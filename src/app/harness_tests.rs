@@ -1815,6 +1815,37 @@ fn mcp_open_worktree_rejects_non_dir() {
     });
 }
 
+/// Dual fs-watch: with a second commander open, the fs-event path predicates
+/// recognize column `b`'s tree + gitdir too — so `b`'s working-tree edits and
+/// index/HEAD changes drive a refresh, not just the ≤1 s poll PR E left.
+#[test]
+fn fs_predicates_recognize_the_second_column() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let a = std::fs::canonicalize(tmp.path()).unwrap().join("a");
+        let b = std::fs::canonicalize(tmp.path()).unwrap().join("b");
+        std::fs::create_dir(&a).unwrap();
+        std::fs::create_dir(&b).unwrap();
+        let mut app = App::test_app(a.clone());
+        app.state.left.git_cache.current_gitdir = Some(a.join(".git"));
+        app.open_second_commander_at(&b);
+        app.state.right.as_mut().unwrap().git_cache.current_gitdir = Some(b.join(".git"));
+
+        // b's tree + index/HEAD are recognized…
+        assert!(app.is_listing_path(&b.join("src/main.rs")), "b tree file");
+        assert!(app.is_gitdir_status_path(&b.join(".git/index")), "b index");
+        assert!(app.is_gitdir_status_path(&b.join(".git/HEAD")), "b HEAD");
+        // …and a's still are (both columns active)…
+        assert!(app.is_listing_path(&a.join("lib.rs")), "a tree file");
+        assert!(app.is_gitdir_status_path(&a.join(".git/index")), "a index");
+        // …while b's .git housekeeping is still rejected.
+        assert!(
+            !app.is_gitdir_status_path(&b.join(".git/objects/ab/cd")),
+            "b objects churn rejected"
+        );
+    });
+}
+
 /// `/` incremental search moves the FOCUSED column's cursor — searching in `b`
 /// must not scroll `a`. Regression: the match application hardcoded `left`.
 #[test]

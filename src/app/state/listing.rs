@@ -138,8 +138,12 @@ impl AppState {
         match Listing::read(&self.cur().listing.dir) {
             Ok(new) => {
                 self.cur_mut().listing = new;
-                // Event-driven refresh touches the FOCUSED column's git (the
-                // 1 Hz poll sweeps both columns; dual fs-watch is deferred).
+                // Event-driven refresh touches the FOCUSED column's git. With
+                // dual fs-watch (PR D) both columns' trees + gitdirs fire
+                // events, so the focused column refreshes here on its own edits;
+                // `.git` index/HEAD events refresh BOTH columns via the
+                // git-event path (`refresh_git_state`). A non-focused column's
+                // working-tree edits still wait for the 1 Hz poll.
                 let side = self.focused_side();
                 // Refresh the top-bar branch/dirty string too — without
                 // this the bar stays on `main` after edits and only

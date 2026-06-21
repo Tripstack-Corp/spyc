@@ -44,7 +44,9 @@ impl App {
             let _ = tx.send(WatchCommand::SyncListing {
                 gitdir: self.state.left.git_cache.current_gitdir.clone(),
                 dir: dir.clone(),
-                // No vertical-split preview can be open at startup.
+                // No second commander or vertical-split preview at startup.
+                dir_right: None,
+                gitdir_right: None,
                 preview: None,
             });
             Some(dir)
@@ -103,6 +105,7 @@ impl App {
         RunCtx {
             watch_tx,
             watched_listing,
+            watched_listing_right: None,
             watched_preview: None,
             // MVU Phase 2: advisory deadline scheduler — computes the
             // recv_timeout wait from armed timers; the loop still fires each
@@ -729,17 +732,30 @@ impl App {
             let listing_changed =
                 ctx.watched_listing.as_deref() != Some(self.state.left.listing.dir.as_path());
             let preview_changed = ctx.watched_preview != preview;
-            if (listing_changed || preview_changed)
+            // Column `b`'s listing dir (and its resolved gitdir), so its tree +
+            // index/HEAD get watched too. `None` when no second commander —
+            // closing `b` re-sends with `dir_right: None`, unwatching it.
+            let dir_right = self.state.right.as_ref().map(|c| c.listing.dir.clone());
+            let gitdir_right = self
+                .state
+                .right
+                .as_ref()
+                .and_then(|c| c.git_cache.current_gitdir.clone());
+            let right_changed = ctx.watched_listing_right != dir_right;
+            if (listing_changed || preview_changed || right_changed)
                 && let Some(tx) = ctx.watch_tx.as_ref()
             {
                 let dir = self.state.left.listing.dir.clone();
                 let _ = tx.send(WatchCommand::SyncListing {
                     gitdir: self.state.left.git_cache.current_gitdir.clone(),
                     dir: dir.clone(),
+                    dir_right: dir_right.clone(),
+                    gitdir_right,
                     preview: preview.clone(),
                 });
                 ctx.watched_listing = Some(dir);
                 ctx.watched_preview = preview;
+                ctx.watched_listing_right = dir_right;
             }
 
             // Event-driven MCP context-file write — debounced + typing-burst

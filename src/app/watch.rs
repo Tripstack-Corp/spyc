@@ -39,6 +39,12 @@ pub enum WatchCommand {
     SyncListing {
         dir: PathBuf,
         gitdir: Option<PathBuf>,
+        /// The **second** commander's (column `b`) listing dir + gitdir, watched
+        /// the same way as the primary's so `b`'s git markers refresh on
+        /// fs-events too (not just the ≤1 s poll PR E left). `None` when no
+        /// second commander is open.
+        dir_right: Option<PathBuf>,
+        gitdir_right: Option<PathBuf>,
         /// The vertical-split preview's source file (`None` when no split is
         /// open). Its *parent* dir is watched non-recursively so a
         /// replace-on-save survives (file-level watches go deaf on the rename)
@@ -89,22 +95,37 @@ pub fn spawn_watch_worker(
         // sending redundant commands.
         let mut active_listing: Option<PathBuf> = None;
         let mut active_git: Option<PathBuf> = None;
+        let mut active_listing_right: Option<PathBuf> = None;
+        let mut active_git_right: Option<PathBuf> = None;
         let mut active_preview: Option<PathBuf> = None;
         while let Ok(cmd) = cmd_rx.recv() {
             match cmd {
                 WatchCommand::SyncListing {
                     dir,
                     gitdir,
+                    dir_right,
+                    gitdir_right,
                     preview,
-                } => sync_listing(
-                    &mut watcher,
-                    &mut active_listing,
-                    &mut active_git,
-                    &mut active_preview,
-                    &dir,
-                    gitdir.as_deref(),
-                    preview.as_deref(),
-                ),
+                } => {
+                    sync_listing(
+                        &mut watcher,
+                        &mut active_listing,
+                        &mut active_git,
+                        &mut active_preview,
+                        &dir,
+                        gitdir.as_deref(),
+                        preview.as_deref(),
+                    );
+                    // Column `b`: same recursive-tree + non-recursive-gitdir
+                    // watches as the primary, so `b`'s working-tree edits and
+                    // index/HEAD changes fire events too. `None` dir → unwatch.
+                    sync_recursive(
+                        &mut watcher,
+                        &mut active_listing_right,
+                        dir_right.as_deref(),
+                    );
+                    sync_nonrecursive(&mut watcher, &mut active_git_right, gitdir_right.as_deref());
+                }
             }
         }
         // cmd_tx dropped at teardown → recv errs → drop `watcher` here, which
@@ -125,24 +146,15 @@ fn sync_listing(
     gitdir: Option<&Path>,
     preview: Option<&Path>,
 ) {
-    if active.as_deref() != Some(new_dir) {
-        if let Some(old) = active.as_ref() {
-            let _ = watcher.unwatch(old);
-        }
-        // Recursive: catches changes anywhere below the listing dir so git
-        // status markers update on the parent directory row when a file is
-        // added/modified in a subdirectory (e.g. touching `docs/foo.md` while
-        // sitting at the repo root). Events under `.git/` are filtered to
-        // specific files (`index`, `HEAD`) by `is_listing_path` to avoid
-        // `.git/objects` / pack / lockfile churn cascading into needless `git
-        // status` calls. On `Err` (e.g. Linux inotify watch-limit on a huge
-        // tree) the dir is left unwatched and the 1 Hz git poll carries
-        // marker refresh.
-        *active = watcher
-            .watch(new_dir, RecursiveMode::Recursive)
-            .is_ok()
-            .then(|| new_dir.to_path_buf());
-    }
+    // Recursive: catches changes anywhere below the listing dir so git status
+    // markers update on the parent directory row when a file is added/modified
+    // in a subdirectory (e.g. touching `docs/foo.md` while sitting at the repo
+    // root). Events under `.git/` are filtered to specific files (`index`,
+    // `HEAD`) by `is_listing_path` to avoid `.git/objects` / pack / lockfile
+    // churn cascading into needless `git status` calls. On `Err` (e.g. Linux
+    // inotify watch-limit on a huge tree) the dir is left unwatched and the 1 Hz
+    // git poll carries marker refresh.
+    sync_recursive(watcher, active, Some(new_dir));
     // Watch the repo's *resolved* gitdir non-recursively. For a normal repo
     // that's `<root>/.git`; for a linked worktree it's
     // `<main>/.git/worktrees/<name>/` (resolved from the `.git` *file*), which
@@ -155,30 +167,56 @@ fn sync_listing(
     // watch sees the rename land. NonRecursive bounds the noise even with huge
     // `.git/objects` trees. `gitdir` is resolved + cached on chdir
     // (`current_gitdir`).
-    if active_git.as_deref() != gitdir {
-        if let Some(old) = active_git.take() {
-            let _ = watcher.unwatch(&old);
-        }
-        if let Some(gd) = gitdir
-            && watcher.watch(gd, RecursiveMode::NonRecursive).is_ok()
-        {
-            *active_git = Some(gd.to_path_buf());
-        }
-    }
+    sync_nonrecursive(watcher, active_git, gitdir);
     // Watch the vertical-split preview's *parent* dir non-recursively (same
     // replace-on-save rationale as the config + gitdir watches: a file-level
     // watch follows the old inode through an editor's atomic rename and goes
     // deaf).
     let want_preview = preview_parent_to_watch(preview, new_dir);
-    if active_preview.as_deref() != want_preview.as_deref() {
-        if let Some(old) = active_preview.take() {
-            let _ = watcher.unwatch(&old);
-        }
-        if let Some(pp) = want_preview
-            && watcher.watch(&pp, RecursiveMode::NonRecursive).is_ok()
-        {
-            *active_preview = Some(pp);
-        }
+    sync_nonrecursive(watcher, active_preview, want_preview.as_deref());
+}
+
+/// Reconcile a single **recursive** watch slot to `want` (unwatching the old
+/// target first). On `watch()` error the slot is cleared (left unwatched; the
+/// poll carries refresh). Shared by the primary + second-commander listing
+/// trees.
+fn sync_recursive(
+    watcher: &mut notify::RecommendedWatcher,
+    active: &mut Option<PathBuf>,
+    want: Option<&Path>,
+) {
+    if active.as_deref() == want {
+        return;
+    }
+    if let Some(old) = active.take() {
+        let _ = watcher.unwatch(&old);
+    }
+    if let Some(dir) = want {
+        *active = watcher
+            .watch(dir, RecursiveMode::Recursive)
+            .is_ok()
+            .then(|| dir.to_path_buf());
+    }
+}
+
+/// Reconcile a single **non-recursive** watch slot to `want` (unwatching the
+/// old target first). Shared by the gitdir / preview-parent / second-commander
+/// gitdir watches.
+fn sync_nonrecursive(
+    watcher: &mut notify::RecommendedWatcher,
+    active: &mut Option<PathBuf>,
+    want: Option<&Path>,
+) {
+    if active.as_deref() == want {
+        return;
+    }
+    if let Some(old) = active.take() {
+        let _ = watcher.unwatch(&old);
+    }
+    if let Some(dir) = want
+        && watcher.watch(dir, RecursiveMode::NonRecursive).is_ok()
+    {
+        *active = Some(dir.to_path_buf());
     }
 }
 

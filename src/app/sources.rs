@@ -283,15 +283,31 @@ impl App {
             .right_pager
             .as_ref()
             .and_then(|v| v.source_path.clone());
-        if let Some(root) = self.state.left.git_cache.current_repo_root.clone() {
-            let listing_dir = self.state.left.listing.dir.clone();
+        // One gitignore-drop pass per active column that's in a repo: each
+        // column's checker judges only paths under ITS OWN tree, so `b`'s
+        // build/cache churn is filtered by `b`'s gitignore (and paths outside
+        // both trees — the other column, config files, gitdirs — survive).
+        let cols: Vec<(std::path::PathBuf, std::path::PathBuf)> = self
+            .state
+            .active_sides()
+            .filter_map(|s| {
+                let c = self.state.col(s);
+                c.git_cache
+                    .current_repo_root
+                    .clone()
+                    .map(|root| (root, c.listing.dir.clone()))
+            })
+            .collect();
+        for (root, listing_dir) in cols {
             crate::git::excludes::with_checker(&root, |is_excluded| {
                 ctx.fs_pending.retain_mut(|ev| {
-                    // Keep cwd-level paths and the previewed file unconditionally
-                    // (short-circuits the gitignore check); drop deeper
-                    // gitignored-subtree churn.
                     ev.paths.retain(|p| {
-                        is_cwd_level(p, &listing_dir)
+                        // Not under this column's tree → leave it for another
+                        // column's pass (or keep it). Under this tree: keep
+                        // cwd-level paths and the previewed file unconditionally;
+                        // drop deeper gitignored-subtree churn.
+                        !p.starts_with(&listing_dir)
+                            || is_cwd_level(p, &listing_dir)
                             || preview_path.as_deref() == Some(p.as_path())
                             || !is_excluded(p)
                     });

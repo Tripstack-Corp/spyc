@@ -872,6 +872,11 @@ pub struct RunCtx {
     /// `SyncListing` so the worker re-points its watches. Purely a send-dedup
     /// key — the worker owns the actual watch topology.
     watched_listing: Option<PathBuf>,
+    /// Last second-commander (column `b`) listing dir we sent a watch command
+    /// for. Re-sent when it changes (open / chdir / close `b`) so the worker
+    /// watches `b`'s tree + gitdir too — `b`'s git markers refresh on
+    /// fs-events, not just the ≤1 s poll.
+    watched_listing_right: Option<PathBuf>,
     /// Last vertical-split preview file we sent a watch command for. The watch
     /// topology is re-sent when this OR `watched_listing` changes, so opening /
     /// swapping / closing the preview re-points the preview-parent watch.
@@ -902,6 +907,7 @@ impl RunCtx {
         Self {
             watch_tx: None,
             watched_listing: None,
+            watched_listing_right: None,
             watched_preview: None,
             scheduler: Scheduler::new(),
             fs_pending: Vec::new(),

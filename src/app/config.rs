@@ -93,38 +93,13 @@ impl App {
                 return false;
             }
         }
-        let dir = self.state.left.listing.dir.as_path();
-
-        // `.git/` filtering against the repo's *resolved* gitdir
-        // (cached on chdir). For a normal repo that's `<root>/.git`;
-        // for a linked worktree it's `<main>/.git/worktrees/<name>/`
-        // (the `.git` here is a *file*, and the real index/HEAD live
-        // outside the working tree). macOS FSEvents sometimes coalesces
-        // intra-directory changes into a single event whose path *is*
-        // the gitdir itself, so accept that as "something happened in
-        // there, refresh." Direct children: only `index` (staging/
-        // status) or `HEAD` (branch switch) -- everything else (objects,
-        // packs, lockfiles, gc activity, refs/, logs/) is rejected so
-        // background git housekeeping doesn't cascade.
-        if let Some(git_dir) = self.state.left.git_cache.current_gitdir.as_deref() {
-            if path == git_dir {
-                return true;
-            }
-            if path.starts_with(git_dir) {
-                if path.parent() == Some(git_dir)
-                    && let Some(name) = path.file_name().and_then(|n| n.to_str())
-                {
-                    return matches!(name, "index" | "HEAD");
-                }
-                return false;
-            }
-        }
-
-        // Anywhere at or below the listing dir (recursive watch) --
-        // accept. The 500ms trailing debounce + git-status's index-
-        // cache mean even noisy subtrees don't produce unbounded
-        // refresh/status work.
-        path.starts_with(dir)
+        // Accept if the path is a listing path for EITHER active column — both
+        // columns' trees are watched (dual fs-watch), so `b`'s edits refresh
+        // its markers too. `current_gitdir` is per-column.
+        self.state.active_sides().any(|side| {
+            let c = self.state.col(side);
+            listing_path_in(path, &c.listing.dir, c.git_cache.current_gitdir.as_deref())
+        })
     }
 
     /// True iff `path` is the file currently shown in the vertical-split
@@ -149,18 +124,54 @@ impl App {
     /// refresh immediately. Subset of `is_listing_path`'s gitdir arm; kept
     /// separate so the caller can give git-state events a no-debounce path.
     pub fn is_gitdir_status_path(&self, path: &Path) -> bool {
-        let Some(git_dir) = self.state.left.git_cache.current_gitdir.as_deref() else {
-            return false;
-        };
+        // Either column's gitdir (per-column; both are watched).
+        self.state.active_sides().any(|side| {
+            gitdir_status_in(
+                path,
+                self.state.col(side).git_cache.current_gitdir.as_deref(),
+            )
+        })
+    }
+}
+
+/// Per-column `is_listing_path` test: is `path` a listing-relevant event for a
+/// column rooted at `dir` with resolved `gitdir`? Accepts anything at/below the
+/// listing dir (recursive watch) — the 500 ms debounce + git-status index-cache
+/// bound noisy subtrees — but inside the gitdir only the discrete signals
+/// (`index`/`HEAD`, or the gitdir itself for FSEvents coalescing), rejecting
+/// `.git/objects` / pack / lockfile / refs churn.
+fn listing_path_in(path: &Path, dir: &Path, gitdir: Option<&Path>) -> bool {
+    if let Some(git_dir) = gitdir {
         if path == git_dir {
             return true;
         }
-        path.parent() == Some(git_dir)
-            && path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|name| matches!(name, "index" | "HEAD"))
+        if path.starts_with(git_dir) {
+            if path.parent() == Some(git_dir)
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            {
+                return matches!(name, "index" | "HEAD");
+            }
+            return false;
+        }
     }
+    path.starts_with(dir)
+}
+
+/// Per-column `is_gitdir_status_path` test: a discrete git-state signal in this
+/// column's `gitdir` — `index`/`HEAD`, or the gitdir itself (FSEvents coalesces
+/// intra-dir changes onto the dir path).
+fn gitdir_status_in(path: &Path, gitdir: Option<&Path>) -> bool {
+    let Some(git_dir) = gitdir else {
+        return false;
+    };
+    if path == git_dir {
+        return true;
+    }
+    path.parent() == Some(git_dir)
+        && path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|name| matches!(name, "index" | "HEAD"))
 }
 
 #[cfg(test)]

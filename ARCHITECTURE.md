@@ -214,10 +214,16 @@ an in-flight guard plus a `preview_dirty` flag collapse a save/resize burst to a
 single trailing re-render. A deleted preview file flashes in the footer and keeps
 the last-good render.
 
-Stage 1 ships the preview-on-the-right; a second *full file-commander* on the
-right (second cwd, git cache, dual-cwd watch, per-pane MCP) is the deferred
-Stage 2 — see ROADMAP.md. The `Side` / `Mount::RightPane` scaffolding is
-forward-compatible with it.
+Stage 1 shipped the preview-on-the-right; Stage 2 — a second *full
+file-commander* on the right — has since landed: a second cwd + per-column git
+(each `Commander` owns its `GitState`/`GitCache`), per-column tools
+(grep/find/MCP-search/harpoon follow the focused column's worktree via
+`tool_root`/`harpoon_root`), focus-aware MCP context, and **dual fs-watch** —
+the watch worker (`watch.rs`) re-points a second recursive-tree + non-recursive
+gitdir watch onto column `b`, and the fs-event predicates (`config::
+is_listing_path` / `is_gitdir_status_path`) accept either column, so `b`'s
+markers refresh on edits, not just the 1 Hz poll. Session restore of two cwds
+remains deferred — see ROADMAP.md.
 
 ## Process & TTY ownership
 
