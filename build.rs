@@ -12,9 +12,15 @@ fn main() {
     let rustc = run_trimmed(Command::new("rustc").arg("--version"));
     println!("cargo:rustc-env=SPYC_RUSTC_VERSION={rustc}");
 
-    // Re-run if git HEAD changes (new commits).
+    // Re-run when HEAD moves. `.git/HEAD` only changes on checkout (its
+    // content is `ref: refs/heads/<branch>`, stable across commits), and a
+    // `rerun-if-changed` on the `.git/refs/heads/` *directory* is shallow —
+    // it misses both in-place edits to a ref file and refs nested under a
+    // `feat/...` subdir. `.git/logs/HEAD` (the reflog) gets a fresh line on
+    // every commit/checkout/reset/merge, so it reliably catches new commits
+    // on the current branch.
     println!("cargo:rerun-if-changed=.git/HEAD");
-    println!("cargo:rerun-if-changed=.git/refs/heads/");
+    println!("cargo:rerun-if-changed=.git/logs/HEAD");
 }
 
 fn run_trimmed(cmd: &mut Command) -> String {

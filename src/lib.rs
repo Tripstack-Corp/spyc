@@ -28,6 +28,14 @@ mod sysinfo;
 mod term_title;
 mod ui;
 
+/// Human-readable build identity, e.g. `1.59.0 (25abd0a)`.
+///
+/// The crate version plus the short git SHA baked in at build time
+/// (`build.rs`). The SHA changes every commit, so this is the signal that tells
+/// an MCP client whether the running spyc predates a tool it expects —
+/// surfaced over MCP via the `initialize` `serverInfo` and `get_spyc_context`.
+pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("SPYC_GIT_SHA"), ")");
+
 /// Public entry points for the `cargo-fuzz` targets in `fuzz/`.
 ///
 /// The crate is otherwise all-private modules. Each wrapper takes raw input

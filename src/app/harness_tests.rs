@@ -1555,6 +1555,29 @@ fn ctrl_d_closes_second_commander_then_quits() {
     });
 }
 
+/// The context snapshot announces the running spyc's identity — its pid and
+/// build (version + git SHA) — so an MCP client can detect a stale server and
+/// name the process to restart.
+#[test]
+fn snapshot_context_announces_pid_and_version() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let app = App::test_app(tmp.path().to_path_buf());
+        let ctx = app.snapshot_context();
+        assert_eq!(ctx.pid, std::process::id(), "reports our own pid");
+        assert_eq!(
+            ctx.version,
+            crate::VERSION,
+            "reports the baked build string"
+        );
+        assert!(
+            ctx.version.contains('(') && ctx.version.contains(')'),
+            "version carries the git SHA in parens: {}",
+            ctx.version
+        );
+    });
+}
+
 /// MCP follows focus: with a second commander focused, the context snapshot
 /// the agent reads reports `b`'s cwd, and a mutating MCP command (set_filter)
 /// targets `b` — not the left/primary column. (PR F: MCP focus-aware.)

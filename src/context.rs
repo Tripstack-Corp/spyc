@@ -34,6 +34,15 @@ pub struct SpycContext {
     pub search_root: Option<PathBuf>,
     /// Spice-pair session name (e.g. `SAFFRON_CUMIN`).
     pub session_name: String,
+    /// PID of the running spyc TUI that wrote this context. Surfaced so an MCP
+    /// client can name the exact process to restart (the writable tools forward
+    /// to *this* instance over its socket).
+    pub pid: u32,
+    /// Build identity of the running spyc — crate version + short git SHA
+    /// (e.g. `1.59.0 (25abd0a)`, from [`crate::VERSION`]). The SHA changes every
+    /// commit, so a client can compare it against the repo HEAD to detect the
+    /// running spyc predates a tool it expects and prompt a restart.
+    pub version: String,
 }
 
 /// Environment variable that tells `spyc --mcp` where to find the
@@ -118,6 +127,8 @@ mod tests {
             project_home: Some(PathBuf::from("/home/user/project")),
             search_root: Some(PathBuf::from("/home/user/project")),
             session_name: "SAFFRON_CUMIN".into(),
+            pid: 4242,
+            version: "1.59.0 (deadbee)".into(),
         };
         write_context_file(&path, &ctx).unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();
@@ -130,6 +141,8 @@ mod tests {
         assert_eq!(parsed["git_branch"], "main");
         assert_eq!(parsed["project_home"], "/home/user/project");
         assert_eq!(parsed["session_name"], "SAFFRON_CUMIN");
+        assert_eq!(parsed["pid"], 4242);
+        assert_eq!(parsed["version"], "1.59.0 (deadbee)");
     }
 
     #[test]
@@ -146,6 +159,8 @@ mod tests {
             project_home: None,
             search_root: None,
             session_name: String::new(),
+            pid: 0,
+            version: String::new(),
         };
         write_context_file(&path, &ctx).unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();
@@ -205,6 +220,8 @@ mod tests {
             project_home: None,
             search_root: None,
             session_name: "SAFFRON_CUMIN".into(),
+            pid: 4242,
+            version: "1.59.0 (deadbee)".into(),
         };
         let same = base.clone();
         let mut different = base.clone();

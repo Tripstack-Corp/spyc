@@ -727,7 +727,10 @@ Claude can query and control the workspace through these tools:
 
 **Read tools:**
 - **`get_spyc_context`** -- returns cwd, cursor file, picks, inventory,
-  active filter, git branch, `project_home`, and `session_name`
+  active filter, git branch, `project_home`, `session_name`, plus the
+  running spyc's `pid` and `version` (`1.59.0 (<git-sha>)`). The version
+  string lets a client spot a stale server (a tool it expects is
+  missing → compare the git SHA to the repo HEAD → restart spyc)
 - **`get_file_content`** -- reads a file's text content (up to 100KB)
 
 **Write tools (Claude can mutate the TUI):**

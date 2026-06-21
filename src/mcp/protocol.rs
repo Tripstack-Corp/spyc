@@ -130,7 +130,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
             "tools": [
                 {
                     "name": "get_spyc_context",
-                    "description": "Get the current spyc file manager state: working directory, cursor position, picked files, inventory, active filter, git branch, project_home (sticky project root), and session_name. Use this to understand what the user is looking at in their file manager.",
+                    "description": "Get the current spyc file manager state: working directory, cursor position, picked files, inventory, active filter, git branch, project_home (sticky project root), session_name, plus the running spyc's pid and version ('1.59.0 (<git-sha>)'). Use this to understand what the user is looking at — and to detect a stale server: if a tool you expect is missing, compare version's git SHA against the repo HEAD and ask the user to restart spyc (pid identifies the process).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {},

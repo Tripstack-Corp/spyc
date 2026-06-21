@@ -77,6 +77,8 @@ fn resources_read_with_context_file() {
         project_home: None,
         search_root: None,
         session_name: String::new(),
+        pid: 0,
+        version: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -135,6 +137,8 @@ fn tools_call_returns_context() {
         project_home: None,
         search_root: None,
         session_name: String::new(),
+        pid: 0,
+        version: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -205,6 +209,8 @@ fn search_paths_tool_walks_root() {
         project_home: Some(root.to_path_buf()),
         search_root: Some(root.to_path_buf()),
         session_name: String::new(),
+        pid: 0,
+        version: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -256,6 +262,8 @@ fn search_root_overrides_project_home() {
         project_home: Some(home),
         search_root: Some(worktree),
         session_name: String::new(),
+        pid: 0,
+        version: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -299,6 +307,8 @@ fn search_content_tool_returns_matches() {
         project_home: Some(root.to_path_buf()),
         search_root: Some(root.to_path_buf()),
         session_name: String::new(),
+        pid: 0,
+        version: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -339,6 +349,8 @@ fn search_picks_tool_only_picked_files() {
         project_home: Some(root.to_path_buf()),
         search_root: Some(root.to_path_buf()),
         session_name: String::new(),
+        pid: 0,
+        version: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -391,6 +403,8 @@ fn socket_server_responds() {
         project_home: None,
         search_root: None,
         session_name: String::new(),
+        pid: 0,
+        version: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -433,6 +447,8 @@ fn disconnect_notification_routes_through_channel() {
         project_home: None,
         search_root: None,
         session_name: String::new(),
+        pid: 0,
+        version: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -665,6 +681,8 @@ fn get_file_content_blocks_path_traversal() {
         project_home: None,
         search_root: None,
         session_name: String::new(),
+        pid: 0,
+        version: String::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();

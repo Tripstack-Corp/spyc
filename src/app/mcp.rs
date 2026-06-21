@@ -163,6 +163,11 @@ impl App {
             // same root grep `F` / find / harpoon use.
             search_root: Some(self.state.tool_root(self.state.focused_side())),
             session_name: self.state.session_name.clone().unwrap_or_default(),
+            // Identify the running instance: our PID (the process the writable
+            // tools reach over the socket) + build (version + git SHA) so a
+            // client can detect a stale server and name what to restart.
+            pid: std::process::id(),
+            version: crate::VERSION.to_string(),
         }
     }
 
