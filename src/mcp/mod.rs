@@ -26,6 +26,27 @@ const SERVER_NAME: &str = "spyc";
 // running server predates a tool it expects.
 const SERVER_VERSION: &str = crate::VERSION;
 const PROTOCOL_VERSION: &str = "2024-11-05";
+
+/// Returned in the `initialize` response's `instructions` field — the MCP
+/// spec's slot for "how to use this server". Claude Code folds it into the
+/// system prompt at connect, which is the one ephemeral, no-files-written way
+/// to bias a spyc-launched agent toward spyc's own tools (it otherwise reaches
+/// for `Bash rg` / `git worktree` and never touches them). Kept short on
+/// purpose — clients truncate instructions, so the prioritization comes first.
+const SERVER_INSTRUCTIONS: &str = "\
+You are running inside spyc, a terminal file/worktree manager, with its tools \
+on this server. Prefer them over shell equivalents — they act on what the user \
+is actually looking at:\n\
+- Call `get_spyc_context` first to ground yourself: the user's cwd, cursor \
+file, picks, filter, git branch, and the running spyc's pid + version.\n\
+- `search_content` / `search_paths` instead of `Bash rg` / `find` — \
+gitignore-aware and scoped to the focused worktree.\n\
+- `navigate_to` to move the user's view; `pick_files` / `set_filter` to drive \
+their selection; `get_file_content` to read what they're viewing.\n\
+- `create_worktree` / `remove_worktree` instead of `git worktree add` / \
+`remove`.\n\
+If a tool you expect is missing, the running spyc is older than this repo — \
+tell the user to restart it (compare `version`'s git SHA to the repo HEAD).";
 const CONTEXT_URI: &str = "spyc://context";
 
 /// Socket IO deadline for the stdio proxy. Bounds how long it waits on a

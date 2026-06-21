@@ -11,7 +11,7 @@ use super::readers::{
     grep_matches_to_json, read_context_or_empty, read_cwd_from_context, read_file_content,
     read_inventory_from_context, read_picks_from_context, search_root,
 };
-use super::{CONTEXT_URI, PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION};
+use super::{CONTEXT_URI, PROTOCOL_VERSION, SERVER_INSTRUCTIONS, SERVER_NAME, SERVER_VERSION};
 pub(super) fn dispatch(
     w: &mut impl Write,
     msg: &str,
@@ -73,7 +73,8 @@ fn handle_initialize(w: &mut impl Write, id: &Value, _params: &Value) -> io::Res
             "serverInfo": {
                 "name": SERVER_NAME,
                 "version": SERVER_VERSION
-            }
+            },
+            "instructions": SERVER_INSTRUCTIONS
         }),
     )
 }

@@ -46,6 +46,20 @@ fn initialize_response() {
     let resp = parse_response(&output);
     assert_eq!(resp["result"]["protocolVersion"], PROTOCOL_VERSION);
     assert_eq!(resp["result"]["serverInfo"]["name"], "spyc");
+    // The `instructions` field steers a launched agent toward spyc's tools.
+    let instructions = resp["result"]["instructions"].as_str().unwrap();
+    assert!(
+        instructions.contains("search_content"),
+        "names the search tool"
+    );
+    assert!(
+        instructions.contains("get_spyc_context"),
+        "tells it to ground first"
+    );
+    assert!(
+        instructions.contains("spyc"),
+        "frames the agent as running inside spyc"
+    );
 }
 
 #[test]
