@@ -48,6 +48,18 @@ tag_pattern = "v[0-9]*"
 sort_commits = "oldest"
 topo_order = false
 
+# Bitbucket squash merges land "Merged in <branch> (pull request #N)" on the
+# commit *subject* and the real conventional message (`feat:`/`fix:`/…) in the
+# body. git-cliff parses the subject, so without this a squashed feature is
+# non-conventional and `filter_unconventional` drops it. Strip the Bitbucket
+# prefix so the body's conventional line becomes the message. (For the older,
+# non-squash merges a 2-parent merge commit *also* echoes the branch's commits
+# in its body — harmless going forward since the flow is now squash-only, but
+# it can double-list within a release range that mixes both merge styles.)
+commit_preprocessors = [
+  { pattern = '^Merged in [^\n]*\(pull request #[0-9]+\)\s*\n+', replace = "" },
+]
+
 commit_parsers = [
   { message = "^feat", group = "<!-- 0 -->Features" },
   { message = "^fix", group = "<!-- 1 -->Bug Fixes" },

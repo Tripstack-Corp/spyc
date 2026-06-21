@@ -2,6 +2,186 @@
 
 All notable changes to spyc. Entries from v1.57.0 onward are generated from the conventional-commit history by [git-cliff](https://git-cliff.org) (config in `cliff.toml`); regenerate the pending section with `make changelog` and cut a release with `make release-tag VERSION=x.y.z`. Entries at v1.56.0 and earlier are the original hand-written log, kept verbatim.
 
+## [1.60.0] - 2026-06-21
+
+### Features
+- **exit**: Narrate a slow pane shutdown at quit instead of freezing
+- TypeScript/TSX syntax highlighting via two-face
+- **pager**: Render mermaid diagrams — `o` opens them full-res (open-MVP)
+- **pager**: Full-screen in-spyc mermaid view (`i`)
+- **codex**: Robust ^a-v session detection + MCP config lifecycle
+- **pager**: Image-pager verbs — `s` save, `o` open (foundation)
+- **pager**: Image-pager `Y` (yank source) + `b` (base64) + roomier default layout
+- **pager**: Image-pager `y` (copy image) + `c` (light/dark toggle)
+- **pane**: Vertical-split layout scaffolding (dormant)
+- **pane**: Vertical split — open, preview, focus, resize (^a |, ^a a/b)
+- **pane**: Live-reload the vertical-split preview on save
+- **vsplit**: Second file-commander in the right column — ^z (Stage 2 C2a)
+- **vsplit**: Prompt for the second commander's directory (^z n)
+- **vsplit**: V/D open in the focused column b (not a)
+- **vsplit**: App-side actions target the focused column
+- **vsplit**: Open the second commander at PROJECT_HOME (not a prompt)
+- **vsplit**: Dual overlay/pager slots — V/D in both columns at once
+- **vsplit**: Commander chord ergonomics — ^z→^s + ^d closes the commander
+- **vsplit**: MCP + / search follow the focused column
+- **vsplit**: Per-column git state (dual git, PR E)
+- **vsplit**: Grep/find/MCP search follow the focused worktree
+- **vsplit**: Harpoon follows the focused worktree (per-column)
+- **mcp**: Announce spyc version + git SHA over MCP
+- **mcp**: Add create_worktree write tool
+- **mcp**: Worktree teardown — remove_worktree + clean_worktree
+- **mcp**: Steer launched agents with an initialize instructions field
+- **activity**: Fixed-width A overlay + per-tool MCP call counts
+- **vsplit**: Open-b-at-worktree — MCP open_worktree + W l switches the focused column
+- **vsplit**: PR D — dual fs-watch (column b's git markers refresh on fs-events)
+- **vsplit**: PR G — session restore reopens both columns
+
+### Bug Fixes
+- **git**: Converge stale worktree markers via deferred re-walk
+- **hud**: Dim only the `N dps` headline, not the reason breakdown
+- **line-edit**: Ignore Ctrl-modified keys in Normal mode
+- **dsl**: Add bindable searchprev verb (+ searchnext alias)
+- **markdown**: Reference-count style modifiers so nested spans restore
+- **scrollback**: Keep styled space runs so color bars survive trim
+- **config**: Surface bad scan-pattern regex as a visible warning
+- **grep**: Neutralize C1 control chars in sanitized match lines
+- **shell**: Refuse % expansion on non-UTF-8 paths instead of mangling
+- **mcp**: Verify a context marker's root before cross-project attach
+- **pane**: Dedup SPYC_PTY_DEBUG dump onto one hardened sink
+- **pager**: Widen centered_rect percentage multiply to avoid u16 overflow
+- **pager**: Preserve per-span styling on the placement cursor row
+- **worktree**: List main worktree from the common dir, not the opened repo
+- **worktree**: Discover the repo upward so W l / add work from a subdir
+- **pager**: Fix the empty-scrollback ^a v behavior + bump 1.58.1
+- **pager**: Keep the empty-scrollback hint visible (1.58.1)
+- **keymap**: Complete ^a chord when Ctrl is held through the 2nd key + bump 1.58.2
+- **mcp**: Clear diagnostic on socket-bind permission failure + bump 1.58.3
+- **watch**: Ignore gitignored-dir churn so git markers stay fresh + bump 1.58.4
+- **git**: Refresh markers instantly on .git/index|HEAD change
+- **tui**: Don't read cursor position on full repaint (crash over SSH)
+- **tui**: Don't read cursor position on full repaint (SSH crash on pager-close/navigation)
+- **pager**: Dark mermaid view by default + no flash on yank/save
+- **git**: Guard the status walk against racy-snapshot staleness
+- **mcp**: Sweep orphaned spyc artifacts left by non-clean exits
+- **watch**: Keep the cwd current — refresh on gitignored cwd-level changes
+- **pane**: Zoom the active region, not always the bottom pane
+- **run**: Add CodexSessionReady to coalesce_recv payloadless-collapse arm
+- **prompt**: Wrap a long command line instead of truncating
+- **overlay**: Editor/pager overlays auto-return on exit (no dismiss keypress)
+- **vsplit**: V/D open inside column b (column-scoped) + focus-switch/pager-scroll fixes
+- **vsplit**: Right column + divider reserve the bottom line (symmetry)
+- **vsplit**: Run ! captures in the focused column's dir (not left/PROJECT_HOME)
+
+### Performance
+- **pager**: Reuse one scratch buffer in commit_search
+- **mcp**: Serialize the context once per write, not twice
+- **pane**: Close tabs off the input thread (no 20-250ms freeze)
+- **git**: Memoize the branch read by HEAD mtime, not gix-open per fs-event
+- **git**: Memoize branch read by HEAD mtime (discovery.rs:34)
+- **diff**: Cache decoded objects for the gd per-path HEAD-tree lookups
+- **diff**: Cache decoded objects for gd per-path HEAD-tree lookups (diff_model:85)
+- **pager**: Compute the multi-column partition once per render
+
+### Refactors
+- **config**: Generate ColorOverrides + merge from one field list
+- **fs**: Move hex-dump styling to the ui layer
+- **fs**: Detect file types via the infer crate, drop magic table
+- **git**: One shared run_git test fixture, hardened
+- **pager**: Share keep-visible / row-length math in cursor moves
+- **app**: Share the pane save-to-file flash handling
+- **mcp**: Share the takeover decision across .mcp.json and codex
+- **ui**: One shared word-wrap routine for markdown + help
+- **pager**: Skip title/position work when the block is borderless
+- **fs**: Single-source the entry kind + ls-F suffix
+- **fs**: Single-source the entry kind + ls-F name suffix
+- **app**: Resolve hostname via uname(2) syscall, not fork-exec
+- **prompt**: Extract cycle_hint for the multi-match Tab flash
+- **streaming**: Hoist the live-timer duration formatter to util
+- **sources**: Extract coalesce_tail shared by coalesce_recv arms
+- **tasks**: Dedup buffer→lines rebuild and exit glyph
+- **pager**: Single-source the :N jump buffer on PagerView
+- **activity**: Group the activity_* counters into an ActivityMonitor
+- **activity**: Group activity_* counters into an ActivityMonitor (loop_steps:131)
+- **git**: Remove the huge-tree git/listing throttle subsystem
+- **watch**: Move fs-watch control off-thread, remove the Linux recursive-watch cap
+- **state**: Extract per-browser Model state into a Commander struct (dormant)
+- **render**: Parameterize per-column row-build + grid-settle
+- **state**: Route pure-Model update path through cur()/cur_mut() (vsplit C1)
+
+### Documentation
+- **review**: Annotate line_edit.rs:253 ctrl-modifier fixed in #386
+- **review**: Annotate dsl.rs:138 searchprev verb fixed in #387
+- **review**: Annotate markdown/renderer.rs:383 nested-bold fixed in #388
+- **review**: Annotate scrollback.rs:178 styled-space trim fixed in #389
+- **review**: Annotate config/mod.rs:431 bad-regex warning fixed in #390
+- **review**: Annotate fs/grep.rs:272 C1-control sanitize fixed in #391
+- **review**: Annotate shell/expand.rs:33 non-UTF-8 refusal fixed in #392
+- **review**: Annotate mcp/server.rs:112 trusted-root sidecar fixed in #393
+- **review**: Annotate config/mod.rs:274+:353 color-merge refactor fixed in #394
+- **review**: Annotate fs/ops.rs:359 hex-dump layer fix in #395
+- **review**: Annotate pane/mod.rs:579 dedup + note #337 missed the parser_worker /tmp site (#396)
+- **review**: Annotate fs/ops.rs:274 infer-crate swap fixed in #397
+- **review**: Annotate pager/layout.rs:292 centered_rect overflow fixed in #398
+- **review**: Annotate git/discovery.rs:51 shared run_git fixture in #399
+- **review**: Annotate pager/render.rs:367 span-preserving cursor cell in #400
+- **review**: Annotate construct.rs:154 shared cursor math in #401
+- **review**: Annotate pane/mod.rs:498 shared save flash in #402
+- **review**: Annotate mcp/config.rs:152 shared takeover decision in #403
+- **review**: Annotate help.rs:449 shared ui::wrap routine in #404
+- **review**: Annotate render.rs:25 borderless dead-compute removed in #406
+- **review**: Annotate long_listing.rs:274 shared entry classify/suffix in #405
+- **review**: Annotate scroll_search.rs:222 reused scratch buffer in #408
+- **review**: Annotate util.rs:193 hostname fork-exec fixed in #409
+- **review**: Annotate prompt.rs:231 cycle-hint dedup fixed in #410
+- **review**: Annotate streaming.rs:146 duration formatter fixed in #411
+- **review**: Annotate sources.rs:91 coalesce_tail dedup fixed in #412
+- **review**: Annotate tasks.rs:560 buffer/glyph dedup fixed in #413
+- **review**: Annotate mcp.rs:96 single-serialize fixed in #414
+- **review**: Annotate tabs.rs:470 off-thread tab close fixed in #415
+- **review**: Annotate discovery.rs:34 confirmed + fixed in #417
+- **review**: Annotate worktree.rs:61 confirmed + fixed in #419
+- **review**: Annotate diff_model:85 confirmed + fixed in #420
+- **review**: Annotate modes.rs:119 fixed in #421
+- **review**: Annotate loop_steps.rs:131 fixed in #422
+- **review**: Annotate render.rs:249 fixed in #423
+- **review**: Mark server.rs:158 accepted — closes the 2026-06 campaign
+- **review**: Close the 2026-06 code-review campaign (server:158 accepted)
+- Archive the closed code-review, consolidate the testing charter
+- Archive closed code-review, consolidate the testing campaign charter
+- **test**: Mark cluster 1 (effect-intent matchers) shipped in #426
+- **test**: Mark cluster 2 (property tests) shipped in #427
+- **test**: Mark cluster 3 (session restore) shipped in #428
+- Add mermaid-in-pager implementation plan
+- **mermaid**: Make "open externally" a first-class phase; reframe inline as preview
+- **git**: VSCode git-extension study as a refresh-design consideration
+- **pane**: Round up the vertical-split docs
+- Round up vertical-split / second-commander reference
+
+### Build & Tooling
+- Split crate lib+bin to enable cargo-fuzz + DSL-parser fuzz target
+- **deploy**: Raise fd limit in zigbuild recipes so the cross-link doesn't hit ProcessFdQuotaExceeded
+- **deploy**: Raise fd limit in zigbuild recipes (fix ProcessFdQuotaExceeded on cross-link)
+- **mermaid**: Add the pure-Rust image/mermaid dependency tree (Phase 0)
+
+### Tests
+- **pane**: De-flake deliberate_stop_suppresses_final_wake
+- Effect-intent matchers — kill byte-for-byte Effect destructures
+- Effect-intent matchers (testing campaign cluster 1)
+- Property tests for cursor-nav bounds + find_match (campaign cluster 2)
+- Property tests for cursor-nav + find_match (campaign cluster 2)
+- Session restore dispatch + serde back-compat (campaign cluster 3)
+- Pane/pty workflow smoke tests (campaign cluster 4)
+- Background-task workflow smoke tests (campaign cluster 5)
+- Quick-select dispatch matrix + overlay state machine (campaign cluster 6)
+- Proptest panic-fuzzing for the keymap DSL parser (campaign cluster 8)
+- **fuzz**: Add cargo-fuzz targets for the pager parsers
+- **fuzz**: Add cargo-fuzz targets for the path + %-template expanders
+
+### Miscellaneous
+- Post-refactor cleanup — docs gap, stale allows, dead helpers, ceiling
+- Commit ROADMAP + BUGS backlog notes
+- Rename BUGS.md → BACKLOG_DRAFT_NOTES.md
+
 ## [1.58.0] - 2026-06-14
 
 ### Features
