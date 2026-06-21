@@ -132,7 +132,10 @@ impl App {
     /// resolved command.
     pub fn start_capture(&mut self, expanded: &str, title_cmd: &str, cmd_display: &str) {
         let title = format!("! {title_cmd}");
-        match spawn_capture(expanded, &self.state.left.listing.dir) {
+        // Run in the FOCUSED column's dir (like `;`/`$` shell spawns + every
+        // other prompt op since per-column), so `!touch foo` lands where the
+        // user is looking — column `b`'s worktree, not `a`/PROJECT_HOME.
+        match spawn_capture(expanded, &self.state.cur().listing.dir) {
             Ok(host) => {
                 // MVU Phase 3c: install the capture's channel wake (a generic
                 // SinkOutput edge — the loop re-scans on it). Survives the
