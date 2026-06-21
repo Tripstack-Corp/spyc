@@ -297,6 +297,41 @@ impl App {
                     message: format!("cleared {count} pick(s)"),
                 }
             }
+            McpCommand::CreateWorktree { branch } => {
+                let branch = branch.trim();
+                if branch.is_empty() {
+                    return McpResponse::Error {
+                        message: "missing required parameter: branch".into(),
+                    };
+                }
+                // Anchor on the FOCUSED column's repo (consistent with `W n` and
+                // the per-worktree tools): `worktree::add` discovers the
+                // enclosing repo from any dir inside it.
+                let dir = self.state.cur().listing.dir.clone();
+                match crate::git::worktree::add(&dir, branch) {
+                    Ok(path) => {
+                        self.state.flash_info(format!(
+                            "[mcp] created worktree {} ({branch})",
+                            path.display()
+                        ));
+                        // Surface the new tree if it landed under the cwd + keep
+                        // markers fresh; the worktree lives in a sibling
+                        // `<repo>.worktrees/` dir, so this is usually a no-op.
+                        self.state.refresh_listing();
+                        self.write_context();
+                        let json = serde_json::json!({
+                            "branch": branch,
+                            "path": path.display().to_string(),
+                        });
+                        McpResponse::Ok {
+                            message: serde_json::to_string_pretty(&json).unwrap_or_default(),
+                        }
+                    }
+                    Err(e) => McpResponse::Error {
+                        message: format!("worktree add: {e}"),
+                    },
+                }
+            }
             McpCommand::Disconnected { new_pid } => {
                 self.view.mcp_running = false;
                 self.state.flash_error(format!(

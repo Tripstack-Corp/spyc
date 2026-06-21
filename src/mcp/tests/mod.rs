@@ -111,17 +111,18 @@ fn tools_list_response() {
     .unwrap();
     let resp = parse_response(&output);
     let tools = resp["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 10);
+    assert_eq!(tools.len(), 11);
     assert_eq!(tools[0]["name"], "get_spyc_context");
     assert_eq!(tools[1]["name"], "navigate_to");
     assert_eq!(tools[2]["name"], "set_filter");
     assert_eq!(tools[3]["name"], "pick_files");
     assert_eq!(tools[4]["name"], "clear_picks");
-    assert_eq!(tools[5]["name"], "get_file_content");
-    assert_eq!(tools[6]["name"], "search_paths");
-    assert_eq!(tools[7]["name"], "search_content");
-    assert_eq!(tools[8]["name"], "search_picks");
-    assert_eq!(tools[9]["name"], "search_inventory");
+    assert_eq!(tools[5]["name"], "create_worktree");
+    assert_eq!(tools[6]["name"], "get_file_content");
+    assert_eq!(tools[7]["name"], "search_paths");
+    assert_eq!(tools[8]["name"], "search_content");
+    assert_eq!(tools[9]["name"], "search_picks");
+    assert_eq!(tools[10]["name"], "search_inventory");
 }
 
 #[test]

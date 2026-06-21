@@ -1617,6 +1617,72 @@ fn mcp_context_and_mutations_follow_the_focused_column() {
     });
 }
 
+/// MCP `create_worktree` makes a git worktree off the FOCUSED column's repo
+/// and replies `{branch, path}` — the entry point a skill uses to spin up a
+/// worktree to work in `b`.
+#[test]
+fn mcp_create_worktree_makes_a_worktree_off_the_focused_repo() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run_git = |dir: &std::path::Path, args: &[&str]| {
+        let ok = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@x")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@x")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("spawn git")
+            .success();
+        assert!(ok, "git {args:?} failed");
+    };
+    crate::state::with_state_root(tmp.path(), || {
+        let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("f.txt"), "v1\n").unwrap();
+        run_git(&repo, &["add", "f.txt"]);
+        run_git(&repo, &["commit", "-q", "-m", "v1"]);
+
+        let mut app = App::test_app(repo.clone());
+        app.state.update_repo_root(state::Side::Left, &repo);
+
+        let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::CreateWorktree {
+            branch: "mcp-wt".to_string(),
+        });
+        match resp {
+            crate::mcp_cmd::McpResponse::Ok { message } => {
+                let v: serde_json::Value = serde_json::from_str(&message).unwrap();
+                assert_eq!(v["branch"], "mcp-wt");
+                let path = std::path::PathBuf::from(v["path"].as_str().unwrap());
+                assert!(path.is_dir(), "worktree dir created: {path:?}");
+                assert!(path.join("f.txt").exists(), "branch tree checked out");
+            }
+            crate::mcp_cmd::McpResponse::Error { message } => {
+                panic!("create_worktree errored: {message}")
+            }
+        }
+    });
+}
+
+/// Empty branch is rejected before touching git.
+#[test]
+fn mcp_create_worktree_rejects_empty_branch() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::CreateWorktree {
+            branch: "   ".to_string(),
+        });
+        assert!(
+            matches!(resp, crate::mcp_cmd::McpResponse::Error { .. }),
+            "blank branch is an error"
+        );
+    });
+}
+
 /// `/` incremental search moves the FOCUSED column's cursor — searching in `b`
 /// must not scroll `a`. Regression: the match application hardcoded `left`.
 #[test]

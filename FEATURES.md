@@ -738,6 +738,11 @@ Claude can query and control the workspace through these tools:
 - **`set_filter`** -- set or clear the file listing filter (glob)
 - **`pick_files`** -- pick files matching glob patterns (additive)
 - **`clear_picks`** -- clear all picks
+- **`create_worktree(branch)`** -- create a git worktree off the
+  focused commander's repo (existing branch, else a new one at HEAD)
+  in a sibling `<repo>.worktrees/<branch>/` dir; returns `{branch,
+  path}`. Lets a skill spin up a worktree to work in a second column
+  while the first stays on its branch.
 
 **Search tools (gitignore-aware, scoped to the focused commander's worktree root — its repo root, else PROJECT_HOME, else cwd):**
 - **`search_paths(query, [limit])`** -- fuzzy filename search

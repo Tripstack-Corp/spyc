@@ -188,6 +188,20 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                     }
                 },
                 {
+                    "name": "create_worktree",
+                    "description": "Create a git worktree off the focused commander's repo for the given branch (uses an existing branch, else creates it at HEAD). The worktree lands in a sibling `<repo>.worktrees/<branch>/` dir. Returns {branch, path} — point a second column or navigate_to there to work in it while the main column stays on its branch. Errors if the focused commander isn't in a repo or the branch is already checked out elsewhere.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "branch": {
+                                "type": "string",
+                                "description": "Branch to check out in the new worktree. Existing branch is reused; otherwise created at the current HEAD."
+                            }
+                        },
+                        "required": ["branch"]
+                    }
+                },
+                {
                     "name": "get_file_content",
                     "description": "Read the text contents of a file (up to 100KB). Binary files are rejected. Relative paths resolved against spyc's cwd.",
                     "inputSchema": {
@@ -378,7 +392,7 @@ fn handle_tools_call(
                 Err(e) => send_tool_error(w, id, &e),
             }
         }
-        "navigate_to" | "set_filter" | "pick_files" | "clear_picks" => {
+        "navigate_to" | "set_filter" | "pick_files" | "clear_picks" | "create_worktree" => {
             let Some(tx) = cmd_tx else {
                 return send_tool_error(w, id, "writable actions not available in stdio mode");
             };
@@ -409,6 +423,13 @@ fn handle_tools_call(
                     McpCommand::PickFiles { patterns }
                 }
                 "clear_picks" => McpCommand::ClearPicks,
+                "create_worktree" => {
+                    let branch = args["branch"].as_str().unwrap_or("").to_string();
+                    if branch.trim().is_empty() {
+                        return send_tool_error(w, id, "missing required parameter: branch");
+                    }
+                    McpCommand::CreateWorktree { branch }
+                }
                 _ => unreachable!(),
             };
 

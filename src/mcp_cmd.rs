@@ -27,6 +27,11 @@ pub enum McpCommand {
     PickFiles { patterns: Vec<String> },
     /// Clear all picks.
     ClearPicks,
+    /// Create a git worktree off the focused column's repo for `branch`
+    /// (existing branch, else a new one at HEAD). Lets a skill spin up a
+    /// worktree to work in `b` while `a` stays on its branch. Replies with
+    /// the new worktree's path.
+    CreateWorktree { branch: String },
     /// Another spyc instance has taken over the MCP socket for this
     /// directory. The TUI should warn the user.
     Disconnected { new_pid: u32 },
