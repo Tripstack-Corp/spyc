@@ -1,7 +1,7 @@
 # spyc roadmap
 
 The single living roadmap. Strategy, backlog, launch plan, and the
-post-2.0 arc all live here; `BUGS.md` is the owner's raw intake
+post-2.0 arc all live here; `BACKLOG_DRAFT_NOTES.md` is the owner's raw intake
 backlog, and `CHANGELOG.md` is the shipped history. Detailed designs
 for not-yet-started work live in `docs/*_PLAN.md` (indexed at the
 bottom); shipped plans are archived in `docs/archive/`.
@@ -573,7 +573,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | Doc | Role |
 |---|---|
 | `ROADMAP.md` | This file — strategy, backlog, launch, decisions. |
-| `BUGS.md` | Owner's raw intake backlog (small fixes, ideas, reports). |
+| `BACKLOG_DRAFT_NOTES.md` | Owner's raw intake backlog (small fixes, ideas, reports). |
 | `CHANGELOG.md` | Shipped history (git-cliff, conventional commits). |
 | `CLAUDE.md` | The architectural contract (MVU invariants, rules). |
 | `ARCHITECTURE.md` | Deep stable design decisions. |

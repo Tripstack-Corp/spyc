@@ -368,8 +368,8 @@ Architecture decisions land in:
   hints. Don't grow it past what's worth paying context tokens for.
 - **`ROADMAP.md`** — forward plan; move shipped items to Done.
 - **`CHANGELOG.md`** — release notes (Keep-a-Changelog).
-- **`BUGS.md`** — open + fixed bugs. Move from open buckets to
-  FIXED on commit.
+- **`BACKLOG_DRAFT_NOTES.md`** — owner's raw backlog / draft notes (open +
+  fixed bugs, ideas, reports). Move from open buckets to FIXED on commit.
 - **`FEATURES.md`** — user-facing feature reference.
 - **`README.md`** — landing page, install, positioning.
 - **`src/ui/help.rs`** — in-app `?` help; user-visible keybindings.

@@ -101,7 +101,7 @@ per-module navigation index.
   - `ARCHITECTURE.md` — only when an *architectural decision* changes (concurrency model, MVU shape, persistence, etc.); not for routine features
   - `DESIGN.md` — only when the *UI design language* changes (a new surface type, a new naming convention, palette change); not for routine features
   - `ROADMAP.md` — move shipped items to Done, update track status
-  - `BUGS.md` — move fixed bugs to FIXED section
+  - `BACKLOG_DRAFT_NOTES.md` — owner's raw backlog; move fixed bugs to FIXED section
   - `CHANGELOG.md` — add entry under Unreleased
   - `INSTALL.md` — if build/install steps change
   - `src/ui/help.rs` — if keybindings or user-facing commands change

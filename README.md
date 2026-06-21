@@ -394,7 +394,7 @@ See [INSTALL.md](INSTALL.md) for detailed setup instructions.
 - [CHANGELOG.md](CHANGELOG.md) -- release history
 - [ROADMAP.md](ROADMAP.md) -- what's next
 - [CONTRIBUTING.md](CONTRIBUTING.md) -- contribution guidelines and SemVer policy
-- [BUGS.md](BUGS.md) -- known bugs and planned fixes
+- [BACKLOG_DRAFT_NOTES.md](BACKLOG_DRAFT_NOTES.md) -- owner's raw backlog / draft notes (bugs, ideas, reports)
 
 ## License
 

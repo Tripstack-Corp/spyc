@@ -224,6 +224,6 @@ A checklist for adding a feature with UI surface:
    row in `ui/help.rs`.
 5. Confirm it reads in mono. If color carries meaning, also use a
    modifier (BOLD / DIM / REVERSED).
-6. Update CHANGELOG, BUGS (if it closes one), and any user-facing
+6. Update CHANGELOG, BACKLOG_DRAFT_NOTES.md (if it closes one), and any user-facing
    doc. ARCHITECTURE only if the *engine* changed; DESIGN only if
    the *language* changed.
