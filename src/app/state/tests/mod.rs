@@ -557,6 +557,33 @@ fn tool_root_prefers_worktree_then_project_home_then_listing() {
     assert_eq!(s.tool_root(Side::Left), PathBuf::from("/repo/a"));
 }
 
+/// `harpoon_root` deliberately DROPS tool_root's listing-dir fallback: outside a
+/// repo with no PROJECT_HOME it returns `None` (harpoon disabled) rather than
+/// spawning a per-dir bookmark file. The `None` arm is what distinguishes it
+/// from `tool_root` and was previously reached only indirectly — a regression
+/// copying tool_root's listing fallback in would compile and pass every test.
+#[test]
+fn harpoon_root_has_no_listing_fallback_unlike_tool_root() {
+    use crate::app::state::Side;
+    let mut s = test_state();
+    s.left.listing.dir = PathBuf::from("/list/a");
+    s.project_home = None;
+    s.left.git_cache.current_repo_root = None;
+
+    // No repo, no PROJECT_HOME → None (NOT the listing dir — the contrast with
+    // tool_root, which returns /list/a here).
+    assert_eq!(s.harpoon_root(Side::Left), None);
+    assert_eq!(s.tool_root(Side::Left), PathBuf::from("/list/a"));
+
+    // PROJECT_HOME set → Some(project_home).
+    s.project_home = Some(PathBuf::from("/proj"));
+    assert_eq!(s.harpoon_root(Side::Left), Some(PathBuf::from("/proj")));
+
+    // Inside a repo → the worktree root wins.
+    s.left.git_cache.current_repo_root = Some(PathBuf::from("/repo/a"));
+    assert_eq!(s.harpoon_root(Side::Left), Some(PathBuf::from("/repo/a")));
+}
+
 /// `compute_git_info_fast` memoizes the branch string by `HEAD`'s mtime:
 /// a matching `(repo_root, mtime)` key reuses the cached value WITHOUT
 /// re-opening gix, and a differing key re-resolves. Proven without relying

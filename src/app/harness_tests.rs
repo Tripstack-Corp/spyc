@@ -1902,6 +1902,46 @@ fn mcp_open_worktree_opens_column_b() {
     });
 }
 
+/// `resolve_worktree_arg` (shared by remove/clean_worktree) — two arms the
+/// existing remove test never hits (it feeds an absolute created-worktree path):
+/// the empty-path error, and the relative-path resolution joined onto the
+/// FOCUSED column's cwd before the occupied check.
+#[test]
+fn worktree_arg_empty_errors_and_relative_resolves_against_cwd() {
+    use crate::mcp_cmd::{McpCommand, McpResponse};
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let base = std::fs::canonicalize(tmp.path()).unwrap();
+        let sub = base.join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        let mut app = App::test_app(base);
+        app.open_second_commander_at(&sub); // b inside base/sub
+        // Resolve relative paths against `a` (base) → "sub" means base/sub.
+        app.state.vsplit.as_mut().unwrap().focus = state::Side::Left;
+        assert_eq!(app.focused_side(), state::Side::Left);
+
+        // Empty path → missing-parameter error (before any path logic).
+        let empty = app.execute_mcp_command(McpCommand::RemoveWorktree {
+            path: String::new(),
+        });
+        assert!(
+            matches!(&empty, McpResponse::Error { message } if message.contains("missing required parameter")),
+            "empty path → missing-parameter error"
+        );
+
+        // Relative "sub" joins onto the focused column's cwd (base) → base/sub,
+        // which b occupies → the occupied-column guard fires. Proves the relative
+        // arm resolved against cur().listing.dir.
+        let rel = app.execute_mcp_command(McpCommand::CleanWorktree {
+            path: "sub".to_string(),
+        });
+        assert!(
+            matches!(&rel, McpResponse::Error { message } if message.contains("open inside")),
+            "relative path resolved against cwd → occupied-column guard"
+        );
+    });
+}
+
 /// A non-directory path is an error and leaves the layout unchanged.
 #[test]
 fn mcp_open_worktree_rejects_non_dir() {

@@ -239,6 +239,31 @@ mod tests {
         );
     }
 
+    /// `is_listing_path`'s gitdir carve-out: ACCEPT `.git/index` / `.git/HEAD`
+    /// (and the gitdir itself, for FSEvents coalescing) plus the working tree,
+    /// but REJECT `.git/objects` / `refs` / lockfile churn. That rejection is
+    /// the whole reason the predicate filters `.git/` (rebase/gc/pack spam →
+    /// refresh spin), yet it was only tested via the SEPARATE
+    /// `is_gitdir_status_path` — and `is_listing_path` ALSO accepts the working
+    /// tree, so the two diverge and need independent coverage.
+    #[test]
+    fn listing_path_accepts_index_head_rejects_object_churn() {
+        let mut app = App::test_app(PathBuf::from("/repo"));
+        app.state.left.git_cache.current_gitdir = Some(PathBuf::from("/repo/.git"));
+
+        // Accepted: the two refresh-worthy gitdir files + the gitdir itself.
+        assert!(app.is_listing_path(Path::new("/repo/.git/index")));
+        assert!(app.is_listing_path(Path::new("/repo/.git/HEAD")));
+        assert!(app.is_listing_path(Path::new("/repo/.git")));
+        // Accepted: ordinary working-tree files (the arm gitdir_status lacks).
+        assert!(app.is_listing_path(Path::new("/repo/src/main.rs")));
+        // Rejected: object/pack/ref/lockfile churn under .git — else every
+        // rebase/gc/pack write would spin refresh_listing → git-status → redraw.
+        assert!(!app.is_listing_path(Path::new("/repo/.git/objects/ab/cd")));
+        assert!(!app.is_listing_path(Path::new("/repo/.git/refs/heads/main")));
+        assert!(!app.is_listing_path(Path::new("/repo/.git/index.lock")));
+    }
+
     /// `is_preview_path` matches exactly the open vertical-split preview's
     /// source file — nothing when no preview is open, and not a sibling.
     #[test]

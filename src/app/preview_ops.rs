@@ -198,6 +198,32 @@ mod tests {
         }
     }
 
+    /// Burst-collapse: while a reload is in flight, `kick_preview_reload` marks
+    /// `preview_dirty` and returns instead of spawning a SECOND worker — the
+    /// design that keeps a save-storm from spawning a thread per event. (The
+    /// trailing re-kick from `apply_preview_reloads` spawns a real worker, so it
+    /// isn't asserted here; this pins the no-second-worker half.)
+    #[test]
+    fn kick_coalesces_while_a_reload_is_in_flight() {
+        use std::sync::atomic::Ordering;
+        let mut app = App::test_app(PathBuf::from("/repo"));
+        open_preview(&mut app, "/repo/doc.md", 10, 0);
+        // Simulate an in-flight worker.
+        app.runtime.preview_reloading.store(true, Ordering::Release);
+        app.view.preview_dirty = false;
+
+        app.kick_preview_reload();
+
+        assert!(
+            app.view.preview_dirty,
+            "in-flight reload → mark dirty for one trailing re-render"
+        );
+        assert!(
+            app.runtime.preview_reloading.load(Ordering::Acquire),
+            "flag untouched — no second worker was kicked"
+        );
+    }
+
     /// A matching reload installs the fresh view and preserves the reader's
     /// scroll position (it fits within the new, longer content).
     #[test]

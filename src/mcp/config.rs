@@ -793,6 +793,52 @@ mod tests {
         assert!(!path.exists(), "sole-spyc .mcp.json should be deleted");
     }
 
+    /// A git-TRACKED (committed) `.mcp.json` is left byte-for-byte intact:
+    /// `guard_tracked` refuses to dirty/delete a config the user committed.
+    /// Every other cleanup test uses a plain (non-git) tempdir, so `is_tracked`
+    /// is always false and the `SkippedTracked` branch — the load-bearing safety
+    /// guard — never ran; a regression dropping it would silently rewrite a
+    /// committed config with no failing test.
+    #[test]
+    fn cleanup_skips_a_git_tracked_mcp_json() {
+        let run_git = |dir: &std::path::Path, args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@x")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@x")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .status()
+                .expect("spawn git")
+                .success();
+            assert!(ok, "git {args:?} failed");
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+        run_git(repo, &["init", "-q", "--initial-branch=main"]);
+        let path = repo.join(".mcp.json");
+        let body = format!(
+            "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}}}}}}",
+            our_sock()
+        );
+        std::fs::write(&path, &body).unwrap();
+        run_git(repo, &["add", ".mcp.json"]);
+        run_git(repo, &["commit", "-q", "-m", "add mcp config"]);
+
+        assert!(
+            matches!(cleanup_mcp_json(repo), ConfigCleanup::SkippedTracked),
+            "committed .mcp.json with our entry → SkippedTracked, not Cleaned"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            body,
+            "the tracked config is left byte-for-byte intact"
+        );
+    }
+
     #[test]
     fn cleanup_mcp_json_preserves_other_servers() {
         let tmp = tempfile::tempdir().unwrap();
