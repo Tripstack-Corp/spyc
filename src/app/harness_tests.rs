@@ -1942,6 +1942,53 @@ fn worktree_arg_empty_errors_and_relative_resolves_against_cwd() {
     });
 }
 
+/// `W d` (worktree delete) refuses when the OTHER column is open inside the
+/// worktree being removed — mirrors the MCP `remove_worktree` occupied guard,
+/// so the in-app key is no less safe than the tool. Without it, deleting `a`'s
+/// worktree while `b` sits in a subdir strands `b` on a removed directory.
+#[test]
+fn worktree_delete_refuses_when_other_column_inside() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let wt = root.join("wt");
+        let sub = wt.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let mut app = App::test_app(wt); // a in wt (the delete target)
+        app.open_second_commander_at(&sub); // b in wt/sub
+        // Focus a (the worktree we'll delete); mark it a git repo so the delete
+        // path proceeds past the "not in a git repository" check.
+        app.state.vsplit.as_mut().unwrap().focus = state::Side::Left;
+        app.state.left.git.info = Some("main".to_string());
+        assert_eq!(app.focused_side(), state::Side::Left);
+
+        let _ = app.apply(&Action::WorktreeDelete);
+        assert!(
+            !matches!(app.state.mode, Mode::Prompting(_)),
+            "refused: no confirm prompt shown"
+        );
+        assert!(
+            app.state
+                .flash
+                .as_ref()
+                .is_some_and(|f| f.text.contains("navigate it away")),
+            "flashed the occupied-column refusal"
+        );
+
+        // Control: move b out of the worktree → the delete now prompts.
+        app.state.right.as_mut().unwrap().listing.dir = root;
+        let _ = app.apply(&Action::WorktreeDelete);
+        assert!(
+            matches!(
+                &app.state.mode,
+                Mode::Prompting(p) if matches!(p.kind, PromptKind::WorktreeDeleteConfirm)
+            ),
+            "b no longer inside → delete confirm prompt shown"
+        );
+    });
+}
+
 /// A non-directory path is an error and leaves the layout unchanged.
 #[test]
 fn mcp_open_worktree_rejects_non_dir() {

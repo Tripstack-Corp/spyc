@@ -471,10 +471,26 @@ impl AppState {
                 }
             }
             Action::WorktreeDelete => {
+                // Refuse if the *other* column is open inside the worktree we'd
+                // remove — else it's left stranded on a deleted dir until its
+                // next chdir/refresh. The focused column is the target (it gets
+                // chdir'd to the parent on success); only the non-focused one
+                // needs guarding. Mirrors the MCP `resolve_worktree_arg` check
+                // so the in-app key is no less safe than `remove_worktree`.
+                let target = self.cur().listing.dir.clone();
+                let other_inside = match self.focused_side() {
+                    super::Side::Left => self.right.as_ref(),
+                    super::Side::Right => Some(&self.left),
+                }
+                .is_some_and(|c| c.listing.dir.starts_with(&target));
                 if self.cur().git.info.is_none() {
                     self.flash_error("not in a git repository");
+                } else if other_inside {
+                    self.flash_error(
+                        "the other column is open inside this worktree — navigate it away first",
+                    );
                 } else {
-                    let dir = self.cur().listing.dir.display().to_string();
+                    let dir = target.display().to_string();
                     self.mode = Mode::Prompting(Prompt::simple(
                         PromptKind::WorktreeDeleteConfirm,
                         format!("remove worktree {dir}? (y/N): "),
