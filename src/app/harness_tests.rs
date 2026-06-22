@@ -2144,6 +2144,57 @@ fn typed_shell_command_runs_in_the_focused_columns_dir() {
     });
 }
 
+/// The COMPOSED gitignore-drop (`drop_gitignored_fs_events`): across a column in
+/// a repo, FSEvents under a gitignored build subtree (`target/`) are dropped so
+/// cargo-build churn can't spam refresh — but three exemptions SURVIVE the drop:
+/// a cwd-level gitignored file (a visible row changed), a normal source edit,
+/// and the open vertical-split preview file even when it lives under the
+/// gitignored subtree (else its save never reaches the live reload). The pure
+/// pieces (`is_cwd_level`, `excludes::with_checker`) are tested in isolation;
+/// this pins their composition in the retain_mut drain.
+#[test]
+fn gitignored_fs_event_drop_keeps_cwd_level_source_and_preview() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let repo = std::fs::canonicalize(tmp.path()).unwrap();
+        gix::init(&repo).unwrap();
+        std::fs::write(repo.join(".gitignore"), "target/\n*.log\n").unwrap();
+
+        let mut app = App::test_app(repo.clone());
+        app.state.update_repo_root(state::Side::Left, &repo);
+        // The open preview points at a file under the gitignored `target/`.
+        let preview = repo.join("target/preview.md");
+        let mut pv = crate::ui::pager::PagerView::new_plain("preview", vec!["x".to_string()]);
+        pv.source_path = Some(preview.clone());
+        app.view.right_pager = Some(pv);
+
+        let ev = |p: &std::path::Path| {
+            notify::Event::new(notify::EventKind::Any).add_path(p.to_path_buf())
+        };
+        let log = repo.join("debug.log"); // cwd-level + gitignored → keep
+        let src = repo.join("src/main.rs"); // ordinary edit → keep
+        let obj = repo.join("target/debug/foo.o"); // gitignored subtree churn → drop
+        let mut pending = vec![ev(&log), ev(&src), ev(&obj), ev(&preview)];
+
+        app.drop_gitignored_fs_events(&mut pending);
+
+        let survived: std::collections::HashSet<std::path::PathBuf> = pending
+            .iter()
+            .flat_map(|e| e.paths.iter().cloned())
+            .collect();
+        assert!(survived.contains(&log), "cwd-level gitignored file kept");
+        assert!(survived.contains(&src), "ordinary source edit kept");
+        assert!(
+            survived.contains(&preview),
+            "open preview file kept even under target/"
+        );
+        assert!(
+            !survived.contains(&obj),
+            "gitignored build-subtree churn dropped"
+        );
+    });
+}
+
 /// Dual fs-watch: with a second commander open, the fs-event path predicates
 /// recognize column `b`'s tree + gitdir too — so `b`'s working-tree edits and
 /// index/HEAD changes drive a refresh, not just the ≤1 s poll PR E left.

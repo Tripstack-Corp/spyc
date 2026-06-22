@@ -212,6 +212,60 @@ fn is_cwd_level(path: &std::path::Path, listing_dir: &std::path::Path) -> bool {
 }
 
 impl App {
+    /// Drop FSEvents under gitignored build/cache subtrees (`target/`,
+    /// `node_modules/`, `.claude/`, …) before they drive a refresh: the
+    /// recursive watch can't skip those subtrees (one FSEvents stream for the
+    /// whole tree), and their churn — a cargo build, a fuzz run — would flood
+    /// the loop and starve the git poll, leaving dirty markers stale. Fails open
+    /// (no repo / no matcher → keep everything).
+    ///
+    /// Survivors, judged per active column that's in a repo: paths at the
+    /// listing level (the cwd the user is viewing — a changed visible row, e.g.
+    /// spyc's own `.spyc-context-*`) stay, and the vertical-split preview file
+    /// stays even from a gitignored subtree (else its save never reaches the
+    /// live reload). Each column's checker judges only paths under ITS OWN tree,
+    /// so a path outside both trees (the other column, config files, gitdirs) is
+    /// left untouched for another pass.
+    ///
+    /// Extracted from `ingest_fs_and_maybe_refresh` so the *composed* drop (the
+    /// `retain_mut` + the cwd-level / preview exemptions, across two columns) is
+    /// unit-testable without a `RunCtx`.
+    pub(crate) fn drop_gitignored_fs_events(&self, fs_pending: &mut Vec<notify::Event>) {
+        let preview_path = self
+            .view
+            .right_pager
+            .as_ref()
+            .and_then(|v| v.source_path.clone());
+        let cols: Vec<(std::path::PathBuf, std::path::PathBuf)> = self
+            .state
+            .active_sides()
+            .filter_map(|s| {
+                let c = self.state.col(s);
+                c.git_cache
+                    .current_repo_root
+                    .clone()
+                    .map(|root| (root, c.listing.dir.clone()))
+            })
+            .collect();
+        for (root, listing_dir) in cols {
+            crate::git::excludes::with_checker(&root, |is_excluded| {
+                fs_pending.retain_mut(|ev| {
+                    ev.paths.retain(|p| {
+                        // Not under this column's tree → leave it for another
+                        // column's pass (or keep it). Under this tree: keep
+                        // cwd-level paths and the previewed file unconditionally;
+                        // drop deeper gitignored-subtree churn.
+                        !p.starts_with(&listing_dir)
+                            || is_cwd_level(p, &listing_dir)
+                            || preview_path.as_deref() == Some(p.as_path())
+                            || !is_excluded(p)
+                    });
+                    !ev.paths.is_empty()
+                });
+            });
+        }
+    }
+
     /// MVU Phase 3a: fold one buffered watcher event into the
     /// listing-refresh debounce state. Extracted verbatim from the old
     /// pre-recv `rx.try_recv()` drain so the recv-arm buffering and this
@@ -266,61 +320,10 @@ impl App {
     ) -> bool {
         let mut needs_draw = false;
         let mut needs_reload = false;
-        // Drop FSEvents under gitignored build/cache dirs (`target/`,
-        // `fuzz/target`, `node_modules/`, `.claude/`, …) before ingesting: the
-        // recursive watch can't skip those subtrees (one FSEvents stream for
-        // the whole tree), and their churn — a cargo build, a fuzz run — would
-        // otherwise flood the loop and starve the git poll, leaving the dirty
-        // markers stale. Built once per batch; fails open (no repo / no
-        // matcher → keep everything).
-        //
-        // EXCEPT entries at the listing level (the cwd the user is viewing): a
-        // file created/removed *there* changes a visible row and must refresh
-        // the listing even when gitignored — e.g. spyc's own `.spyc-context-*`
-        // files, or another instance's startup sweep deleting stale ones. We
-        // only suppress churn from gitignored *subtrees* the user isn't looking
-        // at, so the cwd stays an always-current class.
-        // The previewed file (vertical split) must survive the gitignore drop
-        // even if it lives in a gitignored subtree — otherwise its save event is
-        // filtered out and the live reload never fires. Precomputed so the
-        // retain closure (which borrows `ctx`) needn't reach back into `self`.
-        let preview_path = self
-            .view
-            .right_pager
-            .as_ref()
-            .and_then(|v| v.source_path.clone());
-        // One gitignore-drop pass per active column that's in a repo: each
-        // column's checker judges only paths under ITS OWN tree, so `b`'s
-        // build/cache churn is filtered by `b`'s gitignore (and paths outside
-        // both trees — the other column, config files, gitdirs — survive).
-        let cols: Vec<(std::path::PathBuf, std::path::PathBuf)> = self
-            .state
-            .active_sides()
-            .filter_map(|s| {
-                let c = self.state.col(s);
-                c.git_cache
-                    .current_repo_root
-                    .clone()
-                    .map(|root| (root, c.listing.dir.clone()))
-            })
-            .collect();
-        for (root, listing_dir) in cols {
-            crate::git::excludes::with_checker(&root, |is_excluded| {
-                ctx.fs_pending.retain_mut(|ev| {
-                    ev.paths.retain(|p| {
-                        // Not under this column's tree → leave it for another
-                        // column's pass (or keep it). Under this tree: keep
-                        // cwd-level paths and the previewed file unconditionally;
-                        // drop deeper gitignored-subtree churn.
-                        !p.starts_with(&listing_dir)
-                            || is_cwd_level(p, &listing_dir)
-                            || preview_path.as_deref() == Some(p.as_path())
-                            || !is_excluded(p)
-                    });
-                    !ev.paths.is_empty()
-                });
-            });
-        }
+        // Drop FSEvents under gitignored build/cache subtrees before ingesting
+        // (cwd-level paths + the open preview file survive) — see
+        // `drop_gitignored_fs_events`.
+        self.drop_gitignored_fs_events(&mut ctx.fs_pending);
         let mut git_event = false;
         let mut preview_event = false;
         for ev in std::mem::take(&mut ctx.fs_pending) {
