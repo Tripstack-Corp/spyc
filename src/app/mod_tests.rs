@@ -34,6 +34,107 @@ mod guard_tests {
              raise CEILING."
         );
     }
+
+    /// `state.left`/`right` address a SPECIFIC column (render draws both
+    /// explicitly; the fs-watch dedup-keys per column). "Where the user is
+    /// working" — a spawn cwd, a restore target, the dir an op acts on — must
+    /// use `cur()`/`cur_mut()` so a focused second commander is honored. The
+    /// June-2026 vsplit review found six spawn/restore sites stranded on
+    /// `state.left.listing.dir` (`:;`, the bare pane spawn, pager-edit,
+    /// graveyard restore, …). A new read outside the allowlist is that smell —
+    /// route it through `cur()`, or (if it's genuinely the left column) add the
+    /// file to ALLOW with a why. See AGENTS.md → per-column scoping.
+    ///
+    /// Allowlisted: the left-column fs-watch dedup keys (`run.rs`; the right
+    /// column has its own `watched_listing_right`), the startup `initial_cwd`
+    /// (`bootstrap.rs`, pre-split), and the status-bar header (`chrome.rs`,
+    /// deliberately anchored to the primary column).
+    #[test]
+    fn state_left_listing_dir_uses_are_allowlisted() {
+        const ALLOW: &[&str] = &["run.rs", "bootstrap.rs", "chrome.rs"];
+        // Split so this guard's own source can't match the needle.
+        let needle = format!("{}{}", "state.left", ".listing.dir");
+        let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app");
+        let mut offenders = Vec::new();
+        scan_app_rs(&app, &mut |path, src| {
+            // Production portion only — a `#[cfg(test)]` block may legitimately
+            // poke `state.left` to set up a fixture.
+            let production = src.split("#[cfg(test)]").next().unwrap_or("");
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if production.contains(&needle) && !ALLOW.contains(&name) {
+                offenders.push(name.to_string());
+            }
+        });
+        offenders.sort();
+        assert!(
+            offenders.is_empty(),
+            "`state.left.listing.dir` read outside the allowlist in: {offenders:?}. \
+             Use `cur().listing.dir` (the focused column) for spawn/restore cwd so a \
+             second commander is honored; if it's genuinely the left column, add the \
+             file to ALLOW with a why. See AGENTS.md → per-column scoping."
+        );
+    }
+
+    /// Every top-level `src/app/<feature>.rs` module must be named in the
+    /// AGENTS.md module index — the June-2026 review found `worktree_clean.rs`,
+    /// `activity.rs`, and `git_view_session.rs` silently absent, so the "map of
+    /// the codebase" had holes. A new feature module → add its bullet in the
+    /// same PR. Test-only files (`mod_tests.rs` / `test_harness.rs`) are exempt.
+    #[test]
+    fn every_app_module_is_in_the_agents_index() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let agents = std::fs::read_to_string(root.join("AGENTS.md")).expect("read AGENTS.md");
+        let mut missing = Vec::new();
+        for entry in std::fs::read_dir(root.join("src/app")).expect("read src/app") {
+            let path = entry.expect("dir entry").path();
+            // Top-level feature modules only; subdir modules (render/, state/, …)
+            // are documented as groups.
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if matches!(name, "mod.rs" | "mod_tests.rs" | "test_harness.rs") {
+                continue;
+            }
+            if !agents.contains(name) {
+                missing.push(name.to_string());
+            }
+        }
+        missing.sort();
+        assert!(
+            missing.is_empty(),
+            "src/app/ feature modules missing from the AGENTS.md module index: {missing:?}. \
+             Add a bullet for each (AGENTS.md → \"Keep docs in sync\") — a module absent \
+             from the map is the worktree_clean.rs gap the June-2026 review caught."
+        );
+    }
+
+    /// Recursively read every `.rs` under `dir`, skipping whole-file test
+    /// modules (`*_tests.rs`, `mod_tests.rs` / `test_harness.rs`, and `tests/` /
+    /// `*_tests/` dirs — they carry no in-file `#[cfg(test)]` marker, so the
+    /// production-split heuristic would misread them). Calls `f(path, source)`.
+    fn scan_app_rs(dir: &std::path::Path, f: &mut dyn FnMut(&std::path::Path, &str)) {
+        for entry in std::fs::read_dir(dir).expect("read dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                let dname = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if dname == "tests" || dname.ends_with("_tests") {
+                    continue;
+                }
+                scan_app_rs(&path, f);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if name == "mod_tests.rs"
+                    || name == "test_harness.rs"
+                    || name.ends_with("_tests.rs")
+                {
+                    continue;
+                }
+                let src = std::fs::read_to_string(&path).expect("read .rs");
+                f(&path, &src);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
