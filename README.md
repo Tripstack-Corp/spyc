@@ -20,11 +20,12 @@
 
 ## Why spyc?
 
-Most AI coding agent tools are native desktop apps — macOS-only, outside
-your terminal, with you describing your working tree to them in chat.
-spyc runs inside your existing terminal on macOS and Linux, and gives the
-agent live, structured access to exactly what you're looking at via a
-local MCP socket.
+Put an AI coding agent in your terminal and you usually get a chat
+window — you still describe your working tree to it, paste paths back
+and forth, and lose track of what it's looking at. spyc runs the agent
+in a pane beside a keyboard-driven file commander, on macOS and Linux,
+and gives it live, structured access to exactly what you're looking at
+via a local MCP socket.
 
 The agent can ask spyc *what is the cursor on, what is staged, what is
 pinned, what is in this directory* — no copy-paste, no path description.
@@ -154,7 +155,7 @@ regression).
 | `gg` / `G` | Top / bottom |
 | `Enter` | Descend into dir or view file in pager |
 | `e` / `v` | Descend into dir or open file in `$EDITOR` |
-| `dd` / `Ndd` | Remove cursor entry (+ N-1 below) to the graveyard |
+| `dd` / `Ndd` | Remove cursor entry (+ N-1 below) to the graveyard (confirm with `y`) |
 | `V` | Open `$EDITOR` in top pane (bottom pane stays visible) |
 | `D` | Open file in the in-app pager in top pane (bottom pane stays visible) |
 | `u` / `-` | Climb to parent |
