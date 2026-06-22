@@ -1,0 +1,28 @@
+---
+source: src/app/render/mod.rs
+expression: "render_to_string(&mut app, 80, 24)"
+---
+ 🌶️   /projects/demo  [picks:0 inv:0 m1:on m2:on hidden:0 sort:name]           
+  README.md                            │  lib.rs                                
+  Cargo.toml                           │  main.rs                               
+  src                                  │  mod.rs                                
+  tests                                │                                        
+  docs                                 │                                        
+  BUGS.md                              │                                        
+                                       │                                        
+                                       │                                        
+                                       │                                        
+                                       │                                        
+                                       │                                        
+                                       │                                        
+                                       │                                        
+                                       │                                        
+                                       │                                        
+                                       │                                        
+                                       │                                        
+                                       │                                        
+                                       │                                        
+                                       │                                        
+                                       │                                        
+                                       │                                        
+second commander (^s x / ^d to close)

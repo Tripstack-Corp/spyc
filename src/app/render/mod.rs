@@ -866,6 +866,67 @@ mod render_tests {
         insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
     }
 
+    /// Vertical-split preview (Stage-1 `^a |`), top-only, right column focused:
+    /// the file list narrows to the left, a one-column divider runs down the
+    /// list region, and the preview pager paints into the right column. The
+    /// dual-column layout had zero snapshot coverage — this guards the carve
+    /// geometry, divider placement, and left-list narrowing.
+    fn preview_app(mode: state::VsplitMode, focus: state::Side) -> App {
+        let mut app = demo_app(&files());
+        let mut pv = crate::ui::pager::PagerView::new_plain(
+            "preview.md",
+            (0..30).map(|i| format!("preview line {i}")).collect(),
+        );
+        pv.mount = crate::ui::pager::Mount::RightPane;
+        app.view.right_pager = Some(pv);
+        app.state.vsplit = Some(state::VSplit {
+            width_pct: 50,
+            mode,
+            focus,
+        });
+        app
+    }
+
+    #[test]
+    fn snapshot_frame_vsplit_preview_top_only() {
+        let mut app = preview_app(state::VsplitMode::TopOnly, state::Side::Right);
+        insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
+    }
+
+    /// Full-height vsplit: the divider runs the whole frame height (vs top-only,
+    /// where it stops at the list region). Different carve path — covered too.
+    #[test]
+    fn snapshot_frame_vsplit_preview_full_height() {
+        let mut app = preview_app(state::VsplitMode::FullHeight, state::Side::Right);
+        insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
+    }
+
+    // NOTE: no focus-direction snapshot here — `render_to_string` dumps glyphs
+    // only, and the inactive-column dim is a *style* (color), so a focus-left vs
+    // focus-right frame is byte-identical. The dim direction isn't snapshot-
+    // covered; `decide_focus` / vsplit focus unit tests guard the focus state.
+
+    /// A second file-commander (`^s n`) open in the right column, focused: both
+    /// columns paint their own listing with the divider between. Deterministic
+    /// via a cloned commander with a fixed dir (no real fs), and the right
+    /// rows-cache forced to rebuild the way `demo_app` does for the left.
+    #[test]
+    fn snapshot_frame_second_commander() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            // Real files so `b`'s listing has deterministic basenames; the
+            // displayed dir is overridden below so the header is machine-
+            // independent (open_second_commander_at reads the real path).
+            for n in ["lib.rs", "main.rs", "mod.rs"] {
+                std::fs::write(tmp.path().join(n), "").unwrap();
+            }
+            let mut app = demo_app(&files()); // a = /projects/demo
+            app.open_second_commander_at(tmp.path()); // b reads the 3 files, focused
+            app.state.right.as_mut().unwrap().listing.dir = PathBuf::from("/projects/other");
+            insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
+        });
+    }
+
     /// A prompt opened from `b` must still render when `a` has a `D` TopPane
     /// pager filling its column — the pager branch returns early, so the prompt
     /// is painted into its reserved bottom row rather than swallowed. (Reported:

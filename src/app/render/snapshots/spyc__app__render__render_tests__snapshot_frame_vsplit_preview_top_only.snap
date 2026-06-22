@@ -1,0 +1,27 @@
+---
+source: src/app/render/mod.rs
+expression: "render_to_string(&mut app, 80, 24)"
+---
+ 🌶️   /projects/demo  [picks:0 inv:0 m1:on m2:on hidden:0 sort:name]           
+  README.md                            │┌  preview.md   (30 lines)  ───────────┐
+  Cargo.toml                           ││ 1 preview line 0                     │
+  src                                  ││ 2 preview line 1                     │
+  tests                                ││ 3 preview line 2                     │
+  docs                                 ││ 4 preview line 3                     │
+  BUGS.md                              ││ 5 preview line 4                     │
+                                       ││ 6 preview line 5                     │
+                                       ││ 7 preview line 6                     │
+                                       ││ 8 preview line 7                     │
+                                       ││ 9 preview line 8                     │
+                                       ││10 preview line 9                     │
+                                       ││11 preview line 10                    │
+                                       ││12 preview line 11                    │
+                                       ││13 preview line 12                    │
+                                       ││14 preview line 13                    │
+                                       ││15 preview line 14                    │
+                                       ││16 preview line 15                    │
+                                       ││17 preview line 16                    │
+                                       ││18 preview line 17                    │
+                                       ││19 preview line 18                    │
+                                       ││20 preview line 19                    │
+                                       │└───────────────────────────────  Top  ┘
