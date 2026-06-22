@@ -1,4 +1,18 @@
 ### SMALL ###
+- regular autosave for session state - I've also noticed recently that we're
+  not picking up sessions with spyc -r fully; is something happening during
+  shutdown?
+- we need to add "are you sure?" to ^a-x
+- have gf also scan recent scrollback (not just the visible region) and/or fall
+  back to the project root unconditionally, so it's robust to long agent
+  replies
+- make sure that multiple instances of spyc in the same directory are living
+  together ok - not getting any take over messages?
+- we need to detect that claude sessions need input and change their colour in
+  the pane to a bright blue or something else that will standout to let the
+  user know claude needs attention
+- we need a changelog for humans - in the style of a marketing team like Dropbox
+- embed roto? https://codeberg.org/NLnetLabs/roto
 - Spencer asks if we could have a git diff vs. staged files
 - so we could have a concept of one spyc per agent and the agents could be tied
     - would require that we get rid of all the hardcoded "left / right" references
