@@ -416,16 +416,9 @@ pub enum ZoomTarget {
     RightColumn,
 }
 
-// NOTE: `Side` / `VsplitMode` / `VSplit` are dormant scaffolding in this PR —
-// the `carve_vsplit` geometry + their tests exercise them, but nothing
-// *constructs* a split at runtime until the vsplit keybindings land (PR4).
-// `#[allow(dead_code)]` keeps the no-runtime-constructor case green under
-// `-D warnings`; the allows come off when PR4 wires the keys.
-
 /// Which of the two vertical regions a left/right split addresses. Labelled
 /// `a` (left) / `b` (right) in the UI — numbers stay for PTY tabs, letters
 /// for file panes.
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Side {
     Left,
@@ -436,7 +429,6 @@ pub enum Side {
 /// region (the PTY/agent pane stays full-width below both columns);
 /// `FullHeight` runs the divider the whole frame height (the PTY pane shrinks
 /// to the left column's width).
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum VsplitMode {
     TopOnly,
@@ -447,7 +439,6 @@ pub enum VsplitMode {
 /// width share, the layout mode, and which column owns input. Held as
 /// `Option<VSplit>` on the Model — `None` is the single-column default. The
 /// pager *content* for the right region lives in `ViewState`, not here.
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct VSplit {
     /// The right column's share of the split, percent. Clamped to `[20, 80]`.
@@ -503,8 +494,8 @@ pub struct PaneLayout {
 /// **focused** column through [`AppState::cur`] / [`AppState::cur_mut`] — while
 /// `right` is `None` that always resolves to `left`, so the accessor is
 /// behavior-preserving. Render addresses `left` / `right` explicitly (it draws
-/// both columns). (`git`/`git_cache` stay on `AppState` for now — they move with
-/// the dual-git-worker PR, where the per-column status generation is designed.)
+/// both columns). (`git`/`git_cache` are per-column fields below — moved off
+/// `AppState` for dual git, so `b` in a different repo renders its own markers.)
 pub struct Commander {
     /// The directory this browser is showing + its entries.
     pub listing: Listing,

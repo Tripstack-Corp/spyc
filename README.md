@@ -230,6 +230,8 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a a` / `^a h` | Focus the left file pane (a) |
 | `^a b` / `^a l` | Focus the right file pane (b) |
 | `^a d` | Toggle dimming of the inactive split column / list |
+| `^s n` | Open a second file-commander (column b, at PROJECT_HOME) |
+| `^s x` / `^d` | Close the second file-commander (`^d` quits if none open) |
 | `^a u` | Quick Select — labeled picker for URL/path/SHA/IP |
 | `^a v` | Pane scrollback in the in-app pager (search, jump, visual yank) |
 | `Ctrl+J` | Newline in pane (multi-line input) |

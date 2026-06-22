@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use crate::context;
 
 const SERVER_NAME: &str = "spyc";
-// Version + short git SHA (e.g. `1.59.0 (25abd0a)`) so the `initialize`
+// Version + short git SHA (e.g. `x.y.z (25abd0a)`) so the `initialize`
 // handshake announces the exact build — an MCP client can tell whether the
 // running server predates a tool it expects.
 const SERVER_VERSION: &str = crate::VERSION;

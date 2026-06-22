@@ -282,12 +282,13 @@ once we've daily-driven our own builds for a few days.
   and `^a b`/`^a l` focus the a/b columns, `^a +`/`^a -` resize the width, `^a z`
   zooms the active column, `^a d` toggles the focus-dim. The preview re-renders
   off-thread on save (parent-dir watch survives replace-on-save) and re-wraps on
-  resize. **Stage 2 deferred** — a second *full file-commander* on the right:
-  second process cwd + listing, second git cache + status map, dual-cwd recursive
-  watch, per-pane MCP context (`navigate_to`/`set_filter`/`pick_files` gain a pane
-  selector), and two-cwd session save/restore. The `Side` / `Mount::RightPane`
-  scaffolding from Stage 1 is forward-compatible; build it when a concrete
-  two-commander workflow asks for it.
+  resize. **Stage 2 shipped:** `^s n` opens a second *full file-commander* in
+  column b (`^s x` / `^d` close it) — its own process cwd + listing, per-column
+  git cache + status map (dual fs-watch), per-column harpoon, and search/MCP
+  tools scoped to the focused column's worktree root (`tool_root` /
+  `harpoon_root`). The focused column drives MCP context, and both cwds are
+  saved/restored across sessions (`SavedVsplit.right_cwd`); the `open_worktree` /
+  `clean_worktree` MCP tools operate on column b. See ARCHITECTURE.md.
 - **Context enrichment.** `get_spyc_context` returns paths and
   metadata; could add pick snippets, recent `cargo check` errors,
   unstaged diffs. Makes Claude's context richer without explicit

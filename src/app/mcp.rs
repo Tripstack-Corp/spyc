@@ -145,8 +145,9 @@ impl App {
         // agent's context follows the column the user is working in — `cwd`,
         // `cursor_file`, `picks`, `filter`. Since the read-side MCP tools
         // (search_*, get_file_content) resolve relative paths against this
-        // file's `cwd`, they follow focus for free. (`git_branch` stays the flat
-        // primary git state until dual-git lands; `inventory` is global.)
+        // file's `cwd`, they follow focus for free — and so does `git_branch`
+        // (`cur().git.info`), now that git is a per-column field. (`inventory`
+        // is global.)
         let cur = self.state.cur();
         let cursor_file = cur.rows.get(cur.cursor.index).map(|r| r.display.clone());
         crate::context::SpycContext {

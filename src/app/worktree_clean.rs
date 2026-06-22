@@ -7,6 +7,9 @@
 //! still **refuses** a worktree with uncommitted changes to *tracked* files —
 //! commit or stash those first; only untracked files are preserved (owner's
 //! call: tracked work lives in git, untracked is the part teardown would lose).
+//! A *wholly* untracked directory is archived in full: git collapses it to one
+//! untracked entry, so any gitignored content nested inside it rides along —
+//! harmless, since the directory is being removed regardless.
 //!
 //! App-layer, not `git::worktree` (which is pure git infra): this bridges
 //! `git::status` + `git::worktree` + the `graveyard` (app state). It takes a
