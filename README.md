@@ -5,27 +5,32 @@
 <h1 align="center">spyc</h1>
 
 <p align="center">
-  A Rust TUI file commander where the AI agent in the side pane<br>
-  can query the file commander itself.
+  The file commander is the noun the agent operates on.
 </p>
 
 <p align="center">
-  macOS and Linux · actively developed
+  Keyboard-driven · MCP-native · Rust · macOS and Linux
 </p>
 
 <p align="center">
-  <img src="docs/screen_shot.png" alt="spyc split-pane screenshot" width="720">
+  <img src="docs/demo.gif" alt="spyc demo: navigate, ask the agent, gf jump" width="720">
 </p>
 
 ---
 
 ## Why spyc?
 
-Most "AI in your terminal" tools give the agent a chat window and let
-you copy-paste paths back and forth. spyc puts a local MCP socket next
-to the file view, so the agent can ask spyc *what is the cursor on,
-what is staged, what is pinned, what is in this directory* — and
-answer questions about your working tree without you describing it.
+Most AI coding agent tools are native desktop apps — macOS-only, outside
+your terminal, with you describing your working tree to them in chat.
+spyc runs inside your existing terminal on macOS and Linux, and gives the
+agent live, structured access to exactly what you're looking at via a
+local MCP socket.
+
+The agent can ask spyc *what is the cursor on, what is staged, what is
+pinned, what is in this directory* — no copy-paste, no path description.
+Pick three files and ask a question; the agent sees your selection. When
+it mentions a path in its response, press `gf` to jump there. Context
+flows both ways.
 
 The file commander is the noun the agent operates on, not the chrome
 around it.
