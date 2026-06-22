@@ -60,6 +60,10 @@ fn initialize_response() {
         instructions.contains("spyc"),
         "frames the agent as running inside spyc"
     );
+    assert!(
+        instructions.contains("clean_worktree"),
+        "names the full worktree lifecycle, not just create/remove"
+    );
 }
 
 #[test]

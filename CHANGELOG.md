@@ -2,6 +2,11 @@
 
 All notable changes to spyc. Entries from v1.57.0 onward are generated from the conventional-commit history by [git-cliff](https://git-cliff.org) (config in `cliff.toml`); regenerate the pending section with `make changelog` and cut a release with `make release-tag VERSION=x.y.z`. Entries at v1.56.0 and earlier are the original hand-written log, kept verbatim.
 
+## [1.60.1] - 2026-06-22
+
+### Features
+- **mcp**: Name the full worktree lifecycle in server instructions
+
 ## [1.60.0] - 2026-06-21
 
 ### Features
