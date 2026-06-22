@@ -5,27 +5,33 @@
 <h1 align="center">spyc</h1>
 
 <p align="center">
-  A Rust TUI file commander where the AI agent in the side pane<br>
-  can query the file commander itself.
+  The file commander is the noun the agent operates on.
 </p>
 
 <p align="center">
-  macOS and Linux · actively developed
+  Keyboard-driven · MCP-native · Rust · macOS and Linux
 </p>
 
 <p align="center">
-  <img src="docs/screen_shot.png" alt="spyc split-pane screenshot" width="720">
+  <img src="docs/demo.gif" alt="spyc demo: navigate, ask the agent, gf jump" width="720">
 </p>
 
 ---
 
 ## Why spyc?
 
-Most "AI in your terminal" tools give the agent a chat window and let
-you copy-paste paths back and forth. spyc puts a local MCP socket next
-to the file view, so the agent can ask spyc *what is the cursor on,
-what is staged, what is pinned, what is in this directory* — and
-answer questions about your working tree without you describing it.
+Put an AI coding agent in your terminal and you usually get a chat
+window — you still describe your working tree to it, paste paths back
+and forth, and lose track of what it's looking at. spyc runs the agent
+in a pane beside a keyboard-driven file commander, on macOS and Linux,
+and gives it live, structured access to exactly what you're looking at
+via a local MCP socket.
+
+The agent can ask spyc *what is the cursor on, what is staged, what is
+pinned, what is in this directory* — no copy-paste, no path description.
+Pick three files and ask a question; the agent sees your selection. When
+it mentions a path in its response, press `gf` to jump there. Context
+flows both ways.
 
 The file commander is the noun the agent operates on, not the chrome
 around it.
@@ -97,7 +103,7 @@ spyc -r         # resume a previous session (restores each pane to its own
 ```
 
 spyc opens with your cwd in a multi-column listing. Move with `hjkl`,
-enter a directory with `d`, view a file in the pager with `Enter`, open
+enter a directory or view a file in the pager with `Enter`, open
 in `$EDITOR` with `e`. Press `?` for the full help overlay.
 
 To open the Claude pane, press **`^\`** (Ctrl+Backslash) or **F10**.
@@ -147,8 +153,9 @@ regression).
 |-----|--------|
 | `h` `j` `k` `l` | Move (counts work: `5j`, `10k`) |
 | `gg` / `G` | Top / bottom |
-| `d` / `Enter` | Descend into dir or view file in pager |
+| `Enter` | Descend into dir or view file in pager |
 | `e` / `v` | Descend into dir or open file in `$EDITOR` |
+| `dd` / `Ndd` | Remove cursor entry (+ N-1 below) to the graveyard (confirm with `y`) |
 | `V` | Open `$EDITOR` in top pane (bottom pane stays visible) |
 | `D` | Open file in the in-app pager in top pane (bottom pane stays visible) |
 | `u` / `-` | Climb to parent |
@@ -240,7 +247,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 
 ### Pager
 
-Press `d` or `Enter` on a file to view it in the built-in pager with
+Press `Enter` on a file to view it in the built-in pager with
 syntax highlighting, search, line numbers, hex dump, markdown
 rendering, and ANSI color support. Press `?` inside the pager for
 its own help overlay.

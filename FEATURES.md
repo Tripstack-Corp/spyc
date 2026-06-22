@@ -27,12 +27,15 @@ Everything is keyboard-driven with vi motions as the foundation.
 
 ## Directory browsing
 
-- **d / Enter** descend into a directory, or view a text file in the pager
+- **Enter** descend into a directory, or view a text file in the pager
 - **e / v** descend into a directory, or open a file in `$EDITOR` (suspends TUI)
+- **dd / Ndd** remove the cursor entry (+ N-1 below) to the graveyard,
+  confirming with `y` (bare `d` arms the chord, vim-style; any other key
+  cancels)
 - **V** open `$EDITOR` in the top pane — bottom pane stays visible
 - **D** open the cursor file in spyc's in-app pager mounted in the
   top-pane slot — bottom pane stays visible. Same loader as `Enter`
-  / `d` (syntax highlighting, markdown render, hex dump for
+  (syntax highlighting, markdown render, hex dump for
   binaries, truncation banner for big files) but mounted in the
   top slot instead of as a centered overlay. Workflow: `D` on a
   doc, `^a-j` into the bottom pane to do work, `^a-k` back to
