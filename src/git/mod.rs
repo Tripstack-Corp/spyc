@@ -43,13 +43,15 @@ mod no_subprocess_git_in_production {
                 // `#[cfg(test)] mod …;` carry no in-file `#[cfg(test)]` marker,
                 // so the split heuristic below would misread them as production.
                 // The campaign's convention: `tests.rs`, `*_tests.rs`, or any
-                // file under a `tests/` directory. Test fixtures may use `git`.
+                // file under a `tests/` directory — or a `*_tests/` directory
+                // (e.g. `harness_tests/` split into thematic submodules, whose
+                // fixtures legitimately spawn `git`). Test fixtures may use `git`.
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 let in_tests_dir = path
                     .parent()
                     .and_then(|p| p.file_name())
                     .and_then(|n| n.to_str())
-                    == Some("tests");
+                    .is_some_and(|n| n == "tests" || n.ends_with("_tests"));
                 if name == "tests.rs"
                     || name == "test_support.rs"
                     || name.ends_with("_tests.rs")
