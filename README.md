@@ -102,7 +102,7 @@ spyc -r         # resume a previous session (restores each pane to its own
 ```
 
 spyc opens with your cwd in a multi-column listing. Move with `hjkl`,
-enter a directory with `d`, view a file in the pager with `Enter`, open
+enter a directory or view a file in the pager with `Enter`, open
 in `$EDITOR` with `e`. Press `?` for the full help overlay.
 
 To open the Claude pane, press **`^\`** (Ctrl+Backslash) or **F10**.
@@ -152,8 +152,9 @@ regression).
 |-----|--------|
 | `h` `j` `k` `l` | Move (counts work: `5j`, `10k`) |
 | `gg` / `G` | Top / bottom |
-| `d` / `Enter` | Descend into dir or view file in pager |
+| `Enter` | Descend into dir or view file in pager |
 | `e` / `v` | Descend into dir or open file in `$EDITOR` |
+| `dd` / `Ndd` | Remove cursor entry (+ N-1 below) to the graveyard |
 | `V` | Open `$EDITOR` in top pane (bottom pane stays visible) |
 | `D` | Open file in the in-app pager in top pane (bottom pane stays visible) |
 | `u` / `-` | Climb to parent |
@@ -245,7 +246,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 
 ### Pager
 
-Press `d` or `Enter` on a file to view it in the built-in pager with
+Press `Enter` on a file to view it in the built-in pager with
 syntax highlighting, search, line numbers, hex dump, markdown
 rendering, and ANSI color support. Press `?` inside the pager for
 its own help overlay.

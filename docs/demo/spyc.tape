@@ -1,91 +1,122 @@
-# spyc VHS demo tape
-# Records: navigate file tree → ask agent → agent reads MCP context → gf jump
+# ─────────────────────────────────────────────────────────────────────────────
+# spyc demo — the bidirectional MCP bridge in one take.
 #
-# Prerequisites (run once):
-#   brew install vhs
+#   Story:  open the agent  →  pick three docs in the commander  →  ask the
+#           agent about "these" (never naming them)  →  it reads your picks over
+#           MCP and answers with a path  →  gf jumps the listing to that file.
 #
-# Run from the spyc repo root:
-#   vhs docs/demo/spyc.tape
+#   Generate (from the repo root):
+#       brew install vhs
+#       chmod +x docs/demo/fake-claude.sh
+#       vhs docs/demo/spyc.tape          # writes docs/demo.gif
 #
-# Output: docs/demo.gif  (embed this in README.md)
+#   Hard-won keybinding / behavior notes (verified live, NOT from the README):
+#     • `d` is a chord-arming key (dd = delete). Descend is Enter-only.
+#     • `^a c` creates the pane via TWO pre-filled prompts (command, then cwd) —
+#       Enter each. Bare ^\ / ^a \ only TOGGLE an existing pane; Ctrl+\ (SIGQUIT)
+#       and F10 don't survive the VHS/ttyd path.
+#     • `^a j` focuses the pane, `^a k` focuses the list.
+#     • gf resolves the bottom-most path in the pane's *visible* lines against
+#       the pane cwd. The pane cwd follows the focused commander, so we keep the
+#       list at the repo root: repo-relative paths (src/app/run.rs) then resolve
+#       and gf jumps INTO the tree. The agent reply is kept short so its closing
+#       path stays on screen (an off-screen path is invisible to gf).
 #
-# Iterate on Sleep values if transitions feel rushed or draggy — that's normal
-# for a first pass. The story beats matter more than timing on the first run.
+#   Tuning: Sleep values are reading-beats — bump them if a step feels rushed.
+# ─────────────────────────────────────────────────────────────────────────────
 
 Output docs/demo.gif
 
-Set Shell      "bash"
-Set FontSize   13
-Set Width      200
-Set Height     50
-Set Framerate  24
-Set PlaybackSpeed 1.0
-Set Theme      "Catppuccin Macchiato"
+# ── Look & feel ──────────────────────────────────────────────────────────────
+Set Shell        "bash"
+Set FontFamily   "MesloLGLDZ Nerd Font Mono"   # falls back if absent; or press C in spyc for mono glyphs
+Set FontSize     14
+Set Width        1320
+Set Height       820
+Set Padding      22
+Set Margin       18
+Set MarginFill   "#181825"
+Set WindowBar    Colorful
+Set BorderRadius 10
+Set Framerate    24
+Set Theme        "Catppuccin Macchiato"
+Set CursorBlink  false
+Set TypingSpeed  55ms
 
-# ── Setup (hidden from recording) ────────────────────────────────────────────
-# Launch spyc with the scripted fake-claude and wait for full load.
-# The recording starts after spyc is already rendered.
-
+# ── Setup (hidden): launch spyc with the scripted agent, wait for first paint ──
 Hide
-Type "export SPYC_PANE_CMD=$(pwd)/docs/demo/fake-claude.sh && spyc"
+Type `export SPYC_PANE_CMD="$(pwd)/docs/demo/fake-claude.sh"`
 Enter
-Sleep 5s
+Type "spyc"
+Enter
+Sleep 4s
 Show
 
-# ── 1. Navigate the file tree ─────────────────────────────────────────────────
-# spyc opens at the repo root. Directories sort first: docs/, fuzz/, src/
-# Two j presses land on src/
-
-Type "j"
-Sleep 0.25s
-Type "j"
-Sleep 0.4s
-
-# Enter src/
-Type "d"
-Sleep 0.6s
-
-# app/ is the second entry (after agent/) — one j press
-Type "j"
-Sleep 0.4s
-
-# Enter src/app/
-Type "d"
-Sleep 0.6s
-
-# Use / to search the listing — jumps cursor to mcp.rs in one motion
-Type "/"
-Sleep 0.3s
-Type "mcp"
-Sleep 0.6s
-Enter
-Sleep 0.5s
-
-# ── 2. Open the agent pane ────────────────────────────────────────────────────
-
-Ctrl+\
-Sleep 2.8s
-
-# ── 3. Ask the agent — it will read context without being told what file we're on
-
-Type "what's the entry point for MCP tool dispatch in spyc?"
-Sleep 0.3s
-Enter
-
-# Wait for fake-claude to print its response (sleep in fake-claude.sh + print time)
-Sleep 5s
-
-# ── 4. gf: jump to the file the agent mentioned ───────────────────────────────
-
-# Switch focus from the pane back to the file list
+# ── 1. Open the agent pane at the repo root (two pre-filled prompts) ──────────
 Ctrl+A
-Sleep 0.15s
-Type "k"
-Sleep 0.9s
+Sleep 250ms
+Type "c"
+Sleep 800ms
+Enter
+Sleep 600ms
+Enter
+Sleep 3s
 
-# gf reads the first file:line reference from the pane output and jumps there
+# ── 2. Focus the list and pick three architecture docs (amber * markers) ──────
+#       Staying at the repo root keeps the pane cwd at root so gf resolves.
+Ctrl+A
+Sleep 250ms
+Type "k"
+Sleep 700ms
+
+Type "/"
+Sleep 300ms
+Type "ARCH"
+Sleep 400ms
+Enter
+Sleep 400ms
+Type "t"
+Sleep 700ms
+
+Type "/"
+Sleep 300ms
+Type "AGENTS"
+Sleep 400ms
+Enter
+Sleep 400ms
+Type "t"
+Sleep 700ms
+
+Type "/"
+Sleep 300ms
+Type "CLAUDE"
+Sleep 400ms
+Enter
+Sleep 400ms
+Type "t"
+Sleep 1200ms
+
+# ── 3. Focus the pane and ask about "these three docs" — never naming them ────
+Ctrl+A
+Sleep 250ms
+Type "j"
+Sleep 700ms
+Type "how is spyc structured, per these three docs?"
+Sleep 500ms
+Enter
+
+# Wait out the scripted tool call + short response
+Sleep 4s
+
+# ── 4. Focus the list, then gf jumps to the path in the answer ────────────────
+#       (src/app/run.rs — repo-relative, resolves against the root pane cwd,
+#        and lands in src/app/, so the listing visibly changes)
+Ctrl+A
+Sleep 250ms
+Type "k"
+Sleep 1s
 Type "gf"
 Sleep 1.5s
 
-# Hold the final frame so the viewer can read the result
-Sleep 3s
+# Hold the landing frame
+Sleep 3.5s
