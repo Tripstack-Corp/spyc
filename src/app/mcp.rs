@@ -201,7 +201,7 @@ impl App {
     /// currently open inside it — removing/cleaning it would strand that column
     /// on a deleted dir (mirrors git refusing to touch the current worktree).
     /// `Err` is a ready-to-send reason. Shared by RemoveWorktree + CleanWorktree.
-    fn resolve_worktree_arg(&self, path: &str) -> Result<std::path::PathBuf, String> {
+    pub(crate) fn resolve_worktree_arg(&self, path: &str) -> Result<std::path::PathBuf, String> {
         let path = path.trim();
         if path.is_empty() {
             return Err("missing required parameter: path".into());
@@ -234,6 +234,17 @@ impl App {
         cmd: crate::mcp_cmd::McpCommand,
     ) -> crate::mcp_cmd::McpResponse {
         use crate::mcp_cmd::{McpCommand, McpResponse};
+        // Heavy worktree ops (create/remove/clean) go through the shared planner
+        // + job. The production drain off-threads them (`spawn_worktree_job`); a
+        // direct caller / test runs them synchronously here. Both share
+        // `run_worktree_job` + `after_worktree_mutation`, so the sync and async
+        // paths can't diverge.
+        if let Some(planned) = self.plan_worktree_job(&cmd) {
+            return match planned {
+                Ok(job) => self.run_worktree_job_sync(job),
+                Err(resp) => resp,
+            };
+        }
         match cmd {
             McpCommand::NavigateTo { path } => {
                 match self.state.jump_to(&path) {
@@ -329,93 +340,12 @@ impl App {
                     message: format!("cleared {count} pick(s)"),
                 }
             }
-            McpCommand::CreateWorktree { branch } => {
-                let branch = branch.trim();
-                if branch.is_empty() {
-                    return McpResponse::Error {
-                        message: "missing required parameter: branch".into(),
-                    };
-                }
-                // Anchor on the FOCUSED column's repo (consistent with `W n` and
-                // the per-worktree tools): `worktree::add` discovers the
-                // enclosing repo from any dir inside it.
-                let dir = self.state.cur().listing.dir.clone();
-                match crate::git::worktree::add(&dir, branch) {
-                    Ok(path) => {
-                        self.state.flash_info(format!(
-                            "[mcp] created worktree {} ({branch})",
-                            path.display()
-                        ));
-                        // Surface the new tree if it landed under the cwd + keep
-                        // markers fresh; the worktree lives in a sibling
-                        // `<repo>.worktrees/` dir, so this is usually a no-op.
-                        self.state.refresh_listing();
-                        self.write_context();
-                        let json = serde_json::json!({
-                            "branch": branch,
-                            "path": path.display().to_string(),
-                        });
-                        McpResponse::Ok {
-                            message: serde_json::to_string_pretty(&json).unwrap_or_default(),
-                        }
-                    }
-                    Err(e) => McpResponse::Error {
-                        message: format!("worktree add: {e}"),
-                    },
-                }
-            }
-            McpCommand::RemoveWorktree { path } => {
-                let target = match self.resolve_worktree_arg(&path) {
-                    Ok(t) => t,
-                    Err(message) => return McpResponse::Error { message },
-                };
-                // `worktree::remove` refuses a dirty/locked worktree and leaves
-                // the branch ref intact.
-                match crate::git::worktree::remove(&target) {
-                    Ok(()) => {
-                        self.state
-                            .flash_info(format!("[mcp] removed worktree {}", target.display()));
-                        self.state.refresh_listing();
-                        self.write_context();
-                        McpResponse::Ok {
-                            message: format!("removed worktree {}", target.display()),
-                        }
-                    }
-                    Err(e) => McpResponse::Error {
-                        message: format!("worktree remove: {e}"),
-                    },
-                }
-            }
-            McpCommand::CleanWorktree { path } => {
-                let target = match self.resolve_worktree_arg(&path) {
-                    Ok(t) => t,
-                    Err(message) => return McpResponse::Error { message },
-                };
-                // Archives untracked files to the graveyard, then removes;
-                // refuses uncommitted changes to tracked files.
-                match crate::app::worktree_clean::clean_worktree(&target) {
-                    Ok(report) => {
-                        let message = match &report.label {
-                            Some(label) => format!(
-                                "cleaned worktree {} — archived {} untracked entr{} to the graveyard as '{label}'",
-                                target.display(),
-                                report.archived,
-                                if report.archived == 1 { "y" } else { "ies" },
-                            ),
-                            None => format!(
-                                "cleaned worktree {} (no untracked files to archive)",
-                                target.display()
-                            ),
-                        };
-                        self.state.flash_info(format!("[mcp] {message}"));
-                        self.state.refresh_listing();
-                        self.write_context();
-                        McpResponse::Ok { message }
-                    }
-                    Err(e) => McpResponse::Error {
-                        message: format!("worktree clean: {e}"),
-                    },
-                }
+            McpCommand::CreateWorktree { .. }
+            | McpCommand::RemoveWorktree { .. }
+            | McpCommand::CleanWorktree { .. } => {
+                // Routed above via `plan_worktree_job` (sync) or by the drain
+                // (off-thread) — never reached through this match.
+                unreachable!("worktree create/remove/clean go through plan_worktree_job")
             }
             McpCommand::OpenWorktree { path } => {
                 let path = path.trim();

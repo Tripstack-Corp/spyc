@@ -132,6 +132,12 @@ enum Message {
     /// `apply_mermaid_outcomes` drains the slot in the pre-recv scan. Same shape
     /// as `GraveyardDone`.
     MermaidDone,
+    /// An off-thread MCP worktree op (create/remove/clean) finished and pushed
+    /// its outcome onto `runtime.worktree_results`. Payloadless wake —
+    /// `apply_worktree_outcomes` drains it in the pre-recv scan, re-applies the
+    /// listing/context update, then answers the MCP client. Same shape as
+    /// `MermaidDone`.
+    WorktreeJobDone,
     /// An off-thread vertical-split preview reload (`kick_preview_reload`)
     /// finished and pushed its outcome onto `runtime.preview_results`.
     /// Payloadless wake — `apply_preview_reloads` drains the slot in the
@@ -275,6 +281,7 @@ mod util;
 mod vsplit;
 mod watch;
 mod worktree_clean;
+mod worktree_ops;
 
 use capture::PendingCapture;
 #[cfg(unix)]
@@ -515,6 +522,11 @@ struct Runtime {
     /// scan and surfaces the result in the pager status line. Same shape as
     /// `graveyard_results`.
     mermaid_results: std::sync::Arc<std::sync::Mutex<Vec<mermaid_ops::MermaidOutcome>>>,
+    /// Landing slot for off-thread MCP worktree create/remove/clean ops. The
+    /// worker pushes a `WorktreeOutcome` (result + the MCP reply channel) here
+    /// and wakes with `Message::WorktreeJobDone`; `apply_worktree_outcomes`
+    /// drains it each pre-recv scan, re-applies refresh+context, then replies.
+    worktree_results: std::sync::Arc<std::sync::Mutex<Vec<worktree_ops::WorktreeOutcome>>>,
     /// Landing slot for the off-thread vertical-split preview reload
     /// (`kick_preview_reload`). The worker stores its `PreviewOutcome` here
     /// (last-wins `Option` — one preview, so no `Vec` is needed) and wakes the

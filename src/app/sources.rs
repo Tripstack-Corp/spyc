@@ -72,6 +72,9 @@ pub fn coalesce_pending(
             // view rides `runtime.preview_results`, drained by
             // `apply_preview_reloads` in the pre-recv scan.
             | Message::PreviewReloadDone
+            // MCP worktree op done — same payloadless wake; the outcome rides
+            // `runtime.worktree_results`, drained by `apply_worktree_outcomes`.
+            | Message::WorktreeJobDone
             // Option B: codex-session-scan-done — same payloadless-wake shape;
             // the snapshot rides `runtime.codex_pin_pending`, drained by
             // `apply_codex_session_pins` in the pre-recv scan.
@@ -172,6 +175,9 @@ pub fn coalesce_recv(
             // Vsplit preview reload done — payloadless, drained by
             // `apply_preview_reloads` in the pre-recv scan.
             | Message::PreviewReloadDone
+            // MCP worktree op done — payloadless, drained by
+            // `apply_worktree_outcomes` in the pre-recv scan.
+            | Message::WorktreeJobDone
             // Option B: codex-session-scan-done — payloadless, drained by
             // `apply_codex_session_pins` in the pre-recv scan.
             | Message::CodexSessionReady,

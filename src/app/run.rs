@@ -255,6 +255,7 @@ impl App {
                 | Message::GraveyardDone
                 | Message::MermaidDone
                 | Message::PreviewReloadDone
+                | Message::WorktreeJobDone
                 | Message::CodexSessionReady,
             ) => {
                 unreachable!(
@@ -527,6 +528,12 @@ impl App {
             // install the rebuilt right-column view, preserving scroll. Always
             // drained here; the apply re-kicks if a save landed mid-render.
             if self.apply_preview_reloads() {
+                ctx.draw.mark(3);
+            }
+
+            // Off-thread MCP worktree ops (woke via `Message::WorktreeJobDone`) —
+            // re-apply refresh+context on the loop, then reply to the client.
+            if self.apply_worktree_outcomes() {
                 ctx.draw.mark(3);
             }
 

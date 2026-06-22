@@ -1989,6 +1989,80 @@ fn worktree_delete_refuses_when_other_column_inside() {
     });
 }
 
+/// The off-thread MCP worktree path: plan_worktree_job (sync validate) →
+/// spawn_worktree_job (worker does the gix add) → apply_worktree_outcomes (main
+/// loop refresh+context) → the reply lands on the client's one-shot channel.
+/// Guards that off-threading the heavy IO still answers the client correctly.
+#[test]
+fn mcp_create_worktree_runs_off_thread_and_replies() {
+    use crate::mcp_cmd::{McpCommand, McpResponse};
+    let tmp = tempfile::tempdir().unwrap();
+    let run_git = |dir: &std::path::Path, args: &[&str]| {
+        let ok = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@x")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@x")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("spawn git")
+            .success();
+        assert!(ok, "git {args:?} failed");
+    };
+    crate::state::with_state_root(tmp.path(), || {
+        let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("f.txt"), "v1\n").unwrap();
+        run_git(&repo, &["add", "f.txt"]);
+        run_git(&repo, &["commit", "-q", "-m", "v1"]);
+
+        let mut app = App::test_app(repo.clone());
+        app.state.update_repo_root(state::Side::Left, &repo);
+
+        // Validate on the loop, then hand the gix add to a worker.
+        let job = app
+            .plan_worktree_job(&McpCommand::CreateWorktree {
+                branch: "wt-async".into(),
+            })
+            .expect("a worktree command")
+            .expect("validation passes");
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.spawn_worktree_job(job, tx);
+
+        // Worker runs off-thread (no wake tx in tests); poll the landing slot.
+        for _ in 0..500 {
+            if !app.runtime.worktree_results.lock().unwrap().is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            app.apply_worktree_outcomes(),
+            "landed outcome applied (refresh+context) + redraw requested"
+        );
+        let resp = rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the worker replied on the client's channel");
+        match resp {
+            McpResponse::Ok { message } => {
+                assert!(
+                    message.contains("wt-async"),
+                    "reply carries the branch: {message}"
+                );
+                assert!(
+                    message.contains("path"),
+                    "reply carries the new worktree path"
+                );
+            }
+            McpResponse::Error { message } => panic!("create failed: {message}"),
+        }
+    });
+}
+
 /// A non-directory path is an error and leaves the layout unchanged.
 #[test]
 fn mcp_open_worktree_rejects_non_dir() {
