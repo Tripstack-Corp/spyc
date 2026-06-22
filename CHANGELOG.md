@@ -2,6 +2,27 @@
 
 All notable changes to spyc. Entries from v1.57.0 onward are generated from the conventional-commit history by [git-cliff](https://git-cliff.org) (config in `cliff.toml`); regenerate the pending section with `make changelog` and cut a release with `make release-tag VERSION=x.y.z`. Entries at v1.56.0 and earlier are the original hand-written log, kept verbatim.
 
+## [1.61.0] - 2026-06-22
+
+### Bug Fixes
+- Complete per-column cwd focus-scoping for spawn/restore paths
+- **vsplit**: No blank-split restore, no lying swap-preview flash
+- **worktree**: W d refuses when the other column is inside the target
+
+### Refactors
+- **pager**: Extract image-view verbs to pager_handler/image.rs
+- **mcp**: Run worktree create/remove/clean off the main loop
+- **git**: Relocate status.rs inline tests to a status/tests.rs sibling
+- **test**: Split harness_tests.rs (2518 lines) into thematic submodules
+
+### Tests
+- **render**: Dual-column vsplit snapshot coverage
+- Cover campaign logic that shipped without tests
+- **fs**: Cover the composed gitignore-drop across the fs-event ingest
+
+### Miscellaneous
+- Deep-review safe fixes — stale comments, doc drift, dead scaffolding
+
 ## [1.60.1] - 2026-06-22
 
 ### Features
