@@ -87,11 +87,10 @@ impl App {
                 mode,
                 focus: state::Side::Left,
             });
-            self.load_right_preview(&path);
-            // If the file couldn't be read/rendered, `load_right_preview` left
-            // the slot empty (and flashed its own error) — don't leave a blank
-            // split open.
-            if self.view.right_pager.is_none() {
+            // If the file couldn't be read/rendered, `load_right_preview`
+            // flashed its own error and left the slot as-is — don't leave a
+            // blank split open.
+            if !self.load_right_preview(&path) {
                 self.state.vsplit = None;
                 return;
             }
@@ -112,12 +111,17 @@ impl App {
         if let Some(path) = cursor_file
             && Some(&path) != preview_path.as_ref()
         {
-            self.load_right_preview(&path);
-            let name = path.file_name().map_or_else(
-                || path.display().to_string(),
-                |n| n.to_string_lossy().into_owned(),
-            );
-            self.state.flash_info(format!("preview: {name}"));
+            // Only announce the new file if the swap actually landed —
+            // `load_right_preview` keeps the old content and flashes its own
+            // error on failure, so a "preview: X" flash would lie about what's
+            // shown.
+            if self.load_right_preview(&path) {
+                let name = path.file_name().map_or_else(
+                    || path.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                );
+                self.state.flash_info(format!("preview: {name}"));
+            }
             self.view.needs_full_repaint = true;
             return;
         }

@@ -1231,6 +1231,90 @@ fn session_persists_and_restores_a_commander_split() {
     });
 }
 
+/// restore_vsplit must not restore a *blank* preview split: a saved preview
+/// whose file vanished between sessions would otherwise open a carved, empty
+/// right column. And a present preview restores the split, re-loads the file,
+/// and clamps an out-of-range (hand-edited / older) width.
+#[test]
+fn restore_vsplit_drops_blank_split_and_clamps_width() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let mut app = App::test_app(dir.clone());
+
+        // (a) preview file gone → no split, no phantom right pager.
+        let gone = crate::state::sessions::SavedVsplit {
+            width_pct: 50,
+            full_height: false,
+            focus_right: false,
+            preview_path: Some(dir.join("vanished.md")),
+            right_cwd: None,
+        };
+        app.restore_vsplit(&gone, false);
+        assert!(app.state.vsplit.is_none(), "gone preview → no split");
+        assert!(app.view.right_pager.is_none(), "no phantom right pager");
+
+        // (b) preview present + out-of-range width → split restored, file
+        // loaded, width clamped to [20, 80].
+        let f = dir.join("preview.md");
+        std::fs::write(&f, "# hi\n").unwrap();
+        let ok = crate::state::sessions::SavedVsplit {
+            width_pct: 95,
+            full_height: false,
+            focus_right: false,
+            preview_path: Some(f.clone()),
+            right_cwd: None,
+        };
+        app.restore_vsplit(&ok, false);
+        assert_eq!(
+            app.state.vsplit.map(|v| v.width_pct),
+            Some(80),
+            "split restored with width clamped to 80"
+        );
+        assert_eq!(
+            app.view
+                .right_pager
+                .as_ref()
+                .and_then(|p| p.source_path.clone()),
+            Some(f),
+            "preview file re-loaded"
+        );
+    });
+}
+
+/// load_right_preview reports whether the slot landed: `true` for a readable
+/// file, `false` for a bad path — and on failure it leaves any existing
+/// preview untouched. cycle_vsplit's swap branch relies on this so it doesn't
+/// flash "preview: X" for a file it never actually showed.
+#[test]
+fn load_right_preview_reports_landing() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let mut app = App::test_app(dir.clone());
+
+        let good = dir.join("a.md");
+        std::fs::write(&good, "# a\n").unwrap();
+        assert!(app.load_right_preview(&good), "readable file loads");
+        assert!(app.view.right_pager.is_some());
+
+        // A missing file fails and leaves the prior preview in place (the swap
+        // branch keeps showing the old file).
+        assert!(
+            !app.load_right_preview(&dir.join("nope.md")),
+            "missing file → false"
+        );
+        assert_eq!(
+            app.view
+                .right_pager
+                .as_ref()
+                .and_then(|p| p.source_path.clone()),
+            Some(good),
+            "old preview retained on failure"
+        );
+    });
+}
+
 /// `^s n` opens the second commander directly at PROJECT_HOME (no prompt) —
 /// `b` is a second view into the same project, so its start dir is the shared
 /// project home, not a chosen path.

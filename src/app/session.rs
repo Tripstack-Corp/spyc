@@ -409,6 +409,12 @@ impl App {
             if let Some(path) = sv.preview_path.as_ref().filter(|p| p.exists()) {
                 self.load_right_preview(path);
             }
+            // Don't restore a blank split: if the preview file is gone or
+            // failed to load, there'd be a carved, empty right column with no
+            // content. Match `cycle_vsplit`'s open-branch guard.
+            if self.view.right_pager.is_none() {
+                self.state.vsplit = None;
+            }
         }
     }
 

@@ -452,13 +452,20 @@ impl App {
     /// Load `path` into the right-split preview slot (`Mount::RightPane`),
     /// wrapping markdown to the right column's width (not the full terminal,
     /// or long lines overflow the narrow column). Caller has already checked
-    /// `previewable_cursor_path`.
-    pub(super) fn load_right_preview(&mut self, path: &std::path::Path) {
+    /// `previewable_cursor_path`. Returns `true` iff the file loaded and the
+    /// slot was (re)assigned; on a read/render failure `build_pager_view_for_file`
+    /// flashes the error, this leaves any existing preview untouched, and it
+    /// returns `false` — so callers can avoid announcing a file they didn't
+    /// actually show, or restoring a split that never gained content.
+    pub(super) fn load_right_preview(&mut self, path: &std::path::Path) -> bool {
         let wrap = self.right_preview_body_width();
         if let Some(mut view) = self.build_pager_view_for_file(path, Some(wrap)) {
             view.mount = crate::ui::pager::Mount::RightPane;
             view.no_history = true;
             self.view.right_pager = Some(view);
+            true
+        } else {
+            false
         }
     }
 
