@@ -394,7 +394,7 @@ impl App {
         // didn't save it); use current listing dir as a best-effort
         // tab-info field. The child is already running at its own
         // cwd regardless.
-        let cwd = self.state.left.listing.dir.clone();
+        let cwd = self.state.cur().listing.dir.clone();
         let label = task.title.clone();
         let wake = self.make_pane_wake();
         // MVU Phase 3c: clear the task's reader-thread sink wake BEFORE adopt

@@ -285,7 +285,7 @@ impl App {
                         self.effective_pane_pct(),
                         self.runtime.pane_tabs.is_some(),
                     );
-                    let cwd = self.state.left.listing.dir.clone();
+                    let cwd = self.state.cur().listing.dir.clone();
                     self.clear_pager();
                     self.view.needs_full_repaint = true;
                     let wake = self.make_pane_wake();

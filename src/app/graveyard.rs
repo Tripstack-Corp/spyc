@@ -146,7 +146,7 @@ impl App {
                 std::path::Path::to_path_buf,
             )
         } else {
-            self.state.left.listing.dir.clone()
+            self.state.cur().listing.dir.clone()
         };
         match crate::state::graveyard::Graveyard::restore(&entry, &dest) {
             Ok(()) => {

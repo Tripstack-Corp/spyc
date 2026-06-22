@@ -1865,6 +1865,40 @@ fn capture_runs_in_the_focused_columns_dir() {
     });
 }
 
+/// `:;<cmd>` (typed foreground shell) runs in the FOCUSED column's dir, like
+/// the `;` prompt and `!` capture — `:;touch foo` with `b` focused lands in
+/// `b`. Regression: the typed `:;` path hardcoded `state.left.listing.dir`
+/// while the other shell-spawn paths were converted to follow `cur()`.
+#[test]
+fn typed_shell_command_runs_in_the_focused_columns_dir() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let a = std::fs::canonicalize(tmp.path()).unwrap().join("a");
+        let b = std::fs::canonicalize(tmp.path()).unwrap().join("b");
+        std::fs::create_dir(&a).unwrap();
+        std::fs::create_dir(&b).unwrap();
+        let mut app = App::test_app(a.clone());
+        app.open_second_commander_at(&b); // b focused
+        assert_eq!(app.focused_side(), state::Side::Right);
+
+        app.dispatch_command(";touch marker.txt");
+
+        // `touch` is near-instant; poll briefly for the spawned subprocess.
+        let in_b = b.join("marker.txt");
+        for _ in 0..200 {
+            if in_b.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(in_b.exists(), ":; ran in b (focused) → b/marker.txt");
+        assert!(
+            !a.join("marker.txt").exists(),
+            "did NOT run in a / PROJECT_HOME"
+        );
+    });
+}
+
 /// Dual fs-watch: with a second commander open, the fs-event path predicates
 /// recognize column `b`'s tree + gitdir too — so `b`'s working-tree edits and
 /// index/HEAD changes drive a refresh, not just the ≤1 s poll PR E left.

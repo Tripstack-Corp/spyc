@@ -428,7 +428,7 @@ impl App {
         lines.push(format!("pid      : {}", std::process::id()));
         lines.push(format!(
             "cwd      : {}",
-            crate::paths::display_tilde(&self.state.left.listing.dir)
+            crate::paths::display_tilde(&self.state.cur().listing.dir)
         ));
         lines.push(format!(
             "entries  : {}",
