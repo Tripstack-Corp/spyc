@@ -77,7 +77,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/navigate.rs:160` | gF reads an attacker-controlled path fully into memory synchronously on the input thread (hang/OOM via hostile pane content) | medium | S | REAL |
 | `src/clipboard.rs:111` | Clipboard helper inherits stdout/stderr (garbles the raw-mode TUI) and leaks a zombie when stdin write fails | medium | S | REAL |
 | `src/fs/finder.rs:136` | find_nested_git_repos re-walks the entire subtree raw (no gitignore, no cap, no cancellation) on every F open / :grep in a git root | medium | S | PARTIAL |
-| `src/fs/grep.rs:353` | search_to_vec blocks on the full repo walk even after the result limit is reached | medium | S | REAL |
+| `src/fs/grep.rs:353` | search_to_vec blocks on the full repo walk even after the result limit is reached | medium | S | ✅ PR #527 |
 | `src/pane/pty_host.rs:208` | Unbounded reader->parser channel with a reader that never stops reading: no backpressure, unbounded memory under a firehose child | medium | S | REAL |
 | `src/state/sessions/mod.rs:579` | find_claude_session_name reads the entire conversation JSONL (100+ MB) into memory | medium | S | REAL |
 | `src/agent/resume.rs:298` | gemini_resume_index_for runs `gemini --list-sessions` synchronously with no timeout on the session-restore path | medium | M | REAL |
@@ -175,6 +175,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 **✅ PR #526 — build_rows pending-delete set (2026-06-23):**
 - `render/chrome.rs:320` — `build_rows_for` checked `pending_delete` with a per-row linear scan over `pending_delete_preview` (`v.iter().any(|p| p == &rd.path)`), i.e. O(rows × preview paths) — quadratic when you "delete picks" in a big directory (every picked path is also in the preview). Hoisted the preview into a `HashSet<&Path>` built once, so the per-row check is O(1) and `build_rows` stays linear. Behavior-identical; new test `build_rows_marks_only_pending_delete_paths` locks the exact set of flagged rows (and the no-preview case). (Gate-verified; pure perf.)
+
+**✅ PR #527 — grep search_to_vec early exit (2026-06-23):**
+- `fs/grep.rs:353` (the `search_to_vec` fn) — after collecting `limit` matches the loop `break`s, but the receiver stayed alive through `handle.join()`. The channel is unbounded, so the worker's sends never blocked and it crawled the *entire* repo before `join` returned (e.g. `search_content` with a small limit on a huge tree). Now drops `rx` before joining, so the worker's next batch send fails and it bails early (the same cancellation path the live grep pager already uses). Result set is identical; new test `search_to_vec_caps_across_many_files` guards the multi-file cap. (Gate-verified; pure perf.)
 
 **✅ ALREADY-FIXED — confirmed by the 2026-06-23 sweep (no action needed):**
 - `src/app/mcp.rs:174` — Patterns are validated before any pick is applied; an invalid pattern errors out cleanly with zero picks applied, and the success path always calls write_context().

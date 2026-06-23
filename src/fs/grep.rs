@@ -316,6 +316,14 @@ pub fn search_to_vec(root: &Path, pattern: &str, limit: usize) -> Result<Vec<Gre
             break;
         }
     }
+    // Drop the receiver before joining. Once we've collected `limit` matches
+    // the worker is still walking the tree, and the channel is unbounded — so
+    // its sends never block and it would crawl the *entire* repo before
+    // `join` returned. Dropping `rx` makes the next batch send fail, so the
+    // worker bails early (see the module-level "Cancellation" note) and
+    // `join` returns promptly. (When the search exhausts naturally the worker
+    // has already finished and dropped its sender, so this is a no-op there.)
+    drop(rx);
     // Surface a regex compile error from the worker; success/non-
     // regex errors are silent (per-file IO failures already are).
     if let Ok(Err(e)) = handle.join() {
@@ -594,6 +602,27 @@ mod tests {
         }
         let hits = search_to_vec(root, "needle", 10).unwrap();
         assert_eq!(hits.len(), 10);
+    }
+
+    /// With matches spread across many files, hitting `limit` must still return
+    /// exactly `limit` valid matches — the early-drop of the receiver (which
+    /// makes the worker bail before walking the whole tree) must not truncate
+    /// or corrupt the collected prefix.
+    #[test]
+    fn search_to_vec_caps_across_many_files() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        for i in 0..40 {
+            let mut f = File::create(root.join(format!("f{i:03}.txt"))).unwrap();
+            writeln!(f, "needle in file {i}").unwrap();
+        }
+        let hits = search_to_vec(root, "needle", 5).unwrap();
+        assert_eq!(hits.len(), 5, "cap is honored across a multi-file walk");
+        assert!(
+            hits.iter().all(|m| m.text.contains("needle")),
+            "every returned match is a real hit, not a partial/garbled batch"
+        );
     }
 
     #[test]
