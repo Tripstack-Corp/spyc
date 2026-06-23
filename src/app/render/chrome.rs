@@ -345,7 +345,18 @@ impl App {
     /// `a`'s.)
     pub(super) fn build_rows_for(&self, c: &state::Commander) -> Vec<Row> {
         use crate::ui::list_view::GitFileStatus;
-        let delete_preview: Option<&Vec<PathBuf>> = self.state.pending_delete_preview.as_ref();
+        use std::collections::HashSet;
+        use std::path::Path;
+        // Hoist the pending-delete paths into a set once. The naive
+        // `delete_preview.iter().any(|p| p == &rd.path)` per row was O(rows ×
+        // preview paths) — quadratic when you "delete picks" in a big
+        // directory, where every picked path is also in the preview. An O(1)
+        // set lookup per row keeps `build_rows` linear.
+        let delete_set: Option<HashSet<&Path>> = self
+            .state
+            .pending_delete_preview
+            .as_ref()
+            .map(|v| v.iter().map(PathBuf::as_path).collect());
         c.rows
             .iter()
             .map(|rd| {
@@ -357,8 +368,9 @@ impl App {
                     .get(&rd.display)
                     .copied()
                     .unwrap_or_else(GitFileStatus::clean);
-                let pending_delete =
-                    delete_preview.is_some_and(|v| v.iter().any(|p| p == &rd.path));
+                let pending_delete = delete_set
+                    .as_ref()
+                    .is_some_and(|s| s.contains(rd.path.as_path()));
                 Row {
                     display: rd.display.clone(),
                     kind: rd.kind,
