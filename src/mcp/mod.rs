@@ -43,8 +43,9 @@ file, picks, filter, git branch, and the running spyc's pid + version.\n\
 gitignore-aware and scoped to the focused worktree.\n\
 - `navigate_to` to move the user's view; `pick_files` / `set_filter` to drive \
 their selection; `get_file_content` to read what they're viewing.\n\
-- Worktree lifecycle, all in-process (never `git worktree`): `create_worktree` \
-adds one, `open_worktree` works in it in column b while the user's column stays \
+- Worktree lifecycle, all in-process (never `git worktree`): `list_worktrees` \
+lists them (branch, dirty counts, which is current), `create_worktree` adds \
+one, `open_worktree` works in it in column b while the user's column stays \
 put, `clean_worktree` archives its untracked files to spyc's graveyard before \
 teardown, and `remove_worktree` deletes it.\n\
 If a tool you expect is missing, the running spyc is older than this repo — \

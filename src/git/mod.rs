@@ -23,7 +23,7 @@ pub mod status;
 pub mod worktree;
 
 #[cfg(test)]
-mod test_support;
+pub mod test_support;
 
 #[cfg(test)]
 mod no_subprocess_git_in_production {

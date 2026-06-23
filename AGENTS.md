@@ -193,7 +193,9 @@ You are expected to be running inside spyc's split pane. If the
 - **When the user asks you to organize files:** use `set_filter`,
   `pick_files`, `clear_picks`, and `navigate_to` to update the TUI
   directly rather than giving instructions for the user to do manually.
-- **To spin up / work in / tear down a git worktree:** `create_worktree(branch)` makes
+- **To survey / spin up / work in / tear down a git worktree:** `list_worktrees()` returns
+  the repo's worktrees (branch, short HEAD, dirty counts, which is current) — survey the
+  board before acting; `create_worktree(branch)` makes
   one off the focused commander's repo (sibling `<repo>.worktrees/<branch>/`) and returns
   its path; `open_worktree(path)` opens it in column `b` (re-targets `b` if open) so you
   work in it while `a` stays put — then `navigate_to` / search / `pick_files` act on `b`;
