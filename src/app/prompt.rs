@@ -96,6 +96,34 @@ pub enum PromptKind {
     },
 }
 
+impl PromptKind {
+    /// True when pressing Tab in this prompt completes a filesystem path.
+    ///
+    /// The single allowlist for path completion: both the simple-prompt
+    /// (`handle_prompt_key`) and the vi-prompt (`handle_vi_prompt_key`) Tab
+    /// handlers consult this one predicate, so the set can't drift between
+    /// them — which it had (the simple list omitted the shell/command kinds).
+    ///
+    /// The shell/command kinds (`;`/`!`/`:`) take path arguments, so they
+    /// complete too. They only ever appear as vi-editor prompts (built via
+    /// `Prompt::shell`), so listing them here is harmless for the
+    /// simple-prompt caller — those kinds never reach it.
+    pub const fn wants_path_completion(&self) -> bool {
+        matches!(
+            self,
+            Self::Jump
+                | Self::CopyTo
+                | Self::MoveTo
+                | Self::MakeDir
+                | Self::NewFile
+                | Self::PaneNewTabCwd
+                | Self::ShellCmd
+                | Self::ShellCmdCaptured
+                | Self::Command
+        )
+    }
+}
+
 impl App {
     /// Tab-complete a filesystem path in the prompt buffer. For shell
     /// prompts, completes just the last whitespace-delimited word.
@@ -717,5 +745,44 @@ mod tests {
         assert!(hint.contains("(+3 more)"), "expected +3 more: {hint}");
         assert!(hint.starts_with("m0  m1  "));
         assert!(!hint.contains("m12"), "13th+ match must be hidden: {hint}");
+    }
+
+    /// The single path-completion allowlist (`wants_path_completion`) must
+    /// cover exactly the path/shell/command kinds and nothing else — the
+    /// drift guard for the two Tab handlers that both consult it.
+    #[test]
+    fn wants_path_completion_is_the_one_allowlist() {
+        use super::PromptKind as K;
+        for (name, k) in [
+            ("Jump", K::Jump),
+            ("CopyTo", K::CopyTo),
+            ("MoveTo", K::MoveTo),
+            ("MakeDir", K::MakeDir),
+            ("NewFile", K::NewFile),
+            ("PaneNewTabCwd", K::PaneNewTabCwd),
+            ("ShellCmd", K::ShellCmd),
+            ("ShellCmdCaptured", K::ShellCmdCaptured),
+            ("Command", K::Command),
+        ] {
+            assert!(k.wants_path_completion(), "{name} should path-complete");
+        }
+        for (name, k) in [
+            ("PatternPick", K::PatternPick),
+            ("Search", K::Search { saved_cursor: 0 }),
+            ("RemoveConfirm", K::RemoveConfirm),
+            ("GraveyardPurgeAllConfirm", K::GraveyardPurgeAllConfirm),
+            ("SetEnv", K::SetEnv),
+            ("PaneNewTabCmd", K::PaneNewTabCmd),
+            ("PaneRenameTab", K::PaneRenameTab),
+            ("WorktreeNewBranch", K::WorktreeNewBranch),
+            ("WorktreeDeleteConfirm", K::WorktreeDeleteConfirm),
+            ("Limit", K::Limit),
+            ("ClaudeCrashRecover", K::ClaudeCrashRecover { tab_idx: 0 }),
+        ] {
+            assert!(
+                !k.wants_path_completion(),
+                "{name} should not path-complete"
+            );
+        }
     }
 }
