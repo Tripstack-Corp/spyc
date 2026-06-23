@@ -319,7 +319,16 @@ impl App {
                     }
                 };
                 self.view.pending_pager_return = Some(pager_return);
-                self.clear_pager();
+                // A scrollback `v` lives in `view.scroll_pager`, which
+                // `clear_pager` (top slot only) wouldn't touch — clear ITS slot
+                // so it isn't orphaned, keeping the pane in scroll mode for the
+                // round-trip (the editor return reseats it via
+                // `restore_scroll_pager_view`).
+                if pane_scroll {
+                    self.view.scroll_pager = None;
+                } else {
+                    self.clear_pager();
+                }
                 self.view.needs_full_repaint = true;
                 return sh_c(
                     &format!(

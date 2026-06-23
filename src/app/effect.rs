@@ -558,7 +558,14 @@ impl App {
                                         view.saveable = true;
                                         view.mount = mount;
                                         view.pane_scroll = pane_scroll;
-                                        self.set_pager(view);
+                                        // A scrollback-sourced edit returns to
+                                        // its own bottom slot, not the top
+                                        // `view.pager` (`set_pager`).
+                                        if pane_scroll {
+                                            self.restore_scroll_pager_view(view);
+                                        } else {
+                                            self.set_pager(view);
+                                        }
                                         let _ = std::fs::remove_file(&path);
                                     }
                                     Err(e) => {
@@ -598,7 +605,11 @@ impl App {
                                     view.scroll = scroll;
                                     view.mount = mount;
                                     view.pane_scroll = pane_scroll;
-                                    self.set_pager(view);
+                                    if pane_scroll {
+                                        self.restore_scroll_pager_view(view);
+                                    } else {
+                                        self.set_pager(view);
+                                    }
                                 }
                             }
                         }

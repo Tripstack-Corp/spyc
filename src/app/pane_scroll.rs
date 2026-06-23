@@ -303,6 +303,20 @@ impl App {
         self.install_lower_pane_scroll_view(title, lines, None);
     }
 
+    /// Re-install an already-built `PagerView` into the bottom scrollback slot
+    /// (`view.scroll_pager`), preserving its scroll/content, and focus the pane.
+    /// Used by the in-pager `v` editor round-trip: a scrollback pager edited in
+    /// $EDITOR must return to its OWN slot, not the top `view.pager` that
+    /// `set_pager` writes — otherwise the original orphans in `scroll_pager`
+    /// while the edited copy lands in the top slot and `q`/Esc can't reach it.
+    /// The pane stays in scroll mode across the round-trip (the launch clears
+    /// only the slot, not the mode), so this just reseats the view.
+    pub(crate) fn restore_scroll_pager_view(&mut self, view: crate::ui::pager::PagerView) {
+        self.view.scroll_pager = Some(view);
+        self.state.focus = state::Focus::Pane;
+        self.view.needs_full_repaint = true;
+    }
+
     /// Build + install a bottom-pane scrollback `PagerView` with the shared
     /// LowerPane flags (gutter off so content doesn't jump horizontally, wrap
     /// on so long lines aren't clipped, excluded from buffer history, parked at
