@@ -957,6 +957,36 @@ mod render_tests {
             );
         });
     }
+
+    /// `build_rows` must flag exactly the rows whose path is in
+    /// `pending_delete_preview` — and only those. Locks the set-membership
+    /// refactor (the old per-row linear `any(p == path)` scan was quadratic
+    /// when deleting picks in a big directory) as behavior-equivalent.
+    #[test]
+    fn build_rows_marks_only_pending_delete_paths() {
+        let mut app = demo_app(&files()); // dir = /projects/demo
+        let dir = PathBuf::from("/projects/demo");
+        app.state.pending_delete_preview = Some(vec![dir.join("Cargo.toml"), dir.join("docs")]);
+
+        let rows = app.build_rows();
+        let marked: Vec<&str> = rows
+            .iter()
+            .filter(|r| r.pending_delete)
+            .map(|r| r.display.as_str())
+            .collect();
+        assert_eq!(
+            marked,
+            ["Cargo.toml", "docs"],
+            "only the previewed paths are flagged, in row order"
+        );
+
+        // No preview → nothing flagged.
+        app.state.pending_delete_preview = None;
+        assert!(
+            app.build_rows().iter().all(|r| !r.pending_delete),
+            "no rows are flagged without a delete preview"
+        );
+    }
 }
 
 #[cfg(test)]

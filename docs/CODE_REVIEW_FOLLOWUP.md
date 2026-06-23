@@ -118,7 +118,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/agent/resume.rs:24` | Claude resume stripper misses -r/--continue/-c and eats the flag following a bare --resume | medium | S | ✅ PR #524 |
 | `src/app/key_dispatch/prompts.rs:200` | Tab-completion PromptKind allowlists are hand-synced in three-plus places — the drift pattern the command table was built to kill | medium | S | REAL |
 | `src/app/prompt.rs:590` | J jump prompt silently swallows errors — typo'd path gives zero feedback | medium | S | ✅ PR #522 |
-| `src/app/render/chrome.rs:320` | build_rows is O(rows × delete-preview paths) — quadratic on 'delete picks' in a big directory | medium | S | REAL |
+| `src/app/render/chrome.rs:320` | build_rows is O(rows × delete-preview paths) — quadratic on 'delete picks' in a big directory | medium | S | ✅ PR #526 |
 | `src/fs/listing.rs:137` | Listing::sort comparator allocates 2-4 Strings per comparison — ~1.5M+ allocations per sort of a 50k-entry directory, on the event loop | medium | S | ✅ PR #525 |
 | `src/fs/ops.rs:52` | read_truncated caps lines but not bytes — a huge single-line file is loaded entirely into RAM on the UI thread | medium | S | ✅ PR #521 |
 | `src/git/diff_model/build.rs:559` | Rename similarity recomputed with a second full-blob diff that gix already performed | medium | S | REAL |
@@ -172,6 +172,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 **✅ PR #525 — listing-sort key precomputation (2026-06-23):**
 - `fs/listing.rs:137` — `Listing::sort`'s comparator re-ran `to_ascii_lowercase()` (a fresh allocation) on both operands every comparison — 2 Strings for Name, up to 4 for Ext — so a 50k-entry directory burned ~1.5M short-lived allocations per sort, on the event loop. Switched to decorate-sort-undecorate: a per-entry `SortKey` is built once (O(n) allocations), and the comparator only compares precomputed keys. Behavior-identical (dirs-first grouping, per-mode natural direction, `reversed` semantics all preserved); 5 new tests lock the exact ordering for every mode + reversed. (Gate-verified; pure perf.)
+
+**✅ PR #526 — build_rows pending-delete set (2026-06-23):**
+- `render/chrome.rs:320` — `build_rows_for` checked `pending_delete` with a per-row linear scan over `pending_delete_preview` (`v.iter().any(|p| p == &rd.path)`), i.e. O(rows × preview paths) — quadratic when you "delete picks" in a big directory (every picked path is also in the preview). Hoisted the preview into a `HashSet<&Path>` built once, so the per-row check is O(1) and `build_rows` stays linear. Behavior-identical; new test `build_rows_marks_only_pending_delete_paths` locks the exact set of flagged rows (and the no-preview case). (Gate-verified; pure perf.)
 
 **✅ ALREADY-FIXED — confirmed by the 2026-06-23 sweep (no action needed):**
 - `src/app/mcp.rs:174` — Patterns are validated before any pick is applied; an invalid pattern errors out cleanly with zero picks applied, and the success path always calls write_context().
