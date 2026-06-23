@@ -60,22 +60,18 @@ pub fn rss_kb() -> Option<u64> {
     }
     #[cfg(target_os = "macos")]
     {
-        // Read via `ps -o rss=` — avoids pulling in libc/mach just for
-        // this. The subprocess is short and runs in the background of the
-        // TUI (stdout piped), so we don't need the terminal teardown dance.
-        let pid = std::process::id();
-        let out = std::process::Command::new("ps")
-            .args(["-o", "rss=", "-p", &pid.to_string()])
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        std::str::from_utf8(&out.stdout)
-            .ok()?
-            .trim()
-            .parse::<u64>()
-            .ok()
+        // Read RSS in-process via the `sysinfo` crate (the same source
+        // `proc_rss_threads` uses) rather than shelling out to `ps`.
+        use sysinfo_crate::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+        let pid = Pid::from_u32(std::process::id());
+        let mut sys = System::new();
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            true,
+            ProcessRefreshKind::nothing().with_memory(),
+        );
+        // `memory()` is bytes (sysinfo 0.30+); callers want KB.
+        sys.process(pid).map(|p| p.memory() / 1024)
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {

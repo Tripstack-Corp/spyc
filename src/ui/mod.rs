@@ -11,12 +11,6 @@ pub mod diff_render;
 pub mod help;
 pub mod hex;
 pub mod json;
-#[allow(
-    dead_code,
-    clippy::unnested_or_patterns,
-    clippy::missing_const_for_fn,
-    clippy::match_same_arms
-)]
 pub mod line_edit;
 pub mod list_view;
 pub mod markdown;

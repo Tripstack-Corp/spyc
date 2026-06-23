@@ -70,23 +70,22 @@ pub enum ApplyResult {
     NotHandled,
 }
 
-/// MVU Stage 3: the unified result of any pure-domain producer
-/// (`apply` / `dispatch_command` / `dispatch_prompt`). Collapses the three
-/// per-producer result enums above so the single `App::update` entry point
-/// (Stage 3C) can handle every transition uniformly:
-/// - `Handled(effects)` carries the former `Post` effects (empty `Vec` for the
-///   old plain `Handled` — the App side runs whatever's there);
+/// The unified result of any pure-domain producer (`apply` /
+/// `dispatch_command` / `dispatch_prompt`), normalizing the three
+/// per-producer result enums above (`ApplyResult` / `CommandResult` /
+/// `PromptResult`) into one shape the App-side bridges match uniformly:
+/// - `Handled(effects)` carries the producer's `Post` effects (empty `Vec`
+///   for a plain `Handled` — the App side runs whatever's there);
 /// - `OpenPager` / `Quit` stay typed (App-only capability + a compile-time
 ///   wiring guard — dropping the arm is a build error, not a silent regress);
 /// - `Defer` is the old `NotHandled` — the App-side executor takes over.
 ///
-/// The `From` impls are the single, tested mapping site; producers keep their
-/// own result enums until 3C routes everything through `Update`.
-/// The three App-side bridges (`apply_inner` / `dispatch_command` /
-/// `dispatch_prompt`) normalize their producer's result into this via `From`
-/// and match it uniformly (MVU Stage 3C). The producers still return their own
-/// enums for now; Stage 3D switches them to return `Update` directly and
-/// deletes the three, and adds the single `App::update(msg)` entry point.
+/// The `From` impls below are the single, tested mapping site. The producers
+/// deliberately keep their own narrower result enums (each exposes only the
+/// variants it can actually return); the bridges in `actions` / `commands` /
+/// `prompt` widen to `Update` via `From` at the call site. This is the settled
+/// shape — an earlier plan to have producers return `Update` directly and
+/// delete the three was dropped as churn for no behavioral gain.
 #[derive(Debug)]
 pub enum Update {
     Handled(Vec<Effect>),
