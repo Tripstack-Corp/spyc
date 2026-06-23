@@ -11,6 +11,36 @@ high-severity findings it missed were hand-verified afterward (notes inline).
 
 Severity: high: 22, medium: 88, low: 112. Lens: correctness: 78, maintainability: 99, perf: 28, security: 17.
 
+## Status at archive (2026-06-15)
+
+This review drove the June 2026 remediation campaign (PRs #329–#424, opened and
+merged as-we-go). What it **closed** and **deferred**, as of archival:
+
+**Closed**
+- The entire **Low-severity table below — 112 rows: 111 fixed, 1 owner-accepted**
+  (`src/mcp/server.rs:158`, framing round-trip — disproportionate to remove).
+- **All security, all contained-correctness, the dead-code sweep, and the
+  maintainability / redundancy dedups** across both High/Medium and Low.
+
+**Deferred — NOT resolved at archive**
+- The **Tier-5 "blocking-IO off-thread" refactors** (Effect+worker conversions) and a
+  few **High-severity items** needing real off-thread work or a live-pty test harness —
+  e.g. `state/apply.rs:113` + `selection.rs:77` (inline IO in the pure Model),
+  `git/worktree.rs:188` (sync full-tree checkout), `pane/mod.rs:430` (viewport-only
+  tail read).
+- The **45 findings the verifier fleet never reached** (the adversarial pass died twice
+  on the org spend limit) — still "plausible-but-unchecked".
+
+**Annotation caveat.** Only the Low table was annotated finding-by-finding at close-out.
+The High/Medium `###` sections were annotated **opportunistically** as fixes landed, so
+**absence of a `✅` on a High/Medium finding does not mean it is open**, and a present
+mark can lag reality (e.g. `pager_handler/motion.rs:311` reads as open here but was
+fixed later). Treat this doc as a point-in-time record, not a live ledger.
+
+**Follow-up.** The deferred verification + resolution work — 29 confirmed-but-open and
+45 unverified findings — is tracked in
+[`docs/CODE_REVIEW_FOLLOWUP.md`](../CODE_REVIEW_FOLLOWUP.md).
+
 ## High severity
 
 ### `src/app/key_dispatch/confirms.rs:46` — Synchronous tar+zstd archive of deleted trees runs inline in a key handler
