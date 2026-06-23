@@ -276,6 +276,8 @@ impl App {
                 )),
                 graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 mermaid_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                file_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                inventory_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 worktree_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 preview_results: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 preview_reloading: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),

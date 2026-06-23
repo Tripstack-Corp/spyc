@@ -237,8 +237,7 @@ impl App {
                     return Ok(Vec::new());
                 }
                 KeyCode::Char('x' | 'd') if bare => {
-                    self.state.drop_cursor();
-                    return Ok(Vec::new());
+                    return Ok(self.state.drop_cursor());
                 }
                 KeyCode::Char(' ' | 't') if bare => {
                     self.state

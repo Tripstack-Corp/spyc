@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::app::PromptKind;
+use crate::app::effect::matchers::EffectSliceExt;
 use crate::fs::entry::EntryKind;
 use crate::fs::listing::SortMode;
 use crate::keymap::Action;
@@ -230,10 +231,13 @@ fn toggle_all_picks_selects_then_clears() {
 fn take_cursor_item_to_inventory() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let mut s = state_with_real_files(tmp.path(), &["a.txt", "b.txt"]);
-        s.take();
-        assert_eq!(s.inventory.len(), 1);
-        assert!(s.inventory.contains(&tmp.path().join("a.txt")));
+        let s = state_with_real_files(tmp.path(), &["a.txt", "b.txt"]);
+        let fx = s.take();
+        let inv = fx.inventory().expect("one Inventory effect");
+        assert!(matches!(
+            inv,
+            crate::app::inventory_ops::InventoryOp::Yank { .. }
+        ));
     });
 }
 
@@ -244,8 +248,12 @@ fn take_picks_to_inventory() {
         let mut s = state_with_real_files(tmp.path(), &["a.txt", "b.txt"]);
         s.left.picks.toggle(&tmp.path().join("a.txt"));
         s.left.picks.toggle(&tmp.path().join("b.txt"));
-        s.take();
-        assert_eq!(s.inventory.len(), 2);
+        let fx = s.take();
+        let inv = fx.inventory().expect("one Inventory effect");
+        assert!(matches!(
+            inv,
+            crate::app::inventory_ops::InventoryOp::Yank { .. }
+        ));
     });
 }
 
@@ -254,12 +262,14 @@ fn drop_removes_from_inventory() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
-        s.take(); // yank it first
-        assert_eq!(s.inventory.len(), 1);
-        // Switch to inventory view to drop
+        s.inventory.yank(&tmp.path().join("a.txt")).unwrap();
         s.toggle_inventory_view();
-        s.drop_cursor();
-        assert!(s.inventory.is_empty());
+        let fx = s.drop_cursor();
+        let inv = fx.inventory().expect("one Inventory effect");
+        assert!(matches!(
+            inv,
+            crate::app::inventory_ops::InventoryOp::Remove { .. }
+        ));
     });
 }
 

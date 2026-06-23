@@ -135,19 +135,6 @@ impl From<PromptResult> for Update {
     }
 }
 
-/// Outcome of [`AppState::take`] (yanking files into the inventory). A typed
-/// result so the caller dispatches on the variant instead of string-prefixing
-/// the flash message to tell success from error.
-#[derive(Debug)]
-pub enum TakeOutcome {
-    /// Files were yanked; carries the success flash message.
-    Yanked(String),
-    /// Nothing yanked; carries the error flash message.
-    Failed(String),
-    /// Nothing to do — wrong view, or an empty selection with no error.
-    Noop,
-}
-
 /// Description of a pager to open, without importing UI types.
 #[derive(Debug)]
 pub struct PagerRequest {

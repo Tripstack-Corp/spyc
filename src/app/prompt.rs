@@ -15,7 +15,6 @@
 //! `key_dispatch` / `actions`); the spyc-command / frecency completers
 //! and the `common_prefix` helper are module-internal.
 
-use crate::fs;
 use crate::shell;
 use crate::ui::line_edit::LineEditor;
 
@@ -499,14 +498,8 @@ impl App {
                 }
                 Vec::new()
             }
-            PromptKind::CopyTo => {
-                self.run_selection_to(&prompt.buffer, fs::ops::copy_selection_to, "copied");
-                Vec::new()
-            }
-            PromptKind::MoveTo => {
-                self.run_selection_to(&prompt.buffer, fs::ops::move_selection_to, "moved");
-                Vec::new()
-            }
+            PromptKind::CopyTo => self.run_selection_to(&prompt.buffer, false),
+            PromptKind::MoveTo => self.run_selection_to(&prompt.buffer, true),
             PromptKind::PaneNewTabCwd => {
                 let cwd = prompt.buffer.trim().to_string();
                 if let Some(cmd) = self.state.pending_new_tab_cmd.take() {

@@ -80,24 +80,37 @@ fn apply_pick_toggle_all() {
 
 #[test]
 fn apply_take_adds_to_inventory() {
+    use crate::app::effect::matchers::EffectSliceExt;
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
-        s.apply(&Action::Take);
-        assert_eq!(s.inventory.len(), 1);
-        assert!(s.inventory.contains(&tmp.path().join("a.txt")));
+        let ApplyResult::Post(fx) = s.apply(&Action::Take) else {
+            panic!("expected Post");
+        };
+        let inv = fx.inventory().expect("one Inventory effect");
+        assert!(matches!(
+            inv,
+            crate::app::inventory_ops::InventoryOp::Yank { .. }
+        ));
     });
 }
 
 #[test]
 fn apply_drop_removes_from_inventory() {
+    use crate::app::effect::matchers::EffectSliceExt;
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
-        s.take(); // yank first
+        s.inventory.yank(&tmp.path().join("a.txt")).unwrap();
         s.toggle_inventory_view();
-        s.apply(&Action::Drop);
-        assert!(s.inventory.is_empty());
+        let ApplyResult::Post(fx) = s.apply(&Action::Drop) else {
+            panic!("expected Post");
+        };
+        let inv = fx.inventory().expect("one Inventory effect");
+        assert!(matches!(
+            inv,
+            crate::app::inventory_ops::InventoryOp::Remove { .. }
+        ));
     });
 }
 
@@ -112,13 +125,15 @@ fn apply_toggle_inventory_view() {
 
 #[test]
 fn apply_empty_inventory() {
+    use crate::app::effect::matchers::EffectSliceExt;
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut s = state_with_real_files(tmp.path(), &["a.txt"]);
-        s.take(); // yank first
-        assert_eq!(s.inventory.len(), 1);
-        s.apply(&Action::EmptyInventory);
-        assert!(s.inventory.is_empty());
+        let ApplyResult::Post(fx) = s.apply(&Action::EmptyInventory) else {
+            panic!("expected Post");
+        };
+        let inv = fx.inventory().expect("one Inventory effect");
+        assert!(matches!(inv, crate::app::inventory_ops::InventoryOp::Clear));
     });
 }
 

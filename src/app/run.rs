@@ -254,6 +254,8 @@ impl App {
                 | Message::AgentStatusReady
                 | Message::GraveyardDone
                 | Message::MermaidDone
+                | Message::FileOpDone
+                | Message::InventoryDone
                 | Message::PreviewReloadDone
                 | Message::WorktreeJobDone
                 | Message::CodexSessionReady,
@@ -515,6 +517,19 @@ impl App {
             // Always drained here — the slot holds the outcome regardless of
             // which wake survived coalescing; the apply does the flash + refresh.
             if self.apply_graveyard_outcomes() {
+                ctx.draw.mark(3);
+            }
+
+            let (file_draw, file_fx) = self.apply_file_outcomes();
+            if file_draw {
+                ctx.draw.mark(3);
+            }
+            if !file_fx.is_empty() {
+                self.run_effects(file_fx, terminal, &foreground_exec);
+            }
+
+            // Drain any off-thread inventory ops (yank/remove/clear/put) that landed.
+            if self.apply_inventory_outcomes() {
                 ctx.draw.mark(3);
             }
 
