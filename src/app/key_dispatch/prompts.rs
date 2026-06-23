@@ -84,15 +84,7 @@ impl App {
                 }
             } else if matches!(
                 &self.state.mode,
-                Mode::Prompting(p) if matches!(
-                    p.kind,
-                    PromptKind::Jump
-                        | PromptKind::CopyTo
-                        | PromptKind::MoveTo
-                        | PromptKind::MakeDir
-                        | PromptKind::NewFile
-                        | PromptKind::PaneNewTabCwd
-                )
+                Mode::Prompting(p) if p.kind.wants_path_completion()
             ) {
                 self.tab_complete_path();
             }
@@ -202,18 +194,7 @@ impl App {
         if matches!(key.code, KeyCode::Tab | KeyCode::Char('\t')) {
             let wants_path = matches!(
                 &self.state.mode,
-                Mode::Prompting(p) if matches!(
-                    p.kind,
-                    PromptKind::Jump
-                        | PromptKind::CopyTo
-                        | PromptKind::MoveTo
-                        | PromptKind::MakeDir
-                        | PromptKind::NewFile
-                        | PromptKind::PaneNewTabCwd
-                        | PromptKind::ShellCmd
-                        | PromptKind::ShellCmdCaptured
-                        | PromptKind::Command
-                )
+                Mode::Prompting(p) if p.kind.wants_path_completion()
             );
             if wants_path {
                 self.tab_complete_path();

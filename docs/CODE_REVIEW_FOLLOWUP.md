@@ -116,7 +116,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | Where | Finding | Sev | Eff | Verdict |
 |---|---|---|---|---|
 | `src/agent/resume.rs:24` | Claude resume stripper misses -r/--continue/-c and eats the flag following a bare --resume | medium | S | ✅ PR #524 |
-| `src/app/key_dispatch/prompts.rs:200` | Tab-completion PromptKind allowlists are hand-synced in three-plus places — the drift pattern the command table was built to kill | medium | S | REAL |
+| `src/app/key_dispatch/prompts.rs:200` | Tab-completion PromptKind allowlists are hand-synced in three-plus places — the drift pattern the command table was built to kill | medium | S | ✅ PR #528 |
 | `src/app/prompt.rs:590` | J jump prompt silently swallows errors — typo'd path gives zero feedback | medium | S | ✅ PR #522 |
 | `src/app/render/chrome.rs:320` | build_rows is O(rows × delete-preview paths) — quadratic on 'delete picks' in a big directory | medium | S | ✅ PR #526 |
 | `src/fs/listing.rs:137` | Listing::sort comparator allocates 2-4 Strings per comparison — ~1.5M+ allocations per sort of a 50k-entry directory, on the event loop | medium | S | ✅ PR #525 |
@@ -178,6 +178,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 **✅ PR #527 — grep search_to_vec early exit (2026-06-23):**
 - `fs/grep.rs:353` (the `search_to_vec` fn) — after collecting `limit` matches the loop `break`s, but the receiver stayed alive through `handle.join()`. The channel is unbounded, so the worker's sends never blocked and it crawled the *entire* repo before `join` returned (e.g. `search_content` with a small limit on a huge tree). Now drops `rx` before joining, so the worker's next batch send fails and it bails early (the same cancellation path the live grep pager already uses). Result set is identical; new test `search_to_vec_caps_across_many_files` guards the multi-file cap. (Gate-verified; pure perf.)
+
+**✅ PR #528 — one path-completion allowlist (2026-06-23):**
+- `key_dispatch/prompts.rs:200` — the set of `PromptKind`s that Tab-complete a path was duplicated across the simple-prompt and vi-prompt Tab handlers, and the two had *already drifted* (the simple list omitted the shell/command kinds). Extracted `PromptKind::wants_path_completion()` as the single allowlist; both handlers consult it. Behavior-preserving (the union equals the vi list, and the extra shell/command kinds — `;`/`!`/`:` — are always vi-editor prompts that never reach the simple handler). New test `wants_path_completion_is_the_one_allowlist` pins the exact in/out set across every kind. (Gate-verified.)
 
 **✅ ALREADY-FIXED — confirmed by the 2026-06-23 sweep (no action needed):**
 - `src/app/mcp.rs:174` — Patterns are validated before any pick is applied; an invalid pattern errors out cleanly with zero picks applied, and the success path always calls write_context().
