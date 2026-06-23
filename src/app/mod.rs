@@ -217,10 +217,8 @@ pub struct FrameLayout {
 ///
 /// Anything that needs to own the tty (editor, pager, shell-out) goes
 /// through this so `run()` can tear the TUI down and restore it cleanly.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub enum PostAction {
-    #[default]
-    None,
     Spawn {
         program: String,
         args: Vec<String>,

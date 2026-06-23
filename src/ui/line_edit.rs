@@ -49,7 +49,7 @@ pub struct LineEditor {
 }
 
 impl LineEditor {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             buf: Vec::new(),
             cursor: 0,
@@ -89,10 +89,6 @@ impl LineEditor {
         self.buf.iter().collect()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.buf.is_empty()
-    }
-
     /// Splice a string into the buffer at the current cursor position,
     /// advancing the cursor past the inserted text. Used by the paste
     /// handler so an OS clipboard paste (bracketed paste / OSC 52
@@ -117,10 +113,10 @@ impl LineEditor {
         if ctrl {
             match key.code {
                 KeyCode::Char('c' | 'C') => return EditResult::Cancel,
-                KeyCode::Char('p' | 'P') | KeyCode::Char('k' | 'K') => {
+                KeyCode::Char('p' | 'P' | 'k' | 'K') => {
                     return EditResult::HistoryPrev;
                 }
-                KeyCode::Char('n' | 'N') | KeyCode::Char('j' | 'J') => {
+                KeyCode::Char('n' | 'N' | 'j' | 'J') => {
                     return EditResult::HistoryNext;
                 }
                 _ => {}
@@ -259,8 +255,8 @@ impl LineEditor {
                     self.cursor = 0;
                     self.mode = Mode::Insert;
                 }
-                KeyCode::Esc => {} // cancel pending op
-                _ => {}            // unknown motion, discard
+                // Esc cancels the pending op; any unknown motion is discarded.
+                _ => {}
             }
             return EditResult::Continue;
         }

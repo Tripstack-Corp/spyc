@@ -231,8 +231,11 @@ struct Renderer<'t> {
 /// etc. It does NOT catch `**Bold without colon**` (no `:`) or
 /// `**Bold**: value` (colon outside the bold).
 fn force_hard_breaks_before_keyed_lines(source: &str) -> std::borrow::Cow<'_, str> {
-    let re = regex::Regex::new(r"\n(\*\*[^*\n]+:\*\*)").expect("static regex compiles");
-    re.replace_all(source, "  \n$1")
+    // Compiled once on first use, not per render call.
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\n(\*\*[^*\n]+:\*\*)").expect("static regex compiles")
+    });
+    RE.replace_all(source, "  \n$1")
 }
 
 struct TableBuilder {

@@ -296,15 +296,12 @@ impl SigOk {
     }
 }
 
-/// Total conversion from the legacy `PostAction` carrier. `None` maps to
-/// the empty effect list (a `From<PostAction> for Effect` could not — a
-/// `From` must yield exactly one value, and there is a live
-/// `ApplyResult::Post(PostAction::None)` site). The `Spawn` builders stay
-/// byte-identical and reach `Effect::ForegroundExec` through this shim.
+/// Conversion from the legacy `PostAction::Spawn` carrier to the effect
+/// list. The `Spawn` builders stay byte-identical and reach
+/// `Effect::ForegroundExec` through this shim.
 impl From<PostAction> for Vec<Effect> {
     fn from(pa: PostAction) -> Self {
         match pa {
-            PostAction::None => Self::new(),
             PostAction::Spawn {
                 program,
                 args,
@@ -780,11 +777,6 @@ pub mod matchers {
 #[cfg(test)]
 mod tests {
     use super::{ClipMsg, Effect, PostAction};
-
-    #[test]
-    fn post_action_none_maps_to_empty() {
-        assert!(Vec::<Effect>::from(PostAction::None).is_empty());
-    }
 
     #[test]
     fn clip_pane_lines_count_recomputed_from_text() {

@@ -107,16 +107,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/state/sessions/mod.rs:127` | load_sessions dedup collapses distinct resumable sessions that share cwd + commands | medium | S | REAL |
 | `src/ui/pager/construct.rs:58` | new_plain duplicates the entire 35-field PagerView initializer from new_styled | medium | S | REAL |
 
-### PR10 · Dead-code & stale-shim removal
+### PR10 · Dead-code & stale-shim removal — ✅ done (PR #516; see closed log)
 
-| Where | Finding | Sev | Eff | Verdict |
-|---|---|---|---|---|
-| `src/app/effect.rs:274` | Stale PostAction shim: PostAction::None is dead and its justifying comment cites code that no longer typechecks | medium | S | REAL |
-| `src/mcp/protocol.rs:62` | Nine doc comments detached from their functions by the verbatim mcp.rs split | medium | S | REAL |
-| `src/sysinfo.rs:42` | rss_kb() still shells out to `ps` on macOS while the same file already reads RSS in-process via the sysinfo crate | medium | S | REAL |
-| `src/ui/markdown/mod.rs:136` | Regex compiled on every markdown render call | medium | S | REAL |
-| `src/ui/mod.rs:13` | Blanket #[allow(dead_code, ...)] on line_edit hides real dead code | medium | S | REAL |
-| `src/app/state/mod.rs:84` | Update doc comment describes an abandoned migration stage as pending; three transitional result enums linger | medium | M | REAL |
+5 of 6 done this PR. `src/mcp/protocol.rs:62` (9 doc comments detached by the verbatim mcp.rs split — needs cross-file archaeology to find where each function moved) is deferred into **PR11**, which already touches that file.
 
 ### PR11 · MCP scope/robustness + path/env overlay
 
@@ -125,6 +118,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/mcp/protocol.rs:324` | get_file_content is cwd-scoped while the search tools are project_home-scoped, so spyc's own search results can't be read back | medium | S | REAL |
 | `src/paths.rs:17` | expand() reads HOME via std::env directly, bypassing the envset overlay it uses for every other variable | medium | S | REAL |
 | `src/mcp/server.rs:259` | One slow tool call (>20s) kills the entire MCP connection, and the server's searches are unbounded | medium | M | REAL |
+| `src/mcp/protocol.rs:62` | Nine doc comments detached from their functions by the verbatim mcp.rs split (deferred here from PR10) | medium | S | REAL |
 
 ### PR12 · Misc correctness batch
 
@@ -145,6 +139,13 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 ## Closed / resolved (running log)
 
 **✅ #514 — cluster 1, pure-Model IO moved off-thread (2026-06-23):** `state/apply.rs:113`, `state/selection.rs:77`, `clipboard.rs:189`, `clipboard.rs:250` — inline file copies / tar+zstd archiving / blocking pipe reads replaced by `Effect::FileOp` + `Effect::Inventory` off-thread workers.
+
+**✅ PR #516 — dead-code & stale-shim removal (2026-06-23):**
+- `effect.rs:274` — removed dead `PostAction::None` + the `Default` derive + the stale comment that cited a no-longer-typechecking `ApplyResult::Post(PostAction::None)` site.
+- `sysinfo.rs:42` — macOS `rss_kb()` reads RSS via the `sysinfo` crate (already used in-file), no more `ps` shell-out.
+- `ui/markdown/mod.rs:136` — the keyed-line-break regex is now a function-local `LazyLock`, compiled once instead of per render.
+- `ui/mod.rs:13` — dropped the blanket `#[allow(dead_code, …)]` on `line_edit` (removed the dead `is_empty`, made `new` a `const fn`, collapsed two or-patterns + a duplicate match arm).
+- `state/mod.rs:84` — rewrote the stale `Update` doc comment (the "Stage 3D" migration was abandoned; the per-producer enums + `From` bridges are the settled shape).
 
 **✅ ALREADY-FIXED — confirmed by the 2026-06-23 sweep (no action needed):**
 - `src/app/mcp.rs:174` — Patterns are validated before any pick is applied; an invalid pattern errors out cleanly with zero picks applied, and the success path always calls write_context().
