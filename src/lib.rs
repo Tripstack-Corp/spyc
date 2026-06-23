@@ -164,13 +164,21 @@ pub fn run() -> Result<()> {
     // the panic message to stderr.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        // Best-effort terminal restore — ignore errors.
+        // Best-effort terminal restore — ignore errors. Mirror
+        // `restore_terminal` so a crash doesn't leave the shell in raw mode,
+        // on the alt screen, or — the two that were easy to miss here — with
+        // the kitty keyboard-enhancement flag still pushed or alternate-scroll
+        // still on. Both of those silently corrupt the next TUI / scroll-wheel
+        // behavior in the *same shell session*, long after the panic.
         let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
         let _ = execute!(
             io::stdout(),
             LeaveAlternateScreen,
             DisableBracketedPaste,
-            ShowMousePointer
+            DisableAlternateScroll,
+            ShowMousePointer,
+            crossterm::cursor::Show,
         );
         let _ = term_title::pop();
 
