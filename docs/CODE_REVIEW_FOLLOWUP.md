@@ -120,7 +120,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/prompt.rs:590` | J jump prompt silently swallows errors — typo'd path gives zero feedback | medium | S | REAL |
 | `src/app/render/chrome.rs:320` | build_rows is O(rows × delete-preview paths) — quadratic on 'delete picks' in a big directory | medium | S | REAL |
 | `src/fs/listing.rs:137` | Listing::sort comparator allocates 2-4 Strings per comparison — ~1.5M+ allocations per sort of a 50k-entry directory, on the event loop | medium | S | REAL |
-| `src/fs/ops.rs:52` | read_truncated caps lines but not bytes — a huge single-line file is loaded entirely into RAM on the UI thread | medium | S | REAL |
+| `src/fs/ops.rs:52` | read_truncated caps lines but not bytes — a huge single-line file is loaded entirely into RAM on the UI thread | medium | S | ✅ PR #521 |
 | `src/git/diff_model/build.rs:559` | Rename similarity recomputed with a second full-blob diff that gix already performed | medium | S | REAL |
 | `src/main.rs:87` | Panic hook doesn't pop kitty keyboard-enhancement flags or alternate-scroll mode — terminal left misbehaving after a panic | medium | S | REAL |
 | `src/pane/mod.rs:607` | vt100 panic recovery rebuilds the parser at the adopt-time size, and the resize coalescer guarantees it never gets corrected | medium | S | REAL |
@@ -157,6 +157,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 - `mcp/protocol.rs:324` — `get_file_content` resolves relative paths against the **search root** (worktree root / project_home / cwd) and guards against it, matching `search_paths`/`search_content` so their repo-relative results read back. New test `get_file_content_resolves_relative_against_search_root`; the traversal guard still holds (message reworded to "outside the project root").
 - `paths.rs:17` — `expand()` reads HOME from the `envset` overlay (then falls back to the process env), so an overridden HOME no longer slips past tilde expansion.
 (`mcp/server.rs:259` slow-call timeout + `protocol.rs:62` doc reattachment remain in PR11.)
+
+**✅ PR #521 — read_truncated byte ceiling (2026-06-23):**
+- `fs/ops.rs:52` — the >`MAX_PAGER_BYTES` huge-file pager fallback capped lines but not bytes, so a newline-less giant file was slurped whole into RAM by `read_line`. Now bounds each read by the remaining byte budget (per-line `Take`) and reports truncated when the ceiling is hit. New test with a 5MB+ newline-less file. (Gate-verified; no live test needed.)
 
 **✅ ALREADY-FIXED — confirmed by the 2026-06-23 sweep (no action needed):**
 - `src/app/mcp.rs:174` — Patterns are validated before any pick is applied; an invalid pattern errors out cleanly with zero picks applied, and the success path always calls write_context().
