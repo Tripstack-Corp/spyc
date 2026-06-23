@@ -24,7 +24,7 @@
 //! transcript reads — now ride this seam through the single `stream_id` /
 //! `Message::PagerStreamOutput`.
 
-use super::{App, state};
+use super::App;
 use crate::ui::pager::{self, PagerView};
 use crate::ui::theme::Theme;
 
@@ -186,29 +186,9 @@ impl App {
                 self.view.needs_full_repaint = true;
             }
             PagerStreamMount::LowerPane { title } => {
-                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
-                    tabs.active_mut().enter_scroll_mode();
-                }
-                let mut view = pager::PagerView::new_styled(title, Vec::new());
-                view.mount = pager::Mount::LowerPane;
-                view.pane_scroll = true;
-                view.stream_id = Some(id);
-                view.streaming = true;
-                // Gutter off so existing content doesn't jump horizontally;
-                // wrap on so long transcript turns aren't clipped.
-                view.show_line_numbers = false;
-                view.no_history = true;
-                view.wrap = true;
-                // Park at the bottom on first render (deferred — the LowerPane
-                // branch knows the real viewport height).
-                view.pending_scroll_to_bottom.set(true);
-                // The bottom-region scrollback slot — coexists with a
-                // top-region `view.pager` (`D`) rather than evicting it.
-                self.view.scroll_pager = Some(view);
-                self.state.focus = state::Focus::Pane;
-                self.view.needs_full_repaint = true;
-                self.state
-                    .flash_info("scroll: on (/, n/N, :N, V, y, Esc exit)");
+                // Shares the LowerPane flag block + scroll-mode entry with the
+                // static `mount_scroll_pager`; `Some(id)` marks it a live stream.
+                self.install_lower_pane_scroll_view(title, Vec::new(), Some(id));
             }
         }
     }

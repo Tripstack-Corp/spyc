@@ -18,6 +18,46 @@ use super::state::Focus;
 use super::{App, Effect};
 
 impl App {
+    /// Run `cmd` as a foreground shell overlay that PERSISTS after exit (no
+    /// auto-dismiss — the user reads the output), expanding `%`/selection
+    /// placeholders first. Shared by the `:;cmd` command and the `;`-prompt
+    /// (`ShellCmd`) arms — they had independent copies of this spawn block.
+    /// Flashes on expand/spawn error.
+    pub(super) fn run_foreground_shell_overlay(&mut self, cmd: &str) {
+        let expanded = match crate::shell::expand_percent(cmd, &self.state.selection_paths()) {
+            Ok(s) => s,
+            Err(e) => {
+                self.state.flash_error(e.to_string());
+                return;
+            }
+        };
+        let (rows, cols) =
+            Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
+        let cwd = self.state.cur().listing.dir.clone();
+        let wake = self.make_pane_wake();
+        match Pane::spawn(&expanded, rows, cols, &cwd, &self.view.context_path, wake) {
+            Ok(p) => {
+                // Initial focus on the new overlay so the user drives the
+                // subprocess directly; `^a j` hands focus to the bottom pane.
+                self.runtime.top_overlay = Some(p);
+                self.state.focus = Focus::Overlay;
+            }
+            Err(e) => self.state.flash_error(format!("spawn: {e}")),
+        }
+    }
+
+    /// Run `cmd` as a captured (background-able) shell command: record it as the
+    /// last `!` command, expand `%`/selection placeholders, and hand off to
+    /// `start_capture` with `display` as the task label. Shared by the `:!cmd`
+    /// command and the `!`-prompt (`ShellCmdCaptured`) arms. Flashes on error.
+    pub(super) fn run_captured_shell(&mut self, cmd: &str, display: &str) {
+        self.state.last_captured_cmd = Some(cmd.to_string());
+        match crate::shell::expand_percent(cmd, &self.state.selection_paths()) {
+            Ok(expanded) => self.start_capture(&expanded, cmd, display),
+            Err(e) => self.state.flash_error(e.to_string()),
+        }
+    }
+
     /// Parse and dispatch a `:` command.
     ///
     /// Pure-domain arms are handled by `AppState::dispatch_command`;
@@ -73,11 +113,7 @@ impl App {
                 self.state.flash_error("empty command");
                 return Vec::new();
             }
-            self.state.last_captured_cmd = Some(cmd.to_string());
-            match crate::shell::expand_percent(cmd, &self.state.selection_paths()) {
-                Ok(expanded) => self.start_capture(&expanded, cmd, cmd),
-                Err(e) => self.state.flash_error(e.to_string()),
-            }
+            self.run_captured_shell(cmd, cmd);
             return Vec::new();
         }
 
@@ -88,27 +124,7 @@ impl App {
                 self.state.flash_error("empty command");
                 return Vec::new();
             }
-            let expanded = match crate::shell::expand_percent(cmd, &self.state.selection_paths()) {
-                Ok(s) => s,
-                Err(e) => {
-                    self.state.flash_error(e.to_string());
-                    return Vec::new();
-                }
-            };
-            let (rows, cols) =
-                Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
-            let cwd = self.state.cur().listing.dir.clone();
-            let wake = self.make_pane_wake();
-            match Pane::spawn(&expanded, rows, cols, &cwd, &self.view.context_path, wake) {
-                Ok(p) => {
-                    self.runtime.top_overlay = Some(p);
-                    // Initial focus is on the new overlay so the user
-                    // can drive the subprocess directly. ^a-j hands
-                    // focus to the bottom pane (when one is open).
-                    self.state.focus = Focus::Overlay;
-                }
-                Err(e) => self.state.flash_error(format!("spawn: {e}")),
-            }
+            self.run_foreground_shell_overlay(cmd);
             return Vec::new();
         }
 
