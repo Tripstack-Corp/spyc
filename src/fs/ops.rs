@@ -43,10 +43,15 @@ pub const MAX_PAGER_BYTES: u64 = 5 * 1024 * 1024;
 /// in `$PAGER`.
 pub const MAX_PAGER_LINES: usize = 5000;
 
-/// Read at most the first `MAX_PAGER_LINES` lines of `path`.
-/// Returns `(content, total_lines_read, truncated)`. `truncated`
-/// is true if we hit the line cap before EOF; callers use it to
-/// decide whether to skip syntect and emit a banner row.
+/// Read at most the first `max_lines` lines **or** `MAX_PAGER_BYTES` bytes of
+/// `path`, whichever comes first. Returns `(content, total_lines_read,
+/// truncated)`; `truncated` is true if either cap was hit before EOF (callers
+/// use it to decide whether to skip syntect and emit a banner row).
+///
+/// The byte cap matters because this is the >`MAX_PAGER_BYTES` huge-file
+/// fallback: `read_line` reads to the next `\n` regardless of size, so a
+/// newline-less or very-long-line file would otherwise be slurped whole into
+/// memory on the UI thread.
 pub fn read_truncated(path: &Path, max_lines: usize) -> io::Result<(String, usize, bool)> {
     let f = fs::File::open(path)?;
     let mut reader = io::BufReader::new(f);
@@ -54,8 +59,15 @@ pub fn read_truncated(path: &Path, max_lines: usize) -> io::Result<(String, usiz
     let mut lines_read = 0usize;
     let mut line = String::new();
     while lines_read < max_lines {
+        // Spent the byte budget before the line cap → truncated.
+        if buf.len() as u64 >= MAX_PAGER_BYTES {
+            return Ok((buf, lines_read, true));
+        }
         line.clear();
-        let n = reader.read_line(&mut line)?;
+        // Bound this read by the remaining byte budget so one giant line can't
+        // be read whole; `read_line` on a `Take` stops at the limit.
+        let budget = MAX_PAGER_BYTES - buf.len() as u64;
+        let n = (&mut reader).take(budget).read_line(&mut line)?;
         if n == 0 {
             return Ok((buf, lines_read, false));
         }
@@ -486,6 +498,28 @@ mod tests {
         let (_, lines, truncated) = read_truncated(&path, 5).unwrap();
         assert_eq!(lines, 5);
         assert!(!truncated, "file ending at the cap should not be flagged");
+    }
+
+    #[test]
+    fn read_truncated_caps_total_bytes_on_a_newline_less_file() {
+        // A huge single line (no '\n') must not be slurped whole: read_truncated
+        // is the >MAX_PAGER_BYTES fallback, so the byte ceiling — not the line
+        // cap — has to bound memory. Write just past the cap and assert it stops.
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("oneline.txt");
+        let huge = vec![b'a'; MAX_PAGER_BYTES as usize + 4096];
+        File::create(&path).unwrap().write_all(&huge).unwrap();
+        let (content, lines, truncated) = read_truncated(&path, MAX_PAGER_LINES).unwrap();
+        assert!(
+            content.len() as u64 <= MAX_PAGER_BYTES,
+            "byte ceiling must bound memory (read {} bytes)",
+            content.len()
+        );
+        assert!(truncated, "a file past the byte cap is truncated");
+        assert!(
+            lines <= 1,
+            "a newline-less file is at most one (partial) line, got {lines}"
+        );
     }
 
     fn label_for(bytes: &[u8]) -> String {
