@@ -117,7 +117,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 |---|---|---|---|---|
 | `src/agent/resume.rs:24` | Claude resume stripper misses -r/--continue/-c and eats the flag following a bare --resume | medium | S | REAL |
 | `src/app/key_dispatch/prompts.rs:200` | Tab-completion PromptKind allowlists are hand-synced in three-plus places — the drift pattern the command table was built to kill | medium | S | REAL |
-| `src/app/prompt.rs:590` | J jump prompt silently swallows errors — typo'd path gives zero feedback | medium | S | REAL |
+| `src/app/prompt.rs:590` | J jump prompt silently swallows errors — typo'd path gives zero feedback | medium | S | ✅ PR #522 |
 | `src/app/render/chrome.rs:320` | build_rows is O(rows × delete-preview paths) — quadratic on 'delete picks' in a big directory | medium | S | REAL |
 | `src/fs/listing.rs:137` | Listing::sort comparator allocates 2-4 Strings per comparison — ~1.5M+ allocations per sort of a 50k-entry directory, on the event loop | medium | S | REAL |
 | `src/fs/ops.rs:52` | read_truncated caps lines but not bytes — a huge single-line file is loaded entirely into RAM on the UI thread | medium | S | ✅ PR #521 |
@@ -160,6 +160,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 **✅ PR #521 — read_truncated byte ceiling (2026-06-23):**
 - `fs/ops.rs:52` — the >`MAX_PAGER_BYTES` huge-file pager fallback capped lines but not bytes, so a newline-less giant file was slurped whole into RAM by `read_line`. Now bounds each read by the remaining byte budget (per-line `Take`) and reports truncated when the ceiling is hit. New test with a 5MB+ newline-less file. (Gate-verified; no live test needed.)
+
+**✅ PR #522 — J jump error feedback (2026-06-23):**
+- `prompt.rs:590` — a `J` jump to a typo'd / nonexistent path was `let _ = jump_to(..)` (silent no-op). Now flashes `jump: {e}` on the resolve error (chdir failures already flash inside `jump_to`). New harness test `jump_prompt_flashes_on_bad_path`. (Gate-verified.)
 
 **✅ ALREADY-FIXED — confirmed by the 2026-06-23 sweep (no action needed):**
 - `src/app/mcp.rs:174` — Patterns are validated before any pick is applied; an invalid pattern errors out cleanly with zero picks applied, and the success path always calls write_context().

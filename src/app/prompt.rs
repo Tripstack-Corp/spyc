@@ -548,7 +548,12 @@ impl App {
             PromptKind::Jump => {
                 let trimmed = prompt.buffer.trim();
                 if !trimmed.is_empty() {
-                    let _ = self.state.jump_to(trimmed);
+                    // Surface a bad target (typo'd / nonexistent path) instead of
+                    // swallowing it — `jump_to` errors only when the path can't
+                    // be resolved (chdir failures already flash inside it).
+                    if let Err(e) = self.state.jump_to(trimmed) {
+                        self.state.flash_error(format!("jump: {e}"));
+                    }
                 }
                 self.reconcile_harpoon();
                 Vec::new()

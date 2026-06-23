@@ -164,6 +164,23 @@ fn prompt_input_wins_over_list() {
     });
 }
 
+/// A `J` jump to a typo'd / nonexistent path flashes an error rather than
+/// silently no-op'ing (was `let _ = jump_to(..)`).
+#[test]
+fn jump_prompt_flashes_on_bad_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        let mut p = Prompt::simple(PromptKind::Jump, "jump: ");
+        p.buffer = "/no/such/path/xyz123".to_string();
+        app.dispatch_prompt(p);
+        assert!(
+            app.flash_text().unwrap_or_default().contains("jump"),
+            "a typo'd jump target must flash, not silently no-op"
+        );
+    });
+}
+
 /// Routing: an Overlay-mounted in-app pager consumes normal keys —
 /// `j` is handled by the pager, the list cursor stays put.
 #[test]
