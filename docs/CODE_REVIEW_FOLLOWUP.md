@@ -122,7 +122,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/fs/listing.rs:137` | Listing::sort comparator allocates 2-4 Strings per comparison — ~1.5M+ allocations per sort of a 50k-entry directory, on the event loop | medium | S | ✅ PR #525 |
 | `src/fs/ops.rs:52` | read_truncated caps lines but not bytes — a huge single-line file is loaded entirely into RAM on the UI thread | medium | S | ✅ PR #521 |
 | `src/git/diff_model/build.rs:559` | Rename similarity recomputed with a second full-blob diff that gix already performed | medium | S | REAL |
-| `src/main.rs:87` | Panic hook doesn't pop kitty keyboard-enhancement flags or alternate-scroll mode — terminal left misbehaving after a panic | medium | S | REAL |
+| `src/main.rs:87` | Panic hook doesn't pop kitty keyboard-enhancement flags or alternate-scroll mode — terminal left misbehaving after a panic | medium | S | ✅ PR #529 |
 | `src/pane/mod.rs:607` | vt100 panic recovery rebuilds the parser at the adopt-time size, and the resize coalescer guarantees it never gets corrected | medium | S | REAL |
 | `src/app/run.rs:54` | Config-file watch on $HOME is permanently destroyed when the listing watch passes through the same directory | medium | M | REAL |
 | `src/pane/tabs.rs:20` | Claude-specific session-restore state machine (PendingResumeSend) lives in the generic pane layer | medium | M | REAL |
@@ -181,6 +181,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 **✅ PR #528 — one path-completion allowlist (2026-06-23):**
 - `key_dispatch/prompts.rs:200` — the set of `PromptKind`s that Tab-complete a path was duplicated across the simple-prompt and vi-prompt Tab handlers, and the two had *already drifted* (the simple list omitted the shell/command kinds). Extracted `PromptKind::wants_path_completion()` as the single allowlist; both handlers consult it. Behavior-preserving (the union equals the vi list, and the extra shell/command kinds — `;`/`!`/`:` — are always vi-editor prompts that never reach the simple handler). New test `wants_path_completion_is_the_one_allowlist` pins the exact in/out set across every kind. (Gate-verified.)
+
+**✅ PR #529 — panic-hook terminal restore parity (2026-06-23):**
+- `lib.rs` panic hook (finding `main.rs:87`) — the crash-time restore popped raw mode / alt screen / bracketed-paste / mouse pointer but, unlike the clean `restore_terminal`, never popped the **kitty keyboard-enhancement flag** or **alternate-scroll mode**, and didn't re-show the cursor. After a spyc panic those stay set for the *rest of the shell session*, corrupting key delivery / scroll-wheel for the next TUI. Added `PopKeyboardEnhancementFlags`, `DisableAlternateScroll`, and `cursor::Show` to mirror `restore_terminal`. Crash-path-only and strictly additive (cannot affect normal operation); verified by inspection against the live-proven clean teardown. (Gate-verified; the actual post-panic restore is best-effort, as the hook always was.)
 
 **✅ ALREADY-FIXED — confirmed by the 2026-06-23 sweep (no action needed):**
 - `src/app/mcp.rs:174` — Patterns are validated before any pick is applied; an invalid pattern errors out cleanly with zero picks applied, and the success path always calls write_context().
