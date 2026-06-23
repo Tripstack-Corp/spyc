@@ -608,7 +608,18 @@ impl App {
                 if branch.is_empty() {
                     return Vec::new();
                 }
-                match crate::git::worktree::add(&self.state.cur().listing.dir, branch) {
+                // POLA: base the new worktree off PROJECT_HOME's default branch
+                // (the trunk), not the focused column's current HEAD.
+                let base = self
+                    .state
+                    .project_home
+                    .as_deref()
+                    .and_then(crate::git::branch::default_base);
+                match crate::git::worktree::add(
+                    &self.state.cur().listing.dir,
+                    branch,
+                    base.as_deref(),
+                ) {
                     Ok(path) => {
                         self.state
                             .flash_info(format!("created worktree: {}", path.display()));

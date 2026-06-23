@@ -149,7 +149,7 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
             make_repo(&repo);
-            let wt = worktree::add(&repo, "wt-clean").unwrap();
+            let wt = worktree::add(&repo, "wt-clean", None).unwrap();
             std::fs::write(wt.join("scratch.log"), "junk\n").unwrap(); // untracked
 
             let report = clean_worktree(&wt).expect("clean succeeds");
@@ -178,7 +178,7 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
             make_repo(&repo);
-            let wt = worktree::add(&repo, "wt-dirty").unwrap();
+            let wt = worktree::add(&repo, "wt-dirty", None).unwrap();
             std::fs::write(wt.join("f.txt"), "v2-uncommitted\n").unwrap(); // tracked edit
 
             let err = clean_worktree(&wt).unwrap_err();

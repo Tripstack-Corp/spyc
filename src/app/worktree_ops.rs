@@ -37,6 +37,9 @@ pub enum WorktreeJob {
     Create {
         dir: std::path::PathBuf,
         branch: String,
+        /// Start point for a NEW branch — the repo's default branch (POLA: not
+        /// the focused column's HEAD). `None` falls back to HEAD in `add`.
+        base: Option<String>,
     },
     /// `remove_worktree`: tear down the worktree at `target`.
     Remove { target: std::path::PathBuf },
@@ -76,25 +79,27 @@ const fn err_result(message: String) -> WorktreeJobResult {
 /// (`spawn_worktree_job`'s worker).
 pub fn run_worktree_job(job: WorktreeJob) -> WorktreeJobResult {
     match job {
-        WorktreeJob::Create { dir, branch } => match crate::git::worktree::add(&dir, &branch) {
-            Ok(path) => {
-                let json = serde_json::json!({
-                    "branch": branch,
-                    "path": path.display().to_string(),
-                });
-                WorktreeJobResult {
-                    response: McpResponse::Ok {
-                        message: serde_json::to_string_pretty(&json).unwrap_or_default(),
-                    },
-                    flash: Some(format!(
-                        "[mcp] created worktree {} ({branch})",
-                        path.display()
-                    )),
-                    mutated: true,
+        WorktreeJob::Create { dir, branch, base } => {
+            match crate::git::worktree::add(&dir, &branch, base.as_deref()) {
+                Ok(path) => {
+                    let json = serde_json::json!({
+                        "branch": branch,
+                        "path": path.display().to_string(),
+                    });
+                    WorktreeJobResult {
+                        response: McpResponse::Ok {
+                            message: serde_json::to_string_pretty(&json).unwrap_or_default(),
+                        },
+                        flash: Some(format!(
+                            "[mcp] created worktree {} ({branch})",
+                            path.display()
+                        )),
+                        mutated: true,
+                    }
                 }
+                Err(e) => err_result(format!("worktree add: {e}")),
             }
-            Err(e) => err_result(format!("worktree add: {e}")),
-        },
+        }
         WorktreeJob::Remove { target } => match crate::git::worktree::remove(&target) {
             Ok(()) => WorktreeJobResult {
                 response: McpResponse::Ok {
@@ -157,6 +162,13 @@ impl App {
                     Ok(WorktreeJob::Create {
                         dir: self.state.cur().listing.dir.clone(),
                         branch: branch.to_string(),
+                        // POLA: base a new worktree off PROJECT_HOME's default
+                        // branch, not whatever the focused column is on.
+                        base: self
+                            .state
+                            .project_home
+                            .as_deref()
+                            .and_then(crate::git::branch::default_base),
                     })
                 }
             }
