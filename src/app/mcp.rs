@@ -212,17 +212,10 @@ impl App {
         } else {
             raw
         };
-        // Compare canonical paths; `listing.dir` is already canonical (set on chdir).
-        let canon = std::fs::canonicalize(&target).unwrap_or_else(|_| target.clone());
-        let occupied = std::iter::once(&self.state.left)
-            .chain(self.state.right.as_ref())
-            .any(|c| c.listing.dir.starts_with(&canon));
-        if occupied {
-            return Err(format!(
-                "a column is open inside {} — navigate it away first",
-                canon.display()
-            ));
-        }
+        // A column sitting inside the target is NOT refused: the removal
+        // proceeds, and `reset_orphaned_columns_to_home` (run in
+        // `after_worktree_mutation`) snaps that column back to PROJECT_HOME with
+        // a flash — preferred over stranding the user with a refusal.
         Ok(target)
     }
 
