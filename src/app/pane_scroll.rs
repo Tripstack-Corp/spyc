@@ -387,21 +387,13 @@ impl App {
             };
         }
 
-        // `r`: reload a transcript scroll pager — re-resolve + re-render the
-        // on-disk transcript off-thread (full-screen agents keep appending, so
-        // a snapshot goes stale). Only meaningful for a stream-backed pager;
-        // the vt100 snapshot path falls through to the normal key handling.
-        if matches!(key.code, KeyCode::Char('r'))
-            && !ctrl
-            && self
-                .view
-                .pager
-                .as_ref()
-                .is_some_and(|p| p.stream_id.is_some())
-        {
-            self.open_pane_scroll_pager();
-            return Vec::new();
-        }
+        // NB: `r` (reload a transcript scrollback) is handled in
+        // `handle_pager_motion` (motion.rs), which owns the stream-backed
+        // `scroll_pager`. This handler only runs for the raw vt100 scroll mode
+        // (`InputSink::PaneScroll`), where a stream pager never lives in
+        // `view.pager` (those are Modal / Scrollback → routed to PagerKey), so
+        // the `view.pager.stream_id` check here was always false (dead). `r`
+        // falls through to the no-op below.
 
         let pane = self
             .runtime

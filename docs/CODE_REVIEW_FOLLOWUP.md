@@ -39,8 +39,8 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 | Where | Finding | Sev | Eff | Verdict |
 |---|---|---|---|---|
-| `src/app/pane_scroll.rs:304` | `r` reload branch in handle_pane_scroll_key checks the wrong pager slot and is dead for its stated purpose | medium | S | REAL |
-| `src/app/pager_handler/motion.rs:311` | `v` (edit in $EDITOR) from a bottom scrollback pager closes/restores the wrong pager slot, leaving an orphaned pager that Esc/q cannot close | high | M | 🔧 PR #520 (awaiting live test) |
+| `src/app/pane_scroll.rs:304` | `r` reload branch in handle_pane_scroll_key checks the wrong pager slot and is dead for its stated purpose | medium | S | ✅ PR #523 |
+| `src/app/pager_handler/motion.rs:311` | `v` (edit in $EDITOR) from a bottom scrollback pager closes/restores the wrong pager slot, leaving an orphaned pager that Esc/q cannot close | high | M | ✅ #520 (tested) |
 | `src/app/pager_stream.rs:228` | Opening pager help (`?`) or navigating buffer history (`[b`/`]b`) while a stream is mid-flight kills the worker and permanently freezes the pager at "scanning…"/"computing…" | medium | M | REAL |
 | `src/app/pane_scroll.rs:179` | Single `runtime.pager_stream` slot: starting a grep/git-view while a transcript is loading silently kills the transcript stream, leaving the scroll pager empty forever | medium | M | REAL |
 | `src/pane/mod.rs:430` | recent_lines/save_to_file read one stale viewport, not the recent tail — vt100 contents() is viewport-only | high | M | REAL |
@@ -163,6 +163,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 **✅ PR #522 — J jump error feedback (2026-06-23):**
 - `prompt.rs:590` — a `J` jump to a typo'd / nonexistent path was `let _ = jump_to(..)` (silent no-op). Now flashes `jump: {e}` on the resolve error (chdir failures already flash inside `jump_to`). New harness test `jump_prompt_flashes_on_bad_path`. (Gate-verified.)
+
+**✅ PR #523 — remove dead `r`-reload branch in handle_pane_scroll_key (2026-06-23):**
+- `pane_scroll.rs:304` — the `r` branch checked `view.pager` (top slot) for a `stream_id`, but this handler only runs for raw vt100 scroll mode (`InputSink::PaneScroll`), where a stream pager is always Modal/Scrollback (→ PagerKey/`handle_pager_motion`, which owns the live `r` reload at motion.rs:354). The condition was always false → dead. Removed with a breadcrumb comment. Behavior-neutral (the body never ran).
 
 **✅ ALREADY-FIXED — confirmed by the 2026-06-23 sweep (no action needed):**
 - `src/app/mcp.rs:174` — Patterns are validated before any pick is applied; an invalid pattern errors out cleanly with zero picks applied, and the success path always calls write_context().
