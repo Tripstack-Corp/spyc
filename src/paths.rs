@@ -14,8 +14,12 @@ use std::path::PathBuf;
 /// - `$VAR` and `${VAR}` expand to the corresponding environment value;
 ///   unset vars are left as-is so the user sees what they typed.
 pub fn expand(input: &str) -> PathBuf {
-    let home = std::env::var_os("HOME");
-    let home = home.as_ref().map(|h| h.to_string_lossy());
+    // Prefer the `envset` overlay for HOME (the same source used for every
+    // other variable via the `lookup` below), falling back to the process
+    // environment — otherwise an overridden HOME applied everywhere else was
+    // silently ignored by tilde expansion.
+    let home = crate::envset::var("HOME")
+        .or_else(|| std::env::var_os("HOME").map(|h| h.to_string_lossy().into_owned()));
     expand_with(input, home.as_deref(), crate::envset::var)
 }
 

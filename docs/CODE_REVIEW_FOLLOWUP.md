@@ -104,8 +104,10 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 | Where | Finding | Sev | Eff | Verdict |
 |---|---|---|---|---|
-| `src/mcp/protocol.rs:324` | get_file_content is cwd-scoped while the search tools are project_home-scoped, so spyc's own search results can't be read back | medium | S | REAL |
-| `src/paths.rs:17` | expand() reads HOME via std::env directly, bypassing the envset overlay it uses for every other variable | medium | S | REAL |
+2 done (PR #519 — see closed log: `protocol.rs:324` get_file_content scope, `paths.rs:17` envset HOME). 2 remaining:
+
+| Where | Finding | Sev | Eff | Verdict |
+|---|---|---|---|---|
 | `src/mcp/server.rs:259` | One slow tool call (>20s) kills the entire MCP connection, and the server's searches are unbounded | medium | M | REAL |
 | `src/mcp/protocol.rs:62` | Nine doc comments detached from their functions by the verbatim mcp.rs split (deferred here from PR10) | medium | S | REAL |
 
@@ -150,6 +152,11 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 - `pane_scroll.rs:239` — `mount_scroll_pager` and the `mount_stream_pager` LowerPane arm now share `install_lower_pane_scroll_view` (the LowerPane flag block + scroll-mode entry; `Some(id)` marks a live stream).
 - `commands.rs:83` — the `:;cmd`/`:!cmd` arms and the `;`/`!` prompt arms (`ShellCmd`/`ShellCmdCaptured`) now share `run_foreground_shell_overlay` + `run_captured_shell`; the `!`-repeat-last and per-arm display string stay in the prompt arm.
 - `pager_handler/pickers.rs:198` **closed** (no change): cursor-sync already factored via the `sync_editor!` macro; residual is marginal/delicate.
+
+**✅ PR #519 — MCP scope + path/env overlay (2026-06-23):**
+- `mcp/protocol.rs:324` — `get_file_content` resolves relative paths against the **search root** (worktree root / project_home / cwd) and guards against it, matching `search_paths`/`search_content` so their repo-relative results read back. New test `get_file_content_resolves_relative_against_search_root`; the traversal guard still holds (message reworded to "outside the project root").
+- `paths.rs:17` — `expand()` reads HOME from the `envset` overlay (then falls back to the process env), so an overridden HOME no longer slips past tilde expansion.
+(`mcp/server.rs:259` slow-call timeout + `protocol.rs:62` doc reattachment remain in PR11.)
 
 **✅ ALREADY-FIXED — confirmed by the 2026-06-23 sweep (no action needed):**
 - `src/app/mcp.rs:174` — Patterns are validated before any pick is applied; an invalid pattern errors out cleanly with zero picks applied, and the success path always calls write_context().
