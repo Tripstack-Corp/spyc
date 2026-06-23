@@ -8,7 +8,7 @@ use crate::keymap::Action;
 
 use crate::app::{Effect, Mode, PostAction, Prompt, PromptKind, View};
 
-use super::{AppState, ApplyResult, PagerRequest, TakeOutcome};
+use super::{AppState, ApplyResult, PagerRequest};
 
 use super::count_files_in_dir_capped;
 
@@ -102,11 +102,12 @@ impl AppState {
             Action::PickToggleAll => self.toggle_all_picks(),
 
             // -- Inventory --
-            Action::Take => match self.take() {
-                TakeOutcome::Yanked(msg) => self.flash_info(msg),
-                TakeOutcome::Failed(err) => self.flash_error(err),
-                TakeOutcome::Noop => {}
-            },
+            Action::Take => {
+                let fx = self.take();
+                if !fx.is_empty() {
+                    return ApplyResult::Post(fx);
+                }
+            }
             Action::Untake => {
                 if self.cur().view != View::Dir {
                     return ApplyResult::Handled;
@@ -121,8 +122,12 @@ impl AppState {
                             .find(|i| i.orig_path == path)
                             .map(|i| i.id.clone());
                         if let Some(id) = id {
-                            self.inventory.remove_by_id(&id);
-                            self.flash_info("removed from inventory");
+                            return ApplyResult::Post(vec![Effect::Inventory(
+                                crate::app::inventory_ops::InventoryOp::Remove {
+                                    id,
+                                    show_flash: true,
+                                },
+                            )]);
                         }
                     } else {
                         self.flash_error("not in inventory");
@@ -133,12 +138,17 @@ impl AppState {
             Action::Drop => {
                 // In dir view, p = put (handled by App, not here).
                 // This arm only fires from inventory view fallthrough.
-                self.drop_cursor();
+                let effects = self.drop_cursor();
+                if effects.is_empty() {
+                    return ApplyResult::Handled;
+                }
+                return ApplyResult::Post(effects);
             }
             Action::ToggleInventoryView => self.toggle_inventory_view(),
             Action::EmptyInventory => {
-                self.inventory.clear();
-                self.rebuild_rows();
+                return ApplyResult::Post(vec![Effect::Inventory(
+                    crate::app::inventory_ops::InventoryOp::Clear,
+                )]);
             }
 
             // -- Masks & filtering --

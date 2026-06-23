@@ -63,11 +63,11 @@ Two buckets, **74 findings** total:
 | Where | Finding | Lens | Sev | Status |
 |---|---|---|---|---|
 | `src/app/pager_handler/motion.rs:311` | `v` (edit in $EDITOR) from a bottom scrollback pager closes/restores the wrong pager slot, leaving an orphaned pager that Esc/q cannot close | correctness | high | open — partially addressed; needs live-pty repro (see notes) |
-| `src/app/state/apply.rs:113` | AppState::apply performs inline filesystem IO (file copies, tar+zstd archiving) through the state-module mutators, violating the pure-Model contract | maintainability | high | open |
+| `src/app/state/apply.rs:113` | AppState::apply performs inline filesystem IO (file copies, tar+zstd archiving) through the state-module mutators, violating the pure-Model contract | maintainability | high | ✅ |
 | `src/git/worktree.rs:188` | worktree::add performs a full-tree checkout synchronously on the main input thread | perf | high | open |
 | `src/pane/mod.rs:430` | recent_lines/save_to_file read one stale viewport, not the recent tail — vt100 contents() is viewport-only | perf | high | open |
-| `src/app/clipboard.rs:189` | pipe_content_to_pane does unbounded blocking file reads inline in the input handler | perf | medium | open |
-| `src/app/clipboard.rs:250` | Clipboard/file-op handlers do blocking filesystem IO inline instead of returning Effects | maintainability | medium | open |
+| `src/app/clipboard.rs:189` | pipe_content_to_pane does unbounded blocking file reads inline in the input handler | perf | medium | ✅ |
+| `src/app/clipboard.rs:250` | Clipboard/file-op handlers do blocking filesystem IO inline instead of returning Effects | maintainability | medium | ✅ |
 | `src/app/commands.rs:83` | `:;cmd` and `:!cmd` arms are near-verbatim copies of the ShellCmd / ShellCmdCaptured prompt arms | maintainability | medium | open |
 | `src/app/effect.rs:274` | Stale PostAction shim: PostAction::None is dead and its justifying comment cites code that no longer typechecks | maintainability | medium | open |
 | `src/app/key_dispatch/mod.rs:315` | Capture-pty writes bypass the Effect executor while sibling sinks in the same match use Effect::SendToPane | maintainability | medium | open |
@@ -88,7 +88,7 @@ Two buckets, **74 findings** total:
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates | maintainability | medium | open |
 | `src/app/state/listing.rs:111` | Git status lookups keyed by display name never match executable files | correctness | medium | open |
 | `src/app/state/mod.rs:84` | Update doc comment describes an abandoned migration stage as pending; three transitional result enums linger | maintainability | medium | open |
-| `src/app/state/selection.rs:77` | Action::Take copies file contents to disk inline inside the pure apply path | maintainability | medium | open |
+| `src/app/state/selection.rs:77` | Action::Take copies file contents to disk inline inside the pure apply path | maintainability | medium | ✅ |
 | `src/pane/mod.rs:518` | max_scrollback() hardcodes 10_000; scroll_offset is never synced to vt100's clamp, creating a dead zone after scroll_to_top | maintainability | medium | open |
 | `src/pane/tabs.rs:20` | Claude-specific session-restore state machine (PendingResumeSend) lives in the generic pane layer | maintainability | medium | open |
 
@@ -160,3 +160,7 @@ Two buckets, **74 findings** total:
 ## Resolved / closed (running log)
 
 _(append as PRs land — `✅ #NNN <where> — <one-line reason>`)_
+✅ `src/app/state/apply.rs:113` — moved to off-thread Effect::FileOp/Effect::Inventory
+✅ `src/app/state/selection.rs:77` — moved to off-thread Effect::Inventory
+✅ `src/app/clipboard.rs:189` — moved to off-thread FileOp::PipeContent
+✅ `src/app/clipboard.rs:250` — moved file operations to off-thread workers

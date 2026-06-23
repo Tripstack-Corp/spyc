@@ -26,7 +26,10 @@ use crate::Tui;
 use crate::pane::Pane;
 use crate::ui::pager::PagerView;
 
-use super::{App, ForegroundExec, Message, PagerReturn, PostAction, graveyard_ops, mermaid_ops};
+use super::{
+    App, ForegroundExec, Message, PagerReturn, PostAction, file_ops, graveyard_ops, inventory_ops,
+    mermaid_ops,
+};
 
 /// A side effect for the run loop to execute. Producers (handlers) return
 /// a `Vec<Effect>` describing *what* should happen; `run_effects` is the
@@ -142,6 +145,17 @@ pub enum Effect {
     /// `apply_mermaid_outcomes` (pre-recv scan) surfaces it in the pager status
     /// line. See `docs/MERMAID_PAGER_PLAN.md`.
     RenderMermaid(mermaid_ops::MermaidRenderOp),
+
+    /// Tier 5. Run a file operation (copy / move / pipe) on a detached worker
+    /// thread to avoid blocking the event loop. The worker pushes its outcome
+    /// onto `runtime.file_results` and wakes with `Message::FileOpDone`.
+    FileOp(file_ops::FileOp),
+
+    /// Tier 5. Run an inventory mutation (yank / remove / clear / put) on a
+    /// detached worker thread to avoid blocking the event loop. The worker
+    /// pushes its outcome onto `runtime.inventory_results` and wakes with
+    /// `Message::InventoryDone`.
+    Inventory(inventory_ops::InventoryOp),
 }
 
 /// Which slice of the active pane's text to materialize (MVU Phase 5).
@@ -634,6 +648,28 @@ impl App {
                         }
                     });
                 }
+                Effect::FileOp(op) => {
+                    let results = std::sync::Arc::clone(&self.runtime.file_results);
+                    let wake = self.runtime.pane_wake_tx.clone();
+                    std::thread::spawn(move || {
+                        let outcome = file_ops::run_file_op(op);
+                        results.lock().unwrap().push(outcome);
+                        if let Some(tx) = wake {
+                            let _ = tx.send(Message::FileOpDone);
+                        }
+                    });
+                }
+                Effect::Inventory(op) => {
+                    let results = std::sync::Arc::clone(&self.runtime.inventory_results);
+                    let wake = self.runtime.pane_wake_tx.clone();
+                    std::thread::spawn(move || {
+                        let outcome = inventory_ops::run_inventory_op(op);
+                        results.lock().unwrap().push(outcome);
+                        if let Some(tx) = wake {
+                            let _ = tx.send(Message::InventoryDone);
+                        }
+                    });
+                }
             }
         }
     }
@@ -670,6 +706,9 @@ pub mod matchers {
         /// The sole `ReadPaneText`'s `(kind, sink)`, iff the slice is exactly
         /// one `ReadPaneText`.
         fn read_pane_text(&self) -> Option<(&PaneTextKind, &PaneTextSink)>;
+
+        /// The sole `InventoryOp`, iff the slice is exactly one `Effect::Inventory`.
+        fn inventory(&self) -> Option<&crate::app::inventory_ops::InventoryOp>;
     }
 
     impl EffectSliceExt for [Effect] {
@@ -696,6 +735,13 @@ pub mod matchers {
         fn read_pane_text(&self) -> Option<(&PaneTextKind, &PaneTextSink)> {
             match self {
                 [Effect::ReadPaneText { kind, then, .. }] => Some((kind, then)),
+                _ => None,
+            }
+        }
+
+        fn inventory(&self) -> Option<&crate::app::inventory_ops::InventoryOp> {
+            match self {
+                [Effect::Inventory(op, ..)] => Some(op),
                 _ => None,
             }
         }

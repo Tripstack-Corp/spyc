@@ -147,6 +147,7 @@ impl Inventory {
 
     /// Put items to dest_dir: picked items if any, else all.
     /// Returns (put_count, removed_ids, first_error).
+    #[cfg(test)]
     pub fn put_to(&mut self, dest_dir: &Path) -> (usize, Vec<String>, Option<String>) {
         let ids: Vec<String> = if self.picks.is_empty() {
             self.items.keys().cloned().collect()
@@ -191,6 +192,7 @@ impl Inventory {
     }
 
     /// Remove the item at cursor index.
+    #[cfg(test)]
     pub fn remove_at(&mut self, index: usize) -> Option<CachedItem> {
         let id = self.items.keys().nth(index)?.clone();
         let item = self.items.get(&id).cloned();

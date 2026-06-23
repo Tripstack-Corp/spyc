@@ -79,6 +79,8 @@ pub fn coalesce_pending(
             // the snapshot rides `runtime.codex_pin_pending`, drained by
             // `apply_codex_session_pins` in the pre-recv scan.
             | Message::CodexSessionReady
+            | Message::FileOpDone
+            | Message::InventoryDone
             | Message::Tick(_) => {}
             Message::Input(ev) => return Some(ev),
         }

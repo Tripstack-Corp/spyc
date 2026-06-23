@@ -75,10 +75,9 @@ impl AppState {
 
     /// Yank files into the inventory cache. Takes picks if any, else
     /// cursor item. Only regular files are accepted.
-    pub fn take(&mut self) -> super::TakeOutcome {
-        use super::TakeOutcome;
+    pub fn take(&self) -> Vec<crate::app::Effect> {
         if self.cur().view != View::Dir {
-            return TakeOutcome::Noop;
+            return Vec::new();
         }
         let to_take: Vec<PathBuf> = if !self.cur().picks.is_empty() {
             self.cur().picks.iter().cloned().collect()
@@ -87,30 +86,31 @@ impl AppState {
         } else {
             vec![]
         };
-        let total = to_take.len();
-        let (count, err) = self.inventory.yank_many(&to_take);
-        self.rebuild_rows();
-        let skipped = total - count;
-        if count > 0 {
-            let msg = if skipped > 0 {
-                format!("yanked {count} file(s), skipped {skipped} (dirs/special)")
-            } else {
-                format!("yanked {count} file(s) to inventory")
-            };
-            return TakeOutcome::Yanked(msg);
+        if to_take.is_empty() {
+            return Vec::new();
         }
-        match err {
-            Some(e) => TakeOutcome::Failed(e),
-            None => TakeOutcome::Noop,
-        }
+        vec![crate::app::Effect::Inventory(
+            crate::app::inventory_ops::InventoryOp::Yank { paths: to_take },
+        )]
     }
 
     /// Remove the cursor item from inventory (move to graveyard).
-    pub fn drop_cursor(&mut self) {
-        self.inventory.remove_at(self.cur().cursor.index);
-        self.rebuild_rows();
-        let row_count = self.cur().rows.len();
-        self.cur_mut().cursor.clamp(row_count);
+    pub fn drop_cursor(&self) -> Vec<crate::app::Effect> {
+        if let Some(id) = self
+            .inventory
+            .items()
+            .nth(self.cur().cursor.index)
+            .map(|i| i.id.clone())
+        {
+            vec![crate::app::Effect::Inventory(
+                crate::app::inventory_ops::InventoryOp::Remove {
+                    id,
+                    show_flash: false,
+                },
+            )]
+        } else {
+            Vec::new()
+        }
     }
 
     pub fn toggle_inventory_view(&mut self) {

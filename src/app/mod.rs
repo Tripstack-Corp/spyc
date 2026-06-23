@@ -132,6 +132,10 @@ enum Message {
     /// `apply_mermaid_outcomes` drains the slot in the pre-recv scan. Same shape
     /// as `GraveyardDone`.
     MermaidDone,
+    /// An off-thread file op (`Effect::FileOp`) finished and pushed its outcome.
+    FileOpDone,
+    /// An off-thread inventory op (`Effect::Inventory`) finished.
+    InventoryDone,
     /// An off-thread MCP worktree op (create/remove/clean) finished and pushed
     /// its outcome onto `runtime.worktree_results`. Payloadless wake —
     /// `apply_worktree_outcomes` drains it in the pre-recv scan, re-applies the
@@ -237,6 +241,7 @@ pub mod command_table;
 mod commands;
 mod config;
 mod effect;
+mod file_ops;
 mod find_picker;
 mod focus;
 mod git_state;
@@ -247,6 +252,7 @@ mod grep_session;
 #[cfg(test)]
 mod harness_tests;
 mod harpoon;
+mod inventory_ops;
 mod key_dispatch;
 mod loop_steps;
 mod mcp;
@@ -522,6 +528,10 @@ struct Runtime {
     /// scan and surfaces the result in the pager status line. Same shape as
     /// `graveyard_results`.
     mermaid_results: std::sync::Arc<std::sync::Mutex<Vec<mermaid_ops::MermaidOutcome>>>,
+    /// Landing slot for off-thread file operations.
+    file_results: std::sync::Arc<std::sync::Mutex<Vec<file_ops::FileOutcome>>>,
+    /// Landing slot for off-thread inventory operations.
+    inventory_results: std::sync::Arc<std::sync::Mutex<Vec<inventory_ops::InventoryOutcome>>>,
     /// Landing slot for off-thread MCP worktree create/remove/clean ops. The
     /// worker pushes a `WorktreeOutcome` (result + the MCP reply channel) here
     /// and wakes with `Message::WorktreeJobDone`; `apply_worktree_outcomes`

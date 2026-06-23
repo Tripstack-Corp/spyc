@@ -3,7 +3,6 @@
 //! the active pane, and the copy/move file-op runner. All entry points are
 //! `pub` — called from `actions`/`key_dispatch`.
 
-use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use crate::shell;
@@ -54,28 +53,19 @@ impl App {
     /// Items are removed from inventory after successful put.
     pub fn put_inventory_to_cwd(&mut self) -> Vec<Effect> {
         let dest = self.state.cur().listing.dir.clone();
-        let item_count = if self.state.inventory.picks.is_empty() {
-            self.state.inventory.len()
+        let ids: Vec<String> = if self.state.inventory.picks.is_empty() {
+            self.state.inventory.items().map(|i| i.id.clone()).collect()
         } else {
-            self.state.inventory.picks.len()
+            self.state.inventory.picks.iter().cloned().collect()
         };
-        if item_count == 0 {
+        if ids.is_empty() {
             self.state.flash_error("inventory is empty");
             return Vec::new();
         }
-        // Puts are unconditional today; large puts (>10 items) could
-        // grow a confirmation prompt if the unguarded put ever bites.
-        let (count, _, err) = self.state.inventory.put_to(&dest);
-        self.state.rebuild_rows();
-        if count > 0 {
-            self.state.refresh_listing();
-            self.state
-                .flash_info(format!("put {count} file(s) to {}", dest.display()));
-        }
-        if let Some(e) = err {
-            self.state.flash_error(e);
-        }
-        Vec::new()
+        vec![Effect::Inventory(super::inventory_ops::InventoryOp::Put {
+            dest_dir: dest,
+            ids,
+        })]
     }
 
     /// ^W s — write the current selection as shell-quoted paths to the
@@ -145,35 +135,13 @@ impl App {
             self.state.flash_error("no pane open");
             return Vec::new();
         }
-        // Build payload: read from cache for inventory, from disk for selection.
-        let mut payload = String::new();
-        let mut count = 0usize;
-        let mut skipped = 0usize;
-
-        if use_inventory {
+        let (inventory_ids, paths) = if use_inventory {
             let ids = self.state.inventory.selected_ids();
             if ids.is_empty() {
                 self.state.flash_error("inventory is empty");
                 return Vec::new();
             }
-            for id in &ids {
-                if let Some(item) = self.state.inventory.items().find(|i| &i.id == id) {
-                    if let Some(bytes) = self.state.inventory.read_content(id) {
-                        if let Ok(text) = String::from_utf8(bytes) {
-                            if !payload.is_empty() {
-                                payload.push('\n');
-                            }
-                            let _ =
-                                write!(payload, "[file: {}]\n{}", item.orig_path.display(), text);
-                            count += 1;
-                        } else {
-                            skipped += 1;
-                        }
-                    } else {
-                        skipped += 1;
-                    }
-                }
-            }
+            (ids, Vec::new())
         } else {
             let paths: Vec<PathBuf> = self
                 .state
@@ -185,74 +153,51 @@ impl App {
                 self.state.flash_error("nothing selected");
                 return Vec::new();
             }
-            for path in &paths {
-                let Ok(contents) = std::fs::read_to_string(path) else {
-                    skipped += 1;
-                    continue;
-                };
-                if !payload.is_empty() {
-                    payload.push('\n');
-                }
-                let _ = write!(payload, "[file: {}]\n{}", path.display(), contents);
-                count += 1;
-            }
-        }
-
-        if count == 0 {
-            self.state
-                .flash_error("no readable text files in selection");
-            return Vec::new();
-        }
-        // Send as bracketed paste so it arrives as a single block.
-        let mut buf = Vec::with_capacity(payload.len() + 12);
-        buf.extend_from_slice(b"\x1b[200~");
-        buf.extend_from_slice(payload.as_bytes());
-        buf.extend_from_slice(b"\x1b[201~");
-        let msg = if skipped > 0 {
-            format!("piped {count} file(s), skipped {skipped} binary/unreadable")
-        } else {
-            format!("piped {count} file(s) to pane")
+            (Vec::new(), paths)
         };
-        vec![Effect::SendToPane {
-            target: PaneTarget::Active,
-            input: PaneInput::Bytes(buf),
-            on_ok: Some(msg),
-            err_prefix: Some("pipe failed"),
-        }]
+
+        vec![Effect::FileOp(super::file_ops::FileOp::PipeContent {
+            use_inventory,
+            inventory_ids,
+            paths,
+        })]
     }
 
     /// Resolve `raw_dest` and run a copy-like or move-like operation across
     /// the current selection. Flash a success / error message afterwards
     /// and refresh the listing so results are visible immediately.
-    pub fn run_selection_to(
-        &mut self,
-        raw_dest: &str,
-        op: fn(&[&Path], &Path) -> std::io::Result<()>,
-        verb: &str,
-    ) {
+    pub fn run_selection_to(&mut self, raw_dest: &str, is_move: bool) -> Vec<Effect> {
         let dest_trim = raw_dest.trim();
         if dest_trim.is_empty() {
-            return;
+            return Vec::new();
         }
-        let paths = self.state.selection_paths();
+        let paths: Vec<PathBuf> = self
+            .state
+            .selection_paths()
+            .into_iter()
+            .map(std::path::Path::to_path_buf)
+            .collect();
         if paths.is_empty() {
             self.state.flash_error("nothing selected");
-            return;
+            return Vec::new();
         }
-        let count = paths.len();
         let expanded = crate::paths::expand(dest_trim);
         let dest = if expanded.is_absolute() {
             expanded
         } else {
             self.state.cur().listing.dir.join(&expanded)
         };
-        self.run_and_flash(
-            op(&paths, &dest),
-            format!("{verb} {count} item(s) to {}", dest.display()),
-        );
-        // Picks point at paths that may no longer exist after a move.
-        self.state.cur_mut().picks.clear();
-        self.state.refresh_listing();
+        if is_move {
+            vec![Effect::FileOp(super::file_ops::FileOp::Move {
+                paths,
+                dest,
+            })]
+        } else {
+            vec![Effect::FileOp(super::file_ops::FileOp::Copy {
+                paths,
+                dest,
+            })]
+        }
     }
 
     /// Set the flash message based on the result of a mutating operation.
