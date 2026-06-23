@@ -768,7 +768,53 @@ fn get_file_content_blocks_path_traversal() {
         resp["result"]["content"][0]["text"]
             .as_str()
             .unwrap()
-            .contains("outside the working directory")
+            .contains("outside the project root")
+    );
+}
+
+#[test]
+fn get_file_content_resolves_relative_against_search_root() {
+    // search_root (the repo root) differs from cwd (a subdir). A relative path
+    // as `search_paths`/`search_content` return them (repo-root-relative) must
+    // resolve against the search root, not cwd — so search results read back.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    let sub = root.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(root.join("top.txt"), "from-root").unwrap();
+    let ctx = context::SpycContext {
+        cwd: sub,
+        cursor_file: None,
+        picks: vec![],
+        inventory: vec![],
+        filter: None,
+        git_branch: None,
+        project_home: None,
+        search_root: Some(root),
+        session_name: String::new(),
+        pid: 0,
+        version: String::new(),
+    };
+    let ctx_path = context::context_path(tmp.path());
+    context::write_context_file(&ctx_path, &ctx).unwrap();
+    let mut output = Vec::new();
+    dispatch(
+        &mut output,
+        &json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+            "name":"get_file_content","arguments":{"path":"top.txt"}
+        }})
+        .to_string(),
+        &ctx_path,
+        None,
+    )
+    .unwrap();
+    let resp = parse_response(&output);
+    assert!(
+        resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("from-root"),
+        "search-root-relative path should resolve against search_root, not cwd"
     );
 }
 

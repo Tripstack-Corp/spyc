@@ -8,8 +8,8 @@ use serde_json::{Value, json};
 use crate::mcp_cmd::{McpCommand, McpRequest, McpResponse};
 
 use super::readers::{
-    grep_matches_to_json, list_worktrees_json, read_context_or_empty, read_cwd_from_context,
-    read_file_content, read_inventory_from_context, read_picks_from_context, search_root,
+    grep_matches_to_json, list_worktrees_json, read_context_or_empty, read_file_content,
+    read_inventory_from_context, read_picks_from_context, search_root,
 };
 use super::{CONTEXT_URI, PROTOCOL_VERSION, SERVER_INSTRUCTIONS, SERVER_NAME, SERVER_VERSION};
 pub(super) fn dispatch(
@@ -246,7 +246,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "get_file_content",
-                    "description": "Read the text contents of a file (up to 100KB). Binary files are rejected. Relative paths resolved against spyc's cwd.",
+                    "description": "Read the text contents of a file (up to 100KB). Binary files are rejected. Relative paths resolved against the project root (the focused commander's worktree root, else PROJECT_HOME, else cwd) — the same scope as search_paths/search_content, so their results can be read back.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -385,26 +385,29 @@ fn handle_tools_call(
             if path_str.is_empty() {
                 return send_tool_error(w, id, "missing required parameter: path");
             }
-            // Resolve relative paths against the cwd from the context file.
-            let cwd = read_cwd_from_context(ctx_path);
+            // Resolve relative paths against the SEARCH ROOT (the focused
+            // commander's worktree root / project_home / cwd) — the same scope
+            // `search_paths` / `search_content` use, so their repo-relative
+            // results can be read back. (Was cwd-scoped, which broke that
+            // round-trip whenever cwd differed from the search root.)
+            let root = search_root(ctx_path);
             let resolved = if Path::new(path_str).is_absolute() {
                 PathBuf::from(path_str)
             } else {
-                cwd.join(path_str)
+                root.join(path_str)
             };
-            // Canonicalize to resolve symlinks and ".." components, then
-            // verify the path is under the working directory to prevent
-            // directory traversal attacks.
+            // Canonicalize to resolve symlinks and ".." components, then verify
+            // the path is under the search root to prevent directory traversal.
             let canonical = match std::fs::canonicalize(&resolved) {
                 Ok(p) => p,
                 Err(e) => return send_tool_error(w, id, &format!("{}: {e}", resolved.display())),
             };
-            let canonical_cwd = match std::fs::canonicalize(&cwd) {
+            let canonical_root = match std::fs::canonicalize(&root) {
                 Ok(p) => p,
-                Err(e) => return send_tool_error(w, id, &format!("cwd: {e}")),
+                Err(e) => return send_tool_error(w, id, &format!("root: {e}")),
             };
-            if !canonical.starts_with(&canonical_cwd) {
-                return send_tool_error(w, id, "path is outside the working directory");
+            if !canonical.starts_with(&canonical_root) {
+                return send_tool_error(w, id, "path is outside the project root");
             }
             match read_file_content(&canonical) {
                 Ok(content) => send_tool_result(w, id, &content),
