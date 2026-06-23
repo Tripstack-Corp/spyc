@@ -115,7 +115,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 | Where | Finding | Sev | Eff | Verdict |
 |---|---|---|---|---|
-| `src/agent/resume.rs:24` | Claude resume stripper misses -r/--continue/-c and eats the flag following a bare --resume | medium | S | REAL |
+| `src/agent/resume.rs:24` | Claude resume stripper misses -r/--continue/-c and eats the flag following a bare --resume | medium | S | ✅ PR #524 |
 | `src/app/key_dispatch/prompts.rs:200` | Tab-completion PromptKind allowlists are hand-synced in three-plus places — the drift pattern the command table was built to kill | medium | S | REAL |
 | `src/app/prompt.rs:590` | J jump prompt silently swallows errors — typo'd path gives zero feedback | medium | S | ✅ PR #522 |
 | `src/app/render/chrome.rs:320` | build_rows is O(rows × delete-preview paths) — quadratic on 'delete picks' in a big directory | medium | S | REAL |
@@ -166,6 +166,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 **✅ PR #523 — remove dead `r`-reload branch in handle_pane_scroll_key (2026-06-23):**
 - `pane_scroll.rs:304` — the `r` branch checked `view.pager` (top slot) for a `stream_id`, but this handler only runs for raw vt100 scroll mode (`InputSink::PaneScroll`), where a stream pager is always Modal/Scrollback (→ PagerKey/`handle_pager_motion`, which owns the live `r` reload at motion.rs:354). The condition was always false → dead. Removed with a breadcrumb comment. Behavior-neutral (the body never ran).
+
+**✅ PR #524 — claude resume-flag stripper (2026-06-23):**
+- `agent/resume.rs:24` — `command_without_resume` only handled `--resume` and unconditionally ate the next token. Now handles `--resume`/`-r` (drops an id arg, but not a following flag) and `--continue`/`-c` (no arg), so the fresh-session fallback is built correctly. 6 new unit tests, incl. the bare-`--resume`-eats-flag regression.
 
 **✅ ALREADY-FIXED — confirmed by the 2026-06-23 sweep (no action needed):**
 - `src/app/mcp.rs:174` — Patterns are validated before any pick is applied; an invalid pattern errors out cleanly with zero picks applied, and the success path always calls write_context().

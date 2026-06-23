@@ -7,25 +7,32 @@
 //! that call them, rather than in `crate::app` (MVU Stage 4: the agent layer
 //! shouldn't reach back up into `app` for its own behavior).
 
-/// Strip `--resume <token>` from a command line. Used to derive a
-/// fresh-session fallback when an automatic resume fails — we want to
-/// preserve any other flags the user had on their original `claude`
-/// invocation but drop the resume itself so the fallback doesn't fail
-/// for the same reason.
+/// Strip claude's resume/continue flags from a command line. Used to derive a
+/// fresh-session fallback when an automatic resume fails — we want to preserve
+/// any other flags the user had on their original `claude` invocation but drop
+/// the resume itself so the fallback doesn't fail for the same reason.
+///
+/// Handles all of claude's forms: `--resume`/`-r` (optional `[sessionId]`) and
+/// `--continue`/`-c` (no argument). For `--resume`/`-r` the following token is
+/// dropped **only** when it's an id, not another flag — `claude --resume
+/// --verbose` must keep `--verbose` rather than eating it.
 pub fn command_without_resume(cmd: &str) -> String {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     let mut out: Vec<&str> = Vec::with_capacity(parts.len());
-    let mut skip_next = false;
-    for p in parts {
-        if skip_next {
-            skip_next = false;
-            continue;
+    let mut i = 0;
+    while i < parts.len() {
+        match parts[i] {
+            "--resume" | "-r" => {
+                // Drop an optional session-id argument too, but not a following
+                // flag (a bare `--resume`/`-r` takes no id).
+                if parts.get(i + 1).is_some_and(|n| !n.starts_with('-')) {
+                    i += 1;
+                }
+            }
+            "--continue" | "-c" => {} // no argument to drop
+            other => out.push(other),
         }
-        if p == "--resume" {
-            skip_next = true;
-            continue;
-        }
-        out.push(p);
+        i += 1;
     }
     let stripped = out.join(" ");
     if stripped.is_empty() {
@@ -310,6 +317,55 @@ pub fn gemini_resume_index_for(cwd: &std::path::Path, uuid: &str) -> Option<u32>
     }
     let text = std::str::from_utf8(&out.stdout).ok()?;
     parse_gemini_list_sessions_for_uuid(text, uuid)
+}
+
+#[cfg(test)]
+mod claude_resume_tests {
+    use super::command_without_resume;
+
+    #[test]
+    fn strips_resume_and_session_id() {
+        assert_eq!(command_without_resume("claude --resume abc123"), "claude");
+        assert_eq!(command_without_resume("claude -r abc123"), "claude");
+    }
+
+    #[test]
+    fn strips_continue_flags() {
+        assert_eq!(command_without_resume("claude --continue"), "claude");
+        assert_eq!(command_without_resume("claude -c"), "claude");
+    }
+
+    #[test]
+    fn bare_resume_does_not_eat_following_flag() {
+        // Regression: a bare `--resume`/`-r` (no id) must keep a trailing flag.
+        assert_eq!(
+            command_without_resume("claude --resume --verbose"),
+            "claude --verbose"
+        );
+        assert_eq!(
+            command_without_resume("claude -r --model opus"),
+            "claude --model opus"
+        );
+    }
+
+    #[test]
+    fn preserves_unrelated_flags() {
+        assert_eq!(
+            command_without_resume("claude --model opus --resume abc"),
+            "claude --model opus"
+        );
+    }
+
+    #[test]
+    fn bare_resume_at_end_drops_just_the_flag() {
+        assert_eq!(command_without_resume("claude --resume"), "claude");
+        assert_eq!(command_without_resume("claude -r"), "claude");
+    }
+
+    #[test]
+    fn empty_input_falls_back_to_claude() {
+        assert_eq!(command_without_resume(""), "claude");
+    }
 }
 
 #[cfg(test)]
