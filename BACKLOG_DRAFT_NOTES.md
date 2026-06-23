@@ -1,4 +1,5 @@
 ### SMALL ###
+- we need a way to send ^a through to the pane; Claude needs ^a for some actions
 - regular autosave for session state - I've also noticed recently that we're
   not picking up sessions with spyc -r fully; is something happening during
   shutdown?
