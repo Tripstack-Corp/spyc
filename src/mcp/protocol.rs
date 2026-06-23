@@ -8,8 +8,8 @@ use serde_json::{Value, json};
 use crate::mcp_cmd::{McpCommand, McpRequest, McpResponse};
 
 use super::readers::{
-    grep_matches_to_json, read_context_or_empty, read_cwd_from_context, read_file_content,
-    read_inventory_from_context, read_picks_from_context, search_root,
+    grep_matches_to_json, list_worktrees_json, read_context_or_empty, read_cwd_from_context,
+    read_file_content, read_inventory_from_context, read_picks_from_context, search_root,
 };
 use super::{CONTEXT_URI, PROTOCOL_VERSION, SERVER_INSTRUCTIONS, SERVER_NAME, SERVER_VERSION};
 pub(super) fn dispatch(
@@ -333,6 +333,14 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                         },
                         "required": ["pattern"]
                     }
+                },
+                {
+                    "name": "list_worktrees",
+                    "description": "List the git worktrees of the focused column's repo — the orient/inspect entry point for worktree cleanup. Returns a JSON array, one object per worktree: {path, branch, head, is_current, dirty:{staged,unstaged,untracked}}. Consult it before remove_worktree (which tree is dirty, which is the current one).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
                 }
             ]
         }),
@@ -452,6 +460,7 @@ fn handle_tools_call(
                 Err(e) => send_tool_error(w, id, &e),
             }
         }
+        "list_worktrees" => send_tool_result(w, id, &list_worktrees_json(ctx_path)),
         "navigate_to" | "set_filter" | "pick_files" | "clear_picks" | "create_worktree"
         | "remove_worktree" | "clean_worktree" | "open_worktree" => {
             let Some(tx) = cmd_tx else {

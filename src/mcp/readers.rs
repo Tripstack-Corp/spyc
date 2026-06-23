@@ -151,4 +151,96 @@ pub(super) fn read_context_or_empty(ctx_path: &Path) -> String {
     })
 }
 
+/// JSON inventory of the focused column's worktrees, for the `list_worktrees`
+/// MCP tool: one object per worktree — branch, short HEAD, a dirty-file
+/// breakdown (`repo_status` counts), and whether it's the worktree the user is
+/// currently in. Runs on the socket thread — pure git + the context file's cwd,
+/// no `App`. Returns `[]` outside a repo. (Merged / ahead-behind via
+/// `branch_status` lands in a follow-up; column-`b` flags need context the
+/// snapshot doesn't yet expose.)
+pub(super) fn list_worktrees_json(ctx_path: &Path) -> String {
+    let cwd = read_cwd_from_context(ctx_path);
+    let cwd_canon = std::fs::canonicalize(&cwd).ok();
+    let Some(worktrees) = crate::git::worktree::list(&cwd) else {
+        return "[]".to_string();
+    };
+    let arr: Vec<Value> = worktrees
+        .iter()
+        .map(|wt| {
+            let (staged, unstaged, untracked) =
+                crate::git::status::repo_status(&wt.path).map_or((0, 0, 0), |entries| {
+                    (
+                        entries.iter().filter(|e| e.staged.is_some()).count(),
+                        entries.iter().filter(|e| e.unstaged.is_some()).count(),
+                        entries.iter().filter(|e| e.untracked).count(),
+                    )
+                });
+            let is_current =
+                cwd_canon.is_some() && std::fs::canonicalize(&wt.path).ok() == cwd_canon;
+            json!({
+                "path": wt.path.display().to_string(),
+                "branch": wt.branch,
+                "head": wt.head,
+                "is_current": is_current,
+                "dirty": { "staged": staged, "unstaged": unstaged, "untracked": untracked },
+            })
+        })
+        .collect();
+    Value::Array(arr).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::test_support::run_git;
+
+    #[test]
+    fn reports_inventory_dirty_and_current() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-q", "-m", "c1"]);
+        // A linked worktree on a new branch, with one untracked file.
+        let wt = crate::git::worktree::add(&repo, "feature", None).unwrap();
+        std::fs::write(wt.join("scratch.txt"), "x\n").unwrap();
+        // Context file points cwd at the main repo (the focused column).
+        let ctx = tmp.path().join("ctx.json");
+        std::fs::write(
+            &ctx,
+            json!({ "cwd": repo.display().to_string() }).to_string(),
+        )
+        .unwrap();
+
+        let v: Value = serde_json::from_str(&list_worktrees_json(&ctx)).unwrap();
+        let arr = v.as_array().expect("array");
+        assert_eq!(arr.len(), 2, "main + the linked worktree");
+        let main = arr
+            .iter()
+            .find(|e| e["branch"] == "main")
+            .expect("main entry");
+        assert_eq!(main["is_current"], json!(true));
+        let feat = arr
+            .iter()
+            .find(|e| e["branch"] == "feature")
+            .expect("feature entry");
+        assert_eq!(feat["is_current"], json!(false));
+        assert_eq!(feat["dirty"]["untracked"], json!(1));
+    }
+
+    #[test]
+    fn empty_outside_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = tmp.path().join("ctx.json");
+        std::fs::write(
+            &ctx,
+            json!({ "cwd": tmp.path().display().to_string() }).to_string(),
+        )
+        .unwrap();
+        assert_eq!(list_worktrees_json(&ctx), "[]");
+    }
+}
+
 // ── Framing helpers ─────────────────────────────────────────────
