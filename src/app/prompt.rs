@@ -18,7 +18,7 @@
 use crate::shell;
 use crate::ui::line_edit::LineEditor;
 
-use super::{App, Effect, Mode, Pane, PostAction, TabState, state};
+use super::{App, Effect, Mode, PostAction, TabState, state};
 
 pub struct Prompt {
     pub kind: PromptKind,
@@ -457,30 +457,11 @@ impl App {
         // --- Terminal-touching arms ---
         match prompt.kind {
             PromptKind::ShellCmd => {
-                let expanded =
-                    match shell::expand_percent(&prompt.buffer, &self.state.selection_paths()) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            self.state.flash_error(e.to_string());
-                            return Vec::new();
-                        }
-                    };
-                let (rows, cols) = Self::top_overlay_size(
-                    self.effective_pane_pct(),
-                    self.runtime.pane_tabs.is_some(),
-                );
-                let cwd = self.state.cur().listing.dir.clone();
-                let wake = self.make_pane_wake();
-                match Pane::spawn(&expanded, rows, cols, &cwd, &self.view.context_path, wake) {
-                    Ok(p) => {
-                        self.runtime.top_overlay = Some(p);
-                        self.state.focus = state::Focus::Overlay;
-                    }
-                    Err(e) => self.state.flash_error(format!("spawn: {e}")),
-                }
+                self.run_foreground_shell_overlay(&prompt.buffer);
                 Vec::new()
             }
             PromptKind::ShellCmdCaptured => {
+                // `!` alone repeats the last captured command.
                 let cmd = if prompt.buffer.trim() == "!" {
                     if let Some(c) = self.state.last_captured_cmd.clone() {
                         c
@@ -491,11 +472,7 @@ impl App {
                 } else {
                     prompt.buffer.clone()
                 };
-                self.state.last_captured_cmd = Some(cmd.clone());
-                match shell::expand_percent(&cmd, &self.state.selection_paths()) {
-                    Ok(expanded) => self.start_capture(&expanded, &cmd, &prompt.buffer),
-                    Err(e) => self.state.flash_error(e.to_string()),
-                }
+                self.run_captured_shell(&cmd, &prompt.buffer);
                 Vec::new()
             }
             PromptKind::CopyTo => self.run_selection_to(&prompt.buffer, false),

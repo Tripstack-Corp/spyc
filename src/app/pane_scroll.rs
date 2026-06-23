@@ -300,23 +300,36 @@ impl App {
     /// (divider cues + key routing flip to the pager) and parks the
     /// view at the bottom on first render.
     fn mount_scroll_pager(&mut self, title: String, lines: Vec<ratatui::text::Line<'static>>) {
+        self.install_lower_pane_scroll_view(title, lines, None);
+    }
+
+    /// Build + install a bottom-pane scrollback `PagerView` with the shared
+    /// LowerPane flags (gutter off so content doesn't jump horizontally, wrap
+    /// on so long lines aren't clipped, excluded from buffer history, parked at
+    /// the bottom on first render), enter the pty's scroll mode, focus the pane,
+    /// and flash. Shared by the static `mount_scroll_pager` and the streaming
+    /// `pager_stream::mount_stream_pager` LowerPane arm (`stream_id` set → the
+    /// view is a live stream). The two used to set this flag block independently.
+    pub(crate) fn install_lower_pane_scroll_view(
+        &mut self,
+        title: String,
+        lines: Vec<ratatui::text::Line<'static>>,
+        stream_id: Option<u32>,
+    ) {
         if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
             tabs.active_mut().enter_scroll_mode();
         }
         let mut view = crate::ui::pager::PagerView::new_styled(title, lines);
         view.mount = crate::ui::pager::Mount::LowerPane;
         view.pane_scroll = true;
-        // Gutter off so existing content doesn't jump horizontally
-        // when the pager opens. Toggle with `l`.
         view.show_line_numbers = false;
         view.no_history = true;
-        // Wrap long lines (compiler errors, diffs, transcript turns)
-        // — no horizontal scroll, so truncation would hide content.
         view.wrap = true;
-        // Park at the bottom on first render via the deferred flag;
-        // the LowerPane render branch knows the real viewport height
-        // and scrolls there, avoiding a one-frame jump.
         view.pending_scroll_to_bottom.set(true);
+        if let Some(id) = stream_id {
+            view.stream_id = Some(id);
+            view.streaming = true;
+        }
         // The bottom-region scrollback slot — coexists with a top-region
         // `view.pager` (`D`) rather than evicting it.
         self.view.scroll_pager = Some(view);
