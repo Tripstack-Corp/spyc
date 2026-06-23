@@ -92,20 +92,16 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/ui/pager/construct.rs:182` | Pager yank/save methods do inline OS side effects, bypassing the existing Effect::CopyToClipboard path | medium | M | REAL |
 | `src/app/sources.rs:293` | Watcher-driven `refresh_listing` does a synchronous 50k-entry disk walk + allocation-heavy sort on the event-loop thread | medium | L | PARTIAL |
 
-### PR9 · Dedup / shared-helper cleanups
+### PR9 · Dedup / shared-helper cleanups — 4 done (PR #517), 4 remaining
+
+4 verbatim/structural dedups landed this PR (closed log). The 2 dedup-*behavior* items (`inventory.rs:85`, `sessions/mod.rs:127`) are correctness bugs, not code duplication — **moved to PR12**. Remaining true code-dups:
 
 | Where | Finding | Sev | Eff | Verdict |
 |---|---|---|---|---|
 | `src/app/commands.rs:83` | `:;cmd` and `:!cmd` arms are near-verbatim copies of the ShellCmd / ShellCmdCaptured prompt arms | medium | S | REAL |
-| `src/app/pager_handler/mod.rs:218` | Top-overlay pty spawn block copy-pasted at three sites | medium | S | REAL |
 | `src/app/pager_handler/pickers.rs:198` | History-editor cursor-sync logic duplicated four times despite an existing shared helper | medium | S | REAL |
 | `src/app/pane_scroll.rs:239` | mount_scroll_pager duplicates mount_stream_pager's LowerPane arm flag-for-flag | medium | S | REAL |
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates | medium | S | REAL |
-| `src/fs/grep.rs:288` | find_nested_git_repos is a verbatim copy of finder.rs, including the 10-entry SKIP list | medium | S | REAL |
-| `src/pane/pathref.rs:130` | Handrolled strip_ansi duplicates the strip_ansi_escapes crate that is already a dependency | medium | S | REAL |
-| `src/state/inventory.rs:85` | Re-yanking a modified file silently keeps the stale cached content | medium | S | REAL |
-| `src/state/sessions/mod.rs:127` | load_sessions dedup collapses distinct resumable sessions that share cwd + commands | medium | S | REAL |
-| `src/ui/pager/construct.rs:58` | new_plain duplicates the entire 35-field PagerView initializer from new_styled | medium | S | REAL |
 
 ### PR10 · Dead-code & stale-shim removal — ✅ done (PR #516; see closed log)
 
@@ -135,6 +131,8 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/pane/mod.rs:607` | vt100 panic recovery rebuilds the parser at the adopt-time size, and the resize coalescer guarantees it never gets corrected | medium | S | REAL |
 | `src/app/run.rs:54` | Config-file watch on $HOME is permanently destroyed when the listing watch passes through the same directory | medium | M | REAL |
 | `src/pane/tabs.rs:20` | Claude-specific session-restore state machine (PendingResumeSend) lives in the generic pane layer | medium | M | REAL |
+| `src/state/inventory.rs:85` | Re-yanking a modified file silently keeps the stale cached content (moved from PR9 — dedup *behavior*, not code dup) | medium | S | REAL |
+| `src/state/sessions/mod.rs:127` | load_sessions dedup collapses distinct resumable sessions that share cwd + commands (moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
 
@@ -146,6 +144,13 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 - `ui/markdown/mod.rs:136` — the keyed-line-break regex is now a function-local `LazyLock`, compiled once instead of per render.
 - `ui/mod.rs:13` — dropped the blanket `#[allow(dead_code, …)]` on `line_edit` (removed the dead `is_empty`, made `new` a `const fn`, collapsed two or-patterns + a duplicate match arm).
 - `state/mod.rs:84` — rewrote the stale `Update` doc comment (the "Stage 3D" migration was abandoned; the per-producer enums + `From` bridges are the settled shape).
+
+**✅ PR #517 — dedup / shared-helper cleanups, part 1 (2026-06-23):**
+- `fs/grep.rs:288` — deleted the verbatim `find_nested_git_repos` copy; `finder::find_nested_git_repos` is now the single shared definition.
+- `pane/pathref.rs:130` — `strip_ansi` delegates to the `strip-ansi-escapes` crate (already a dep) instead of the handrolled CSI/OSC scanner.
+- `ui/pager/construct.rs:58` — `new_plain` delegates to `new_styled` (was a verbatim 35-field copy).
+- `pager_handler/mod.rs:218` — the 3 copy-pasted top-overlay pty-spawn blocks now share `spawn_top_overlay`.
+(Remaining 4 dedups + 2 reclassified correctness items tracked under PR9/PR12.)
 
 **✅ ALREADY-FIXED — confirmed by the 2026-06-23 sweep (no action needed):**
 - `src/app/mcp.rs:174` — Patterns are validated before any pick is applied; an invalid pattern errors out cleanly with zero picks applied, and the success path always calls write_context().

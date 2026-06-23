@@ -232,6 +232,22 @@ impl App {
     /// case keeps the existing `top_overlay` slot with the auto-dismiss flag and
     /// the column pin. Shared by `V` (`edit_in_pane`), `D`-on-a-huge-file
     /// (`spawn_pager_overlay_for_path`), and the in-pager `v` editor handoff.
+    /// Spawn `cmd` as a top-overlay PTY: the `top_overlay_size` geometry, the
+    /// focused listing dir as cwd, the standard pane wake. Installs it into the
+    /// focused column's overlay slot on success, or flashes the spawn error.
+    /// Shared by the `V`/`D`-huge-file editor overlays and the in-pager `v`
+    /// `TopPane` editor handoff (the block was copy-pasted at three sites).
+    pub(super) fn spawn_top_overlay(&mut self, cmd: &str) {
+        let (rows, cols) =
+            Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
+        let cwd = self.state.cur().listing.dir.clone();
+        let wake = self.make_pane_wake();
+        match Pane::spawn(cmd, rows, cols, &cwd, &self.view.context_path, wake) {
+            Ok(p) => self.install_overlay_pty(p),
+            Err(e) => self.state.flash_error(format!("spawn: {e}")),
+        }
+    }
+
     pub(super) fn install_overlay_pty(&mut self, p: Pane) {
         if self.overlay_targets_right() {
             self.runtime.top_overlay_right = Some(p);
@@ -359,14 +375,7 @@ impl App {
             argv.join(" "),
             shell::shell_quote(&path.display().to_string()),
         );
-        let (rows, cols) =
-            Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
-        let cwd = self.state.cur().listing.dir.clone();
-        let wake = self.make_pane_wake();
-        match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
-            Ok(p) => self.install_overlay_pty(p),
-            Err(e) => self.state.flash_error(format!("spawn: {e}")),
-        }
+        self.spawn_top_overlay(&cmd);
     }
 
     /// `D` — open the cursor file in spyc's in-app pager mounted in
@@ -735,14 +744,7 @@ impl App {
             argv.join(" "),
             shell::shell_quote(&path.display().to_string()),
         );
-        let (rows, cols) =
-            Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
-        let cwd = self.state.cur().listing.dir.clone();
-        let wake = self.make_pane_wake();
-        match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
-            Ok(p) => self.install_overlay_pty(p),
-            Err(e) => self.state.flash_error(format!("spawn: {e}")),
-        }
+        self.spawn_top_overlay(&cmd);
     }
 }
 

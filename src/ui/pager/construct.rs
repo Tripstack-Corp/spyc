@@ -55,43 +55,10 @@ impl PagerView {
     }
 
     /// Build a pager from plain strings. Each string becomes one
-    /// unstyled line.
+    /// unstyled line. Delegates to [`Self::new_styled`] after converting
+    /// the strings to unstyled `Line`s — the field defaults are identical.
     pub fn new_plain(title: impl Into<String>, lines: Vec<String>) -> Self {
-        Self {
-            title: title.into(),
-            lines: lines.into_iter().map(Line::from).collect(),
-            scroll: 0,
-            search: Search::Off,
-            show_line_numbers: true,
-            show_whitespace: false,
-            saveable: false,
-            full_width: false,
-            fit_to_content: false,
-            no_history: false,
-            task_id: None,
-            stream_id: None,
-            columns: 1,
-            source_path: None,
-            picker_cursor: None,
-            picker_edit_cursor: None,
-            streaming: false,
-            eof_in_content: false,
-            wrap: true,
-            alt_lines: None,
-            markdown_rendered: false,
-            saved_alt_scroll: None,
-            line_count_hint: None,
-            jump_buf: None,
-            flash: None,
-            last_viewport_h: std::cell::Cell::new(0),
-            last_body_w: std::cell::Cell::new(0),
-            visual: None,
-            placement: None,
-            mount: Mount::Overlay,
-            pane_scroll: false,
-            pending_scroll_to_bottom: std::cell::Cell::new(false),
-            mermaid_blocks: Vec::new(),
-        }
+        Self::new_styled(title, lines.into_iter().map(Line::from).collect())
     }
 
     /// The first ` ```mermaid ` block whose rendered-line range overlaps the
