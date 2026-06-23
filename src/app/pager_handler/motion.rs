@@ -5,7 +5,6 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::pane::Pane;
 use crate::shell;
 
 use crate::app::{App, Effect, PagerReturn, TaskStatus, sh_c};
@@ -281,20 +280,11 @@ impl App {
                         "{editor_cmd} {}",
                         shell::shell_quote(&src.display().to_string())
                     );
-                    let (rows, cols) = Self::top_overlay_size(
-                        self.effective_pane_pct(),
-                        self.runtime.pane_tabs.is_some(),
-                    );
-                    let cwd = self.state.cur().listing.dir.clone();
                     self.clear_pager();
                     self.view.needs_full_repaint = true;
-                    let wake = self.make_pane_wake();
-                    match Pane::spawn(&cmd, rows, cols, &cwd, &self.view.context_path, wake) {
-                        // Routes to the focused column's overlay slot (`b` gets
-                        // its own), auto-dismiss on exit, focus the editor.
-                        Ok(p) => self.install_overlay_pty(p),
-                        Err(e) => self.state.flash_error(format!("spawn: {e}")),
-                    }
+                    // Routes to the focused column's overlay slot (`b` gets its
+                    // own), auto-dismiss on exit, focus the editor.
+                    self.spawn_top_overlay(&cmd);
                     return Vec::new();
                 }
 

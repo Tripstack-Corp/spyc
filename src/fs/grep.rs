@@ -87,7 +87,7 @@ pub fn search_streaming(
     // `.git` as a gitdir-pointer file, but is still a repo root whose
     // pass-2 nested-clone scan should run. Mirrors finder.rs.
     if root.join(".git").exists() {
-        for extra in find_nested_git_repos(root) {
+        for extra in crate::fs::finder::find_nested_git_repos(root) {
             if !search_one(&extra, root, &matcher, &tx, &mut count) {
                 return Ok(());
             }
@@ -289,49 +289,6 @@ fn sanitize_line(bytes: &[u8]) -> String {
         }
     }
     out
-}
-
-/// Same scan as `finder::find_nested_git_repos` -- find sibling-clone
-/// `.git` directories the outer gitignore excluded. Duplicated rather
-/// than shared so finder and grep can evolve independently if their
-/// skip lists diverge (e.g. grep might want to skip lockfiles
-/// someday).
-fn find_nested_git_repos(root: &Path) -> Vec<PathBuf> {
-    const SKIP: &[&str] = &[
-        "node_modules",
-        "target",
-        "build",
-        "dist",
-        "_build",
-        ".next",
-        ".cache",
-        "__pycache__",
-        "venv",
-        ".venv",
-    ];
-    let mut found = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        if dir != root && dir.join(".git").exists() {
-            found.push(dir);
-            continue;
-        }
-        let Ok(rd) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in rd.flatten() {
-            if !entry.file_type().is_ok_and(|t| t.is_dir()) {
-                continue;
-            }
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if name_str.starts_with('.') || SKIP.contains(&name_str.as_ref()) {
-                continue;
-            }
-            stack.push(entry.path());
-        }
-    }
-    found
 }
 
 /// Synchronous search across `root`. Same gitignore-aware walk +

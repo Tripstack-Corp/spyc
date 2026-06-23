@@ -139,7 +139,10 @@ fn walk_one(
 /// gitignore context). Skips `root` itself (already walked in
 /// pass 1) plus a small set of well-known noise dirs to avoid
 /// pointless descent into build/dependency trees.
-fn find_nested_git_repos(root: &Path) -> Vec<PathBuf> {
+///
+/// Shared with `grep` (the `F` finder and `:grep` content search use the
+/// identical sibling-clone descent); kept here as the single definition.
+pub fn find_nested_git_repos(root: &Path) -> Vec<PathBuf> {
     const SKIP: &[&str] = &[
         "node_modules",
         "target",

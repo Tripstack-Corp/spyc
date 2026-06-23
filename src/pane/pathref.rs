@@ -133,37 +133,12 @@ fn candidates(line: &str) -> Vec<String> {
     result
 }
 
-/// Remove ANSI escape sequences from a string.
+/// Remove ANSI escape sequences from a string. Delegates to the
+/// `strip-ansi-escapes` crate (already a dependency) rather than the former
+/// handrolled CSI/OSC scanner — same intent, broader and battle-tested
+/// sequence coverage.
 fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            // Skip ESC [ ... final_byte
-            if chars.peek() == Some(&'[') {
-                chars.next(); // consume '['
-                // Consume parameter bytes (0x30-0x3F), intermediate (0x20-0x2F),
-                // until final byte (0x40-0x7E).
-                for c in chars.by_ref() {
-                    if ('@'..='~').contains(&c) {
-                        break;
-                    }
-                }
-            }
-            // Also handle ESC ] (OSC) sequences terminated by BEL or ST.
-            else if chars.peek() == Some(&']') {
-                chars.next();
-                for c in chars.by_ref() {
-                    if c == '\x07' || c == '\\' {
-                        break;
-                    }
-                }
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
+    strip_ansi_escapes::strip_str(s)
 }
 
 /// Strip common prefixes that tools emit before paths.
