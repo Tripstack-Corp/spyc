@@ -10,7 +10,7 @@ use crate::state::Cursor;
 
 use crate::app::{Effect, Matcher, RowData, View, row_from_entry};
 
-use super::AppState;
+use super::{AppState, Side};
 
 use super::format_age;
 
@@ -208,12 +208,25 @@ impl AppState {
     }
 
     pub fn chdir(&mut self, path: &Path) -> Result<()> {
+        self.chdir_side(self.focused_side(), path)
+    }
+
+    /// `chdir`, but targeting a SPECIFIC column rather than always the focused
+    /// one. The process cwd, `prev_dir`, and frecency are *focused-column*
+    /// concerns, so they move only when `side` IS the focused column — resetting
+    /// a background column (e.g. `b` after its worktree is removed) must not yank
+    /// the process cwd or back-nav history out from under the focused one.
+    /// `chdir` is the `side == focused_side()` case, behavior-for-behavior.
+    pub fn chdir_side(&mut self, side: Side, path: &Path) -> Result<()> {
         let canonical = std::fs::canonicalize(path)?;
         let new_listing = Listing::read(&canonical)?;
-        if self.cur().listing.dir != canonical {
-            self.prev_dir = Some(self.cur().listing.dir.clone());
+        let focused = self.focused_side() == side;
+        if focused && self.col(side).listing.dir != canonical {
+            self.prev_dir = Some(self.col(side).listing.dir.clone());
         }
-        let _ = std::env::set_current_dir(&canonical);
+        if focused {
+            let _ = std::env::set_current_dir(&canonical);
+        }
         // If the directory had more than `MAX_ENTRIES`, the read
         // stopped early. Surface that to the user with a flash so a
         // partial listing isn't mistaken for the whole picture — the
@@ -225,11 +238,9 @@ impl AppState {
                 crate::fs::listing::MAX_ENTRIES
             ));
         }
-        self.cur_mut().listing = new_listing;
-        let (order, reversed) = (self.cur().sort_order, self.cur().sort_reversed);
-        self.cur_mut().listing.sort(order, reversed);
-        // chdir is the FOCUSED column's navigation — refresh that column's git.
-        let side = self.focused_side();
+        self.col_mut(side).listing = new_listing;
+        let (order, reversed) = (self.col(side).sort_order, self.col(side).sort_reversed);
+        self.col_mut(side).listing.sort(order, reversed);
         // Resolve + cache the repo root for the new dir *before* the git
         // calls below so they see the right root on the first run after chdir.
         self.update_repo_root(side, &canonical);
@@ -245,13 +256,45 @@ impl AppState {
         // for the next 1 Hz poll to detect the mismatch.
         let key = self.compute_git_mtime_key_fast(side);
         self.col_mut(side).git_cache.git_poll_cache = key;
-        self.cur_mut().picks.clear();
-        self.cur_mut().temp_filter = None;
-        self.cur_mut().cursor = Cursor::new();
-        self.cur_mut().view = View::Dir;
+        self.col_mut(side).picks.clear();
+        self.col_mut(side).temp_filter = None;
+        self.col_mut(side).cursor = Cursor::new();
+        self.col_mut(side).view = View::Dir;
         self.rebuild_rows();
-        self.frecency.record(&canonical);
+        if focused {
+            self.frecency.record(&canonical);
+        }
         Ok(())
+    }
+
+    /// After a worktree removal, a column (A or B) that was sitting inside it
+    /// now points at a deleted directory. Snap any such column back to
+    /// PROJECT_HOME (the main repo) and flash a notice, rather than stranding it
+    /// on a path that no longer exists. No-op when PROJECT_HOME is unset/gone or
+    /// no column is orphaned. (The `remove_worktree`/`clean_worktree` MCP flow
+    /// no longer refuses a worktree a column is in — it relies on this.)
+    pub fn reset_orphaned_columns_to_home(&mut self) {
+        let Some(home) = self.project_home.clone() else {
+            return;
+        };
+        if !home.is_dir() {
+            return;
+        }
+        let mut sides = vec![Side::Left];
+        if self.right.is_some() {
+            sides.push(Side::Right);
+        }
+        for side in sides {
+            if self.col(side).listing.dir.is_dir() {
+                continue; // still a valid directory — leave it
+            }
+            if self.chdir_side(side, &home).is_ok() {
+                self.flash_info(format!(
+                    "column reset to {} (its worktree was removed)",
+                    crate::paths::display_tilde(&home)
+                ));
+            }
+        }
     }
 
     /// Execute an [`Effect::ChangeDir`]: `chdir`, then on success focus

@@ -18,6 +18,31 @@ fn test_state() -> AppState {
     AppState::test_default(PathBuf::from("/tmp/test"))
 }
 
+#[test]
+fn reset_orphaned_columns_snaps_a_removed_worktree_column_home() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = std::fs::canonicalize(tmp.path()).unwrap();
+    let sub = home.join("wt");
+    std::fs::create_dir(&sub).unwrap();
+
+    let mut s = test_state();
+    // Left (focused) sits in a real dir; Right sits in the soon-removed worktree.
+    let left = Commander::for_dir(&home, &s.config).unwrap();
+    let right = Commander::for_dir(&sub, &s.config).unwrap();
+    s.left = left;
+    s.right = Some(right);
+    s.project_home = Some(home.clone());
+
+    // Simulate the worktree removal: Right's dir no longer exists.
+    std::fs::remove_dir_all(&sub).unwrap();
+    s.reset_orphaned_columns_to_home();
+
+    // Right snapped back to home (non-focused → no process-cwd change); Left
+    // (valid + focused) is left untouched.
+    assert_eq!(s.right.as_ref().unwrap().listing.dir, home);
+    assert_eq!(s.left.listing.dir, home);
+}
+
 /// Build a test state with named rows (simulating a directory listing).
 fn state_with_rows(names: &[&str]) -> AppState {
     let mut s = test_state();

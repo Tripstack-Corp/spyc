@@ -251,6 +251,10 @@ impl App {
         if let Some(message) = flash {
             self.state.flash_info(message);
         }
+        // A removal can delete the dir a column (A/B) was sitting in — snap any
+        // such column back to PROJECT_HOME (with its own flash) before the
+        // listing refresh, so we never refresh against a deleted cwd.
+        self.state.reset_orphaned_columns_to_home();
         self.state.refresh_listing();
         self.write_context();
     }

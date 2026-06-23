@@ -151,10 +151,11 @@ fn mcp_create_worktree_rejects_empty_branch() {
     });
 }
 
-/// MCP `remove_worktree` tears down a clean worktree — but refuses one a column
-/// is currently open in (removing it would strand the column on a deleted dir).
+/// MCP `remove_worktree` tears down a clean worktree — and when a column is open
+/// inside it, removal still proceeds and the column is snapped back to
+/// PROJECT_HOME (rather than refused and left stranded on a deleted dir).
 #[test]
-fn mcp_remove_worktree_tears_down_and_guards_occupied() {
+fn mcp_remove_worktree_tears_down_and_resets_occupied_column() {
     use crate::mcp_cmd::{McpCommand, McpResponse};
     let tmp = tempfile::tempdir().unwrap();
     let run_git = |dir: &std::path::Path, args: &[&str]| {
@@ -196,27 +197,27 @@ fn mcp_remove_worktree_tears_down_and_guards_occupied() {
         };
         assert!(path.is_dir(), "worktree created");
 
-        // Open `b` inside it → remove must refuse (would strand b).
+        // Open `b` inside it, then refocus `a` (so the post-removal reset of the
+        // background column `b` doesn't move the process cwd during the test).
+        app.state.project_home = Some(repo.clone());
         app.open_second_commander_at(&path);
-        let occ = app.execute_mcp_command(McpCommand::RemoveWorktree {
-            path: path.display().to_string(),
-        });
-        assert!(
-            matches!(occ, McpResponse::Error { .. }),
-            "refuses to remove a worktree a column is open in"
-        );
-        assert!(path.is_dir(), "still there while occupied");
+        app.state.vsplit.as_mut().unwrap().focus = state::Side::Left;
 
-        // Close `b`, then removal succeeds and the dir is gone.
-        app.close_second_commander();
-        let ok = app.execute_mcp_command(McpCommand::RemoveWorktree {
+        // Removal PROCEEDS even with `b` inside it (the occupied-column refuse is
+        // gone) and snaps `b` back to PROJECT_HOME instead of stranding it.
+        let removed = app.execute_mcp_command(McpCommand::RemoveWorktree {
             path: path.display().to_string(),
         });
         assert!(
-            matches!(ok, McpResponse::Ok { .. }),
-            "removes a clean, unoccupied worktree: {ok:?}"
+            matches!(removed, McpResponse::Ok { .. }),
+            "removes a worktree even with a column inside it: {removed:?}"
         );
         assert!(!path.exists(), "worktree dir removed");
+        assert_eq!(
+            app.state.right.as_ref().unwrap().listing.dir,
+            repo,
+            "column b reset to PROJECT_HOME after its worktree was removed"
+        );
     });
 }
 
@@ -258,7 +259,7 @@ fn worktree_arg_empty_errors_and_relative_resolves_against_cwd() {
         let base = std::fs::canonicalize(tmp.path()).unwrap();
         let sub = base.join("sub");
         std::fs::create_dir(&sub).unwrap();
-        let mut app = App::test_app(base);
+        let mut app = App::test_app(base.clone());
         app.open_second_commander_at(&sub); // b inside base/sub
         // Resolve relative paths against `a` (base) → "sub" means base/sub.
         app.state.vsplit.as_mut().unwrap().focus = state::Side::Left;
@@ -273,15 +274,16 @@ fn worktree_arg_empty_errors_and_relative_resolves_against_cwd() {
             "empty path → missing-parameter error"
         );
 
-        // Relative "sub" joins onto the focused column's cwd (base) → base/sub,
-        // which b occupies → the occupied-column guard fires. Proves the relative
-        // arm resolved against cur().listing.dir.
-        let rel = app.execute_mcp_command(McpCommand::CleanWorktree {
-            path: "sub".to_string(),
-        });
-        assert!(
-            matches!(&rel, McpResponse::Error { message } if message.contains("open inside")),
-            "relative path resolved against cwd → occupied-column guard"
+        // Relative "sub" joins onto the focused column's cwd (base) → base/sub.
+        // (The occupied-column refuse was removed — removal now resets the
+        // column instead — so assert the path resolution directly.)
+        let resolved = app
+            .resolve_worktree_arg("sub")
+            .expect("relative path resolves");
+        assert_eq!(
+            resolved,
+            base.join("sub"),
+            "relative path resolved against the focused column's cwd"
         );
     });
 }

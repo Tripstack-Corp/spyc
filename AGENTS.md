@@ -199,7 +199,8 @@ You are expected to be running inside spyc's split pane. If the
   one off the focused commander's repo (sibling `<repo>.worktrees/<branch>/`) and returns
   its path; `open_worktree(path)` opens it in column `b` (re-targets `b` if open) so you
   work in it while `a` stays put — then `navigate_to` / search / `pick_files` act on `b`;
-  `remove_worktree(path)` tears it down (refuses a dirty one or one a column is in);
+  `remove_worktree(path)` tears it down (refuses a dirty one; a column sitting inside it
+  is reset to PROJECT_HOME with a status flash, not refused);
   `clean_worktree(path)` archives untracked files to the graveyard first, then removes
   (still refuses uncommitted *tracked* changes). The TUI `W l` picker switches the
   **focused** column to a worktree (focus `b` first to put one there).
