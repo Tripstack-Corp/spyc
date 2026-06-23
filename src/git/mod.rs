@@ -14,6 +14,7 @@
 //! [`no_subprocess_git_in_production`] guard test enforces that.
 
 pub mod blame;
+pub mod branch;
 pub mod diff_model;
 pub mod discovery;
 pub mod excludes;

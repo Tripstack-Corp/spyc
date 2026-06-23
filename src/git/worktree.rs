@@ -120,9 +120,10 @@ pub fn list(dir: &Path) -> Option<Vec<Worktree>> {
 
 /// Create a new worktree under a per-repo `<repo>.worktrees/` dir next to
 /// the working-tree root (`<repo_parent>/<repo>.worktrees/<branch>`): use an
-/// EXISTING branch `<branch>` if present, else create it at the current HEAD.
+/// EXISTING branch `<branch>` if present, else create it at `base` (a ref/rev,
+/// typically the repo's default branch), or HEAD when `base` is `None`.
 /// Returns the new worktree's path.
-pub fn add(dir: &Path, branch: &str) -> std::io::Result<PathBuf> {
+pub fn add(dir: &Path, branch: &str, base: Option<&str>) -> std::io::Result<PathBuf> {
     // `gix::discover` (not `gix::open`) so adding from a repo subdirectory
     // resolves the enclosing repo and anchors the new worktree on its root,
     // matching `git worktree add` from anywhere in the tree.
@@ -160,7 +161,7 @@ pub fn add(dir: &Path, branch: &str) -> std::io::Result<PathBuf> {
 
     // Resolve / create the branch ref, yielding the commit to check out.
     let full_ref = format!("refs/heads/{branch}");
-    let commit_id = resolve_or_create_branch(&repo, &common_dir, &full_ref, branch)?;
+    let commit_id = resolve_or_create_branch(&repo, &common_dir, &full_ref, branch, base)?;
 
     // Refuse if the branch is already checked out in another worktree
     // (matches `git worktree add`).
@@ -226,17 +227,20 @@ pub fn add(dir: &Path, branch: &str) -> std::io::Result<PathBuf> {
     Ok(target)
 }
 
-/// Resolve `full_ref` (`refs/heads/<branch>`) to its commit id, creating the
-/// branch at the current HEAD commit if it doesn't exist yet (replicating
-/// `git worktree add` with vs without `-b`). `common_dir` is the absolute
-/// shared git dir the loose ref is written under.
+/// Resolve `full_ref` (`refs/heads/<branch>`) to its commit id. If the branch
+/// doesn't exist yet, create it at `base` (a ref/rev — typically the repo's
+/// default branch, so a new worktree starts off the trunk, NOT the asking
+/// column's HEAD), falling back to HEAD when `base` is `None` or unresolvable.
+/// `common_dir` is the absolute shared git dir the loose ref is written under.
 fn resolve_or_create_branch(
     repo: &gix::Repository,
     common_dir: &Path,
     full_ref: &str,
     branch: &str,
+    base: Option<&str>,
 ) -> std::io::Result<gix::ObjectId> {
-    // `find_reference` checks both loose and packed refs.
+    // `find_reference` checks both loose and packed refs. An existing branch is
+    // checked out as-is — `base` only matters when CREATING the branch.
     if let Ok(mut existing) = repo.find_reference(full_ref) {
         return existing
             .peel_to_id()
@@ -247,10 +251,19 @@ fn resolve_or_create_branch(
     // before writing the loose ref by hand.
     gix::refs::FullName::try_from(full_ref)
         .map_err(|e| std::io::Error::other(format!("invalid branch name '{branch}': {e}")))?;
-    let head_commit = repo
-        .head_id()
-        .map_err(|e| std::io::Error::other(format!("resolve HEAD: {e}")))?
-        .detach();
+    // Start the new branch at `base` (the repo's default branch) when given and
+    // resolvable, else the current HEAD — the pre-POLA behavior, and the
+    // fallback when there's no resolvable default (origin-less / unborn repo).
+    let start_commit = match base.and_then(|b| {
+        repo.rev_parse_single(gix::bstr::BStr::new(b.as_bytes()))
+            .ok()
+    }) {
+        Some(id) => id.detach(),
+        None => repo
+            .head_id()
+            .map_err(|e| std::io::Error::other(format!("resolve HEAD: {e}")))?
+            .detach(),
+    };
     // Write the loose ref directly (`<common_dir>/refs/heads/<branch>` = the
     // 40-hex commit + newline). We bypass gix's `repo.reference()` because it
     // writes a reflog with `force_create_reflog: false`, which fails to
@@ -262,8 +275,8 @@ fn resolve_or_create_branch(
     if let Some(parent) = ref_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&ref_path, format!("{}\n", head_commit.to_hex()))?;
-    Ok(head_commit)
+    std::fs::write(&ref_path, format!("{}\n", start_commit.to_hex()))?;
+    Ok(start_commit)
 }
 
 /// Pick the admin-dir name under `worktrees_root`: the basename, deduped the
@@ -432,11 +445,29 @@ mod tests {
     }
 
     #[test]
+    fn new_branch_starts_at_base_not_head() {
+        let (_tmp, main) = init_repo();
+        // HEAD moves to an OLDER commit (a feature branch off `main~1`), while
+        // `main` stays at the newer tip — so "base vs HEAD" is observable.
+        run_git(&main, &["checkout", "-q", "-b", "feature", "HEAD~1"]);
+        let main_tip = rev_parse(&main, "main");
+        let head_tip = rev_parse(&main, "HEAD");
+        assert_ne!(main_tip, head_tip, "precondition: HEAD != main");
+        // Create a worktree for a NEW branch based on `main`, not HEAD.
+        add(&main, "wt", Some("main")).expect("add with base");
+        assert_eq!(
+            rev_parse(&main, "wt"),
+            main_tip,
+            "new branch must start at the base (main), not the checked-out HEAD"
+        );
+    }
+
+    #[test]
     fn add_new_branch_real_git_accepts_worktree() {
         let (_tmp, main) = init_repo();
         let main_head = gix_head_sha(&main);
 
-        let target = add(&main, "feature").expect("add worktree");
+        let target = add(&main, "feature", None).expect("add worktree");
 
         // The worktree's gitfile must point to an ABSOLUTE, existing admin
         // dir — a relative `gitdir:` (which git resolves against the
@@ -519,7 +550,7 @@ mod tests {
         let existing_head = rev_parse(&main, "existing");
         assert_ne!(existing_head, rev_parse(&main, "HEAD"));
 
-        let target = add(&main, "existing").expect("add worktree for existing branch");
+        let target = add(&main, "existing", None).expect("add worktree for existing branch");
 
         // It checks out the existing branch's commit, not a fresh HEAD branch
         // (gix in-process — see `gix_head_sha`).
@@ -540,7 +571,7 @@ mod tests {
     #[test]
     fn list_orders_main_first_then_linked() {
         let (_tmp, main) = init_repo();
-        let target = add(&main, "feature").expect("add");
+        let target = add(&main, "feature", None).expect("add");
 
         let worktrees = list(&main).expect("list");
         assert_eq!(worktrees.len(), 2, "expected main + linked");
@@ -584,7 +615,7 @@ mod tests {
     #[test]
     fn list_from_linked_worktree_still_shows_main_first() {
         let (_tmp, main) = init_repo();
-        let target = add(&main, "feature").expect("add");
+        let target = add(&main, "feature", None).expect("add");
 
         // Listing from INSIDE the linked worktree must still enumerate the
         // main worktree + the linked one, main first — NOT list the current
@@ -619,7 +650,7 @@ mod tests {
     #[test]
     fn remove_clean_worktree_leaves_nothing() {
         let (_tmp, main) = init_repo();
-        let target = add(&main, "feature").expect("add");
+        let target = add(&main, "feature", None).expect("add");
         let admin_dir = admin_of(&target);
         assert!(admin_dir.is_dir(), "admin dir should exist before remove");
 
@@ -645,7 +676,7 @@ mod tests {
     #[test]
     fn remove_dirty_worktree_refuses() {
         let (_tmp, main) = init_repo();
-        let target = add(&main, "feature").expect("add");
+        let target = add(&main, "feature", None).expect("add");
 
         // Dirty a tracked file in the worktree.
         std::fs::write(target.join("f.txt"), "v1\nv2\nDIRTY\n").unwrap();
@@ -662,7 +693,7 @@ mod tests {
     #[test]
     fn remove_dirty_with_untracked_refuses() {
         let (_tmp, main) = init_repo();
-        let target = add(&main, "feature").expect("add");
+        let target = add(&main, "feature", None).expect("add");
         std::fs::write(target.join("brand_new.txt"), "untracked\n").unwrap();
 
         let err = remove(&target).expect_err("untracked content should refuse removal");
@@ -696,7 +727,7 @@ mod tests {
 
         // Adding from a subdir must anchor the worktree on the REPO root
         // (`<repo>.worktrees/<branch>`), not on the subdir.
-        let target = add(&sub, "feature").expect("add from a repo subdirectory");
+        let target = add(&sub, "feature", None).expect("add from a repo subdirectory");
         assert_eq!(
             target
                 .parent()
