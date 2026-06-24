@@ -336,7 +336,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "list_worktrees",
-                    "description": "List the git worktrees of the focused column's repo — the orient/inspect entry point for worktree cleanup. Returns a JSON array, one object per worktree: {path, branch, head, is_current, dirty:{staged,unstaged,untracked}}. Consult it before remove_worktree (which tree is dirty, which is the current one).",
+                    "description": "List the git worktrees of the focused column's repo — the orient/inspect entry point for worktree cleanup. Returns a JSON array, one object per worktree: {path, branch, head, is_current, dirty:{staged,unstaged,untracked}, ahead, behind, merged}. ahead/behind/merged are relative to the repo's integration base (null when unresolvable) — `merged:true` means removing that worktree/branch loses no unmerged commits. Consult it before remove_worktree (which tree is dirty, which is merged and safe to drop, which is the current one).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {}
