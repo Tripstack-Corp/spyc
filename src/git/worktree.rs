@@ -200,24 +200,38 @@ pub fn add(dir: &Path, branch: &str, base: Option<&str>) -> std::io::Result<Path
     let name = unique_admin_name(&worktrees_root, branch);
     let admin_dir = worktrees_root.join(&name);
 
-    std::fs::create_dir_all(&target)?;
-    std::fs::create_dir_all(&admin_dir)?;
-
-    // Run checkout + admin-file setup. On any failure, remove the partial
-    // directories so a retry with the same branch name is possible: the
-    // non-empty-dir guard above would otherwise block it forever.
-    if let Err(e) = checkout_and_write(repo, tree_id, &target, &admin_dir, branch) {
-        let _ = std::fs::remove_dir_all(&target);
-        let _ = std::fs::remove_dir_all(&admin_dir);
-        return Err(e);
-    }
+    materialize_worktree(repo, tree_id, &target, &admin_dir, branch)?;
 
     Ok(target)
 }
 
+/// Create the worktree + admin directories, check the branch tree out, and
+/// write the admin files. On **any** failure, remove the partial directories
+/// so a retry with the same branch name is possible — the non-empty-dir guard
+/// in [`add`] would otherwise block it forever. (The branch ref, created
+/// earlier, is intentionally left in place; an existing branch is reused on
+/// retry.)
+fn materialize_worktree(
+    repo: gix::Repository,
+    tree_id: gix::ObjectId,
+    target: &Path,
+    admin_dir: &Path,
+    branch: &str,
+) -> std::io::Result<()> {
+    std::fs::create_dir_all(target)?;
+    std::fs::create_dir_all(admin_dir)?;
+    if let Err(e) = checkout_and_write(repo, tree_id, target, admin_dir, branch) {
+        let _ = std::fs::remove_dir_all(target);
+        let _ = std::fs::remove_dir_all(admin_dir);
+        return Err(e);
+    }
+    Ok(())
+}
+
 /// Build the worktree index from `tree_id`, check it out into `target`, write
 /// the index to `admin_dir/index`, then write the four admin files git expects.
-/// Separated from `add` so partial state can be cleaned up if this fails.
+/// Separated from [`materialize_worktree`] so partial state can be cleaned up
+/// if any step fails.
 fn checkout_and_write(
     repo: gix::Repository,
     tree_id: gix::ObjectId,
@@ -891,31 +905,55 @@ mod tests {
     }
 
     #[test]
-    fn add_retry_succeeds_after_remove() {
-        // Regression guard for the cleanup-on-failure fix: `add` cleans up
-        // target + admin dirs on error so the same branch name can be retried.
-        // The cleanup code runs when `checkout_and_write` fails; to test it
-        // end-to-end we simulate the post-failure state directly (the dirs
-        // exist but are empty / don't contain a valid worktree) and verify
-        // that `add` can still succeed with the same branch name.
-        //
-        // Concrete test: successful add → remove → add again with the same
-        // name must succeed, not be blocked by leftover state.
+    fn materialize_worktree_cleans_up_partial_dirs_on_failure() {
+        // The cleanup-on-failure fix: when checkout fails partway, both the
+        // target and admin directories `materialize_worktree` created must be
+        // removed so a retry with the same branch name isn't blocked by the
+        // non-empty-dir guard. Force a deterministic failure by passing a null
+        // ObjectId as the tree id — `index_from_tree` can't resolve it, so
+        // checkout_and_write errors *after* the directories are created.
         let (_tmp, main) = init_repo();
-        let branch = "retry-test";
+        let group = main.parent().unwrap().join("repo.worktrees");
+        let target = group.join("boom");
+        let admin_dir = main.join(".git").join("worktrees").join("boom");
+        assert!(
+            !target.exists() && !admin_dir.exists(),
+            "clean precondition"
+        );
 
-        let target = add(&main, branch, None).expect("first add");
-        assert!(target.is_dir());
+        let repo = gix::open(&main).expect("open repo");
+        let bogus_tree = gix::ObjectId::null(repo.object_hash());
 
-        remove(&target).expect("remove");
-        assert!(!target.exists(), "target should be gone after remove");
+        let res = super::materialize_worktree(repo, bogus_tree, &target, &admin_dir, "boom");
+        assert!(res.is_err(), "null tree id must fail the checkout");
 
-        // Without the cleanup guard, a crashed-midway add would leave an
-        // empty target dir that passes the `is_some()` guard check (it's
-        // empty), but repeated failures pile up admin dirs. The remove +
-        // re-add cycle exercises the same branch-name-reuse path.
-        let target2 = add(&main, branch, None).expect("second add after remove");
-        assert_eq!(target2, target, "retry lands in the same location");
-        assert!(target2.is_dir());
+        // Both directories the helper created must be gone — without the
+        // cleanup, the empty `target` would block a same-name retry.
+        assert!(!target.exists(), "partial target dir not cleaned up");
+        assert!(!admin_dir.exists(), "partial admin dir not cleaned up");
+    }
+
+    #[test]
+    fn add_succeeds_after_a_prior_failed_attempt() {
+        // End-to-end companion: a failed materialize leaves nothing behind, so
+        // a subsequent real `add` with the SAME branch name succeeds (the bug
+        // was that leftover dirs tripped the "already exists and not empty"
+        // guard forever).
+        let (_tmp, main) = init_repo();
+        let group = main.parent().unwrap().join("repo.worktrees");
+        let target = group.join("feature");
+        let admin_dir = main.join(".git").join("worktrees").join("feature");
+
+        let repo = gix::open(&main).expect("open repo");
+        let bogus_tree = gix::ObjectId::null(repo.object_hash());
+        assert!(
+            super::materialize_worktree(repo, bogus_tree, &target, &admin_dir, "feature").is_err(),
+            "forced failure"
+        );
+
+        // Same branch name now adds cleanly.
+        let added = add(&main, "feature", None).expect("retry add after failure");
+        assert_eq!(added, target);
+        assert!(added.is_dir());
     }
 }
