@@ -324,18 +324,17 @@ protocol **types** as a runtime-agnostic crate we could pull *without* tokio.)
 
 ## 6. Branch deletion semantics
 
-No branch-deletion code exists today (`git::worktree::remove` deliberately
-leaves the ref, `src/git/worktree.rs:319`). Add `git::branch::delete(root,
-name, force)` over gix ref deletion. `remove_worktree`'s `delete_branch`:
+✅ **Shipped (2026-06-24):** `git::branch::delete(root, name)` (gix ref delete)
++ the `"auto"` policy below, baked into `safe_remove_worktree`. The explicit
+`delete_branch` override (`always`/`never`) is **deferred** — v1 is auto-only.
 
-- `"auto"` (default): delete iff `branch_status.merged == true`. Unmerged →
-  keep (commits stay alive on the ref).
-- `"always"`: delete regardless (with the stretch `git bundle` archive if built;
-  otherwise rely on reflog + a warning in the response).
-- `"never"`: never delete; just remove the working tree.
+- `"auto"` (default, SHIPPED): delete iff `branch_status.merged == true`, and
+  never the base branch itself. Unmerged → keep (commits stay alive on the ref).
+- `"always"` (deferred): delete regardless (rely on reflog + a warning).
+- `"never"` (deferred): never delete; just remove the working tree.
 
 Detached-HEAD worktrees (like the `spyc-recover` one in the motivating session)
-have no branch → `delete_branch` is a no-op; the report says so.
+have no branch → no-op; the report says `detached HEAD (no branch)`.
 
 ---
 
@@ -408,7 +407,7 @@ feature that would *build on* this MCP surface. Tracked, not built here.
 | 1b | `fix/mcp-create-worktree-base` | `create_worktree` defaults base to PROJECT_HOME's default branch (POLA); reuses #1's resolver | small | low |
 | 2 | `feat/graveyard-write-blob` | `write_blob(bytes, label)` (pure, tested) | yes | low |
 | 3 | `feat/mcp-list-worktrees` | `list_worktrees` (R, socket thread) + `Worktree` status fields; update `SERVER_INSTRUCTIONS` | small | low |
-| 4 | `feat/mcp-safe-remove-worktree` | safe-by-default `remove_worktree` + `branch::delete` + off-main lane + reconcile cmd; fold/alias `clean_worktree` | yes | **med** (the §5 lane split — review carefully) |
+| 4 | `feat/mcp-safe-remove-worktree` | ✅ DONE — safe-by-default `remove_worktree` (archive untracked+uncommitted → `remove_force` → `branch::delete` iff merged) + `clean_worktree` folded in as an alias; rides the existing off-main lane; respects the `claim_worktree` lease | yes | **med** |
 | 5 | `feat/mcp-git-read-tools` | `git_status` / `git_diff` / `git_log` (R) | small | low |
 | 6 | `feat/mcp-create-worktree-ext` | `create_worktree` `base` + `open` | none | low |
 
@@ -417,10 +416,15 @@ Ship 1–4 for the complete safe-cleanup loop; 5–6 are additive.
 ## 11. Open decisions for the owner
 
 1. **Fold `clean_worktree` into `remove_worktree`** (safe-by-default), keeping
-   `clean` as an alias? (Recommend: yes.)
-2. **`delete_branch` default = `auto`** (delete only if merged)? (Recommend: yes.)
+   `clean` as an alias? — ✅ DECIDED yes (owner, 2026-06-24); shipped in the
+   safe-remove PR (`safe_remove_worktree`, both jobs route to it).
+2. **`delete_branch` default = `auto`** (delete only if merged)? — ✅ DECIDED yes
+   (2026-06-24). Shipped auto-only; the explicit `delete_branch` override param
+   is **deferred** to a follow-on (not in v1).
 3. **Unmerged-commit safety = keep the branch ref** (recommend) vs. also
-   build the `git bundle` archive now (stretch)?
+   build the `git bundle` archive now (stretch)? — ✅ DECIDED: keep the ref, no
+   bundle (2026-06-24). Also: archive uncommitted-tracked content as **file
+   contents**, not a `.patch` (simpler, fully recoverable).
 4. **Phase-2 read tools** (`git_diff`/`git_status`/`git_log`) in v1, or just
    `list_worktrees` + `branch_status` (enough for safe removal)?
 5. **Mutating-tool reply timeout** — 30s for the archive path? Acceptable?

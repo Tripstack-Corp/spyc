@@ -205,7 +205,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "remove_worktree",
-                    "description": "Tear down a git worktree by path (the path create_worktree returned). Refuses a worktree with uncommitted/untracked changes, a locked one, or one a spyc column is currently open in; the branch ref is left intact. The teardown half of the worktree flow.",
+                    "description": "Safely tear down a git worktree by path (the path create_worktree returned). Safe by default: archives any untracked + uncommitted changes to spyc's graveyard first (recoverable), removes the worktree, then deletes its branch ONLY if it is merged into the integration base — an unmerged branch's ref is kept (it's the commit backup). Refuses a worktree CLAIMED by another session (claim_worktree) — release it first. A spyc column sitting inside is reset to PROJECT_HOME, not refused. The teardown half of the worktree flow.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -219,7 +219,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "clean_worktree",
-                    "description": "Clean out and remove a worktree by path: archive its UNTRACKED files into spyc's graveyard (recoverable, under '<worktree>-<timestamp>'), then remove it. Unlike remove_worktree this doesn't choke on untracked junk — it preserves it. Still refuses if a column is open in it or there are uncommitted changes to TRACKED files (commit/stash those first; only untracked files are preserved). The branch ref is left intact.",
+                    "description": "Alias of remove_worktree (kept for familiarity) — identical safe-by-default teardown: archives untracked + uncommitted changes to the graveyard under '<worktree>-<timestamp>', removes the worktree, and deletes the branch iff merged. Prefer remove_worktree.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {

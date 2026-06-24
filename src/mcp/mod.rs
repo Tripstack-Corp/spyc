@@ -47,9 +47,10 @@ their selection; `get_file_content` to read what they're viewing.\n\
 lists them (branch, dirty counts, which is current, whether each is merged / \
 ahead-behind the base — the safe-to-remove signal — and whether one is claimed \
 by another session), `create_worktree` adds one, `open_worktree` works in it in \
-column b while the user's column stays put, `clean_worktree` archives its \
-untracked files to spyc's graveyard before teardown, and `remove_worktree` \
-deletes it.\n\
+column b while the user's column stays put, and `remove_worktree` tears one \
+down safely — archiving any untracked + uncommitted changes to spyc's \
+graveyard, then deleting the branch only if it's merged (`clean_worktree` is \
+an alias).\n\
 - Coordinating with another agent on the same repo: `claim_worktree(path, reason)` \
 to lease the worktree you're working in (a cooperative lock — others' \
 remove/clean will refuse it), and `release_worktree(path)` when you're done. \

@@ -342,35 +342,50 @@ fn write_admin_files(admin_dir: &Path, target: &Path, branch: &str) -> std::io::
 /// the worktree dir and its admin dir under `<common_dir>/worktrees/<name>`.
 /// The branch ref is left intact (git's `worktree remove` doesn't delete it).
 pub fn remove(path: &Path) -> std::io::Result<()> {
+    remove_inner(path, false)
+}
+
+/// Like [`remove`], but skips the *dirty* refusal — for safe-remove, which has
+/// already archived the worktree's uncommitted/untracked content to the
+/// graveyard. A *lease* (lock) is still honored: `force` forces past dirt, not
+/// past another session's claim — release it first.
+pub fn remove_force(path: &Path) -> std::io::Result<()> {
+    remove_inner(path, true)
+}
+
+fn remove_inner(path: &Path, force_dirty: bool) -> std::io::Result<()> {
     // Resolve the admin dir from the worktree's `.git` gitfile.
     let admin_dir = admin_dir_of(path)?;
 
-    // SAFETY: refuse if locked (git refuses a locked worktree). spyc's
-    // `claim_worktree` lease writes this file with an owner reason, so surface
-    // it — a cooperating session sees WHO claimed the worktree and why.
+    // SAFETY (always, even under force): refuse if locked (git refuses a locked
+    // worktree). spyc's `claim_worktree` lease writes this file with an owner
+    // reason, so surface it — a cooperating session sees WHO claimed it and why.
     let locked = admin_dir.join("locked");
     if locked.is_file() {
         let reason = std::fs::read_to_string(&locked).unwrap_or_default();
         let reason = reason.trim();
         return Err(std::io::Error::other(if reason.is_empty() {
-            "worktree is locked (claimed) — release it (or force) to remove".to_string()
+            "worktree is locked (claimed) — release it to remove".to_string()
         } else {
-            format!("worktree is locked (claimed): {reason} — release it (or force) to remove")
+            format!("worktree is locked (claimed): {reason} — release it to remove")
         }));
     }
 
     // SAFETY: refuse a dirty worktree (uncommitted or untracked changes),
-    // matching `git worktree remove`. An empty status Vec is clean.
-    match crate::git::status::repo_status(path) {
-        Some(entries) if !entries.is_empty() => {
-            return Err(std::io::Error::other(
-                "worktree contains modified or untracked files, use --force to delete it",
-            ));
+    // matching `git worktree remove` — unless the caller forces (safe-remove,
+    // which archived the dirt first). An empty status Vec is clean.
+    if !force_dirty {
+        match crate::git::status::repo_status(path) {
+            Some(entries) if !entries.is_empty() => {
+                return Err(std::io::Error::other(
+                    "worktree contains modified or untracked files, use --force to delete it",
+                ));
+            }
+            // `None` = couldn't open it as a repo; fall through to removal (the
+            // gitfile resolved an admin dir, so it is a worktree — a status
+            // failure shouldn't strand the user with an un-removable worktree).
+            _ => {}
         }
-        // `None` = couldn't open it as a repo; fall through to removal (the
-        // gitfile resolved an admin dir, so it is a worktree — a status
-        // failure shouldn't strand the user with an un-removable worktree).
-        _ => {}
     }
 
     if path.exists() {
