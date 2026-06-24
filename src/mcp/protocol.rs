@@ -538,10 +538,26 @@ fn handle_tools_call(
             {
                 return send_tool_error(w, id, "spyc is not running");
             }
-            match reply_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            // Worktree mutations can run a status walk + tar.zst archive off
+            // the main loop (§5 of WORKTREE_MCP_PLAN.md); a large tree easily
+            // outlasts the interactive 5s window, so give them a generous
+            // ceiling. Everything else is a fast in-memory model edit. (Stage 0
+            // of the async/Tasks plan — §5.1; Stage 1 returns a task handle
+            // instead of blocking.)
+            let reply_timeout = match name {
+                "create_worktree" | "remove_worktree" | "clean_worktree" => {
+                    std::time::Duration::from_secs(60)
+                }
+                _ => std::time::Duration::from_secs(5),
+            };
+            match reply_rx.recv_timeout(reply_timeout) {
                 Ok(McpResponse::Ok { message }) => send_tool_result(w, id, &message),
                 Ok(McpResponse::Error { message }) => send_tool_error(w, id, &message),
-                Err(_) => send_tool_error(w, id, "spyc did not respond within 5 seconds"),
+                Err(_) => send_tool_error(
+                    w,
+                    id,
+                    &format!("spyc did not respond within {}s", reply_timeout.as_secs()),
+                ),
             }
         }
         _ => send_tool_error(w, id, &format!("unknown tool: {name}")),

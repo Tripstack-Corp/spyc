@@ -264,6 +264,62 @@ revisit the worker only if archives of huge untracked trees become a problem.
 This lane split is the bit most worth getting right in review — it's what keeps
 the feature from regressing the very responsiveness the project guards.
 
+### 5.1 Async / Tasks — staged adoption (decided 2026-06-24)
+
+Live evidence from a dogfooding cleanup: `remove_worktree` on a worktree with a
+large cargo `target/` tripped the 5s reply timeout ("spyc did not respond within
+5 seconds") **even though the off-main job completed fine** — only the
+socket-thread reply correlation gave up. The fix is an *async shape*, and MCP now
+has a first-class one.
+
+**What the protocol offers.** The 2025-11-25 spec adds an **experimental**
+[Tasks utility](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks):
+a task-augmented `tools/call` returns a `CreateTaskResult` with a `taskId`
+immediately, work continues in the background, and the requestor polls
+`tasks/get` → fetches via `tasks/result` (blocks to terminal) → can enumerate
+history via `tasks/list` and abort via `tasks/cancel`. It's purely additive and
+**server-opt-in per tool** (`tools/list` advertises `execution.taskSupport:
+optional|required|forbidden`), so we could expose Tasks for *only* the heavy
+worktree mutations and leave the other ~16 tools synchronous. `"optional"` keeps
+old clients working; `"required"` would break them (`-32601`).
+
+**Two facts that gate us:** (1) it's flagged experimental — "design and behavior
+may evolve"; (2) the *benefit is client-gated* — Tasks does nothing until the
+client (effectively just Claude Code for us) declares the `tasks` capability and
+actually augments the call + polls. spyc is a single-user, single-client, local
+socket server, so the *standardization* payoff is muted — the win is the async
+*shape*, which we can deliver at the app level without the wire format.
+
+**Decision — do NOT adopt the `rmcp` SDK.** It's the mature official SDK, but
+it's **tokio-first with no sync API**, and spyc is deliberately std-threads + one
+blocking `recv` (0 wakes at idle, no busy-poll — a stated MVU invariant). It also
+expects per-request task spawning, which fights our read-on-socket-thread /
+delegate-writes-to-the-loop model, needs custom-transport glue for our stdio↔unix
+-socket bridge anyway, and drags a large dep tree into a small-deps project. Our
+hand-rolled MCP (~2.5 KLoC on `serde_json`, zero MCP deps) uses a *tiny, stable*
+slice of the protocol; tracking it by hand is cheap. (One narrow hedge worth a
+quick check if we ever want spec-exact wire structs: whether `rmcp` publishes its
+protocol **types** as a runtime-agnostic crate we could pull *without* tokio.)
+
+**Plan — three stages, nothing wasted:**
+
+- **Stage 0 (interim, done in the PR that adds this section):** give the heavy
+  worktree mutations (`create/remove/clean_worktree`) a 60s reply timeout instead
+  of the interactive 5s (`src/mcp/protocol.rs`). Kills the false "did not respond"
+  for the common big-`target/` case. No protocol change.
+- **Stage 1 (with the safe-`remove_worktree` work, §3/§10):** build the async
+  shape at the *app* level — a heavy mutation returns a `task_id`, a read-only
+  `task_status` reader on the socket thread reports progress, and a small bounded
+  in-memory registry doubles as the "tasks performed" history. Deliberately
+  **mirror the spec's vocabulary** (`taskId`, `working/completed/failed`,
+  `tasks/list`-shaped listing) so Stage 2 is a rename, not a rewrite. Rides the
+  existing off-main `worktree_ops.rs` lane.
+- **Stage 2 (only when Claude Code advertises `tasks`):** bump the advertised
+  `protocolVersion` to `2025-11-25`, declare `tasks.requests.tools.call`, mark the
+  heavy tools `execution.taskSupport: "optional"`, and wrap the Stage-1 registry
+  in the real `tasks/get|result|list|cancel` methods. Track the client; don't lead
+  it.
+
 ---
 
 ## 6. Branch deletion semantics
