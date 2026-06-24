@@ -154,9 +154,11 @@ pub(super) fn read_context_or_empty(ctx_path: &Path) -> String {
 /// JSON inventory of the focused column's worktrees, for the `list_worktrees`
 /// MCP tool: one object per worktree — branch, short HEAD, a dirty-file
 /// breakdown (`repo_status` counts), whether it's the worktree the user is
-/// currently in, and `ahead`/`behind`/`merged` against the repo's integration
+/// currently in, `ahead`/`behind`/`merged` against the repo's integration
 /// base (the "is this safe to remove?" signal; `null` when the tip or base
-/// can't be resolved — a bare/unborn entry, or a repo with no base branch).
+/// can't be resolved — a bare/unborn entry, or a repo with no base branch),
+/// and `locked`/`lock_reason` (the `claim_worktree` lease — a cooperating
+/// session's `remove`/`clean` refuses a locked worktree).
 /// Runs on the socket thread — pure git + the context file's cwd, no `App`.
 /// Returns `[]` outside a repo. (Column-`b` flags still need context the
 /// snapshot doesn't yet expose.)
@@ -192,6 +194,7 @@ pub(super) fn list_worktrees_json(ctx_path: &Path) -> String {
                 .zip(base.as_deref())
                 .filter(|_| !wt.head.is_empty())
                 .and_then(|(root, base)| crate::git::branch::branch_status(root, &wt.head, base));
+            let lock_reason = crate::git::worktree::lock_reason(&wt.path);
             json!({
                 "path": wt.path.display().to_string(),
                 "branch": wt.branch,
@@ -201,10 +204,52 @@ pub(super) fn list_worktrees_json(ctx_path: &Path) -> String {
                 "ahead": status.map(|s| s.ahead),
                 "behind": status.map(|s| s.behind),
                 "merged": status.map(|s| s.merged),
+                "locked": lock_reason.is_some(),
+                "lock_reason": lock_reason,
             })
         })
         .collect();
     Value::Array(arr).to_string()
+}
+
+/// Resolve a worktree path arg for the lease tools: absolute as-is, else
+/// relative to the context cwd (the focused column). The lease tools run on the
+/// socket thread — pure fs on the worktree's admin dir, no `App`.
+fn resolve_worktree_path(ctx_path: &Path, path_arg: &str) -> PathBuf {
+    let raw = PathBuf::from(path_arg);
+    if raw.is_absolute() {
+        raw
+    } else {
+        read_cwd_from_context(ctx_path).join(raw)
+    }
+}
+
+/// `claim_worktree`: lock the worktree at `path_arg` with `reason` (git's
+/// native lock), so a cooperating session's `remove_worktree`/`clean_worktree`
+/// refuses to tear it down. Returns a confirmation message or an error string.
+pub(super) fn claim_worktree_result(
+    ctx_path: &Path,
+    path_arg: &str,
+    reason: &str,
+) -> Result<String, String> {
+    let target = resolve_worktree_path(ctx_path, path_arg);
+    let reason = reason.trim();
+    let reason = if reason.is_empty() {
+        "in use by an MCP client"
+    } else {
+        reason
+    };
+    crate::git::worktree::lock(&target, reason)
+        .map(|()| format!("claimed worktree {} — locked: {reason}", target.display()))
+        .map_err(|e| format!("claim {}: {e}", target.display()))
+}
+
+/// `release_worktree`: clear the lease on the worktree at `path_arg`.
+pub(super) fn release_worktree_result(ctx_path: &Path, path_arg: &str) -> Result<String, String> {
+    let target = resolve_worktree_path(ctx_path, path_arg);
+    crate::git::worktree::unlock(&target)
+        .map(|()| format!("released worktree {} (lease cleared)", target.display()))
+        .map_err(|e| format!("release {}: {e}", target.display()))
 }
 
 #[cfg(test)]
@@ -294,6 +339,49 @@ mod tests {
         )
         .unwrap();
         assert_eq!(list_worktrees_json(&ctx), "[]");
+    }
+
+    #[test]
+    fn claim_release_round_trip_reflected_in_listing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-q", "-m", "c1"]);
+        let wt = crate::git::worktree::add(&repo, "feature", None).unwrap();
+        let ctx = tmp.path().join("ctx.json");
+        std::fs::write(
+            &ctx,
+            json!({ "cwd": repo.display().to_string() }).to_string(),
+        )
+        .unwrap();
+
+        let feat = |ctx: &Path| -> Value {
+            let v: Value = serde_json::from_str(&list_worktrees_json(ctx)).unwrap();
+            v.as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["branch"] == "feature")
+                .expect("feature entry")
+                .clone()
+        };
+
+        // Initially unlocked.
+        let before = feat(&ctx);
+        assert_eq!(before["locked"], json!(false));
+        assert_eq!(before["lock_reason"], json!(null));
+
+        // Claim → listing shows the lock + reason.
+        claim_worktree_result(&ctx, &wt.display().to_string(), "agent A").expect("claim");
+        let claimed = feat(&ctx);
+        assert_eq!(claimed["locked"], json!(true));
+        assert_eq!(claimed["lock_reason"], json!("agent A"));
+
+        // Release → back to unlocked.
+        release_worktree_result(&ctx, &wt.display().to_string()).expect("release");
+        assert_eq!(feat(&ctx)["locked"], json!(false));
     }
 }
 

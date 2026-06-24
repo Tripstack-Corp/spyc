@@ -196,16 +196,21 @@ You are expected to be running inside spyc's split pane. If the
   `pick_files`, `clear_picks`, and `navigate_to` to update the TUI
   directly rather than giving instructions for the user to do manually.
 - **To survey / spin up / work in / tear down a git worktree:** `list_worktrees()` returns
-  the repo's worktrees (branch, short HEAD, dirty counts, which is current, and
+  the repo's worktrees (branch, short HEAD, dirty counts, which is current,
   `ahead`/`behind`/`merged` vs the integration base — `merged:true` is the safe-to-remove
-  signal) — survey the board before acting; `create_worktree(branch)` makes
-  one off the focused commander's repo (sibling `<repo>.worktrees/<branch>/`) and returns
+  signal — and `locked`/`lock_reason` when another session has claimed one) — survey the
+  board before acting; `create_worktree(branch)` makes
+  one off the main repo (sibling `<repo>.worktrees/<branch>/`, anchored on the main worktree
+  even when the asking column is inside a linked worktree) and returns
   its path; `open_worktree(path)` opens it in column `b` (re-targets `b` if open) so you
   work in it while `a` stays put — then `navigate_to` / search / `pick_files` act on `b`;
-  `remove_worktree(path)` tears it down (refuses a dirty one; a column sitting inside it
-  is reset to PROJECT_HOME with a status flash, not refused);
+  `remove_worktree(path)` tears it down (refuses a dirty or *claimed* one; a column sitting
+  inside it is reset to PROJECT_HOME with a status flash, not refused);
   `clean_worktree(path)` archives untracked files to the graveyard first, then removes
-  (still refuses uncommitted *tracked* changes). The TUI `W l` picker switches the
+  (still refuses uncommitted *tracked* changes). When two agents share a repo,
+  `claim_worktree(path, reason)` leases a worktree (git's native lock — others' remove/clean
+  refuse it) and `release_worktree(path)` clears it; claim before working, release when done.
+  The TUI `W l` picker switches the
   **focused** column to a worktree (focus `b` first to put one there).
 - **To read a file the user is viewing:** use `get_file_content`
   with relative paths (resolved against spyc's cwd).

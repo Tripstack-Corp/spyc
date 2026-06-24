@@ -462,3 +462,48 @@ Ship 1–4 for the complete safe-cleanup loop; 5–6 are additive.
   but doesn't open a column or flash, so the user can't tell spyc did it (hit
   live this session). Add a flash (`created worktree <name> @ <path>`); consider
   auto-`open` (the Phase 3 `open: true`).
+
+---
+
+## 14. Worktree ownership / leases (concurrent-agent safety)
+
+Motivated by a live collision (2026-06-24): two `claude` panes drove the **same**
+spyc, and one session's worktree cleanup tore down a worktree the other was
+actively editing. A worktree had no way to signal "an agent is live in here."
+
+**v1 (SHIPPED) — cooperative lease over git's native lock.** Reuse git's
+`<admin>/locked` file (which `worktree::remove` already refuses) as an advisory
+lease:
+
+- `git::worktree::{lock(path, reason), unlock(path), lock_reason(path)}` —
+  thin facade over the `locked` file. The main worktree can't be locked (no
+  gitfile), like git.
+- MCP `claim_worktree(path, reason)` / `release_worktree(path)` — socket-thread
+  tools (pure fs on the admin dir, no `App`).
+- `remove`/`clean` refuse a locked worktree and **surface the owner reason** in
+  the error, so a cooperating session sees who claimed it and why. (Plain `git
+  worktree remove` also refuses it — protection even outside spyc.)
+- `list_worktrees` gains `locked` + `lock_reason`.
+- `SERVER_INSTRUCTIONS` teaches: claim before working, `list_worktrees` +
+  skip-locked before removing, release when done.
+
+It's **advisory/cooperative** (both agents read the same instructions), and the
+lease is explicit — the agent claims and releases, so there's no stale-lease
+buildup and no per-connection plumbing.
+
+**v2 (future) — auto-claim + auto-release, identity-keyed.** Make it
+foolproof rather than discipline-dependent:
+
+- **Auto-claim** on `create_worktree` / `open_worktree` (the acting session owns
+  it without remembering to claim).
+- **Identity = the MCP connection, NOT the spyc pid** — the key wrinkle: two
+  agents share one spyc, so pid is identical. Each `claude` is a distinct MCP
+  client connection; tag the lease with a per-connection id (+ a human label).
+- **Auto-release on disconnect** — spyc already receives `spyc/disconnected`
+  (`protocol.rs`); drop a connection's leases when it closes. Solves stale
+  leases that auto-claim would otherwise create.
+- Then `remove`/`clean` refuse a *live other-owner* claim but freely remove your
+  own / unowned / dead-owner worktrees; `force` overrides.
+
+v2 needs the connection-id threaded through the MCP command path — deferred
+until the explicit v1 proves the ergonomics.

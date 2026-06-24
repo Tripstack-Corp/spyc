@@ -44,11 +44,17 @@ gitignore-aware and scoped to the focused worktree.\n\
 - `navigate_to` to move the user's view; `pick_files` / `set_filter` to drive \
 their selection; `get_file_content` to read what they're viewing.\n\
 - Worktree lifecycle, all in-process (never `git worktree`): `list_worktrees` \
-lists them (branch, dirty counts, which is current, and whether each is merged \
-/ ahead-behind the base — the safe-to-remove signal), `create_worktree` adds \
-one, `open_worktree` works in it in column b while the user's column stays \
-put, `clean_worktree` archives its untracked files to spyc's graveyard before \
-teardown, and `remove_worktree` deletes it.\n\
+lists them (branch, dirty counts, which is current, whether each is merged / \
+ahead-behind the base — the safe-to-remove signal — and whether one is claimed \
+by another session), `create_worktree` adds one, `open_worktree` works in it in \
+column b while the user's column stays put, `clean_worktree` archives its \
+untracked files to spyc's graveyard before teardown, and `remove_worktree` \
+deletes it.\n\
+- Coordinating with another agent on the same repo: `claim_worktree(path, reason)` \
+to lease the worktree you're working in (a cooperative lock — others' \
+remove/clean will refuse it), and `release_worktree(path)` when you're done. \
+Before removing a worktree you didn't create, `list_worktrees` first and skip \
+any that are `locked` by someone else.\n\
 If a tool you expect is missing, the running spyc is older than this repo — \
 tell the user to restart it (compare `version`'s git SHA to the repo HEAD).";
 const CONTEXT_URI: &str = "spyc://context";

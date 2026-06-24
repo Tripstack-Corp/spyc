@@ -8,8 +8,9 @@ use serde_json::{Value, json};
 use crate::mcp_cmd::{McpCommand, McpRequest, McpResponse};
 
 use super::readers::{
-    grep_matches_to_json, list_worktrees_json, read_context_or_empty, read_file_content,
-    read_inventory_from_context, read_picks_from_context, search_root,
+    claim_worktree_result, grep_matches_to_json, list_worktrees_json, read_context_or_empty,
+    read_file_content, read_inventory_from_context, read_picks_from_context,
+    release_worktree_result, search_root,
 };
 use super::{CONTEXT_URI, PROTOCOL_VERSION, SERVER_INSTRUCTIONS, SERVER_NAME, SERVER_VERSION};
 pub(super) fn dispatch(
@@ -336,10 +337,33 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "list_worktrees",
-                    "description": "List the git worktrees of the focused column's repo — the orient/inspect entry point for worktree cleanup. Returns a JSON array, one object per worktree: {path, branch, head, is_current, dirty:{staged,unstaged,untracked}, ahead, behind, merged}. ahead/behind/merged are relative to the repo's integration base (null when unresolvable) — `merged:true` means removing that worktree/branch loses no unmerged commits. Consult it before remove_worktree (which tree is dirty, which is merged and safe to drop, which is the current one).",
+                    "description": "List the git worktrees of the focused column's repo — the orient/inspect entry point for worktree cleanup. Returns a JSON array, one object per worktree: {path, branch, head, is_current, dirty:{staged,unstaged,untracked}, ahead, behind, merged, locked, lock_reason}. ahead/behind/merged are relative to the repo's integration base (null when unresolvable) — `merged:true` means removing that worktree/branch loses no unmerged commits. `locked:true` (with `lock_reason`) means another session has claimed it via claim_worktree and remove/clean will refuse. Consult it before remove_worktree (which tree is dirty, which is merged and safe to drop, which is claimed by someone else, which is the current one).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {}
+                    }
+                },
+                {
+                    "name": "claim_worktree",
+                    "description": "Claim a worktree for your exclusive use — a cooperative lease so another spyc session (e.g. a second agent) won't tear it down underneath you. Sets git's native worktree lock with your `reason`, so remove_worktree/clean_worktree (here and via plain git) refuse it until released. Claim the worktree you're working in before you start editing; release_worktree when done. Locking the MAIN worktree is not possible (mirrors git).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string", "description": "Path of the worktree to claim (as returned by create_worktree); relative paths resolve against the focused column's cwd." },
+                            "reason": { "type": "string", "description": "Human-readable owner/reason recorded on the lease and shown to other sessions (e.g. 'agent A: refactoring auth'). Optional." }
+                        },
+                        "required": ["path"]
+                    }
+                },
+                {
+                    "name": "release_worktree",
+                    "description": "Release a claim_worktree lease (clear the lock), so the worktree can be removed/cleaned again. Call it when you're done working in a worktree you claimed. No-op if it wasn't locked.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string", "description": "Path of the worktree to release; relative paths resolve against the focused column's cwd." }
+                        },
+                        "required": ["path"]
                     }
                 }
             ]
@@ -464,6 +488,27 @@ fn handle_tools_call(
             }
         }
         "list_worktrees" => send_tool_result(w, id, &list_worktrees_json(ctx_path)),
+        "claim_worktree" => {
+            let path = args["path"].as_str().unwrap_or("");
+            if path.trim().is_empty() {
+                return send_tool_error(w, id, "missing required parameter: path");
+            }
+            let reason = args["reason"].as_str().unwrap_or("");
+            match claim_worktree_result(ctx_path, path, reason) {
+                Ok(msg) => send_tool_result(w, id, &msg),
+                Err(e) => send_tool_error(w, id, &e),
+            }
+        }
+        "release_worktree" => {
+            let path = args["path"].as_str().unwrap_or("");
+            if path.trim().is_empty() {
+                return send_tool_error(w, id, "missing required parameter: path");
+            }
+            match release_worktree_result(ctx_path, path) {
+                Ok(msg) => send_tool_result(w, id, &msg),
+                Err(e) => send_tool_error(w, id, &e),
+            }
+        }
         "navigate_to" | "set_filter" | "pick_files" | "clear_picks" | "create_worktree"
         | "remove_worktree" | "clean_worktree" | "open_worktree" => {
             let Some(tx) = cmd_tx else {
