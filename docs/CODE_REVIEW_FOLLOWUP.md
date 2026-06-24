@@ -52,7 +52,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/listing.rs:111` | Git status lookups keyed by display name never match executable files | medium | S | REAL |
 | `src/git/status.rs:246` | One failed status item silently blanks git status for the whole repo | medium | S | REAL |
 | `src/git/blame.rs:49` | BlameModel has no size cap and clones 3 metadata Strings per line | medium | M | REAL ⚠︎ |
-| `src/git/diff_model/build.rs:89` | gd diff silently drops the deletion side of an unstaged rename | medium | M | REAL |
+| `src/git/diff_model/build.rs:89` | gd diff silently drops the deletion side of an unstaged rename | medium | M | ✅ PR #533 |
 | `src/git/status.rs:217` | gix status-walk setup and item-decode skeleton duplicated between repo_status and collect_worktree_plan | medium | M | REAL |
 | `src/git/worktree.rs:170` | worktree::add leaves partial on-disk state on failure, and the leftover state blocks retry | medium | M | REAL |
 | `src/git/status.rs:314` | repo_status diverges from porcelain on unstaged renames (parity contract violation) | medium | none | REAL ⚠︎ |
@@ -131,6 +131,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
+
+**✅ PR #533 — gd diff: keep the deletion side of an unstaged rename (2026-06-24):**
+- `git/diff_model/build.rs:89` — the working-tree (`gd`) diff enabled `index_worktree_rewrites`, so an unstaged `mv` (tracked file renamed on disk, not staged) surfaced as a single `IwItem::Rewrite`; `collect_worktree_plan` emitted only its **destination** (an addition) and dropped the **source** — so `gd` showed the renamed file as all-new and silently lost the original's deletion. Same root cause as #530's status fix: git itself never pairs a worktree-only rename (the dest is untracked), so `git diff HEAD` reports the source DELETED + the dest ADDED. Dropped `index_worktree_rewrites` (staged renames still collapse via `tree_index_track_renames`); the unstaged rename now decomposes into a Modification{Removed} + DirectoryContents{Untracked} that the existing arms turn into a deletion + addition. The now-defensive `IwItem::Rewrite` arm decodes BOTH sides so parity holds even if rewrite detection is re-enabled. New test `working_unstaged_rename_shows_both_delete_and_add` (verified it fails on the old code). (Gate-verified.)
 
 **✅ #514 — cluster 1, pure-Model IO moved off-thread (2026-06-23):** `state/apply.rs:113`, `state/selection.rs:77`, `clipboard.rs:189`, `clipboard.rs:250` — inline file copies / tar+zstd archiving / blocking pipe reads replaced by `Effect::FileOp` + `Effect::Inventory` off-thread workers.
 

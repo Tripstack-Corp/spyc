@@ -53,8 +53,14 @@ pub fn collect_worktree_plan(repo: &gix::Repository) -> Option<Vec<WorkItem>> {
         .status(gix::progress::Discard)
         .ok()?
         .untracked_files(UntrackedFiles::Files)
-        .tree_index_track_renames(TrackRenames::Given(gix::diff::Rewrites::default()))
-        .index_worktree_rewrites(gix::diff::Rewrites::default());
+        // Staged renames (HEAD↔index) DO collapse to a single rename — that's
+        // what `git diff` shows. But we deliberately leave `index_worktree_rewrites`
+        // OFF: `git diff HEAD` never pairs a worktree-only rename (the
+        // destination is untracked), so an unstaged `mv` shows as the source
+        // DELETED + the destination ADDED. Enabling it made gix emit one
+        // `IwItem::Rewrite` whose source we dropped — losing the deletion half
+        // entirely (see `working_unstaged_rename_shows_both_delete_and_add`).
+        .tree_index_track_renames(TrackRenames::Given(gix::diff::Rewrites::default()));
 
     // Rename pairs override the per-path treatment of their endpoints, so we
     // remember which paths are consumed by a rename and skip emitting a plain
@@ -86,9 +92,19 @@ pub fn collect_worktree_plan(repo: &gix::Repository) -> Option<Vec<WorkItem>> {
                 }
             },
             Item::IndexWorktree(iw) => match iw {
-                IwItem::Rewrite { dirwalk_entry, .. } => {
-                    // An unstaged rename: source path is lost here, so fall
-                    // back to treating the destination as a plain path.
+                IwItem::Rewrite {
+                    source,
+                    dirwalk_entry,
+                    ..
+                } => {
+                    // With `index_worktree_rewrites` left disabled (above) gix
+                    // doesn't emit this for the unstaged half — the rename
+                    // decomposes into a Modification{Removed} (source) plus a
+                    // DirectoryContents{Untracked} (dest), which the arms below
+                    // turn into a deletion + an addition. Decode it the same way
+                    // defensively (BOTH sides, not just the dest) so the deletion
+                    // half survives even if rewrite detection is ever re-enabled.
+                    plain.insert(source.rela_path().to_str_lossy().into_owned());
                     plain.insert(dirwalk_entry.rela_path.to_str_lossy().into_owned());
                 }
                 IwItem::Modification { rela_path, .. } => {
