@@ -409,7 +409,7 @@ feature that would *build on* this MCP surface. Tracked, not built here.
 | 3 | `feat/mcp-list-worktrees` | `list_worktrees` (R, socket thread) + `Worktree` status fields; update `SERVER_INSTRUCTIONS` | small | low |
 | 4 | `feat/mcp-safe-remove-worktree` | ✅ DONE — safe-by-default `remove_worktree` (archive untracked+uncommitted → `remove_force` → `branch::delete` iff merged) + `clean_worktree` folded in as an alias; rides the existing off-main lane; respects the `claim_worktree` lease | yes | **med** |
 | 5 | `feat/mcp-git-read-tools` | ✅ `git_status` + `git_log` DONE (R, socket-thread); **`git_diff` deferred** — `DiffModel` is render-structured, a unified-text producer is its own effort + a shell agent can `git diff`; revisit if a non-shell client needs it | small | low |
-| 6 | `feat/mcp-create-worktree-ext` | `create_worktree` `base` + `open` | none | low |
+| 6 | `feat/mcp-create-worktree-ext` | ✅ DONE — `create_worktree` gains `base` (override the new branch's start point) + `open` (also open it in column `b` + focus it: the create→work flow in one call; the off-main create's reconcile opens `b`) | none | low |
 
 Ship 1–4 for the complete safe-cleanup loop; 5–6 are additive.
 
@@ -462,10 +462,11 @@ Ship 1–4 for the complete safe-cleanup loop; 5–6 are additive.
   → watch the markers). Likely fix: make the background column's poll reconverge
   (or watch the resolved per-worktree gitdir). Part of the git-marker freshness
   saga (#440–#451).
-- **`create_worktree` is silent in the UI.** It creates + registers the worktree
-  but doesn't open a column or flash, so the user can't tell spyc did it (hit
-  live this session). Add a flash (`created worktree <name> @ <path>`); consider
-  auto-`open` (the Phase 3 `open: true`).
+- ✅ **`create_worktree` silent-in-UI — RESOLVED.** The off-main lane already
+  flashes `[mcp] created worktree <path> (<branch>)` on success (via
+  `after_worktree_mutation`), and `create_worktree open=true` (PR6) now also
+  opens it in column `b` + focuses it — a persistent, unmistakable signal that
+  spyc did it.
 
 ---
 

@@ -199,10 +199,11 @@ You are expected to be running inside spyc's split pane. If the
   the repo's worktrees (branch, short HEAD, dirty counts, which is current,
   `ahead`/`behind`/`merged` vs the integration base — `merged:true` is the safe-to-remove
   signal — and `locked`/`lock_reason` when another session has claimed one) — survey the
-  board before acting; `create_worktree(branch)` makes
+  board before acting; `create_worktree(branch, base?, open?)` makes
   one off the main repo (sibling `<repo>.worktrees/<branch>/`, anchored on the main worktree
-  even when the asking column is inside a linked worktree) and returns
-  its path; `open_worktree(path)` opens it in column `b` (re-targets `b` if open) so you
+  even when the asking column is inside a linked worktree; `base` overrides the new branch's
+  start point, `open:true` also opens it in `b`) and returns
+  its path; `open_worktree(path)` opens an existing one in column `b` (re-targets `b` if open) so you
   work in it while `a` stays put — then `navigate_to` / search / `pick_files` act on `b`;
   `remove_worktree(path)` tears it down **safe-by-default** — archives untracked + uncommitted
   changes to the graveyard, removes the tree, then deletes the branch *iff merged* (an unmerged
