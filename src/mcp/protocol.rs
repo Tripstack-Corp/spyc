@@ -8,9 +8,9 @@ use serde_json::{Value, json};
 use crate::mcp_cmd::{McpCommand, McpRequest, McpResponse};
 
 use super::readers::{
-    claim_worktree_result, grep_matches_to_json, list_worktrees_json, read_context_or_empty,
-    read_file_content, read_inventory_from_context, read_picks_from_context,
-    release_worktree_result, search_root,
+    claim_worktree_result, git_log_json, git_status_json, grep_matches_to_json,
+    list_worktrees_json, read_context_or_empty, read_file_content, read_inventory_from_context,
+    read_picks_from_context, release_worktree_result, search_root,
 };
 use super::{CONTEXT_URI, PROTOCOL_VERSION, SERVER_INSTRUCTIONS, SERVER_NAME, SERVER_VERSION};
 pub(super) fn dispatch(
@@ -365,6 +365,24 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                         },
                         "required": ["path"]
                     }
+                },
+                {
+                    "name": "git_status",
+                    "description": "Working-tree status of the focused column's worktree, gitignore-aware and in-process (don't shell out to `git status`). Returns a JSON array, one object per changed path: {path, staged, unstaged, untracked} — `staged`/`unstaged` are the change kind ('modified'|'added'|'deleted'|'renamed'|'conflicted') or null. Empty array when the tree is clean.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
+                    "name": "git_log",
+                    "description": "Recent commit history of the focused column's worktree (HEAD, newest first), in-process. Returns a JSON array: {short_id, author, time, subject} per commit. Use it to orient on what's landed without shelling out to `git log`.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "limit": { "type": "integer", "description": "Max commits to return (default 20, capped at 500)." }
+                        }
+                    }
                 }
             ]
         }),
@@ -488,6 +506,11 @@ fn handle_tools_call(
             }
         }
         "list_worktrees" => send_tool_result(w, id, &list_worktrees_json(ctx_path)),
+        "git_status" => send_tool_result(w, id, &git_status_json(ctx_path)),
+        "git_log" => {
+            let limit = args["limit"].as_u64().map_or(20, |n| n.min(500) as usize);
+            send_tool_result(w, id, &git_log_json(ctx_path, limit))
+        }
         "claim_worktree" => {
             let path = args["path"].as_str().unwrap_or("");
             if path.trim().is_empty() {

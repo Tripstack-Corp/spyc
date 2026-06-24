@@ -25,7 +25,7 @@
 mod blob;
 mod build;
 
-pub use blob::format_git_time;
+pub use blob::{commit_meta, format_git_time};
 
 use crate::git::model::DiffModel;
 use std::path::Path;
@@ -36,7 +36,7 @@ use std::path::Path;
 /// changed file. Bounded LRU, lives only for the off-thread model build.
 const OBJECT_CACHE_BYTES: usize = 8 * 1024 * 1024;
 
-use blob::{MAX_DIFF_LINES, account_file, commit_meta, path_selected, tree_blob_at};
+use blob::{MAX_DIFF_LINES, account_file, path_selected, tree_blob_at};
 use build::{
     OwnedIndexChange, WorkItem, build_index_change_file, build_tree_change_file,
     build_worktree_file, build_worktree_rename, collect_worktree_plan, own_index_change,

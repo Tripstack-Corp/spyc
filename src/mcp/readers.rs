@@ -252,6 +252,60 @@ pub(super) fn release_worktree_result(ctx_path: &Path, path_arg: &str) -> Result
         .map_err(|e| format!("release {}: {e}", target.display()))
 }
 
+/// One-word label for a `GitChange` (for the `git_status` JSON).
+const fn change_label(c: crate::ui::list_view::GitChange) -> &'static str {
+    use crate::ui::list_view::GitChange;
+    match c {
+        GitChange::Modified => "modified",
+        GitChange::Added => "added",
+        GitChange::Deleted => "deleted",
+        GitChange::Renamed => "renamed",
+        GitChange::Conflicted => "conflicted",
+    }
+}
+
+/// `git_status`: the focused worktree's working-tree status as a JSON array,
+/// one object per changed path — `{path, staged, unstaged, untracked}` (staged
+/// / unstaged are the change kind or null). Socket-thread, pure git on the
+/// search root; `[]` when clean or outside a repo.
+pub(super) fn git_status_json(ctx_path: &Path) -> String {
+    let root = search_root(ctx_path);
+    let Some(entries) = crate::git::status::repo_status(&root) else {
+        return "[]".to_string();
+    };
+    let arr: Vec<Value> = entries
+        .iter()
+        .map(|e| {
+            json!({
+                "path": e.rela_path,
+                "staged": e.staged.map(change_label),
+                "unstaged": e.unstaged.map(change_label),
+                "untracked": e.untracked,
+            })
+        })
+        .collect();
+    Value::Array(arr).to_string()
+}
+
+/// `git_log`: the most recent `limit` commits reachable from the focused
+/// worktree's HEAD, newest first — `{short_id, author, time, subject}` per
+/// entry. Socket-thread, pure git; `[]` outside a repo / unborn HEAD.
+pub(super) fn git_log_json(ctx_path: &Path, limit: usize) -> String {
+    let root = search_root(ctx_path);
+    let arr: Vec<Value> = crate::git::log::recent(&root, limit)
+        .iter()
+        .map(|c| {
+            json!({
+                "short_id": c.short_id,
+                "author": c.author,
+                "time": c.time,
+                "subject": c.subject,
+            })
+        })
+        .collect();
+    Value::Array(arr).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,6 +436,45 @@ mod tests {
         // Release → back to unlocked.
         release_worktree_result(&ctx, &wt.display().to_string()).expect("release");
         assert_eq!(feat(&ctx)["locked"], json!(false));
+    }
+
+    #[test]
+    fn git_status_and_log_reflect_the_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-q", "-m", "first"]);
+        // One tracked modification + one untracked file.
+        std::fs::write(repo.join("a.txt"), "a\nb\n").unwrap();
+        std::fs::write(repo.join("new.txt"), "x\n").unwrap();
+        // search_root falls back to project_home → cwd; point cwd at the repo.
+        let ctx = tmp.path().join("ctx.json");
+        std::fs::write(
+            &ctx,
+            json!({ "cwd": repo.display().to_string() }).to_string(),
+        )
+        .unwrap();
+
+        let status: Value = serde_json::from_str(&git_status_json(&ctx)).unwrap();
+        let arr = status.as_array().expect("status array");
+        let a = arr
+            .iter()
+            .find(|e| e["path"] == "a.txt")
+            .expect("a.txt entry");
+        assert_eq!(a["unstaged"], json!("modified"));
+        let n = arr
+            .iter()
+            .find(|e| e["path"] == "new.txt")
+            .expect("new.txt entry");
+        assert_eq!(n["untracked"], json!(true));
+
+        let log: Value = serde_json::from_str(&git_log_json(&ctx, 10)).unwrap();
+        let log = log.as_array().expect("log array");
+        assert_eq!(log.len(), 1, "one commit");
+        assert_eq!(log[0]["subject"], json!("first"));
     }
 }
 

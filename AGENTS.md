@@ -224,6 +224,11 @@ You are expected to be running inside spyc's split pane. If the
   files (a TUI multi-select you can't see otherwise), and
   `search_inventory` searches the user's persistent yanked-cache
   across sessions.
+- **For git state:** `git_status` (changed paths + kind, structured
+  JSON) and `git_log` (recent commits — `{short_id, author, time,
+  subject}`) read the focused worktree's working tree / history
+  in-process, scoped like search; prefer them over `Bash git status`/
+  `git log`. (No `git_diff` yet — shell out, or use the TUI `|` diff.)
 
 If the spyc MCP tools are NOT available, remind the user:
 "I don't see the spyc MCP tools — are we running inside spyc?

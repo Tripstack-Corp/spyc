@@ -408,7 +408,7 @@ feature that would *build on* this MCP surface. Tracked, not built here.
 | 2 | `feat/graveyard-write-blob` | `write_blob(bytes, label)` (pure, tested) | yes | low |
 | 3 | `feat/mcp-list-worktrees` | `list_worktrees` (R, socket thread) + `Worktree` status fields; update `SERVER_INSTRUCTIONS` | small | low |
 | 4 | `feat/mcp-safe-remove-worktree` | ✅ DONE — safe-by-default `remove_worktree` (archive untracked+uncommitted → `remove_force` → `branch::delete` iff merged) + `clean_worktree` folded in as an alias; rides the existing off-main lane; respects the `claim_worktree` lease | yes | **med** |
-| 5 | `feat/mcp-git-read-tools` | `git_status` / `git_diff` / `git_log` (R) | small | low |
+| 5 | `feat/mcp-git-read-tools` | ✅ `git_status` + `git_log` DONE (R, socket-thread); **`git_diff` deferred** — `DiffModel` is render-structured, a unified-text producer is its own effort + a shell agent can `git diff`; revisit if a non-shell client needs it | small | low |
 | 6 | `feat/mcp-create-worktree-ext` | `create_worktree` `base` + `open` | none | low |
 
 Ship 1–4 for the complete safe-cleanup loop; 5–6 are additive.

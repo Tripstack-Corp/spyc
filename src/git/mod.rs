@@ -18,6 +18,7 @@ pub mod branch;
 pub mod diff_model;
 pub mod discovery;
 pub mod excludes;
+pub mod log;
 pub mod model;
 pub mod restore;
 pub mod status;
