@@ -19,6 +19,13 @@ pub enum FileOp {
         inventory_ids: Vec<String>,
         paths: Vec<PathBuf>,
     },
+    /// Restore a git-deleted file back into the worktree from the index/HEAD
+    /// (in-process gix). `rela_path` is repo-relative; the op writes the blob
+    /// and refuses to clobber an existing file.
+    GitRestore {
+        repo_root: PathBuf,
+        rela_path: String,
+    },
 }
 
 #[derive(Debug)]
@@ -37,6 +44,10 @@ pub enum FileOutcome {
         payload: Vec<u8>,
         count: usize,
         skipped: usize,
+    },
+    Restored {
+        rela_path: String,
+        result: Result<(), String>,
     },
 }
 
@@ -63,6 +74,13 @@ pub fn run_file_op(op: FileOp) -> FileOutcome {
                 dest,
                 result,
             }
+        }
+        FileOp::GitRestore {
+            repo_root,
+            rela_path,
+        } => {
+            let result = crate::git::restore::restore_to_worktree(&repo_root, &rela_path).map(drop);
+            FileOutcome::Restored { rela_path, result }
         }
         FileOp::PipeContent {
             use_inventory,
@@ -170,6 +188,15 @@ impl App {
                     Err(e) => self.state.flash_error(format!("error: {e}")),
                 }
                 self.state.cur_mut().picks.clear();
+                self.state.refresh_listing();
+            }
+            FileOutcome::Restored { rela_path, result } => {
+                match result {
+                    Ok(()) => self.state.flash_info(format!("restored {rela_path}")),
+                    Err(e) => self.state.flash_error(format!("restore failed: {e}")),
+                }
+                // The file is back on disk (so its ghost row clears) and the
+                // git status changes — refresh both.
                 self.state.refresh_listing();
             }
             FileOutcome::PipedContent {

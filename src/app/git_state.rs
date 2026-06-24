@@ -8,9 +8,38 @@ use std::path::Path;
 use crate::ui::pager;
 
 use super::git_view_session::GitViewKind;
-use super::{App, state};
+use super::{App, Effect, state};
 
 impl App {
+    /// `g r` — restore the cursor's deleted (struck-through) file from the
+    /// index/HEAD back into the worktree. Only acts on a ghost row; the actual
+    /// blob read + write runs off-thread via `Effect::FileOp` (no blocking IO
+    /// on the input path), and the resulting refresh clears the ghost.
+    pub fn git_restore_cursor(&mut self) -> Vec<Effect> {
+        let Some(row) = self.state.cur().rows.get(self.state.cur().cursor.index) else {
+            return Vec::new();
+        };
+        if !row.deleted {
+            self.state
+                .flash_error("g r restores a deleted file — cursor isn't on one");
+            return Vec::new();
+        }
+        let path = row.path.clone();
+        let Some(repo_root) = self.state.cur().git_cache.current_repo_root.clone() else {
+            self.state.flash_error("restore: not in a git repository");
+            return Vec::new();
+        };
+        // Repo-relative, forward slashes (matches how git keys paths).
+        let Some(rela_path) = repo_relative(&path, &repo_root) else {
+            self.state.flash_error("restore: file is outside the repo");
+            return Vec::new();
+        };
+        vec![Effect::FileOp(super::file_ops::FileOp::GitRestore {
+            repo_root,
+            rela_path,
+        })]
+    }
+
     /// Drain the Model's git-request outbox onto the Runtime's worker
     /// channel. The Model records cache-miss requests in
     /// `state.git_cache.pending_git_requests` (it owns no `Sender`); this sends each
@@ -283,5 +312,59 @@ mod tests {
     fn repo_relative_root_itself_is_none() {
         let root = Path::new("/home/u/proj");
         assert!(repo_relative(Path::new("/home/u/proj"), root).is_none());
+    }
+
+    #[test]
+    fn git_restore_cursor_emits_restore_effect_for_a_ghost() {
+        use crate::app::file_ops::FileOp;
+        use crate::app::{App, Effect, RowData};
+        use crate::fs::EntryKind;
+        use std::path::PathBuf;
+
+        let root = PathBuf::from("/repo");
+        let mut app = App::test_app(root.clone());
+        app.state.left.git_cache.current_repo_root = Some(root.clone());
+        app.state.left.rows = vec![RowData {
+            path: root.join("gone.txt"),
+            display: "gone.txt".into(),
+            kind: EntryKind::File,
+            deleted: true,
+        }];
+        app.state.left.cursor.index = 0;
+
+        match app.git_restore_cursor().as_slice() {
+            [
+                Effect::FileOp(FileOp::GitRestore {
+                    repo_root,
+                    rela_path,
+                }),
+            ] => {
+                assert_eq!(repo_root, &root);
+                assert_eq!(rela_path, "gone.txt");
+            }
+            _ => panic!("expected a single GitRestore effect"),
+        }
+    }
+
+    #[test]
+    fn git_restore_cursor_is_a_noop_on_a_live_row() {
+        use crate::app::{App, RowData};
+        use crate::fs::EntryKind;
+        use std::path::PathBuf;
+
+        let root = PathBuf::from("/repo");
+        let mut app = App::test_app(root.clone());
+        app.state.left.git_cache.current_repo_root = Some(root.clone());
+        app.state.left.rows = vec![RowData {
+            path: root.join("real.txt"),
+            display: "real.txt".into(),
+            kind: EntryKind::File,
+            deleted: false,
+        }];
+        app.state.left.cursor.index = 0;
+        assert!(
+            app.git_restore_cursor().is_empty(),
+            "a live (non-deleted) row produces no restore effect"
+        );
     }
 }

@@ -201,7 +201,7 @@ impl App {
                 .file_name()
                 .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
             self.state
-                .flash_info(format!("{name}: deleted — `gd` to view its removal"));
+                .flash_info(format!("{name}: deleted — `gd` to view, `gr` to restore"));
             return Vec::new();
         }
 
