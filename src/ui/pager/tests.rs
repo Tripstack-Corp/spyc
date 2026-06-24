@@ -1,6 +1,6 @@
 //! Unit tests for the pager, split out of `pager` verbatim.
 
-use super::layout::{line_plain_text, pager_inner_area, wrap_line};
+use super::layout::{line_plain_text, pager_inner_area, visual_rows, wrap_line, wrap_line_capped};
 use super::*;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -54,7 +54,7 @@ fn position_indicator_multi_matches_recomputing_path() {
     let mut view = PagerView::new_plain("t", lines);
     view.columns = 2;
     let chunks = super::layout::partition_lines_static(&view.lines, 2);
-    for (scroll, vh) in [(0u16, 6u16), (3, 6), (8, 6), (100, 6)] {
+    for (scroll, vh) in [(0usize, 6u16), (3, 6), (8, 6), (100, 6)] {
         view.scroll = scroll;
         assert_eq!(
             view.position_indicator_multi(&chunks, vh),
@@ -971,4 +971,90 @@ fn long_file_shows_eof_marker_at_bottom() {
         text.contains("line 99"),
         "the last content line stays visible:\n{text}"
     );
+}
+
+// ---- PR4: scroll math (u16 saturation, wrap-row reachability) -----------
+
+/// Finding `ui/pager/mod.rs:141` / `pager_handler/mod.rs:311`: `scroll` was a
+/// `u16`, so any pager over 65 535 lines (a big log, a generated file) could
+/// not scroll past line 65 536. With `scroll: usize`, the bottom of a 70k-line
+/// document is reachable.
+#[test]
+fn scroll_reaches_beyond_u16_max_lines() {
+    let mut view = PagerView::new_plain("big", (0..70_000).map(|i| i.to_string()).collect());
+    view.wrap = false;
+    view.scroll_to_bottom(10);
+    assert!(
+        view.scroll > u16::MAX as usize,
+        "scroll {} should exceed the old u16 cap of 65535",
+        view.scroll
+    );
+    // logical scroll_max = 70_000 - 10, +1 for the [EOF] end-marker row.
+    assert_eq!(view.scroll, 69_991);
+}
+
+/// Finding `ui/pager/layout.rs:131`: `visual_rows` underestimated wrapped rows
+/// because `total_width.div_ceil(width)` assumes perfect packing. A wide
+/// (2-cell) glyph that doesn't fit the last cell of a row is pushed whole to
+/// the next row, so the true count is higher. The greedy walk must match
+/// `wrap_line`.
+#[test]
+fn visual_rows_counts_wide_char_greedy_waste() {
+    // FULLWIDTH 'A' is 2 cells. 5 of them = 10 cells. div_ceil(10,5)=2, but
+    // greedy fits 2 per 5-cell row (1 cell wasted) → 3 rows, matching wrap_line.
+    let wide = Line::from("\u{ff21}".repeat(5));
+    assert_eq!(visual_rows(&wide, 5), 3);
+    assert_eq!(visual_rows(&wide, 5), wrap_line(&wide, 5).len());
+    // ASCII packs perfectly: 10 chars at width 5 = 2 rows.
+    let ascii = Line::from("x".repeat(10));
+    assert_eq!(visual_rows(&ascii, 5), 2);
+    // A glyph wider than the whole width is forced onto one row (never zero).
+    assert_eq!(visual_rows(&Line::from("\u{ff21}".to_string()), 1), 1);
+    // Empty line is one visual row.
+    assert_eq!(visual_rows(&Line::from(""), 5), 1);
+}
+
+/// Finding `ui/pager/selection.rs:281`: the visual-cursor auto-scroll assumed
+/// one logical line == one screen row, so under wrap the cursor slid off the
+/// bottom without the viewport following. It must count *visual* rows.
+#[test]
+fn scroll_to_keep_visible_is_wrap_aware() {
+    // 5 lines, each 60 wide; body_w=20 → 3 visual rows each. Viewport = 6 rows.
+    let mut view = PagerView::new_plain("t", vec!["x".repeat(60); 5]);
+    view.wrap = true;
+    view.last_body_w.set(20);
+    view.enter_visual();
+    view.visual_jump_to(4, 6); // jump the cursor to the last line
+    // Logical math would leave scroll=0 (line 4 < 0+6) and lines 0,1 (6 rows)
+    // would fill the viewport, hiding line 4. Wrap-aware: walk back from 4
+    // (3+3=6 fits, +3=9 overflows) → top = line 3, so line 4 sits at the bottom.
+    assert_eq!(view.scroll, 3, "viewport must follow the cursor under wrap");
+    // With wrap off, the logical math applies: line 4, vh 6 → still visible at 0.
+    let mut plain = PagerView::new_plain("t", vec!["x".repeat(60); 5]);
+    plain.wrap = false;
+    plain.enter_visual();
+    plain.visual_jump_to(4, 6);
+    assert_eq!(plain.scroll, 0, "no wrap: 5 lines fit in 6 rows, no scroll");
+}
+
+/// Finding `ui/pager/render.rs:180`: the render path materialized a logical
+/// line's *entire* wrapped expansion every frame even though only the visible
+/// rows are painted. `wrap_line_capped` bounds the work to `max_rows`, and the
+/// capped prefix must equal the full expansion's prefix (so output is identical).
+#[test]
+fn wrap_line_capped_bounds_to_visible_rows() {
+    let line = Line::from("x".repeat(100)); // 10 rows at width 10
+    let full = wrap_line(&line, 10);
+    assert_eq!(full.len(), 10);
+    let capped = wrap_line_capped(&line, 10, 3);
+    assert_eq!(capped.len(), 3, "bounded to the 3 requested rows");
+    for i in 0..3 {
+        assert_eq!(
+            plain_text(&capped[i]),
+            plain_text(&full[i]),
+            "row {i} differs"
+        );
+    }
+    // max_rows past the real row count is a no-op (full expansion).
+    assert_eq!(wrap_line_capped(&line, 10, 999).len(), 10);
 }

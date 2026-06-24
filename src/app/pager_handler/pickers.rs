@@ -159,7 +159,7 @@ impl App {
                     let old_cursor = cursor;
                     self.show_history_popup();
                     if let Some(ref mut v) = self.view.pager {
-                        let max = (v.line_count() as usize).saturating_sub(1);
+                        let max = v.line_count().saturating_sub(1);
                         v.picker_cursor = Some(old_cursor.min(max));
                         let new_cur = v.picker_cursor.unwrap_or(0);
                         let entries = self.state.history.entries();

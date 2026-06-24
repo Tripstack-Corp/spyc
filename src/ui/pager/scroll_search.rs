@@ -43,28 +43,29 @@ impl PagerView {
             // First visit: project proportionally so a user halfway
             // down the source lands halfway down the rendered view
             // (and vice versa). Bottom of one side maps to bottom of
-            // the other.
+            // the other. u128 for the multiply so the product of two
+            // usize line indices can't overflow.
             if old_total <= 1 || new_total == 0 {
                 0
             } else {
-                let num = u32::from(old_scroll) * (new_total - 1) as u32;
-                let denom = (old_total - 1) as u32;
-                u16::try_from(num / denom).unwrap_or(u16::MAX)
+                let num = old_scroll as u128 * (new_total - 1) as u128;
+                let denom = (old_total - 1) as u128;
+                usize::try_from(num / denom).unwrap_or(usize::MAX)
             }
         });
-        let max_index = u16::try_from(new_total.saturating_sub(1)).unwrap_or(u16::MAX);
+        let max_index = new_total.saturating_sub(1);
         self.scroll = restored.min(max_index);
         self.saved_alt_scroll = Some(old_scroll);
         true
     }
 
-    pub fn line_count(&self) -> u16 {
-        u16::try_from(self.lines.len()).unwrap_or(u16::MAX)
+    pub const fn line_count(&self) -> usize {
+        self.lines.len()
     }
 
     /// Lines visible per "page" — viewport_height * columns.
-    pub fn page_lines(&self, viewport_height: u16) -> u16 {
-        viewport_height.saturating_mul(u16::from(self.columns.max(1)))
+    pub fn page_lines(&self, viewport_height: u16) -> usize {
+        viewport_height as usize * self.columns.max(1) as usize
     }
 
     /// Maximum useful `scroll` value for the current layout. In multi-col
@@ -80,7 +81,7 @@ impl PagerView {
     /// `body_w` from the most recent render, we walk lines from the
     /// end summing visual rows; max_scroll = the highest logical line
     /// index whose inclusion still fits the viewport.
-    pub fn scroll_max(&self, viewport_height: u16) -> u16 {
+    pub fn scroll_max(&self, viewport_height: u16) -> usize {
         if self.columns.max(1) as usize > 1 {
             // Multi-col: bound by the longest column chunk. Wrap is irrelevant
             // here because multi-col is only used for pickers (find finder,
@@ -108,9 +109,9 @@ impl PagerView {
     /// The greatest scroll that pins the last line to the bottom row (the
     /// viewport fills exactly, no room for an end marker). [`Self::scroll_max`]
     /// adds the `[EOF]` reservation on top of this.
-    fn scroll_max_content(&self, viewport_height: u16) -> u16 {
-        let logical_max = u16::try_from(self.lines.len().saturating_sub(viewport_height.into()))
-            .unwrap_or(u16::MAX);
+    fn scroll_max_content(&self, viewport_height: u16) -> usize {
+        let vh = viewport_height as usize;
+        let logical_max = self.lines.len().saturating_sub(vh);
         let body_w = self.last_body_w.get() as usize;
         if !self.wrap || body_w == 0 || viewport_height == 0 {
             return logical_max;
@@ -121,13 +122,11 @@ impl PagerView {
         // greatest scroll value that still keeps the last line
         // visible: starting from `i`, the renderer fills exactly
         // viewport_h rows ending at the document's last line.
-        let vh = u32::from(viewport_height);
-        let mut acc = 0u32;
+        let mut acc = 0usize;
         for (i, line) in self.lines.iter().enumerate().rev() {
-            let rows = u32::try_from(visual_rows(line, body_w)).unwrap_or(u32::MAX);
-            acc = acc.saturating_add(rows);
+            acc = acc.saturating_add(visual_rows(line, body_w));
             if acc >= vh {
-                return u16::try_from(i).unwrap_or(u16::MAX);
+                return i;
             }
         }
         // Whole document fits in the viewport — no scrolling needed.
@@ -142,9 +141,9 @@ impl PagerView {
     }
 
     pub fn scroll_by(&mut self, delta: i32, viewport_height: u16) {
-        let current = i32::from(self.scroll);
-        let new = (current + delta).max(0);
-        self.scroll = u16::try_from(new).unwrap_or(u16::MAX);
+        let current = self.scroll as i64;
+        let new = (current + i64::from(delta)).max(0);
+        self.scroll = usize::try_from(new).unwrap_or(usize::MAX);
         self.clamp_scroll(viewport_height);
     }
 
@@ -186,14 +185,14 @@ impl PagerView {
     /// chunk (each column scrolls independently within its chunk) minus the
     /// viewport. Split out so the render pass can pass a partition it already
     /// computed instead of re-partitioning (see [`Self::position_indicator_multi`]).
-    fn multi_col_max_scroll(chunks: &[(usize, usize)], viewport_height: u16) -> u16 {
+    fn multi_col_max_scroll(chunks: &[(usize, usize)], viewport_height: u16) -> usize {
         let longest = chunks.iter().map(|(s, e)| e - s).max().unwrap_or(0);
-        u16::try_from(longest.saturating_sub(viewport_height.into())).unwrap_or(u16::MAX)
+        longest.saturating_sub(viewport_height as usize)
     }
 
     /// The "Top" / "Bot" / "All" / "NN%" label from a scroll position and its
     /// max. Shared by the single- and multi-column indicator paths.
-    fn indicator_string(scroll: u16, max_scroll: u16) -> String {
+    fn indicator_string(scroll: usize, max_scroll: usize) -> String {
         if max_scroll == 0 {
             return "All".to_string();
         }
@@ -203,7 +202,7 @@ impl PagerView {
         if scroll >= max_scroll {
             return "Bot".to_string();
         }
-        let pct = (u32::from(scroll) * 100) / u32::from(max_scroll);
+        let pct = (scroll as u64 * 100) / max_scroll as u64;
         format!("{pct}%")
     }
 
@@ -377,7 +376,7 @@ impl PagerView {
         };
         let target = local_idx as i64 - third;
         let scroll = target.max(0);
-        self.scroll = u16::try_from(scroll).unwrap_or(u16::MAX);
+        self.scroll = usize::try_from(scroll).unwrap_or(usize::MAX);
         self.clamp_scroll(viewport_height);
     }
 

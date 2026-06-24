@@ -347,14 +347,14 @@ enum PagerReturn {
     TempFile {
         path: PathBuf,
         title: String,
-        scroll: u16,
+        scroll: usize,
         mount: crate::ui::pager::Mount,
         pane_scroll: bool,
     },
     /// On-disk file: reopen from the original path.
     SourceFile {
         path: PathBuf,
-        scroll: u16,
+        scroll: usize,
         mount: crate::ui::pager::Mount,
         pane_scroll: bool,
     },

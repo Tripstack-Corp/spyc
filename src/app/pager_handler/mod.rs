@@ -164,7 +164,7 @@ impl App {
             .active_pager_ref()
             .and_then(|v| v.source_path.clone().map(|p| (p, v.scroll)))
         {
-            self.view.pager_positions.record(&path, scroll);
+            self.view.pager_positions.record(&path, scroll as u64);
         }
     }
 
@@ -508,7 +508,7 @@ impl App {
                 // Restore the scroll position from the previous visit (if any).
                 if let Some(saved) = self.view.pager_positions.get(path) {
                     let last = view.lines.len().saturating_sub(1);
-                    view.scroll = saved.min(u16::try_from(last).unwrap_or(u16::MAX));
+                    view.scroll = usize::try_from(saved).unwrap_or(usize::MAX).min(last);
                     // Then clamp to the document END for the viewport, not just
                     // the last line — a saved row near the bottom (e.g. from a
                     // taller/wider column) would otherwise sit at the viewport

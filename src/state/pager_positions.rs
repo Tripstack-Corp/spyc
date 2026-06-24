@@ -23,9 +23,11 @@ const MAX_ENTRIES: usize = 500;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Entry {
     /// Top-line index of the viewport when the view was last seen.
-    /// `u16` matches `PagerView::scroll`; files past 65k lines clamp
-    /// at u16::MAX (acceptable — pager already truncates huge files).
-    scroll: u16,
+    /// `u64` (a fixed width for the persisted format, vs. the in-memory
+    /// `usize` of `PagerView::scroll`) so positions in files past 65 535
+    /// lines round-trip — old JSON written when this was `u16` still
+    /// parses (any small number deserializes into `u64`).
+    scroll: u64,
     /// Epoch seconds of the last save. Drives LRU eviction.
     last_visit: u64,
 }
@@ -47,13 +49,13 @@ impl PagerPositions {
 
     /// Look up the saved scroll for `path`. Returns `None` if the
     /// path was never seen.
-    pub fn get(&self, path: &Path) -> Option<u16> {
+    pub fn get(&self, path: &Path) -> Option<u64> {
         self.entries.get(&Self::key(path)).map(|e| e.scroll)
     }
 
     /// Record (or update) the scroll for `path`. Bumps `last_visit`
     /// and prunes if we're over the cap.
-    pub fn record(&mut self, path: &Path, scroll: u16) {
+    pub fn record(&mut self, path: &Path, scroll: u64) {
         let now = crate::sysinfo::epoch_secs();
         self.entries.insert(
             Self::key(path),

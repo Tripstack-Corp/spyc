@@ -164,7 +164,7 @@ impl App {
                     view.source_path = Some(path);
                     // Jump to the referenced line (0-indexed scroll).
                     if let Some(ln) = line {
-                        view.scroll = u16::try_from(ln.saturating_sub(1)).unwrap_or(u16::MAX);
+                        view.scroll = ln.saturating_sub(1);
                     }
                     self.set_pager(view);
                 }
