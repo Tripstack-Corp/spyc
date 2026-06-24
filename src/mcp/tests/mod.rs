@@ -129,7 +129,7 @@ fn tools_list_response() {
     .unwrap();
     let resp = parse_response(&output);
     let tools = resp["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 17);
+    assert_eq!(tools.len(), 19);
     assert_eq!(tools[0]["name"], "get_spyc_context");
     assert_eq!(tools[1]["name"], "navigate_to");
     assert_eq!(tools[2]["name"], "set_filter");
@@ -147,6 +147,8 @@ fn tools_list_response() {
     assert_eq!(tools[14]["name"], "list_worktrees");
     assert_eq!(tools[15]["name"], "claim_worktree");
     assert_eq!(tools[16]["name"], "release_worktree");
+    assert_eq!(tools[17]["name"], "git_status");
+    assert_eq!(tools[18]["name"], "git_log");
 }
 
 #[test]
