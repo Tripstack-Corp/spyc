@@ -102,7 +102,7 @@ impl App {
         if let Some(r) = self.handle_pager_jump_history(key, viewport) {
             return r;
         }
-        if let Some(r) = self.handle_pager_worktree_pick(key) {
+        if let Some(r) = self.handle_pager_worktree_pick(key, viewport) {
             return r;
         }
         if let Some(r) = self.handle_pager_history_editor(key, viewport) {
