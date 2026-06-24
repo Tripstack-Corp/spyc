@@ -182,7 +182,20 @@ pub fn coalesce_recv(
             | Message::WorktreeJobDone
             // Option B: codex-session-scan-done — payloadless, drained by
             // `apply_codex_session_pins` in the pre-recv scan.
-            | Message::CodexSessionReady,
+            | Message::CodexSessionReady
+            // Tier 5 (cluster 1, #514): off-thread file-op / inventory done —
+            // payloadless, the outcome rides `runtime.file_results` /
+            // `inventory_results` and is drained by `apply_file_outcomes` /
+            // `apply_inventory_outcomes` in the pre-recv scan. These were wired
+            // into `coalesce_pending` (the burst drain) and the
+            // `dispatch_effective` unreachable arm but MISSED here, so a
+            // FileOpDone/InventoryDone arriving as the FIRST message of a wakeup
+            // (the common case: a copy/move worker finishes and its wake is next
+            // off the channel) fell through to `other` and surfaced as
+            // `effective`, panicking on the unreachable. Collapse them like
+            // every other payloadless done-wake.
+            | Message::FileOpDone
+            | Message::InventoryDone,
         ) => coalesce_tail(rx, ctx),
         other => other,
     }
@@ -548,6 +561,28 @@ mod tests {
         assert_eq!(fs_pending.len(), 2);
         assert_eq!(git_pending.len(), 1); // Tick + Grep/Find wakes dropped, not buffered
         assert_eq!(mcp_pending.len(), 1, "MCP request buffered, not dropped");
+    }
+
+    /// Regression: the off-thread file-op / inventory done-wakes (cluster 1,
+    /// #514) were wired into `coalesce_pending` and the `dispatch_effective`
+    /// unreachable arm but MISSED in `coalesce_recv`'s collapse list — so one
+    /// arriving as the FIRST message of a wakeup (a copy/move worker finishing,
+    /// its wake next off the channel) fell through to `other`, surfaced as
+    /// `effective`, and panicked on the unreachable. Each must collapse to a
+    /// synthesized Timeout (the outcome rides `runtime.file_results` /
+    /// `inventory_results`, drained by the pre-recv scan), leaving nothing
+    /// queued.
+    #[test]
+    fn coalesce_recv_collapses_file_op_and_inventory_done() {
+        for done in [Message::FileOpDone, Message::InventoryDone] {
+            let (_tx, rx) = mpsc::channel::<Message>();
+            let mut ctx = RunCtx::for_test();
+            let out = coalesce_recv(Ok(done), &rx, &mut ctx);
+            assert!(
+                matches!(out, Err(mpsc::RecvTimeoutError::Timeout)),
+                "FileOpDone/InventoryDone must collapse to Timeout, not surface as `effective`"
+            );
+        }
     }
 
     #[test]
