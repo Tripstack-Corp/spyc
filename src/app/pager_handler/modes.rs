@@ -94,6 +94,12 @@ impl App {
                             view.picker_edit_cursor =
                                 Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
                         }
+                    } else if self.state.pending_worktrees.is_some() {
+                        // Worktree picker: land the highlighted cursor on the
+                        // search match so Enter then switches to that worktree.
+                        if let Some(line) = view.current_match_line() {
+                            view.picker_cursor = Some(line);
+                        }
                     }
                 }
                 KeyCode::Backspace => view.search_backspace(),

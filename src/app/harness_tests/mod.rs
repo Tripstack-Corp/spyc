@@ -200,6 +200,40 @@ fn overlay_pager_consumes_keys_not_list() {
     });
 }
 
+/// Worktree picker: `j`/`k` move the highlighted `picker_cursor` (not the pager
+/// scroll), clamping at the ends, and don't close the picker. (Selection on
+/// Enter/1-9 chdirs the focused column, which `set_current_dir`s — left out
+/// here to keep the unit test chdir-free per the parallel-runner rule.)
+#[test]
+fn worktree_picker_jk_moves_highlight() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+        // Simulate an open worktree picker: 3 entries, cursor on the first.
+        app.state.pending_worktrees = Some(vec![
+            std::path::PathBuf::from("/tmp/wt0"),
+            std::path::PathBuf::from("/tmp/wt1"),
+            std::path::PathBuf::from("/tmp/wt2"),
+        ]);
+        let mut view =
+            PagerView::new_plain("worktrees", vec!["wt0".into(), "wt1".into(), "wt2".into()]);
+        view.picker_cursor = Some(0);
+        app.view.pager = Some(view);
+
+        let cursor = |app: &App| app.view.pager.as_ref().unwrap().picker_cursor;
+        app.handle_key(key('j')).unwrap();
+        assert_eq!(cursor(&app), Some(1), "j moves down");
+        app.handle_key(key('j')).unwrap();
+        assert_eq!(cursor(&app), Some(2));
+        app.handle_key(key('j')).unwrap();
+        assert_eq!(cursor(&app), Some(2), "clamps at the last row");
+        app.handle_key(key('k')).unwrap();
+        assert_eq!(cursor(&app), Some(1), "k moves up");
+        assert!(app.view.pager.is_some(), "j/k keep the picker open");
+        assert!(app.state.pending_worktrees.is_some());
+    });
+}
+
 /// Routing: a paste while the F-finder is open feeds the text into the
 /// picker query (type-to-filter), not the bottom pane. Regression for the
 /// key/paste dispatch asymmetry — keys hit the modal finder first

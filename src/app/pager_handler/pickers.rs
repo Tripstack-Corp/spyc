@@ -99,35 +99,73 @@ impl App {
         None
     }
 
-    /// Worktree picker: 1-9 switches the **focused** column to the chosen
-    /// worktree (focus `a` → switch `a`; focus `b` → switch `b`).
-    pub(super) fn handle_pager_worktree_pick(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
-        if let Some(ref worktrees) = self.state.pending_worktrees
-            && let KeyCode::Char(c @ '1'..='9') = key.code
-        {
-            let idx = (c as u8 - b'1') as usize;
-            if let Some(path) = worktrees.get(idx).cloned() {
-                self.clear_pager();
-                self.state.pending_worktrees = None;
-                self.view.needs_full_repaint = true;
-                // Switch the FOCUSED column (`chdir` targets `cur()`). To put a
-                // worktree in `b`, focus it (or open it with `^s n`) first. The
-                // per-column tools follow this column's `current_repo_root`, so
-                // PROJECT_HOME is NOT re-anchored — it stays the overall anchor
-                // (`g h`). (`g w` jumps to this column's worktree root.)
-                if let Err(e) = self.state.chdir(&path) {
-                    self.state.flash_error(format!("chdir: {e}"));
-                    return Some(Vec::new());
+    /// Worktree picker: `j`/`k` (or arrows) move the highlighted row, `Enter`
+    /// switches the **focused** column to it, and `1`-`9` quick-switch by number
+    /// (focus `a` → switch `a`; focus `b` → switch `b`). `/` search syncs the
+    /// cursor to its match (see `handle_pager_search_typing`). Other keys fall
+    /// through (so `q`/`Esc`/scroll still work via the motion handler).
+    pub(super) fn handle_pager_worktree_pick(
+        &mut self,
+        key: KeyEvent,
+        viewport: u16,
+    ) -> Option<Vec<Effect>> {
+        self.state.pending_worktrees.as_ref()?;
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(view) = active_pager_mut!(self) {
+                    view.picker_move(1, viewport);
                 }
-                // Re-key the focused column's harpoon to the new worktree root.
-                self.reconcile_harpoon();
-                self.state
-                    .flash_info(format!("worktree: {}", crate::paths::display_tilde(&path)));
-                return Some(Vec::new());
+                Some(Vec::new())
             }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(view) = active_pager_mut!(self) {
+                    view.picker_move(-1, viewport);
+                }
+                Some(Vec::new())
+            }
+            KeyCode::Enter => {
+                let cursor = active_pager_mut!(self)
+                    .and_then(|v| v.picker_cursor)
+                    .unwrap_or(0);
+                self.switch_to_pending_worktree(cursor);
+                Some(Vec::new())
+            }
+            KeyCode::Char(c @ '1'..='9') => {
+                self.switch_to_pending_worktree((c as u8 - b'1') as usize);
+                Some(Vec::new())
+            }
+            _ => None,
         }
+    }
 
-        None
+    /// Switch the focused column to `pending_worktrees[idx]` and close the
+    /// picker. No-op (picker stays open) when `idx` is out of range.
+    fn switch_to_pending_worktree(&mut self, idx: usize) {
+        let Some(path) = self
+            .state
+            .pending_worktrees
+            .as_ref()
+            .and_then(|w| w.get(idx))
+            .cloned()
+        else {
+            return;
+        };
+        self.clear_pager();
+        self.state.pending_worktrees = None;
+        self.view.needs_full_repaint = true;
+        // Switch the FOCUSED column (`chdir` targets `cur()`). To put a worktree
+        // in `b`, focus it (or open it with `^s n`) first. The per-column tools
+        // follow this column's `current_repo_root`, so PROJECT_HOME is NOT
+        // re-anchored — it stays the overall anchor (`g h`). (`g w` jumps to
+        // this column's worktree root.)
+        if let Err(e) = self.state.chdir(&path) {
+            self.state.flash_error(format!("chdir: {e}"));
+            return;
+        }
+        // Re-key the focused column's harpoon to the new worktree root.
+        self.reconcile_harpoon();
+        self.state
+            .flash_info(format!("worktree: {}", crate::paths::display_tilde(&path)));
     }
 
     /// History editor: vi-edit the highlighted line, Enter runs, Ctrl+D deletes.

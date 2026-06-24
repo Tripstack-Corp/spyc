@@ -229,13 +229,20 @@ impl App {
     pub fn worktree_list(&mut self) {
         match crate::git::worktree::list(&self.state.cur().listing.dir) {
             Some(worktrees) => {
+                let cur_dir = self.state.cur().listing.dir.clone();
+                // Start the cursor on the worktree the focused column is in (so
+                // the highlight reflects "where I am"), else the first row.
+                let start = worktrees
+                    .iter()
+                    .position(|w| w.path == cur_dir)
+                    .unwrap_or(0);
                 self.state.pending_worktrees =
                     Some(worktrees.iter().map(|w| w.path.clone()).collect());
                 let lines: Vec<String> = worktrees
                     .iter()
                     .enumerate()
                     .map(|(i, wt)| {
-                        let current = if wt.path == self.state.cur().listing.dir {
+                        let current = if wt.path == cur_dir {
                             " ← current"
                         } else {
                             ""
@@ -250,10 +257,17 @@ impl App {
                         )
                     })
                     .collect();
-                let view = pager::PagerView::new_plain(
-                    "git worktrees — press 1-9 to switch the focused column, q to close",
+                let mut view = pager::PagerView::new_plain(
+                    "git worktrees — j/k+Enter or 1-9 to switch, / to search, q to close",
                     lines,
                 );
+                // A highlighted picker row (j/k move it, Enter switches to it);
+                // `/` search syncs the cursor to its match (see
+                // `handle_pager_search_typing`). Mirrors the jump-history popup.
+                view.picker_cursor = Some(start);
+                view.no_history = true;
+                view.show_line_numbers = false;
+                view.wrap = false;
                 self.set_pager(view);
             }
             None => self

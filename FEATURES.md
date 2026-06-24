@@ -194,9 +194,11 @@ spyc's workflow: browse files above, talk to Claude below.
   running job. `^s` is at worst terminal flow-control XOFF, which spyc's
   raw mode clears; over a flow-control-sensitive SSH/serial link it may
   still be intercepted.)
-- **W l** opens a **worktree picker** — pick a git worktree and the
-  *focused* column switches to it (focus `b` first to put a worktree
-  there). With the MCP tools (`create_worktree` / `open_worktree` /
+- **W l** opens a **worktree picker** — `j`/`k` (or arrows) move the
+  highlighted row, `Enter` switches the *focused* column to it, `/`
+  searches (the cursor lands on the match), and `1`-`9` quick-switch by
+  number (focus `b` first to put a worktree there). With the MCP tools
+  (`create_worktree` / `open_worktree` /
   `remove_worktree` / `clean_worktree`) an agent can spin up a worktree,
   open it in `b`, work, and tear it down — while `a` stays on the main
   branch.
