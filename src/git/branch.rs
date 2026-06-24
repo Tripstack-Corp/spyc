@@ -115,6 +115,20 @@ fn count_reachable(
     )
 }
 
+/// Delete the local branch ref `refs/heads/<branch>` in the repo at
+/// `repo_root`. Unconditional at the gix level — safe-remove only calls this
+/// once it has confirmed the branch is merged (`delete_branch: auto`), so the
+/// "don't lose unmerged commits" policy lives in the caller, not here.
+///
+/// Pure facade, in-process gix — same contract as [`default_base`].
+pub fn delete(repo_root: &Path, branch: &str) -> std::io::Result<()> {
+    let repo = gix::open(repo_root).map_err(std::io::Error::other)?;
+    repo.find_reference(&format!("refs/heads/{branch}"))
+        .map_err(std::io::Error::other)?
+        .delete()
+        .map_err(std::io::Error::other)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +211,22 @@ mod tests {
         let (_t, root) = init_repo();
         assert!(branch_status(&root, "does-not-exist", "main").is_none());
         assert!(branch_status(&root, "", "main").is_none());
+    }
+
+    #[test]
+    fn delete_removes_the_branch_ref() {
+        let (_t, root) = init_repo();
+        run_git(&root, &["branch", "doomed", "main"]);
+        let exists = |b: &str| {
+            gix::open(&root)
+                .unwrap()
+                .find_reference(&format!("refs/heads/{b}"))
+                .is_ok()
+        };
+        assert!(exists("doomed"), "precondition: branch present");
+        delete(&root, "doomed").expect("delete the branch");
+        assert!(!exists("doomed"), "branch ref removed");
+        // Deleting a missing branch errors (no ref to find).
+        assert!(delete(&root, "doomed").is_err());
     }
 }

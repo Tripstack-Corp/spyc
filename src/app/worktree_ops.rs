@@ -41,9 +41,11 @@ pub enum WorktreeJob {
         /// the focused column's HEAD). `None` falls back to HEAD in `add`.
         base: Option<String>,
     },
-    /// `remove_worktree`: tear down the worktree at `target`.
+    /// `remove_worktree`: safe-by-default teardown of `target` — archive
+    /// untracked + uncommitted content to the graveyard, force-remove, delete
+    /// the branch iff merged.
     Remove { target: std::path::PathBuf },
-    /// `clean_worktree`: archive untracked files, then remove `target`.
+    /// `clean_worktree`: an alias of `Remove` (kept for the MCP tool name).
     Clean { target: std::path::PathBuf },
 }
 
@@ -100,41 +102,53 @@ pub fn run_worktree_job(job: WorktreeJob) -> WorktreeJobResult {
                 Err(e) => err_result(format!("worktree add: {e}")),
             }
         }
-        WorktreeJob::Remove { target } => match crate::git::worktree::remove(&target) {
-            Ok(()) => WorktreeJobResult {
-                response: McpResponse::Ok {
-                    message: format!("removed worktree {}", target.display()),
-                },
-                flash: Some(format!("[mcp] removed worktree {}", target.display())),
-                mutated: true,
-            },
-            Err(e) => err_result(format!("worktree remove: {e}")),
-        },
-        WorktreeJob::Clean { target } => {
-            match crate::app::worktree_clean::clean_worktree(&target) {
+        // `clean` is folded into `remove`: both archive untracked + uncommitted
+        // content to the graveyard, force-remove the tree, and delete the branch
+        // iff merged (safe-by-default).
+        WorktreeJob::Remove { target } | WorktreeJob::Clean { target } => {
+            match crate::app::worktree_clean::safe_remove_worktree(&target) {
                 Ok(report) => {
-                    let message = match &report.label {
-                        Some(label) => format!(
-                            "cleaned worktree {} — archived {} untracked entr{} to the graveyard as '{label}'",
-                            target.display(),
-                            report.archived,
-                            if report.archived == 1 { "y" } else { "ies" },
-                        ),
-                        None => format!(
-                            "cleaned worktree {} (no untracked files to archive)",
-                            target.display()
-                        ),
-                    };
+                    let message = safe_remove_message(&target, &report);
                     WorktreeJobResult {
                         flash: Some(format!("[mcp] {message}")),
                         response: McpResponse::Ok { message },
                         mutated: true,
                     }
                 }
-                Err(e) => err_result(format!("worktree clean: {e}")),
+                Err(e) => err_result(format!("worktree remove: {e}")),
             }
         }
     }
+}
+
+/// Build the human/agent-facing message for a safe-remove outcome: what was
+/// archived, and whether the branch was deleted (merged) or kept (unmerged).
+fn safe_remove_message(
+    target: &std::path::Path,
+    report: &crate::app::worktree_clean::SafeRemoveReport,
+) -> String {
+    let mut parts = vec![format!("removed worktree {}", target.display())];
+    if let Some(label) = &report.label {
+        parts.push(format!(
+            "archived {} uncommitted/untracked entr{} to the graveyard as '{label}'",
+            report.archived,
+            if report.archived == 1 { "y" } else { "ies" }
+        ));
+    }
+    match (
+        &report.branch,
+        report.branch_deleted,
+        report.kept_unmerged_ahead,
+    ) {
+        (Some(b), true, _) => parts.push(format!("deleted merged branch '{b}'")),
+        (Some(b), false, Some(ahead)) => parts.push(format!(
+            "kept branch '{b}' ({ahead} commit{} not in base)",
+            if ahead == 1 { "" } else { "s" }
+        )),
+        (Some(b), false, _) => parts.push(format!("kept branch '{b}'")),
+        (None, _, _) => parts.push("detached HEAD (no branch)".to_string()),
+    }
+    parts.join("; ")
 }
 
 impl App {
