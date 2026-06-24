@@ -347,6 +347,15 @@ explicit `base` override on the tools. For `create_worktree` the base resolves
 from **PROJECT_HOME** (the main repo root), not the focused column (§3 Phase 1).
 Minor work; no new dependency.
 
+**POLA, part two — the worktree *path* (fixed):** the base-branch fix (#511)
+left a sibling bug. `git::worktree::add` built the `<repo>.worktrees/<branch>`
+path from the workdir `gix::discover` returned for the asking dir — so creating
+a worktree while the asking column sat *inside* an existing linked worktree
+nested the new one under `<linked>.worktrees/<branch>`. Fixed by anchoring the
+path on the **main** worktree root (resolved from the shared `common_dir`, the
+same way `list()` does), independent of where the asking column is. One change
+in `add`; covers both the MCP and the `W n` TUI path.
+
 ---
 
 ## 8. Testing
