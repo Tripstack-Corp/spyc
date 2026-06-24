@@ -1007,11 +1007,13 @@ mod render_tests {
                 path: dir.join("run"),
                 display: "run*".to_string(), // ls -F decoration for an executable
                 kind: EntryKind::Executable,
+                deleted: false,
             },
             RowData {
                 path: dir.join("a.rs"),
                 display: "a.rs".to_string(),
                 kind: EntryKind::File,
+                deleted: false,
             },
         ];
         // git status keys BOTH by bare basename (no `*`).

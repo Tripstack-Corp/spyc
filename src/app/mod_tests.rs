@@ -848,6 +848,7 @@ mod git_key_tests {
             path: PathBuf::from("/repo").join(name),
             display: display.to_string(),
             kind,
+            deleted: false,
         }
     }
 

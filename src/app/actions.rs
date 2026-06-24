@@ -496,6 +496,9 @@ impl App {
                     self.open_git_blame();
                 }
             }
+            Action::GitRestore => {
+                effects = self.git_restore_cursor();
+            }
 
             Action::ShowMemory => self.show_session_info(),
             Action::ColorToggle => {

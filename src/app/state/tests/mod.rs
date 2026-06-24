@@ -20,6 +20,81 @@ fn test_state() -> AppState {
 }
 
 #[test]
+fn rebuild_rows_synthesizes_struck_ghost_for_deleted_file() {
+    use crate::fs::Entry;
+    use crate::ui::list_view::{GitChange, GitFileStatus};
+    use std::time::SystemTime;
+
+    let mk = |name: &str| Entry {
+        path: PathBuf::from("/tmp/test").join(name),
+        name: name.to_string(),
+        kind: EntryKind::File,
+        size: 0,
+        mtime: SystemTime::UNIX_EPOCH,
+    };
+    let mut s = test_state();
+    s.left.view = crate::app::View::Dir;
+    s.left.sort_order = SortMode::Name;
+    s.left.sort_reversed = false;
+    // Two files on disk; `mid.txt` is tracked-but-deleted (gone from disk).
+    s.left.listing.entries = vec![mk("aaa.txt"), mk("zzz.txt")];
+    s.left.git.files.insert(
+        "mid.txt".to_string(),
+        GitFileStatus::unstaged(GitChange::Deleted),
+    );
+    s.rebuild_rows();
+
+    // The deleted file is synthesized as a row, interleaved by name, and flagged
+    // so the view strikes it through.
+    let names: Vec<&str> = s.left.rows.iter().map(|r| r.display.as_str()).collect();
+    assert_eq!(
+        names,
+        ["aaa.txt", "mid.txt", "zzz.txt"],
+        "ghost interleaves into the name sort"
+    );
+    let ghost = s.left.rows.iter().find(|r| r.display == "mid.txt").unwrap();
+    assert!(ghost.deleted, "the deleted file is a ghost row");
+    assert!(
+        s.left
+            .rows
+            .iter()
+            .filter(|r| r.display != "mid.txt")
+            .all(|r| !r.deleted),
+        "real on-disk rows are never flagged deleted"
+    );
+}
+
+#[test]
+fn rebuild_rows_does_not_ghost_a_deleted_file_still_on_disk() {
+    use crate::fs::Entry;
+    use crate::ui::list_view::{GitChange, GitFileStatus};
+    use std::time::SystemTime;
+
+    let mut s = test_state();
+    s.left.view = crate::app::View::Dir;
+    // `staged.txt` is `git rm --cached` (deleted in the index) but still present
+    // on disk — it keeps its real row, no ghost duplicate.
+    s.left.listing.entries = vec![Entry {
+        path: PathBuf::from("/tmp/test/staged.txt"),
+        name: "staged.txt".to_string(),
+        kind: EntryKind::File,
+        size: 1,
+        mtime: SystemTime::UNIX_EPOCH,
+    }];
+    s.left.git.files.insert(
+        "staged.txt".to_string(),
+        GitFileStatus {
+            staged: Some(GitChange::Deleted),
+            unstaged: None,
+            untracked: false,
+        },
+    );
+    s.rebuild_rows();
+    assert_eq!(s.left.rows.len(), 1, "no ghost for an on-disk file");
+    assert!(!s.left.rows[0].deleted, "the real row stays a real row");
+}
+
+#[test]
 fn reset_orphaned_columns_snaps_a_removed_worktree_column_home() {
     let tmp = tempfile::tempdir().unwrap();
     let home = std::fs::canonicalize(tmp.path()).unwrap();
@@ -53,6 +128,7 @@ fn state_with_rows(names: &[&str]) -> AppState {
             path: PathBuf::from(format!("/tmp/test/{n}")),
             display: n.to_string(),
             kind: EntryKind::File,
+            deleted: false,
         })
         .collect();
     s
@@ -71,6 +147,7 @@ fn state_with_real_files(tmp: &std::path::Path, names: &[&str]) -> AppState {
             path: tmp.join(n),
             display: n.to_string(),
             kind: EntryKind::File,
+            deleted: false,
         })
         .collect();
     s

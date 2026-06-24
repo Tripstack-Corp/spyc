@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::fs::Listing;
+use crate::fs::{Entry, Listing};
 use crate::state::Cursor;
 
 use crate::app::{Effect, Matcher, RowData, View, row_from_entry};
@@ -24,17 +24,7 @@ impl AppState {
     pub fn rebuild_rows(&mut self) {
         self.cur_mut().list_generation = self.cur().list_generation.wrapping_add(1);
         self.cur_mut().rows = match self.cur().view {
-            View::Dir => {
-                let base: Vec<RowData> = self
-                    .cur()
-                    .listing
-                    .entries
-                    .iter()
-                    .filter(|e| !self.cur().masks.hides(&e.name))
-                    .map(row_from_entry)
-                    .collect();
-                self.apply_temp_filter(base)
-            }
+            View::Dir => self.build_dir_rows(),
             View::Inventory => self
                 .inventory
                 .items()
@@ -46,6 +36,7 @@ impl AppState {
                         item.orig_path.parent().unwrap_or(Path::new("/")).display()
                     ),
                     kind: crate::fs::EntryKind::File,
+                    deleted: false,
                 })
                 .collect(),
             View::Graveyard => self
@@ -77,12 +68,83 @@ impl AppState {
                         path: e.orig_path.clone(),
                         display: format!("{glyph} {}{count_tag} ({age})  ← {parent}", e.filename),
                         kind,
+                        deleted: false,
                     }
                 })
                 .collect(),
         };
         let row_count = self.cur().rows.len();
         self.cur_mut().cursor.clamp(row_count);
+    }
+
+    /// Build the `View::Dir` rows: the on-disk entries (mask-filtered, in the
+    /// listing's sort order) plus synthesized "ghost" rows for git-deleted
+    /// files that are gone from disk, so a deletion stays visible (the view
+    /// then renders ghosts struck-through). Ghosts are interleaved via the
+    /// listing's own sort so a deleted file sorts into place — e.g. the source
+    /// of an unstaged rename sits right next to its new name under name order.
+    fn build_dir_rows(&self) -> Vec<RowData> {
+        use std::collections::HashSet;
+
+        let masks = &self.cur().masks;
+        let live: Vec<&Entry> = self
+            .cur()
+            .listing
+            .entries
+            .iter()
+            .filter(|e| !masks.hides(&e.name))
+            .collect();
+        let live_names: HashSet<&str> = live.iter().map(|e| e.name.as_str()).collect();
+
+        // `git.files` keys in-dir files by bare basename and dir aggregates by
+        // `name/`. A git-deleted file that's no longer on disk (and isn't
+        // mask-hidden) becomes a ghost; one still on disk (e.g. `git rm
+        // --cached`) keeps its real row.
+        let ghost_names: Vec<&String> = self
+            .cur()
+            .git
+            .files
+            .iter()
+            .filter(|(name, st)| {
+                !name.ends_with('/')
+                    && st.is_deleted()
+                    && !live_names.contains(name.as_str())
+                    && !masks.hides(name)
+            })
+            .map(|(name, _)| name)
+            .collect();
+
+        if ghost_names.is_empty() {
+            // Fast path: no deletions to surface — identical to the old behavior.
+            return self.apply_temp_filter(live.iter().copied().map(row_from_entry).collect());
+        }
+
+        // Combine live + ghost placeholders and re-sort with the listing's OWN
+        // comparator (a throwaway `Listing` reuses `Listing::sort` verbatim, so
+        // the order — and #525's allocation-free sort — can't drift). Ghosts
+        // are then identified by name to set the struck-through flag.
+        let dir = self.cur().listing.dir.clone();
+        let mut combined: Vec<Entry> = live.iter().map(|&e| e.clone()).collect();
+        for name in &ghost_names {
+            combined.push(Entry::deleted_placeholder(&dir, name));
+        }
+        let ghost_set: HashSet<&str> = ghost_names.iter().map(|n| n.as_str()).collect();
+        let mut tmp = Listing {
+            dir,
+            entries: combined,
+            truncated: false,
+        };
+        tmp.sort(self.cur().sort_order, self.cur().sort_reversed);
+        let rows: Vec<RowData> = tmp
+            .entries
+            .iter()
+            .map(|e| {
+                let mut rd = row_from_entry(e);
+                rd.deleted = ghost_set.contains(e.name.as_str());
+                rd
+            })
+            .collect();
+        self.apply_temp_filter(rows)
     }
 
     /// Re-sort the listing with the current `sort_order` / `sort_reversed` and

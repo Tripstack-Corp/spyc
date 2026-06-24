@@ -169,11 +169,13 @@ fn slash_search_targets_the_focused_column() {
                 path: right_dir.join("alpha"),
                 display: "alpha".to_string(),
                 kind: EntryKind::File,
+                deleted: false,
             },
             RowData {
                 path: right_dir.join("zebra"),
                 display: "zebra".to_string(),
                 kind: EntryKind::File,
+                deleted: false,
             },
         ];
         r.cursor.index = 0;
@@ -395,6 +397,7 @@ fn harpoon_is_per_column_pinned_to_each_worktree() {
             path: fa.clone(),
             display: "fa.txt".into(),
             kind: EntryKind::File,
+            deleted: false,
         }];
         app.state.left.cursor.index = 0;
         app.harpoon_append();
@@ -412,6 +415,7 @@ fn harpoon_is_per_column_pinned_to_each_worktree() {
             path: fb.clone(),
             display: "fb.txt".into(),
             kind: EntryKind::File,
+            deleted: false,
         }];
         app.state.right.as_mut().unwrap().cursor.index = 0;
         app.harpoon_append();

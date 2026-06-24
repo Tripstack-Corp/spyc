@@ -166,6 +166,7 @@ pub enum Action {
     GitDiff,       // g d — diff-vs-HEAD for cursor file / selection (staged + unstaged + new)
     GitDiffCached, // g D — staged (cached) diff
     GitBlame,      // g b — git blame on cursor file
+    GitRestore,    // g r — restore a deleted (struck-through) file from index/HEAD
 
     // Cursor jumps to next / previous git-changed entry in the current
     // listing. Vim-style "next/prev hunk" muscle memory.
@@ -297,6 +298,7 @@ impl Action {
             Self::GitDiff => "git diff HEAD (staged + unstaged + new)",
             Self::GitDiffCached => "git diff --cached (staged)",
             Self::GitBlame => "git blame (cursor file)",
+            Self::GitRestore => "restore deleted file (struck-through row) from git",
             Self::GotoFile => "jump to path in pane output",
             Self::GotoFileLine => "jump to path:line in pane output",
             Self::SetMark(_) => "set mark",
