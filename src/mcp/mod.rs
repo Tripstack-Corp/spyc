@@ -47,8 +47,9 @@ their selection; `get_file_content` to read what they're viewing.\n\
 - Worktree lifecycle, all in-process (never `git worktree`): `list_worktrees` \
 lists them (branch, dirty counts, which is current, whether each is merged / \
 ahead-behind the base — the safe-to-remove signal — and whether one is claimed \
-by another session), `create_worktree` adds one, `open_worktree` works in it in \
-column b while the user's column stays put, and `remove_worktree` tears one \
+by another session), `create_worktree` adds one (pass `open:true` to also open \
+it in column b and work there right away), `open_worktree` opens an existing one \
+in column b while the user's column stays put, and `remove_worktree` tears one \
 down safely — archiving any untracked + uncommitted changes to spyc's \
 graveyard, then deleting the branch only if it's merged (`clean_worktree` is \
 an alias).\n\

@@ -27,11 +27,15 @@ pub enum McpCommand {
     PickFiles { patterns: Vec<String> },
     /// Clear all picks.
     ClearPicks,
-    /// Create a git worktree off the focused column's repo for `branch`
-    /// (existing branch, else a new one at HEAD). Lets a skill spin up a
-    /// worktree to work in `b` while `a` stays on its branch. Replies with
-    /// the new worktree's path.
-    CreateWorktree { branch: String },
+    /// Create a git worktree for `branch` (existing branch, else a new one).
+    /// `base` overrides the start point for a NEW branch (`None` → PROJECT_HOME's
+    /// default branch, the POLA default). `open` also opens it in column `b`
+    /// (the create→work flow in one call). Replies with the new worktree's path.
+    CreateWorktree {
+        branch: String,
+        base: Option<String>,
+        open: bool,
+    },
     /// Tear down a worktree by path (the path `CreateWorktree` returned).
     /// Refuses a dirty/locked worktree or one a column is currently in; the
     /// branch ref is left intact. The teardown half of the skill flow.

@@ -91,20 +91,10 @@ fn mcp_context_and_mutations_follow_the_focused_column() {
 #[test]
 fn mcp_create_worktree_makes_a_worktree_off_the_focused_repo() {
     let tmp = tempfile::tempdir().unwrap();
+    // Route through the cwd-pinned + retrying test helper; the local
+    // `current_dir(dir)` spawn flakes under the parallel suite's cwd thrash.
     let run_git = |dir: &std::path::Path, args: &[&str]| {
-        let ok = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@x")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@x")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .status()
-            .expect("spawn git")
-            .success();
-        assert!(ok, "git {args:?} failed");
+        crate::git::test_support::run_git(dir, args);
     };
     crate::state::with_state_root(tmp.path(), || {
         let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
@@ -119,6 +109,8 @@ fn mcp_create_worktree_makes_a_worktree_off_the_focused_repo() {
 
         let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::CreateWorktree {
             branch: "mcp-wt".to_string(),
+            base: None,
+            open: false,
         });
         match resp {
             crate::mcp_cmd::McpResponse::Ok { message } => {
@@ -135,6 +127,52 @@ fn mcp_create_worktree_makes_a_worktree_off_the_focused_repo() {
     });
 }
 
+/// `create_worktree open=true` also opens the new worktree in column `b` and
+/// focuses it (the create→work-in-b flow in one call). Chdir-free: opening `b`
+/// builds a commander + focuses, it doesn't `set_current_dir`.
+#[test]
+fn mcp_create_worktree_open_opens_column_b() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Route through the cwd-pinned + retrying test helper; the local
+    // `current_dir(dir)` spawn flakes under the parallel suite's cwd thrash.
+    let run_git = |dir: &std::path::Path, args: &[&str]| {
+        crate::git::test_support::run_git(dir, args);
+    };
+    crate::state::with_state_root(tmp.path(), || {
+        let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("f.txt"), "v1\n").unwrap();
+        run_git(&repo, &["add", "f.txt"]);
+        run_git(&repo, &["commit", "-q", "-m", "v1"]);
+
+        let mut app = App::test_app(repo.clone());
+        app.state.update_repo_root(state::Side::Left, &repo);
+        app.state.project_home = Some(repo.clone());
+        assert!(app.state.right.is_none(), "single column to start");
+
+        let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::CreateWorktree {
+            branch: "mcp-open-wt".to_string(),
+            base: None,
+            open: true,
+        });
+        let path = match resp {
+            crate::mcp_cmd::McpResponse::Ok { message } => {
+                let v: serde_json::Value = serde_json::from_str(&message).unwrap();
+                std::path::PathBuf::from(v["path"].as_str().unwrap())
+            }
+            crate::mcp_cmd::McpResponse::Error { message } => panic!("create errored: {message}"),
+        };
+        let b = app.state.right.as_ref().expect("open=true opens column b");
+        assert_eq!(
+            std::fs::canonicalize(&b.listing.dir).ok(),
+            std::fs::canonicalize(&path).ok(),
+            "b opened at the new worktree"
+        );
+        assert_eq!(app.focused_side(), state::Side::Right, "focus moved to b");
+    });
+}
+
 /// Empty branch is rejected before touching git.
 #[test]
 fn mcp_create_worktree_rejects_empty_branch() {
@@ -143,6 +181,8 @@ fn mcp_create_worktree_rejects_empty_branch() {
         let mut app = App::test_app(tmp.path().to_path_buf());
         let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::CreateWorktree {
             branch: "   ".to_string(),
+            base: None,
+            open: false,
         });
         assert!(
             matches!(resp, crate::mcp_cmd::McpResponse::Error { .. }),
@@ -158,20 +198,10 @@ fn mcp_create_worktree_rejects_empty_branch() {
 fn mcp_remove_worktree_tears_down_and_resets_occupied_column() {
     use crate::mcp_cmd::{McpCommand, McpResponse};
     let tmp = tempfile::tempdir().unwrap();
+    // Route through the cwd-pinned + retrying test helper; the local
+    // `current_dir(dir)` spawn flakes under the parallel suite's cwd thrash.
     let run_git = |dir: &std::path::Path, args: &[&str]| {
-        let ok = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@x")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@x")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .status()
-            .expect("spawn git")
-            .success();
-        assert!(ok, "git {args:?} failed");
+        crate::git::test_support::run_git(dir, args);
     };
     crate::state::with_state_root(tmp.path(), || {
         let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
@@ -187,6 +217,8 @@ fn mcp_remove_worktree_tears_down_and_resets_occupied_column() {
         // Create, then capture its path.
         let created = app.execute_mcp_command(McpCommand::CreateWorktree {
             branch: "teardown-wt".to_string(),
+            base: None,
+            open: false,
         });
         let path = match created {
             McpResponse::Ok { message } => {
@@ -343,20 +375,10 @@ fn worktree_delete_refuses_when_other_column_inside() {
 fn mcp_create_worktree_runs_off_thread_and_replies() {
     use crate::mcp_cmd::{McpCommand, McpResponse};
     let tmp = tempfile::tempdir().unwrap();
+    // Route through the cwd-pinned + retrying test helper; the local
+    // `current_dir(dir)` spawn flakes under the parallel suite's cwd thrash.
     let run_git = |dir: &std::path::Path, args: &[&str]| {
-        let ok = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@x")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@x")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .status()
-            .expect("spawn git")
-            .success();
-        assert!(ok, "git {args:?} failed");
+        crate::git::test_support::run_git(dir, args);
     };
     crate::state::with_state_root(tmp.path(), || {
         let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
@@ -373,6 +395,8 @@ fn mcp_create_worktree_runs_off_thread_and_replies() {
         let job = app
             .plan_worktree_job(&McpCommand::CreateWorktree {
                 branch: "wt-async".into(),
+                base: None,
+                open: false,
             })
             .expect("a worktree command")
             .expect("validation passes");

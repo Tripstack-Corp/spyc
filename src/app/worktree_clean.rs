@@ -163,20 +163,12 @@ fn archive_dirty(path: &Path, dirty: &[&str]) -> std::io::Result<(usize, Option<
 mod tests {
     use super::*;
 
+    // Route through the cwd-pinned + retrying test helper; the local
+    // `current_dir(dir)` spawn flaked under the parallel suite's cwd thrash
+    // (`safe_remove_archives_uncommitted_tracked_changes` was intermittently
+    // failing the gate).
     fn run_git(dir: &Path, args: &[&str]) {
-        let ok = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@x")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@x")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .status()
-            .expect("spawn git")
-            .success();
-        assert!(ok, "git {args:?} failed");
+        crate::git::test_support::run_git(dir, args);
     }
 
     fn make_repo(root: &Path) {

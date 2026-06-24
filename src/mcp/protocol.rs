@@ -191,13 +191,21 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "create_worktree",
-                    "description": "Create a git worktree off the focused commander's repo for the given branch (uses an existing branch, else creates it at HEAD). The worktree lands in a sibling `<repo>.worktrees/<branch>/` dir. Returns {branch, path} — point a second column or navigate_to there to work in it while the main column stays on its branch. Errors if the focused commander isn't in a repo or the branch is already checked out elsewhere.",
+                    "description": "Create a git worktree for the given branch (existing branch reused, else a NEW branch created off the repo's default/integration branch — pass `base` to override that start point). It lands in a sibling `<repo>.worktrees/<branch>/` dir, anchored on the MAIN repo even when called from inside a linked worktree. Returns {branch, path}. Pass `open:true` to also open it in column b and work there right away (otherwise navigate_to / open_worktree later). Errors if not in a repo or the branch is already checked out elsewhere.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "branch": {
                                 "type": "string",
-                                "description": "Branch to check out in the new worktree. Existing branch is reused; otherwise created at the current HEAD."
+                                "description": "Branch to check out in the new worktree. Existing branch is reused; otherwise created off `base` (or the repo's default branch)."
+                            },
+                            "base": {
+                                "type": "string",
+                                "description": "Start point (branch/rev) for a NEW branch. Optional — defaults to the repo's default branch. Ignored when `branch` already exists."
+                            },
+                            "open": {
+                                "type": "boolean",
+                                "description": "If true, also open the new worktree in column b (and focus it) so you can work in it immediately. Default false."
                             }
                         },
                         "required": ["branch"]
@@ -569,7 +577,12 @@ fn handle_tools_call(
                     if branch.trim().is_empty() {
                         return send_tool_error(w, id, "missing required parameter: branch");
                     }
-                    McpCommand::CreateWorktree { branch }
+                    let base = args["base"]
+                        .as_str()
+                        .filter(|s| !s.trim().is_empty())
+                        .map(String::from);
+                    let open = args["open"].as_bool().unwrap_or(false);
+                    McpCommand::CreateWorktree { branch, base, open }
                 }
                 "remove_worktree" => {
                     let path = args["path"].as_str().unwrap_or("").to_string();

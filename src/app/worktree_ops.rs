@@ -40,6 +40,8 @@ pub enum WorktreeJob {
         /// Start point for a NEW branch — the repo's default branch (POLA: not
         /// the focused column's HEAD). `None` falls back to HEAD in `add`.
         base: Option<String>,
+        /// Also open the new worktree in column `b` (create→work in one call).
+        open: bool,
     },
     /// `remove_worktree`: safe-by-default teardown of `target` — archive
     /// untracked + uncommitted content to the graveyard, force-remove, delete
@@ -59,6 +61,9 @@ pub struct WorktreeJobResult {
     /// Whether the worktree was actually created/removed — gates the
     /// `refresh_listing` + `write_context` re-apply.
     pub mutated: bool,
+    /// `Some(path)` when `create_worktree` was asked to also open it — the
+    /// main-thread reconcile opens column `b` there. Off-main here (no `App`).
+    pub open_path: Option<std::path::PathBuf>,
 }
 
 /// A landed worker result plus the one-shot reply channel to answer the MCP
@@ -73,6 +78,7 @@ const fn err_result(message: String) -> WorktreeJobResult {
         response: McpResponse::Error { message },
         flash: None,
         mutated: false,
+        open_path: None,
     }
 }
 
@@ -81,22 +87,30 @@ const fn err_result(message: String) -> WorktreeJobResult {
 /// (`spawn_worktree_job`'s worker).
 pub fn run_worktree_job(job: WorktreeJob) -> WorktreeJobResult {
     match job {
-        WorktreeJob::Create { dir, branch, base } => {
+        WorktreeJob::Create {
+            dir,
+            branch,
+            base,
+            open,
+        } => {
             match crate::git::worktree::add(&dir, &branch, base.as_deref()) {
                 Ok(path) => {
                     let json = serde_json::json!({
                         "branch": branch,
                         "path": path.display().to_string(),
                     });
+                    let opened = if open { " (opened in b)" } else { "" };
                     WorktreeJobResult {
                         response: McpResponse::Ok {
                             message: serde_json::to_string_pretty(&json).unwrap_or_default(),
                         },
                         flash: Some(format!(
-                            "[mcp] created worktree {} ({branch})",
+                            "[mcp] created worktree {} ({branch}){opened}",
                             path.display()
                         )),
                         mutated: true,
+                        // The main-thread reconcile opens `b` here (off-main can't).
+                        open_path: open.then(|| path.clone()),
                     }
                 }
                 Err(e) => err_result(format!("worktree add: {e}")),
@@ -113,6 +127,7 @@ pub fn run_worktree_job(job: WorktreeJob) -> WorktreeJobResult {
                         flash: Some(format!("[mcp] {message}")),
                         response: McpResponse::Ok { message },
                         mutated: true,
+                        open_path: None,
                     }
                 }
                 Err(e) => err_result(format!("worktree remove: {e}")),
@@ -163,7 +178,7 @@ impl App {
         cmd: &McpCommand,
     ) -> Option<Result<WorktreeJob, McpResponse>> {
         Some(match cmd {
-            McpCommand::CreateWorktree { branch } => {
+            McpCommand::CreateWorktree { branch, base, open } => {
                 let branch = branch.trim();
                 if branch.is_empty() {
                     Err(McpResponse::Error {
@@ -176,13 +191,16 @@ impl App {
                     Ok(WorktreeJob::Create {
                         dir: self.state.cur().listing.dir.clone(),
                         branch: branch.to_string(),
-                        // POLA: base a new worktree off PROJECT_HOME's default
-                        // branch, not whatever the focused column is on.
-                        base: self
-                            .state
-                            .project_home
-                            .as_deref()
-                            .and_then(crate::git::branch::default_base),
+                        // Caller's explicit `base` override, else PROJECT_HOME's
+                        // default branch (POLA: not whatever the focused column
+                        // is on).
+                        base: base.clone().or_else(|| {
+                            self.state
+                                .project_home
+                                .as_deref()
+                                .and_then(crate::git::branch::default_base)
+                        }),
+                        open: *open,
                     })
                 }
             }
@@ -205,9 +223,10 @@ impl App {
             response,
             flash,
             mutated,
+            open_path,
         } = run_worktree_job(job);
         if mutated {
-            self.after_worktree_mutation(flash);
+            self.after_worktree_mutation(flash, open_path);
         }
         response
     }
@@ -246,9 +265,10 @@ impl App {
                 response,
                 flash,
                 mutated,
+                open_path,
             } = result;
             if mutated {
-                self.after_worktree_mutation(flash);
+                self.after_worktree_mutation(flash, open_path);
             }
             // The client may have timed out (5 s) and dropped its receiver — a
             // failed send is fine; the refresh/context update already happened.
@@ -257,11 +277,20 @@ impl App {
         true
     }
 
-    /// Shared post-mutation step: surface the status flash, refresh the focused
-    /// listing (the worktree lives in a sibling dir, so usually a no-op), and
-    /// rewrite the context file synchronously (the client commonly reads it
-    /// right after).
-    fn after_worktree_mutation(&mut self, flash: Option<String>) {
+    /// Shared post-mutation step: optionally open the freshly-created worktree
+    /// in column `b` (`create_worktree open=true`), surface the status flash,
+    /// refresh the focused listing (the worktree lives in a sibling dir, so
+    /// usually a no-op), and rewrite the context file synchronously (the client
+    /// commonly reads it right after).
+    fn after_worktree_mutation(
+        &mut self,
+        flash: Option<String>,
+        open_path: Option<std::path::PathBuf>,
+    ) {
+        // Open `b` FIRST so the refresh + context capture the now-focused column.
+        if let Some(path) = open_path {
+            self.open_second_commander_at(&path);
+        }
         if let Some(message) = flash {
             self.state.flash_info(message);
         }
