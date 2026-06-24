@@ -345,9 +345,18 @@ pub fn remove(path: &Path) -> std::io::Result<()> {
     // Resolve the admin dir from the worktree's `.git` gitfile.
     let admin_dir = admin_dir_of(path)?;
 
-    // SAFETY: refuse if locked (git refuses a locked worktree).
-    if admin_dir.join("locked").is_file() {
-        return Err(std::io::Error::other("worktree is locked; will not remove"));
+    // SAFETY: refuse if locked (git refuses a locked worktree). spyc's
+    // `claim_worktree` lease writes this file with an owner reason, so surface
+    // it — a cooperating session sees WHO claimed the worktree and why.
+    let locked = admin_dir.join("locked");
+    if locked.is_file() {
+        let reason = std::fs::read_to_string(&locked).unwrap_or_default();
+        let reason = reason.trim();
+        return Err(std::io::Error::other(if reason.is_empty() {
+            "worktree is locked (claimed) — release it (or force) to remove".to_string()
+        } else {
+            format!("worktree is locked (claimed): {reason} — release it (or force) to remove")
+        }));
     }
 
     // SAFETY: refuse a dirty worktree (uncommitted or untracked changes),
@@ -373,6 +382,38 @@ pub fn remove(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Lock a worktree using git's native mechanism: write `<admin>/locked` with
+/// `reason`. `remove` (and `git worktree remove`) refuse a locked worktree, so
+/// this is spyc's worktree "claim/lease" — an agent locks the worktree it's
+/// working in so a cooperating session won't tear it down. Errors if `path`
+/// isn't a linked worktree (the main worktree can't be locked, like in git).
+pub fn lock(path: &Path, reason: &str) -> std::io::Result<()> {
+    let admin_dir = admin_dir_of(path)?;
+    std::fs::write(admin_dir.join("locked"), reason)
+}
+
+/// Release a worktree lock (clear `<admin>/locked`). No-op if already unlocked.
+pub fn unlock(path: &Path) -> std::io::Result<()> {
+    let locked = admin_dir_of(path)?.join("locked");
+    if locked.is_file() {
+        std::fs::remove_file(locked)?;
+    }
+    Ok(())
+}
+
+/// The lock reason if the worktree is locked, else `None`. `Some(String::new())`
+/// for a worktree locked without a recorded reason. `None` for the main
+/// worktree (no gitfile) or any non-worktree path.
+pub fn lock_reason(path: &Path) -> Option<String> {
+    let locked = admin_dir_of(path).ok()?.join("locked");
+    locked.is_file().then(|| {
+        std::fs::read_to_string(&locked)
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    })
+}
+
 /// Resolve a worktree's admin dir from its `<path>/.git` gitfile
 /// (`gitdir: <admin>\n`). Errors if `<path>` isn't a linked worktree (no
 /// gitfile, or a real `.git` directory).
@@ -393,7 +434,7 @@ fn admin_dir_of(path: &Path) -> std::io::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{add, list, remove};
+    use super::{add, list, lock, lock_reason, remove, unlock};
     use crate::git::test_support::run_git;
     use std::path::{Path, PathBuf};
 
@@ -793,5 +834,27 @@ mod tests {
     fn list_none_outside_repo() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(list(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn lock_claims_a_worktree_and_remove_refuses_until_released() {
+        let (_tmp, main) = init_repo();
+        let wt = add(&main, "feature", None).expect("add worktree");
+        assert_eq!(lock_reason(&wt), None, "fresh worktree is unlocked");
+
+        // Claim it; the reason round-trips and remove refuses, surfacing it.
+        lock(&wt, "agent A: working").expect("lock");
+        assert_eq!(lock_reason(&wt).as_deref(), Some("agent A: working"));
+        let err = remove(&wt).expect_err("remove must refuse a locked worktree");
+        assert!(
+            err.to_string().contains("agent A: working"),
+            "lock reason should be in the refusal: {err}"
+        );
+
+        // Release, then a clean remove proceeds.
+        unlock(&wt).expect("unlock");
+        assert_eq!(lock_reason(&wt), None);
+        remove(&wt).expect("remove after release");
+        assert!(!wt.exists());
     }
 }
