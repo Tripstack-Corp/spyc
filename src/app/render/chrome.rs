@@ -365,7 +365,7 @@ impl App {
                 let git_status = c
                     .git
                     .files
-                    .get(&rd.display)
+                    .get(rd.git_key())
                     .copied()
                     .unwrap_or_else(GitFileStatus::clean);
                 let pending_delete = delete_set

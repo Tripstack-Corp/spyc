@@ -115,13 +115,14 @@ impl AppState {
             // non-Clean state. `git_files` keys files by basename and
             // also marks parent directories that contain changes
             // (basename + trailing `/`), so directories show up too —
-            // useful for navigating into a subtree with edits.
+            // useful for navigating into a subtree with edits. `git_key`
+            // strips the executable `*` decoration so exec files match.
             rows.into_iter()
                 .filter(|r| {
                     self.cur()
                         .git
                         .files
-                        .get(&r.display)
+                        .get(r.git_key())
                         .copied()
                         .is_some_and(|s| !s.is_clean())
                 })

@@ -49,13 +49,13 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 | Where | Finding | Sev | Eff | Verdict |
 |---|---|---|---|---|
-| `src/app/state/listing.rs:111` | Git status lookups keyed by display name never match executable files | medium | S | REAL |
-| `src/git/status.rs:246` | One failed status item silently blanks git status for the whole repo | medium | S | REAL |
+| `src/app/state/listing.rs:111` | Git status lookups keyed by display name never match executable files | medium | S | ✅ PR #530 |
+| `src/git/status.rs:246` | One failed status item silently blanks git status for the whole repo | medium | S | ✅ PR #530 |
 | `src/git/blame.rs:49` | BlameModel has no size cap and clones 3 metadata Strings per line | medium | M | REAL ⚠︎ |
 | `src/git/diff_model/build.rs:89` | gd diff silently drops the deletion side of an unstaged rename | medium | M | ✅ PR #533 |
 | `src/git/status.rs:217` | gix status-walk setup and item-decode skeleton duplicated between repo_status and collect_worktree_plan | medium | M | REAL |
 | `src/git/worktree.rs:170` | worktree::add leaves partial on-disk state on failure, and the leftover state blocks retry | medium | M | REAL |
-| `src/git/status.rs:314` | repo_status diverges from porcelain on unstaged renames (parity contract violation) | medium | none | REAL ⚠︎ |
+| `src/git/status.rs:314` | repo_status diverges from porcelain on unstaged renames (parity contract violation) | medium | none | ✅ PR #530 |
 
 ### PR4 · Pager scroll math — u16 saturation + wrapped-row reachability
 
@@ -187,6 +187,11 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 **✅ PR #529 — panic-hook terminal restore parity (2026-06-23):**
 - `lib.rs` panic hook (finding `main.rs:87`) — the crash-time restore popped raw mode / alt screen / bracketed-paste / mouse pointer but, unlike the clean `restore_terminal`, never popped the **kitty keyboard-enhancement flag** or **alternate-scroll mode**, and didn't re-show the cursor. After a spyc panic those stay set for the *rest of the shell session*, corrupting key delivery / scroll-wheel for the next TUI. Added `PopKeyboardEnhancementFlags`, `DisableAlternateScroll`, and `cursor::Show` to mirror `restore_terminal`. Crash-path-only and strictly additive (cannot affect normal operation); verified by inspection against the live-proven clean teardown. (Gate-verified; the actual post-panic restore is best-effort, as the hook always was.)
+
+**✅ PR #530 — git status parity + robustness (2026-06-23):**
+- `git/status.rs:314` (⚠︎ contested → confirmed REAL by hand) — `repo_status` enabled `index_worktree_rewrites`, so a plain filesystem `mv` of a tracked file (no `git add`) collapsed to a single `R renamed` — but `git status --porcelain -unormal` reports ` D orig` + `?? renamed`: it never pairs a worktree-only rename because the destination is *untracked* and worktree-half rename detection only considers tracked entries. Dropped `index_worktree_rewrites` (staged renames still collapse to `R` via `tree_index_track_renames`, which is the half git actually does detect), and made the now-defensive `IwItem::Rewrite` arm decode source→Deleted + dest→untracked so the parity contract holds whether or not rewrite detection is on. New parity case `case08b_unstaged_rename` cross-checks against `git`.
+- `git/status.rs:246` — one `Err` item from the gix status iterator made `repo_status` return `None`, blanking the *entire* repo's git markers. Now skips the single bad item (`let Ok(item) = item else { continue }`) so partial status beats none; a failure to even start the walk still returns `None`.
+- `app/state/listing.rs:111` — both the render gutter (`render/chrome.rs`) and the `git` temp-filter looked up `git.files` by the decorated `display` name. `Entry::display_name` appends `*` to executables (ls -F), but the git map keys files by bare basename, so **no executable ever showed its git marker** (dirs matched because their `/` is part of the key). Added one shared `RowData::git_key()` that strips the executable `*`; both sites use it. Tests: `git_key_tests` (the predicate, incl. a `foo*`-named exec) + `build_rows_resolves_git_status_for_executables` (end-to-end). (Gate-verified.)
 
 **✅ ALREADY-FIXED — confirmed by the 2026-06-23 sweep (no action needed):**
 - `src/app/mcp.rs:174` — Patterns are validated before any pick is applied; an invalid pattern errors out cleanly with zero picks applied, and the success path always calls write_context().
