@@ -817,6 +817,11 @@ pub struct RowData {
     pub path: PathBuf,
     pub display: String,
     pub kind: EntryKind,
+    /// A git-deleted file that no longer exists on disk, synthesized into the
+    /// `Dir` listing so the deletion is visible (rendered struck-through).
+    /// `path` is the would-be location; opening it is guarded, and a future
+    /// restore (`gr`) brings it back. `false` for every real on-disk row.
+    pub deleted: bool,
 }
 
 /// Per-iteration draw accumulator for the event loop. `dirty` is an OR
@@ -1183,5 +1188,6 @@ pub fn row_from_entry(e: &Entry) -> RowData {
         path: e.path.clone(),
         display: e.display_name(),
         kind: e.kind,
+        deleted: false,
     }
 }

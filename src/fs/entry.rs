@@ -41,6 +41,22 @@ impl Entry {
         }
     }
 
+    /// A synthetic entry for a git-deleted file that no longer exists on disk,
+    /// so the listing can show it (struck-through). It's a `File` with zero
+    /// size and the epoch mtime — those only affect where it sorts under
+    /// size/mtime ordering (it sinks to the end, which is sensible for a file
+    /// that's gone); under name/ext it interleaves by name like any other.
+    /// `path` is the would-be path (`dir/name`) so restore knows the target.
+    pub fn deleted_placeholder(dir: &Path, name: &str) -> Self {
+        Self {
+            path: dir.join(name),
+            name: name.to_string(),
+            kind: EntryKind::File,
+            size: 0,
+            mtime: SystemTime::UNIX_EPOCH,
+        }
+    }
+
     /// Display name with a trailing `/` for directories or `*` for
     /// executables (both are classic spy / `ls -F` conventions).
     pub fn display_name(&self) -> String {

@@ -191,6 +191,19 @@ impl App {
         };
         let path = row.path.clone();
         let kind = row.kind;
+        let deleted = row.deleted;
+
+        // A git-deleted "ghost" row points at a file that's gone from disk —
+        // there's nothing to open or descend into. Surface the deletion instead
+        // (and `gd` still shows what was removed).
+        if deleted {
+            let name = path
+                .file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            self.state
+                .flash_info(format!("{name}: deleted — `gd` to view its removal"));
+            return Vec::new();
+        }
 
         // Inventory view: enter drills down to the containing directory and
         // focuses on the item, then continues with the intent on that item.

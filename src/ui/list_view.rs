@@ -66,6 +66,13 @@ impl GitFileStatus {
             untracked: false,
         }
     }
+
+    /// True when either half marks this path as deleted — used to surface
+    /// git-deleted files (gone from disk) as struck-through "ghost" rows.
+    pub const fn is_deleted(self) -> bool {
+        matches!(self.staged, Some(GitChange::Deleted))
+            || matches!(self.unstaged, Some(GitChange::Deleted))
+    }
 }
 
 pub struct Row {
@@ -73,6 +80,9 @@ pub struct Row {
     pub kind: EntryKind,
     pub picked: bool,
     pub taken: bool,
+    /// A git-deleted file that no longer exists on disk — rendered
+    /// struck-through. The path is its would-be location (for restore).
+    pub deleted: bool,
     pub git_status: GitFileStatus,
     /// True while this entry is among the targets of an active
     /// `RemoveConfirm` prompt. Drives the warning-color row
@@ -345,6 +355,14 @@ impl Widget for ListView<'_> {
             } else {
                 name_style.add_modifier(dim)
             };
+            // A git-deleted "ghost" row (the file is gone from disk) is struck
+            // through, so a deletion reads at a glance — including the source
+            // side of an unstaged rename sitting next to its new name.
+            let final_name_style = if row.deleted {
+                final_name_style.add_modifier(Modifier::CROSSED_OUT)
+            } else {
+                final_name_style
+            };
 
             let name_w = cell_w.saturating_sub(MARKER_W) as usize;
             let drawn = super::display_truncate(&row.display, name_w);
@@ -428,6 +446,7 @@ mod tests {
             kind: EntryKind::File,
             picked: false,
             taken: false,
+            deleted: false,
             git_status: GitFileStatus::clean(),
             pending_delete: false,
         }
@@ -570,6 +589,7 @@ mod tests {
                 kind: EntryKind::File,
                 picked: true,
                 taken: false,
+                deleted: false,
                 git_status: GitFileStatus::clean(),
                 pending_delete: false,
             },
@@ -578,6 +598,7 @@ mod tests {
                 kind: EntryKind::File,
                 picked: false,
                 taken: true,
+                deleted: false,
                 git_status: GitFileStatus::clean(),
                 pending_delete: false,
             },
@@ -586,6 +607,7 @@ mod tests {
                 kind: EntryKind::Dir,
                 picked: false,
                 taken: false,
+                deleted: false,
                 git_status: GitFileStatus::unstaged(GitChange::Modified),
                 pending_delete: false,
             },

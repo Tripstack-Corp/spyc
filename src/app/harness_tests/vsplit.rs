@@ -336,6 +336,7 @@ fn vsplit_cycle_on_directory_warns_and_stays_closed() {
             path: dir.join("sub"),
             display: "sub".to_string(),
             kind: EntryKind::Dir,
+            deleted: false,
         }];
         app.state.left.cursor.index = 0;
 

@@ -376,6 +376,7 @@ impl App {
                     kind: rd.kind,
                     picked: c.view == View::Dir && c.picks.contains(&rd.path),
                     taken: self.state.inventory.contains(&rd.path),
+                    deleted: rd.deleted,
                     git_status,
                     pending_delete,
                 }

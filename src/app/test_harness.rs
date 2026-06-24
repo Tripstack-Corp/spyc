@@ -73,6 +73,7 @@ impl App {
                 path: dir.join(n),
                 display: (*n).to_string(),
                 kind: EntryKind::File,
+                deleted: false,
             })
             .collect();
         self.state.left.cursor.clamp(self.state.left.rows.len());
