@@ -355,19 +355,20 @@ impl Widget for ListView<'_> {
             } else {
                 name_style.add_modifier(dim)
             };
-            // A git-deleted "ghost" row (the file is gone from disk) is struck
-            // through, so a deletion reads at a glance — including the source
-            // side of an unstaged rename sitting next to its new name.
-            let final_name_style = if row.deleted {
-                final_name_style.add_modifier(Modifier::CROSSED_OUT)
-            } else {
-                final_name_style
-            };
 
             let name_w = cell_w.saturating_sub(MARKER_W) as usize;
             let drawn = super::display_truncate(&row.display, name_w);
             let drawn_w = super::display_width(drawn) as u16;
-            buf.set_string(x + MARKER_W, y, drawn, final_name_style);
+            // A git-deleted "ghost" row (the file is gone from disk) strikes
+            // through ONLY the filename glyphs — not the trailing pad — so the
+            // line stops at the name. SGR 9 on the pad spaces would otherwise
+            // run the strikethrough out to the column edge.
+            let drawn_style = if row.deleted {
+                final_name_style.add_modifier(Modifier::CROSSED_OUT)
+            } else {
+                final_name_style
+            };
+            buf.set_string(x + MARKER_W, y, drawn, drawn_style);
 
             let used = MARKER_W + drawn_w;
             if used < cell_w {
@@ -621,5 +622,62 @@ mod tests {
         let rows: Vec<Row> = Vec::new();
         let out = render_list_to_string(&rows, 0, true, 30, 4);
         insta::assert_snapshot!(out);
+    }
+
+    /// A deleted "ghost" row strikes through ONLY the filename glyphs, not the
+    /// trailing pad — SGR 9 on the pad would run the line out to the column
+    /// edge (the bug the first cut shipped). Renders a non-cursor deleted row
+    /// and checks the CROSSED_OUT modifier per cell.
+    #[test]
+    fn deleted_row_strikes_filename_only_not_pad() {
+        use ratatui::style::Modifier;
+        let rows = vec![
+            row("keep.md"),
+            Row {
+                display: "gone.txt".into(), // 8 chars at x = MARKER_W(2)..10
+                kind: EntryKind::File,
+                picked: false,
+                taken: false,
+                deleted: true,
+                git_status: GitFileStatus {
+                    staged: None,
+                    unstaged: Some(GitChange::Deleted),
+                    untracked: false,
+                },
+                pending_delete: false,
+            },
+        ];
+        let backend = TestBackend::new(30, 4);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal
+            .draw(|f| {
+                let lv = ListView {
+                    rows: &rows,
+                    cursor: 0, // cursor on keep.md, so the ghost row isn't highlighted
+                    view_top: 0,
+                    empty_marker: true,
+                    focused: true,
+                    theme: &theme,
+                };
+                f.render_widget(lv, Rect::new(0, 0, 30, 4));
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let y = 1; // the ghost row
+        let crossed = |x: u16| {
+            buf.cell((x, y))
+                .unwrap()
+                .modifier
+                .contains(Modifier::CROSSED_OUT)
+        };
+        // Filename glyphs (x = 2..10) are struck …
+        for x in 2u16..10 {
+            assert!(crossed(x), "filename cell {x} should be struck through");
+        }
+        // … but the pad past the name is not.
+        for x in 12u16..30 {
+            assert!(!crossed(x), "pad cell {x} must not be struck through");
+        }
     }
 }
