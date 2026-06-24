@@ -73,15 +73,17 @@ impl App {
         // If the stashed pager is backed by an in-flight stream, park the
         // stream by id so `drain_pager_stream` doesn't drop it while its pager
         // is off-screen (it id-gates against the *live* pager). Re-installed on
-        // restore. (The stream lives here, not on the `pane::TabEntry`, per the
-        // one-way `app → pane` rule.)
+        // restore. Scroll pagers always use `scroll_stream` (never
+        // `pager_stream`, which is for overlay grep / git-view). (The stream
+        // lives here, not on the `pane::TabEntry`, per the one-way `app → pane`
+        // rule.)
         if let Some(id) = view.stream_id
             && self
                 .runtime
-                .pager_stream
+                .scroll_stream
                 .as_ref()
                 .is_some_and(|s| s.id() == id)
-            && let Some(stream) = self.runtime.pager_stream.take()
+            && let Some(stream) = self.runtime.scroll_stream.take()
         {
             self.runtime.stashed_pager_streams.insert(id, stream);
         }
@@ -106,11 +108,12 @@ impl App {
             return;
         };
         // Pull the parked stream (if any) back into the live slot by id so it
-        // resumes draining (`tabs` borrow ends at the `take` above).
+        // resumes draining (`tabs` borrow ends at the `take` above). Scroll
+        // pagers always use `scroll_stream`.
         if let Some(id) = view.stream_id
             && let Some(stream) = self.runtime.stashed_pager_streams.remove(&id)
         {
-            self.runtime.pager_stream = Some(stream);
+            self.runtime.scroll_stream = Some(stream);
         }
         self.view.scroll_pager = Some(view);
     }
