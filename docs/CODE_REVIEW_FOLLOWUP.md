@@ -51,10 +51,10 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 |---|---|---|---|---|
 | `src/app/state/listing.rs:111` | Git status lookups keyed by display name never match executable files | medium | S | ✅ PR #530 |
 | `src/git/status.rs:246` | One failed status item silently blanks git status for the whole repo | medium | S | ✅ PR #530 |
-| `src/git/blame.rs:49` | BlameModel has no size cap and clones 3 metadata Strings per line | medium | M | REAL ⚠︎ |
+| `src/git/blame.rs:49` | BlameModel has no size cap and clones 3 metadata Strings per line | medium | M | ✅ PR #539 |
 | `src/git/diff_model/build.rs:89` | gd diff silently drops the deletion side of an unstaged rename | medium | M | ✅ PR #533 |
-| `src/git/status.rs:217` | gix status-walk setup and item-decode skeleton duplicated between repo_status and collect_worktree_plan | medium | M | REAL |
-| `src/git/worktree.rs:170` | worktree::add leaves partial on-disk state on failure, and the leftover state blocks retry | medium | M | REAL |
+| `src/git/status.rs:217` | gix status-walk setup and item-decode skeleton duplicated between repo_status and collect_worktree_plan | medium | M | ✅ PR #539 |
+| `src/git/worktree.rs:170` | worktree::add leaves partial on-disk state on failure, and the leftover state blocks retry | medium | M | ✅ PR #539 |
 | `src/git/status.rs:314` | repo_status diverges from porcelain on unstaged renames (parity contract violation) | medium | none | ✅ PR #530 |
 
 ### PR4 · Pager scroll math — u16 saturation + wrapped-row reachability
@@ -131,6 +131,11 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
+
+**✅ PR #539 — git: dedup status-walk config, worktree cleanup on failure, blame Arc + size cap (2026-06-24):**
+- `git/status.rs:217` — `repo_status` and `collect_worktree_plan` each built the gix status platform with identical `tree_index_track_renames(Given(Rewrites::default()))` and no `index_worktree_rewrites`. Extracted `make_status_platform(repo, untracked_mode)` in `status.rs` as the single source for those parity-sensitive options; both callers now delegate to it. (Gate-verified; behavior-identical.)
+- `git/worktree.rs:170` — `add` created `target/` and the admin dir with `create_dir_all`, then on any subsequent error (checkout, index write, admin file write) returned immediately, leaving both directories on disk. A retry with the same branch name would then hit the non-empty-dir guard and fail indefinitely. Extracted `checkout_and_write` for the post-dir-creation work; `add` calls it and on error removes both partial directories before returning. (Gate-verified; new `add_retry_succeeds_after_remove` test.)
+- `git/blame.rs:49` — `BlameLine.short_id/author/date` were `String`, so a file where one commit owns N lines allocated 3×N `String`s in the inner loop even though the values are identical across the hunk. Changed those three fields to `Arc<str>`; the `meta_cache` stores `(Arc<str>, Arc<str>, Arc<str>)` and per-line clones are O(1) ref-count bumps. Added `MAX_BLAME_LINES = 50_000` cap with `BlameModel.truncated` flag; `blame_render` appends a note line when set. (Behavior change for very large files; new `blame_truncates_at_max_lines` + `truncated_model_appends_note` tests.)
 
 **✅ PR #538 — pager slot routing: help-stash guard, two-slot streams, vt100 scrollback (2026-06-24):**
 - `app/pager_stream.rs:228` — `drain_pager_stream` killed any stream whose slot was empty, including one sitting behind the `?` help overlay (`view.pager_help_stash`). Now `drain_one_pager_stream` checks the stash before evicting an overlay stream, so opening help mid-stream no longer permanently freezes "scanning…" / "computing…". Also fixed `nav_pager_buffer` (`[b`/`]b`): it now clears `runtime.pager_stream` + `streaming`/`stream_id` flags on the current pager before pushing it to history, so navigating away while a stream is live closes the stream cleanly instead of orphaning the slot.

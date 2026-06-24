@@ -58,6 +58,12 @@ pub fn render_blame(model: &BlameModel, theme: &Theme) -> Vec<Line<'static>> {
         }
         out.push(Line::from(spans));
     }
+    if model.truncated {
+        out.push(Line::styled(
+            "… blame truncated (file too large to display in full)",
+            theme.diff_meta_style(),
+        ));
+    }
     out
 }
 
@@ -118,6 +124,7 @@ mod tests {
                 line("def5678", "Bob", "2026-03-04", 3, "    let y = 2;"),
                 line("abc1234", "Ada", "2026-01-02", 4, "}"),
             ],
+            truncated: false,
         }
     }
 
@@ -173,9 +180,24 @@ mod tests {
             &BlameModel {
                 path: "x".into(),
                 lines: Vec::new(),
+                truncated: false,
             },
             &theme,
         );
         assert_eq!(text(&out), "No blame data.");
+    }
+
+    #[test]
+    fn truncated_model_appends_note() {
+        let mut model = sample();
+        model.truncated = true;
+        let out = render_blame(&model, &Theme::default());
+        assert_eq!(out.len(), 5, "4 lines + 1 truncation note");
+        let last = out.last().unwrap();
+        let note: String = last.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            note.contains("truncated"),
+            "truncation note missing: {note:?}"
+        );
     }
 }

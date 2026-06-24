@@ -180,6 +180,27 @@ pub fn map_to_listing(entries: &[StatusEntry], prefix: &str) -> HashMap<String, 
     map
 }
 
+/// Build the gix status [`Platform`] with the parity-sensitive options shared
+/// between [`repo_status`] and
+/// [`crate::git::diff_model::build::collect_worktree_plan`]: staged-rename
+/// detection at git's default (-M50%), no index↔worktree rewrite detection
+/// (see `case08b_unstaged_rename` for why that must stay off). The `untracked`
+/// mode differs between callers — `Collapsed` for porcelain parity, `Files`
+/// for the working-tree diff plan. Keeping this config in one place ensures
+/// the two callers can't drift on parity-sensitive options.
+pub fn make_status_platform(
+    repo: &gix::Repository,
+    untracked: gix::status::UntrackedFiles,
+) -> Option<gix::status::Platform<'_, gix::progress::Discard>> {
+    use gix::status::tree_index::TrackRenames;
+    Some(
+        repo.status(gix::progress::Discard)
+            .ok()?
+            .untracked_files(untracked)
+            .tree_index_track_renames(TrackRenames::Given(gix::diff::Rewrites::default())),
+    )
+}
+
 /// The live status backend (run by the background git worker, bootstrap.rs):
 /// produce the same `Vec<StatusEntry>` as [`decode_porcelain`] does for
 /// `git status --porcelain -unormal`, but without shelling out — walking the
@@ -214,28 +235,14 @@ pub fn repo_status(repo_root: &Path) -> Option<Vec<StatusEntry>> {
     use gix::diff::index::ChangeRef;
     use gix::status::index_worktree::Item as IwItem;
     use gix::status::plumbing::index_as_worktree::{Change, EntryStatus};
-    use gix::status::tree_index::TrackRenames;
     use gix::status::{Item, UntrackedFiles};
 
     let repo = gix::open(repo_root).ok()?;
-    let platform = repo
-        .status(gix::progress::Discard)
-        .ok()?
-        // `-unormal`: collapse a fully-untracked dir to one `dir/` entry, but
-        // list an untracked file inside a tracked dir individually. See the
-        // doc comment above for why this is `Collapsed`, not `Files`.
-        .untracked_files(UntrackedFiles::Collapsed)
-        // Match git's `status` default rename detection (-M50%). This applies
-        // to the STAGED half only (HEAD↔index): a staged rename collapses to a
-        // single `R` instead of a delete + add pair. We deliberately do NOT
-        // enable `index_worktree_rewrites`: git porcelain never pairs a
-        // worktree-only rename, because the destination is an *untracked* file
-        // and rename detection in the index↔worktree half only considers
-        // tracked entries. Enabling it made gix report a plain `mv` (without
-        // `git add`) as a single `R renamed`, while porcelain reports
-        // ` D orig` + `?? renamed` — a parity violation (see
-        // `case08b_unstaged_rename`).
-        .tree_index_track_renames(TrackRenames::Given(gix::diff::Rewrites::default()));
+    // `-unormal`: collapse a fully-untracked dir to one `dir/` entry, but list
+    // an untracked file inside a tracked dir individually. See the doc comment
+    // above for why this is `Collapsed`, not `Files`. Rename-detection config
+    // is shared with `collect_worktree_plan` via `make_status_platform`.
+    let platform = make_status_platform(&repo, UntrackedFiles::Collapsed)?;
 
     // Accumulate per repo-relative path: the staged column (TreeIndex) and the
     // unstaged/untracked column (IndexWorktree) for the same path merge into

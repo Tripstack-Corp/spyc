@@ -156,17 +156,24 @@ pub struct BlameModel {
     pub path: String,
     /// One entry per line of the file, in file order.
     pub lines: Vec<BlameLine>,
+    /// `true` when the file exceeded [`crate::git::blame::MAX_BLAME_LINES`]
+    /// and later lines were dropped. The renderer shows a truncation note.
+    pub truncated: bool,
 }
 
 /// One line of a [`BlameModel`].
+///
+/// `short_id`, `author`, and `date` use `Arc<str>` so lines sharing the same
+/// commit (the common case — a blame hunk can span thousands of lines) do not
+/// allocate a new `String` per line. Cloning is O(1) (ref-count bump).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlameLine {
     /// 7-char short id of the commit that introduced this line.
-    pub short_id: String,
+    pub short_id: std::sync::Arc<str>,
     /// Author name of that commit.
-    pub author: String,
+    pub author: std::sync::Arc<str>,
     /// Human-readable author date of that commit.
-    pub date: String,
+    pub date: std::sync::Arc<str>,
     /// 1-based line number in the blamed file.
     pub lineno: u32,
     /// The line content (without the trailing newline).

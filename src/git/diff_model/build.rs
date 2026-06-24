@@ -45,22 +45,14 @@ pub fn collect_worktree_plan(repo: &gix::Repository) -> Option<Vec<WorkItem>> {
     use gix::bstr::ByteSlice;
     use gix::diff::index::ChangeRef;
     use gix::status::index_worktree::Item as IwItem;
-    use gix::status::tree_index::TrackRenames;
     use gix::status::{Item, UntrackedFiles};
     use std::collections::BTreeSet;
 
-    let platform = repo
-        .status(gix::progress::Discard)
-        .ok()?
-        .untracked_files(UntrackedFiles::Files)
-        // Staged renames (HEAD↔index) DO collapse to a single rename — that's
-        // what `git diff` shows. But we deliberately leave `index_worktree_rewrites`
-        // OFF: `git diff HEAD` never pairs a worktree-only rename (the
-        // destination is untracked), so an unstaged `mv` shows as the source
-        // DELETED + the destination ADDED. Enabling it made gix emit one
-        // `IwItem::Rewrite` whose source we dropped — losing the deletion half
-        // entirely (see `working_unstaged_rename_shows_both_delete_and_add`).
-        .tree_index_track_renames(TrackRenames::Given(gix::diff::Rewrites::default()));
+    // `UntrackedFiles::Files`: each untracked file becomes its own WorkItem
+    // so the diff plan sees individual additions. Staged-rename detection and
+    // the deliberate omission of index↔worktree rewrite detection are shared
+    // with `repo_status` via `crate::git::status::make_status_platform`.
+    let platform = crate::git::status::make_status_platform(repo, UntrackedFiles::Files)?;
 
     // Rename pairs override the per-path treatment of their endpoints, so we
     // remember which paths are consumed by a rename and skip emitting a plain
