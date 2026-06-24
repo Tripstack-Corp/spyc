@@ -136,6 +136,11 @@ impl App {
     /// `stream_id`, and install the boxed session built by `build`. The shared
     /// open path for grep / git-view / transcript — the per-feature parts are
     /// just `produce` (the worker body) and `build` (the `PagerStream` impl).
+    ///
+    /// Routes to `runtime.pager_stream` for [`PagerStreamMount::Overlay`] and
+    /// `runtime.scroll_stream` for [`PagerStreamMount::LowerPane`] so the two
+    /// stream kinds never evict each other (a grep no longer kills a concurrent
+    /// transcript load).
     pub(crate) fn spawn_pager_stream<T, P, B>(
         &mut self,
         mount: PagerStreamMount,
@@ -159,8 +164,14 @@ impl App {
             produce(tx);
             final_wake();
         });
+        let is_lower_pane = matches!(mount, PagerStreamMount::LowerPane { .. });
         self.mount_stream_pager(mount, id);
-        self.runtime.pager_stream = Some(build(id, rx));
+        let stream = build(id, rx);
+        if is_lower_pane {
+            self.runtime.scroll_stream = Some(stream);
+        } else {
+            self.runtime.pager_stream = Some(stream);
+        }
     }
 
     /// Mount the initial empty pager for a freshly-spawned stream, tagged with
@@ -193,26 +204,60 @@ impl App {
         }
     }
 
-    /// Drain the active pager stream into its backing pager. Called every tick
-    /// from the run loop (a no-op when no stream is active). Returns true when
-    /// something changed so the caller can request a redraw.
-    ///
-    /// id-gate: if the live pager's `stream_id` no longer matches (closed /
-    /// replaced / stashed), the stream is dropped and its worker exits on its
-    /// next send.
+    /// Drain both active pager streams (overlay + scroll) into their backing
+    /// pagers. Called every tick from the run loop (a no-op when neither stream
+    /// is active). Returns true when anything changed so the caller can request
+    /// a redraw.
     pub(crate) fn drain_pager_stream(&mut self) -> bool {
-        let Some(stream) = self.runtime.pager_stream.as_ref() else {
-            return false;
+        // Drain overlay (grep/git-view → view.pager) then scroll
+        // (transcript → view.scroll_pager). Sequential calls are fine because
+        // `drain_one_pager_stream` borrows self for its full duration and then
+        // releases, so there is no aliasing.
+        let a = self.drain_one_pager_stream(false);
+        let b = self.drain_one_pager_stream(true);
+        a || b
+    }
+
+    /// Drain one stream slot into its view. `is_scroll` selects
+    /// `runtime.scroll_stream` / `view.scroll_pager` (true) or
+    /// `runtime.pager_stream` / `view.pager` (false).
+    ///
+    /// id-gate: if the view slot whose `stream_id` matches this stream is gone
+    /// (closed / replaced), the stream is dropped and its worker exits on its
+    /// next send. Exception for the overlay slot: if the stream pager is
+    /// temporarily stashed behind the help overlay (`view.pager_help_stash`),
+    /// the worker is left running — its buffered output drains when help closes.
+    fn drain_one_pager_stream(&mut self, is_scroll: bool) -> bool {
+        let stream_id = if is_scroll {
+            self.runtime.scroll_stream.as_ref().map(|s| s.id())
+        } else {
+            self.runtime.pager_stream.as_ref().map(|s| s.id())
         };
-        let id = stream.id();
-        // The stream's pager may live in either region slot: the top/overlay
-        // `view.pager` (grep, git-view) or the bottom `view.scroll_pager`
-        // (transcript). Drop the stream if neither holds it (closed / replaced
-        // / stashed).
+        let Some(id) = stream_id else { return false };
+
+        // Find which view slot holds the pager for this stream.
         let Some(in_scroll) = self.stream_slot(id) else {
-            self.runtime.pager_stream = None;
+            // No slot holds this stream's pager: it was closed or replaced.
+            // Exception: the overlay stream's pager may be stashed behind the
+            // help overlay. If so, leave the stream alive — the worker keeps
+            // buffering and drains when `?` is dismissed and the pager returns.
+            if !is_scroll
+                && self
+                    .view
+                    .pager_help_stash
+                    .as_ref()
+                    .is_some_and(|p| p.stream_id == Some(id))
+            {
+                return false;
+            }
+            if is_scroll {
+                self.runtime.scroll_stream = None;
+            } else {
+                self.runtime.pager_stream = None;
+            }
             return false;
         };
+
         // Owned RenderCtx (clone the theme) so the `&mut` pager borrow below
         // doesn't alias `&self.view.theme` — both live under `self.view`.
         let full_width = if in_scroll {
@@ -227,37 +272,47 @@ impl App {
             theme: self.view.theme.clone(),
             full_width,
         };
-        // Field-level `&mut` (one pager slot) + the disjoint `runtime` borrow
-        // coexist; both end when `drain` returns the owned outcome.
+        // Field-level `&mut` on one view slot + the disjoint `runtime` borrow
+        // both end when `drain` returns the owned DrainOutcome.
         let view = if in_scroll {
             self.view.scroll_pager.as_mut()
         } else {
             self.view.pager.as_mut()
         }
-        .expect("matching slot checked above");
-        let stream = self
-            .runtime
-            .pager_stream
-            .as_mut()
-            .expect("stream presence checked above");
+        .expect("matching slot confirmed by stream_slot above");
+        let stream = if is_scroll {
+            self.runtime.scroll_stream.as_mut()
+        } else {
+            self.runtime.pager_stream.as_mut()
+        }
+        .expect("stream presence confirmed above");
         match stream.drain(view, &ctx) {
             DrainOutcome::Idle => false,
             DrainOutcome::Changed => true,
             DrainOutcome::Finished => {
-                let retain = self
-                    .runtime
-                    .pager_stream
-                    .as_ref()
-                    .is_some_and(|s| s.retain_after_finish());
+                let retain = if is_scroll {
+                    self.runtime.scroll_stream.as_ref()
+                } else {
+                    self.runtime.pager_stream.as_ref()
+                }
+                .is_some_and(|s| s.retain_after_finish());
                 if !retain {
-                    self.runtime.pager_stream = None;
+                    if is_scroll {
+                        self.runtime.scroll_stream = None;
+                    } else {
+                        self.runtime.pager_stream = None;
+                    }
                 }
                 true
             }
             DrainOutcome::CloseInfo(msg) => {
                 self.close_stream_pager(in_scroll);
                 self.state.flash_info(msg);
-                self.runtime.pager_stream = None;
+                if is_scroll {
+                    self.runtime.scroll_stream = None;
+                } else {
+                    self.runtime.pager_stream = None;
+                }
                 true
             }
         }
@@ -472,6 +527,65 @@ mod tests {
             // The empty result reveals the base listing; stream drops.
             assert!(app.view.pager.is_none());
             assert!(app.runtime.pager_stream.is_none());
+        });
+    }
+
+    /// Regression: pressing `?` (help) while a grep or git-view is scanning must
+    /// not kill the worker. The motion handler stashes the streaming pager in
+    /// `view.pager_help_stash` and replaces `view.pager` with the help view
+    /// (no `stream_id`). `drain_pager_stream` must recognise the stash and
+    /// leave the stream alive so buffered output drains when help is dismissed.
+    #[test]
+    fn help_overlay_preserves_in_flight_overlay_stream() {
+        with_app(|app| {
+            // Stream pager hidden behind the help overlay.
+            app.view.pager_help_stash = Some(pager_with_stream_id(1));
+            app.view.pager = Some(PagerView::new_plain("help", Vec::<String>::new()));
+            app.runtime.pager_stream = Some(Box::new(FakeStream {
+                id: 1,
+                outcome: Some(DrainOutcome::Changed),
+                retain: false,
+            }));
+            // drain must be a no-op (pager is stashed) and must NOT kill the stream.
+            assert!(
+                !app.drain_pager_stream(),
+                "no drain while pager is behind help"
+            );
+            assert!(
+                app.runtime.pager_stream.is_some(),
+                "stream must survive the help overlay"
+            );
+        });
+    }
+
+    /// Regression: starting a grep (overlay stream in `view.pager`) while a
+    /// transcript is loading (scroll stream in `view.scroll_pager`) must not kill
+    /// the transcript's worker. The two streams now live in separate slots.
+    #[test]
+    fn overlay_stream_coexists_with_scroll_stream() {
+        with_app(|app| {
+            // Transcript loading into the lower-pane slot.
+            app.view.scroll_pager = Some(pager_with_stream_id(10));
+            app.runtime.scroll_stream = Some(Box::new(FakeStream {
+                id: 10,
+                outcome: Some(DrainOutcome::Idle),
+                retain: false,
+            }));
+            // Grep open in the overlay slot.
+            app.view.pager = Some(pager_with_stream_id(20));
+            app.runtime.pager_stream = Some(Box::new(FakeStream {
+                id: 20,
+                outcome: Some(DrainOutcome::Changed),
+                retain: false,
+            }));
+            let changed = app.drain_pager_stream();
+            assert!(changed, "overlay stream must drain");
+            assert!(
+                app.runtime.scroll_stream.is_some(),
+                "transcript stream must not be killed by the grep"
+            );
+            // The grep pager received the 'Changed' append.
+            assert_eq!(app.view.pager.as_ref().unwrap().lines.len(), 1);
         });
     }
 

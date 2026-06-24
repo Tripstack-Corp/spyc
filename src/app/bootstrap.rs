@@ -263,6 +263,7 @@ impl App {
                 background_tasks: BackgroundTasks::new(),
                 find_picker: None,
                 pager_stream: None,
+                scroll_stream: None,
                 next_stream_id: 0,
                 stashed_pager_streams: std::collections::HashMap::new(),
                 pending_git_view: None,
