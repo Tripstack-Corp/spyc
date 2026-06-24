@@ -484,11 +484,16 @@ struct Runtime {
     background_tasks: BackgroundTasks,
     /// Active F-finder (holds the walker thread's receiver).
     find_picker: Option<FindPicker>,
-    /// The active pager stream (the unified "worker → pager" abstraction —
-    /// see [`pager_stream`]). grep / git-view / transcript collapse onto this
-    /// slot as each migrates; `None` until then. Drained every tick by
-    /// `drain_pager_stream` (id-gated against the live pager's `stream_id`).
+    /// Active overlay pager stream (grep / git-view — drains into `view.pager`).
+    /// Drained every tick by `drain_pager_stream` (id-gated against
+    /// `view.pager.stream_id`).
     pager_stream: Option<Box<dyn pager_stream::PagerStream>>,
+    /// Active scroll / lower-pane stream (agent transcript — drains into
+    /// `view.scroll_pager`). Kept in its own slot so starting a grep or
+    /// git-view (which writes to `pager_stream`) does not kill a
+    /// concurrently-loading transcript. Stashed / restored alongside the
+    /// scroll pager by `stash/restore_scrollback_pager_to_active_tab`.
+    scroll_stream: Option<Box<dyn pager_stream::PagerStream>>,
     /// Monotonic pager-stream id (stale-stream guard), shared across all
     /// stream kinds.
     next_stream_id: u32,
@@ -496,7 +501,7 @@ struct Runtime {
     /// stashed on a backgrounded tab (keyed by the pager's `stream_id`). Kept
     /// here rather than on the `pane::TabEntry` because `PagerStream` is an
     /// `app` type and the dependency runs `app → pane` only. Re-installed into
-    /// `pager_stream` by `restore_active_tab_scrollback_pager`.
+    /// `scroll_stream` by `restore_active_tab_scrollback_pager`.
     stashed_pager_streams: std::collections::HashMap<u32, Box<dyn pager_stream::PagerStream>>,
     /// An in-flight git-view whose model is being built off-thread, before any
     /// pager is mounted. `drain_pending_git_view` mounts the overlay only when a

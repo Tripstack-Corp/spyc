@@ -172,9 +172,28 @@ impl App {
     /// 15-line mirror copies — only the history call and the end-of-list wording
     /// differ.
     fn nav_pager_buffer(&mut self, forward: bool) {
-        let Some(current) = self.view.pager.take() else {
+        let Some(mut current) = self.view.pager.take() else {
             return;
         };
+        // If navigating away from a mid-flight overlay stream, kill it now and
+        // clear the streaming flag on the pager before pushing it to history.
+        // Without this, `drain_pager_stream` kills the worker a tick later but
+        // the pager is already in history with `streaming = true` — so navigating
+        // back with `]b` shows a pager frozen at "scanning…" with no stream to
+        // drain it.
+        if current.streaming {
+            if let Some(id) = current.stream_id
+                && self
+                    .runtime
+                    .pager_stream
+                    .as_ref()
+                    .is_some_and(|s| s.id() == id)
+            {
+                self.runtime.pager_stream = None;
+            }
+            current.streaming = false;
+            current.stream_id = None;
+        }
         let step = if forward {
             self.view.pager_history.go_forward(current)
         } else {

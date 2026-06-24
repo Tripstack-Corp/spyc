@@ -462,15 +462,20 @@ impl Pane {
     /// screen). Used by `gf`/`gF` so path references that scrolled past
     /// the viewport are still found.
     pub fn recent_lines(&self, max_lines: usize) -> Vec<String> {
-        let prev = self.scroll_offset;
-        let max_sb = self.max_scrollback();
+        // `vt100::Screen::contents()` is viewport-only — it returns at most
+        // terminal_height rows at the current scrollback offset. Walking the
+        // full scrollback requires the page-walk in `lines_from_scrollback`.
         let all: Vec<String> = self.with_screen_mut(|s| {
-            s.set_scrollback(max_sb);
-            let lines: Vec<String> = s.contents().lines().map(String::from).collect();
-            s.set_scrollback(prev);
-            lines
+            crate::ui::scrollback::lines_from_scrollback(s)
+                .into_iter()
+                .map(|l| {
+                    l.spans
+                        .iter()
+                        .map(|sp| sp.content.as_ref())
+                        .collect::<String>()
+                })
+                .collect()
         });
-        // Return only the last `max_lines` lines.
         if all.len() > max_lines {
             all[all.len() - max_lines..].to_vec()
         } else {
@@ -530,14 +535,19 @@ impl Pane {
 
     /// Save full scrollback + screen contents to a timestamped file.
     pub fn save_to_file(&self) -> std::io::Result<std::path::PathBuf> {
-        // Temporarily set scrollback to max so contents() captures everything.
-        let prev = self.scroll_offset;
-        let max = self.max_scrollback();
+        // `vt100::Screen::contents()` is viewport-only. Walk the full
+        // scrollback + live screen via the page-walk in `lines_from_scrollback`.
         let text = self.with_screen_mut(|s| {
-            s.set_scrollback(max);
-            let text = s.contents();
-            s.set_scrollback(prev);
-            text
+            crate::ui::scrollback::lines_from_scrollback(s)
+                .into_iter()
+                .map(|l| {
+                    l.spans
+                        .iter()
+                        .map(|sp| sp.content.as_ref())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
         });
 
         let now = crate::sysinfo::format_now().replace([' ', ':'], "_");
