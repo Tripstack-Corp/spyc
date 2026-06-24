@@ -13,6 +13,12 @@
 use crate::git::model::{BlameLine, BlameModel};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
+
+/// Files with more lines than this are silently truncated; `BlameModel.truncated`
+/// is set so the renderer can show a note. Prevents OOM on pathologically large
+/// files (auto-generated, minified, huge log files accidentally committed).
+pub const MAX_BLAME_LINES: usize = 50_000;
 
 /// Blame `path` (repo-relative, forward slashes) at the repo rooted at
 /// `repo_root`, against the current `HEAD`. Returns one entry per line in file
@@ -32,20 +38,27 @@ pub fn blame(repo_root: &Path, path: &str) -> Option<BlameModel> {
         )
         .ok()?;
 
-    // Cache commit metadata (short id, author, date) per commit so a file
-    // touched by N commits decodes each commit once, not once per line.
-    let mut meta_cache: HashMap<gix::ObjectId, (String, String, String)> = HashMap::new();
+    // Cache commit metadata per commit (decoded once, then Arc-cloned per
+    // line). Arc<str> makes per-line clones O(1): a large file whose lines
+    // all come from one commit no longer allocates 3 × N Strings.
+    type CommitMeta = (Arc<str>, Arc<str>, Arc<str>);
+    let mut meta_cache: HashMap<gix::ObjectId, CommitMeta> = HashMap::new();
     let mut lines: Vec<BlameLine> = Vec::new();
+    let mut truncated = false;
 
-    for (entry, entry_lines) in outcome.entries_with_lines() {
+    'blame: for (entry, entry_lines) in outcome.entries_with_lines() {
         let (short_id, author, date) = meta_cache
             .entry(entry.commit_id)
             .or_insert_with(|| commit_meta(&repo, entry.commit_id))
-            .clone();
+            .clone(); // Arc clone — O(1)
         // `start_in_blamed_file` is the 0-based first line of this hunk in the
         // blamed file; line numbers in the model are 1-based.
         let base = entry.start_in_blamed_file;
         for (offset, text) in entry_lines.iter().enumerate() {
+            if lines.len() >= MAX_BLAME_LINES {
+                truncated = true;
+                break 'blame;
+            }
             lines.push(BlameLine {
                 short_id: short_id.clone(),
                 author: author.clone(),
@@ -66,6 +79,7 @@ pub fn blame(repo_root: &Path, path: &str) -> Option<BlameModel> {
     Some(BlameModel {
         path: path.to_string(),
         lines,
+        truncated,
     })
 }
 
@@ -73,27 +87,28 @@ pub fn blame(repo_root: &Path, path: &str) -> Option<BlameModel> {
 /// failure the short id is still returned (it's just the hash) with empty
 /// author/date, so a partially-corrupt history degrades gracefully rather
 /// than dropping lines.
-fn commit_meta(repo: &gix::Repository, id: gix::ObjectId) -> (String, String, String) {
+fn commit_meta(repo: &gix::Repository, id: gix::ObjectId) -> (Arc<str>, Arc<str>, Arc<str>) {
     use gix::bstr::ByteSlice;
 
     // A fixed 7-char short id (git's default width) so parity against
     // `git blame --porcelain` is a clean prefix compare. `ObjectId` derefs to
     // `oid`, whose `to_hex_with_len` gives the truncated hex.
-    let short_id = id.to_hex_with_len(7).to_string();
+    let short_id: Arc<str> = id.to_hex_with_len(7).to_string().into();
     let Ok(commit) = repo.find_commit(id) else {
-        return (short_id, String::new(), String::new());
+        return (short_id, Arc::from(""), Arc::from(""));
     };
-    let (author, date) = match commit.author() {
+    let (author, date): (Arc<str>, Arc<str>) = match commit.author() {
         Ok(sig) => {
-            let name = sig.name.to_str_lossy().into_owned();
-            let date = sig
+            let name: Arc<str> = sig.name.to_str_lossy().into_owned().into();
+            let date: Arc<str> = sig
                 .time()
                 .ok()
                 .map(crate::git::diff_model::format_git_time)
-                .unwrap_or_default();
+                .unwrap_or_default()
+                .into();
             (name, date)
         }
-        Err(_) => (String::new(), String::new()),
+        Err(_) => (Arc::from(""), Arc::from("")),
     };
     (short_id, author, date)
 }
@@ -168,7 +183,7 @@ mod tests {
         for (i, l) in model.lines.iter().enumerate() {
             assert_eq!(l.lineno, i as u32 + 1);
             assert_eq!(l.short_id.len(), 7);
-            assert_eq!(l.author, "Ada");
+            assert_eq!(l.author.as_ref(), "Ada");
             assert!(!l.date.is_empty());
         }
 
@@ -186,7 +201,7 @@ mod tests {
                 .get(&l.lineno)
                 .unwrap_or_else(|| panic!("no porcelain sha for line {}", l.lineno));
             assert!(
-                git_sha.starts_with(&l.short_id),
+                git_sha.starts_with(l.short_id.as_ref()),
                 "line {} blame mismatch: model {} vs git {}",
                 l.lineno,
                 l.short_id,
@@ -209,5 +224,27 @@ mod tests {
         run_git(&root, &["commit", "-q", "-m", "c1"]);
         // A path that doesn't exist at HEAD → None, not a panic.
         assert!(blame(&root, "nope.txt").is_none());
+    }
+
+    #[test]
+    fn blame_truncates_at_max_lines() {
+        use crate::git::blame::MAX_BLAME_LINES;
+        let (_t, root) = init_repo();
+
+        // Write a file with MAX_BLAME_LINES + 5 lines so we cross the cap.
+        use std::fmt::Write as _;
+        let mut big = String::new();
+        for i in 1..=MAX_BLAME_LINES + 5 {
+            let _ = writeln!(big, "line {i}");
+        }
+        std::fs::write(root.join("big.txt"), &big).unwrap();
+        run_git(&root, &["add", "big.txt"]);
+        run_git(&root, &["commit", "-q", "-m", "big"]);
+
+        let model = blame(&root, "big.txt").expect("blame model");
+        assert_eq!(model.lines.len(), MAX_BLAME_LINES, "exactly capped");
+        assert!(model.truncated, "truncated flag must be set");
+        // The last line kept must be line MAX_BLAME_LINES (1-based).
+        assert_eq!(model.lines.last().unwrap().lineno, MAX_BLAME_LINES as u32);
     }
 }

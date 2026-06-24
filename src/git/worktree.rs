@@ -200,11 +200,45 @@ pub fn add(dir: &Path, branch: &str, base: Option<&str>) -> std::io::Result<Path
     let name = unique_admin_name(&worktrees_root, branch);
     let admin_dir = worktrees_root.join(&name);
 
-    std::fs::create_dir_all(&target)?;
-    std::fs::create_dir_all(&admin_dir)?;
+    materialize_worktree(repo, tree_id, &target, &admin_dir, branch)?;
 
-    // Build the worktree index from the branch tree, point it at the admin
-    // `index` file, check the tree out into `target`, then persist the index.
+    Ok(target)
+}
+
+/// Create the worktree + admin directories, check the branch tree out, and
+/// write the admin files. On **any** failure, remove the partial directories
+/// so a retry with the same branch name is possible — the non-empty-dir guard
+/// in [`add`] would otherwise block it forever. (The branch ref, created
+/// earlier, is intentionally left in place; an existing branch is reused on
+/// retry.)
+fn materialize_worktree(
+    repo: gix::Repository,
+    tree_id: gix::ObjectId,
+    target: &Path,
+    admin_dir: &Path,
+    branch: &str,
+) -> std::io::Result<()> {
+    std::fs::create_dir_all(target)?;
+    std::fs::create_dir_all(admin_dir)?;
+    if let Err(e) = checkout_and_write(repo, tree_id, target, admin_dir, branch) {
+        let _ = std::fs::remove_dir_all(target);
+        let _ = std::fs::remove_dir_all(admin_dir);
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// Build the worktree index from `tree_id`, check it out into `target`, write
+/// the index to `admin_dir/index`, then write the four admin files git expects.
+/// Separated from [`materialize_worktree`] so partial state can be cleaned up
+/// if any step fails.
+fn checkout_and_write(
+    repo: gix::Repository,
+    tree_id: gix::ObjectId,
+    target: &Path,
+    admin_dir: &Path,
+    branch: &str,
+) -> std::io::Result<()> {
     let mut index = repo
         .index_from_tree(&tree_id)
         .map_err(|e| std::io::Error::other(format!("index from tree: {e}")))?;
@@ -220,7 +254,7 @@ pub fn add(dir: &Path, branch: &str, base: Option<&str>) -> std::io::Result<Path
     let should_interrupt = AtomicBool::new(false);
     gix::worktree::state::checkout(
         &mut index,
-        &target,
+        target,
         objects,
         &gix::progress::Discard,
         &gix::progress::Discard,
@@ -232,10 +266,7 @@ pub fn add(dir: &Path, branch: &str, base: Option<&str>) -> std::io::Result<Path
         .write(gix::index::write::Options::default())
         .map_err(|e| std::io::Error::other(format!("write index: {e}")))?;
 
-    // Write the admin files git expects, byte-for-byte.
-    write_admin_files(&admin_dir, &target, branch)?;
-
-    Ok(target)
+    write_admin_files(admin_dir, target, branch)
 }
 
 /// Resolve `full_ref` (`refs/heads/<branch>`) to its commit id. If the branch
@@ -871,5 +902,58 @@ mod tests {
         assert_eq!(lock_reason(&wt), None);
         remove(&wt).expect("remove after release");
         assert!(!wt.exists());
+    }
+
+    #[test]
+    fn materialize_worktree_cleans_up_partial_dirs_on_failure() {
+        // The cleanup-on-failure fix: when checkout fails partway, both the
+        // target and admin directories `materialize_worktree` created must be
+        // removed so a retry with the same branch name isn't blocked by the
+        // non-empty-dir guard. Force a deterministic failure by passing a null
+        // ObjectId as the tree id — `index_from_tree` can't resolve it, so
+        // checkout_and_write errors *after* the directories are created.
+        let (_tmp, main) = init_repo();
+        let group = main.parent().unwrap().join("repo.worktrees");
+        let target = group.join("boom");
+        let admin_dir = main.join(".git").join("worktrees").join("boom");
+        assert!(
+            !target.exists() && !admin_dir.exists(),
+            "clean precondition"
+        );
+
+        let repo = gix::open(&main).expect("open repo");
+        let bogus_tree = gix::ObjectId::null(repo.object_hash());
+
+        let res = super::materialize_worktree(repo, bogus_tree, &target, &admin_dir, "boom");
+        assert!(res.is_err(), "null tree id must fail the checkout");
+
+        // Both directories the helper created must be gone — without the
+        // cleanup, the empty `target` would block a same-name retry.
+        assert!(!target.exists(), "partial target dir not cleaned up");
+        assert!(!admin_dir.exists(), "partial admin dir not cleaned up");
+    }
+
+    #[test]
+    fn add_succeeds_after_a_prior_failed_attempt() {
+        // End-to-end companion: a failed materialize leaves nothing behind, so
+        // a subsequent real `add` with the SAME branch name succeeds (the bug
+        // was that leftover dirs tripped the "already exists and not empty"
+        // guard forever).
+        let (_tmp, main) = init_repo();
+        let group = main.parent().unwrap().join("repo.worktrees");
+        let target = group.join("feature");
+        let admin_dir = main.join(".git").join("worktrees").join("feature");
+
+        let repo = gix::open(&main).expect("open repo");
+        let bogus_tree = gix::ObjectId::null(repo.object_hash());
+        assert!(
+            super::materialize_worktree(repo, bogus_tree, &target, &admin_dir, "feature").is_err(),
+            "forced failure"
+        );
+
+        // Same branch name now adds cleanly.
+        let added = add(&main, "feature", None).expect("retry add after failure");
+        assert_eq!(added, target);
+        assert!(added.is_dir());
     }
 }
