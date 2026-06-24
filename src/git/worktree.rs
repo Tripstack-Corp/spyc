@@ -137,11 +137,22 @@ pub fn add(dir: &Path, branch: &str, base: Option<&str>) -> std::io::Result<Path
     // every path we *persist* (the worktree gitfile + admin `gitdir`)
     // absolute — a relative `gitdir:` would make `git` resolve the admin
     // dir against the worktree and fail to find it (the bug this guards).
+    let common_dir = std::fs::canonicalize(repo.common_dir())?;
+    // Anchor the sibling `.worktrees/` dir on the MAIN worktree root — NOT on
+    // whichever worktree `dir` was discovered from. `gix::discover` resolves the
+    // *enclosing* repo, so adding a worktree while the asking column sits inside
+    // an existing linked worktree would otherwise build the path from that
+    // linked worktree's root and nest the new one as
+    // `<linked>.worktrees/<branch>` (the recurring nesting bug: #511's POLA fix
+    // corrected the base BRANCH but not the PATH). The common dir is shared by
+    // every worktree of the repo, so opening it yields the main worktree's repo
+    // view regardless of where `dir` points.
     let root = std::fs::canonicalize(
-        repo.workdir()
+        gix::open(&common_dir)
+            .ok()
+            .and_then(|main| main.workdir().map(std::path::Path::to_path_buf))
             .ok_or_else(|| std::io::Error::other("cannot add a worktree to a bare repository"))?,
     )?;
-    let common_dir = std::fs::canonicalize(repo.common_dir())?;
 
     // Group worktrees under a per-repo sibling dir, so they don't clutter the
     // repo's parent or collide with unrelated dirs:
@@ -459,6 +470,35 @@ mod tests {
             rev_parse(&main, "wt"),
             main_tip,
             "new branch must start at the base (main), not the checked-out HEAD"
+        );
+    }
+
+    #[test]
+    fn add_from_inside_linked_worktree_anchors_on_main() {
+        // The nesting bug: when the asking dir sits INSIDE an existing linked
+        // worktree (e.g. a spyc column navigated into one), the new worktree
+        // must still land as a SIBLING of the MAIN repo
+        // (`<repo>.worktrees/<branch>`), not nested under the linked one
+        // (`<linked>.worktrees/<branch>`).
+        let (_tmp, main) = init_repo();
+        let group = main.parent().unwrap().join("repo.worktrees");
+        let wt1 = add(&main, "feat-a", None).expect("first worktree");
+        assert!(
+            wt1.starts_with(&group),
+            "precondition: first worktree under repo.worktrees/, got {wt1:?}"
+        );
+
+        // Add a SECOND worktree, asking from INSIDE the first one.
+        let wt2 = add(&wt1, "feat-b", None).expect("second worktree from inside the first");
+
+        assert_eq!(
+            wt2,
+            group.join("feat-b"),
+            "worktree must anchor on the main repo, got {wt2:?}"
+        );
+        assert!(
+            !wt2.starts_with(&wt1),
+            "worktree must NOT nest under the asking linked worktree: {wt2:?}"
         );
     }
 
