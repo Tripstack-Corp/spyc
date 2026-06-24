@@ -819,6 +819,24 @@ pub struct RowData {
     pub kind: EntryKind,
 }
 
+impl RowData {
+    /// The key under which this row's git status lives in `git.files`. That
+    /// map keys files by bare basename and directories by `basename/` (see
+    /// `git::status::map_to_listing`) — which equals `display` for every kind
+    /// EXCEPT executables: `Entry::display_name` decorates those with a
+    /// trailing `*` (ls -F style) that the git map never carries, so looking up
+    /// by raw `display` silently fails to find any executable's status. Strip
+    /// that one suffix so executable files surface their markers like any other
+    /// file. (A file genuinely named `foo*` decorates to `foo**`, so stripping
+    /// one `*` still yields its real basename key.)
+    pub fn git_key(&self) -> &str {
+        match self.kind {
+            EntryKind::Executable => self.display.strip_suffix('*').unwrap_or(&self.display),
+            _ => &self.display,
+        }
+    }
+}
+
 /// Per-iteration draw accumulator for the event loop. `dirty` is an OR
 /// across every step in an iteration; `reason` is last-writer-wins,
 /// matching the old `draw_reason = N` overwrite semantics. Reset by the

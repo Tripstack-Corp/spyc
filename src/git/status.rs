@@ -225,9 +225,17 @@ pub fn repo_status(repo_root: &Path) -> Option<Vec<StatusEntry>> {
         // list an untracked file inside a tracked dir individually. See the
         // doc comment above for why this is `Collapsed`, not `Files`.
         .untracked_files(UntrackedFiles::Collapsed)
-        // Match git's `status` default rename detection (-M50%).
-        .tree_index_track_renames(TrackRenames::Given(gix::diff::Rewrites::default()))
-        .index_worktree_rewrites(gix::diff::Rewrites::default());
+        // Match git's `status` default rename detection (-M50%). This applies
+        // to the STAGED half only (HEAD↔index): a staged rename collapses to a
+        // single `R` instead of a delete + add pair. We deliberately do NOT
+        // enable `index_worktree_rewrites`: git porcelain never pairs a
+        // worktree-only rename, because the destination is an *untracked* file
+        // and rename detection in the index↔worktree half only considers
+        // tracked entries. Enabling it made gix report a plain `mv` (without
+        // `git add`) as a single `R renamed`, while porcelain reports
+        // ` D orig` + `?? renamed` — a parity violation (see
+        // `case08b_unstaged_rename`).
+        .tree_index_track_renames(TrackRenames::Given(gix::diff::Rewrites::default()));
 
     // Accumulate per repo-relative path: the staged column (TreeIndex) and the
     // unstaged/untracked column (IndexWorktree) for the same path merge into
@@ -246,7 +254,12 @@ pub fn repo_status(repo_root: &Path) -> Option<Vec<StatusEntry>> {
 
     let iter = platform.into_iter(None).ok()?;
     for item in iter {
-        let item = item.ok()?;
+        // Tolerate a single bad item: one path that fails to decode (e.g. an
+        // unreadable worktree entry) must not blank the *entire* repo's git
+        // markers. Skip it and keep surfacing status for every other path —
+        // partial status beats none. (A failure to even start the walk above
+        // still returns None: there's nothing to show.)
+        let Ok(item) = item else { continue };
         match item {
             // STAGED column: HEAD-tree vs index.
             Item::TreeIndex(change) => match change {
@@ -314,12 +327,27 @@ pub fn repo_status(repo_root: &Path) -> Option<Vec<StatusEntry>> {
                     }
                     // Ignored / Pruned / Tracked → skip.
                 }
-                IwItem::Rewrite { dirwalk_entry, .. } => {
+                IwItem::Rewrite {
+                    source,
+                    dirwalk_entry,
+                    ..
+                } => {
+                    // With `index_worktree_rewrites` left disabled (see the
+                    // platform setup above) gix doesn't emit this for the
+                    // index↔worktree half, matching git porcelain: a
+                    // worktree-only `mv` (no `git add`) shows as a deletion of
+                    // the source plus an *untracked* destination — git won't
+                    // pair them into one `R`, because the destination isn't
+                    // tracked. Decode it that way so the porcelain parity
+                    // contract holds even if rewrite detection is ever
+                    // re-enabled here.
+                    entry(&mut by_path, source.rela_path().to_str_lossy().into_owned()).unstaged =
+                        Some(GitChange::Deleted);
                     entry(
                         &mut by_path,
                         dirwalk_entry.rela_path.to_str_lossy().into_owned(),
                     )
-                    .unstaged = Some(GitChange::Renamed);
+                    .untracked = true;
                 }
             },
         }
