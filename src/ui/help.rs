@@ -110,8 +110,14 @@ const SECTIONS: &[Section] = &[
     Section {
         title: "File operations",
         rows: &[
-            ("c", "copy selection to a destination (prompt)"),
-            ("M", "move selection to a destination (prompt)"),
+            (
+                "c",
+                "copy selection to a destination (prompt; % = filename)",
+            ),
+            (
+                "M",
+                "move/rename selection (prompt; % = filename, e.g. %.bak)",
+            ),
             ("R  /  dd", "remove selection (confirm with y)"),
             ("Ndd", "remove cursor + N-1 entries below (e.g. 4dd)"),
             ("+", "make a new directory (prompt)"),
