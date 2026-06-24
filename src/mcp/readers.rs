@@ -153,10 +153,12 @@ pub(super) fn read_context_or_empty(ctx_path: &Path) -> String {
 
 /// JSON inventory of the focused column's worktrees, for the `list_worktrees`
 /// MCP tool: one object per worktree — branch, short HEAD, a dirty-file
-/// breakdown (`repo_status` counts), and whether it's the worktree the user is
-/// currently in. Runs on the socket thread — pure git + the context file's cwd,
-/// no `App`. Returns `[]` outside a repo. (Merged / ahead-behind via
-/// `branch_status` lands in a follow-up; column-`b` flags need context the
+/// breakdown (`repo_status` counts), whether it's the worktree the user is
+/// currently in, and `ahead`/`behind`/`merged` against the repo's integration
+/// base (the "is this safe to remove?" signal; `null` when the tip or base
+/// can't be resolved — a bare/unborn entry, or a repo with no base branch).
+/// Runs on the socket thread — pure git + the context file's cwd, no `App`.
+/// Returns `[]` outside a repo. (Column-`b` flags still need context the
 /// snapshot doesn't yet expose.)
 pub(super) fn list_worktrees_json(ctx_path: &Path) -> String {
     let cwd = read_cwd_from_context(ctx_path);
@@ -164,6 +166,14 @@ pub(super) fn list_worktrees_json(ctx_path: &Path) -> String {
     let Some(worktrees) = crate::git::worktree::list(&cwd) else {
         return "[]".to_string();
     };
+    // Resolve the integration base once, from the MAIN worktree — always first
+    // (`worktree::list` ordering) and a clean repo root, unlike the column's
+    // possibly-subdir cwd. Each entry's ahead/behind/merged is computed against
+    // it via the shared object DB.
+    let repo_root = worktrees.first().map(|w| w.path.clone());
+    let base = repo_root
+        .as_deref()
+        .and_then(crate::git::branch::default_base);
     let arr: Vec<Value> = worktrees
         .iter()
         .map(|wt| {
@@ -177,12 +187,20 @@ pub(super) fn list_worktrees_json(ctx_path: &Path) -> String {
                 });
             let is_current =
                 cwd_canon.is_some() && std::fs::canonicalize(&wt.path).ok() == cwd_canon;
+            let status = repo_root
+                .as_deref()
+                .zip(base.as_deref())
+                .filter(|_| !wt.head.is_empty())
+                .and_then(|(root, base)| crate::git::branch::branch_status(root, &wt.head, base));
             json!({
                 "path": wt.path.display().to_string(),
                 "branch": wt.branch,
                 "head": wt.head,
                 "is_current": is_current,
                 "dirty": { "staged": staged, "unstaged": unstaged, "untracked": untracked },
+                "ahead": status.map(|s| s.ahead),
+                "behind": status.map(|s| s.behind),
+                "merged": status.map(|s| s.merged),
             })
         })
         .collect();
@@ -228,6 +246,42 @@ mod tests {
             .expect("feature entry");
         assert_eq!(feat["is_current"], json!(false));
         assert_eq!(feat["dirty"]["untracked"], json!(1));
+        // No commits past main → fully merged, nothing would be lost on removal.
+        assert_eq!(feat["merged"], json!(true));
+        assert_eq!(feat["ahead"], json!(0));
+        assert_eq!(main["merged"], json!(true));
+    }
+
+    #[test]
+    fn reports_ahead_behind_for_unmerged_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-q", "-m", "c1"]);
+        // A worktree on a branch one commit ahead of main.
+        let wt = crate::git::worktree::add(&repo, "feature", None).unwrap();
+        std::fs::write(wt.join("b.txt"), "b\n").unwrap();
+        run_git(&wt, &["add", "."]);
+        run_git(&wt, &["commit", "-q", "-m", "c2"]);
+        let ctx = tmp.path().join("ctx.json");
+        std::fs::write(
+            &ctx,
+            json!({ "cwd": repo.display().to_string() }).to_string(),
+        )
+        .unwrap();
+
+        let v: Value = serde_json::from_str(&list_worktrees_json(&ctx)).unwrap();
+        let arr = v.as_array().expect("array");
+        let feat = arr
+            .iter()
+            .find(|e| e["branch"] == "feature")
+            .expect("feature entry");
+        assert_eq!(feat["ahead"], json!(1));
+        assert_eq!(feat["behind"], json!(0));
+        assert_eq!(feat["merged"], json!(false));
     }
 
     #[test]
