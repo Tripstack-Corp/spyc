@@ -427,6 +427,37 @@ mod tests {
     }
 
     #[test]
+    fn working_unstaged_rename_shows_both_delete_and_add() {
+        let (_t, root) = empty_repo();
+        let body = "alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\n";
+        std::fs::write(root.join("orig.txt"), body).unwrap();
+        run_git(&root, &["add", "orig.txt"]);
+        run_git(&root, &["commit", "-q", "-m", "add orig"]);
+        // Filesystem rename WITHOUT staging. `git diff HEAD` (+ new) reports
+        // orig.txt as DELETED and renamed.txt as ADDED — it never pairs an
+        // untracked destination as a rename. The `gd` model must surface BOTH;
+        // the old code dropped the deletion side (only the addition showed).
+        std::fs::rename(root.join("orig.txt"), root.join("renamed.txt")).unwrap();
+
+        let model = diff_head_to_worktree(&root, &[]).expect("model");
+        let deleted = model
+            .files
+            .iter()
+            .find(|f| f.old_path.as_deref() == Some("orig.txt"))
+            .unwrap_or_else(|| panic!("deletion side dropped: {:?}", model.files));
+        assert_eq!(deleted.status, FileStatus::Deleted);
+        assert_eq!(deleted.new_path, None);
+
+        let added = model
+            .files
+            .iter()
+            .find(|f| f.new_path.as_deref() == Some("renamed.txt"))
+            .unwrap_or_else(|| panic!("addition side missing: {:?}", model.files));
+        assert_eq!(added.status, FileStatus::Added);
+        assert_eq!(added.old_path, None);
+    }
+
+    #[test]
     fn working_binary_file_flagged() {
         let (_t, root) = repo_with_commit();
         // A file with NUL bytes → gix classifies it binary.

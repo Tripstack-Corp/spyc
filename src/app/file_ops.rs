@@ -14,6 +14,16 @@ pub enum FileOp {
         paths: Vec<PathBuf>,
         dest: PathBuf,
     },
+    /// Per-file copy/move: each `(src, dest)` pair is handled independently.
+    /// Produced when a copy/move destination references the source name via
+    /// `%` (expanded per source to that file's basename), so a multi-pick
+    /// `%.bak` batch-renames each selected file to its own target. A single
+    /// pair stays on the plain `Copy`/`Move` op above (keeps the "to <dest>"
+    /// flash); this variant carries the fan-out.
+    RenameEach {
+        pairs: Vec<(PathBuf, PathBuf)>,
+        is_move: bool,
+    },
     PipeContent {
         use_inventory: bool,
         inventory_ids: Vec<String>,
@@ -38,6 +48,14 @@ pub enum FileOutcome {
     Moved {
         count: usize,
         dest: PathBuf,
+        result: Result<(), String>,
+    },
+    /// Outcome of a [`FileOp::RenameEach`] fan-out: `verb_move` picks the
+    /// flash wording, `count` is how many pairs were attempted, and `result`
+    /// is the first failure (stops at the first error) or Ok.
+    RenamedEach {
+        count: usize,
+        is_move: bool,
         result: Result<(), String>,
     },
     PipedContent {
@@ -72,6 +90,30 @@ pub fn run_file_op(op: FileOp) -> FileOutcome {
             FileOutcome::Moved {
                 count,
                 dest,
+                result,
+            }
+        }
+        FileOp::RenameEach { pairs, is_move } => {
+            let count = pairs.len();
+            let mut result = Ok(());
+            for (src, dest) in &pairs {
+                // `dispatch_selection` with a single source + non-existent dest
+                // renames; with an existing dir it moves into it — either is a
+                // sensible outcome for a per-file target.
+                let one = [src.as_path()];
+                let r = if is_move {
+                    crate::fs::ops::move_selection_to(&one, dest)
+                } else {
+                    crate::fs::ops::copy_selection_to(&one, dest)
+                };
+                if let Err(e) = r {
+                    result = Err(format!("{}: {e}", src.display()));
+                    break;
+                }
+            }
+            FileOutcome::RenamedEach {
+                count,
+                is_move,
                 result,
             }
         }
@@ -190,6 +232,19 @@ impl App {
                 self.state.cur_mut().picks.clear();
                 self.state.refresh_listing();
             }
+            FileOutcome::RenamedEach {
+                count,
+                is_move,
+                result,
+            } => {
+                let verb = if is_move { "renamed" } else { "copied" };
+                match result {
+                    Ok(()) => self.state.flash_info(format!("{verb} {count} item(s)")),
+                    Err(e) => self.state.flash_error(format!("error: {e}")),
+                }
+                self.state.cur_mut().picks.clear();
+                self.state.refresh_listing();
+            }
             FileOutcome::Restored { rela_path, result } => {
                 match result {
                     Ok(()) => self.state.flash_info(format!("restored {rela_path}")),
@@ -276,6 +331,34 @@ mod tests {
         assert!(result.is_ok(), "{result:?}");
         assert!(dest.join("a.txt").exists());
         assert!(!a.exists(), "move removes the source");
+    }
+
+    #[test]
+    fn rename_each_renames_every_pair_to_its_own_dest() {
+        let work = tempdir().unwrap();
+        let a = write_file(work.path(), "a.txt", "alpha");
+        let b = write_file(work.path(), "b.txt", "beta");
+        let out = run_file_op(FileOp::RenameEach {
+            pairs: vec![
+                (a.clone(), work.path().join("a.txt.bak")),
+                (b.clone(), work.path().join("b.txt.bak")),
+            ],
+            is_move: true,
+        });
+        let FileOutcome::RenamedEach {
+            count,
+            is_move,
+            result,
+        } = out
+        else {
+            panic!("expected RenamedEach");
+        };
+        assert_eq!(count, 2);
+        assert!(is_move);
+        assert!(result.is_ok(), "{result:?}");
+        assert!(work.path().join("a.txt.bak").exists());
+        assert!(work.path().join("b.txt.bak").exists());
+        assert!(!a.exists() && !b.exists(), "move removes the sources");
     }
 
     #[test]

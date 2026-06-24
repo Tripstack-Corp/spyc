@@ -355,6 +355,23 @@ mod parity_tests {
     }
 
     #[test]
+    fn case08b_unstaged_rename() {
+        // A plain filesystem `mv` of a tracked file, NOT staged. git porcelain
+        // does not pair this into a single `R`: the destination is untracked,
+        // and worktree-half rename detection only considers tracked entries, so
+        // it reports ` D orig.txt` + `?? renamed.txt`. `repo_status` must agree
+        // — i.e. it must NOT enable index↔worktree rewrite detection (which
+        // would collapse it to one `R renamed.txt`). Regression guard for the
+        // parity-contract violation at the `index_worktree_rewrites` setup.
+        let (_t, root) = repo_with_commit();
+        std::fs::write(root.join("orig.txt"), "line1\nline2\nline3\nline4\n").unwrap();
+        run_git(&root, &["add", "orig.txt"]);
+        run_git(&root, &["commit", "-q", "-m", "add orig"]);
+        std::fs::rename(root.join("orig.txt"), root.join("renamed.txt")).unwrap();
+        assert_parity(&root, "sub");
+    }
+
+    #[test]
     fn case09_untracked_file() {
         let (_t, root) = repo_with_commit();
         std::fs::write(root.join("untracked.txt"), "u\n").unwrap();

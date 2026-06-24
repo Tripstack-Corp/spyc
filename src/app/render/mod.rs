@@ -987,6 +987,57 @@ mod render_tests {
             "no rows are flagged without a delete preview"
         );
     }
+
+    /// An executable file must surface its git marker. `display_name` decorates
+    /// executables with a trailing `*` (`run*`), but `git.files` keys them by the
+    /// bare basename (`run`) — so a raw `display` lookup silently missed every
+    /// executable. `build_rows` now keys via `RowData::git_key`, which strips the
+    /// `*`. Guards the exec-file marker regression (and that a plain file's
+    /// lookup is unaffected).
+    #[test]
+    fn build_rows_resolves_git_status_for_executables() {
+        use crate::app::RowData;
+        use crate::fs::EntryKind;
+        use crate::ui::list_view::{GitChange, GitFileStatus};
+
+        let mut app = demo_app(&files()); // dir = /projects/demo
+        let dir = PathBuf::from("/projects/demo");
+        app.state.left.rows = vec![
+            RowData {
+                path: dir.join("run"),
+                display: "run*".to_string(), // ls -F decoration for an executable
+                kind: EntryKind::Executable,
+                deleted: false,
+            },
+            RowData {
+                path: dir.join("a.rs"),
+                display: "a.rs".to_string(),
+                kind: EntryKind::File,
+                deleted: false,
+            },
+        ];
+        // git status keys BOTH by bare basename (no `*`).
+        let files = &mut app.state.left.git.files;
+        files.insert(
+            "run".to_string(),
+            GitFileStatus::unstaged(GitChange::Modified),
+        );
+        files.insert(
+            "a.rs".to_string(),
+            GitFileStatus::unstaged(GitChange::Modified),
+        );
+
+        let rows = app.build_rows();
+        let by_name = |d: &str| rows.iter().find(|r| r.display == d).unwrap().git_status;
+        assert!(
+            !by_name("run*").is_clean(),
+            "executable row must resolve its git marker (git_key strips the `*`)"
+        );
+        assert!(
+            !by_name("a.rs").is_clean(),
+            "plain file marker still resolves"
+        );
+    }
 }
 
 #[cfg(test)]

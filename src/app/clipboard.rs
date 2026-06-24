@@ -166,6 +166,13 @@ impl App {
     /// Resolve `raw_dest` and run a copy-like or move-like operation across
     /// the current selection. Flash a success / error message afterwards
     /// and refresh the listing so results are visible immediately.
+    ///
+    /// `%` in the destination refers to each source file's own basename (a
+    /// literal percent is `%%`), spy-style: `M %.o` on `Makefile` renames it
+    /// to `Makefile.o`, and a multi-pick `%.bak` batch-renames every selected
+    /// file to its own `<name>.bak`. Without a `%` the destination is a single
+    /// target (a directory to move into, or a rename when one file is selected)
+    /// exactly as before.
     pub fn run_selection_to(&mut self, raw_dest: &str, is_move: bool) -> Vec<Effect> {
         let dest_trim = raw_dest.trim();
         if dest_trim.is_empty() {
@@ -181,12 +188,38 @@ impl App {
             self.state.flash_error("nothing selected");
             return Vec::new();
         }
-        let expanded = crate::paths::expand(dest_trim);
-        let dest = if expanded.is_absolute() {
-            expanded
-        } else {
-            self.state.cur().listing.dir.join(&expanded)
-        };
+        let base_dir = self.state.cur().listing.dir.clone();
+
+        // Per-file `%` expansion: each source resolves the destination against
+        // its OWN name. Single source reuses the plain Copy/Move op (keeping
+        // its "to <dest>" flash); multiple sources fan out via RenameEach.
+        if dest_references_name(dest_trim) {
+            let pairs: Vec<(PathBuf, PathBuf)> = paths
+                .into_iter()
+                .map(|src| {
+                    let name = src
+                        .file_name()
+                        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                    let dest = resolve_dest(&expand_dest_name(dest_trim, &name), &base_dir);
+                    (src, dest)
+                })
+                .collect();
+            if pairs.len() == 1 {
+                let (src, dest) = pairs.into_iter().next().expect("len == 1");
+                let paths = vec![src];
+                return vec![Effect::FileOp(if is_move {
+                    super::file_ops::FileOp::Move { paths, dest }
+                } else {
+                    super::file_ops::FileOp::Copy { paths, dest }
+                })];
+            }
+            return vec![Effect::FileOp(super::file_ops::FileOp::RenameEach {
+                pairs,
+                is_move,
+            })];
+        }
+
+        let dest = resolve_dest(dest_trim, &base_dir);
         if is_move {
             vec![Effect::FileOp(super::file_ops::FileOp::Move {
                 paths,
@@ -205,6 +238,133 @@ impl App {
         match result {
             Ok(()) => self.state.flash_info(success_msg),
             Err(e) => self.state.flash_error(format!("error: {e}")),
+        }
+    }
+}
+
+/// True when `template` contains a `%` that references the source name — an
+/// unescaped `%` (a literal percent is written `%%`). Drives whether a
+/// copy/move destination is expanded per source file.
+fn dest_references_name(template: &str) -> bool {
+    let mut chars = template.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '%' {
+            if chars.peek() == Some(&'%') {
+                chars.next(); // `%%` is a literal percent, not a name reference
+            } else {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Expand `%` in a copy/move destination to `name` (a source file's basename);
+/// `%%` is a literal percent. Mirrors [`crate::shell::expand_percent`]'s escape
+/// rule but substitutes a single bare name with no shell quoting, so the result
+/// is a plain path — `M %.o` on `Makefile` yields `Makefile.o`.
+fn expand_dest_name(template: &str, name: &str) -> String {
+    let mut out = String::with_capacity(template.len() + name.len());
+    let mut chars = template.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '%' {
+            if chars.peek() == Some(&'%') {
+                chars.next();
+                out.push('%');
+            } else {
+                out.push_str(name);
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Resolve a (possibly `~`/env-bearing) destination string against `base_dir`:
+/// tilde/env expansion first, then anchor a relative result on the listing dir.
+fn resolve_dest(dest: &str, base_dir: &Path) -> PathBuf {
+    let expanded = crate::paths::expand(dest);
+    if expanded.is_absolute() {
+        expanded
+    } else {
+        base_dir.join(expanded)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dest_references_name_detects_unescaped_percent() {
+        assert!(dest_references_name("%.o"));
+        assert!(dest_references_name("backup/%"));
+        assert!(dest_references_name("%%-%")); // literal then a real ref
+        assert!(!dest_references_name("plain.txt"));
+        assert!(!dest_references_name("100%%done")); // only an escaped literal
+        assert!(!dest_references_name(""));
+    }
+
+    #[test]
+    fn expand_dest_name_substitutes_basename() {
+        assert_eq!(expand_dest_name("%.o", "Makefile"), "Makefile.o");
+        assert_eq!(expand_dest_name("%.o", "SECURITY.md"), "SECURITY.md.o");
+        // Multiple refs all expand.
+        assert_eq!(expand_dest_name("%/%", "a"), "a/a");
+        // `%%` stays a literal percent; a bare `%` is the name.
+        assert_eq!(expand_dest_name("%%-%", "x"), "%-x");
+        // No ref → unchanged.
+        assert_eq!(expand_dest_name("plain.txt", "x"), "plain.txt");
+    }
+
+    /// The user's exact case: `M %.o` on the cursor file renames it to
+    /// `<name>.o`, in the listing dir — reusing the plain Move op for one file.
+    #[test]
+    fn run_selection_to_expands_percent_for_cursor_file() {
+        use super::super::file_ops::FileOp;
+        let mut app = App::test_app(std::env::temp_dir());
+        app.state.left.listing.dir = PathBuf::from("/projects/demo");
+        app.seed_rows(&["Makefile", "README.md"]); // cursor at 0 = Makefile
+        let fx = app.run_selection_to("%.o", true);
+        match fx.as_slice() {
+            [Effect::FileOp(FileOp::Move { paths, dest })] => {
+                assert_eq!(paths, &[PathBuf::from("/projects/demo/Makefile")]);
+                assert_eq!(dest, &PathBuf::from("/projects/demo/Makefile.o"));
+            }
+            _ => panic!("expected a single Move to Makefile.o"),
+        }
+    }
+
+    /// Multi-pick `%` fans out per file: `%.bak` renames every picked file to
+    /// its OWN `<name>.bak`, via the RenameEach op.
+    #[test]
+    fn run_selection_to_batch_renames_picks_via_percent() {
+        use super::super::View;
+        use super::super::file_ops::FileOp;
+        let mut app = App::test_app(std::env::temp_dir());
+        app.state.left.listing.dir = PathBuf::from("/projects/demo");
+        app.seed_rows(&["a.txt", "b.txt"]);
+        app.state.left.view = View::Dir;
+        app.state
+            .left
+            .picks
+            .insert(Path::new("/projects/demo/a.txt"));
+        app.state
+            .left
+            .picks
+            .insert(Path::new("/projects/demo/b.txt"));
+        let fx = app.run_selection_to("%.bak", false);
+        match fx.as_slice() {
+            [Effect::FileOp(FileOp::RenameEach { pairs, is_move })] => {
+                assert!(!is_move, "copy, not move");
+                assert_eq!(pairs.len(), 2);
+                for (src, dest) in pairs {
+                    let want = PathBuf::from(format!("{}.bak", src.display()));
+                    assert_eq!(dest, &want, "each picked file → its own .bak");
+                }
+            }
+            _ => panic!("expected RenameEach for a multi-pick %"),
         }
     }
 }

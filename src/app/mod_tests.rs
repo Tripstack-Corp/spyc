@@ -838,6 +838,48 @@ mod matcher_tests {
 }
 
 #[cfg(test)]
+mod git_key_tests {
+    use super::super::RowData;
+    use crate::fs::EntryKind;
+    use std::path::PathBuf;
+
+    fn row(name: &str, display: &str, kind: EntryKind) -> RowData {
+        RowData {
+            path: PathBuf::from("/repo").join(name),
+            display: display.to_string(),
+            kind,
+            deleted: false,
+        }
+    }
+
+    /// `git.files` keys files by bare basename and dirs by `basename/` — which
+    /// equals `display` for every kind except executables, whose `*` decoration
+    /// the git map never carries. `git_key` must strip exactly that suffix so
+    /// the lookup matches; everything else passes `display` through untouched.
+    #[test]
+    fn strips_only_the_executable_star() {
+        // Executable: the `*` is stripped back to the bare basename key.
+        assert_eq!(row("run", "run*", EntryKind::Executable).git_key(), "run");
+        // Regular file / symlink / other: display is the key already.
+        assert_eq!(row("a.rs", "a.rs", EntryKind::File).git_key(), "a.rs");
+        assert_eq!(row("link", "link", EntryKind::Symlink).git_key(), "link");
+        // Directory: the trailing `/` IS the key (it's how the map stores dirs),
+        // so it must survive.
+        assert_eq!(row("sub", "sub/", EntryKind::Dir).git_key(), "sub/");
+    }
+
+    /// A file genuinely named `foo*` decorates to `foo**`; stripping one `*`
+    /// still yields its real basename key `foo*`.
+    #[test]
+    fn strips_just_one_star_for_a_starred_name() {
+        assert_eq!(
+            row("foo*", "foo**", EntryKind::Executable).git_key(),
+            "foo*"
+        );
+    }
+}
+
+#[cfg(test)]
 mod hud_constant_tests {
     use super::super::App;
 
