@@ -75,7 +75,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | Where | Finding | Sev | Eff | Verdict |
 |---|---|---|---|---|
 | `src/app/navigate.rs:160` | gF reads an attacker-controlled path fully into memory synchronously on the input thread (hang/OOM via hostile pane content) | medium | S | REAL |
-| `src/clipboard.rs:111` | Clipboard helper inherits stdout/stderr (garbles the raw-mode TUI) and leaks a zombie when stdin write fails | medium | S | REAL |
+| `src/clipboard.rs:111` | Clipboard helper inherits stdout/stderr (garbles the raw-mode TUI) and leaks a zombie when stdin write fails | medium | S | ✅ PR #549 |
 | `src/fs/finder.rs:136` | find_nested_git_repos re-walks the entire subtree raw (no gitignore, no cap, no cancellation) on every F open / :grep in a git root | medium | S | PARTIAL |
 | `src/fs/grep.rs:353` | search_to_vec blocks on the full repo walk even after the result limit is reached | medium | S | ✅ PR #527 |
 | `src/pane/pty_host.rs:208` | Unbounded reader->parser channel with a reader that never stops reading: no backpressure, unbounded memory under a firehose child | medium | S | REAL |
@@ -131,6 +131,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
+
+**✅ PR #549 (clipboard) — null the helper's stdout/stderr + always reap (2026-06-24):**
+- `clipboard.rs:111` — `spawn_and_pipe` (shared fork-exec for `pbcopy`/`wl-copy`/`xclip`/`xsel`) left the helper's stdout/stderr **inherited**, so anything it printed corrupted spyc's raw-mode alternate-screen TUI; and it `?`-returned on a `write_all` failure **before** `child.wait()`, leaking a zombie. Now spawns with `Stdio::null()` for stdout+stderr and captures the write result so the child is **always** reaped; the exit status takes precedence over a stdin-write EPIPE (a non-zero exit still halts the Linux helper cascade via `ErrorKind::Other`). Happy-path yank unchanged. New `copy_reaps_child_and_errors_when_helper_ignores_large_stdin`. (Gate-verified; happy-path-preserving, merged without live test.)
 
 **✅ PR #548 — move `L` / file-type IO off the pure apply dispatcher and onto a worker (2026-06-24):**
 - `app/state/apply.rs:320` — the `LongList` and `FileType` arms called `format_long_listing` (one `symlink_metadata` + owner/group resolution per path) and `file_type_label` (`symlink_metadata` + 512-byte magic read per path) **inside the pure `AppState::apply` dispatcher**, on the input thread — violating the no-IO-in-apply invariant and able to stall on a big selection. Now both arms are pure: they collect the target paths and emit `Effect::FileOp(FileOp::LongList { paths, title })` / `FileOp::FileType { paths }`. The existing file-op worker (`run_file_op` → `runtime.file_results` → `Message::FileOpDone`, already wired through coalesce/dispatch) runs the IO off-thread and `apply_one_file_outcome` opens the pager / flashes via a new shared `open_pager_request` helper (also used by the `Update::OpenPager` bridge). No new `Message` variant (reused `FileOpDone` — sidesteps the #531 3-list-lockstep trap). The now-dead `ApplyResult::OpenPager` variant + its `From` arm were removed (apply no longer opens pagers directly). **Behavior change:** `L` / file-type open a tick later (async) instead of synchronously — imperceptible for small dirs, keeps the UI responsive on huge selections. 4 new file_ops tests + updated apply-dispatch assertions. (Build-and-hold for owner test.)
