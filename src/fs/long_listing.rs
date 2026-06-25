@@ -5,6 +5,7 @@
 //! and m/a/c/birth times. Column widths are computed once across all rows so
 //! everything aligns. Extracted verbatim from `fs/ops.rs` (800-LoC campaign).
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -67,9 +68,16 @@ impl LongRow {
 pub fn format_long_listing(paths: &[&Path]) -> Vec<String> {
     let mut rows: Vec<LongRow> = Vec::with_capacity(paths.len());
     let mut errors: Vec<String> = Vec::new();
+    // Memoize owner/group name resolution per uid/gid: `uzers::get_user_by_uid`
+    // / `get_group_by_gid` are NSS lookups, which on an LDAP/AD-backed machine
+    // hit the network. A directory's files almost all share a handful of
+    // uids/gids, so caching collapses `L` from one round-trip *per row* (which
+    // could stall seconds-to-minutes on a big listing) to one *per distinct id*.
+    let mut uid_cache: HashMap<u32, String> = HashMap::new();
+    let mut gid_cache: HashMap<u32, String> = HashMap::new();
     for path in paths {
         match fs::symlink_metadata(path) {
-            Ok(md) => rows.push(make_long_row(path, &md)),
+            Ok(md) => rows.push(make_long_row(path, &md, &mut uid_cache, &mut gid_cache)),
             Err(e) => errors.push(format!("?? {}: {e}", path.display())),
         }
     }
@@ -145,16 +153,27 @@ fn write_cell(s: &mut String, val: &str, width: usize, right: bool) {
 }
 
 #[cfg(unix)]
-fn make_long_row(path: &Path, md: &fs::Metadata) -> LongRow {
+fn make_long_row(
+    path: &Path,
+    md: &fs::Metadata,
+    uid_cache: &mut HashMap<u32, String>,
+    gid_cache: &mut HashMap<u32, String>,
+) -> LongRow {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let inode = md.ino().to_string();
     let mode = format_mode(md);
     let oct = format!("{:04o}", md.permissions().mode() & 0o7777);
     let links = md.nlink().to_string();
     let uid = md.uid();
-    let owner = lookup_user_name(uid).unwrap_or_else(|| uid.to_string());
+    let owner = uid_cache
+        .entry(uid)
+        .or_insert_with(|| lookup_user_name(uid).unwrap_or_else(|| uid.to_string()))
+        .clone();
     let gid = md.gid();
-    let group = lookup_group_name(gid).unwrap_or_else(|| gid.to_string());
+    let group = gid_cache
+        .entry(gid)
+        .or_insert_with(|| lookup_group_name(gid).unwrap_or_else(|| gid.to_string()))
+        .clone();
     let size = crate::fs::ops::format_size(md.len());
     let bytes = md.len().to_string();
     let blocks = md.blocks().to_string();
@@ -191,7 +210,12 @@ fn make_long_row(path: &Path, md: &fs::Metadata) -> LongRow {
 }
 
 #[cfg(not(unix))]
-fn make_long_row(path: &Path, md: &fs::Metadata) -> LongRow {
+fn make_long_row(
+    path: &Path,
+    md: &fs::Metadata,
+    _uid_cache: &mut HashMap<u32, String>,
+    _gid_cache: &mut HashMap<u32, String>,
+) -> LongRow {
     let mode = format_mode(md);
     let size = crate::fs::ops::format_size(md.len());
     let bytes = md.len().to_string();
@@ -391,6 +415,31 @@ mod tests {
                 matches!(ch, b'-' | b'd' | b'l' | b'b' | b'c' | b'p' | b's'),
                 "mode column misaligned in row at offset {mode_col_offset}: {row:?}",
             );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn long_listing_memoizes_owner_group_per_id() {
+        // Two files sharing the current uid/gid: the second row is a cache hit,
+        // and must resolve to the same owner/group name the direct NSS lookup
+        // gives. Guards the per-id memoization added for the LDAP-stall fix.
+        use std::os::unix::fs::MetadataExt;
+        let tmp = tempdir().unwrap();
+        let a = tmp.path().join("a.txt");
+        let b = tmp.path().join("b.txt");
+        File::create(&a).unwrap();
+        File::create(&b).unwrap();
+
+        let lines = format_long_listing(&[&a, &b]);
+        assert_eq!(lines.len(), 3, "header + 2 rows: {lines:?}");
+
+        let md = std::fs::metadata(&a).unwrap();
+        let owner = lookup_user_name(md.uid()).unwrap_or_else(|| md.uid().to_string());
+        let group = lookup_group_name(md.gid()).unwrap_or_else(|| md.gid().to_string());
+        for row in &lines[1..] {
+            assert!(row.contains(&owner), "row missing owner {owner}: {row}");
+            assert!(row.contains(&group), "row missing group {group}: {row}");
         }
     }
 

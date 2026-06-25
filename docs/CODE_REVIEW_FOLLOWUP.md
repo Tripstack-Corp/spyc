@@ -84,7 +84,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/key_dispatch/mod.rs:315` | Capture-pty writes bypass the Effect executor while sibling sinks in the same match use Effect::SendToPane | medium | M | REAL |
 | `src/app/mod.rs:793` | crossterm::terminal::size() called inside key/action handlers (8 sites), against the effects-as-data contract | medium | M | REAL |
 | `src/app/state/apply.rs:320` | format_long_listing and file_type_label do per-file IO inside the pure apply dispatcher | medium | M | REAL |
-| `src/fs/long_listing.rs:155` | format_long_listing does an unmemoized getpwuid/getgrgid NSS lookup per row — L on a large listing can stall seconds-to-minutes on LDAP-backed machines | medium | M | REAL |
+| `src/fs/long_listing.rs:155` | format_long_listing does an unmemoized getpwuid/getgrgid NSS lookup per row — L on a large listing can stall seconds-to-minutes on LDAP-backed machines | medium | M | ✅ PR #547 |
 | `src/git/worktree.rs:188` | worktree::add performs a full-tree checkout synchronously on the main input thread | high | M | PARTIAL |
 | `src/pane/widget.rs:37` | Parser mutex held across the whole pane draw — per-frame O(cells) set_string under the lock contends with the parser worker | medium | M | REAL |
 | `src/ui/blame_render.rs:44` | render_blame joins and syntect-highlights the whole file on the main thread with no size cap | medium | M | REAL |
@@ -131,6 +131,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
+
+**✅ PR #547 — memoize owner/group NSS lookups in the `L` long-listing (2026-06-24):**
+- `fs/long_listing.rs:155` — `format_long_listing` resolved each row's owner/group via `uzers::get_user_by_uid` / `get_group_by_gid` (NSS lookups → network on LDAP/AD machines), once *per row*, so `L` on a big directory could stall seconds-to-minutes. Memoize per invocation with `HashMap<u32, String>` uid→owner and gid→group caches threaded into `make_long_row`: one lookup per distinct id. Behavior-identical (same names, cached). New `long_listing_memoizes_owner_group_per_id`. (Gate-verified perf; no live test.) The sibling finding `apply.rs:320` (the same formatter runs inside the *pure* apply dispatcher + on the main thread) is the next PR.
 
 **✅ PR #544 — pager scroll math: u16 saturation, wrap-row reachability, pane scroll sync (2026-06-24):** all 8 PR4 findings (3 root causes; 7 fixed, 1 documented).
 - `ui/pager/mod.rs:141` + `pager_handler/mod.rs:311` — `PagerView.scroll` was `u16`, silently capping every pager at 65 535 lines so a longer file (big log, generated source) was unreachable past line 65 536. Widened `scroll` (and `saved_alt_scroll`) to `usize`; all the scroll-domain math (`scroll_max`/`scroll_by`/`scroll_to_match`/`indicator_string`/…) widened with it, while `viewport_height` stays `u16` (a real terminal dim). Persistence (`state/pager_positions.rs`) widened `u16`→`u64` (fixed-width for the on-disk JSON; old small values still parse). New `scroll_reaches_beyond_u16_max_lines`.
