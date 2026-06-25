@@ -139,9 +139,13 @@ fn archive_dirty(path: &Path, dirty: &[&str]) -> std::io::Result<(usize, Option<
         .unwrap_or("worktree");
     let stamp = crate::sysinfo::epoch_secs();
     let entry_name = format!("{name}-{stamp}");
-    let staging =
-        std::env::temp_dir().join(format!(".spyc-wt-remove-{}-{stamp}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&staging); // clear any stale leftover
+    // Staging dir must be unique PER CALL. PID + epoch-seconds was not: two
+    // safe-removes in the same wall-clock second (the parallel test suite, but
+    // equally two concurrent MCP worktree jobs in one process) computed the
+    // same path, and one's cleanup `remove_dir_all` then nuked the other's
+    // staging mid-copy → a spurious `NotFound`. A v7 uuid is collision-free, so
+    // no pre-clear is needed (the dir is always fresh).
+    let staging = std::env::temp_dir().join(format!(".spyc-wt-remove-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&staging)?;
     let archive = (|| -> std::io::Result<()> {
         for rel in dirty {
