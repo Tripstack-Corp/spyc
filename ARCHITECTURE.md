@@ -132,6 +132,22 @@ Goal: 0 draws-per-second at idle. Implementation:
 The activity overlay (`A` toggle) reports dps and bytes/sec for
 ongoing tuning.
 
+## No live cursor reads (the SSH rule)
+
+<!-- SPYC-TRAP: cursor-read-ssh -->
+Nothing on a live, post-startup code path may read the cursor position
+(`ESC[6n` / `get_cursor_position()`). The reply can exceed crossterm's
+~2 s timeout over SSH, *and* the unparked input-reader thread races to
+read the same bytes off stdin — either way the read fails and tears the
+whole session down. This bit us through ratatui 0.30's `Terminal::clear()`
+(closing a pager / any `needs_full_repaint` over SSH crashed the session,
+#444); `force_full_repaint` (`src/lib.rs`) is the cursor-read-free
+replacement — `Terminal::resize()` to the current size has the same
+clear-and-full-repaint effect but takes the no-cursor-read branch. Any
+detection that *does* need a probe (the graphics-protocol query feeding
+`detect_image_picker`) runs **once at startup, before the input reader
+spawns**, so nothing races it. Fixed 1.58.8.
+
 ## Mermaid / image rendering
 
 The pager renders ` ```mermaid ` blocks as real images, all pure-Rust
@@ -153,6 +169,7 @@ copy uses `arboard` (spyc's text clipboard stays shell-based).
 
 Graphics gotchas, each of which cost real debugging time:
 
+<!-- SPYC-TRAP: iterm-osc1337 -->
 - **iTerm2 (3.5+) answers the Kitty graphics probe**, so
   `Picker::from_query_stdio` detects it as Kitty — but only iTerm2's
   *native* OSC 1337 actually paints. `detect_image_picker` forces the
@@ -392,3 +409,26 @@ Architecture decisions land in:
 
 When a commit changes user-visible behavior, update every doc
 that's affected in the same commit — not as a follow-up.
+
+### Load-bearing trap anchors
+
+A handful of invariants fail *silently* when a later edit undoes them —
+the session crashes only over SSH, or queries quietly return wrong rows.
+Those get a **trap anchor**: a terse, grep-unique `SPYC-TRAP(<slug>)`
+comment at each code site, dereferencing to the full rationale here,
+keyed by `<slug>`. This file is the rationale store; the marker is an
+invisible, render-agnostic HTML comment placed at the head of the
+section:
+
+```
+<!-- SPYC-TRAP: <slug> -->
+```
+
+The **slug is the join key**, deliberately not the heading text — so the
+section can be reworded without dangling the references. A guard test
+(`app::mod_tests::guard_tests::traps_resolve_against_architecture_anchors`,
+in `make check`) pins both ends: every `SPYC-TRAP(<slug>)` in `src/`
+resolves to a marker here, and every marker has a code referrer. This is
+a sparse discoverability signal for agents and humans — **not** a
+comment-style change; ordinary "why" comments stay inline. See AGENTS.md
+→ "Load-bearing trap anchors" for the authoring protocol.

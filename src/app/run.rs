@@ -306,9 +306,9 @@ impl App {
             let _ = crossterm::execute!(terminal.backend_mut(), BeginSynchronizedUpdate);
         }
         if pending_clear {
-            // NOT `terminal.clear()`: ratatui 0.30's clear() does a
-            // `get_cursor_position()` (`ESC[6n`) round-trip that hangs/errs
-            // over SSH and races the input reader — see `force_full_repaint`.
+            // SPYC-TRAP(cursor-read-ssh): keep this on `force_full_repaint`, NOT
+            // `terminal.clear()` — clear()'s `get_cursor_position()` (`ESC[6n`)
+            // round-trip hangs/errs over SSH and races the input reader.
             crate::force_full_repaint(terminal)?;
         }
         let draw_start = std::time::Instant::now();

@@ -56,7 +56,7 @@ mod guard_tests {
         let needle = format!("{}{}", "state.left", ".listing.dir");
         let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app");
         let mut offenders = Vec::new();
-        scan_app_rs(&app, &mut |path, src| {
+        scan_rs(&app, &mut |path, src| {
             // Production portion only — a `#[cfg(test)]` block may legitimately
             // poke `state.left` to set up a fixture.
             let production = src.split("#[cfg(test)]").next().unwrap_or("");
@@ -109,11 +109,121 @@ mod guard_tests {
         );
     }
 
+    /// Load-bearing "trap" anchors are a sparse, machine-checked
+    /// *discoverability* signal — NOT a comment-style change. An ordinary "why"
+    /// comment stays inline and dense (spyc runs ~22% comment density by
+    /// design); a `SPYC-TRAP(<slug>)` marks the rare invariant whose failure is
+    /// *silent* — "undo this and queries return wrong rows / the session
+    /// crashes only over SSH" — the kind a future edit destroys without
+    /// noticing, and which is *harder*, not easier, to find buried in the
+    /// comment flood. The terse code anchor derefs to the full rationale in
+    /// ARCHITECTURE.md, keyed by the slug — a stable join that survives the doc
+    /// being reworded (the heading text is deliberately NOT the key).
+    ///
+    /// This guard pins BOTH ends against the slug so a reference can't rot
+    /// green: every `SPYC-TRAP(<slug>)` in `src/` must resolve to a
+    /// `<!-- SPYC-TRAP: <slug> -->` marker in ARCHITECTURE.md (no dangling
+    /// code→doc ref), AND every marker must have at least one code referrer (no
+    /// orphan store entry). See AGENTS.md → "Load-bearing trap anchors".
+    #[test]
+    fn traps_resolve_against_architecture_anchors() {
+        // Assemble the sigil so this guard's own source (already skipped by
+        // `scan_rs`) can never register as an anchor.
+        let sigil = format!("{}{}", "SPYC-", "TRAP");
+        let code_open = format!("{sigil}(");
+        let store_open = format!("<!-- {sigil}: ");
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+
+        // Code side: `SPYC-TRAP(<slug>)` across production src/.
+        let mut code: Vec<(String, String)> = Vec::new(); // (slug, file)
+        scan_rs(&root.join("src"), &mut |path, src| {
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            for slug in slugs_between(src, &code_open, ")") {
+                code.push((slug, name.clone()));
+            }
+        });
+
+        // Store side: `<!-- SPYC-TRAP: <slug> -->` in ARCHITECTURE.md.
+        let arch =
+            std::fs::read_to_string(root.join("ARCHITECTURE.md")).expect("read ARCHITECTURE.md");
+        let store = slugs_between(&arch, &store_open, " -->");
+
+        // No duplicate store entries — an ambiguous deref target.
+        let mut dupes: Vec<&String> = store
+            .iter()
+            .filter(|s| store.iter().filter(|x| x == s).count() > 1)
+            .collect();
+        dupes.sort();
+        dupes.dedup();
+        assert!(
+            dupes.is_empty(),
+            "duplicate SPYC-TRAP markers in ARCHITECTURE.md: {dupes:?}. \
+             Each slug names one rationale section — merge or rename."
+        );
+
+        // Forward: every code anchor resolves to a store marker.
+        let mut dangling: Vec<String> = code
+            .iter()
+            .filter(|(slug, _)| !store.contains(slug))
+            .map(|(slug, file)| format!("{slug} ({file})"))
+            .collect();
+        dangling.sort();
+        dangling.dedup();
+        assert!(
+            dangling.is_empty(),
+            "SPYC-TRAP anchor(s) with no matching `<!-- SPYC-TRAP: <slug> -->` \
+             section in ARCHITECTURE.md: {dangling:?}. Add the rationale section \
+             (keyed by the slug) in the same commit. See AGENTS.md → trap anchors."
+        );
+
+        // Reverse: every store marker has at least one code referrer.
+        let mut orphans: Vec<String> = store
+            .iter()
+            .filter(|slug| !code.iter().any(|(s, _)| s == *slug))
+            .cloned()
+            .collect();
+        orphans.sort();
+        orphans.dedup();
+        assert!(
+            orphans.is_empty(),
+            "orphan SPYC-TRAP section(s) in ARCHITECTURE.md (no `SPYC-TRAP(<slug>)` \
+             referrer in src/): {orphans:?}. The code site went away — drop the \
+             section, or restore the anchor. See AGENTS.md → trap anchors."
+        );
+    }
+
+    /// Every `<slug>` framed by `open`…`close`, where a slug is a run of
+    /// `[a-z0-9-]`. Anything else (a doc template written `(<slug>)`) is skipped,
+    /// so prose examples never register as real anchors.
+    fn slugs_between(hay: &str, open: &str, close: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut rest = hay;
+        while let Some(i) = rest.find(open) {
+            let after = &rest[i + open.len()..];
+            let Some(j) = after.find(close) else { break };
+            let slug = &after[..j];
+            if !slug.is_empty()
+                && slug
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            {
+                out.push(slug.to_string());
+            }
+            rest = &after[j + close.len()..];
+        }
+        out
+    }
+
     /// Recursively read every `.rs` under `dir`, skipping whole-file test
     /// modules (`*_tests.rs`, `mod_tests.rs` / `test_harness.rs`, and `tests/` /
     /// `*_tests/` dirs — they carry no in-file `#[cfg(test)]` marker, so the
     /// production-split heuristic would misread them). Calls `f(path, source)`.
-    fn scan_app_rs(dir: &std::path::Path, f: &mut dyn FnMut(&std::path::Path, &str)) {
+    fn scan_rs(dir: &std::path::Path, f: &mut dyn FnMut(&std::path::Path, &str)) {
         for entry in std::fs::read_dir(dir).expect("read dir") {
             let path = entry.expect("dir entry").path();
             if path.is_dir() {
@@ -121,7 +231,7 @@ mod guard_tests {
                 if dname == "tests" || dname.ends_with("_tests") {
                     continue;
                 }
-                scan_app_rs(&path, f);
+                scan_rs(&path, f);
             } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 if name == "mod_tests.rs"

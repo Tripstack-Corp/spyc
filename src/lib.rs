@@ -432,6 +432,9 @@ fn install_signal_handlers() {
 fn detect_image_picker() -> Option<ratatui_image::picker::Picker> {
     use ratatui_image::picker::{Picker, ProtocolType};
     let mut picker = Picker::from_query_stdio().ok()?;
+    // SPYC-TRAP(iterm-osc1337): do not drop the iTerm2 override below — iTerm2
+    // answers the Kitty probe but only its native OSC 1337 actually paints, so
+    // images silently fail to render on iTerm2 without it.
     // iTerm2 (3.5+) also implements the Kitty graphics protocol, so the probe
     // detects Kitty — but iTerm2's Kitty emulation doesn't paint reliably here,
     // while its native inline-image protocol (OSC 1337) does. And without a
@@ -540,6 +543,9 @@ pub fn resume_tui(terminal: &mut Tui) -> Result<()> {
     Ok(())
 }
 
+// SPYC-TRAP(cursor-read-ssh): do not "simplify" this back to
+// `Terminal::clear()` — its `ESC[6n` cursor round-trip silently hangs/crashes
+// the session, but only over SSH, so it passes every local test.
 /// Clear the whole screen and force a full repaint on the next draw.
 ///
 /// Deliberately avoids ratatui 0.30's `Terminal::clear()`, which snapshots
