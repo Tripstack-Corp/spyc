@@ -620,7 +620,7 @@ fn handle_tools_call(
                 return send_tool_error(w, id, "spyc is not running");
             }
             // Worktree mutations can run a status walk + tar.zst archive off
-            // the main loop (§5 of WORKTREE_MCP_PLAN.md); a large tree easily
+            // the main loop (§5 of docs/archive/WORKTREE_MCP_PLAN.md); a large tree easily
             // outlasts the interactive 5s window, so give them a generous
             // ceiling. Everything else is a fast in-memory model edit. (Stage 0
             // of the async/Tasks plan — §5.1; Stage 1 returns a task handle

@@ -1,5 +1,35 @@
 # spyc worktree MCP — encapsulate the housekeeping, default to the graveyard
 
+## ✅ Status at archive (2026-06-24) — COMPLETE
+
+The §10 order of attack (PR1–6) shipped, plus two live-caught fixes and the
+owner-requested lease feature. **8 PRs merged** to main: #511 (default-base
+POLA), #535 (Stage-0 timeout + the async/Tasks decision, §5.1), #536
+(`list_worktrees` + `branch_status` ahead/behind/merged), #537 (worktree-path
+POLA, §7), #539 (`claim_worktree`/`release_worktree` leases, §14), #541
+(safe-by-default `remove_worktree` + `branch::delete`, §3/§4/§6), #542
+(`git_status`/`git_log`, §3 Phase 2), #545 (`create_worktree` `base`/`open`, §3
+Phase 3). The full **inspect → claim → safe-remove → verify** loop is in-process.
+
+**Deltas from the original plan (intentional):**
+- `graveyard::write_blob` + the `.patch` archive (§2/§4/§10 PR2) were
+  **obviated** — safe-remove archives uncommitted *file contents* via the
+  existing `write_entry_as` (simpler, fully recoverable); no `.patch` needed.
+- `branch_status` shipped as a **facade consumed by `list_worktrees`**, not a
+  standalone MCP tool (the merged/ahead/behind fields cover the need).
+
+**Deferred (not built; none blocking):** `git_diff` tool (§3 Phase 2 —
+`DiffModel` is render-structured + a shell agent can `git diff`); `delete_branch`
+override `always`/`never` (§6 — v1 is auto-only); `list_worktrees`
+`is_open_b`/`subject` fields and `remove` `archive:false`/`force:true` escape
+hatches (§3); **v2 leases** (auto-claim/auto-release-on-disconnect, §14); and the
+§13 **stale-markers-in-a-background-worktree-column** bug (needs a live repro →
+owner's backlog).
+
+*Original charter below, preserved.*
+
+---
+
 **Status:** Committed + greenlit for implementation (2026-06-21); a product-launch priority. Owner decisions are baked into §11. This charter turns a
 dogfooding observation into a plan: when Claude cleaned up six worktrees in
 this repo it called spyc's MCP exactly *once* (`get_spyc_context`) and ran the
@@ -403,10 +433,10 @@ feature that would *build on* this MCP surface. Tracked, not built here.
 
 | # | PR | Scope | New facade work | Risk |
 |---|----|-------|-----------------|------|
-| 1 | `feat/git-branch-status` | `branch_status` + `merge_base`/`is_ancestor` + base detection (pure, tested) | yes | low |
-| 1b | `fix/mcp-create-worktree-base` | `create_worktree` defaults base to PROJECT_HOME's default branch (POLA); reuses #1's resolver | small | low |
-| 2 | `feat/graveyard-write-blob` | `write_blob(bytes, label)` (pure, tested) | yes | low |
-| 3 | `feat/mcp-list-worktrees` | `list_worktrees` (R, socket thread) + `Worktree` status fields; update `SERVER_INSTRUCTIONS` | small | low |
+| 1 | `feat/git-branch-status` | ✅ DONE (#511 base detection / `default_base`; #536 `branch_status` ahead/behind/merged) | yes | low |
+| 1b | `fix/mcp-create-worktree-base` | ✅ DONE (#511) — `create_worktree` defaults base to PROJECT_HOME's default branch (POLA) | small | low |
+| 2 | `feat/graveyard-write-blob` | ⊘ OBVIATED — safe-remove archives uncommitted *file contents* via existing `write_entry_as`, not a `.patch`, so `write_blob` is unnecessary | yes | low |
+| 3 | `feat/mcp-list-worktrees` | ✅ DONE (#512 inventory; #536 ahead/behind/merged; #539 locked/lock_reason) + `SERVER_INSTRUCTIONS` updated | small | low |
 | 4 | `feat/mcp-safe-remove-worktree` | ✅ DONE — safe-by-default `remove_worktree` (archive untracked+uncommitted → `remove_force` → `branch::delete` iff merged) + `clean_worktree` folded in as an alias; rides the existing off-main lane; respects the `claim_worktree` lease | yes | **med** |
 | 5 | `feat/mcp-git-read-tools` | ✅ `git_status` + `git_log` DONE (R, socket-thread); **`git_diff` deferred** — `DiffModel` is render-structured, a unified-text producer is its own effort + a shell agent can `git diff`; revisit if a non-shell client needs it | small | low |
 | 6 | `feat/mcp-create-worktree-ext` | ✅ DONE — `create_worktree` gains `base` (override the new branch's start point) + `open` (also open it in column `b` + focus it: the create→work flow in one call; the off-main create's reconcile opens `b`) | none | low |
@@ -425,12 +455,15 @@ Ship 1–4 for the complete safe-cleanup loop; 5–6 are additive.
    build the `git bundle` archive now (stretch)? — ✅ DECIDED: keep the ref, no
    bundle (2026-06-24). Also: archive uncommitted-tracked content as **file
    contents**, not a `.patch` (simpler, fully recoverable).
-4. **Phase-2 read tools** (`git_diff`/`git_status`/`git_log`) in v1, or just
-   `list_worktrees` + `branch_status` (enough for safe removal)?
-5. **Mutating-tool reply timeout** — 30s for the archive path? Acceptable?
-6. **`list_worktrees` column flags** — how much column-b/current state does the
-   context snapshot actually expose to the socket thread today? (Verify before
-   committing to the `is_open_b`/`is_current` fields.)
+4. **Phase-2 read tools** (`git_diff`/`git_status`/`git_log`) in v1? — ✅ RESOLVED:
+   `git_status` + `git_log` shipped (#542); `git_diff` **deferred** (render-structured
+   `DiffModel`); standalone `branch_status` tool **subsumed** by `list_worktrees`'s
+   merged/ahead/behind fields.
+5. **Mutating-tool reply timeout** — ✅ RESOLVED: shipped **60s** for the heavy
+   worktree mutations (Stage 0, #535) — generous vs. the 30s floated here.
+6. **`list_worktrees` column flags** — ✅ RESOLVED: `is_current` shipped (cwd
+   canonicalize-compare). `is_open_b` **deferred** — the context snapshot doesn't
+   expose column-`b` state to the socket thread (noted in `readers.rs`).
 7. **`create_worktree` base** — DECIDED (owner, 2026-06-21): default to
    PROJECT_HOME's default branch, not the focused column's HEAD (POLA). The
    explicit `base` override stays. (See §3 Phase 1, §7.)

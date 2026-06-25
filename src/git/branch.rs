@@ -3,7 +3,7 @@
 //!
 //! This is what lets `create_worktree` base a new worktree off PROJECT_HOME's
 //! default branch instead of the focused column's HEAD (the POLA fix in
-//! `docs/WORKTREE_MCP_PLAN.md` §3/§7). The richer branch-relationship queries
+//! `docs/archive/WORKTREE_MCP_PLAN.md` §3/§7). The richer branch-relationship queries
 //! (merge-base, ahead/behind, merged-ness) land with `list_worktrees`, their
 //! first consumer.
 //!
