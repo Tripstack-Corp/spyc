@@ -71,7 +71,7 @@ impl PagerView {
         if !self.markdown_rendered {
             return None;
         }
-        let top = self.scroll as usize;
+        let top = self.scroll;
         let bottom = top + (self.last_viewport_h.get() as usize).max(1);
         self.mermaid_blocks
             .iter()

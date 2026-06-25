@@ -3,7 +3,7 @@
 
 use super::{PagerView, PlacementCursor, Search, VisualKind, VisualSelection};
 
-use super::layout::{line_plain_text, next_word_start, prev_word_start};
+use super::layout::{line_plain_text, next_word_start, prev_word_start, visual_rows};
 
 impl PagerView {
     /// True while the user is selecting a line range with `V`.
@@ -46,7 +46,7 @@ impl PagerView {
         // Clear any active selection so placement and visual are
         // mutually exclusive (they share the cursor highlight).
         self.visual = None;
-        let row = (self.scroll as usize).min(self.lines.len() - 1);
+        let row = self.scroll.min(self.lines.len() - 1);
         self.placement = Some(PlacementCursor { row, col: 0 });
     }
 
@@ -230,7 +230,7 @@ impl PagerView {
             return;
         }
         let max = self.lines.len() - 1;
-        let start = (self.scroll as usize).min(max);
+        let start = self.scroll.min(max);
         self.visual = Some(VisualSelection {
             anchor: start,
             cursor: start,
@@ -278,17 +278,56 @@ impl PagerView {
     /// Adjust `scroll` so `line` is in the viewport. Visual cursor
     /// helper, factored out so both `visual_move` and `visual_jump_to`
     /// share the same edge logic.
-    pub(super) const fn scroll_to_keep_visible(&mut self, line: usize, viewport_height: u16) {
-        let top = self.scroll as usize;
+    ///
+    /// Wrap-aware: when `wrap` is on, a logical line can occupy several
+    /// visual rows, so the naive "1 logical line = 1 row" math
+    /// (`bot = top + vh`) let the cursor slide off the bottom without
+    /// scrolling. With a cached `body_w`, we count *visual* rows between
+    /// the top and `line`; if they overflow the viewport, scroll down just
+    /// enough to pin `line` to the bottom (walking back from `line`
+    /// accumulating visual rows). A single logical line taller than the
+    /// whole viewport pins to its own top (the rest is only reachable with
+    /// wrap off — see the pager-wrap limitation note).
+    pub(super) fn scroll_to_keep_visible(&mut self, line: usize, viewport_height: u16) {
         let vh = viewport_height as usize;
         if vh == 0 {
             return;
         }
-        let bot = top + vh;
-        if line < top {
-            self.scroll = line as u16;
-        } else if line >= bot {
-            self.scroll = (line + 1).saturating_sub(vh) as u16;
+        // Above the top → pin `line` to the top regardless of wrap.
+        if line < self.scroll {
+            self.scroll = line;
+            return;
+        }
+        let body_w = self.last_body_w.get() as usize;
+        if !self.wrap || body_w == 0 {
+            // Logical-row math: one line per row.
+            if line >= self.scroll + vh {
+                self.scroll = (line + 1).saturating_sub(vh);
+            }
+            return;
+        }
+        // Wrap on: scroll down only if `line` would fall off the bottom.
+        // Walk *back* from `line` accumulating visual rows until the budget is
+        // spent; the earliest line that still fits is where the viewport must
+        // start to keep `line` at the bottom. This is also the fits-check —
+        // if the walk reaches `self.scroll` before overflowing, the cursor is
+        // already visible and `new_top <= self.scroll`, so we never scroll up
+        // here (the `line < self.scroll` case is handled above). O(vh), not
+        // O(line - scroll): it stops as soon as the budget overflows.
+        let mut acc = 0usize;
+        let mut new_top = line;
+        for i in (0..=line).rev() {
+            acc += visual_rows(&self.lines[i], body_w);
+            if acc > vh {
+                break;
+            }
+            new_top = i;
+        }
+        // Only ever scroll *down* to follow the cursor: if the cursor is
+        // already visible from the current top, `new_top` lands at or before
+        // it, and we must not yank the view downward.
+        if new_top > self.scroll {
+            self.scroll = new_top;
         }
     }
 

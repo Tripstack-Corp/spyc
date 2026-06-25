@@ -104,27 +104,43 @@ pub(super) fn prev_word_start(chars: &[char], col: usize) -> Option<usize> {
 
 /// Count the number of visual rows `line` will occupy when wrapped
 /// at `width`. Mirrors `wrap_line`'s greedy hard-break policy
-/// (cells are filled left-to-right, breaks happen at the first
-/// char that would overflow), but doesn't allocate — used by
-/// `scroll_max` on every keystroke.
+/// **exactly** (cells filled left-to-right; a char that would overflow
+/// the current row starts a new one — wasting the leftover cells), but
+/// doesn't allocate — used by `scroll_max` on every keystroke.
 ///
-/// Empty lines render as one visual row (a blank line); this
-/// matches the renderer's behavior so the math is symmetric.
-/// `width == 0` yields one row to match `wrap_line`'s short-circuit.
+/// A simple `total_width.div_ceil(width)` *underestimates*: it assumes
+/// perfect packing, but a wide (CJK / emoji, 2-cell) char that doesn't
+/// fit the 1 cell left at a row's end is pushed whole to the next row,
+/// so the real row count is higher. That undercount made `scroll_max`
+/// clamp short of the true bottom on wide-char content with wrap on.
+///
+/// Empty lines render as one visual row (a blank line); this matches the
+/// renderer. `width == 0` yields one row to match `wrap_line`'s
+/// short-circuit. A char wider than `width` is forced onto a row by
+/// itself (matching `wrap_line`'s "force at least one char" guard), so a
+/// row is never left empty.
 pub(super) fn visual_rows(line: &Line<'_>, width: usize) -> usize {
     if width == 0 {
         return 1;
     }
-    let total: usize = line
-        .spans
-        .iter()
-        .flat_map(|s| s.content.chars())
-        .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0))
-        .sum();
-    if total == 0 {
-        return 1;
+    let mut rows = 1usize;
+    let mut col = 0usize;
+    for ch in line.spans.iter().flat_map(|s| s.content.chars()) {
+        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if w == 0 {
+            continue; // zero-width (combining marks, controls): no advance
+        }
+        // Break only when the current row already holds content — an
+        // overflowing char on an *empty* row is forced onto it (you can't
+        // split a glyph), exactly as `wrap_line` does.
+        if col > 0 && col + w > width {
+            rows += 1;
+            col = w;
+        } else {
+            col += w;
+        }
     }
-    total.div_ceil(width)
+    rows
 }
 
 /// Split a styled line into 1+ visual rows, each at most `width`
@@ -134,17 +150,38 @@ pub(super) fn visual_rows(line: &Line<'_>, width: usize) -> usize {
 /// offset. Width is in unicode display columns, so wide CJK
 /// characters and emoji count as 2 — same units ratatui uses for
 /// layout.
+#[cfg(test)]
 pub(super) fn wrap_line(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
+    wrap_line_capped(line, width, usize::MAX)
+}
+
+/// Like [`wrap_line`] but stops after producing `max_rows` visual rows.
+/// The renderer only paints `viewport_h` rows, yet a single very long
+/// logical line was wrapped into its *entire* expansion (possibly
+/// hundreds of pieces) every frame — allocation churn proportional to the
+/// longest line, not the viewport. Capping the work to the rows that will
+/// actually be shown bounds it to the viewport. `max_rows == usize::MAX`
+/// reproduces [`wrap_line`] byte-for-byte (the guards never fire).
+pub(super) fn wrap_line_capped(
+    line: &Line<'static>,
+    width: usize,
+    max_rows: usize,
+) -> Vec<Line<'static>> {
     if width == 0 {
         return vec![line.clone()];
     }
     let mut pieces: Vec<Vec<Span<'static>>> = vec![Vec::new()];
     let mut current_w = 0usize;
-    for span in &line.spans {
+    'outer: for span in &line.spans {
         let mut rest: &str = span.content.as_ref();
         while !rest.is_empty() {
             let remaining = width.saturating_sub(current_w);
             if remaining == 0 {
+                // About to start another visual row — stop if we already
+                // have all the rows the caller asked for.
+                if pieces.len() >= max_rows {
+                    break 'outer;
+                }
                 pieces.push(Vec::new());
                 current_w = 0;
                 continue;
@@ -178,6 +215,9 @@ pub(super) fn wrap_line(line: &Line<'static>, width: usize) -> Vec<Line<'static>
                 current_w += visual;
             }
             if !rest.is_empty() {
+                if pieces.len() >= max_rows {
+                    break 'outer;
+                }
                 pieces.push(Vec::new());
                 current_w = 0;
             }

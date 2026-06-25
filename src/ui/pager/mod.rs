@@ -140,8 +140,12 @@ pub struct PagerView {
     /// Pre-styled lines. ANSI escapes in source are already converted to
     /// styled spans; plain text becomes a single unstyled span per line.
     pub lines: Vec<Line<'static>>,
-    /// Top line currently shown in the viewport (0-indexed).
-    pub scroll: u16,
+    /// Top line currently shown in the viewport (0-indexed). `usize`, not
+    /// `u16`: a `u16` silently capped every pager at 65 535 lines, so content
+    /// in a longer file (a big log, a generated source file) was unreachable
+    /// past line 65 536. Line indices into `lines` are `usize` everywhere
+    /// else; this matches.
+    pub scroll: usize,
     search: Search,
     /// When true, show line numbers in the gutter.
     pub show_line_numbers: bool,
@@ -206,6 +210,19 @@ pub struct PagerView {
     /// alignment. Default true for content pagers; false for picker
     /// UIs (find finder, task viewer) where each source line maps to
     /// a single selectable row.
+    ///
+    /// KNOWN LIMITATION (wrap + a single over-tall logical line):
+    /// `scroll` indexes *logical* lines, so scrolling moves a whole
+    /// logical line at a time. `scroll_max` counts visual rows so the
+    /// trailing lines stay reachable at "Bot", but if one logical line
+    /// itself wraps to MORE visual rows than the viewport (e.g. a
+    /// 2000-char minified line in an 80×24 box), the rows of that single
+    /// line below the first viewportful can't be scrolled to — the next
+    /// scroll step jumps past it to the following logical line. Fully
+    /// fixing this needs visual-row-granular scrolling (an intra-line row
+    /// offset), a larger change to the scroll model. Mitigation today:
+    /// toggle `wrap` off to truncate (then the line is one row), or `v`
+    /// to open the file in `$EDITOR`.
     pub wrap: bool,
     /// Alternate-view buffer used by the Markdown viewer. When
     /// `Some`, `m` toggles `lines` ↔ `alt_lines` (rendered ↔
@@ -222,7 +239,7 @@ pub struct PagerView {
     /// reading position. `None` until the first toggle (we fall
     /// back to a proportional projection of the departing scroll
     /// in that case — better than always resetting to the top).
-    saved_alt_scroll: Option<u16>,
+    saved_alt_scroll: Option<usize>,
     /// Lower bound for the line-number gutter width. Streaming views
     /// use this to lock the gutter at the expected final size so it
     /// doesn't widen mid-scan as `ilog10(lines.len())` grows -- which

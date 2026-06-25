@@ -558,28 +558,29 @@ impl Pane {
         Ok(path)
     }
 
-    #[allow(clippy::unused_self)]
-    const fn max_scrollback(&self) -> usize {
-        // vt100 stores scrollback rows in an internal VecDeque.
-        // screen().scrollback() returns the *current* offset, not
-        // the maximum. We can probe by temporarily setting a huge
-        // offset — set_scrollback clamps to the actual buffer length.
-        // But that mutates, so we use a simpler heuristic: the
-        // contents() method with full scrollback gives us everything.
-        // For navigation we need the max offset. The internal buffer
-        // length isn't directly exposed, so we binary-search or just
-        // set a large value and read back what it clamped to.
-        //
-        // Actually, set_scrollback(usize::MAX) clamps internally,
-        // but we'd need &mut. Since we already have &self in some
-        // callers, let's store it. For now, use a reasonable upper
-        // bound and accept the clamp.
-        10_000 // matches our scrollback_len
+    /// The real maximum scrollback offset: vt100's actual buffered history
+    /// length, not a guess. `scrollback_len` probes it via
+    /// `set_scrollback(usize::MAX)` + readback (restoring the live offset),
+    /// so clamping against it matches what vt100 will actually accept — no
+    /// phantom offset above the real top.
+    fn max_scrollback(&self) -> usize {
+        self.with_screen_mut(crate::ui::scrollback::scrollback_len)
     }
 
-    fn apply_scroll(&self) {
+    /// Push `scroll_offset` into vt100, then sync it back to the value vt100
+    /// actually clamped to. Without the read-back, `scroll_offset` could sit
+    /// *above* vt100's real top (e.g. after `g` set it to a stale 10_000
+    /// guess) — then every `scroll_down` just decrements a phantom counter
+    /// with no visible movement until it falls back below the real length
+    /// (the "scroll-down is dead" / "dead zone after g" dead zone). Keeping
+    /// the field equal to vt100's clamp keeps Top/Bot and the key math honest.
+    fn apply_scroll(&mut self) {
         let off = self.scroll_offset;
-        self.with_screen_mut(|s| s.set_scrollback(off));
+        let clamped = self.with_screen_mut(|s| {
+            s.set_scrollback(off);
+            s.scrollback()
+        });
+        self.scroll_offset = clamped;
     }
 }
 

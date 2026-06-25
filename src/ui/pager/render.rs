@@ -14,7 +14,7 @@ use crate::ui::theme::Theme;
 use super::{Mount, PagerView, VisualKind};
 
 use super::layout::{
-    COL_GAP, line_plain_text, pager_inner_area, partition_lines_static, wrap_line,
+    COL_GAP, line_plain_text, pager_inner_area, partition_lines_static, wrap_line_capped,
 };
 
 pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
@@ -139,7 +139,7 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
 
 fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView, theme: &Theme) {
     let viewport_h = content_area.height as usize;
-    let start = view.scroll as usize;
+    let start = view.scroll;
     let content_end = view.lines.len();
 
     let total_lines = view.lines.len();
@@ -194,7 +194,10 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
         // would smear. Vim does the same.
         let block_mode = view.visual.is_some_and(|v| v.kind == VisualKind::Block);
         let pieces = if view.wrap && body_w > 0 && !block_mode {
-            wrap_line(&styled, body_w)
+            // Only wrap as many rows as still fit the viewport — a single
+            // 10k-char line shouldn't allocate 100s of off-screen pieces.
+            let budget = viewport_h.saturating_sub(display_lines.len());
+            wrap_line_capped(&styled, body_w, budget)
         } else {
             vec![styled]
         };
@@ -251,7 +254,7 @@ fn render_multi_column(
     chunks: &[(usize, usize)],
 ) {
     let viewport_h = content_area.height as usize;
-    let scroll = view.scroll as usize;
+    let scroll = view.scroll;
     let content_end = view.lines.len();
     // Divide available width evenly (minus gaps between columns).
     let total_gap = COL_GAP * (ncols as u16).saturating_sub(1);

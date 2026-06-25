@@ -61,14 +61,14 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 | Where | Finding | Sev | Eff | Verdict |
 |---|---|---|---|---|
-| `src/pane/mod.rs:472` | scroll_offset desyncs from vt100's clamped scrollback, making scroll-down appear dead after 'g' or over-scrolling up | medium | S | REAL |
-| `src/pane/mod.rs:518` | max_scrollback() hardcodes 10_000; scroll_offset is never synced to vt100's clamp, creating a dead zone after scroll_to_top | medium | S | REAL |
-| `src/ui/pager/layout.rs:131` | visual_rows underestimates actual wrapped rows (wide-char greedy waste + whitespace markers), so scroll_max clamps before the real bottom | medium | S | PARTIAL |
-| `src/ui/pager/render.rs:180` | wrap_line materializes the full wrapped expansion of each visible logical line every frame — allocation churn proportional to longest line, not viewport | medium | S | REAL |
-| `src/app/pager_handler/mod.rs:311` | Files under 5 MB but over 65,535 lines load fully yet are unscrollable past line 65,536 (u16 scroll saturation) | medium | M | REAL |
-| `src/ui/pager/mod.rs:141` | scroll: u16 silently caps every pager at 65,535 lines — reachable content beyond that is unviewable | medium | M | REAL |
-| `src/ui/pager/render.rs:125` | With wrap on, scroll is logical-line granular — visual rows of a long line beyond the first viewport_h are unreachable | medium | M | PARTIAL |
-| `src/ui/pager/selection.rs:281` | Visual/placement auto-scroll assumes 1 logical line = 1 screen row; with wrap on the cursor moves off-screen without scrolling | medium | M | REAL |
+| `src/pane/mod.rs:472` | scroll_offset desyncs from vt100's clamped scrollback, making scroll-down appear dead after 'g' or over-scrolling up | medium | S | ✅ PR #544 |
+| `src/pane/mod.rs:518` | max_scrollback() hardcodes 10_000; scroll_offset is never synced to vt100's clamp, creating a dead zone after scroll_to_top | medium | S | ✅ PR #544 |
+| `src/ui/pager/layout.rs:131` | visual_rows underestimates actual wrapped rows (wide-char greedy waste + whitespace markers), so scroll_max clamps before the real bottom | medium | S | ✅ PR #544 |
+| `src/ui/pager/render.rs:180` | wrap_line materializes the full wrapped expansion of each visible logical line every frame — allocation churn proportional to longest line, not viewport | medium | S | ✅ PR #544 |
+| `src/app/pager_handler/mod.rs:311` | Files under 5 MB but over 65,535 lines load fully yet are unscrollable past line 65,536 (u16 scroll saturation) | medium | M | ✅ PR #544 |
+| `src/ui/pager/mod.rs:141` | scroll: u16 silently caps every pager at 65,535 lines — reachable content beyond that is unviewable | medium | M | ✅ PR #544 |
+| `src/ui/pager/render.rs:125` | With wrap on, scroll is logical-line granular — visual rows of a long line beyond the first viewport_h are unreachable | medium | M | 📝 PR #544 (documented limitation) |
+| `src/ui/pager/selection.rs:281` | Visual/placement auto-scroll assumes 1 logical line = 1 screen row; with wrap on the cursor moves off-screen without scrolling | medium | M | ✅ PR #544 |
 
 ### PR5–8 · Blocking-IO off-thread sub-campaign (split by subsystem, #349 template)
 
@@ -131,6 +131,14 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
+
+**✅ PR #544 — pager scroll math: u16 saturation, wrap-row reachability, pane scroll sync (2026-06-24):** all 8 PR4 findings (3 root causes; 7 fixed, 1 documented).
+- `ui/pager/mod.rs:141` + `pager_handler/mod.rs:311` — `PagerView.scroll` was `u16`, silently capping every pager at 65 535 lines so a longer file (big log, generated source) was unreachable past line 65 536. Widened `scroll` (and `saved_alt_scroll`) to `usize`; all the scroll-domain math (`scroll_max`/`scroll_by`/`scroll_to_match`/`indicator_string`/…) widened with it, while `viewport_height` stays `u16` (a real terminal dim). Persistence (`state/pager_positions.rs`) widened `u16`→`u64` (fixed-width for the on-disk JSON; old small values still parse). New `scroll_reaches_beyond_u16_max_lines`.
+- `ui/pager/layout.rs:131` — `visual_rows` used `total_width.div_ceil(width)`, which assumes perfect packing and *underestimates*: a 2-cell glyph that doesn't fit the last cell of a row is pushed whole to the next, so `scroll_max` clamped short of the true bottom on wide-char content. Rewrote it to mirror `wrap_line`'s greedy fill exactly (including the "force ≥1 char per row" guard). New `visual_rows_counts_wide_char_greedy_waste`.
+- `ui/pager/selection.rs:281` — `scroll_to_keep_visible` (visual-cursor auto-scroll) assumed 1 logical line = 1 row, so under wrap the cursor slid off the bottom without the viewport following. Made it wrap-aware: count visual rows from the top to the cursor; if they overflow, walk back from the cursor accumulating visual rows to find the new top. New `scroll_to_keep_visible_is_wrap_aware`.
+- `ui/pager/render.rs:180` — the render path wrapped each visible logical line into its *entire* expansion every frame (hundreds of pieces for a long line), then painted only the visible ones. Added `wrap_line_capped(line, width, max_rows)` (`wrap_line` now delegates with `usize::MAX`, byte-identical) and the renderer passes the remaining viewport budget. New `wrap_line_capped_bounds_to_visible_rows`.
+- `pane/mod.rs:472` + `pane/mod.rs:518` — `max_scrollback()` hardcoded `10_000` and `scroll_offset` was never reconciled with vt100's real clamp, so after `g` (scroll-to-top set the offset to the 10k guess) scroll-down decremented a phantom counter with no visible movement until it fell below the real length (the "scroll-down dead" dead zone). `max_scrollback` now probes the real length via `scrollback_len`, and `apply_scroll` reads vt100's clamped offset back into `scroll_offset`. Live-pty (`^a-v` raw scroll) — owner-tested, not unit-tested per the campaign's pty lesson.
+- `ui/pager/render.rs:125` — 📝 **documented limitation, not fixed.** `scroll` is logical-line-granular, so a *single* logical line that wraps to more visual rows than the viewport can't be scrolled *through* (the next step jumps to the following logical line). `scroll_max` already keeps the trailing lines reachable; the residual intra-line gap needs visual-row-granular scrolling (an intra-line row offset) — a scroll-model rearchitecture too risky to fold into this PR. Documented on the `PagerView::wrap` field with mitigations (toggle wrap off, or `v` to open in `$EDITOR`).
 
 **✅ PR #540 — git: dedup status-walk config, worktree cleanup on failure, blame Arc + size cap (2026-06-24):**
 - `git/status.rs:217` — `repo_status` and `collect_worktree_plan` each built the gix status platform with identical `tree_index_track_renames(Given(Rewrites::default()))` and no `index_worktree_rewrites`. Extracted `make_status_platform(repo, untracked_mode)` in `status.rs` as the single source for those parity-sensitive options; both callers now delegate to it. (Gate-verified; behavior-identical.)

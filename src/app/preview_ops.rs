@@ -144,7 +144,7 @@ impl App {
                     // the new last line — the file may have shrunk).
                     if let Some(old) = self.view.right_pager.as_ref() {
                         let last = view.lines.len().saturating_sub(1);
-                        view.scroll = old.scroll.min(u16::try_from(last).unwrap_or(u16::MAX));
+                        view.scroll = old.scroll.min(last);
                     }
                     self.view.right_pager = Some(view);
                     redraw = true;
@@ -176,7 +176,7 @@ mod tests {
     use std::path::PathBuf;
 
     /// Seed `right_pager` with a preview of `path` scrolled to `scroll`.
-    fn open_preview(app: &mut App, path: &str, lines: usize, scroll: u16) {
+    fn open_preview(app: &mut App, path: &str, lines: usize, scroll: usize) {
         let mut v = PagerView::new_plain(
             "doc.md".to_string(),
             (0..lines).map(|i| i.to_string()).collect(),
