@@ -1,6 +1,7 @@
 use std::fmt::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use super::state::PagerRequest;
 use super::{App, Effect, PaneInput, PaneTarget};
 use crate::state::inventory::Inventory;
 
@@ -36,6 +37,19 @@ pub enum FileOp {
         repo_root: PathBuf,
         rela_path: String,
     },
+    /// Build the `L` long-listing table (one `symlink_metadata` + owner/group
+    /// resolution per path) off the input thread — the pure `apply` dispatcher
+    /// just hands over the selected paths. `title` is precomputed (it only
+    /// needs the listing dir, which `apply` has).
+    LongList {
+        paths: Vec<PathBuf>,
+        title: String,
+    },
+    /// Classify the file type of each path (`symlink_metadata` + a 512-byte
+    /// magic read per path) off the input thread.
+    FileType {
+        paths: Vec<PathBuf>,
+    },
 }
 
 #[derive(Debug)]
@@ -66,6 +80,15 @@ pub enum FileOutcome {
     Restored {
         rela_path: String,
         result: Result<(), String>,
+    },
+    /// Computed `L` long-listing lines, ready to open in a fit-to-content pager.
+    LongListReady { title: String, lines: Vec<String> },
+    /// Computed file-type classification: `flash` is set for a single path
+    /// (shown in the status line), otherwise `pager_lines` holds the
+    /// `name: type` rows for a multi-file pager.
+    FileTypeReady {
+        flash: Option<String>,
+        pager_lines: Vec<String>,
     },
 }
 
@@ -123,6 +146,37 @@ pub fn run_file_op(op: FileOp) -> FileOutcome {
         } => {
             let result = crate::git::restore::restore_to_worktree(&repo_root, &rela_path).map(drop);
             FileOutcome::Restored { rela_path, result }
+        }
+        FileOp::LongList { paths, title } => {
+            let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
+            let lines = crate::fs::long_listing::format_long_listing(&refs);
+            FileOutcome::LongListReady { title, lines }
+        }
+        FileOp::FileType { paths } => {
+            // Single path → a status flash; multiple → a pager table. Mirrors
+            // the synchronous behavior the pure `apply` arm used to produce.
+            if let [only] = paths.as_slice() {
+                let label = crate::fs::ops::file_type_label(only);
+                FileOutcome::FileTypeReady {
+                    flash: Some(format!("{}: {label}", file_name_of(only))),
+                    pager_lines: Vec::new(),
+                }
+            } else {
+                let pager_lines = paths
+                    .iter()
+                    .map(|p| {
+                        format!(
+                            "{}: {}",
+                            file_name_of(p),
+                            crate::fs::ops::file_type_label(p)
+                        )
+                    })
+                    .collect();
+                FileOutcome::FileTypeReady {
+                    flash: None,
+                    pager_lines,
+                }
+            }
         }
         FileOp::PipeContent {
             use_inventory,
@@ -186,6 +240,14 @@ pub fn run_file_op(op: FileOp) -> FileOutcome {
             }
         }
     }
+}
+
+/// A path's basename for display, falling back to the full path string.
+fn file_name_of(p: &Path) -> String {
+    p.file_name().map_or_else(
+        || p.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    )
 }
 
 impl App {
@@ -275,6 +337,26 @@ impl App {
                     on_ok: Some(msg),
                     err_prefix: Some("pipe failed"),
                 });
+            }
+            FileOutcome::LongListReady { title, lines } => {
+                self.open_pager_request(PagerRequest {
+                    title,
+                    lines,
+                    columns: 1,
+                    fit_to_content: true,
+                });
+            }
+            FileOutcome::FileTypeReady { flash, pager_lines } => {
+                if let Some(msg) = flash {
+                    self.state.flash_info(msg);
+                } else {
+                    self.open_pager_request(PagerRequest {
+                        title: "file types".to_string(),
+                        lines: pager_lines,
+                        columns: 1,
+                        fit_to_content: false,
+                    });
+                }
             }
         }
     }
@@ -434,5 +516,72 @@ mod tests {
         assert!(drew);
         assert_eq!(fx.len(), 1);
         assert!(matches!(fx[0], Effect::SendToPane { .. }));
+    }
+
+    #[test]
+    fn long_list_op_builds_table_off_thread() {
+        let work = tempdir().unwrap();
+        let a = write_file(work.path(), "hello.txt", "hi");
+        let out = run_file_op(FileOp::LongList {
+            paths: vec![a],
+            title: "long listing — x".to_string(),
+        });
+        let FileOutcome::LongListReady { title, lines } = out else {
+            panic!("expected LongListReady");
+        };
+        assert_eq!(title, "long listing — x");
+        assert!(lines[0].contains("MODE"), "header row: {lines:?}");
+        assert!(
+            lines.iter().any(|l| l.contains("hello.txt")),
+            "filename row: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn file_type_op_single_yields_flash_not_pager() {
+        let work = tempdir().unwrap();
+        let a = write_file(work.path(), "a.txt", "plain text");
+        let out = run_file_op(FileOp::FileType { paths: vec![a] });
+        let FileOutcome::FileTypeReady { flash, pager_lines } = out else {
+            panic!("expected FileTypeReady");
+        };
+        let flash = flash.expect("single path flashes");
+        assert!(flash.starts_with("a.txt: "), "got {flash}");
+        assert!(pager_lines.is_empty(), "single path has no pager lines");
+    }
+
+    #[test]
+    fn file_type_op_multi_yields_pager_lines() {
+        let work = tempdir().unwrap();
+        let a = write_file(work.path(), "a.txt", "x");
+        let b = write_file(work.path(), "b.txt", "y");
+        let out = run_file_op(FileOp::FileType { paths: vec![a, b] });
+        let FileOutcome::FileTypeReady { flash, pager_lines } = out else {
+            panic!("expected FileTypeReady");
+        };
+        assert!(flash.is_none(), "multi path opens a pager, no flash");
+        assert_eq!(pager_lines.len(), 2);
+        assert!(pager_lines[0].starts_with("a.txt: "));
+        assert!(pager_lines[1].starts_with("b.txt: "));
+    }
+
+    #[test]
+    fn long_list_outcome_drains_into_a_pager() {
+        let work = tempdir().unwrap();
+        let mut app = App::test_app(work.path().to_path_buf());
+        app.runtime
+            .file_results
+            .lock()
+            .unwrap()
+            .push(FileOutcome::LongListReady {
+                title: "long listing — x".to_string(),
+                lines: vec!["INODE  MODE".to_string(), "1  -rw-".to_string()],
+            });
+        let (drew, fx) = app.apply_file_outcomes();
+        assert!(drew);
+        assert!(fx.is_empty(), "opening a pager emits no follow-on effect");
+        let pager = app.view.pager.as_ref().expect("pager opened from outcome");
+        assert_eq!(pager.title, "long listing — x");
+        assert!(pager.fit_to_content, "L pager is fit-to-content");
     }
 }

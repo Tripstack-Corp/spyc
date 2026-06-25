@@ -172,20 +172,11 @@ fn apply_result_into_update() {
         Update::from(ApplyResult::NotHandled),
         Update::Defer
     ));
-    // Post carries its effects through unchanged (count preserved).
+    // Post carries its effects through unchanged (count preserved). `apply`
+    // has no `OpenPager` variant — pager-opening goes via `Effect::FileOp`
+    // (off-thread) or the command path's `Update::OpenPager` (tested below).
     let fx = vec![Effect::SetTerminalTitle { title: "x".into() }];
     assert!(matches!(Update::from(ApplyResult::Post(fx)), Update::Handled(ref f) if f.len() == 1));
-    // OpenPager passes the request through verbatim.
-    let req = PagerRequest {
-        title: "T".into(),
-        lines: vec!["a".into()],
-        columns: 2,
-        fit_to_content: true,
-    };
-    assert!(matches!(
-        Update::from(ApplyResult::OpenPager(req)),
-        Update::OpenPager(r) if r.title == "T" && r.columns == 2 && r.fit_to_content
-    ));
 }
 
 #[test]

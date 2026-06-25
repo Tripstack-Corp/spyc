@@ -61,10 +61,15 @@ pub enum PromptResult {
 pub enum ApplyResult {
     /// Handled entirely by `AppState`. Cursor already clamped.
     Handled,
-    /// Open a pager with these contents.
-    OpenPager(PagerRequest),
     /// Effects for the event loop to execute (e.g. a `ForegroundExec`
-    /// for `$SHELL`). Empty == nothing to do.
+    /// for `$SHELL`, or an off-thread `FileOp` that opens a pager when it
+    /// completes). Empty == nothing to do.
+    ///
+    /// `apply` has no direct `OpenPager` variant: opening a pager needs the
+    /// content's IO (e.g. `L`'s per-file `symlink_metadata`), which must not
+    /// run in this pure dispatcher — those arms emit an `Effect::FileOp`
+    /// instead. The marks / command path produces `Update::OpenPager`
+    /// directly (see `CommandResult`).
     Post(Vec<Effect>),
     /// Caller must handle this action (terminal-touching).
     NotHandled,
@@ -98,7 +103,6 @@ impl From<ApplyResult> for Update {
     fn from(r: ApplyResult) -> Self {
         match r {
             ApplyResult::Handled => Self::Handled(Vec::new()),
-            ApplyResult::OpenPager(req) => Self::OpenPager(req),
             ApplyResult::Post(fx) => Self::Handled(fx),
             ApplyResult::NotHandled => Self::Defer,
         }

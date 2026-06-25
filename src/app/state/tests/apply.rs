@@ -243,19 +243,43 @@ fn apply_macro_record_reserved_flashes_hint() {
 }
 
 #[test]
-fn apply_long_list_returns_pager() {
+fn apply_long_list_emits_off_thread_file_op() {
+    use crate::app::Effect;
+    use crate::app::file_ops::FileOp;
     let mut s = state_with_rows(&["a.txt"]);
     let result = s.apply(&Action::LongList);
-    assert!(matches!(result, ApplyResult::OpenPager(_)));
+    // Pure dispatcher: the `symlink_metadata` + owner/group IO is handed to an
+    // off-thread `FileOp::LongList` (the worker opens the pager on completion),
+    // not run inline as an `OpenPager`.
+    let ApplyResult::Post(fx) = result else {
+        panic!("expected Post(FileOp::LongList), got {result:?}");
+    };
+    assert!(
+        matches!(fx.as_slice(), [Effect::FileOp(FileOp::LongList { .. })]),
+        "got {fx:?}"
+    );
 }
 
 #[test]
-fn apply_file_type_single_flashes() {
+fn apply_file_type_emits_off_thread_file_op() {
+    use crate::app::Effect;
+    use crate::app::file_ops::FileOp;
     let mut s = state_with_rows(&["a.txt"]);
     let result = s.apply(&Action::FileType);
-    // Single file: flashes info, returns Handled
-    assert!(matches!(result, ApplyResult::Handled));
-    assert!(s.flash.is_some());
+    // Classification IO (symlink_metadata + magic read) now runs off-thread; the
+    // worker flashes (single) or opens a pager (multi). `apply` stays pure — no
+    // flash here, just the emitted effect.
+    let ApplyResult::Post(fx) = result else {
+        panic!("expected Post(FileOp::FileType), got {result:?}");
+    };
+    assert!(
+        matches!(fx.as_slice(), [Effect::FileOp(FileOp::FileType { .. })]),
+        "got {fx:?}"
+    );
+    assert!(
+        s.flash.is_none(),
+        "flash happens on the outcome, not in apply"
+    );
 }
 
 #[test]
