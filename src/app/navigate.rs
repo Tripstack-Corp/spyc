@@ -330,7 +330,7 @@ mod tests {
                 app.state
                     .flash
                     .as_ref()
-                    .is_some_and(|f| f.text.contains("not a regular file")),
+                    .is_some_and(|f| f.text.contains("not a readable file")),
                 "should flash the refusal, got {:?}",
                 app.state.flash
             );
