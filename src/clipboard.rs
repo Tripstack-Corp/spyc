@@ -129,28 +129,43 @@ fn copy_impl(_text: &str) -> io::Result<()> {
 }
 
 fn spawn_and_pipe(prog: &str, args: &[&str], text: &str) -> io::Result<()> {
+    // Null out stdout/stderr: spyc runs in raw-mode alternate-screen, so
+    // anything a helper prints (xclip usage text, a wl-copy warning) would
+    // scribble over the TUI. We surface failures via the exit status below,
+    // so we don't need the helper's own stderr.
     let mut child = Command::new(prog)
         .args(args)
         .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()?;
-    if let Some(stdin) = child.stdin.as_mut() {
-        stdin.write_all(text.as_bytes())?;
-    }
-    // `wait()?` only surfaces wait-syscall failure, not a non-zero
-    // exit from the helper itself. xclip/wl-copy/xsel can launch
-    // cleanly and then fail (no compositor, archived display, dbus
-    // unreachable…) — we need to treat those as errors so the user
-    // sees the real reason instead of a phantom "yanked" flash, and
-    // so the Linux cascade doesn't get stuck on a present-but-broken
-    // helper. ErrorKind::Other is deliberate: callers in this module
-    // only fall through to the next candidate on `NotFound`, so
-    // non-zero-exit failures stop the cascade and surface immediately.
+    // Write the payload, then drop stdin so the helper sees EOF — but do NOT
+    // early-return on a write error: a bare `?` here would drop the child
+    // handle without `wait()`, leaking a zombie (the bug this guards). Capture
+    // the result and reap the child first.
+    let write_result = match child.stdin.take() {
+        Some(mut stdin) => stdin.write_all(text.as_bytes()),
+        None => Ok(()),
+    };
+    // `wait()` reaps the child (no zombie) and only surfaces wait-syscall
+    // failure, not a non-zero exit. xclip/wl-copy/xsel can launch cleanly and
+    // then fail (no compositor, archived display, dbus unreachable…) — treat a
+    // non-zero exit as an error so the user sees the real reason instead of a
+    // phantom "yanked" flash, and so the Linux cascade doesn't get stuck on a
+    // present-but-broken helper. The exit status is the more informative
+    // signal, so it takes precedence over a stdin-write error (e.g. an EPIPE
+    // from a helper that bailed before reading). ErrorKind::Other is
+    // deliberate: callers only fall through on `NotFound`, so a non-zero exit
+    // stops the cascade and surfaces immediately.
     let status = child.wait()?;
     if !status.success() {
         return Err(io::Error::other(format!(
             "{prog} exited unsuccessfully: {status}"
         )));
     }
+    // Helper succeeded but our write didn't complete → the clipboard wasn't
+    // set; report it rather than flash a false "yanked".
+    write_result?;
     Ok(())
 }
 
@@ -209,5 +224,26 @@ mod tests {
             err.to_string().contains("exited unsuccessfully"),
             "error message should mention non-zero exit, got: {err}"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_reaps_child_and_errors_when_helper_ignores_large_stdin() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let stub = tmp.path().join("stub-ignore.sh");
+        // Helper exits 0 WITHOUT reading stdin. A payload larger than the pipe
+        // buffer then overflows, and our `write_all` hits EPIPE once the reader
+        // is gone. The fix must still reap the child (no zombie), must not hang,
+        // and must surface the write failure rather than flash a false "yanked".
+        fs::write(&stub, "#!/bin/sh\nexit 0\n").expect("write stub");
+        let mut perms = fs::metadata(&stub).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&stub, perms).unwrap();
+
+        let big = "x".repeat(512 * 1024); // >> any pipe buffer
+        let err = with_clipboard_override(&stub, || copy(&big))
+            .expect_err("a helper that ignores a large stdin should surface a write error");
+        assert_eq!(err.kind(), io::ErrorKind::BrokenPipe, "got {err:?}");
     }
 }
