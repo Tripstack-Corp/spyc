@@ -131,6 +131,16 @@ reason-about-able — preserve them; don't quietly erode them:
 
 ## Conventions
 
+- **Rust house style — deliberate divergences from generic Rust advice** (don't
+  "modernize" these away): spyc is **sync-only** — `std::thread` + `mpsc`, no async
+  runtime (no `tokio` / `async-std` / `futures`); off-thread work is a detached
+  thread that wakes the loop with a `Message` (see ARCHITECTURE.md → "Concurrency
+  model"). Errors are **`anyhow`**, not `thiserror` (spyc is an application, not a
+  library). And `.unwrap()` / `.expect()` / panicking indexing is allowed in
+  production **with a comment stating the invariant that makes it unfireable** (a
+  `SPYC-TRAP` when that failure would be silent) — there is **no** blanket
+  no-`unwrap` ban. A generic "use tokio / thiserror / never unwrap" checklist is
+  wrong *here*; these three choices are load-bearing.
 - **Action enum dispatch**: New features get an `Action` variant, a keymap binding, and a handler arm in `src/app/actions.rs` (`apply_inner`) — or the pure-domain half in `AppState::apply`. Not in `mod.rs`.
 - **Keep `src/app/` modularized (don't regrow the monolith)**: `app/mod.rs` was a ~12k-line monolith; the `docs/archive/REFACTOR_PLAN.md` decomposition + the MVU migration + the 800-LoC campaign carved it down to ~1k (the `App`/`Runtime`/`ViewState` defs, the `Message` enum, and a little glue — the constructor, event loop, process I/O, and leaf helpers are sibling modules). New render/key/command/action/session logic belongs in the matching child module (or a new `src/app/<feature>.rs`), **not** appended to `mod.rs`. The pattern is a child module with `impl App { … }`: child modules can read `App`'s private fields via the descendant-module rule, so you almost never need to make a field `pub` — only the handful of methods called from `app` or sibling modules. A test (`app::guard_tests::mod_rs_stays_decomposed`) fails if `mod.rs` grows past its ceiling; if you hit it, extract a module rather than bumping the number.
 - **No `.rs` over ~800 lines without a solid reason.** Oversized files make
