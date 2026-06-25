@@ -17,6 +17,7 @@ use crate::pane::Pane;
 use crate::shell;
 use crate::ui::pager;
 
+use super::file_ops::{FileOp, PagerDest};
 use super::{App, Effect, EntryKind, PagerView, state};
 
 /// `&mut` selector for the focused-region pager — the macro companion to
@@ -413,27 +414,29 @@ impl App {
     /// streams from disk while the in-app pager loads the (already
     /// truncated) buffer into memory. Streaming wins for multi-GB
     /// logs.
-    pub fn display_in_pane(&mut self) {
+    pub fn display_in_pane(&mut self) -> Vec<Effect> {
         // Page the FOCUSED column's cursor file. From the right commander the
         // pager opens INSIDE `b` (its own `pager_right` slot), coexisting with a
         // `V`/`D` already open in `a` instead of evicting it.
         let Some(row) = self.state.cur().rows.get(self.state.cur().cursor.index) else {
-            return;
+            return Vec::new();
         };
         let path = row.path.clone();
         if row.kind == EntryKind::Dir
             || (row.kind == EntryKind::Symlink && crate::fs::target_is_dir(&path))
         {
             self.state.flash_error("D: cannot page a directory");
-            return;
+            return Vec::new();
         }
         let file_size = std::fs::metadata(&path).map_or(0, |m| m.len());
         if file_size > crate::fs::ops::MAX_PAGER_BYTES {
             // Huge file: $PAGER's stream-from-disk wins over our
             // in-memory pager. Fall back to the pre-v1.5 behavior
-            // (spawn $PAGER as a top overlay).
+            // (spawn $PAGER as a top overlay). A char device reports
+            // length 0, so it never lands here — it routes to the
+            // device-safe off-thread open below.
             self.spawn_pager_overlay_for_path(&path);
-            return;
+            return Vec::new();
         }
         // With a vertical split open, `D`'s pager renders inside the focused
         // column (the carve scopes `top_unit` to it), so wrap to that column's
@@ -448,15 +451,13 @@ impl App {
                 },
             )
         });
-        let Some(mut view) = self.build_pager_view_for_file(&path, wrap) else {
-            return;
-        };
-        view.mount = crate::ui::pager::Mount::TopPane;
-        // Don't push to buffer history: this is a fresh open, not a
-        // page the user navigated away from and might want to revisit
-        // via `[b` / `]b`.
-        view.no_history = true;
-        self.install_top_pager(view);
+        // Regular file → built + mounted inline (no thread/flicker); a special
+        // file → read off-thread (returned as the `OpenSpecialFile` effect) so a
+        // blocking device can't freeze the input thread.
+        self.plan_pager_open(&path, wrap, PagerDest::TopPane)
+            .map(Effect::FileOp)
+            .into_iter()
+            .collect()
     }
 
     /// Load a one-shot preview of the file under the cursor into the right
@@ -539,6 +540,69 @@ impl App {
             Err(e) => {
                 self.state.flash_error(e);
                 None
+            }
+        }
+    }
+
+    /// Plan opening `path` in a pager at `dest`, off-loading the read of a
+    /// *non-regular* file (char/block device, …) onto the file-op worker so a
+    /// blocking read can't freeze the input thread. Returns:
+    ///
+    /// * `None` — `path` is a regular file (the common case): it was built and
+    ///   installed **inline**, here, synchronously (no thread spawn, no
+    ///   one-frame "computing" flicker, an immediate read error flashes). A stat
+    ///   failure also counts as "regular" so a missing/typo'd path flashes its
+    ///   real error now rather than after a worker round-trip.
+    /// * `Some(op)` — `path` is non-regular: the caller runs `op` (a pure-side
+    ///   caller wraps it in `Effect::FileOp`; the executor-layer `gF` caller
+    ///   passes it to [`App::spawn_file_op`]). The worker reads it (sampling a
+    ///   readable device, parking on a blocking one) and the drain installs the
+    ///   result at `dest`.
+    ///
+    /// `fs::metadata` follows symlinks (a symlink to a device is non-regular),
+    /// matching `build_pager_view`'s special-file guard.
+    pub(crate) fn plan_pager_open(
+        &mut self,
+        path: &Path,
+        wrap: Option<u16>,
+        dest: PagerDest,
+    ) -> Option<FileOp> {
+        let is_regular = std::fs::metadata(path).map_or(true, |m| m.is_file());
+        if is_regular {
+            if let Some(view) = self.build_pager_view_for_file(path, wrap) {
+                self.install_pager_at_dest(view, dest);
+            }
+            return None;
+        }
+        Some(FileOp::OpenSpecialFile {
+            path: path.to_path_buf(),
+            theme: self.view.theme.clone(),
+            open_as_rendered: self.state.config.markdown.open_as_rendered,
+            wrap,
+            dest,
+        })
+    }
+
+    /// Install an already-built `view` at `dest`. Shared by the inline regular
+    /// path ([`Self::plan_pager_open`]) and the off-thread special-file drain
+    /// ([`Self::apply_file_outcomes`]), so the mount + scroll handling can't
+    /// drift between them.
+    pub(crate) fn install_pager_at_dest(&mut self, mut view: PagerView, dest: PagerDest) {
+        match dest {
+            PagerDest::Overlay { scroll } => {
+                // gF lands at its referenced line; Enter keeps the builder's
+                // position (a regular file's restored scroll, or the top).
+                if let Some(s) = scroll {
+                    view.scroll = s;
+                }
+                self.set_pager(view);
+            }
+            PagerDest::TopPane => {
+                view.mount = crate::ui::pager::Mount::TopPane;
+                // A fresh open, not a page navigated away from → keep it out of
+                // the `[b`/`]b` buffer history.
+                view.no_history = true;
+                self.install_top_pager(view);
             }
         }
     }

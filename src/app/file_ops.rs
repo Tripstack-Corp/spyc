@@ -2,8 +2,24 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use super::state::PagerRequest;
-use super::{App, Effect, PaneInput, PaneTarget};
+use super::{App, Effect, Message, PaneInput, PaneTarget, pager_handler};
 use crate::state::inventory::Inventory;
+use crate::ui::pager::PagerView;
+
+/// Where an opened file's pager view should be installed — carried from the
+/// open site, through the (possibly off-thread) build, to the install. `Copy`
+/// so it rides a [`FileOp::OpenSpecialFile`] out to the worker and back without
+/// ceremony.
+#[derive(Debug, Clone, Copy)]
+pub enum PagerDest {
+    /// Centered overlay (Enter / `gF`). `scroll`, when set, overrides the
+    /// landing line (`gF`'s referenced line, 0-indexed); `None` keeps the
+    /// builder's default position.
+    Overlay { scroll: Option<usize> },
+    /// Top-pane mount (`D`): the bottom pane stays visible. Installed with
+    /// `no_history` (a fresh open, not a navigation the user might revisit).
+    TopPane,
+}
 
 #[derive(Debug)]
 pub enum FileOp {
@@ -50,9 +66,28 @@ pub enum FileOp {
     FileType {
         paths: Vec<PathBuf>,
     },
+    /// Read + render a **non-regular** file (char/block device, etc.) into a
+    /// `PagerView` on the worker. The read this performs (`looks_like_text` +
+    /// `read_truncated`/`read_hex_window`) is byte-capped, but on an exotic
+    /// blocking-read device (`/dev/input/*`) it can block forever — so it must
+    /// not run on the input thread. A *readable* device (`/dev/zero`,
+    /// `/dev/urandom`) samples and lands a pager; a truly-blocking one parks
+    /// this worker, never the UI. Regular files never reach here (the open
+    /// sites build them inline — no thread/flicker for the common case). The
+    /// builder inputs are captured on the main thread (the tty-size query
+    /// behind `wrap`, the theme); `dest` rides back out to the install.
+    OpenSpecialFile {
+        path: PathBuf,
+        theme: crate::ui::theme::Theme,
+        open_as_rendered: bool,
+        wrap: Option<u16>,
+        dest: PagerDest,
+    },
 }
 
-#[derive(Debug)]
+// No `derive(Debug)`: `SpecialFileOpened` carries a `PagerView`, which isn't
+// `Debug` (it holds styled `ratatui::text::Line`s). Same call as
+// `preview_ops::PreviewOutcome`, the other off-thread carrier of a built view.
 pub enum FileOutcome {
     Copied {
         count: usize,
@@ -89,6 +124,14 @@ pub enum FileOutcome {
     FileTypeReady {
         flash: Option<String>,
         pager_lines: Vec<String>,
+    },
+    /// Result of a [`FileOp::OpenSpecialFile`] build. `Ok` carries the built
+    /// view (boxed — `PagerView` is large) to install at `dest`; `Err` is the
+    /// builder's reason string (the refusal for a tty/FIFO/socket, or a read
+    /// error), flashed on the status bar.
+    SpecialFileOpened {
+        result: Result<Box<PagerView>, String>,
+        dest: PagerDest,
     },
 }
 
@@ -177,6 +220,22 @@ pub fn run_file_op(op: FileOp) -> FileOutcome {
                     pager_lines,
                 }
             }
+        }
+        FileOp::OpenSpecialFile {
+            path,
+            theme,
+            open_as_rendered,
+            wrap,
+            dest,
+        } => {
+            // The blocking read lives here, off the input thread. Reuse the
+            // exact pure builder the inline path uses, so a device's pager
+            // (sample, hex-dump, line numbers) is byte-identical to a regular
+            // file's. Scroll-position restore is the `&mut self` wrapper's job
+            // and is skipped here — a device has no meaningful saved offset.
+            let result = pager_handler::build_pager_view(&path, &theme, open_as_rendered, wrap)
+                .map(Box::new);
+            FileOutcome::SpecialFileOpened { result, dest }
         }
         FileOp::PipeContent {
             use_inventory,
@@ -358,13 +417,37 @@ impl App {
                     });
                 }
             }
+            FileOutcome::SpecialFileOpened { result, dest } => match result {
+                Ok(view) => self.install_pager_at_dest(*view, dest),
+                Err(e) => self.state.flash_error(e),
+            },
         }
+    }
+
+    /// Spawn the detached file-op worker: run `op`, push its outcome onto
+    /// `runtime.file_results`, and wake the loop. The single spawn site shared
+    /// by the [`Effect::FileOp`] executor arm and the executor-layer `gF` open
+    /// (`goto_file_navigate`), so the slot/wake wiring can't drift. `wake` is
+    /// `None` only before `run()` / in the test harness, where the outcome
+    /// still lands in the slot for a manual drain.
+    pub(crate) fn spawn_file_op(&self, op: FileOp) {
+        let results = std::sync::Arc::clone(&self.runtime.file_results);
+        let wake = self.runtime.pane_wake_tx.clone();
+        std::thread::spawn(move || {
+            let outcome = run_file_op(op);
+            results.lock().unwrap().push(outcome);
+            if let Some(tx) = wake {
+                let _ = tx.send(Message::FileOpDone);
+            }
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{App, Effect, FileOp, FileOutcome, run_file_op};
+    use super::{App, Effect, FileOp, FileOutcome, PagerDest, run_file_op};
+    use crate::ui::pager::PagerView;
+    use crate::ui::theme::Theme;
     use std::path::PathBuf;
     use tempfile::tempdir;
 
@@ -583,5 +666,125 @@ mod tests {
         let pager = app.view.pager.as_ref().expect("pager opened from outcome");
         assert_eq!(pager.title, "long listing — x");
         assert!(pager.fit_to_content, "L pager is fit-to-content");
+    }
+
+    #[test]
+    fn open_special_file_op_builds_a_view_off_thread() {
+        // The worker reuses the regular open path's builder, so a *readable*
+        // special file (here a plain file standing in for `/dev/zero`) yields a
+        // pager view titled by the file name — the sample the user wants.
+        let work = tempdir().unwrap();
+        let a = write_file(work.path(), "sample.bin", "zeros\n");
+        let out = run_file_op(FileOp::OpenSpecialFile {
+            path: a,
+            theme: Theme::default(),
+            open_as_rendered: false,
+            wrap: None,
+            dest: PagerDest::Overlay { scroll: Some(0) },
+        });
+        let FileOutcome::SpecialFileOpened { result, dest } = out else {
+            panic!("expected SpecialFileOpened");
+        };
+        assert!(matches!(dest, PagerDest::Overlay { scroll: Some(0) }));
+        let view = result.expect("a readable file builds a view");
+        assert_eq!(view.title, "sample.bin");
+    }
+
+    /// The worker carries the build *failure* back as `Err` (instead of
+    /// blocking or panicking): a socket is refused by `build_pager_view`'s
+    /// special-file guard. A unix socket is a portable non-regular stand-in.
+    #[cfg(unix)]
+    #[test]
+    fn open_special_file_op_refuses_a_socket() {
+        let work = tempdir().unwrap();
+        let sock = work.path().join("s.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let out = run_file_op(FileOp::OpenSpecialFile {
+            path: sock,
+            theme: Theme::default(),
+            open_as_rendered: false,
+            wrap: None,
+            dest: PagerDest::Overlay { scroll: None },
+        });
+        let FileOutcome::SpecialFileOpened { result, .. } = out else {
+            panic!("expected SpecialFileOpened");
+        };
+        let err = result.err().expect("a socket is refused, not paged");
+        assert!(err.contains("not a readable file"), "got {err}");
+    }
+
+    #[test]
+    fn special_file_outcome_installs_overlay_pager_at_scroll() {
+        let work = tempdir().unwrap();
+        let mut app = App::test_app(work.path().to_path_buf());
+        let view = PagerView::new_plain(
+            "dev".to_string(),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()],
+        );
+        app.runtime
+            .file_results
+            .lock()
+            .unwrap()
+            .push(FileOutcome::SpecialFileOpened {
+                result: Ok(Box::new(view)),
+                dest: PagerDest::Overlay { scroll: Some(2) },
+            });
+        let (drew, fx) = app.apply_file_outcomes();
+        assert!(drew);
+        assert!(
+            fx.is_empty(),
+            "installing a pager emits no follow-on effect"
+        );
+        let pager = app.view.pager.as_ref().expect("overlay pager installed");
+        assert_eq!(
+            pager.scroll, 2,
+            "the dest's scroll override (gF line) applied"
+        );
+    }
+
+    #[test]
+    fn special_file_outcome_installs_top_pane_pager() {
+        let work = tempdir().unwrap();
+        let mut app = App::test_app(work.path().to_path_buf());
+        let view = PagerView::new_plain("dev".to_string(), vec!["x".to_string()]);
+        app.runtime
+            .file_results
+            .lock()
+            .unwrap()
+            .push(FileOutcome::SpecialFileOpened {
+                result: Ok(Box::new(view)),
+                dest: PagerDest::TopPane,
+            });
+        let (drew, _) = app.apply_file_outcomes();
+        assert!(drew);
+        let pager = app.view.pager.as_ref().expect("top-pane pager installed");
+        assert!(matches!(pager.mount, crate::ui::pager::Mount::TopPane));
+        assert!(pager.no_history, "D opens are not pushed to buffer history");
+    }
+
+    #[test]
+    fn special_file_outcome_flashes_on_build_error() {
+        let work = tempdir().unwrap();
+        let mut app = App::test_app(work.path().to_path_buf());
+        app.runtime
+            .file_results
+            .lock()
+            .unwrap()
+            .push(FileOutcome::SpecialFileOpened {
+                result: Err("s.sock: not a readable file".to_string()),
+                dest: PagerDest::Overlay { scroll: None },
+            });
+        let (drew, fx) = app.apply_file_outcomes();
+        assert!(drew);
+        assert!(fx.is_empty());
+        assert!(app.view.pager.is_none(), "a refused open leaves no pager");
+        assert!(
+            app.state
+                .flash
+                .as_ref()
+                .is_some_and(|f| f.text.contains("not a readable file")),
+            "the refusal is flashed, got {:?}",
+            app.state.flash
+        );
     }
 }

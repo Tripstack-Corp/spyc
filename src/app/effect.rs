@@ -656,17 +656,9 @@ impl App {
                         }
                     });
                 }
-                Effect::FileOp(op) => {
-                    let results = std::sync::Arc::clone(&self.runtime.file_results);
-                    let wake = self.runtime.pane_wake_tx.clone();
-                    std::thread::spawn(move || {
-                        let outcome = file_ops::run_file_op(op);
-                        results.lock().unwrap().push(outcome);
-                        if let Some(tx) = wake {
-                            let _ = tx.send(Message::FileOpDone);
-                        }
-                    });
-                }
+                // The single spawn site lives in `file_ops` (shared with the gF
+                // executor open); this arm just hands it the op.
+                Effect::FileOp(op) => self.spawn_file_op(op),
                 Effect::Inventory(op) => {
                     let results = std::sync::Arc::clone(&self.runtime.inventory_results);
                     let wake = self.runtime.pane_wake_tx.clone();

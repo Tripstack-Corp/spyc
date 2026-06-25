@@ -218,8 +218,7 @@ impl App {
                 return Ok(Vec::new());
             }
             Action::DisplayInPane => {
-                self.display_in_pane();
-                return Ok(Vec::new());
+                return Ok(self.display_in_pane());
             }
 
             Action::ChmodAdd(mode_char) => {

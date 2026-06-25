@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use crate::shell;
 use crate::spyc_debug;
 
+use super::file_ops::PagerDest;
 use super::{ActivateIntent, App, Effect, EntryKind, PostAction, View, state};
 
 impl App {
@@ -151,19 +152,18 @@ impl App {
 
         // gF: also open the file in the pager at the referenced line.
         if open_at_line {
-            // Reuse the normal file-open builder instead of a raw
-            // `read_to_string`: that slurped the *whole* file into memory on
-            // the input thread (a hang/OOM vector for a hostile multi-GB path
-            // from pane content), whereas `build_pager_view` caps the read at
-            // `MAX_PAGER_BYTES`, refuses non-regular files (`/dev/zero`, a
-            // FIFO), and adds syntax/markdown rendering. It flashes on error
-            // and sets `source_path` itself; we just override the restored
-            // scroll with the referenced line.
-            if let Some(mut view) = self.build_pager_view_for_file(&path, None) {
-                if let Some(ln) = line {
-                    view.scroll = ln.saturating_sub(1);
-                }
-                self.set_pager(view);
+            // Route through `plan_pager_open`: a regular file builds + installs
+            // inline here (bounded read, syntax/markdown render, lands at the
+            // referenced line); a non-regular file (a hostile `/dev/zero` /
+            // `/dev/input/*` reference scraped from pane output) reads on the
+            // file-op worker so it can't block this thread. `gF` already runs
+            // inside `run_effects`, so we spawn that worker directly rather than
+            // returning the effect.
+            let dest = PagerDest::Overlay {
+                scroll: line.map(|ln| ln.saturating_sub(1)),
+            };
+            if let Some(op) = self.plan_pager_open(&path, None, dest) {
+                self.spawn_file_op(op);
             }
         } else if let Some(ln) = line {
             self.state.flash_info(format!(
@@ -237,10 +237,14 @@ impl App {
         // File: dispatch based on intent.
         match intent {
             ActivateIntent::Display => {
-                if let Some(view) = self.build_pager_view_for_file(&path, None) {
-                    self.set_pager(view);
-                }
-                Vec::new()
+                // Regular file → built + installed inline; a special file (a
+                // device under the cursor in `/dev`) → read off-thread via the
+                // returned `OpenSpecialFile` effect, so a blocking read can't
+                // freeze the input thread.
+                self.plan_pager_open(&path, None, PagerDest::Overlay { scroll: None })
+                    .map(Effect::FileOp)
+                    .into_iter()
+                    .collect()
             }
             ActivateIntent::Edit => {
                 let mut argv = shell::resolve_editor();
@@ -309,30 +313,35 @@ mod tests {
         });
     }
 
-    /// gF (and Enter, via the shared `build_pager_view`) must refuse a
-    /// non-regular file rather than opening it — reading a char device / FIFO
-    /// blocks or streams forever (the reported Enter-on-/dev/stderr lockup). A
-    /// unix socket is a portable stand-in for a non-regular file.
+    /// gF (and Enter / `D`, via the shared `plan_pager_open`) must never read a
+    /// non-regular file on the input thread — a char device / FIFO can block or
+    /// stream forever (the reported Enter-on-/dev/stderr lockup, and the exotic
+    /// blocking-read device behind it). The open is *diverted off-thread*: the
+    /// planner returns an `OpenSpecialFile` op (run on the file-op worker)
+    /// instead of building inline, and nothing is paged synchronously. The
+    /// refusal/sample of the file itself is covered by the `file_ops` worker +
+    /// drain tests. A unix socket is a portable non-regular stand-in.
     #[cfg(unix)]
     #[test]
-    fn gf_refuses_non_regular_file_instead_of_locking_up() {
+    fn gf_diverts_non_regular_file_off_the_input_thread() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             let dir = tmp.path().to_path_buf();
             let sock = dir.join("s.sock");
             let _listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
-            let mut app = App::test_app(dir.clone());
+            let mut app = App::test_app(dir);
 
-            app.goto_file_navigate(vec![sock.to_string_lossy().into_owned()], dir, true);
-
-            assert!(app.view.pager.is_none(), "a socket must not be paged");
+            let op = app.plan_pager_open(&sock, None, PagerDest::Overlay { scroll: None });
             assert!(
-                app.state
-                    .flash
-                    .as_ref()
-                    .is_some_and(|f| f.text.contains("not a readable file")),
-                "should flash the refusal, got {:?}",
-                app.state.flash
+                matches!(
+                    op,
+                    Some(crate::app::file_ops::FileOp::OpenSpecialFile { .. })
+                ),
+                "a socket is read off-thread, never inline on the input thread"
+            );
+            assert!(
+                app.view.pager.is_none(),
+                "nothing is paged synchronously for a non-regular file"
             );
         });
     }
