@@ -35,13 +35,16 @@ const PROTOCOL_VERSION: &str = "2024-11-05";
 /// purpose — clients truncate instructions, so the prioritization comes first.
 const SERVER_INSTRUCTIONS: &str = "\
 You are running inside spyc, a terminal file/worktree manager, with its tools \
-on this server. Prefer them over shell equivalents — they act on what the user \
-is actually looking at:\n\
+on this server. Prefer them over shell equivalents — even mid-task, not only \
+when answering questions about the user's view:\n\
 - Call `get_spyc_context` first to ground yourself: the user's cwd, cursor \
 file, picks, filter, git branch, and the running spyc's pid + version.\n\
-- `search_content` / `search_paths` instead of `Bash rg` / `find` — \
-gitignore-aware and scoped to the focused worktree. `git_status` / `git_log` \
-read the focused worktree's changes + history in-process.\n\
+- `search_content` / `search_paths` instead of `Bash rg` / `find`, and \
+`git_status` / `git_log` / `git_diff` instead of shelling out to git — all \
+in-process, gitignore-aware, and structured. They scope to the focused column \
+by default; when you're working in a DIFFERENT worktree, pass its path as the \
+`root` argument so they target it (otherwise shell with explicit paths is the \
+right call).\n\
 - `navigate_to` to move the user's view; `pick_files` / `set_filter` to drive \
 their selection; `get_file_content` to read what they're viewing.\n\
 - Worktree lifecycle, all in-process (never `git worktree`): `list_worktrees` \

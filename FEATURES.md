@@ -803,6 +803,25 @@ Claude can query and control the workspace through these tools:
   files surviving across sessions). Lets Claude grep accumulated
   "interesting files" without re-establishing context.
 
+**Git tools (in-process gix, scoped like search; no `git` subprocess):**
+- **`git_status`** -- working-tree status as structured JSON,
+  `{path, staged, unstaged, untracked}` per changed path.
+- **`git_log([limit])`** -- recent commits newest-first,
+  `{short_id, author, time, subject}` per commit.
+- **`git_diff([cached], [paths])`** -- unified-diff text: the
+  working tree (staged + unstaged + untracked) vs HEAD, or
+  `cached:true` for the staged-vs-HEAD view; `paths` restricts to
+  specific files/subtrees. The read for reviewing your own changes
+  before committing.
+
+**Working in another worktree (`root`):** every read/search/git tool
+above (`get_file_content`, `search_paths`, `search_content`,
+`git_status`, `git_log`, `git_diff`) takes an optional `root` (an
+absolute path) to target a *different* worktree than the user's
+focused column — pass the path returned by `create_worktree` /
+`list_worktrees`. Without it the tools follow the focused column (so
+an agent editing in a sibling worktree should pass `root`).
+
 Write actions execute on the main thread via a command channel.
 Flash messages (`[mcp] navigated to src/`) inform the user when
 Claude changes the workspace. The `gf`/`gF` keys complete the loop:

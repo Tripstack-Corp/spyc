@@ -8,9 +8,9 @@ use serde_json::{Value, json};
 use crate::mcp_cmd::{McpCommand, McpRequest, McpResponse};
 
 use super::readers::{
-    claim_worktree_result, git_log_json, git_status_json, grep_matches_to_json,
-    list_worktrees_json, read_context_or_empty, read_file_content, read_inventory_from_context,
-    read_picks_from_context, release_worktree_result, search_root,
+    claim_worktree_result, effective_root, git_diff_text, git_log_json, git_status_json,
+    grep_matches_to_json, list_worktrees_json, read_context_or_empty, read_file_content,
+    read_inventory_from_context, read_picks_from_context, release_worktree_result,
 };
 use super::{CONTEXT_URI, PROTOCOL_VERSION, SERVER_INSTRUCTIONS, SERVER_NAME, SERVER_VERSION};
 pub(super) fn dispatch(
@@ -255,13 +255,17 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "get_file_content",
-                    "description": "Read the text contents of a file (up to 100KB). Binary files are rejected. Relative paths resolved against the project root (the focused commander's worktree root, else PROJECT_HOME, else cwd) — the same scope as search_paths/search_content, so their results can be read back.",
+                    "description": "Read the text contents of a file (up to 100KB). Binary files are rejected. Relative paths resolved against the project root (the focused commander's worktree root, else PROJECT_HOME, else cwd) — the same scope as search_paths/search_content, so their results can be read back. Pass `root` to resolve against a different worktree you're working in.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "path": {
                                 "type": "string",
                                 "description": "Absolute or relative path to the file."
+                            },
+                            "root": {
+                                "type": "string",
+                                "description": "Optional absolute path to resolve relative paths against instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root."
                             }
                         },
                         "required": ["path"]
@@ -269,7 +273,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "search_paths",
-                    "description": "Project-wide fuzzy filename search. Walks the focused commander's worktree root (its repo root, else PROJECT_HOME, else cwd) honoring .gitignore, scores candidates against the query with fzf-style ranking (basename hits beat parent-dir hits). Returns a JSON array of repo-relative paths, best match first. Empty query returns paths in walk order, truncated.",
+                    "description": "Project-wide fuzzy filename search. Walks the focused commander's worktree root (its repo root, else PROJECT_HOME, else cwd) honoring .gitignore, scores candidates against the query with fzf-style ranking (basename hits beat parent-dir hits). Returns a JSON array of repo-relative paths, best match first. Empty query returns paths in walk order, truncated. Pass `root` to walk a different worktree you're working in.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -281,6 +285,10 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                                 "type": "integer",
                                 "description": "Maximum results to return. Default 100, max 1000.",
                                 "minimum": 1
+                            },
+                            "root": {
+                                "type": "string",
+                                "description": "Optional absolute path to walk instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root."
                             }
                         },
                         "required": ["query"]
@@ -288,7 +296,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "search_content",
-                    "description": "Project-wide content search using ripgrep's matcher (gitignore-aware, smart-case, binary files skipped). Walks the focused commander's worktree root (its repo root, else PROJECT_HOME, else cwd). Returns a JSON array of {path, line, col, text} match objects.",
+                    "description": "Project-wide content search using ripgrep's matcher (gitignore-aware, smart-case, binary files skipped). Walks the focused commander's worktree root (its repo root, else PROJECT_HOME, else cwd). Returns a JSON array of {path, line, col, text} match objects. Pass `root` to search a different worktree you're working in.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -300,6 +308,10 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                                 "type": "integer",
                                 "description": "Maximum matches to return. Default 200, max 5000.",
                                 "minimum": 1
+                            },
+                            "root": {
+                                "type": "string",
+                                "description": "Optional absolute path to search instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root."
                             }
                         },
                         "required": ["pattern"]
@@ -376,19 +388,50 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "git_status",
-                    "description": "Working-tree status of the focused column's worktree, gitignore-aware and in-process (don't shell out to `git status`). Returns a JSON array, one object per changed path: {path, staged, unstaged, untracked} — `staged`/`unstaged` are the change kind ('modified'|'added'|'deleted'|'renamed'|'conflicted') or null. Empty array when the tree is clean.",
+                    "description": "Working-tree status of the focused column's worktree, gitignore-aware and in-process (don't shell out to `git status`). Returns a JSON array, one object per changed path: {path, staged, unstaged, untracked} — `staged`/`unstaged` are the change kind ('modified'|'added'|'deleted'|'renamed'|'conflicted') or null. Empty array when the tree is clean. Pass `root` to inspect a different worktree you're working in.",
                     "inputSchema": {
                         "type": "object",
-                        "properties": {}
+                        "properties": {
+                            "root": {
+                                "type": "string",
+                                "description": "Optional absolute path of the worktree to inspect instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root."
+                            }
+                        }
                     }
                 },
                 {
                     "name": "git_log",
-                    "description": "Recent commit history of the focused column's worktree (HEAD, newest first), in-process. Returns a JSON array: {short_id, author, time, subject} per commit. Use it to orient on what's landed without shelling out to `git log`.",
+                    "description": "Recent commit history of the focused column's worktree (HEAD, newest first), in-process. Returns a JSON array: {short_id, author, time, subject} per commit. Use it to orient on what's landed without shelling out to `git log`. Pass `root` for a different worktree you're working in.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "limit": { "type": "integer", "description": "Max commits to return (default 20, capped at 500)." }
+                            "limit": { "type": "integer", "description": "Max commits to return (default 20, capped at 500)." },
+                            "root": {
+                                "type": "string",
+                                "description": "Optional absolute path of the worktree whose history to read instead of the user's focused column — e.g. a sibling worktree you're working in. Defaults to the focused column's worktree root."
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "git_diff",
+                    "description": "Unified diff of the focused column's worktree, in-process (don't shell out to `git diff` — and the production guard forbids it). By default shows the working tree (staged + unstaged + untracked) vs HEAD; set `cached:true` for the staged-vs-HEAD view. Returns `git diff`-style unified text (empty string when there's nothing to show). This is the read you want when reviewing your own changes before committing. Pass `root` for a different worktree, and `paths` to restrict to specific files/subtrees.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "cached": {
+                                "type": "boolean",
+                                "description": "If true, diff the staged changes (index vs HEAD). Default false = working tree (staged + unstaged + untracked) vs HEAD."
+                            },
+                            "paths": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "Optional repo-relative paths (forward-slash) to restrict the diff to. Empty/omitted = the whole worktree."
+                            },
+                            "root": {
+                                "type": "string",
+                                "description": "Optional absolute path of the worktree to diff instead of the user's focused column — e.g. a sibling worktree you're working in. Defaults to the focused column's worktree root."
+                            }
                         }
                     }
                 }
@@ -435,12 +478,16 @@ fn handle_tools_call(
             if path_str.is_empty() {
                 return send_tool_error(w, id, "missing required parameter: path");
             }
-            // Resolve relative paths against the SEARCH ROOT (the focused
-            // commander's worktree root / project_home / cwd) — the same scope
-            // `search_paths` / `search_content` use, so their repo-relative
-            // results can be read back. (Was cwd-scoped, which broke that
-            // round-trip whenever cwd differed from the search root.)
-            let root = search_root(ctx_path);
+            // Resolve relative paths against the effective root (the focused
+            // commander's worktree root / project_home / cwd, or the agent's
+            // explicit `root` override) — the same scope `search_paths` /
+            // `search_content` use, so their repo-relative results can be read
+            // back. (Was cwd-scoped, which broke that round-trip whenever cwd
+            // differed from the search root.)
+            let root = match effective_root(args, ctx_path) {
+                Ok(r) => r,
+                Err(e) => return send_tool_error(w, id, &e),
+            };
             let resolved = if Path::new(path_str).is_absolute() {
                 PathBuf::from(path_str)
             } else {
@@ -467,7 +514,10 @@ fn handle_tools_call(
         "search_paths" => {
             let query = args["query"].as_str().unwrap_or("").to_string();
             let limit = args["limit"].as_u64().map_or(100, |n| n.min(1000) as usize);
-            let root = search_root(ctx_path);
+            let root = match effective_root(args, ctx_path) {
+                Ok(r) => r,
+                Err(e) => return send_tool_error(w, id, &e),
+            };
             let paths = crate::fs::finder::find_paths(&root, &query, limit);
             let arr: Vec<Value> = paths
                 .iter()
@@ -481,7 +531,10 @@ fn handle_tools_call(
                 return send_tool_error(w, id, "missing required parameter: pattern");
             }
             let limit = args["limit"].as_u64().map_or(200, |n| n.min(5000) as usize);
-            let root = search_root(ctx_path);
+            let root = match effective_root(args, ctx_path) {
+                Ok(r) => r,
+                Err(e) => return send_tool_error(w, id, &e),
+            };
             match crate::fs::grep::search_to_vec(&root, pattern, limit) {
                 Ok(hits) => send_tool_result(w, id, &grep_matches_to_json(&hits).to_string()),
                 Err(e) => send_tool_error(w, id, &e),
@@ -514,10 +567,36 @@ fn handle_tools_call(
             }
         }
         "list_worktrees" => send_tool_result(w, id, &list_worktrees_json(ctx_path)),
-        "git_status" => send_tool_result(w, id, &git_status_json(ctx_path)),
+        "git_status" => {
+            let root = match effective_root(args, ctx_path) {
+                Ok(r) => r,
+                Err(e) => return send_tool_error(w, id, &e),
+            };
+            send_tool_result(w, id, &git_status_json(&root))
+        }
         "git_log" => {
             let limit = args["limit"].as_u64().map_or(20, |n| n.min(500) as usize);
-            send_tool_result(w, id, &git_log_json(ctx_path, limit))
+            let root = match effective_root(args, ctx_path) {
+                Ok(r) => r,
+                Err(e) => return send_tool_error(w, id, &e),
+            };
+            send_tool_result(w, id, &git_log_json(&root, limit))
+        }
+        "git_diff" => {
+            let root = match effective_root(args, ctx_path) {
+                Ok(r) => r,
+                Err(e) => return send_tool_error(w, id, &e),
+            };
+            let cached = args["cached"].as_bool().unwrap_or(false);
+            let paths: Vec<String> = args["paths"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            send_tool_result(w, id, &git_diff_text(&root, cached, &paths))
         }
         "claim_worktree" => {
             let path = args["path"].as_str().unwrap_or("");

@@ -129,7 +129,7 @@ fn tools_list_response() {
     .unwrap();
     let resp = parse_response(&output);
     let tools = resp["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 19);
+    assert_eq!(tools.len(), 20);
     assert_eq!(tools[0]["name"], "get_spyc_context");
     assert_eq!(tools[1]["name"], "navigate_to");
     assert_eq!(tools[2]["name"], "set_filter");
@@ -149,6 +149,7 @@ fn tools_list_response() {
     assert_eq!(tools[16]["name"], "release_worktree");
     assert_eq!(tools[17]["name"], "git_status");
     assert_eq!(tools[18]["name"], "git_log");
+    assert_eq!(tools[19]["name"], "git_diff");
 }
 
 #[test]
@@ -337,6 +338,80 @@ fn search_root_overrides_project_home() {
         .collect();
     assert!(paths.contains(&"in_worktree.rs"), "walks search_root");
     assert!(!paths.contains(&"in_home.rs"), "ignores project_home");
+}
+
+/// The `root` argument overrides the focused column's search_root for the git
+/// read tools — the unlock for an agent working in a *different* worktree than
+/// the user's view. The context points at an empty non-repo dir; a `git_diff`
+/// call with `root` set to a scratch repo (with an unstaged change) reflects
+/// THAT repo, and a non-existent `root` is a clear tool error.
+#[test]
+fn git_diff_tool_honors_explicit_root_arg() {
+    let tmp = tempfile::tempdir().unwrap();
+    // The focused column points at an empty (non-repo) dir.
+    let focused = tmp.path().join("focused");
+    std::fs::create_dir_all(&focused).unwrap();
+    // A separate scratch repo the agent is "working in", with an unstaged change.
+    let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    crate::git::test_support::run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+    std::fs::write(repo.join("f.txt"), "v1\n").unwrap();
+    crate::git::test_support::run_git(&repo, &["add", "."]);
+    crate::git::test_support::run_git(&repo, &["commit", "-q", "-m", "first"]);
+    std::fs::write(repo.join("f.txt"), "v2\n").unwrap();
+
+    let ctx = context::SpycContext {
+        cwd: focused.clone(),
+        cursor_file: None,
+        picks: vec![],
+        inventory: vec![],
+        filter: None,
+        git_branch: None,
+        project_home: Some(focused.clone()),
+        search_root: Some(focused),
+        session_name: String::new(),
+        pid: 0,
+        version: String::new(),
+    };
+    let ctx_path = context::context_path(tmp.path());
+    context::write_context_file(&ctx_path, &ctx).unwrap();
+
+    // git_diff with an explicit root → the scratch repo's diff (the empty
+    // focused column would yield nothing).
+    let mut output = Vec::new();
+    dispatch(
+        &mut output,
+        &json!({"jsonrpc":"2.0","id":31,"method":"tools/call",
+                "params":{"name":"git_diff","arguments":{"root": repo.display().to_string()}}})
+        .to_string(),
+        &ctx_path,
+        None,
+    )
+    .unwrap();
+    let resp = parse_response(&output);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("diff --git a/f.txt b/f.txt"),
+        "root-scoped diff:\n{text}"
+    );
+    assert!(
+        text.contains("-v1") && text.contains("+v2"),
+        "diff body:\n{text}"
+    );
+
+    // A non-existent root is a clear tool error, not a silent fallback.
+    let mut out_err = Vec::new();
+    dispatch(
+        &mut out_err,
+        &json!({"jsonrpc":"2.0","id":32,"method":"tools/call",
+                "params":{"name":"git_status","arguments":{"root": "/no/such/dir/xyz"}}})
+        .to_string(),
+        &ctx_path,
+        None,
+    )
+    .unwrap();
+    let body = parse_response(&out_err).to_string();
+    assert!(body.contains("not a directory"), "bad root errors: {body}");
 }
 
 #[test]
