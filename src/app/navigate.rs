@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 
 use crate::shell;
 use crate::spyc_debug;
-use crate::ui::pager;
 
 use super::{ActivateIntent, App, Effect, EntryKind, PostAction, View, state};
 
@@ -152,26 +151,19 @@ impl App {
 
         // gF: also open the file in the pager at the referenced line.
         if open_at_line {
-            let name = path.file_name().map_or_else(
-                || path.display().to_string(),
-                |n| n.to_string_lossy().into_owned(),
-            );
-
-            match std::fs::read_to_string(&path) {
-                Ok(text) => {
-                    let lines_vec: Vec<String> = text.lines().map(String::from).collect();
-                    let mut view = pager::PagerView::new_plain(&name, lines_vec);
-                    view.source_path = Some(path);
-                    // Jump to the referenced line (0-indexed scroll).
-                    if let Some(ln) = line {
-                        view.scroll = ln.saturating_sub(1);
-                    }
-                    self.set_pager(view);
+            // Reuse the normal file-open builder instead of a raw
+            // `read_to_string`: that slurped the *whole* file into memory on
+            // the input thread (a hang/OOM vector for a hostile multi-GB path
+            // from pane content), whereas `build_pager_view` caps the read at
+            // `MAX_PAGER_BYTES`, refuses non-regular files (`/dev/zero`, a
+            // FIFO), and adds syntax/markdown rendering. It flashes on error
+            // and sets `source_path` itself; we just override the restored
+            // scroll with the referenced line.
+            if let Some(mut view) = self.build_pager_view_for_file(&path, None) {
+                if let Some(ln) = line {
+                    view.scroll = ln.saturating_sub(1);
                 }
-                Err(e) => {
-                    self.state
-                        .flash_error(format!("gF: cannot read {name}: {e}"));
-                }
+                self.set_pager(view);
             }
         } else if let Some(ln) = line {
             self.state.flash_info(format!(
@@ -265,5 +257,83 @@ impl App {
                 .into()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// gF on a real file routes through `build_pager_view_for_file` (the
+    /// bounded, syntax/markdown-aware open path) instead of the old unbounded
+    /// `read_to_string`, and lands the pager at the referenced line.
+    #[test]
+    fn gf_opens_regular_file_at_referenced_line() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let dir = tmp.path().to_path_buf();
+            std::fs::write(dir.join("foo.txt"), "l1\nl2\nl3\nl4\n").unwrap();
+            let mut app = App::test_app(dir.clone());
+
+            // A pane line referencing the file at line 3 (compiler/grep shape).
+            app.goto_file_navigate(vec!["foo.txt:3".to_string()], dir.clone(), true);
+
+            let pager = app.view.pager.as_ref().expect("gF opened a pager");
+            assert_eq!(
+                pager.source_path.as_deref(),
+                Some(dir.join("foo.txt").as_path()),
+                "pager is backed by the referenced file"
+            );
+            assert_eq!(pager.scroll, 2, "scroll jumps to line 3 (0-indexed)");
+        });
+    }
+
+    /// gF refuses a non-regular target (here: a path that doesn't resolve to a
+    /// regular file) rather than reading it — the guard against a hostile
+    /// /dev/zero / FIFO in pane output. Uses a directory reference, which is
+    /// handled as a chdir, never an open: no pager is created.
+    #[test]
+    fn gf_directory_reference_does_not_open_a_pager() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let dir = tmp.path().to_path_buf();
+            std::fs::create_dir(dir.join("sub")).unwrap();
+            let mut app = App::test_app(dir.clone());
+
+            app.goto_file_navigate(vec!["sub".to_string()], dir, true);
+
+            assert!(
+                app.view.pager.is_none(),
+                "a directory reference chdirs, never opens a file pager"
+            );
+        });
+    }
+
+    /// gF (and Enter, via the shared `build_pager_view`) must refuse a
+    /// non-regular file rather than opening it — reading a char device / FIFO
+    /// blocks or streams forever (the reported Enter-on-/dev/stderr lockup). A
+    /// unix socket is a portable stand-in for a non-regular file.
+    #[cfg(unix)]
+    #[test]
+    fn gf_refuses_non_regular_file_instead_of_locking_up() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let dir = tmp.path().to_path_buf();
+            let sock = dir.join("s.sock");
+            let _listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+            let mut app = App::test_app(dir.clone());
+
+            app.goto_file_navigate(vec![sock.to_string_lossy().into_owned()], dir, true);
+
+            assert!(app.view.pager.is_none(), "a socket must not be paged");
+            assert!(
+                app.state
+                    .flash
+                    .as_ref()
+                    .is_some_and(|f| f.text.contains("not a readable file")),
+                "should flash the refusal, got {:?}",
+                app.state.flash
+            );
+        });
     }
 }

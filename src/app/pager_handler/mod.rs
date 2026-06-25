@@ -564,6 +564,32 @@ pub(super) fn build_pager_view(
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
+    // Special-file guard, applied BEFORE the text sniff (`looks_like_text`
+    // opens + reads the path). The reads further down are already byte-capped
+    // (`read_hex_window` / `read_truncated`), so a *readable* streaming device
+    // (`/dev/zero`, `/dev/urandom`) or block device samples fine — what we must
+    // avoid are the two block hazards:
+    //   * a FIFO or socket — opening/reading blocks waiting for a writer/peer;
+    //     detected via `metadata` (a stat, never blocks) and refused.
+    //   * a terminal (`/dev/stderr` → the tty) — reading blocks waiting for
+    //     input (the reported "Enter on /dev/stderr locks up"). Opening a char
+    //     device doesn't block, so open it and check `IsTerminal`; refuse a tty.
+    // `fs::metadata` follows symlinks, so `/dev/stderr` resolves to the device.
+    if let Ok(md) = std::fs::metadata(path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileTypeExt as _;
+            let ft = md.file_type();
+            if ft.is_fifo() || ft.is_socket() {
+                return Err(format!("{name}: not a readable file"));
+            }
+        }
+        if !md.is_file()
+            && std::fs::File::open(path).is_ok_and(|f| std::io::IsTerminal::is_terminal(&f))
+        {
+            return Err(format!("{name}: refusing to read a terminal"));
+        }
+    }
     if shell::looks_like_text(path) {
         let file_size = std::fs::metadata(path).map_or(0, |m| m.len());
         // Big files used to OOM us: read_to_string + syntect every
