@@ -74,7 +74,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 | Where | Finding | Sev | Eff | Verdict |
 |---|---|---|---|---|
-| `src/app/navigate.rs:160` | gF reads an attacker-controlled path fully into memory synchronously on the input thread (hang/OOM via hostile pane content) | medium | S | REAL |
+| `src/app/navigate.rs:160` | gF reads an attacker-controlled path fully into memory synchronously on the input thread (hang/OOM via hostile pane content) | medium | S | ✅ PR #550 |
 | `src/clipboard.rs:111` | Clipboard helper inherits stdout/stderr (garbles the raw-mode TUI) and leaks a zombie when stdin write fails | medium | S | ✅ PR #549 |
 | `src/fs/finder.rs:136` | find_nested_git_repos re-walks the entire subtree raw (no gitignore, no cap, no cancellation) on every F open / :grep in a git root | medium | S | PARTIAL |
 | `src/fs/grep.rs:353` | search_to_vec blocks on the full repo walk even after the result limit is reached | medium | S | ✅ PR #527 |
@@ -131,6 +131,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
+
+**✅ PR #550 — gF bounded file open (2026-06-24):**
+- `app/navigate.rs:160` — the `gF` (open-file-reference) handler did a raw `std::fs::read_to_string(&path)` on a path extracted from **arbitrary pane content**, slurping the whole file into memory on the input thread — a hang/OOM vector for a hostile multi-GB path. Now routes through `build_pager_view_for_file` (the same builder Enter/`D` use), which caps the read at `MAX_PAGER_BYTES` and adds syntax/markdown rendering + the truncation banner; the referenced line is applied as the scroll override. Added an `is_file()` guard up front so a non-regular target (a `/dev/zero` char device or a FIFO, whose `metadata().len()` is 0 and thus dodges the size cap, reading forever / blocking) is refused with a flash instead of opened. **Behavior change:** the `gF` pager is now syntax/markdown-rendered (was plain) and consistent with Enter. New `gf_opens_regular_file_at_referenced_line` + `gf_directory_reference_does_not_open_a_pager`. (Build-and-hold for owner test.)
 
 **✅ PR #549 (clipboard) — null the helper's stdout/stderr + always reap (2026-06-24):**
 - `clipboard.rs:111` — `spawn_and_pipe` (shared fork-exec for `pbcopy`/`wl-copy`/`xclip`/`xsel`) left the helper's stdout/stderr **inherited**, so anything it printed corrupted spyc's raw-mode alternate-screen TUI; and it `?`-returned on a `write_all` failure **before** `child.wait()`, leaking a zombie. Now spawns with `Stdio::null()` for stdout+stderr and captures the write result so the child is **always** reaped; the exit status takes precedence over a stdin-write EPIPE (a non-zero exit still halts the Linux helper cascade via `ErrorKind::Other`). Happy-path yank unchanged. New `copy_reaps_child_and_errors_when_helper_ignores_large_stdin`. (Gate-verified; happy-path-preserving, merged without live test.)
