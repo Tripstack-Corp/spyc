@@ -358,6 +358,21 @@ stderr instead) — we never dirty something the user committed.
 Enterprise managed-settings.json policies
 (`deniedMcpServers`/`allowedMcpServers`) are honored.
 
+**Two execution lanes** keep the event loop responsive. *Read* tools
+(`get_spyc_context`, `search_*`, `list_worktrees`, `git_status`/`git_log`,
+`claim_worktree`/`release_worktree`) run **on the socket thread** off a snapshot
+of the context file + the pure `git::`/`fs::` facades — no `App` access, so the
+loop never stalls. *Light writable* tools (`navigate_to`, `pick_files`, …) send
+an `McpCommand` and run on the **main thread**, replying synchronously. *Heavy
+writable* worktree mutations (`create`/`remove`/`clean_worktree`) take a third
+path (`src/app/worktree_ops.rs`): validate on the loop, run the gix/graveyard IO
+on a **detached worker**, then a tiny main-thread reconcile refreshes the
+listing + writes the context before replying — so a multi-worktree archive can't
+block render/input. Worktree removal is **safe-by-default** (untracked +
+uncommitted content goes to the graveyard; a branch is deleted only if merged),
+and a worktree can be **leased** (`claim_worktree` writes git's native lock) so a
+second agent's cleanup refuses it.
+
 ## Documentation contract
 
 Architecture decisions land in:
