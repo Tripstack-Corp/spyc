@@ -78,8 +78,8 @@ Every user-visible feature maps to an `Action` enum variant in
 each entry carries its handler, so a registered command with no
 handler is a compile error. Side effects are `Effect` variants
 (`src/app/effect.rs`) returned as data — handlers never touch the OS
-directly. `CLAUDE.md` is the full architectural contract (MVU
-invariants); read it before adding behavior.
+directly. `AGENTS.md` is the full architectural contract (MVU
+invariants + conventions); read it before adding behavior.
 
 ### File size
 

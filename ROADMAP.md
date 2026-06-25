@@ -36,8 +36,8 @@ git→gix migration (100% in-process, guard-enforced, with in-house
 side-by-side diff/show/blame views), off-thread PagerStream (grep /
 git-view / agent transcripts on one seam), and unified input routing
 (`route_input`/`InputSink`, `Focus` as the routing authority).
-CLAUDE.md is the architectural contract; ARCHITECTURE.md holds the
-deep design decisions. What remains before 2.0 is daily-driver
+AGENTS.md is the architectural contract + conventions; ARCHITECTURE.md
+holds the deep design decisions. What remains before 2.0 is daily-driver
 papercuts, two gating thesis features, and the distribution/launch
 pass — see "Road to 2.0."
 
@@ -576,9 +576,9 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `ROADMAP.md` | This file — strategy, backlog, launch, decisions. |
 | `BACKLOG_DRAFT_NOTES.md` | Owner's raw intake backlog (small fixes, ideas, reports). |
 | `CHANGELOG.md` | Shipped history (git-cliff, conventional commits). |
-| `CLAUDE.md` | The architectural contract (MVU invariants, rules). |
+| `AGENTS.md` | The canonical agent guide: architectural contract (MVU invariants), module map, conventions. |
+| `CLAUDE.md` | One-line `@AGENTS.md` import (Claude Code entrypoint). |
 | `ARCHITECTURE.md` | Deep stable design decisions. |
-| `AGENTS.md` | Module map + day-to-day conventions. |
 | `DESIGN.md` | UI design language (theme, components, glyphs). |
 | `FEATURES.md` | User-facing feature reference. |
 | `docs/AUTO_APPROVAL_PLAN.md` | Pending design (post-2.0). |

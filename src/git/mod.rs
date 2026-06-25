@@ -6,7 +6,7 @@
 //! diff / show / blame models ([`diff_model`], [`blame`], [`model`]). The
 //! facade is pure infrastructure: paths in, owned `Send` data out. It has no
 //! `App` dependency and never touches ratatui, so `app` depends on `git` and
-//! never the reverse (the CLAUDE.md one-way dependency rule).
+//! never the reverse (the AGENTS.md one-way dependency rule).
 //!
 //! Production code no longer shells out to the `git` binary at all; the only
 //! remaining git-subprocess usages are `#[cfg(test)]` fixtures that

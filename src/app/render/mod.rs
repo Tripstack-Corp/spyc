@@ -1042,7 +1042,7 @@ mod render_tests {
 
 #[cfg(test)]
 mod purity_guard {
-    //! Mechanical guard for the CLAUDE.md contract "Render is pure (`&self`);
+    //! Mechanical guard for the AGENTS.md contract "Render is pure (`&self`);
     //! the draw pass reads … and mutates nothing." The June-2026 deep review
     //! found three OS-in-draw violations (`agent_status.rs:80`, `tabs.rs:239`,
     //! `overlays.rs:215`) where the `&self` draw spawned threads / forked
@@ -1092,7 +1092,7 @@ mod purity_guard {
                     !src.contains(pat),
                     "`{label}` contains `{pat}` — the draw pass must stay pure (&self). \
                      Move the side effect to a `prepare_*` settle step (&mut) or an `Effect`; \
-                     see CLAUDE.md \"Render is pure\" and the #346–#348 fixes."
+                     see AGENTS.md \"Render is pure\" and the #346–#348 fixes."
                 );
             }
         }

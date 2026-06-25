@@ -2,6 +2,13 @@
 
 A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/crossterm. Inspired by SideFX's `spy`. Single-developer project.
 
+> **This file is the canonical agent guide** — the architectural contract (MVU
+> invariants), the per-module map, and the day-to-day conventions, all in one
+> place so every tool reads the same source: Claude Code loads it via a one-line
+> `CLAUDE.md` (`@AGENTS.md`), and codex / agy / others read it directly. Deeper
+> detail lives in [`ARCHITECTURE.md`](ARCHITECTURE.md) (stable design decisions)
+> and [`DESIGN.md`](DESIGN.md) (UI language).
+
 ## What it does
 
 - Vi-style navigation, marks, cursor motion, and numeric prefix (`3j`, `5G`)
@@ -89,10 +96,59 @@ per-module navigation index.
 - **`src/debug_log.rs`** — `spyc_debug!` macro; writes to `/tmp/spyc-debug-<TIMESTAMP>.log` when `--debug` / `SPYC_DEBUG` is set.
 - **`src/main.rs`** — Terminal setup/teardown, `suspend_tui`/`resume_tui` for child processes.
 
+## The architecture we're committed to (MVU / Elm)
+
+spyc is Model-View-Update. These invariants are what make the system
+reason-about-able — preserve them; don't quietly erode them:
+
+- **Three disjoint state types on `App`.** `state: AppState` is the **Model** —
+  pure domain (listing, cursor, picks, marks, filter, mode, focus, git display);
+  it holds *no* OS handles. `runtime: Runtime` holds OS handles / channels /
+  `PtyHost`s and is never seen by domain logic. `view: ViewState` holds render
+  ephemerals + caches. Don't smuggle OS handles into the Model, or domain state
+  into Runtime.
+- **One update entry.** User input flows through a single `App::update(msg)`.
+  The pure transitions (`AppState::apply` / `dispatch_command` /
+  `dispatch_prompt`) take the Model and **return effects as data** — no
+  terminal/OS access, unit-testable without a TUI.
+- **Effects are data; `run_effects` is the only executor.** Side effects are
+  `Effect` variants (`src/app/effect.rs`); handlers return `Vec<Effect>` and
+  never touch the OS directly. This is what makes "forgot to clear `pending_X`"
+  and inline-IO bug classes structurally hard. Need a side effect? Add an
+  `Effect` — don't reach for the OS inside a handler or the render pass.
+- **Render is pure (`&self`).** The draw pass reads Model / ViewState / live
+  grids and mutates nothing; any pre-frame state settling happens in
+  `prepare_frame` *before* the draw. It's covered by a `TestBackend` + `insta`
+  snapshot net — keep both true.
+- **One message channel, event-driven.** Every source (input reader, `notify`
+  watcher, pane parsers, capture/task readers, MCP, git worker, finder/grep)
+  pushes `Message`s into one `mpsc::Receiver`; the loop blocks on `recv`
+  (0 wakes at idle). Don't reintroduce `event::poll` / busy-polling.
+- **Dependency direction is one-way.** `app` → `agent` profiles, never the
+  reverse; the Model never depends on the `App` aggregate. Inside `src/app/`,
+  child modules read `App`'s private fields via the descendant-module rule, so
+  fields stay private — only the handful of cross-module entry points are `pub`.
+
 ## Conventions
 
 - **Action enum dispatch**: New features get an `Action` variant, a keymap binding, and a handler arm in `src/app/actions.rs` (`apply_inner`) — or the pure-domain half in `AppState::apply`. Not in `mod.rs`.
 - **Keep `src/app/` modularized (don't regrow the monolith)**: `app/mod.rs` was a ~12k-line monolith; the `docs/archive/REFACTOR_PLAN.md` decomposition + the MVU migration + the 800-LoC campaign carved it down to ~1k (the `App`/`Runtime`/`ViewState` defs, the `Message` enum, and a little glue — the constructor, event loop, process I/O, and leaf helpers are sibling modules). New render/key/command/action/session logic belongs in the matching child module (or a new `src/app/<feature>.rs`), **not** appended to `mod.rs`. The pattern is a child module with `impl App { … }`: child modules can read `App`'s private fields via the descendant-module rule, so you almost never need to make a field `pub` — only the handful of methods called from `app` or sibling modules. A test (`app::guard_tests::mod_rs_stays_decomposed`) fails if `mod.rs` grows past its ceiling; if you hit it, extract a module rather than bumping the number.
+- **No `.rs` over ~800 lines without a solid reason.** Oversized files make
+  diffs impossible to reason about. When a file grows, extract a cohesive
+  child/sibling module (verbatim relocation, behavior-identical) rather than
+  letting it sprawl. A module root holding its own core *type definitions* is a
+  legitimate "solid reason"; a pile of helpers is not. (`app/mod.rs` has a
+  ceiling-guard test — extract a module if you hit it, don't bump the number.)
+- **Glue stays with its types; leaves move out.** A helper that builds the
+  module's own types (e.g. an `Effect` or `RowData`) is glue — keep it near
+  them. A leaf helper with no `App` dependency (time/byte/text formatting, a
+  path/host string, a subprocess shell-out) belongs in a `util`-style module.
+- **Pure decisions get extracted and tested.** Branchy decisions (key routing,
+  focus selection) become a `Copy` snapshot + a pure `fn` + unit tests (the
+  `route.rs` / `focus.rs` template) instead of inline guards buried in a method.
+- **Refactors are behavior-preserving.** Relocations don't edit test assertions;
+  the full gate (`make check` / `make lint` / `make test`, plus `make
+  lint-linux` for OS-gated code) stays green on every change.
 - **`:command` registration goes through `COMMAND_TABLE`** (`src/app/command_table.rs`): every `:`-command is one `CommandSpec { name, handler, completion }` entry, where `handler` is `CmdHandler::Pure` (resolved in `AppState::dispatch_command`) or `CmdHandler::App(fn)` (terminal-touching, in `src/app/commands.rs`). State runs first; the table drives tab-completion and the Pure→App routing, so you add a table entry plus its handler together — no hand-synced punt list. A missing **Pure** arm is caught by the `command_table_*` tests; a missing **App** handler is now a **compile error** (the handler fn-pointer is named in the entry). Symbol commands (`!`, `;`, `!!`) are dispatched directly and stay out of the table. Bitten historically on `:undo` (v1.41.1) and the `:limit`/`:`-history split — both now structurally prevented.
 - **No OS in the pure layers (enforced, not just documented)**: the Model (`AppState::apply`) and the draw pass (`&self` render) must not do blocking IO, spawn threads, read env, or fork subprocesses. Side effects are `Effect` data run *only* by `run_effects`; any pre-frame settling happens in the `&mut` `prepare_*` steps (`render/mod.rs`), never the draw methods (`render/inner.rs`/`chrome`/`overlays`). The June-2026 deep review (`docs/archive/CODE_REVIEW_2026-06.md`, shipped) found this contract had silently eroded — OS calls smuggled into `&self` render via interior mutability (`agent_status`/`live_cwd`/HUD), and tar/trash IO run inline in key handlers (multi-second freezes on a big `R` delete). The render half is now a **source-scan test** (`app::render::purity_guard`): a draw module containing `thread::spawn` / `std::fs::` / `read_to_string` / env reads is a test failure. To move a blocking op off-thread, copy the `graveyard_ops` template — handler emits an `Effect`, `run_effects` spawns a detached worker, the worker pushes its result onto a `Runtime` slot + wakes the loop with a *payloadless* `Message` (wired through both `sources.rs` coalesce arms + the `run.rs` dispatch `unreachable!` arm), and the pre-recv scan drains+applies — then add the now-clean module to the guard's `PURE_DRAW` list to lock the fix in. **Lesson: a documented invariant drifts unless it's a build/test failure** — reach for the guard-test / compile-error pattern (this, the `mod.rs` ceiling, `COMMAND_TABLE`) over a prose rule.
 - **Comments state what IS, not what's planned**: no "for now" / "until X lands" / "with the Y PR" / "stays on Z until…" in code or doc-comments — they rot into lies the moment that work ships and nobody updates them. The June-2026 vsplit review found *three* comments still saying "until dual-git lands" / "stay on `AppState` for now" **after** dual-git shipped, plus a `#[allow(dead_code)]` whose NOTE said "comes off when PR4 wires the keys" (PR4 had shipped). Describe current behavior; if a transition genuinely must be recorded, the PR that completes it greps for the reference and removes it in the same commit. A *temporary* `#[allow(dead_code)]` names the PR that removes it — and that PR removes it.
