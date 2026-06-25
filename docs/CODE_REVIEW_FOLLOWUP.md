@@ -83,7 +83,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/agent/resume.rs:298` | gemini_resume_index_for runs `gemini --list-sessions` synchronously with no timeout on the session-restore path | medium | M | REAL |
 | `src/app/key_dispatch/mod.rs:315` | Capture-pty writes bypass the Effect executor while sibling sinks in the same match use Effect::SendToPane | medium | M | REAL |
 | `src/app/mod.rs:793` | crossterm::terminal::size() called inside key/action handlers (8 sites), against the effects-as-data contract | medium | M | REAL |
-| `src/app/state/apply.rs:320` | format_long_listing and file_type_label do per-file IO inside the pure apply dispatcher | medium | M | ✅ PR #549 |
+| `src/app/state/apply.rs:320` | format_long_listing and file_type_label do per-file IO inside the pure apply dispatcher | medium | M | ✅ PR #548 |
 | `src/fs/long_listing.rs:155` | format_long_listing does an unmemoized getpwuid/getgrgid NSS lookup per row — L on a large listing can stall seconds-to-minutes on LDAP-backed machines | medium | M | ✅ PR #547 |
 | `src/git/worktree.rs:188` | worktree::add performs a full-tree checkout synchronously on the main input thread | high | M | PARTIAL |
 | `src/pane/widget.rs:37` | Parser mutex held across the whole pane draw — per-frame O(cells) set_string under the lock contends with the parser worker | medium | M | REAL |
@@ -132,7 +132,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 ## Closed / resolved (running log)
 
-**✅ PR #549 — move `L` / file-type IO off the pure apply dispatcher and onto a worker (2026-06-24):**
+**✅ PR #548 — move `L` / file-type IO off the pure apply dispatcher and onto a worker (2026-06-24):**
 - `app/state/apply.rs:320` — the `LongList` and `FileType` arms called `format_long_listing` (one `symlink_metadata` + owner/group resolution per path) and `file_type_label` (`symlink_metadata` + 512-byte magic read per path) **inside the pure `AppState::apply` dispatcher**, on the input thread — violating the no-IO-in-apply invariant and able to stall on a big selection. Now both arms are pure: they collect the target paths and emit `Effect::FileOp(FileOp::LongList { paths, title })` / `FileOp::FileType { paths }`. The existing file-op worker (`run_file_op` → `runtime.file_results` → `Message::FileOpDone`, already wired through coalesce/dispatch) runs the IO off-thread and `apply_one_file_outcome` opens the pager / flashes via a new shared `open_pager_request` helper (also used by the `Update::OpenPager` bridge). No new `Message` variant (reused `FileOpDone` — sidesteps the #531 3-list-lockstep trap). The now-dead `ApplyResult::OpenPager` variant + its `From` arm were removed (apply no longer opens pagers directly). **Behavior change:** `L` / file-type open a tick later (async) instead of synchronously — imperceptible for small dirs, keeps the UI responsive on huge selections. 4 new file_ops tests + updated apply-dispatch assertions. (Build-and-hold for owner test.)
 
 **✅ PR #547 — memoize owner/group NSS lookups in the `L` long-listing (2026-06-24):**
