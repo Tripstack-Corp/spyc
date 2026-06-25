@@ -3,12 +3,12 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::fs;
 use crate::keymap::Action;
 
+use crate::app::file_ops::FileOp;
 use crate::app::{Effect, Mode, PostAction, Prompt, PromptKind, View};
 
-use super::{AppState, ApplyResult, PagerRequest};
+use super::{AppState, ApplyResult};
 
 use super::count_files_in_dir_capped;
 
@@ -24,10 +24,11 @@ impl AppState {
     /// Handle the pure-domain arms of `Action` dispatch.
     ///
     /// Returns `ApplyResult::Handled` when the action was fully processed
-    /// (cursor is clamped before returning), `ApplyResult::OpenPager` when
-    /// the caller should open a pager, `ApplyResult::Post` for a `PostAction`,
-    /// or `ApplyResult::NotHandled` when the caller must handle the action
-    /// (terminal-touching: pager, pane, theme, redraw, etc.).
+    /// (cursor is clamped before returning), `ApplyResult::Post` for effects
+    /// the event loop must run (a `PostAction`, or an `Effect::FileOp` that
+    /// does the IO + opens a pager off-thread), or `ApplyResult::NotHandled`
+    /// when the caller must handle the action (terminal-touching: pager, pane,
+    /// theme, redraw, etc.).
     pub fn apply(&mut self, action: &Action) -> ApplyResult {
         let len = self.cur().rows.len();
         let rows_per_col = self.cur().grid_dims.rows_per_col as usize;
@@ -336,6 +337,11 @@ impl AppState {
             }
 
             // -- Long listing (pager) --
+            // Pure: collect the target paths + title and hand them to the
+            // off-thread `FileOp::LongList` worker. `format_long_listing` does
+            // a `symlink_metadata` + owner/group resolution per path — IO that
+            // must not run inside this pure dispatcher (nor block the input
+            // thread on a big selection). The worker opens the pager when done.
             Action::LongList => {
                 let owned: Vec<PathBuf>;
                 let paths: Vec<&Path> = if self.selection_paths().is_empty() {
@@ -350,53 +356,32 @@ impl AppState {
                 } else {
                     self.selection_paths()
                 };
-                let lines = fs::long_listing::format_long_listing(&paths);
-                let title = format!("long listing — {}", self.cur().listing.dir.display());
+                let op = FileOp::LongList {
+                    paths: paths.iter().map(|p| p.to_path_buf()).collect(),
+                    title: format!("long listing — {}", self.cur().listing.dir.display()),
+                };
                 let row_count = self.cur().rows.len();
                 self.cur_mut().cursor.clamp(row_count);
-                return ApplyResult::OpenPager(PagerRequest {
-                    title,
-                    lines,
-                    columns: 1,
-                    fit_to_content: true,
-                });
+                return ApplyResult::Post(vec![Effect::FileOp(op)]);
             }
 
             // -- File type --
+            // Pure: hand the selected paths to the off-thread `FileOp::FileType`
+            // worker (`file_type_label` does a `symlink_metadata` + 512-byte
+            // magic read per path). The worker flashes (single) or opens a pager
+            // (multi) when done.
             Action::FileType => {
                 let paths = self.selection_paths();
+                let row_count = self.cur().rows.len();
                 if paths.is_empty() {
-                    let row_count = self.cur().rows.len();
                     self.cur_mut().cursor.clamp(row_count);
                     return ApplyResult::Post(Vec::new());
                 }
-                if paths.len() == 1 {
-                    let label = fs::ops::file_type_label(paths[0]);
-                    let name = paths[0].file_name().map_or_else(
-                        || paths[0].display().to_string(),
-                        |n| n.to_string_lossy().into_owned(),
-                    );
-                    self.flash_info(format!("{name}: {label}"));
-                } else {
-                    let lines: Vec<String> = paths
-                        .iter()
-                        .map(|p| {
-                            let name = p.file_name().map_or_else(
-                                || p.display().to_string(),
-                                |n| n.to_string_lossy().into_owned(),
-                            );
-                            format!("{name}: {}", fs::ops::file_type_label(p))
-                        })
-                        .collect();
-                    let row_count = self.cur().rows.len();
-                    self.cur_mut().cursor.clamp(row_count);
-                    return ApplyResult::OpenPager(PagerRequest {
-                        title: "file types".to_string(),
-                        lines,
-                        columns: 1,
-                        fit_to_content: false,
-                    });
-                }
+                let op = FileOp::FileType {
+                    paths: paths.iter().map(|p| p.to_path_buf()).collect(),
+                };
+                self.cur_mut().cursor.clamp(row_count);
+                return ApplyResult::Post(vec![Effect::FileOp(op)]);
             }
 
             // -- Marks --

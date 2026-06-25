@@ -21,7 +21,6 @@ use crate::keymap::Action;
 use crate::pane::PaneTabs;
 use crate::spyc_debug;
 use crate::state::Harpoon;
-use crate::ui::pager::PagerView;
 
 use super::state;
 use super::{
@@ -183,14 +182,7 @@ impl App {
                 return Ok(post);
             }
             state::Update::OpenPager(req) => {
-                let mut view = PagerView::new_plain(req.title, req.lines);
-                view.columns = req.columns;
-                if req.fit_to_content {
-                    view.fit_to_content = true;
-                    // Line-number gutter is noise for short summaries.
-                    view.show_line_numbers = false;
-                }
-                self.set_pager(view);
+                self.open_pager_request(req);
                 return Ok(Vec::new());
             }
             state::Update::Quit => {

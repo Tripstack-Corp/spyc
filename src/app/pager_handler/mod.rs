@@ -225,6 +225,23 @@ impl App {
         self.view.pager = Some(view);
     }
 
+    /// Build a [`PagerView`] from a [`state::PagerRequest`] and install it.
+    /// The single place that turns the pure-side "open a pager with these
+    /// lines" request into the view — shared by the `Update::OpenPager`
+    /// bridge (`actions.rs`) and the off-thread listing/file-type outcomes
+    /// (`file_ops.rs`), so the `columns` / `fit_to_content` handling can't
+    /// drift between them.
+    pub(crate) fn open_pager_request(&mut self, req: state::PagerRequest) {
+        let mut view = PagerView::new_plain(req.title, req.lines);
+        view.columns = req.columns;
+        if req.fit_to_content {
+            view.fit_to_content = true;
+            // Line-number gutter is noise for short summaries.
+            view.show_line_numbers = false;
+        }
+        self.set_pager(view);
+    }
+
     /// Install a freshly-spawned editor / `$PAGER` overlay PTY into the focused
     /// column's slot, then focus it. The right column (`b`) gets its own
     /// `top_overlay_right` slot — coexisting with a `V`/`D` in `a` and always
