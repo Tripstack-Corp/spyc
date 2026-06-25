@@ -564,6 +564,16 @@ pub(super) fn build_pager_view(
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
+    // Refuse non-regular files BEFORE any read. A char device (`/dev/zero`,
+    // `/dev/stderr` → the tty), FIFO, or socket has no finite contents:
+    // `looks_like_text` below opens + reads the path, which *blocks* on a tty
+    // (the reported "Enter on /dev/stderr locks up") or streams unbounded. The
+    // `MAX_PAGER_BYTES` size cap can't save us either — their `metadata().len()`
+    // is 0. `fs::metadata` follows symlinks, so `/dev/stderr` resolves to the
+    // device. (A stat failure falls through to the existing read-error path.)
+    if std::fs::metadata(path).is_ok_and(|m| !m.is_file()) {
+        return Err(format!("{name}: not a regular file"));
+    }
     if shell::looks_like_text(path) {
         let file_size = std::fs::metadata(path).map_or(0, |m| m.len());
         // Big files used to OOM us: read_to_string + syntect every

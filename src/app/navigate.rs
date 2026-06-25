@@ -151,26 +151,14 @@ impl App {
 
         // gF: also open the file in the pager at the referenced line.
         if open_at_line {
-            let name = path.file_name().map_or_else(
-                || path.display().to_string(),
-                |n| n.to_string_lossy().into_owned(),
-            );
-            // The path comes from arbitrary pane content, so guard it before
-            // reading: only page a *regular* file. A char device (`/dev/zero`)
-            // or FIFO would read forever / block, and the size-based huge-file
-            // bound below can't catch them (their `metadata().len()` is 0).
-            if !std::fs::metadata(&path).is_ok_and(|m| m.is_file()) {
-                self.state
-                    .flash_error(format!("gF: not a regular file: {name}"));
-                return;
-            }
             // Reuse the normal file-open builder instead of a raw
             // `read_to_string`: that slurped the *whole* file into memory on
-            // the input thread (a hang/OOM vector for a hostile multi-GB path),
-            // whereas `build_pager_view` caps the read at `MAX_PAGER_BYTES` and
-            // adds syntax/markdown rendering. It flashes on a read error and
-            // sets `source_path` itself; we just override the restored scroll
-            // with the referenced line.
+            // the input thread (a hang/OOM vector for a hostile multi-GB path
+            // from pane content), whereas `build_pager_view` caps the read at
+            // `MAX_PAGER_BYTES`, refuses non-regular files (`/dev/zero`, a
+            // FIFO), and adds syntax/markdown rendering. It flashes on error
+            // and sets `source_path` itself; we just override the restored
+            // scroll with the referenced line.
             if let Some(mut view) = self.build_pager_view_for_file(&path, None) {
                 if let Some(ln) = line {
                     view.scroll = ln.saturating_sub(1);
@@ -317,6 +305,34 @@ mod tests {
             assert!(
                 app.view.pager.is_none(),
                 "a directory reference chdirs, never opens a file pager"
+            );
+        });
+    }
+
+    /// gF (and Enter, via the shared `build_pager_view`) must refuse a
+    /// non-regular file rather than opening it — reading a char device / FIFO
+    /// blocks or streams forever (the reported Enter-on-/dev/stderr lockup). A
+    /// unix socket is a portable stand-in for a non-regular file.
+    #[cfg(unix)]
+    #[test]
+    fn gf_refuses_non_regular_file_instead_of_locking_up() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let dir = tmp.path().to_path_buf();
+            let sock = dir.join("s.sock");
+            let _listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+            let mut app = App::test_app(dir.clone());
+
+            app.goto_file_navigate(vec![sock.to_string_lossy().into_owned()], dir, true);
+
+            assert!(app.view.pager.is_none(), "a socket must not be paged");
+            assert!(
+                app.state
+                    .flash
+                    .as_ref()
+                    .is_some_and(|f| f.text.contains("not a regular file")),
+                "should flash the refusal, got {:?}",
+                app.state.flash
             );
         });
     }
