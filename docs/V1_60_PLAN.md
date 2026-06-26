@@ -140,9 +140,9 @@ become visible quickly without polling.
   "pid": 12345,
   "spyc_version": "1.60.0",
   "capabilities": ["status", "frame_mirror", "input_forward"],
-  "project_home": "/Users/derek/src/spyc",
+  "project_home": "/Users/x/src/spyc",
   "session_name": "SAFFRON_CUMIN",
-  "mcp_socket": "/Users/derek/.local/state/spyc/mcp-12345.sock",
+  "mcp_socket": "/Users/x/.local/state/spyc/mcp-12345.sock",
   "started_at_secs": 1762605451,
   "label": "spyc",
   "mode": "regular"

@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn middle_truncation_favours_tail() {
-        let s = "/Users/derek/src/spyc/a/b/c/very_long_directory_name";
+        let s = "/Users/x/src/spyc/a/b/c/very_long_directory_name";
         let out = truncate_middle(s, 25);
         assert_eq!(dw(&out), 25);
         assert!(out.starts_with("/User"));
@@ -345,7 +345,7 @@ mod tests {
         let out = render_status_to_string(
             Some("spyc"),
             Some("SAFFRON_CUMIN"),
-            "/home/derek/src",
+            "/home/user/src",
             "[picks:2 m1:on]",
             None,
             None,

@@ -308,6 +308,55 @@ mod guard_tests {
         );
     }
 
+    /// No author-identity leak in source home-path literals. An audit flagged
+    /// ~a dozen fixtures that baked the author's username into a `/Users/<name>`
+    /// / `/home/<name>` path — it reads as careless and is brittle. Fixtures use
+    /// the `x` placeholder (`/Users/x`) or `tempfile`. This is a **denylist** of
+    /// the leaked name forms, not an allowlist of placeholders, so legitimate
+    /// fixtures (`/home/me`, `/home/u`, the `/home/résumé` unicode test) pass —
+    /// only the author's username trips it (the realistic recurrence: an agent
+    /// regenerating an example from the dev's own `$HOME`). Scans `src/**.rs`;
+    /// frozen docs (CHANGELOG / docs/archive) keep their historical paths by the
+    /// never-reformat convention.
+    #[test]
+    fn no_author_name_in_home_paths() {
+        // The username forms that leaked (the project author). Lowercased match.
+        const LEAKED: &[&str] = &["derek", "derekmarshall"];
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        let root = std::path::Path::new(manifest).join("src");
+        let mut offenders = Vec::new();
+        scan_all_rs(&root, &mut |path, src| {
+            // Skip this guard's own home — it names the denylist above.
+            if path.file_name().and_then(|n| n.to_str()) == Some("mod_tests.rs") {
+                return;
+            }
+            let rel = path.strip_prefix(manifest).unwrap_or(path).display();
+            for (i, line) in src.lines().enumerate() {
+                for prefix in ["/Users/", "/home/"] {
+                    let mut rest = line;
+                    while let Some(p) = rest.find(prefix) {
+                        let seg: String = rest[p + prefix.len()..]
+                            .chars()
+                            .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+                            .collect();
+                        if LEAKED.contains(&seg.to_ascii_lowercase().as_str()) {
+                            offenders.push(format!("{rel}:{}  ({prefix}{seg})", i + 1));
+                        }
+                        rest = &rest[p + prefix.len()..];
+                    }
+                }
+            }
+        });
+        offenders.sort();
+        offenders.dedup();
+        assert!(
+            offenders.is_empty(),
+            "author username baked into a src home-path literal — use the `x` \
+             placeholder (`/Users/x`); FS tests use tempfile:\n{}",
+            offenders.join("\n")
+        );
+    }
+
     /// Walk every `.rs` under `dir`, INCLUDING test files — comment slop in a
     /// test is still slop (the offender that prompted the guard was a test).
     /// `scan_rs`'s sibling without the production-only skip list.

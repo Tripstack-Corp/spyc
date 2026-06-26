@@ -293,7 +293,7 @@ pub fn pick_closest_unclaimed_session<T: SessionCandidate>(
 }
 
 /// Slug for a cwd as Claude stores its conversations:
-/// `/Users/derek/src/spyc` → `-Users-derek-src-spyc`.
+/// `/Users/x/src/spyc` → `-Users-x-src-spyc`.
 ///
 /// Claude rewrites *any* non-alphanumeric/hyphen character to `-`,
 /// not just `/`. So `tripstack_platform` becomes `tripstack-platform`

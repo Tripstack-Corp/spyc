@@ -19,7 +19,7 @@ spyc's project root, not the agent's actual cwd.
 
 What we actually want from a handoff reference:
 
-1. **Terse** in the agent's view (not a leaked `/Users/derekmarshall/…`).
+1. **Terse** in the agent's view (not a leaked `/Users/x/…`).
 2. **Resolves deterministically** to the correct absolute file,
    regardless of the agent's cwd.
 3. **Universal** — works for claude, codex, *and* a plain shell/REPL.

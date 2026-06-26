@@ -1,6 +1,5 @@
 ---
 source: src/ui/status.rs
-assertion_line: 314
 expression: out
 ---
-spyc SAFFRON_CUMIN: /home/derek/src  [picks:2 m1:on]
+spyc SAFFRON_CUMIN: /home/user/src  [picks:2 m1:on]

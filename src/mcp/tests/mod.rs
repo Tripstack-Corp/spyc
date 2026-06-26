@@ -581,9 +581,8 @@ fn socket_server_responds() {
         handle_socket_connection(stream, &ctx_for_thread, &cmd_tx).unwrap_or(());
     });
 
-    // Give the server thread a moment to start.
-    std::thread::sleep(std::time::Duration::from_millis(50));
-
+    // The listener is bound (and listening) before the accept thread spawns, so
+    // the client connects into the backlog immediately — no readiness wait.
     let stream = UnixStream::connect(&sock_path).unwrap();
     let mut reader = io::BufReader::new(stream.try_clone().unwrap());
     let mut writer = stream;
@@ -624,8 +623,7 @@ fn disconnect_notification_routes_through_channel() {
         handle_socket_connection(stream, &ctx_for_thread, &cmd_tx).unwrap_or(());
     });
 
-    std::thread::sleep(std::time::Duration::from_millis(50));
-
+    // Listener is bound before the accept thread spawns; connect immediately.
     let mut stream = UnixStream::connect(&sock_path).unwrap();
     let notification = json!({
         "jsonrpc": "2.0",

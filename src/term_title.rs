@@ -89,16 +89,16 @@ mod tests {
 
     #[test]
     fn compose_with_project_and_session() {
-        let p = PathBuf::from("/Users/derek/src/spyc");
-        let cwd = PathBuf::from("/Users/derek/src/spyc/src");
+        let p = PathBuf::from("/Users/x/src/spyc");
+        let cwd = PathBuf::from("/Users/x/src/spyc/src");
         let s = compose(Some(&p), Some("SAFFRON_CUMIN"), &cwd);
         assert_eq!(s, "\u{1f336}\u{fe0f}: spyc \u{b7} SAFFRON_CUMIN");
     }
 
     #[test]
     fn compose_without_session() {
-        let p = PathBuf::from("/Users/derek/src/spyc");
-        let cwd = PathBuf::from("/Users/derek/src/spyc");
+        let p = PathBuf::from("/Users/x/src/spyc");
+        let cwd = PathBuf::from("/Users/x/src/spyc");
         let s = compose(Some(&p), None, &cwd);
         assert_eq!(s, "\u{1f336}\u{fe0f}: spyc");
     }

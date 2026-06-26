@@ -11,23 +11,23 @@ fn now_secs() -> u64 {
 #[test]
 fn slug_replaces_path_separators() {
     assert_eq!(
-        project_slug(std::path::Path::new("/Users/derek/src/spyc")),
-        "-Users-derek-src-spyc"
+        project_slug(std::path::Path::new("/Users/x/src/spyc")),
+        "-Users-x-src-spyc"
     );
 }
 
 #[test]
 fn slug_rewrites_underscores_like_claude() {
     // Claude rewrites underscores to hyphens in its on-disk slug.
-    // `~/.claude/projects/-Users-derek-src-tripstack-platform/`
+    // `~/.claude/projects/-Users-x-src-tripstack-platform/`
     // is what we must match for `tripstack_platform`.
     assert_eq!(
-        project_slug(std::path::Path::new("/Users/derek/src/tripstack_platform")),
-        "-Users-derek-src-tripstack-platform"
+        project_slug(std::path::Path::new("/Users/x/src/tripstack_platform")),
+        "-Users-x-src-tripstack-platform"
     );
     assert_eq!(
-        project_slug(std::path::Path::new("/Users/derek/src/system_setup")),
-        "-Users-derek-src-system-setup"
+        project_slug(std::path::Path::new("/Users/x/src/system_setup")),
+        "-Users-x-src-system-setup"
     );
 }
 

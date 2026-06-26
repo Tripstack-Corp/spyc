@@ -38,8 +38,8 @@ fn expand_with(
 /// Inverse of `expand_tilde` for *display*: if `path` starts with `$HOME`,
 /// replace that prefix with `~`. Otherwise return the path verbatim.
 ///
-/// Matches at directory boundaries so `/Users/derekmarshall_other` is not
-/// rewritten when `$HOME` is `/Users/derekmarshall`.
+/// Matches at directory boundaries so `/Users/xx` is not rewritten
+/// when `$HOME` is `/Users/x`.
 pub fn display_tilde(path: &std::path::Path) -> String {
     let s = path.to_string_lossy();
     let Some(home) = std::env::var_os("HOME") else {

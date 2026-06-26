@@ -121,7 +121,7 @@ Used sparingly — every glyph below has a specific meaning.
 Powerline arrows (``) separate status segments and require a
 Nerd Font; mono mode switches to plain spaces and a single rule.
 
-Tilde-collapse (`/Users/derek/src/spyc` → `~/src/spyc`) is applied
+Tilde-collapse (`/Users/x/src/spyc` → `~/src/spyc`) is applied
 at every user-facing path display via `paths::display_tilde`. Match
 is anchored at directory boundaries. **MCP context output is
 exempt** — consumers expect absolute paths.
