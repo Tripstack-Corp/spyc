@@ -5,6 +5,11 @@
 //! domain logic live here; the `App` shell in `mod.rs` owns terminal state
 //! (pager widget, pane tabs, pty handles) and delegates to `AppState`.
 
+// The pure Model must never panic on domain state: a bare `.unwrap()` here is a
+// build error (use `.expect("invariant")`, or handle the `None`/`Err`). Scoped
+// on purpose — see AGENTS.md → "Rust house style"; the `tests/` module opts out.
+#![deny(clippy::unwrap_used)]
+
 use std::path::{Path, PathBuf};
 
 use crate::config::Config;

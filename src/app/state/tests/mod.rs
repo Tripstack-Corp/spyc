@@ -1,5 +1,8 @@
 //! Unit tests for `AppState`, split out of `state` thematically.
 #![allow(clippy::wildcard_imports)]
+// Tests assert on known-good fixtures; `.unwrap()` is fine here. The scoped
+// `deny(clippy::unwrap_used)` in state/mod.rs guards production paths only.
+#![allow(clippy::unwrap_used)]
 
 use super::*;
 use crate::app::PromptKind;

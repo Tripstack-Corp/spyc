@@ -17,6 +17,12 @@
 //! stays in `app` because callers on both sides of the split construct and
 //! read it.
 
+// The draw pass is `&self` and must not panic on view state: a bare `.unwrap()`
+// here is a build error (use `.expect("invariant")`, or handle the `None`).
+// Scoped on purpose — see AGENTS.md → "Rust house style"; the inline
+// `#[cfg(test)]` modules below opt back out.
+#![deny(clippy::unwrap_used)]
+
 use ratatui::Frame;
 
 use crate::config::StatusPosition;
@@ -787,6 +793,7 @@ mod render_tests {
     //! the `.snap` diff. Pane *content* is intentionally not snapshotted — it
     //! needs a live `PtyHost`; these cover the file-list surface, which is
     //! exactly what `prepare_frame` touches.
+    #![allow(clippy::unwrap_used)] // test fixtures; the module deny is for production
     use std::path::PathBuf;
 
     use super::*;

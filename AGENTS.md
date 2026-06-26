@@ -139,8 +139,12 @@ reason-about-able — preserve them; don't quietly erode them:
   library). And `.unwrap()` / `.expect()` / panicking indexing is allowed in
   production **with a comment stating the invariant that makes it unfireable** (a
   `SPYC-TRAP` when that failure would be silent) — there is **no** blanket
-  no-`unwrap` ban. A generic "use tokio / thiserror / never unwrap" checklist is
-  wrong *here*; these three choices are load-bearing.
+  no-`unwrap` ban, *except* a scoped `deny(clippy::unwrap_used)` in the pure
+  Model (`src/app/state/`) and the draw pass (`src/app/render/`), where a bare
+  `.unwrap()` is a build error (write `.expect("invariant")` instead) — both
+  trees are already unwrap-free and the gate keeps them that way. A generic "use
+  tokio / thiserror / never unwrap" checklist is wrong *here*; these choices are
+  load-bearing.
 - **Action enum dispatch**: New features get an `Action` variant, a keymap binding, and a handler arm in `src/app/actions.rs` (`apply_inner`) — or the pure-domain half in `AppState::apply`. Not in `mod.rs`.
 - **Keep `src/app/` modularized (don't regrow the monolith)**: `app/mod.rs` was a ~12k-line monolith; the `docs/archive/REFACTOR_PLAN.md` decomposition + the MVU migration + the 800-LoC campaign carved it down to ~1k (the `App`/`Runtime`/`ViewState` defs, the `Message` enum, and a little glue — the constructor, event loop, process I/O, and leaf helpers are sibling modules). New render/key/command/action/session logic belongs in the matching child module (or a new `src/app/<feature>.rs`), **not** appended to `mod.rs`. The pattern is a child module with `impl App { … }`: child modules can read `App`'s private fields via the descendant-module rule, so you almost never need to make a field `pub` — only the handful of methods called from `app` or sibling modules. A test (`app::guard_tests::mod_rs_stays_decomposed`) fails if `mod.rs` grows past its ceiling; if you hit it, extract a module rather than bumping the number.
 - **No `.rs` over ~800 lines without a solid reason.** Oversized files make
