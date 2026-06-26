@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 /// Metadata for a single cached inventory item.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedItem {
-    /// Unique identifier.
     pub id: String,
     /// Original absolute path when yanked.
     pub orig_path: PathBuf,
@@ -57,7 +56,6 @@ impl Inventory {
         }
     }
 
-    /// Load inventory from the cache directory.
     pub fn load() -> Self {
         let Some(dir) = inventory_dir() else {
             return Self::new();
@@ -74,7 +72,6 @@ impl Inventory {
         let Some(dir) = inventory_dir() else {
             return Err("no state directory".into());
         };
-        // Only regular files.
         let meta =
             std::fs::metadata(path).map_err(|e| format!("can't read {}: {e}", path.display()))?;
         if !meta.is_file() {
@@ -191,7 +188,6 @@ impl Inventory {
         self.picks.remove(id);
     }
 
-    /// Remove the item at cursor index.
     #[cfg(test)]
     pub fn remove_at(&mut self, index: usize) -> Option<CachedItem> {
         let id = self.items.keys().nth(index)?.clone();
@@ -249,7 +245,6 @@ impl Inventory {
         self.picks.clear();
     }
 
-    /// Toggle pick on item at index.
     pub fn toggle_pick(&mut self, index: usize) {
         if let Some(id) = self.items.keys().nth(index).cloned()
             && !self.picks.remove(&id)
@@ -258,7 +253,6 @@ impl Inventory {
         }
     }
 
-    /// Check if item at index is picked.
     #[allow(dead_code)]
     pub fn is_picked(&self, index: usize) -> bool {
         self.items

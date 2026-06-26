@@ -66,7 +66,6 @@ impl History {
         // Remove earlier duplicate (move-to-end dedup).
         self.entries.retain(|e| e != cmd);
         self.entries.push(cmd.to_string());
-        // Cap at MAX_ENTRIES.
         if self.entries.len() > MAX_ENTRIES {
             let drain = self.entries.len() - MAX_ENTRIES;
             self.entries.drain(..drain);
