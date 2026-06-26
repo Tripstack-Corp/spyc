@@ -333,19 +333,17 @@ impl App {
                 // Split the list region into left | divider | right. Both
                 // columns and the divider span exactly the left list's height,
                 // so they end on the same row — the prompt/arming row stays
-                // reserved as the spyc unit's shared lowest line (rendered under
-                // the left list only), keeping the two columns symmetrical.
+                // reserved as the spyc unit's shared lowest line BELOW both
+                // columns, keeping them symmetrical. That row keeps its full
+                // frame width: nothing renders beside it (the columns end above
+                // it), and a flash / `:` command line / chord hint is global,
+                // not column-scoped — clamping it to the left column truncated
+                // flash messages (e.g. a long worktree path) at the divider.
                 let list = out.list;
                 out.list = Rect {
                     width: left_w,
                     ..list
                 };
-                let pane_div_y = out.divider.map(|d| d.y);
-                let prompt_in_top = pane_div_y.is_none_or(|dy| out.prompt.y < dy);
-                if prompt_in_top {
-                    // Keep the arming/flash line under the left list only.
-                    out.prompt.width = out.prompt.width.min(left_w);
-                }
                 let height = list.height;
                 out.vdivider = Some(Rect {
                     x: vdiv_x,

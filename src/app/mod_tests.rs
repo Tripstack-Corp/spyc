@@ -608,11 +608,42 @@ mod layout_tests {
             l.list.y + l.list.height,
             "divider ends where the left list does"
         );
-        // The prompt (arming/flash) stays under the left column only; the pane
-        // stays full-width (TopOnly).
-        assert_eq!(l.prompt.width, 43);
+        // The prompt/flash/command row is the shared lowest line BELOW both
+        // columns, so it keeps the FULL frame width (a flash message or `:`
+        // command line is global, not column-scoped). The status bar and pane
+        // are full-width too (TopOnly).
+        assert_eq!(
+            l.prompt.width, 80,
+            "prompt/flash row spans the full frame width"
+        );
         assert_eq!(l.status.width, 80);
         assert_eq!(l.pane.unwrap().width, 80);
+    }
+
+    /// Regression: a `TopOnly` split must NOT truncate the shared bottom
+    /// prompt/flash/command row at the divider — it spans the full frame width
+    /// whether or not a pty pane is open (a flash like a long worktree path was
+    /// being cut at the left column). The columns always end above this row, so
+    /// nothing renders beside it. (`FullHeight` is different — its right column
+    /// owns that row's full height, so it stays clamped, covered separately.)
+    #[test]
+    fn carve_vsplit_top_only_prompt_row_spans_full_width() {
+        for has_pane in [false, true] {
+            let l = App::carve_vsplit(
+                App::compute_layout(area(80, 24), has_pane, 50, StatusPosition::Top),
+                VSplit {
+                    width_pct: 45,
+                    mode: VsplitMode::TopOnly,
+                    focus: Side::Left,
+                },
+                area(80, 24),
+                None,
+            );
+            assert_eq!(
+                l.prompt.width, 80,
+                "TopOnly prompt/flash row must be full-width (has_pane={has_pane})"
+            );
+        }
     }
 
     /// `top_unit` (the V/D overlay + TopPane-pager region) follows the column
