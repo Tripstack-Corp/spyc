@@ -291,7 +291,11 @@ You are expected to be running inside spyc's split pane. If the
   `remove_worktree(path)` tears it down **safe-by-default** — archives untracked + uncommitted
   changes to the graveyard, removes the tree, then deletes the branch *iff merged* (an unmerged
   branch's ref is kept); refuses a *claimed* one (release first); a column sitting inside it is
-  reset to PROJECT_HOME with a status flash, not refused. `clean_worktree(path)` is an alias of
+  reset to PROJECT_HOME with a status flash, not refused. (Independent of this path,
+  `AppState::refresh_listing` self-heals a column whose cwd vanishes by *any* means — an external
+  `git worktree remove`, `rm -rf`, or another agent — snapping it back to PROJECT_HOME (or, if that's
+  gone too, the nearest existing ancestor of the dead path) with a `directory not found, …` flash,
+  so a pane is never stranded in a deleted worktree.) `clean_worktree(path)` is an alias of
   `remove_worktree`. When two agents share a repo,
   `claim_worktree(path, reason)` leases a worktree (git's native lock — others' remove/clean
   refuse it) and `release_worktree(path)` clears it; claim before working, release when done.

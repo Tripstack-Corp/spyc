@@ -787,6 +787,14 @@ Claude can query and control the workspace through these tools:
   work in it while the main column stays put. After this,
   `navigate_to` / search / `pick_files` act on `b`.
 
+A column is never left stranded in a **deleted worktree**: if its
+directory is removed out from under it by *any* means -- spyc's own
+`remove_worktree`, an external `git worktree remove`, `rm -rf`, or
+another agent -- the next listing refresh snaps that column back to
+PROJECT_HOME (or, if PROJECT_HOME is gone too, the nearest existing
+ancestor of the dead path) with a `directory not found, …` flash, so
+a pane is never stranded.
+
 **Search tools (gitignore-aware, scoped to the focused commander's worktree root — its repo root, else PROJECT_HOME, else cwd):**
 - **`search_paths(query, [limit])`** -- fuzzy filename search
   (same `ignore` walker + nucleo ranking as the `F` picker).

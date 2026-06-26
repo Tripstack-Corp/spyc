@@ -198,6 +198,14 @@ impl AppState {
     }
 
     pub fn refresh_listing(&mut self) {
+        // Self-heal first: if a column's cwd was deleted out from under us (an
+        // external `git worktree remove` / `rm -rf` / another agent's teardown —
+        // anything spyc didn't route through its own `remove_worktree`), snap it
+        // back to PROJECT_HOME instead of leaving it stranded on a dead path with
+        // stale rows. Checks both columns (cheap `is_dir` stats); no-op when none
+        // is orphaned. Runs here because every fs-event / poll refresh lands in
+        // this method, so an external deletion is healed on the next refresh.
+        self.reset_orphaned_columns_to_home();
         match Listing::read(&self.cur().listing.dir) {
             Ok(new) => {
                 self.cur_mut().listing = new;
@@ -330,32 +338,46 @@ impl AppState {
         Ok(())
     }
 
-    /// After a worktree removal, a column (A or B) that was sitting inside it
-    /// now points at a deleted directory. Snap any such column back to
-    /// PROJECT_HOME (the main repo) and flash a notice, rather than stranding it
-    /// on a path that no longer exists. No-op when PROJECT_HOME is unset/gone or
-    /// no column is orphaned. (The `remove_worktree`/`clean_worktree` MCP flow
-    /// no longer refuses a worktree a column is in — it relies on this.)
+    /// Snap any column (A or B) whose cwd no longer exists back to a real
+    /// directory with a flash, rather than stranding it on a deleted path.
+    /// Cause-agnostic: covers a worktree torn down by spyc's own
+    /// `remove_worktree`/`clean_worktree`, **and** one removed out from under us
+    /// externally (a raw `git worktree remove`, `rm -rf`, or another agent) —
+    /// the latter is caught because [`Self::refresh_listing`] calls this on every
+    /// refresh. Target is PROJECT_HOME when it's still a directory; if PROJECT_HOME
+    /// is unset or itself gone, falls back to the orphaned dir's nearest existing
+    /// ancestor (worst case `/`) so the heal is **never** a no-op — a column is
+    /// always moved to somewhere real. No-op only when no column is orphaned.
+    /// (The `remove_worktree`/`clean_worktree` MCP flow no longer refuses a
+    /// worktree a column is in — it relies on this.)
     pub fn reset_orphaned_columns_to_home(&mut self) {
-        let Some(home) = self.project_home.clone() else {
-            return;
-        };
-        if !home.is_dir() {
-            return;
-        }
+        let home = self.project_home.clone().filter(|h| h.is_dir());
         let mut sides = vec![Side::Left];
         if self.right.is_some() {
             sides.push(Side::Right);
         }
         for side in sides {
-            if self.col(side).listing.dir.is_dir() {
+            let orphaned = self.col(side).listing.dir.clone();
+            if orphaned.is_dir() {
                 continue; // still a valid directory — leave it
             }
-            if self.chdir_side(side, &home).is_ok() {
-                self.flash_info(format!(
-                    "column reset to {} (its worktree was removed)",
-                    crate::paths::display_tilde(&home)
-                ));
+            // Prefer PROJECT_HOME; else the nearest existing ancestor of the
+            // dead path (so even a missing PROJECT_HOME can't leave the column
+            // stranded). `to_home` only when we actually used PROJECT_HOME, so
+            // the flash doesn't claim "project home" for an ancestor landing.
+            let (target, to_home) = match &home {
+                Some(h) => (h.clone(), true),
+                None => (nearest_existing_ancestor(&orphaned), false),
+            };
+            if self.chdir_side(side, &target).is_ok() {
+                self.flash_info(if to_home {
+                    "directory not found, returning to project home".to_string()
+                } else {
+                    format!(
+                        "directory not found, moved to {}",
+                        crate::paths::display_tilde(&target)
+                    )
+                });
             }
         }
     }
@@ -439,4 +461,16 @@ impl AppState {
         }
         Ok(canon)
     }
+}
+
+/// The nearest existing directory at or above `path` — walk up its ancestors
+/// and return the first that is a directory. Column dirs are canonicalized
+/// (absolute), so the walk terminates at `/` (always a directory); the
+/// `unwrap_or` is a belt-and-suspenders for a pathological relative input.
+/// Used as the orphaned-column heal target when PROJECT_HOME is also gone, so
+/// a column is never left on a dead path.
+fn nearest_existing_ancestor(path: &Path) -> PathBuf {
+    path.ancestors()
+        .find(|p| p.is_dir())
+        .map_or_else(|| PathBuf::from("/"), Path::to_path_buf)
 }

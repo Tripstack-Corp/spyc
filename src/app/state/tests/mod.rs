@@ -119,6 +119,80 @@ fn reset_orphaned_columns_snaps_a_removed_worktree_column_home() {
     assert_eq!(s.left.listing.dir, home);
 }
 
+/// A plain `refresh_listing` (the fs-event / poll path) must self-heal a column
+/// whose cwd was deleted *externally* — a raw `git worktree remove`, `rm -rf`,
+/// or another agent — not just spyc's own `remove_worktree`. This pins the
+/// wiring that keeps a pane from being stranded in a deleted worktree.
+/// (Deletes the non-focused Right column to stay chdir-free — healing the
+/// focused column would call `set_current_dir`, which races the parallel
+/// runner; the heal logic is identical for either side.)
+#[test]
+fn refresh_listing_self_heals_a_column_whose_dir_was_deleted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = std::fs::canonicalize(tmp.path()).unwrap();
+    let sub = home.join("wt");
+    std::fs::create_dir(&sub).unwrap();
+
+    let mut s = test_state();
+    s.left = Commander::for_dir(&home, &s.config).unwrap();
+    s.right = Some(Commander::for_dir(&sub, &s.config).unwrap());
+    s.project_home = Some(home.clone());
+
+    // Remove Right's dir WITHOUT going through spyc (the external-removal case).
+    std::fs::remove_dir_all(&sub).unwrap();
+
+    s.refresh_listing();
+
+    assert_eq!(
+        s.right.as_ref().unwrap().listing.dir,
+        home,
+        "refresh_listing snaps a column off a deleted dir back to PROJECT_HOME"
+    );
+    assert!(
+        s.flash
+            .as_ref()
+            .is_some_and(|f| f.text.contains("directory not found")),
+        "flashes the heal notice, got {:?}",
+        s.flash
+    );
+}
+
+/// When PROJECT_HOME is *also* unavailable, the heal must not be a no-op (which
+/// would leave the column stranded — the very bug this fixes). It falls back to
+/// the orphaned dir's nearest existing ancestor so the column always lands
+/// somewhere real. (Non-focused Right column → chdir-free.)
+#[test]
+fn reset_orphaned_falls_back_to_nearest_ancestor_when_home_is_gone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    let deep = base.join("a").join("b").join("c");
+    std::fs::create_dir_all(&deep).unwrap();
+
+    let mut s = test_state();
+    s.left = Commander::for_dir(&base, &s.config).unwrap();
+    s.right = Some(Commander::for_dir(&deep, &s.config).unwrap());
+    // PROJECT_HOME unset → the heal must fall back to an ancestor, not no-op.
+    s.project_home = None;
+
+    // Remove b/ (and c/ under it), leaving `a` as the nearest existing ancestor.
+    std::fs::remove_dir_all(base.join("a").join("b")).unwrap();
+
+    s.reset_orphaned_columns_to_home();
+
+    assert_eq!(
+        s.right.as_ref().unwrap().listing.dir,
+        base.join("a"),
+        "falls back to the nearest existing ancestor when PROJECT_HOME is gone"
+    );
+    assert!(
+        s.flash
+            .as_ref()
+            .is_some_and(|f| f.text.contains("moved to")),
+        "ancestor landing flashes 'moved to', not 'project home', got {:?}",
+        s.flash
+    );
+}
+
 /// Build a test state with named rows (simulating a directory listing).
 fn state_with_rows(names: &[&str]) -> AppState {
     let mut s = test_state();
