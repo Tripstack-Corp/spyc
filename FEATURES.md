@@ -76,6 +76,10 @@ change highlighting on modified lines.
 - **gd** — diff vs HEAD for the selection (cursor file or picks):
   staged + unstaged + new files, everything different from HEAD
 - **gD** — staged-only diff (`git diff --cached`): what would commit
+- **gu** — unstaged diff (plain `git diff`): the index vs the working
+  tree — only what changed *since* you staged. The view you want after
+  staging a checkpoint and continuing to edit (e.g. while an agent keeps
+  working): `gD` shows the checkpoint, `gu` shows everything since
 - **gb** — blame the cursor file (selection ignored)
 - **|** inside a diff / show view toggles **side-by-side ⇄ unified**
   layout. Side-by-side is the default, falling back to unified when
@@ -816,11 +820,14 @@ a pane is never stranded.
   `{path, staged, unstaged, untracked}` per changed path.
 - **`git_log([limit])`** -- recent commits newest-first,
   `{short_id, author, time, subject}` per commit.
-- **`git_diff([cached], [paths])`** -- unified-diff text: the
-  working tree (staged + unstaged + untracked) vs HEAD, or
-  `cached:true` for the staged-vs-HEAD view; `paths` restricts to
-  specific files/subtrees. The read for reviewing your own changes
-  before committing.
+- **`git_diff([cached], [unstaged], [paths])`** -- unified-diff text
+  at one of three scopes: the working tree (staged + unstaged +
+  untracked) vs HEAD (default), `cached:true` for staged-vs-HEAD, or
+  `unstaged:true` for the index vs the working tree (plain `git diff` —
+  only what changed since the last `git add`, the read for a
+  stage-then-keep-editing checkpoint); `paths` restricts to specific
+  files/subtrees. The read for reviewing your own changes before
+  committing.
 
 **Working in another worktree (`root`):** every read/search/git tool
 above (`get_file_content`, `search_paths`, `search_content`,

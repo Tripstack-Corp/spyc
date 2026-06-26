@@ -52,6 +52,16 @@ fn g_cap_d_is_git_diff_cached() {
 }
 
 #[test]
+fn gu_is_git_diff_unstaged() {
+    let mut r = Resolver::new();
+    feed(&mut r, key('g'));
+    assert_eq!(
+        feed(&mut r, key('u')),
+        ResolverOutcome::Action(Action::GitDiffUnstaged)
+    );
+}
+
+#[test]
 fn gf_is_goto_file() {
     let mut r = Resolver::new();
     feed(&mut r, key('g'));

@@ -5,10 +5,12 @@
 //! the in-house renderer in [`crate::ui::diff_render`]. They are the live
 //! diff/show path — production no longer shells out to git.
 //!
-//! Three scopes mirror spyc's git keys:
+//! Four scopes mirror spyc's git keys:
 //! * [`diff_head_to_worktree`] — `gd`: `HEAD` vs the working tree
 //!   (staged + unstaged + untracked).
 //! * [`diff_cached`] — `gD`: `HEAD` tree vs the index (staged only).
+//! * [`diff_index_to_worktree`] — `gu`: the index vs the working tree
+//!   (unstaged only — plain `git diff`, "what changed since you staged").
 //! * [`show_model`] — `git show <rev>`: a commit vs its first parent
 //!   (root commit → vs the empty tree), plus commit metadata.
 //!
@@ -39,7 +41,8 @@ const OBJECT_CACHE_BYTES: usize = 8 * 1024 * 1024;
 use blob::{MAX_DIFF_LINES, account_file, path_selected, tree_blob_at};
 use build::{
     OwnedIndexChange, WorkItem, build_index_change_file, build_tree_change_file,
-    build_worktree_file, build_worktree_rename, collect_worktree_plan, own_index_change,
+    build_worktree_file, build_worktree_rename, collect_index_worktree_plan, collect_worktree_plan,
+    own_index_change,
 };
 
 /// `gd` scope: working tree (staged + unstaged) vs `HEAD`. For every changed
@@ -168,6 +171,72 @@ pub fn diff_cached(repo_root: &Path, paths: &[String]) -> Option<DiffModel> {
     Some(DiffModel { files, truncated })
 }
 
+/// `gu` scope: the index vs the working tree — plain `git diff` (the *unstaged*
+/// changes). For every tracked path whose worktree content differs from the
+/// **staged** (index) content the old side is the index blob and the new side
+/// is the worktree file; untracked files come back as all-addition `FileDiff`s
+/// (matching [`diff_head_to_worktree`]'s treatment, friendlier than git's
+/// "show nothing for untracked").
+///
+/// This is "what changed since you staged": a file that is staged but not
+/// further modified shows **nothing** (its worktree matches the index, so it
+/// never enters the index↔worktree plan), and a file staged *and then* edited
+/// shows only the post-stage delta — the gap [`diff_cached`] (staged vs `HEAD`)
+/// and [`diff_head_to_worktree`] (everything vs `HEAD`) leave open. `None` if
+/// `repo_root` can't be opened.
+///
+/// `paths` restricts the result as in [`diff_head_to_worktree`].
+pub fn diff_index_to_worktree(repo_root: &Path, paths: &[String]) -> Option<DiffModel> {
+    use gix::bstr::BStr;
+
+    let mut repo = gix::open(repo_root).ok()?;
+    // Same rationale as `diff_head_to_worktree`: cache decoded objects so the
+    // per-path index-blob reads below reuse shared parent objects.
+    repo.object_cache_size_if_unset(OBJECT_CACHE_BYTES);
+    let workdir = repo.workdir()?.to_path_buf();
+    // The index supplies the OLD (staged) side for each changed path; loaded
+    // once and indexed by path inside the loop.
+    let index = repo.index_or_load_from_head_or_empty().ok()?;
+
+    // Worktree-rooted resource cache so the "new" side reads straight from the
+    // working tree (null id + rela_path) — identical to the `gd` setup.
+    let mut rc = repo
+        .diff_resource_cache(
+            gix::diff::blob::pipeline::Mode::ToGit,
+            gix::diff::blob::pipeline::WorktreeRoots {
+                old_root: None,
+                new_root: Some(workdir.clone()),
+            },
+        )
+        .ok()?;
+
+    // Plan: only the unstaged (index↔worktree) half of the status walk.
+    let mut plan = collect_index_worktree_plan(&repo)?;
+    plan.retain(|p| path_selected(p, paths));
+    plan.sort();
+
+    let mut budget = MAX_DIFF_LINES;
+    let mut files = Vec::new();
+    let mut truncated = false;
+
+    for path in plan {
+        if truncated {
+            break;
+        }
+        // Old side = the index entry's staged blob (None ⇒ untracked addition).
+        let old_blob = index
+            .entry_by_path(BStr::new(path.as_bytes()))
+            .map(|e| e.id);
+        let worktree_present = workdir.join(&path).is_file();
+        if let Some(file) = build_worktree_file(&mut rc, &repo, &path, old_blob, worktree_present) {
+            account_file(&file, &mut budget, &mut truncated);
+            files.push(file);
+        }
+    }
+
+    Some(DiffModel { files, truncated })
+}
+
 /// `git show <rev>`: resolve `rev` to a commit, diff its tree against its
 /// first-parent tree (root commit → vs the empty tree, so every line is an
 /// addition), and return the commit metadata alongside the structured diff.
@@ -220,7 +289,7 @@ mod tests {
     //! Structural / parity tests for the gix model builders. The production
     //! builders are pure in-process gix; `git` is a test-only fixture used to
     //! *construct* the repos and cross-check ids.
-    use super::{diff_cached, diff_head_to_worktree, show_model};
+    use super::{diff_cached, diff_head_to_worktree, diff_index_to_worktree, show_model};
     use crate::git::model::{DiffKind, FileStatus, LineOrigin};
     use crate::git::test_support::run_git;
     use std::path::PathBuf;
@@ -517,6 +586,90 @@ mod tests {
             vec!["E"],
             "cached unaffected by later unstaged edit"
         );
+    }
+
+    /// The requirement behind `gu` (Spencer's ask): the index↔worktree diff
+    /// shows ONLY what changed *since* you staged. Stage line `E`, then make a
+    /// further unstaged edit `B`. `diff_index_to_worktree` must surface `B`
+    /// alone — the already-staged `E` must NOT appear (that's the gap `gd`
+    /// (everything-vs-HEAD) and `gD` (staged-vs-HEAD) both leave open).
+    #[test]
+    fn index_to_worktree_shows_only_post_stage_changes() {
+        let (_t, root) = repo_with_commit();
+        std::fs::write(root.join("f.txt"), "a\nb\nc\nd\nE\n").unwrap();
+        run_git(&root, &["add", "f.txt"]);
+        // Further UNSTAGED edit on top of the staged content.
+        std::fs::write(root.join("f.txt"), "a\nB\nc\nd\nE\n").unwrap();
+
+        let unstaged = diff_index_to_worktree(&root, &[]).expect("unstaged");
+        let adds = origin_texts(text_hunks(&unstaged, "f.txt"), LineOrigin::Add);
+        assert_eq!(
+            adds,
+            vec!["B"],
+            "index↔worktree must show only the post-stage edit B, not staged E: {adds:?}"
+        );
+        // And the removed side is the staged `b`, not HEAD's `b` — confirming the
+        // OLD side is the index, not HEAD.
+        assert_eq!(
+            origin_texts(text_hunks(&unstaged, "f.txt"), LineOrigin::Remove),
+            vec!["b"]
+        );
+    }
+
+    /// Negative: a file staged but NOT further modified has nothing to show in
+    /// the index↔worktree diff (its worktree matches the index) — even though
+    /// `gd`/`gD` both list it. Guards the whole point of the scope: it's the
+    /// *unstaged* delta, never the staged content.
+    #[test]
+    fn index_to_worktree_ignores_a_purely_staged_file() {
+        let (_t, root) = repo_with_commit();
+        std::fs::write(root.join("f.txt"), "a\nb\nc\nd\nE\n").unwrap();
+        run_git(&root, &["add", "f.txt"]);
+
+        // Staged-vs-HEAD and everything-vs-HEAD both see the staged change…
+        assert!(!diff_cached(&root, &[]).expect("cached").files.is_empty());
+        assert!(
+            !diff_head_to_worktree(&root, &[])
+                .expect("working")
+                .files
+                .is_empty()
+        );
+        // …but the plain `git diff` (index↔worktree) is clean.
+        let unstaged = diff_index_to_worktree(&root, &[]).expect("unstaged");
+        assert!(
+            unstaged.files.is_empty(),
+            "purely-staged file must not appear in index↔worktree: {:?}",
+            unstaged.files
+        );
+        assert!(!unstaged.truncated);
+    }
+
+    /// An untracked file the agent creates after staging shows as an addition,
+    /// and a tracked file deleted on disk shows as a deletion — both surfaced
+    /// by `diff_index_to_worktree` exactly as `gd` surfaces them.
+    #[test]
+    fn index_to_worktree_surfaces_untracked_add_and_worktree_delete() {
+        let (_t, root) = repo_with_commit();
+        std::fs::write(root.join("new.txt"), "fresh\n").unwrap();
+        std::fs::remove_file(root.join("f.txt")).unwrap();
+
+        let model = diff_index_to_worktree(&root, &[]).expect("model");
+
+        let added = model
+            .files
+            .iter()
+            .find(|f| f.new_path.as_deref() == Some("new.txt"))
+            .unwrap_or_else(|| panic!("untracked addition missing: {:?}", model.files));
+        assert_eq!(added.status, FileStatus::Added);
+        assert_eq!(added.old_path, None);
+
+        let deleted = model
+            .files
+            .iter()
+            .find(|f| f.old_path.as_deref() == Some("f.txt"))
+            .unwrap_or_else(|| panic!("worktree deletion missing: {:?}", model.files));
+        assert_eq!(deleted.status, FileStatus::Deleted);
+        assert_eq!(deleted.new_path, None);
     }
 
     #[test]

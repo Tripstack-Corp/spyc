@@ -22,6 +22,7 @@ use crate::pane::PaneTabs;
 use crate::spyc_debug;
 use crate::state::Harpoon;
 
+use super::git_view_session::DiffScope;
 use super::state;
 use super::{
     ActivateIntent, App, ClipMsg, Effect, Mode, PaneTextKind, PaneTextSink, Prompt, PromptKind,
@@ -472,12 +473,16 @@ impl App {
 
             Action::WorktreeList => self.worktree_list(),
 
-            Action::GitDiff | Action::GitDiffCached => {
-                let cached = matches!(action, Action::GitDiffCached);
+            Action::GitDiff | Action::GitDiffCached | Action::GitDiffUnstaged => {
+                let scope = match action {
+                    Action::GitDiffCached => DiffScope::Cached,
+                    Action::GitDiffUnstaged => DiffScope::IndexToWorktree,
+                    _ => DiffScope::HeadToWorktree,
+                };
                 if self.state.cur().git.info.is_none() {
                     self.state.flash_error("not in a git repository");
                 } else {
-                    self.open_git_diff(cached);
+                    self.open_git_diff(scope);
                 }
             }
             Action::GitBlame => {

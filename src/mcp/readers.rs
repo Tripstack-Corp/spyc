@@ -329,18 +329,29 @@ pub(super) fn git_log_json(root: &Path, limit: usize) -> String {
     Value::Array(arr).to_string()
 }
 
-/// `git_diff`: unified-diff text for `root`'s changes — staged vs `HEAD` when
-/// `cached`, else the working tree (staged + unstaged + untracked) vs `HEAD`.
-/// `paths` (repo-relative, forward-slash) optionally restricts the result;
-/// empty means everything. In-process gix via the `diff_model` builders (no
-/// `git` subprocess — the production guard forbids it). Returns `""` when
+/// Which two sides the `git_diff` tool compares (mirrors the TUI's `gd`/`gD`/`gu`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DiffMode {
+    /// `git diff HEAD`: the working tree (staged + unstaged + untracked) vs `HEAD`.
+    HeadToWorktree,
+    /// `git diff --cached`: the index vs `HEAD` (staged only).
+    Cached,
+    /// `git diff`: the index vs the working tree (unstaged only — what changed
+    /// since you staged).
+    Unstaged,
+}
+
+/// `git_diff`: unified-diff text for `root`'s changes at the requested
+/// [`DiffMode`]. `paths` (repo-relative, forward-slash) optionally restricts the
+/// result; empty means everything. In-process gix via the `diff_model` builders
+/// (no `git` subprocess — the production guard forbids it). Returns `""` when
 /// there's nothing to show or `root` isn't a repo. A capped result ends with a
 /// truncation note.
-pub(super) fn git_diff_text(root: &Path, cached: bool, paths: &[String]) -> String {
-    let model = if cached {
-        crate::git::diff_model::diff_cached(root, paths)
-    } else {
-        crate::git::diff_model::diff_head_to_worktree(root, paths)
+pub(super) fn git_diff_text(root: &Path, mode: DiffMode, paths: &[String]) -> String {
+    let model = match mode {
+        DiffMode::Cached => crate::git::diff_model::diff_cached(root, paths),
+        DiffMode::Unstaged => crate::git::diff_model::diff_index_to_worktree(root, paths),
+        DiffMode::HeadToWorktree => crate::git::diff_model::diff_head_to_worktree(root, paths),
     };
     model
         .as_ref()
@@ -677,7 +688,7 @@ mod tests {
         std::fs::write(repo.join("a.txt"), "one\nTWO\nthree\n").unwrap();
         std::fs::write(repo.join("new.txt"), "fresh\n").unwrap();
 
-        let diff = git_diff_text(&repo, false, &[]);
+        let diff = git_diff_text(&repo, DiffMode::HeadToWorktree, &[]);
         assert!(
             diff.contains("diff --git a/a.txt b/a.txt"),
             "header:\n{diff}"
@@ -691,19 +702,32 @@ mod tests {
         );
 
         // `paths` restricts the diff.
-        let only_a = git_diff_text(&repo, false, &["a.txt".to_string()]);
+        let only_a = git_diff_text(&repo, DiffMode::HeadToWorktree, &["a.txt".to_string()]);
         assert!(
             only_a.contains("a.txt") && !only_a.contains("new.txt"),
             "path filter:\n{only_a}"
         );
 
-        // `cached` is the staged-vs-HEAD view: nothing staged yet → empty.
-        assert_eq!(git_diff_text(&repo, true, &[]), "", "nothing staged");
+        // Cached is the staged-vs-HEAD view: nothing staged yet → empty.
+        assert_eq!(
+            git_diff_text(&repo, DiffMode::Cached, &[]),
+            "",
+            "nothing staged"
+        );
         run_git(&repo, &["add", "a.txt"]);
-        let staged = git_diff_text(&repo, true, &[]);
+        let staged = git_diff_text(&repo, DiffMode::Cached, &[]);
         assert!(
             staged.contains("a.txt") && staged.contains("+TWO"),
             "staged view:\n{staged}"
+        );
+
+        // Unstaged (index↔worktree) after staging a.txt: it now matches the
+        // index, so plain `git diff` shows nothing for it — only the still-
+        // untracked new.txt remains.
+        let unstaged = git_diff_text(&repo, DiffMode::Unstaged, &[]);
+        assert!(
+            !unstaged.contains("a.txt") && unstaged.contains("new.txt"),
+            "unstaged view should drop the now-staged a.txt:\n{unstaged}"
         );
     }
 

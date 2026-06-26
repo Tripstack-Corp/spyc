@@ -165,6 +165,7 @@ pub enum Action {
     // Git diff (M12).
     GitDiff,       // g d — diff-vs-HEAD for cursor file / selection (staged + unstaged + new)
     GitDiffCached, // g D — staged (cached) diff
+    GitDiffUnstaged, // g u — unstaged diff (index vs worktree — plain `git diff`)
     GitBlame,      // g b — git blame on cursor file
     GitRestore,    // g r — restore a deleted (struck-through) file from index/HEAD
 
@@ -297,6 +298,7 @@ impl Action {
             Self::WorktreeDelete => "delete git worktree",
             Self::GitDiff => "git diff HEAD (staged + unstaged + new)",
             Self::GitDiffCached => "git diff --cached (staged)",
+            Self::GitDiffUnstaged => "git diff (unstaged — since you staged)",
             Self::GitBlame => "git blame (cursor file)",
             Self::GitRestore => "restore deleted file (struck-through row) from git",
             Self::GotoFile => "jump to path in pane output",

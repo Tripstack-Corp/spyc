@@ -399,6 +399,44 @@ fn git_diff_tool_honors_explicit_root_arg() {
         "diff body:\n{text}"
     );
 
+    // `unstaged:true` (index↔worktree) sees the same v1→v2 edit while it's
+    // unstaged…
+    let mut out_u = Vec::new();
+    dispatch(
+        &mut out_u,
+        &json!({"jsonrpc":"2.0","id":33,"method":"tools/call",
+                "params":{"name":"git_diff","arguments":{"root": repo.display().to_string(), "unstaged": true}}})
+        .to_string(),
+        &ctx_path,
+        None,
+    )
+    .unwrap();
+    let u_text = parse_response(&out_u)["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        u_text.contains("-v1") && u_text.contains("+v2"),
+        "unstaged diff body:\n{u_text}"
+    );
+    // …but once staged, plain `git diff` (unstaged) is empty.
+    crate::git::test_support::run_git(&repo, &["add", "f.txt"]);
+    let mut out_u2 = Vec::new();
+    dispatch(
+        &mut out_u2,
+        &json!({"jsonrpc":"2.0","id":34,"method":"tools/call",
+                "params":{"name":"git_diff","arguments":{"root": repo.display().to_string(), "unstaged": true}}})
+        .to_string(),
+        &ctx_path,
+        None,
+    )
+    .unwrap();
+    let u2_text = parse_response(&out_u2)["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(u2_text, "", "unstaged diff empty once staged:\n{u2_text}");
+
     // A non-existent root is a clear tool error, not a silent fallback.
     let mut out_err = Vec::new();
     dispatch(

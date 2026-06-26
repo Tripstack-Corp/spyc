@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::mcp_cmd::{McpCommand, McpRequest, McpResponse};
 
 use super::readers::{
-    claim_worktree_result, effective_root, git_diff_text, git_log_json, git_status_json,
+    DiffMode, claim_worktree_result, effective_root, git_diff_text, git_log_json, git_status_json,
     grep_matches_to_json, list_worktrees_json, read_context_or_empty, read_file_content,
     read_inventory_from_context, read_picks_from_context, release_worktree_result,
 };
@@ -415,13 +415,17 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "git_diff",
-                    "description": "Unified diff of the focused column's worktree, in-process (don't shell out to `git diff` — and the production guard forbids it). By default shows the working tree (staged + unstaged + untracked) vs HEAD; set `cached:true` for the staged-vs-HEAD view. Returns `git diff`-style unified text (empty string when there's nothing to show). This is the read you want when reviewing your own changes before committing. Pass `root` for a different worktree, and `paths` to restrict to specific files/subtrees.",
+                    "description": "Unified diff of the focused column's worktree, in-process (don't shell out to `git diff` — and the production guard forbids it). Three scopes: default = the working tree (staged + unstaged + untracked) vs HEAD; `cached:true` = staged vs HEAD (what would commit); `unstaged:true` = the index vs the working tree (plain `git diff` — only what changed SINCE you staged). The last is the read you want when someone stages a checkpoint and then keeps editing. Returns `git diff`-style unified text (empty string when there's nothing to show). Pass `root` for a different worktree, and `paths` to restrict to specific files/subtrees.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "cached": {
                                 "type": "boolean",
                                 "description": "If true, diff the staged changes (index vs HEAD). Default false = working tree (staged + unstaged + untracked) vs HEAD."
+                            },
+                            "unstaged": {
+                                "type": "boolean",
+                                "description": "If true, diff the index vs the working tree (plain `git diff` — only the unstaged changes, i.e. what changed since you last staged). Takes precedence over `cached`."
                             },
                             "paths": {
                                 "type": "array",
@@ -587,7 +591,15 @@ fn handle_tools_call(
                 Ok(r) => r,
                 Err(e) => return send_tool_error(w, id, &e),
             };
-            let cached = args["cached"].as_bool().unwrap_or(false);
+            // `unstaged` (index↔worktree) wins over `cached` (index↔HEAD); with
+            // neither set it's the working tree vs HEAD.
+            let mode = if args["unstaged"].as_bool().unwrap_or(false) {
+                DiffMode::Unstaged
+            } else if args["cached"].as_bool().unwrap_or(false) {
+                DiffMode::Cached
+            } else {
+                DiffMode::HeadToWorktree
+            };
             let paths: Vec<String> = args["paths"]
                 .as_array()
                 .map(|a| {
@@ -596,7 +608,7 @@ fn handle_tools_call(
                         .collect()
                 })
                 .unwrap_or_default();
-            send_tool_result(w, id, &git_diff_text(&root, cached, &paths))
+            send_tool_result(w, id, &git_diff_text(&root, mode, &paths))
         }
         "claim_worktree" => {
             let path = args["path"].as_str().unwrap_or("");

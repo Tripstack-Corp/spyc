@@ -212,6 +212,7 @@ toggles), word-level intra-line change highlighting.
 |-----|--------|
 | `gd` | Diff vs HEAD for the selection (staged + unstaged + new) |
 | `gD` | Staged-only diff (`git diff --cached`) |
+| `gu` | Unstaged diff (`git diff`) — what changed since you staged |
 | `gb` | Blame the cursor file |
 | `\|` (in view) | Toggle side-by-side ⇄ unified layout |
 

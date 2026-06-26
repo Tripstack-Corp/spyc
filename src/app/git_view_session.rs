@@ -23,16 +23,31 @@ use crate::ui::{blame_render, theme::Theme};
 use super::App;
 use super::pager_stream::{DrainOutcome, PagerStream, PagerStreamCmd, PagerStreamMount, RenderCtx};
 
+/// Which two sides a `git diff` view compares — the three diff keys (`gd` /
+/// `gD` / `gu`) each pick one. Maps 1:1 to a `diff_model` builder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffScope {
+    /// `gd` / `git diff HEAD`: `HEAD` vs the working tree (staged + unstaged +
+    /// untracked).
+    HeadToWorktree,
+    /// `gD` / `git diff --cached`: `HEAD` tree vs the index (staged only — what
+    /// would commit).
+    Cached,
+    /// `gu` / `git diff`: the index vs the working tree (unstaged only — what
+    /// changed since you staged).
+    IndexToWorktree,
+}
+
 /// What the worker thread should build. Carries owned, `Send` inputs only.
 pub enum GitViewKind {
-    /// `git diff` (HEAD vs worktree, or `--cached`) over `paths`.
+    /// `git diff` over `paths`, at the given [`DiffScope`].
     Diff {
         /// Repository workdir root.
         repo_root: PathBuf,
         /// Repo-relative paths to restrict the diff to.
         paths: Vec<String>,
-        /// `true` for the staged ("what would commit") view.
-        cached: bool,
+        /// Which two sides to compare.
+        scope: DiffScope,
     },
     /// `git show <rev>`.
     Show {
@@ -356,12 +371,14 @@ fn build_payload(kind: GitViewKind) -> GitViewPayload {
         GitViewKind::Diff {
             repo_root,
             paths,
-            cached,
+            scope,
         } => {
-            let m = if cached {
-                diff_model::diff_cached(&repo_root, &paths)
-            } else {
-                diff_model::diff_head_to_worktree(&repo_root, &paths)
+            let m = match scope {
+                DiffScope::Cached => diff_model::diff_cached(&repo_root, &paths),
+                DiffScope::IndexToWorktree => {
+                    diff_model::diff_index_to_worktree(&repo_root, &paths)
+                }
+                DiffScope::HeadToWorktree => diff_model::diff_head_to_worktree(&repo_root, &paths),
             };
             match m {
                 Some(model) if model.files.is_empty() => GitViewPayload::Empty,

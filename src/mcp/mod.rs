@@ -41,7 +41,10 @@ when answering questions about the user's view:\n\
 file, picks, filter, git branch, and the running spyc's pid + version.\n\
 - `search_content` / `search_paths` instead of `Bash rg` / `find`, and \
 `git_status` / `git_log` / `git_diff` instead of shelling out to git — all \
-in-process, gitignore-aware, and structured. They scope to the focused column \
+in-process, gitignore-aware, and structured. `git_diff` has three scopes: \
+default vs HEAD, `cached:true` for staged, and `unstaged:true` for the index \
+vs the working tree (what changed since the last `git add` — use it after a \
+staged checkpoint). They scope to the focused column \
 by default; when you're working in a DIFFERENT worktree, pass its path as the \
 `root` argument so they target it (otherwise shell with explicit paths is the \
 right call).\n\

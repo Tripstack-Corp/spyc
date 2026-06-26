@@ -124,6 +124,77 @@ pub fn collect_worktree_plan(repo: &gix::Repository) -> Option<Vec<WorkItem>> {
     Some(out)
 }
 
+/// Walk the repo status and reduce its *unstaged* half (index↔worktree) to the
+/// per-path plan plain-`git diff` ([`super::diff_index_to_worktree`]) needs: a
+/// repo-relative path per modified / deleted tracked file and per untracked
+/// file. The staged (`tree_index`) half is intentionally **ignored** — `git
+/// diff` compares the index to the worktree, so a path whose worktree already
+/// matches its staged content has nothing to show. Rename detection stays off
+/// (shared with [`collect_worktree_plan`] via `make_status_platform`), so an
+/// unstaged rename decomposes into a deletion + an addition, matching git's
+/// rename-detection-off default for the working-tree diff. `None` if the walk
+/// can't run.
+pub fn collect_index_worktree_plan(repo: &gix::Repository) -> Option<Vec<String>> {
+    use gix::bstr::ByteSlice;
+    use gix::status::index_worktree::Item as IwItem;
+    use gix::status::plumbing::index_as_worktree::{Change, EntryStatus};
+    use gix::status::{Item, UntrackedFiles};
+    use std::collections::BTreeSet;
+
+    // `UntrackedFiles::Files` so each untracked file is its own addition (not a
+    // collapsed `dir/` entry) — same choice as `collect_worktree_plan`.
+    let platform = crate::git::status::make_status_platform(repo, UntrackedFiles::Files)?;
+    let mut plain: BTreeSet<String> = BTreeSet::new();
+
+    for item in platform.into_iter(None).ok()? {
+        let item = item.ok()?;
+        // Only the unstaged (index↔worktree) half is relevant for `git diff`.
+        let Item::IndexWorktree(iw) = item else {
+            continue;
+        };
+        match iw {
+            IwItem::Modification {
+                rela_path, status, ..
+            } => {
+                // Emit only real content changes; a conflict (no clean two-way
+                // diff), a stat-refresh hint, or an intent-to-add placeholder
+                // has nothing to render here.
+                if let EntryStatus::Change(
+                    Change::Removed
+                    | Change::Type { .. }
+                    | Change::Modification { .. }
+                    | Change::SubmoduleModification(_),
+                ) = status
+                {
+                    plain.insert(rela_path.to_str_lossy().into_owned());
+                }
+            }
+            IwItem::DirectoryContents {
+                entry: dir_entry, ..
+            } => {
+                if dir_entry.status == gix::dir::entry::Status::Untracked
+                    && dir_entry.disk_kind != Some(gix::dir::entry::Kind::Directory)
+                {
+                    plain.insert(dir_entry.rela_path.to_str_lossy().into_owned());
+                }
+            }
+            IwItem::Rewrite {
+                source,
+                dirwalk_entry,
+                ..
+            } => {
+                // Rewrite detection is disabled (see `make_status_platform`), so
+                // this normally doesn't fire; decode BOTH sides defensively so a
+                // rename's deletion half survives if it's ever re-enabled.
+                plain.insert(source.rela_path().to_str_lossy().into_owned());
+                plain.insert(dirwalk_entry.rela_path.to_str_lossy().into_owned());
+            }
+        }
+    }
+
+    Some(plain.into_iter().collect())
+}
+
 /// Build a `FileDiff` for a detected working-tree rename/copy: old side is the
 /// HEAD-tree blob at `source`, new side is the worktree file at `dest`.
 pub fn build_worktree_rename(

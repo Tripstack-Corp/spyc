@@ -7,7 +7,7 @@ use std::path::Path;
 
 use crate::ui::pager;
 
-use super::git_view_session::GitViewKind;
+use super::git_view_session::{DiffScope, GitViewKind};
 use super::{App, Effect, state};
 
 impl App {
@@ -153,15 +153,18 @@ impl App {
         );
     }
 
-    /// g d / g D — run `git diff` on selection and show in pager.
+    /// g d / g D / g u — run `git diff` on selection and show in pager.
     ///
-    /// `gd` (cached=false) shows diff-vs-HEAD (staged + unstaged) so it
-    /// matches the `~` marker semantics — `~` flags anything different from
-    /// HEAD. `gD` (`--cached`) keeps the staged-only "what would commit"
-    /// view. PR 8b: builds the structured model off-thread (gix) and renders
-    /// it in-house; the gix diff already surfaces untracked files, so the
-    /// old `untracked_bytes` synthesis is gone.
-    pub fn open_git_diff(&mut self, cached: bool) {
+    /// `gd` ([`DiffScope::HeadToWorktree`]) shows diff-vs-HEAD (staged +
+    /// unstaged + new) so it matches the `~` marker semantics — `~` flags
+    /// anything different from HEAD. `gD` ([`DiffScope::Cached`], `--cached`)
+    /// keeps the staged-only "what would commit" view. `gu`
+    /// ([`DiffScope::IndexToWorktree`], plain `git diff`) shows only the
+    /// unstaged delta — "what changed since you staged". PR 8b builds the
+    /// structured model off-thread (gix) and renders it in-house; the gix diff
+    /// already surfaces untracked files, so the old `untracked_bytes` synthesis
+    /// is gone.
+    pub fn open_git_diff(&mut self, scope: DiffScope) {
         let paths = self.state.selection_paths();
         if paths.is_empty() {
             return;
@@ -178,16 +181,16 @@ impl App {
             .iter()
             .filter_map(|p| repo_relative(p, &root))
             .collect();
-        let title = if cached {
-            "git diff --cached"
-        } else {
-            "git diff HEAD (+ new)"
+        let title = match scope {
+            DiffScope::Cached => "git diff --cached",
+            DiffScope::IndexToWorktree => "git diff (unstaged)",
+            DiffScope::HeadToWorktree => "git diff HEAD (+ new)",
         };
         self.open_git_view(
             GitViewKind::Diff {
                 repo_root: root,
                 paths: rel,
-                cached,
+                scope,
             },
             title.to_string(),
         );
