@@ -28,11 +28,8 @@ fn pending_display_count_plus_g() {
     let mut r = Resolver::new();
     feed(&mut r, key('5'));
     feed(&mut r, key('g'));
-    // count is 5 but g clears count context — actually let's check
-    // Actually looking at the code: g doesn't go through count path,
-    // it sets pending = G. The count stays.
-    // Wait, actually 'g' enters PendingSeq::G but doesn't touch count.
-    // So pending_display should be "5g-"
+    // `g` enters `PendingSeq::G` without touching the count, so the count
+    // survives the chord → display "5g-".
     assert_eq!(r.pending_display(), Some("5g-".to_string()));
 }
 

@@ -245,6 +245,83 @@ mod guard_tests {
             }
         }
     }
+
+    /// Reasoning-leakage slop in committed comments — the "thinking out loud"
+    /// that LLM authoring leaks into code. The offender that prompted this: a
+    /// test debating itself above a one-line assert (five lines of "...let's
+    /// check / Actually looking at the code / Wait, actually ..."). It reads as
+    /// careless and taints the credibility of the genuine "why" comments around
+    /// it. A curated, high-signal phrase list — NOT a density cap, and
+    /// deliberately NOT the adverb "actually" (legitimate technical English,
+    /// ~55 uses in this tree). See AGENTS.md → "Comments state what IS".
+    #[test]
+    fn comments_carry_no_reasoning_leakage() {
+        // Multi-word deliberation phrases only, so a wrapped doc line or the
+        // bare adverb can't false-trip (validated against the whole tree).
+        const SLOP: &[&str] = &[
+            "wait, actually",
+            "let's check",
+            "let's see",
+            "let me check",
+            "let me look",
+            "let me think",
+            "looking at the code",
+            " hmm",
+            "i think ",
+            "i'm not sure",
+            "not sure if",
+            "i guess",
+            "i suspect",
+            "on second thought",
+            "never mind",
+            "nevermind",
+            "scratch that",
+            "as i said",
+            "so basically",
+            "to be honest",
+            "honestly,",
+        ];
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        let root = std::path::Path::new(manifest).join("src");
+        let mut offenders = Vec::new();
+        scan_all_rs(&root, &mut |path, src| {
+            // Skip this guard's own home — it spells the phrases out above.
+            if path.file_name().and_then(|n| n.to_str()) == Some("mod_tests.rs") {
+                return;
+            }
+            let rel = path.strip_prefix(manifest).unwrap_or(path).display();
+            for (i, line) in src.lines().enumerate() {
+                let Some(idx) = line.find("//") else { continue };
+                let comment = line[idx..].to_ascii_lowercase();
+                if let Some(p) = SLOP.iter().find(|p| comment.contains(**p)) {
+                    offenders.push(format!("{rel}:{}  ({p})", i + 1));
+                }
+            }
+        });
+        offenders.sort();
+        assert!(
+            offenders.is_empty(),
+            "reasoning-leakage in comments — delete it; state the decision or \
+             invariant, not the thought process behind it (AGENTS.md → \
+             \"Comments state what IS\"):\n{}",
+            offenders.join("\n")
+        );
+    }
+
+    /// Walk every `.rs` under `dir`, INCLUDING test files — comment slop in a
+    /// test is still slop (the offender that prompted the guard was a test).
+    /// `scan_rs`'s sibling without the production-only skip list.
+    fn scan_all_rs(dir: &std::path::Path, f: &mut dyn FnMut(&std::path::Path, &str)) {
+        for entry in std::fs::read_dir(dir).expect("read dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                scan_all_rs(&path, f);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                let src = std::fs::read_to_string(&path).expect("read .rs");
+                f(&path, &src);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
