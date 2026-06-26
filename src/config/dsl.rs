@@ -42,9 +42,8 @@ use crate::keymap::action::Action;
 use crate::keymap::user::{BoundAction, KeyChord, NamedKey, UserBinding};
 
 /// Parse a single `map`/`unmap` line. Returns `Ok(None)` for blank/comment
-/// lines and `Ok(Some(binding))` for real rules. `unmap` returns Ok(None)
-/// today because we don't model removals yet; when we do we'll return a
-/// separate variant.
+/// lines and `Ok(Some(binding))` for real rules; `unmap` currently parses to
+/// `Ok(None)` (removals aren't modeled).
 pub fn parse(line: &str) -> Result<Option<UserBinding>, String> {
     let trimmed = line.trim();
     if trimmed.is_empty() || trimmed.starts_with('#') {

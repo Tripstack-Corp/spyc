@@ -16,9 +16,8 @@ mod widget;
 pub use tabs::{PaneTabs, TabEntry, TabInfo};
 pub use widget::{PaneWidget, cell_style};
 
-// v1.5 Phase 6a: shared pty kernel that `Pane`, `PendingCapture`
-// and `BackgroundTask` all wrap. Phase 6b/6c (promotion / demotion)
-// becomes a state shift on the same handles.
+// Shared pty kernel that `Pane`, `PendingCapture` and `BackgroundTask`
+// all wrap.
 pub mod pty_host;
 
 use std::io::Write as _;

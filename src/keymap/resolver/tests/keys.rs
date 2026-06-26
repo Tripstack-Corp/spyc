@@ -72,7 +72,7 @@ fn ctrl_r_reloads_config() {
 #[test]
 fn ctrl_resets_pending_state() {
     let mut r = Resolver::new();
-    feed(&mut r, key('g')); // pending G
+    feed(&mut r, key('g'));
     assert!(r.is_pending());
     assert_eq!(
         feed(&mut r, ctrl('d')),
@@ -227,13 +227,11 @@ fn harpoon_chord_append_remove() {
 #[test]
 fn inventory_keys() {
     let mut r = Resolver::new();
-    // y enters pending, yy = take
     assert_eq!(feed(&mut r, key('y')), ResolverOutcome::Pending);
     assert_eq!(
         feed(&mut r, key('y')),
         ResolverOutcome::Action(Action::Take)
     );
-    // yp = yank prompt
     assert_eq!(feed(&mut r, key('y')), ResolverOutcome::Pending);
     assert_eq!(
         feed(&mut r, key('p')),

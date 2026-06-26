@@ -9,14 +9,6 @@
 //! parser for `Pane`, flat byte buffer + lifecycle metadata for
 //! `BackgroundTask`).
 //!
-//! The shared kernel also unblocks Phase 6b/6c: with both consumers
-//! holding a `PtyHost`, promoting a backgrounded task to a pane (or
-//! demoting in reverse) becomes a state shift — same pty handles,
-//! different shell around them. Pre-v1.5 that wasn't possible because
-//! `spawn_capture` discarded the master after extracting reader/writer
-//! (so a backgrounded task couldn't be resized → couldn't act as a
-//! pane).
-//!
 //! Strict rule for Phase 6a: this module changes no observable
 //! behavior. The reader-thread protocol, debug-byte-dump,
 //! exit-status harvesting, and shutdown semantics all match the

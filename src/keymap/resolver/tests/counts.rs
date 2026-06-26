@@ -74,7 +74,6 @@ fn multi_digit_count() {
     let mut r = Resolver::new();
     assert_eq!(feed(&mut r, key('1')), ResolverOutcome::Pending);
     assert_eq!(feed(&mut r, key('2')), ResolverOutcome::Pending);
-    // 12j should move down 12
     assert_eq!(
         feed(&mut r, key('j')),
         ResolverOutcome::Action(Action::Down(12))
@@ -97,7 +96,6 @@ fn count_resets_after_action() {
     let mut r = Resolver::new();
     feed(&mut r, key('5'));
     feed(&mut r, key('j'));
-    // Next motion without count should default to 1
     assert_eq!(
         feed(&mut r, key('j')),
         ResolverOutcome::Action(Action::Down(1))
@@ -129,7 +127,6 @@ fn count_resets_on_non_motion_key() {
         feed(&mut r, key('t')),
         ResolverOutcome::Action(Action::TogglePick)
     );
-    // Count should be gone
     assert_eq!(
         feed(&mut r, key('j')),
         ResolverOutcome::Action(Action::Down(1))

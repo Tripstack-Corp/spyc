@@ -1,6 +1,14 @@
 # Comment Audit — recheck every comment block against the AGENTS.md standard
 
-**Status:** SCOPED 2026-06-25, not started. Phase 0 (calibration) is the next step.
+**Status:** COMPLETE 2026-06-26. Phase 0 calibration (10 files / 323 blocks)
+measured ~7% violations with the core pristine; B was pocketed, not
+codebase-wide — so Phase 1 was **targeted, not a 12-PR campaign**:
+- `#564` — state/inventory + history field/method-doc trim (7 deletions).
+- the `comment-audit-phase1-finish` PR — resolver-test assert-restating trim
+  (6 deletions) + production future-work temporal rot (pane/pty_host/dsl/markdown).
+Per-owner decision the test-comment pass was scoped to the resolver tests
+only (the rest of the test tree is low-visibility; left as-is). The slop
+guard (#561) + the sharpened AGENTS.md standard prevent regrowth.
 
 ## Why
 

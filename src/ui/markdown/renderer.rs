@@ -640,9 +640,7 @@ impl<'t> Renderer<'t> {
     }
 
     /// Emit a ` ```mermaid ` block's placeholder and record it in
-    /// `mermaid_blocks`. For now we show the source under a discoverable
-    /// header (so nothing is hidden before the off-thread image render lands);
-    /// the inline image later replaces the source rows in this same range.
+    /// `mermaid_blocks`, showing the source under a discoverable header.
     fn emit_mermaid_block(&mut self, body: &str) {
         let start = self.lines.len();
         let header = Style::default()
