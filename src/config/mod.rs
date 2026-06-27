@@ -78,12 +78,24 @@ pub enum StatusPosition {
     Bottom,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct LayoutConfig {
     /// `"top"` (default) or `"bottom"`. With `"bottom"` the prompt
     /// sits one row above the status bar (vim-style cmdline-above-
     /// statusline ordering).
     pub status_position: StatusPosition,
+    /// Delay (ms) before the which-key chord-hint popup appears after a chord
+    /// prefix is pressed and held. `0` disables the popup. Default 300.
+    pub chord_hint_delay_ms: u64,
+}
+
+impl Default for LayoutConfig {
+    fn default() -> Self {
+        Self {
+            status_position: StatusPosition::default(),
+            chord_hint_delay_ms: 300,
+        }
+    }
 }
 
 /// On-disk shape of `[layout]`. Each field is `Option` so we can tell
@@ -95,6 +107,8 @@ pub struct LayoutConfig {
 struct FileLayout {
     #[serde(default)]
     status_position: Option<StatusPosition>,
+    #[serde(default)]
+    chord_hint_delay_ms: Option<u64>,
 }
 
 /// Pane / pty defaults. Currently just the default command for `^a c`.
@@ -395,6 +409,9 @@ impl Config {
         // with no `[layout]` would clobber a value the user file set.
         if let Some(pos) = file.layout.status_position {
             self.layout.status_position = pos;
+        }
+        if let Some(ms) = file.layout.chord_hint_delay_ms {
+            self.layout.chord_hint_delay_ms = ms;
         }
 
         // Pane: per-field merge for the same reason.

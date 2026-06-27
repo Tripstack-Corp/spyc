@@ -269,6 +269,7 @@ impl App {
         }
         match outcome {
             ResolverOutcome::Action(action) => {
+                self.clear_chord_hint();
                 // Stamp focus-switch chord completions so the next
                 // ~60 ms suppresses a same-key Repeat or bouncy second
                 // Press from leaking into the now-focused pane.
@@ -277,10 +278,37 @@ impl App {
                 }
                 return self.update(UiMsg::Action(action));
             }
-            ResolverOutcome::User(bound) => return self.update(UiMsg::Bound(bound)),
-            ResolverOutcome::Pending | ResolverOutcome::Ignored => {}
+            ResolverOutcome::User(bound) => {
+                self.clear_chord_hint();
+                return self.update(UiMsg::Bound(bound));
+            }
+            ResolverOutcome::Pending => {
+                // A chord prefix is armed — schedule the which-key hint popup
+                // (unless disabled, or this is just a count prefix, which is
+                // `Pending` but not a chord). `settle_chord_hint` shows it if
+                // the chord is still pending when the delay elapses.
+                let delay = self.state.config.layout.chord_hint_delay_ms;
+                if delay > 0 && self.state.resolver.is_pending() {
+                    self.view.chord_hint_due =
+                        Some(std::time::Instant::now() + std::time::Duration::from_millis(delay));
+                    self.view.chord_hint = None;
+                } else {
+                    self.clear_chord_hint();
+                }
+            }
+            ResolverOutcome::Ignored => self.clear_chord_hint(),
         }
         Ok(Vec::new())
+    }
+
+    /// Tear down the which-key chord-hint popup and its pending timer. If a
+    /// popup was actually on screen, request a full repaint so its overlay
+    /// cells are cleared from underneath (the overlay-dismiss convention).
+    fn clear_chord_hint(&mut self) {
+        self.view.chord_hint_due = None;
+        if self.view.chord_hint.take().is_some() {
+            self.view.needs_full_repaint = true;
+        }
     }
 
     /// Forward a keystroke to a running `!` capture child via its master

@@ -54,6 +54,11 @@ pub enum Deadline {
     /// animation frame while ≥1 agent tab is Working. Disarmed when all tabs
     /// are quiet, so idle stays 0 dps. PRE-recv (`settle_agent_activity`).
     AgentAnim,
+    /// which-key chord-hint popup: wake once, `chord_hint_delay_ms` after a
+    /// chord is armed, to show the continuations popup if it's still pending.
+    /// Armed from `view.chord_hint_due`, disarmed when the chord resolves.
+    /// POST-recv (`settle_chord_hint`).
+    ChordHint,
 }
 
 /// Run()-local deadline scheduler (MVU Phase 2). **Advisory** — it only

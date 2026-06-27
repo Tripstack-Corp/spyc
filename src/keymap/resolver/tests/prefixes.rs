@@ -199,3 +199,60 @@ fn ctrl_s_unknown_key_is_ignored() {
     assert_eq!(feed(&mut r, key('q')), ResolverOutcome::Ignored);
     assert!(!r.is_pending(), "the chord resets after an unknown key");
 }
+
+// ── which-key continuations (the chord-hint popup's data) ──────
+
+/// The which-key popup is only trustworthy if every key it advertises for a
+/// chord actually fires the action it claims. This drives that end-to-end
+/// through the public API: arm each chord by its entry keystroke, then feed
+/// each single-byte continuation key on a fresh resolver and compare against
+/// `continuations()`'s listed action. If a `feed` arm is re-bound without
+/// updating `continuations()` (or vice-versa), this fails. Multi-byte display
+/// strings — ranges (`"1-9"`), sets (`"a h"`), and non-char keys (`"↓"`) —
+/// are listed for the popup but not feed-verified here.
+#[test]
+fn chord_continuations_resolve_to_their_actions() {
+    let prefixes: &[(KeyEvent, &str)] = &[
+        (key('g'), "g"),
+        (ctrl('w'), "^a"),
+        (ctrl('s'), "^s"),
+        (key('W'), "W"),
+        (key('H'), "H"),
+        (key('y'), "y"),
+        (key('m'), "m"),
+        (key('\''), "'"),
+        (key('['), "["),
+        (key(']'), "]"),
+        (key('d'), "d"),
+        (key('Z'), "Z"),
+    ];
+    for (entry, name) in prefixes {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, *entry),
+            ResolverOutcome::Pending,
+            "{name} should arm a chord"
+        );
+        let rows = r.continuations();
+        assert!(
+            !rows.is_empty(),
+            "{name} chord has no continuations for the popup"
+        );
+        for (keys, action) in rows {
+            // Only single-byte ASCII keys correspond to a `Char` we can feed.
+            if keys.len() != 1 {
+                continue;
+            }
+            let Some(ch) = keys.chars().next() else {
+                continue;
+            };
+            let mut r2 = Resolver::new();
+            feed(&mut r2, *entry);
+            assert_eq!(
+                feed(&mut r2, key(ch)),
+                ResolverOutcome::Action(action),
+                "{name}{keys} should resolve to the action the popup advertises"
+            );
+        }
+    }
+}

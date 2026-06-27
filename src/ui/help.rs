@@ -367,6 +367,10 @@ const SECTIONS: &[Section] = &[
         title: "Meta",
         rows: &[
             ("?  F1", "this help"),
+            (
+                "(hold a chord)",
+                "which-key popup of a prefix's keys ([layout] chord_hint_delay_ms; 0 disables)",
+            ),
             ("^L", "redraw"),
             ("^R", "reload config (auto-reloads on save)"),
             ("Q  ^D  :q  ZZ", "quit (q reserved for future macros)"),

@@ -14,8 +14,13 @@
 #
 # With "bottom", the prompt sits one row above the status bar (vim-style
 # cmdline-above-statusline ordering).
+#
+# chord_hint_delay_ms: how long to hold a chord prefix (e.g. `g`, `^a`, `H`)
+# before the which-key popup lists its continuations. Default 300. Set to 0
+# to disable the popup entirely.
 [layout]
 # status_position = "top"
+# chord_hint_delay_ms = 300
 
 # ── pane ──────────────────────────────────────────────────────────────
 # Default command pre-filled into the `^a c` (new pane tab) prompt.

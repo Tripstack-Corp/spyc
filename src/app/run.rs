@@ -735,6 +735,11 @@ impl App {
                 ctx.draw.set_dirty();
             }
 
+            // which-key chord-hint popup: show it once the hint delay elapses
+            // while a chord is still armed, and (dis)arm its wake. Before
+            // `render_frame` so the popup lands in this frame.
+            self.settle_chord_hint(now_post, &mut ctx);
+
             // Re-arm the post-recv advisory deadlines — ActivityRollover +
             // CaptureTick (see `arm_post_recv_deadlines`).
             self.arm_post_recv_deadlines(now_post, &mut ctx);

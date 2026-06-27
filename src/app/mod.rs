@@ -572,6 +572,17 @@ pub struct ImageView {
     pub flash: Option<String>,
 }
 
+/// The which-key chord-hint popup's render data — a chord prefix's title and
+/// its continuation rows (`keys → label`). Built in `settle_chord_hint` from
+/// `Resolver::continuations` once the hint delay elapses while a chord is still
+/// pending; read (never mutated) by `render_chord_hint`.
+pub struct ChordHint {
+    /// The armed prefix, e.g. `"^a"` or `"g"`.
+    pub title: String,
+    /// `(keys, label)` per continuation, e.g. `("z", "zoom pane (toggle fullscreen)")`.
+    pub rows: Vec<(&'static str, &'static str)>,
+}
+
 /// MVU end-state: the **ViewState** cluster — render ephemerals + derived
 /// caches + UI-layer state. Pure of OS handles (those live in [`Runtime`]) and
 /// of domain state (that lives in `AppState`). Owned by `App` as a disjoint
@@ -651,6 +662,15 @@ pub struct ViewState {
     /// Active harpoon menu overlay (interactive: reorder, delete, jump).
     // Module-private (type `HarpoonMenu` is module-private).
     harpoon_menu: Option<HarpoonMenu>,
+    /// The which-key chord-hint popup, once the hint delay has elapsed while a
+    /// chord is still armed. `None` when no popup is showing (set in
+    /// `settle_chord_hint`, cleared the moment the chord resolves/cancels).
+    pub chord_hint: Option<ChordHint>,
+    /// When the chord-hint popup is due to appear (set on a pending chord in
+    /// `handle_key`, consumed by `settle_chord_hint`). `None` when no chord is
+    /// arming a popup. Distinct from `chord_hint` so the timer and the shown
+    /// popup are tracked independently.
+    pub chord_hint_due: Option<std::time::Instant>,
     /// Active Quick Select picker (`^a u`).
     pub quick_select: Option<crate::pane::quick_select::QuickSelect>,
     /// `dd` arming for the graveyard view (first `d` arms, second deletes).
@@ -761,6 +781,8 @@ impl ViewState {
             right_cached_grid_key: (u64::MAX, 0, 0, 0, 0),
             last_term_title: None,
             harpoon_menu: None,
+            chord_hint: None,
+            chord_hint_due: None,
             quick_select: None,
             graveyard_pending_d: false,
             graveyard_pending_g: false,

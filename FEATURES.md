@@ -25,6 +25,22 @@ Everything is keyboard-driven with vi motions as the foundation.
   at the start when you want that
 - **n / N** to repeat search forward / backward
 
+## Chord hints (which-key popup)
+
+spyc has a lot of chord prefixes (`g`, `^a`, `H`, `W`, `y`, `m`, `[`/`]`,
+…). Rather than memorize them all, **press a prefix and wait** — after a
+short pause a popup appears listing every key that completes the chord,
+each with a one-line description, flowed into columns. Pressing the next
+key (or `Esc`) dismisses it. It's spyc's on-demand answer to "what can I
+do from here?", modeled on Neovim's which-key.
+
+- The delay is `[layout] chord_hint_delay_ms` (default **300** ms). Set
+  it to **0** to disable the popup entirely.
+- The popup always reflects the *real* bindings — it's generated from the
+  resolver, so it can't drift out of date (a test enforces that every
+  advertised key resolves to the action it shows).
+- `?` (or `F1`) still opens the full, scrollable, searchable key reference.
+
 ## Directory browsing
 
 - **Enter** descend into a directory, or view a text file in the pager

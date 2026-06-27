@@ -106,6 +106,100 @@ impl Resolver {
         Some(format!("{prefix}{seq}"))
     }
 
+    /// The built-in keys that complete the current pending chord, each paired
+    /// with the `Action` it fires. This is the data behind the which-key hint
+    /// popup (rendered as `keys → action.describe()`); user-keymap bindings
+    /// under the prefix are merged on top by the popup builder.
+    ///
+    /// Authored alongside `feed`'s chord arms — the exhaustive match means a
+    /// new `PendingSeq` variant *must* get an entry here (a build error
+    /// otherwise), and `chord_continuations_resolve_to_their_actions` guards
+    /// that every listed single-byte key actually resolves to its action, so
+    /// the popup can't silently drift from the real bindings.
+    ///
+    /// Multi-key display strings (`"a h"`, `"1-9"`, `"a-z"`, `"↓"`) name a
+    /// set/range/non-char key; only single-byte ASCII entries are
+    /// feed-verified.
+    pub fn continuations(&self) -> Vec<(&'static str, Action)> {
+        use Action as A;
+        match self.pending {
+            PendingSeq::Normal => Vec::new(),
+            PendingSeq::G => vec![
+                ("g", A::GotoFirst),
+                ("d", A::GitDiff),
+                ("D", A::GitDiffCached),
+                ("u", A::GitDiffUnstaged),
+                ("b", A::GitBlame),
+                ("r", A::GitRestore),
+                ("f", A::GotoFile),
+                ("F", A::GotoFileLine),
+                ("h", A::JumpProjectHome),
+                ("w", A::JumpWorktreeRoot),
+                ("P", A::SetProjectHomeHere),
+                ("S", A::SetStartDirHere),
+                ("s", A::SortReverse),
+                ("p", A::ReopenLastBuffer),
+                ("y", A::OpenGraveyardView),
+                ("B", A::OpenTaskViewer),
+                ("U", A::ShowUserHost),
+                ("V", A::Version),
+            ],
+            PendingSeq::W => vec![
+                ("j", A::PaneFocusDown),
+                ("k", A::PaneFocusUp),
+                ("a h", A::VsplitFocusLeft),
+                ("b l", A::VsplitFocusRight),
+                ("|", A::VsplitCycle),
+                ("d", A::ToggleDim),
+                ("n ]", A::PaneNextTab),
+                ("p [", A::PanePrevTab),
+                ("c", A::PaneNewTab),
+                ("1-9", A::PaneTabByIndex(0)),
+                ("x", A::PaneCloseTab),
+                ("r", A::PaneRenameTab),
+                ("R", A::PaneRestartTab),
+                ("z", A::TogglePaneZoom),
+                ("v", A::PaneScrollEnter),
+                ("+", A::PaneGrow),
+                ("-", A::PaneShrink),
+                ("s", A::PaneSendSelection),
+                ("↓", A::PaneSendPrefix),
+                ("P", A::PanePipeContent),
+                ("i", A::PanePipeInventory),
+                ("u", A::QuickSelectOpen),
+                ("\\", A::TogglePane),
+            ],
+            PendingSeq::CtrlS => vec![
+                ("n", A::OpenSecondCommander),
+                ("x", A::CloseSecondCommander),
+            ],
+            PendingSeq::Worktree => vec![
+                ("l", A::WorktreeList),
+                ("n", A::WorktreeNew),
+                ("d", A::WorktreeDelete),
+            ],
+            PendingSeq::Harpoon => vec![
+                ("1-9", A::HarpoonJump(0)),
+                ("a", A::HarpoonAppend),
+                ("x", A::HarpoonRemove),
+                ("h", A::HarpoonOpenMenu),
+            ],
+            PendingSeq::Yank => vec![
+                ("y", A::Take),
+                ("f", A::YankPaths),
+                ("p", A::YankPrompt),
+                ("P", A::YankLastPrompt),
+                ("a", A::YankScrollback),
+            ],
+            PendingSeq::Mark => vec![("a-z", A::SetMark('a'))],
+            PendingSeq::JumpMark => vec![("a-z", A::JumpMark('a')), ("'", A::JumpPrevDir)],
+            PendingSeq::NextBracket => vec![("g", A::JumpNextGitChange)],
+            PendingSeq::PrevBracket => vec![("g", A::JumpPrevGitChange)],
+            PendingSeq::D => vec![("d", A::RemovePrompt(None))],
+            PendingSeq::Z => vec![("Z", A::Quit)],
+        }
+    }
+
     /// Feed a key through the resolver, first consulting the user keymap
     /// and falling through to the built-in default bindings.
     pub fn feed(&mut self, ev: KeyEvent, user: &UserKeymap) -> ResolverOutcome {

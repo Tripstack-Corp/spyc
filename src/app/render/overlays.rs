@@ -320,4 +320,97 @@ impl App {
             frame.render_widget(ActivityP::new(line), rect);
         }
     }
+
+    /// Render the which-key chord-hint popup: a centered box listing the armed
+    /// chord's continuations (`keys → label`), flowed into as many columns as
+    /// fit. Drawn from `view.chord_hint` (built in `settle_chord_hint`); a pure
+    /// `&self` read. No-op when no popup is active.
+    pub(super) fn render_chord_hint(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+        use ratatui::{
+            layout::Rect,
+            style::{Modifier, Style},
+            text::{Line, Span},
+            widgets::{Block, Borders, Clear, Paragraph},
+        };
+        let Some(hint) = self.view.chord_hint.as_ref() else {
+            return;
+        };
+        if hint.rows.is_empty() || area.width < 24 || area.height < 8 {
+            return;
+        }
+
+        // Column geometry. Labels are capped so one verbose entry can't blow
+        // the box past the screen width.
+        const LABEL_CAP: usize = 34;
+        let key_w = hint
+            .rows
+            .iter()
+            .map(|(k, _)| crate::ui::display_width(k))
+            .max()
+            .unwrap_or(0);
+        let label_w = hint
+            .rows
+            .iter()
+            .map(|(_, l)| crate::ui::display_width(l).min(LABEL_CAP))
+            .max()
+            .unwrap_or(0);
+        let col_w = key_w + 2 + label_w + 1; // " <key>  <label> "
+
+        // Flow into columns: enough columns that each fits the available height,
+        // capped by the available width.
+        let margin = 4u16;
+        let body_h_max = (area.height.saturating_sub(margin)).max(1) as usize;
+        let max_cols = ((area.width.saturating_sub(margin)) as usize / col_w.max(1)).max(1);
+        let n_cols = hint.rows.len().div_ceil(body_h_max).clamp(1, max_cols);
+        let col_h = hint.rows.len().div_ceil(n_cols);
+
+        let inner_w = (n_cols * col_w) as u16;
+        let width = (inner_w + 2).min(area.width);
+        let height = (col_h as u16 + 2).min(area.height);
+        let x = area.x + area.width.saturating_sub(width) / 2;
+        let y = area.y + area.height.saturating_sub(height) / 2;
+        let rect = Rect {
+            x,
+            y,
+            width,
+            height,
+        };
+        frame.render_widget(Clear, rect);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" {} ", hint.title))
+            .border_style(Style::default().fg(self.view.theme.prompt_prefix));
+        let inner = block.inner(rect);
+        frame.render_widget(block, rect);
+
+        let key_style = Style::default()
+            .fg(self.view.theme.pick)
+            .add_modifier(Modifier::BOLD);
+        let label_style = Style::default().fg(self.view.theme.status_path);
+        let mut lines: Vec<Line> = Vec::with_capacity(col_h);
+        for r in 0..col_h {
+            let mut spans: Vec<Span> = Vec::with_capacity(n_cols * 2);
+            for c in 0..n_cols {
+                // Column-major fill: column 0 top-to-bottom, then column 1, …
+                let Some(&(keys, label)) = hint.rows.get(c * col_h + r) else {
+                    continue;
+                };
+                let mut lbl = label.to_string();
+                if crate::ui::display_width(&lbl) > LABEL_CAP {
+                    lbl = lbl
+                        .chars()
+                        .take(LABEL_CAP.saturating_sub(1))
+                        .collect::<String>();
+                    lbl.push('…');
+                }
+                let key_pad = " ".repeat(key_w.saturating_sub(crate::ui::display_width(keys)));
+                let lbl_pad = " ".repeat(label_w.saturating_sub(crate::ui::display_width(&lbl)));
+                spans.push(Span::styled(format!(" {key_pad}{keys}  "), key_style));
+                spans.push(Span::styled(format!("{lbl}{lbl_pad} "), label_style));
+            }
+            lines.push(Line::from(spans));
+        }
+        frame.render_widget(Paragraph::new(lines), inner);
+    }
 }

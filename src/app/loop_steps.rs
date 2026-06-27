@@ -9,7 +9,9 @@
 
 use std::time::{Duration, Instant};
 
-use super::{App, Deadline, Mode, Prompt, PromptKind, RunCtx, arm_resume_deadlines, state};
+use super::{
+    App, ChordHint, Deadline, Mode, Prompt, PromptKind, RunCtx, arm_resume_deadlines, state,
+};
 
 impl App {
     /// One-shot full-repaint bookkeeping at the top of each iteration.
@@ -180,6 +182,43 @@ impl App {
                 .arm(Deadline::CaptureTick, now_post + Duration::from_secs(1));
         } else {
             ctx.scheduler.disarm(Deadline::CaptureTick);
+        }
+    }
+
+    /// Settle the which-key chord-hint popup. When the hint delay has elapsed
+    /// (`chord_hint_due` reached) and a chord is *still* pending, build the
+    /// popup from the resolver's continuations and dirty the frame; then
+    /// arm/disarm the `ChordHint` wake from `chord_hint_due` so the loop sleeps
+    /// exactly until the popup is due (and not at all once it has shown or the
+    /// chord resolved). POST-recv, alongside the other advisory deadlines.
+    pub(crate) fn settle_chord_hint(&mut self, now_post: Instant, ctx: &mut RunCtx) {
+        if let Some(due) = self.view.chord_hint_due
+            && now_post >= due
+        {
+            self.view.chord_hint_due = None;
+            if self.state.resolver.is_pending() {
+                let title = self
+                    .state
+                    .resolver
+                    .pending_display()
+                    .map(|s| s.trim_end_matches('-').to_string())
+                    .unwrap_or_default();
+                let rows: Vec<(&'static str, &'static str)> = self
+                    .state
+                    .resolver
+                    .continuations()
+                    .into_iter()
+                    .map(|(keys, action)| (keys, action.describe()))
+                    .collect();
+                if !rows.is_empty() {
+                    self.view.chord_hint = Some(ChordHint { title, rows });
+                    ctx.draw.mark(3);
+                }
+            }
+        }
+        match self.view.chord_hint_due {
+            Some(due) => ctx.scheduler.arm(Deadline::ChordHint, due),
+            None => ctx.scheduler.disarm(Deadline::ChordHint),
         }
     }
 
