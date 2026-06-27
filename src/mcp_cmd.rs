@@ -49,6 +49,15 @@ pub enum McpCommand {
     /// `CreateWorktree` returned — so a skill can work in it while `a` stays put.
     /// Re-targets `b` if it's already open. The "work in it in b" step.
     OpenWorktree { path: String },
+    /// Agent self-reports its activity for the per-tab dot (P1 semantic
+    /// channel). `status` is `working`/`blocked`/`idle`/`done`; `pane` targets a
+    /// 1-based tab (the divider `[N]`), defaulting to the focused tab; `ttl_ms`
+    /// overrides the backstop expiry. Overrides output timing while live.
+    ReportStatus {
+        pane: Option<usize>,
+        status: String,
+        ttl_ms: Option<u64>,
+    },
     /// Another spyc instance has taken over the MCP socket for this
     /// directory. The TUI should warn the user.
     Disconnected { new_pid: u32 },

@@ -187,15 +187,21 @@ spyc's workflow: browse files above, talk to Claude below.
   inert while zoomed (only `^a z` exits), and the prior split is restored on
   un-zoom.
 - **Agent-activity dots** — each **agent** pane tab shows a live activity dot
-  in the divider, derived purely from pane-output timing (no hooks, no
-  screen-scraping): a **spicy heat-pulse `●`** — a pepper-red → ember → orange
-  → spark color *breath* (~4 Hz) — while output is flowing, fading to a quiet
-  `·` once the agent goes silent. Non-agent tabs (a plain shell) get no dot.
-  The pulse animates only while something is working, so a fully-idle pane set
-  still renders at 0 fps. It's a coarse *"output is flowing"* signal: a long
-  silent thinking pause reads as idle, and "blocked / waiting on you" + "done"
-  come with the planned semantic hook. **`:why-status`** flashes the active
-  tab's classification (state + seconds since last output) for debugging.
+  in the divider, from two sources:
+  - **Output timing** (no hooks, no screen-scraping): a **spicy heat-pulse `●`**
+    — a pepper-red → ember → orange → spark color *breath* (~4 Hz) — while
+    output is flowing, fading to a quiet `·` once the agent goes silent. The
+    pulse animates only while something is working, so a fully-idle pane set
+    still renders at 0 fps.
+  - **Semantic self-report** via the `report_status` MCP tool: a cooperative
+    agent (Claude, codex, …) tells spyc when it's `working` (holds the pulse
+    through a silent thinking pause — no false "idle"), `blocked` (a steady
+    **hot-red `●`** — the "which agent needs me" signal), or `done` (a calm
+    teal `●`). A live report overrides the timing guess until it expires or the
+    agent resumes output. Non-agent tabs (a plain shell) get no dot.
+
+  **`:why-status`** flashes the active tab's state, its source (self-reported
+  vs output-timing), and seconds since last output, for debugging.
 - **^a |** vertical (left/right) split of the file area. Opens (50/50) with a
   **preview of the file under the cursor** (markdown rendered) in the right
   column. Press it again **on a different file** to swap the preview to that
@@ -798,6 +804,10 @@ Claude can query and control the workspace through these tools:
 - **`get_file_content`** -- reads a file's text content (up to 100KB)
 
 **Write tools (Claude can mutate the TUI):**
+- **`report_status(status, [pane], [ttl_ms])`** -- self-report activity for
+  your pane's dot: `working` / `blocked` (the "needs me" hot-red dot) / `done` /
+  `idle`. Overrides spyc's output-timing guess; targets the focused tab by
+  default.
 - **`navigate_to`** -- change directory or focus cursor on a file
 - **`set_filter`** -- set or clear the file listing filter (glob)
 - **`pick_files`** -- pick files matching glob patterns (additive)

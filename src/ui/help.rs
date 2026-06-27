@@ -226,7 +226,7 @@ const SECTIONS: &[Section] = &[
             ("^a R", "restart active tab command"),
             (
                 "● / ·",
-                "agent tab activity dot: spicy pulse = working, dim = idle (:why-status explains)",
+                "agent tab dot: spicy pulse=working, red=blocked, teal=done, dim=idle (:why-status)",
             ),
             (
                 "^a +  ^a -",

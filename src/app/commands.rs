@@ -166,11 +166,11 @@ pub(super) fn cmd_date(app: &mut App, _args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
-/// `:why-status` — explain the active tab's agent-activity classification (P0
-/// debug aid, `docs/AGENT_AWARENESS_PLAN.md`): the derived state and how long
-/// since its last pane output. The state is the coarse output-timing signal
-/// (`App::settle_agent_activity`) — a silent thinking pause reads as idle until
-/// the P1 semantic hook lands. App-layer (reads the live pane tabs + clock).
+/// `:why-status` — explain the active tab's agent-activity classification
+/// (debug aid, `docs/AGENT_AWARENESS_PLAN.md`): the current state, its **source**
+/// (a semantic `report_status` self-report vs the output-timing fallback), and
+/// how long since its last pane output. App-layer (reads the live pane tabs +
+/// clock).
 pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
     use crate::pane::AgentActivity;
     use crate::state::sessions::AgentKind;
@@ -188,12 +188,17 @@ pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
         let state = match info.activity {
             AgentActivity::Working => "working",
             AgentActivity::Idle => "idle",
+            AgentActivity::Blocked => "blocked",
+            AgentActivity::Done => "done",
             AgentActivity::Unknown => "unknown",
         };
-        format!(
-            "why-status [{}]: {state} — {age} (output-timing signal)",
-            info.label
-        )
+        // A live report is authoritative; otherwise it's the timing fallback.
+        let source = if info.reported.is_some() {
+            "self-reported"
+        } else {
+            "output-timing"
+        };
+        format!("why-status [{}]: {state} ({source}) — {age}", info.label)
     } else {
         format!("why-status: '{}' is not a known agent — no dot", info.label)
     };

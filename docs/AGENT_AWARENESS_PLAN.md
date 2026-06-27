@@ -110,6 +110,18 @@ hard to debug. Build this early.
 
 The heart of the plan: semantic self-report first, tunable scrape fallback.
 
+> **Status: P1-1 tool + authority SHIPPED; auto-hook still pending.** The
+> `report_status` MCP tool + the authority model (`App::effective_activity`: a
+> live report with a `ttl_ms` backstop overrides output timing, and fresh output
+> supersedes a stale report) + the `Blocked`/`Done` states + render + a
+> `SERVER_INSTRUCTIONS` nudge all landed. So a cooperative agent that *calls*
+> `report_status` (instruction-driven) gets accurate working/blocked/done now.
+> **Still TODO:** the auto-firing **hook** (so it's reliable without the agent
+> choosing to call it) — env `SPYC_PANE_ID` injection + a `spyc --report-status`
+> reporter + Claude `Stop`/`Notification`/`UserPromptSubmit` hooks written via
+> `ensure_agent_mcp_config`. And `seq` ordering (deferred — reports are serial
+> enough today; `at`-based supersede covers it).
+
 **P1-1 · `report_status` MCP tool + a self-report agent hook.**
 Add an MCP tool the agent can call to set its own pane status
 (`working`/`blocked`/`idle`, optional message). Then — using the **existing**

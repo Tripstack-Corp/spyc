@@ -50,6 +50,11 @@ by default; when you're working in a DIFFERENT worktree, pass its path as the \
 right call).\n\
 - `navigate_to` to move the user's view; `pick_files` / `set_filter` to drive \
 their selection; `get_file_content` to read what they're viewing.\n\
+- `report_status` to keep your pane tab's activity dot accurate: call it \
+`working` when you start a task, `blocked` when you pause to ask the user a \
+question or for permission (so they see at a glance which agent needs them), \
+and `done` when you finish. Cheap and idempotent — call it freely as your turn \
+changes; it overrides spyc's output-timing guess.\n\
 - Worktree lifecycle, all in-process (never `git worktree`): `list_worktrees` \
 lists them (branch, dirty counts, which is current, whether each is merged / \
 ahead-behind the base — the safe-to-remove signal — and whether one is claimed \

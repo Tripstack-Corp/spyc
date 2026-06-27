@@ -14,7 +14,7 @@
 use std::time::{Duration, Instant};
 
 use super::{AGENT_STATUS_TTL, AgentKind, AgentStatusCache, App, Deadline, Message, RunCtx};
-use crate::pane::AgentActivity;
+use crate::pane::{AgentActivity, ReportedStatus};
 
 /// How long after a tab's last pane output it still counts as `Working`. Long
 /// enough to bridge the sub-second gaps between streamed token chunks; short
@@ -200,6 +200,31 @@ impl App {
         }
     }
 
+    /// The authority resolution (P1, testable core): a live semantic
+    /// [`ReportedStatus`] wins over the output-timing fallback. A report is
+    /// *live* until it expires or the tab produces output **after** it (the
+    /// agent resumed → timing takes back over). When no report is live, fall
+    /// back to [`Self::activity_for`]. Non-agent tabs are always `Unknown`
+    /// (a report targeting one is ignored — dots are agent-only).
+    fn effective_activity(
+        reported: Option<ReportedStatus>,
+        is_agent: bool,
+        last_output_at: Option<Instant>,
+        now: Instant,
+    ) -> AgentActivity {
+        if !is_agent {
+            return AgentActivity::Unknown;
+        }
+        if let Some(r) = reported {
+            let expired = now >= r.expiry;
+            let superseded = last_output_at.is_some_and(|o| o > r.at);
+            if !expired && !superseded {
+                return r.status;
+            }
+        }
+        Self::activity_for(is_agent, last_output_at, now)
+    }
+
     /// Agent-activity (P0): derive each agent tab's [`AgentActivity`] from the
     /// `last_output_at` that `drain_pane_output` stamps, advance the spicy
     /// pulse, and arm the two activity deadlines. Returns whether the frame
@@ -227,12 +252,30 @@ impl App {
         let mut any_working = false;
         for entry in tabs.tabs_mut() {
             let is_agent = crate::agent::detect(&entry.info.command).kind() != AgentKind::Other;
-            let new = Self::activity_for(is_agent, entry.info.last_output_at, now);
-            if new == AgentActivity::Working
+            // Drop a report that's no longer authoritative (expired, or the tab
+            // resumed output after it) so state + `:why-status` stay honest.
+            if let Some(r) = entry.info.reported
+                && (now >= r.expiry || entry.info.last_output_at.is_some_and(|o| o > r.at))
+            {
+                entry.info.reported = None;
+            }
+            let new = Self::effective_activity(
+                entry.info.reported,
+                is_agent,
+                entry.info.last_output_at,
+                now,
+            );
+            // Wake-arming: re-evaluate at the earliest of a live report's expiry
+            // or a timing-Working tab's idle-flip, so the dot can't go stale.
+            if let Some(r) = entry.info.reported {
+                earliest_flip = Some(earliest_flip.map_or(r.expiry, |m: Instant| m.min(r.expiry)));
+            } else if new == AgentActivity::Working
                 && let Some(at) = entry.info.last_output_at
             {
                 let flip = at + AGENT_ACTIVE_WINDOW;
                 earliest_flip = Some(earliest_flip.map_or(flip, |m: Instant| m.min(flip)));
+            }
+            if new == AgentActivity::Working {
                 any_working = true;
             }
             if entry.info.activity != new {
@@ -345,6 +388,69 @@ mod tests {
         assert_eq!(
             App::activity_for(true, Some(base), base + Duration::from_millis(2500)),
             AgentActivity::Idle
+        );
+    }
+
+    // P1 authority: a live semantic report wins over output timing; an expired
+    // or output-superseded report falls back to timing; a non-agent ignores it.
+    #[test]
+    fn effective_activity_honors_live_reports_then_falls_back() {
+        use crate::pane::{AgentActivity, ReportedStatus};
+        use std::time::{Duration, Instant};
+        let base = Instant::now();
+        let report = |status, at, expiry| Some(ReportedStatus { status, at, expiry });
+
+        // A live `working` report wins even with NO output (silent thinking) —
+        // the headline win over the timing-only P0 dot.
+        assert_eq!(
+            App::effective_activity(
+                report(AgentActivity::Working, base, base + Duration::from_secs(60)),
+                true,
+                None,
+                base,
+            ),
+            AgentActivity::Working
+        );
+        // A live `blocked` report → Blocked (the "needs me" signal).
+        assert_eq!(
+            App::effective_activity(
+                report(AgentActivity::Blocked, base, base + Duration::from_secs(60)),
+                true,
+                Some(base),
+                base + Duration::from_secs(1),
+            ),
+            AgentActivity::Blocked
+        );
+        // Expired report → falls back to timing (no recent output → Idle).
+        assert_eq!(
+            App::effective_activity(
+                report(AgentActivity::Blocked, base, base + Duration::from_secs(1)),
+                true,
+                None,
+                base + Duration::from_secs(2),
+            ),
+            AgentActivity::Idle
+        );
+        // Output AFTER the report (agent resumed) supersedes it → timing wins.
+        let later = base + Duration::from_millis(500);
+        assert_eq!(
+            App::effective_activity(
+                report(AgentActivity::Idle, base, base + Duration::from_secs(60)),
+                true,
+                Some(later),
+                later,
+            ),
+            AgentActivity::Working
+        );
+        // A non-agent tab ignores any report (dots are agent-only).
+        assert_eq!(
+            App::effective_activity(
+                report(AgentActivity::Working, base, base + Duration::from_secs(60)),
+                false,
+                None,
+                base,
+            ),
+            AgentActivity::Unknown
         );
     }
 }

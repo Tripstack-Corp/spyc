@@ -21,7 +21,7 @@ A vi-keyboard-driven terminal file manager written in Rust, built on ratatui/cro
 - Vi-editable shell prompt with persistent history (`!` captured, `;` foreground, `$` interactive shell)
 - `!?` history editor — popup with vi-editable lines, `/search`, `G`/`gg`, `:N` jump, `Ctrl+D` delete
 - `:` command line — vim-style command entry (`:limit`, `:!cmd`, `:!!`, `:;cmd`, `:fg`, `:task`, `:grep`, `:bprev`, `:bnext`, `:why-status`, `:q`)
-- Agent-activity dots — each **agent** pane tab carries a live activity dot in the divider, derived from pane-output timing (no hooks, no screen-scraping): a **spicy heat-pulse `●`** (a pepper-red→ember→orange→spark color breath, ~4 Hz) while output is flowing (`Working`), a quiet `·` once it goes silent (`Idle`), nothing for a non-agent tab. The pulse is armed only while ≥1 tab is Working, so an all-idle pane set still draws 0 fps. P0 of the herdr-informed agent-awareness plan (`docs/AGENT_AWARENESS_PLAN.md`); `:why-status` explains the active tab's classification. The richer `Blocked`/`Done` states (and staying Working through a silent thinking pause) need the P1 semantic hook — output timing reads a silent agent as `Idle`.
+- Agent-activity dots — each **agent** pane tab carries a live activity dot in the divider, from two sources (herdr-informed agent-awareness plan, `docs/AGENT_AWARENESS_PLAN.md`). **P0 output timing** (no hooks, no screen-scraping): a **spicy heat-pulse `●`** (pepper-red→ember→orange→spark breath, ~4 Hz) while output flows (`Working`), a quiet `·` once silent (`Idle`); armed only while ≥1 tab works, so idle draws 0 fps. **P1 semantic self-report** via the `report_status` MCP tool: a cooperative agent asserts `Working` (holds through a silent thinking pause), `Blocked` (steady hot-red `●` — the "which agent needs me" signal), or `Done` (teal `●`); a live report **overrides** timing until it expires or the tab resumes output (`App::effective_activity` authority). `:why-status` shows the active tab's state + source. Non-agent tabs get no dot.
 - Project-wide search — `F` opens a fuzzy filename finder (gitignore-aware walker on a worker thread, multi-repo descent into sibling-clone subrepos); `:grep <pattern>` is a project-wide content search via the embedded ripgrep matcher (`grep-regex` + `grep-searcher`, no subprocess), streams `path:line:col: text` into a pager so `gf`/`gF` jump for free.
 - Background tasks — `^Z` while a `!` capture pager is open sends the running task to the background; reader thread keeps draining output into a per-task buffer (head-truncated at 1 MB). `:fg` (or `:fg N`) resumes; `gB` / `:task N` / `[t`/`]t` open a peek "task viewer" without taking ownership. Tasks render as `[N+]`/`[N●]`/`[N✓]`/`[N✗]` in the pane divider (right-aligned, distinct color from pane tabs). On close of a viewed-and-exited task, the rendered view is promoted into buffer history.
 - Pager buffer history — closed pager views go onto a back/forward stack (max 10). `:bprev`/`:bnext` walk it from the prompt; `[b`/`]b` chord walks it from inside an open pager; `gp` reopens the most-recent closed buffer from the file list. The help overlay is excluded from the stack.
@@ -284,6 +284,11 @@ You are expected to be running inside spyc's split pane. If the
 - **When the user asks you to organize files:** use `set_filter`,
   `pick_files`, `clear_picks`, and `navigate_to` to update the TUI
   directly rather than giving instructions for the user to do manually.
+- **To show the user your live status:** call `report_status(status)` as your
+  turn changes — `working` when you start, `blocked` when you stop to ask them
+  something (lights the tab dot hot-red — "needs me"), `done` when finished.
+  It drives the per-tab activity dot, overriding spyc's output-timing guess.
+  Targets your focused tab by default. Cheap + idempotent.
 - **To survey / spin up / work in / tear down a git worktree:** `list_worktrees()` returns
   the repo's worktrees (branch, short HEAD, dirty counts, which is current,
   `ahead`/`behind`/`merged` vs the integration base — `merged:true` is the safe-to-remove

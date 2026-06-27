@@ -140,6 +140,29 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                     }
                 },
                 {
+                    "name": "report_status",
+                    "description": "Report YOUR current activity so spyc shows it as a live dot on your pane tab — the 'which agent needs me' signal. Call it as your turn changes: 'working' when you start a non-trivial task, 'blocked' when you stop to ask the user a question or for permission (this is the one that earns attention), 'done' when you finish, 'idle' when waiting with nothing pending. Overrides spyc's output-timing guess and keeps your dot accurate through silent thinking. Targets your own (focused) tab by default; pass `pane` for a specific tab. Cheap and idempotent — call it freely.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "status": {
+                                "type": "string",
+                                "enum": ["working", "blocked", "idle", "done"],
+                                "description": "working = actively doing a task; blocked = waiting on the user (needs attention); done = finished a turn; idle = nothing pending."
+                            },
+                            "pane": {
+                                "type": "integer",
+                                "description": "Optional 1-based tab number (the `[N]` in the divider) to report for. Defaults to the focused tab — normally omit it."
+                            },
+                            "ttl_ms": {
+                                "type": "integer",
+                                "description": "Optional backstop in ms after which the report expires and the dot falls back to output timing. Defaults to a few minutes; rarely needed."
+                            }
+                        },
+                        "required": ["status"]
+                    }
+                },
+                {
                     "name": "navigate_to",
                     "description": "Navigate spyc to a directory or file. If the path is a directory, changes to it. If a file, navigates to its parent directory and places the cursor on it.",
                     "inputSchema": {
@@ -632,11 +655,28 @@ fn handle_tools_call(
             }
         }
         "navigate_to" | "set_filter" | "pick_files" | "clear_picks" | "create_worktree"
-        | "remove_worktree" | "clean_worktree" | "open_worktree" => {
+        | "remove_worktree" | "clean_worktree" | "open_worktree" | "report_status" => {
             let Some(tx) = cmd_tx else {
                 return send_tool_error(w, id, "writable actions not available in stdio mode");
             };
             let command = match name {
+                "report_status" => {
+                    let status = args["status"].as_str().unwrap_or("").to_string();
+                    if !matches!(status.as_str(), "working" | "blocked" | "idle" | "done") {
+                        return send_tool_error(
+                            w,
+                            id,
+                            "status must be one of: working, blocked, idle, done",
+                        );
+                    }
+                    let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
+                    let ttl_ms = args["ttl_ms"].as_u64();
+                    McpCommand::ReportStatus {
+                        pane,
+                        status,
+                        ttl_ms,
+                    }
+                }
                 "navigate_to" => {
                     let path = args["path"].as_str().unwrap_or("").to_string();
                     if path.is_empty() {

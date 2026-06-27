@@ -13,7 +13,7 @@ pub mod quick_select;
 pub mod tabs;
 mod widget;
 
-pub use tabs::{AgentActivity, PaneTabs, TabEntry, TabInfo};
+pub use tabs::{AgentActivity, PaneTabs, ReportedStatus, TabEntry, TabInfo};
 pub use widget::{PaneWidget, cell_style};
 
 // Shared pty kernel that `Pane`, `PendingCapture` and `BackgroundTask`

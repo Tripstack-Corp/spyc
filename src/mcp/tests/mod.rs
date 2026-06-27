@@ -129,27 +129,28 @@ fn tools_list_response() {
     .unwrap();
     let resp = parse_response(&output);
     let tools = resp["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 20);
+    assert_eq!(tools.len(), 21);
     assert_eq!(tools[0]["name"], "get_spyc_context");
-    assert_eq!(tools[1]["name"], "navigate_to");
-    assert_eq!(tools[2]["name"], "set_filter");
-    assert_eq!(tools[3]["name"], "pick_files");
-    assert_eq!(tools[4]["name"], "clear_picks");
-    assert_eq!(tools[5]["name"], "create_worktree");
-    assert_eq!(tools[6]["name"], "remove_worktree");
-    assert_eq!(tools[7]["name"], "clean_worktree");
-    assert_eq!(tools[8]["name"], "open_worktree");
-    assert_eq!(tools[9]["name"], "get_file_content");
-    assert_eq!(tools[10]["name"], "search_paths");
-    assert_eq!(tools[11]["name"], "search_content");
-    assert_eq!(tools[12]["name"], "search_picks");
-    assert_eq!(tools[13]["name"], "search_inventory");
-    assert_eq!(tools[14]["name"], "list_worktrees");
-    assert_eq!(tools[15]["name"], "claim_worktree");
-    assert_eq!(tools[16]["name"], "release_worktree");
-    assert_eq!(tools[17]["name"], "git_status");
-    assert_eq!(tools[18]["name"], "git_log");
-    assert_eq!(tools[19]["name"], "git_diff");
+    assert_eq!(tools[1]["name"], "report_status");
+    assert_eq!(tools[2]["name"], "navigate_to");
+    assert_eq!(tools[3]["name"], "set_filter");
+    assert_eq!(tools[4]["name"], "pick_files");
+    assert_eq!(tools[5]["name"], "clear_picks");
+    assert_eq!(tools[6]["name"], "create_worktree");
+    assert_eq!(tools[7]["name"], "remove_worktree");
+    assert_eq!(tools[8]["name"], "clean_worktree");
+    assert_eq!(tools[9]["name"], "open_worktree");
+    assert_eq!(tools[10]["name"], "get_file_content");
+    assert_eq!(tools[11]["name"], "search_paths");
+    assert_eq!(tools[12]["name"], "search_content");
+    assert_eq!(tools[13]["name"], "search_picks");
+    assert_eq!(tools[14]["name"], "search_inventory");
+    assert_eq!(tools[15]["name"], "list_worktrees");
+    assert_eq!(tools[16]["name"], "claim_worktree");
+    assert_eq!(tools[17]["name"], "release_worktree");
+    assert_eq!(tools[18]["name"], "git_status");
+    assert_eq!(tools[19]["name"], "git_log");
+    assert_eq!(tools[20]["name"], "git_diff");
 }
 
 #[test]

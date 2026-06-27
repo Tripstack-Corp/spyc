@@ -83,8 +83,6 @@ impl App {
                 if is_active {
                     active_idx = Some(i);
                 }
-                let star = if is_active { "*" } else { "" };
-                let activity = if entry.info.has_activity { "+" } else { "" };
                 let sep = "─";
                 // Uppercase the active tab label in scroll mode — the
                 // shape change is a peripheral-vision cue even before
@@ -94,35 +92,66 @@ impl App {
                 } else {
                     entry.info.label.clone()
                 };
-                let tab_text = format!("[{}{star}{activity}] {label} ", i + 1);
-                // The live agent-activity dot (P0): a spicy heat-pulse `●` while
-                // the agent is Working, a quiet `·` when Idle, nothing for a
-                // non-agent tab. A separate span so it carries its own (pulsing)
-                // color independent of the tab label's style.
-                let dot = self.agent_activity_span(entry.info.activity);
+                // FIXED-WIDTH indicator so the divider never reflows as statuses
+                // change: every tab is `[N]` + exactly one status cell + label.
+                // The active tab is marked by reverse-video (`active_tab_style`),
+                // not a `*` glyph — that glyph was redundant with the highlight
+                // AND made the active tab one column wider (a focus-switch jump).
+                // The single cell is: the colored activity dot for an agent tab
+                // (one with a resolved activity), else `+` for a shell tab with
+                // unseen output, else a blank space (still reserved, so a shell's
+                // `+` flicking on/off — e.g. htop — no longer changes the width).
+                let is_agent = entry.info.activity != crate::pane::AgentActivity::Unknown;
+                let bracket = format!("[{}]", i + 1);
+                // Agent → its own colored dot span; shell → a `+`/blank cell
+                // carried in the bracket run's style.
+                let dot = if is_agent {
+                    self.agent_activity_span(entry.info.activity)
+                } else {
+                    None
+                };
+                let shell_cell = if is_agent {
+                    "" // the dot span fills the cell instead
+                } else if entry.info.has_activity {
+                    "+"
+                } else {
+                    " " // reserved blank — keeps the width fixed
+                };
+                let label_text = format!(" {label} ");
+                // Measure in display columns, not bytes — `sep` ("─") is 3
+                // bytes but 1 column, and a label can carry multibyte chars;
+                // `used`/`width` are column budgets. Bracket + 1 cell + label is
+                // constant for a given N (`dot_w` is 1 for an agent, and
+                // `shell_cell` is "" then — so the cell is always exactly 1 col).
                 let dot_w = dot
                     .as_ref()
                     .map_or(0, |s| crate::ui::display_width(s.content.as_ref()));
-                // Measure in display columns, not bytes — `sep` ("─") is 3
-                // bytes but 1 column, and a label can carry multibyte chars;
-                // `used`/`width` are column budgets.
-                let tab_len =
-                    crate::ui::display_width(sep) + crate::ui::display_width(&tab_text) + dot_w;
+                let tab_len = crate::ui::display_width(sep)
+                    + crate::ui::display_width(&bracket)
+                    + crate::ui::display_width(shell_cell)
+                    + dot_w
+                    + crate::ui::display_width(&label_text);
                 if used + tab_len > width {
                     break;
                 }
                 spans.push(Span::styled(sep, rule_style));
+                // An agent tab's eye-pull comes from the colored dot, so its
+                // label stays calm (inactive style); a shell tab keeps the teal
+                // `activity_style` highlight for unseen output.
                 let style = if is_active {
                     active_tab_style
-                } else if entry.info.has_activity {
+                } else if !is_agent && entry.info.has_activity {
                     activity_style
                 } else {
                     inactive_tab_style
                 };
-                spans.push(Span::styled(tab_text, style));
+                spans.push(Span::styled(bracket, style));
                 if let Some(dot) = dot {
                     spans.push(dot);
+                } else {
+                    spans.push(Span::styled(shell_cell, style));
                 }
+                spans.push(Span::styled(label_text, style));
                 used += tab_len;
             }
         }
@@ -256,28 +285,47 @@ impl App {
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
-    /// The per-tab agent-activity dot span (P0): a spicy heat-pulse `●` while
-    /// the agent is Working, a quiet `·` when Idle, `None` for a non-agent /
-    /// never-output tab (so only agent tabs carry a dot). PURE — reads the theme
-    /// and the already-settled `agent_anim_frame` (advanced off the draw path in
-    /// `settle_agent_activity`); the draw never touches the clock.
+    /// The per-tab agent-activity dot span: a spicy heat-pulse `●` while
+    /// Working, a steady hot-red `●` when Blocked, a teal `●` when Done, a quiet
+    /// `·` when Idle, `None` for a non-agent tab. The glyph is TIGHT (no leading
+    /// space) — the caller renders it right against the `[N*]` bracket so it's
+    /// unambiguously that tab's, replacing the redundant `+`. PURE — reads the
+    /// theme and the already-settled `agent_anim_frame` (advanced off the draw
+    /// path in `settle_agent_activity`); the draw never touches the clock.
     fn agent_activity_span(
         &self,
         activity: crate::pane::AgentActivity,
     ) -> Option<ratatui::text::Span<'static>> {
         use crate::pane::AgentActivity;
+        use ratatui::style::Color;
         use ratatui::style::{Modifier, Style};
         use ratatui::text::Span;
         match activity {
             AgentActivity::Unknown => None,
             AgentActivity::Idle => Some(Span::styled(
-                " ·",
+                "·",
                 Style::default().fg(self.view.theme.status_suffix),
             )),
             AgentActivity::Working => Some(Span::styled(
-                " \u{25cf}", // ●
+                "\u{25cf}", // ●
                 Style::default()
                     .fg(self.spicy_pulse_color(self.view.agent_anim_frame))
+                    .add_modifier(Modifier::BOLD),
+            )),
+            // Blocked = "needs me": a STEADY hot red `●` (not the pulse) so it
+            // reads as a distinct, attention-grabbing state, not just "working".
+            AgentActivity::Blocked => Some(Span::styled(
+                "\u{25cf}", // ●
+                Style::default()
+                    .fg(Color::Rgb(0xF7, 0x76, 0x8E)) // hot red (matches bg-task err)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            // Done = finished a turn: a calm teal `●` (the "pulls the eye but
+            // settled" color), distinct from the warm working pulse.
+            AgentActivity::Done => Some(Span::styled(
+                "\u{25cf}", // ●
+                Style::default()
+                    .fg(self.view.theme.take)
                     .add_modifier(Modifier::BOLD),
             )),
         }
@@ -453,4 +501,40 @@ impl App {
 
 const fn on_off(b: bool) -> &'static str {
     if b { "on" } else { "off" }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::App;
+    use crate::pane::AgentActivity;
+    use std::path::PathBuf;
+
+    /// The pane-tab indicator is fixed-width: `[N]` + exactly one status cell.
+    /// Guard the agent half of that invariant — every *agent* activity renders a
+    /// single-column dot (so the divider can't reflow as a tab's status changes,
+    /// the bug this design fixes). `Unknown` (a non-agent tab) yields no dot; its
+    /// cell is the `+`/blank shell glyph (1 col by construction in the loop).
+    #[test]
+    fn agent_status_dot_is_always_one_column() {
+        let app = App::test_app(PathBuf::from("/tmp/proj"));
+        for activity in [
+            AgentActivity::Working,
+            AgentActivity::Idle,
+            AgentActivity::Blocked,
+            AgentActivity::Done,
+        ] {
+            let span = app
+                .agent_activity_span(activity)
+                .unwrap_or_else(|| panic!("agent activity {activity:?} should render a dot"));
+            assert_eq!(
+                crate::ui::display_width(span.content.as_ref()),
+                1,
+                "{activity:?} dot must be exactly one column (fixed-width indicator)"
+            );
+        }
+        assert!(
+            app.agent_activity_span(AgentActivity::Unknown).is_none(),
+            "a non-agent tab carries no dot"
+        );
+    }
 }

@@ -61,26 +61,48 @@ pub fn resume_still_unsubmitted(tail_lines: &[String], sid: &str) -> bool {
     tail_lines.iter().any(|l| l.contains(sid))
 }
 
-/// Coarse activity state of a tab's process, derived from output timing
-/// (`App::settle_agent_activity`) and shown as a colored dot per **agent** tab
-/// in the divider.
+/// Activity state of a tab's process, shown as a colored dot per **agent** tab
+/// in the divider (`App::settle_agent_activity`).
 ///
-/// This is the P0 vocabulary from `docs/AGENT_AWARENESS_PLAN.md`. It is a
-/// deliberately coarse *"is output flowing"* signal: `Working` while a tab has
-/// produced output within `AGENT_ACTIVE_WINDOW`, `Idle` once it has gone quiet,
-/// `Unknown` for a non-agent tab or one that has never produced output (no dot).
-/// The richer `Blocked` / `Done` states — and staying `Working` through a silent
-/// thinking pause — need the semantic self-report channel planned for P1, not
-/// output timing; an agent thinking with no output reads as `Idle` here.
+/// Two sources feed it (`docs/AGENT_AWARENESS_PLAN.md`): the coarse P0
+/// *output-timing* signal (`Working` while output flows, else `Idle`), and the
+/// P1 *semantic self-report* over the `report_status` MCP tool, which a
+/// cooperative agent uses to assert `Working` (even through a silent thinking
+/// pause), `Blocked` (waiting on the user — the founding "which agent needs me"
+/// signal), or `Done`. A live report wins over timing (see
+/// [`ReportedStatus`]); when none is active, timing drives Working/Idle.
+/// `Unknown` is a non-agent tab or one with no signal yet — no dot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum AgentActivity {
-    /// Output produced within the active window — the agent is doing something.
+    /// Doing something — output flowing, or a `working` self-report.
     Working,
-    /// Quiet for the active window — finished, or thinking silently.
+    /// Quiet (timing), or an `idle` self-report.
     Idle,
-    /// Not an agent tab, or no output seen yet. Renders no dot.
+    /// Waiting on the user (a `blocked` self-report) — "needs me". Semantic only.
+    Blocked,
+    /// Finished a turn (a `done` self-report). Semantic only.
+    Done,
+    /// Not an agent tab, or no signal yet. Renders no dot.
     #[default]
     Unknown,
+}
+
+/// A semantic activity self-report from a cooperative agent via the
+/// `report_status` MCP tool — the P1 channel that supersedes output timing.
+///
+/// Authority model (`App::effective_activity`): a report wins over the timing
+/// fallback **until** it expires (`expiry`, a backstop so a crashed agent's
+/// stale `working`/`blocked` doesn't stick forever) **or** the tab produces
+/// fresh output *after* the report (`at`) — new output means the agent resumed,
+/// so timing takes back over. `at` also lets a newer report supersede an older.
+#[derive(Clone, Copy, Debug)]
+pub struct ReportedStatus {
+    /// The reported state (`Working` / `Blocked` / `Idle` / `Done`).
+    pub status: AgentActivity,
+    /// When the report was received (monotonic) — beaten by newer output.
+    pub at: std::time::Instant,
+    /// Backstop expiry; after this the dot falls back to output timing.
+    pub expiry: std::time::Instant,
 }
 
 /// Per-tab metadata displayed in the status line.
@@ -97,9 +119,13 @@ pub struct TabInfo {
     /// `App::drain_pane_output`. `None` until the first output. Drives
     /// [`AgentActivity`] via `App::settle_agent_activity`.
     pub last_output_at: Option<std::time::Instant>,
-    /// Cached coarse activity state, recomputed OFF the draw path in
+    /// Cached activity state, recomputed OFF the draw path in
     /// `App::settle_agent_activity` (render is pure and can't read `now`).
     pub activity: AgentActivity,
+    /// Latest semantic self-report from the agent (`report_status` MCP tool),
+    /// or `None`. Overrides output timing per the [`ReportedStatus`] authority
+    /// model; settle clears it once expired / superseded by fresh output.
+    pub reported: Option<ReportedStatus>,
     /// Set when the tab was spawned by session restore as a `claude
     /// --resume`. On a non-zero exit shortly after spawn we treat the
     /// resume as failed and replace the tab with a fresh spawn of this
@@ -151,6 +177,7 @@ impl TabInfo {
             has_activity: false,
             last_output_at: None,
             activity: AgentActivity::Unknown,
+            reported: None,
             restore_fallback: None,
             pending_resume_send: None,
             spawn_at: std::time::Instant::now(),

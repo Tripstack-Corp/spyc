@@ -12,6 +12,12 @@
 
 use super::App;
 
+/// Backstop expiry for a `report_status` self-report (5 min) when the agent
+/// gives no `ttl_ms`: long enough that a genuinely-blocked agent's dot persists
+/// until answered, short enough that a crashed agent's stale `working`/`blocked`
+/// eventually falls back to output timing. Overridable per-report.
+const DEFAULT_REPORT_TTL_MS: u64 = 300_000;
+
 impl App {
     /// Write the MCP client config a *launching* agent needs to discover spyc's
     /// socket — `.mcp.json` for claude, `.codex/config.toml` for codex — into
@@ -366,6 +372,54 @@ impl App {
                 self.write_context();
                 McpResponse::Ok {
                     message: format!("opened column b at {}", opened.display()),
+                }
+            }
+            McpCommand::ReportStatus {
+                pane,
+                status,
+                ttl_ms,
+            } => {
+                use crate::pane::{AgentActivity, ReportedStatus};
+                let activity = match status.as_str() {
+                    "working" => AgentActivity::Working,
+                    "blocked" => AgentActivity::Blocked,
+                    "idle" => AgentActivity::Idle,
+                    "done" => AgentActivity::Done,
+                    other => {
+                        return McpResponse::Error {
+                            message: format!("unknown status: {other}"),
+                        };
+                    }
+                };
+                let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+                    return McpResponse::Error {
+                        message: "no pane open".into(),
+                    };
+                };
+                // 1-based `pane` targets a specific tab; default the focused one.
+                let idx = match pane {
+                    Some(n) if (1..=tabs.tabs().len()).contains(&n) => n - 1,
+                    Some(n) => {
+                        return McpResponse::Error {
+                            message: format!("no pane {n} (have {})", tabs.tabs().len()),
+                        };
+                    }
+                    None => tabs.active_index(),
+                };
+                let now = std::time::Instant::now();
+                let ttl = std::time::Duration::from_millis(ttl_ms.unwrap_or(DEFAULT_REPORT_TTL_MS));
+                let entry = &mut tabs.tabs_mut()[idx];
+                entry.info.reported = Some(ReportedStatus {
+                    status: activity,
+                    at: now,
+                    expiry: now + ttl,
+                });
+                // Apply immediately so this frame reflects it; `settle_agent_activity`
+                // maintains it (and falls back to timing once it expires).
+                entry.info.activity = activity;
+                let label = entry.info.label.clone();
+                McpResponse::Ok {
+                    message: format!("status '{status}' set for pane {} ({label})", idx + 1),
                 }
             }
             McpCommand::Disconnected { new_pid } => {
