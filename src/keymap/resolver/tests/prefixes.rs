@@ -203,16 +203,18 @@ fn ctrl_s_unknown_key_is_ignored() {
 // ── which-key continuations (the chord-hint popup's data) ──────
 
 /// The which-key popup is only trustworthy if every key it advertises for a
-/// chord actually fires the action it claims. This drives that end-to-end
-/// through the public API: arm each chord by its entry keystroke, then feed
-/// each single-byte continuation key on a fresh resolver and compare against
-/// `continuations()`'s listed action. If a `feed` arm is re-bound without
-/// updating `continuations()` (or vice-versa), this fails. Multi-byte display
-/// strings — ranges (`"1-9"`), sets (`"a h"`), and non-char keys (`"↓"`) —
-/// are listed for the popup but not feed-verified here.
+/// chord actually does what it claims. This drives that end-to-end through the
+/// public API: arm each chord by its entry keystroke, then feed each single-byte
+/// continuation key on a fresh resolver and compare against `continuations()` —
+/// an `Act` entry must resolve to its action, a `Sub` entry must open a submenu
+/// (`Pending`). If a `feed` arm is re-bound without updating `continuations()`
+/// (or vice-versa), this fails. Multi-byte display strings — ranges (`"1-9"`),
+/// sets (`"a h"`), non-char keys (`"↓"`), and word keys (`"Space"`) — are listed
+/// for the popup but not feed-verified here.
 #[test]
 fn chord_continuations_resolve_to_their_actions() {
     let prefixes: &[(KeyEvent, &str)] = &[
+        (key(' '), "leader"),
         (key('g'), "g"),
         (ctrl('w'), "^a"),
         (ctrl('s'), "^s"),
@@ -238,7 +240,10 @@ fn chord_continuations_resolve_to_their_actions() {
             !rows.is_empty(),
             "{name} chord has no continuations for the popup"
         );
-        for (keys, action) in rows {
+        for row in rows {
+            let keys = match &row {
+                ChordEntry::Act(k, _) | ChordEntry::Sub(k, _) => *k,
+            };
             // Only single-byte ASCII keys correspond to a `Char` we can feed.
             if keys.len() != 1 {
                 continue;
@@ -248,11 +253,69 @@ fn chord_continuations_resolve_to_their_actions() {
             };
             let mut r2 = Resolver::new();
             feed(&mut r2, *entry);
-            assert_eq!(
-                feed(&mut r2, key(ch)),
-                ResolverOutcome::Action(action),
-                "{name}{keys} should resolve to the action the popup advertises"
-            );
+            let got = feed(&mut r2, key(ch));
+            match row {
+                ChordEntry::Act(_, action) => assert_eq!(
+                    got,
+                    ResolverOutcome::Action(action),
+                    "{name}{keys} should resolve to the action the popup advertises"
+                ),
+                ChordEntry::Sub(_, _) => assert_eq!(
+                    got,
+                    ResolverOutcome::Pending,
+                    "{name}{keys} should open the submenu the popup advertises"
+                ),
+            }
         }
     }
+}
+
+// ── leader (Space / ^a Space) ─────────────────────────────────
+
+#[test]
+fn space_enters_leader() {
+    let mut r = Resolver::new();
+    assert_eq!(feed(&mut r, key(' ')), ResolverOutcome::Pending);
+    assert!(r.is_pending());
+}
+
+#[test]
+fn space_p_jumps_project_home() {
+    let mut r = Resolver::new();
+    feed(&mut r, key(' '));
+    assert_eq!(
+        feed(&mut r, key('p')),
+        ResolverOutcome::Action(Action::JumpProjectHome)
+    );
+}
+
+#[test]
+fn space_w_opens_worktree_submenu_then_new() {
+    let mut r = Resolver::new();
+    feed(&mut r, key(' '));
+    assert_eq!(feed(&mut r, key('w')), ResolverOutcome::Pending);
+    assert_eq!(
+        feed(&mut r, key('n')),
+        ResolverOutcome::Action(Action::WorktreeNew)
+    );
+}
+
+#[test]
+fn ctrl_a_space_enters_leader_from_pane_prefix() {
+    // The pane-focus path into the global menu: `^a` then Space.
+    let mut r = Resolver::new();
+    feed(&mut r, ctrl('w'));
+    assert_eq!(feed(&mut r, key(' ')), ResolverOutcome::Pending);
+    assert_eq!(
+        feed(&mut r, key('p')),
+        ResolverOutcome::Action(Action::JumpProjectHome)
+    );
+}
+
+#[test]
+fn gh_no_longer_jumps_project_home() {
+    // `gh` was dropped in favor of the leader (`Space p`); `gw` stays.
+    let mut r = Resolver::new();
+    feed(&mut r, key('g'));
+    assert_eq!(feed(&mut r, key('h')), ResolverOutcome::Ignored);
 }

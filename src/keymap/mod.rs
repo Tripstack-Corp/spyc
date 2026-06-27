@@ -9,5 +9,5 @@ pub mod resolver;
 pub mod user;
 
 pub use action::Action;
-pub use resolver::{Resolver, ResolverOutcome};
+pub use resolver::{ChordEntry, Resolver, ResolverOutcome};
 pub use user::{BoundAction, UserKeymap};

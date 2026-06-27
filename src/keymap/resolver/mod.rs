@@ -45,6 +45,10 @@ enum PendingSeq {
     /// `n` = open a second commander, `x` = close it. (Was `^z`; moved to `^s`
     /// so the commander chord doesn't SIGTSTP a focused shell pane.)
     CtrlS,
+    /// Seen the leader (`Space` in list focus, or `^a Space` from pane focus),
+    /// waiting for a global/workspace sub-command: `w` worktree submenu,
+    /// `p`/`P` project-home jump/set, `s` session info, `?` help.
+    Leader,
 }
 
 /// What the resolver produced from the latest keystroke.
@@ -58,6 +62,17 @@ pub enum ResolverOutcome {
     Pending,
     /// Unknown key, no effect.
     Ignored,
+}
+
+/// One row of the which-key chord-hint popup for a pending chord: either a key
+/// that fires an `Action`, or a key that opens a nested submenu (shown with its
+/// own label). Returned by [`Resolver::continuations`].
+#[derive(Debug, Clone)]
+pub enum ChordEntry {
+    /// `key` fires `action`; the popup renders `key → action.describe()`.
+    Act(&'static str, Action),
+    /// `key` opens a submenu the popup labels `label` (e.g. `"worktree"`).
+    Sub(&'static str, &'static str),
 }
 
 impl Resolver {
@@ -102,6 +117,7 @@ impl Resolver {
             PendingSeq::D => "d-",
             PendingSeq::Z => "Z-",
             PendingSeq::CtrlS => "^s-",
+            PendingSeq::Leader => "leader-",
         };
         Some(format!("{prefix}{seq}"))
     }
@@ -119,84 +135,95 @@ impl Resolver {
     ///
     /// Multi-key display strings (`"a h"`, `"1-9"`, `"a-z"`, `"↓"`) name a
     /// set/range/non-char key; only single-byte ASCII entries are
-    /// feed-verified.
-    pub fn continuations(&self) -> Vec<(&'static str, Action)> {
+    /// feed-verified. A [`ChordEntry::Sub`] names a key that opens a nested
+    /// submenu rather than firing an action.
+    pub fn continuations(&self) -> Vec<ChordEntry> {
         use Action as A;
+        use ChordEntry::{Act, Sub};
         match self.pending {
             PendingSeq::Normal => Vec::new(),
+            // Leader (global / workspace): `Space` in list focus, `^a Space`
+            // from pane focus.
+            PendingSeq::Leader => vec![
+                Sub("w", "worktree"),
+                Act("p", A::JumpProjectHome),
+                Act("P", A::SetProjectHomeHere),
+                Act("s", A::ShowMemory),
+                Act("?", A::Help),
+            ],
             PendingSeq::G => vec![
-                ("g", A::GotoFirst),
-                ("d", A::GitDiff),
-                ("D", A::GitDiffCached),
-                ("u", A::GitDiffUnstaged),
-                ("b", A::GitBlame),
-                ("r", A::GitRestore),
-                ("f", A::GotoFile),
-                ("F", A::GotoFileLine),
-                ("h", A::JumpProjectHome),
-                ("w", A::JumpWorktreeRoot),
-                ("P", A::SetProjectHomeHere),
-                ("S", A::SetStartDirHere),
-                ("s", A::SortReverse),
-                ("p", A::ReopenLastBuffer),
-                ("y", A::OpenGraveyardView),
-                ("B", A::OpenTaskViewer),
-                ("U", A::ShowUserHost),
-                ("V", A::Version),
+                Act("g", A::GotoFirst),
+                Act("d", A::GitDiff),
+                Act("D", A::GitDiffCached),
+                Act("u", A::GitDiffUnstaged),
+                Act("b", A::GitBlame),
+                Act("r", A::GitRestore),
+                Act("f", A::GotoFile),
+                Act("F", A::GotoFileLine),
+                Act("w", A::JumpWorktreeRoot),
+                Act("P", A::SetProjectHomeHere),
+                Act("S", A::SetStartDirHere),
+                Act("s", A::SortReverse),
+                Act("p", A::ReopenLastBuffer),
+                Act("y", A::OpenGraveyardView),
+                Act("B", A::OpenTaskViewer),
+                Act("U", A::ShowUserHost),
+                Act("V", A::Version),
             ],
             PendingSeq::W => vec![
-                ("j", A::PaneFocusDown),
-                ("k", A::PaneFocusUp),
-                ("a h", A::VsplitFocusLeft),
-                ("b l", A::VsplitFocusRight),
-                ("|", A::VsplitCycle),
-                ("d", A::ToggleDim),
-                ("n ]", A::PaneNextTab),
-                ("p [", A::PanePrevTab),
-                ("c", A::PaneNewTab),
-                ("1-9", A::PaneTabByIndex(0)),
-                ("x", A::PaneCloseTab),
-                ("r", A::PaneRenameTab),
-                ("R", A::PaneRestartTab),
-                ("z", A::TogglePaneZoom),
-                ("v", A::PaneScrollEnter),
-                ("+", A::PaneGrow),
-                ("-", A::PaneShrink),
-                ("s", A::PaneSendSelection),
-                ("↓", A::PaneSendPrefix),
-                ("P", A::PanePipeContent),
-                ("i", A::PanePipeInventory),
-                ("u", A::QuickSelectOpen),
-                ("\\", A::TogglePane),
+                Act("j", A::PaneFocusDown),
+                Act("k", A::PaneFocusUp),
+                Act("a h", A::VsplitFocusLeft),
+                Act("b l", A::VsplitFocusRight),
+                Act("|", A::VsplitCycle),
+                Act("d", A::ToggleDim),
+                Act("n ]", A::PaneNextTab),
+                Act("p [", A::PanePrevTab),
+                Act("c", A::PaneNewTab),
+                Act("1-9", A::PaneTabByIndex(0)),
+                Act("x", A::PaneCloseTab),
+                Act("r", A::PaneRenameTab),
+                Act("R", A::PaneRestartTab),
+                Act("z", A::TogglePaneZoom),
+                Act("v", A::PaneScrollEnter),
+                Act("+", A::PaneGrow),
+                Act("-", A::PaneShrink),
+                Act("s", A::PaneSendSelection),
+                Act("↓", A::PaneSendPrefix),
+                Act("P", A::PanePipeContent),
+                Act("i", A::PanePipeInventory),
+                Act("u", A::QuickSelectOpen),
+                Act("\\", A::TogglePane),
+                Sub("Space", "global menu"),
             ],
             PendingSeq::CtrlS => vec![
-                ("n", A::OpenSecondCommander),
-                ("x", A::CloseSecondCommander),
+                Act("n", A::OpenSecondCommander),
+                Act("x", A::CloseSecondCommander),
             ],
             PendingSeq::Worktree => vec![
-                ("l", A::WorktreeList),
-                ("n", A::WorktreeNew),
-                ("d", A::WorktreeDelete),
+                Act("l", A::WorktreeList),
+                Act("n", A::WorktreeNew),
+                Act("d", A::WorktreeDelete),
             ],
             PendingSeq::Harpoon => vec![
-                ("1-9", A::HarpoonJump(0)),
-                ("a", A::HarpoonAppend),
-                ("x", A::HarpoonRemove),
-                ("h", A::HarpoonOpenMenu),
+                Act("1-9", A::HarpoonJump(0)),
+                Act("a", A::HarpoonAppend),
+                Act("x", A::HarpoonRemove),
+                Act("h", A::HarpoonOpenMenu),
             ],
             PendingSeq::Yank => vec![
-                ("y", A::Take),
-                ("f", A::YankPaths),
-                ("p", A::YankPrompt),
-                ("P", A::YankLastPrompt),
-                ("a", A::YankScrollback),
+                Act("y", A::Take),
+                Act("f", A::YankPaths),
+                Act("p", A::YankPrompt),
+                Act("P", A::YankLastPrompt),
+                Act("a", A::YankScrollback),
             ],
-            PendingSeq::Mark => vec![("a-z", A::SetMark('a'))],
-            PendingSeq::JumpMark => vec![("a-z", A::JumpMark('a')), ("'", A::JumpPrevDir)],
-            PendingSeq::NextBracket => vec![("g", A::JumpNextGitChange)],
-            PendingSeq::PrevBracket => vec![("g", A::JumpPrevGitChange)],
-            PendingSeq::D => vec![("d", A::RemovePrompt(None))],
-            PendingSeq::Z => vec![("Z", A::Quit)],
+            PendingSeq::Mark => vec![Act("a-z", A::SetMark('a'))],
+            PendingSeq::JumpMark => vec![Act("a-z", A::JumpMark('a')), Act("'", A::JumpPrevDir)],
+            PendingSeq::NextBracket => vec![Act("g", A::JumpNextGitChange)],
+            PendingSeq::PrevBracket => vec![Act("g", A::JumpPrevGitChange)],
+            PendingSeq::D => vec![Act("d", A::RemovePrompt(None))],
+            PendingSeq::Z => vec![Act("Z", A::Quit)],
         }
     }
 
@@ -248,6 +275,13 @@ impl Resolver {
         // regression. (`^a ^a` is already intercepted just above as
         // PaneLastTab, so it never reaches the `'a' | 'A'` focus arm here.)
         if self.pending == PendingSeq::W {
+            // `^a Space` → the global leader menu. This is the pane-focus path
+            // into it: bare Space can't be intercepted while typing in the pane
+            // (it's literal text), so `^a` wakes spyc and Space enters the menu.
+            if matches!(ev.code, KeyCode::Char(' ')) {
+                self.pending = PendingSeq::Leader;
+                return ResolverOutcome::Pending;
+            }
             let out = match ev.code {
                 // Vertical focus — j/J down (to pane), k up (to list/spyc row).
                 // `a`/`A` used to alias `j` here; reclaimed below for the
@@ -299,6 +333,25 @@ impl Resolver {
             let out = match ev.code {
                 KeyCode::Char('n' | 'N') => ResolverOutcome::Action(Action::OpenSecondCommander),
                 KeyCode::Char('x' | 'X') => ResolverOutcome::Action(Action::CloseSecondCommander),
+                _ => ResolverOutcome::Ignored,
+            };
+            self.reset();
+            return out;
+        }
+
+        // Mid-sequence: leader (`Space` / `^a Space`) — the global/workspace
+        // menu. `w` opens the worktree submenu (reusing the `W`-prefix
+        // sub-handler so `Space w l/n/d` == `W l/n/d`); the rest fire directly.
+        if self.pending == PendingSeq::Leader {
+            if matches!(ev.code, KeyCode::Char('w' | 'W')) {
+                self.pending = PendingSeq::Worktree;
+                return ResolverOutcome::Pending;
+            }
+            let out = match ev.code {
+                KeyCode::Char('p') => ResolverOutcome::Action(Action::JumpProjectHome),
+                KeyCode::Char('P') => ResolverOutcome::Action(Action::SetProjectHomeHere),
+                KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::ShowMemory),
+                KeyCode::Char('?') => ResolverOutcome::Action(Action::Help),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
@@ -390,7 +443,9 @@ impl Resolver {
                 KeyCode::Char('f') => ResolverOutcome::Action(Action::GotoFile),
                 KeyCode::Char('F') => ResolverOutcome::Action(Action::GotoFileLine),
                 KeyCode::Char('V') => ResolverOutcome::Action(Action::Version),
-                KeyCode::Char('h') => ResolverOutcome::Action(Action::JumpProjectHome),
+                // `gh` (project home) was dropped — it's now `Space p` (the
+                // leader/global menu), which removes the confusing `gh` vs `gw`
+                // pair. `gw` (jump to the worktree root) stays as frame nav.
                 KeyCode::Char('w') => ResolverOutcome::Action(Action::JumpWorktreeRoot),
                 KeyCode::Char('P') => ResolverOutcome::Action(Action::SetProjectHomeHere),
                 KeyCode::Char('S') => ResolverOutcome::Action(Action::SetStartDirHere),
@@ -552,9 +607,17 @@ impl Resolver {
                 let n = self.take_count();
                 ResolverOutcome::Action(Action::Up(n))
             }
-            KeyCode::Char('l' | ' ') | KeyCode::Right => {
+            KeyCode::Char('l') | KeyCode::Right => {
                 let n = self.take_count();
                 ResolverOutcome::Action(Action::Right(n))
+            }
+            // Space is the leader (global/workspace menu). It used to be a
+            // redundant alias for Right (→); `l` / `→` keep that. From pane
+            // focus the menu is reached via `^a Space` (see the `W` block) —
+            // a bare Space there is literal text for the child.
+            KeyCode::Char(' ') => {
+                self.pending = PendingSeq::Leader;
+                ResolverOutcome::Pending
             }
 
             KeyCode::PageUp => {

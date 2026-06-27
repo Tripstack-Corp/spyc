@@ -208,7 +208,10 @@ impl App {
                     .resolver
                     .continuations()
                     .into_iter()
-                    .map(|(keys, action)| (keys, action.describe()))
+                    .map(|e| match e {
+                        crate::keymap::ChordEntry::Act(keys, action) => (keys, action.describe()),
+                        crate::keymap::ChordEntry::Sub(keys, label) => (keys, label),
+                    })
                     .collect();
                 if !rows.is_empty() {
                     self.view.chord_hint = Some(ChordHint { title, rows });

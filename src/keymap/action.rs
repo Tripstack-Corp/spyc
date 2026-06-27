@@ -83,8 +83,8 @@ pub enum Action {
     JumpStartDir,   // ` — jump to directory where spyc was launched
 
     // Project home (sticky project root).
-    JumpProjectHome,    // gh — jump to PROJECT_HOME (the overall project)
-    JumpWorktreeRoot,   // gw — jump the focused column to ITS repo/worktree root
+    JumpProjectHome,  // Space p (leader) — jump to PROJECT_HOME (the overall project)
+    JumpWorktreeRoot, // gw — jump the focused column to ITS repo/worktree root
     SetProjectHomeHere, // gP — set PROJECT_HOME to current directory
 
     // Start dir (target of backtick `).
@@ -156,7 +156,7 @@ pub enum Action {
     HarpoonJump(u8), // H 1..9 — chdir to slot N's parent + cursor on it
     HarpoonAppend,   // H a — append cursor file/dir to harpoon list
     HarpoonRemove,   // H x — remove cursor file from harpoon list
-    HarpoonOpenMenu, // H h / g h — open the harpoon menu (reorder, delete, jump)
+    HarpoonOpenMenu, // H h — open the harpoon menu (reorder, delete, jump)
 
     // Git worktree (M11).
     WorktreeList,   // W l — list worktrees, pick to chdir

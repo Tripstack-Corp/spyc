@@ -147,9 +147,18 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
+        title: "Global menu (leader: Space, or ^a Space from the pane)",
+        rows: &[
+            ("Space w l|n|d", "worktree: list / new / delete"),
+            ("Space p", "jump to PROJECT_HOME (overall project)"),
+            ("Space P", "set PROJECT_HOME to current directory"),
+            ("Space s", "session info"),
+            ("Space ?", "this help"),
+        ],
+    },
+    Section {
         title: "Project home & session",
         rows: &[
-            ("g h", "jump to PROJECT_HOME (overall project)"),
             ("g w", "jump the focused column to its worktree / repo root"),
             ("g P", "set PROJECT_HOME to current directory"),
             ("g S", "set start dir (target of `) to current directory"),

@@ -334,14 +334,19 @@ on the top bar and persist across `spyc -r`.
 
 | Key | Action |
 |-----|--------|
-| `gh` | Jump to `PROJECT_HOME` |
-| `gP` | Set `PROJECT_HOME` to current directory |
+| `Space p` | Jump to `PROJECT_HOME` (leader; `^a Space p` from the pane) |
+| `gP` / `Space P` | Set `PROJECT_HOME` to current directory |
 | `gS` | Set start dir (target of `` ` ``) to current directory |
 | `gU` | Flash `user@host` in the status line |
 | `:project [.\|<path>\|clear]` | Manage `PROJECT_HOME` |
 | `:startdir [.\|<path>]` | Manage start dir |
 | `:name <NEW>` | Rename the active session |
 | `:whoami` | Show `user@host` |
+
+The **leader** (`Space`, or `^a Space` from the agent pane) opens a
+global/workspace menu: `Space w l\|n\|d` (worktree list/new/delete),
+`Space p` (project home), `Space s` (session info). Hold it to see the
+which-key popup.
 
 `PROJECT_HOME` is auto-set on startup if the launch directory contains
 `.git`. New pane tabs default their cwd to `PROJECT_HOME` when set.

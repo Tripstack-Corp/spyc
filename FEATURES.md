@@ -226,7 +226,7 @@ spyc's workflow: browse files above, talk to Claude below.
   search**, and **harpoon** all scope to the focused column's *worktree
   root* (so `b` in a separate worktree searches its own tree, with its
   own pinned harpoon list). **g w** jumps the focused column to its
-  worktree / repo root; `PROJECT_HOME` (jumped by `g h`) stays the
+  worktree / repo root; `PROJECT_HOME` (jumped by `Space p`) stays the
   overall anchor. Git markers in each column refresh on filesystem
   events independently. (The second-commander chord is `^s`, not `^z`:
   `^z` to a shell in the bottom pane is SIGTSTP — it'd background a
@@ -618,7 +618,28 @@ H-prefix bindings flash a hint and bail.
 
 Note: `H` was previously an alias for "jump to `$HOME`"; it's now
 the harpoon chord prefix. The `~` key and the Home key still jump
-to `$HOME`, and `gh` jumps to `PROJECT_HOME`.
+to `$HOME`, and `Space p` jumps to `PROJECT_HOME`.
+
+## Global menu (leader)
+
+Workspace-level commands live behind a **leader** so they're reachable
+from anywhere — including while you're typing to the agent in the bottom
+pane. The leader is **`Space`** in the file list; from the pane it's
+**`^a Space`** (a bare `Space` is literal text to the child, so `^a`
+wakes spyc first, then `Space` enters the menu). Hold it and the
+which-key popup lists the options:
+
+- **`Space w l` / `w n` / `w d`** — worktree list / new / delete (the same
+  submenu as the `W` prefix, which still works in the list).
+- **`Space p`** — jump to `PROJECT_HOME`.
+- **`Space P`** — set `PROJECT_HOME` to the current directory.
+- **`Space s`** — session info.
+- **`Space ?`** — open this help.
+
+This is the line between *global* commands (worktree, project — they make
+sense from any focus) and *frame* commands (git, picks, sort — they act on
+the file view and stay on the `g` / letter chords). `gh` (old project-home
+jump) is gone in favor of `Space p`; `gw` (jump to the worktree root) stays.
 
 ## Project home & session name
 
@@ -629,8 +650,8 @@ shown on the top bar and persist across `spyc -r`.
 - **Auto-detect** — `PROJECT_HOME` is set to the launch directory
   automatically when that directory contains a `.git` entry. No
   upward walk — the concept is explicit and predictable.
-- **Keys** — `gh` jumps to `PROJECT_HOME`; `gP` sets it to the current
-  directory; `gS` re-points the start directory (target of `` ` ``).
+- **Keys** — `Space p` jumps to `PROJECT_HOME`; `gP` (or `Space P`) sets it
+  to the current directory; `gS` re-points the start directory (target of `` ` ``).
 - **Commands** — `:project` prints; `:project .`, `:project <path>`,
   `:project clear` manage the value. `:startdir` manages start dir.
   `:name <NEW>` renames the session (normalized to
