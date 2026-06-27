@@ -21,16 +21,27 @@ for verbatim text and correct attribution.
 
 > ~~"The TUI-native agent-orchestration space is almost empty — a blue ocean."~~
 
-**It isn't.** The terminal lane already has an incumbent — **Claude Squad**
-(7.9k★, the self-described "most popular claude code multiplexer") — plus
-agent-deck, crmux, Codirigent, AgentWire and others. Users track **8+ tools by
-name** and are visibly fatigued by the flood. spyc's opening is real, but it is
-**differentiation in a crowd**, not first-mover in a vacuum.
+**It isn't.** The terminal lane already has **two** incumbents — **Claude Squad**
+(7.9k★, Go, the self-described "most popular claude code multiplexer") and, as of
+2026, **herdr** (~7.4k★, **Rust**, "agent multiplexer that lives in your
+terminal") — plus agent-deck, crmux, Codirigent, AgentWire and others. Users
+track **8+ tools by name** and are visibly fatigued by the flood. spyc's opening
+is real, but it is **differentiation in a crowd**, not first-mover in a vacuum.
 
-The differentiator therefore cannot be "a cross-platform TUI" — agent-deck and
-Claude Squad already are. It has to be **what spyc is that they aren't**: a real
-vi-driven file/process manager you already live in, with git-aware navigation,
-an in-process diff/review loop, and the MCP bridge.
+herdr matters more than the rest because it is spyc's **Rust-TUI twin**: same
+language, same cross-platform lane, and it has *already shipped* the two things
+this review flagged as spyc's biggest openings — a live agent-status sidebar
+(unmet need #2) and, architecturally, session persistence via a detach/reattach
+daemon (unmet need #4). It is fresh, sharp proof that **"a cross-platform Rust
+TUI" cannot itself be spyc's differentiator.**
+
+The differentiator therefore has to be **what spyc is that herdr and Claude Squad
+are not** — and the deep dive in §1a confirms herdr has *none* of these: a real
+vi-driven **file manager** you already live in (navigation, git-status gutter,
+marks, harpoon, picks), an **in-process diff/review loop** (herdr's own marketing
+concedes worktree-diff-review to others), and the **MCP bridge** that grounds the
+agent in your view. The wedge is **file-manager + review + MCP**, not "terminal,
+cross-platform, Rust" — herdr owns that ground too.
 
 ---
 
@@ -43,6 +54,7 @@ lane** is where spyc lives — and it already has occupants.
 | Tool | Lane | What it is · signal |
 |------|------|---------------------|
 | **Claude Squad** | TUI · cross-plat | 7.9k★ · Go · tmux+worktrees, AGPL. The terminal incumbent; "works like you'd expect," but dinged for clunky UX and no uninstall script. |
+| **herdr** | TUI · cross-plat | ~7.4k★ · **Rust** · AGPL+commercial, single maintainer. The closest twin — live agent-status sidebar (blocked/working/done/idle), detach/reattach daemon + live binary handoff, a Unix-socket orchestration API with **wait/subscribe** verbs, 15+ agents. But **no file manager, no diff/review, no MCP** — and its two headline features (hook-free status detection, persistence) are exactly where its bug reports cluster. See §1a. |
 | **cmux** | GUI · macOS | Swift/libghostty. Vertical tabs + notifications are loved; plagued by an 80 GB OOM leak, session loss, crash windows, and an agent-wrapper trust crisis. |
 | **supacode** | GUI · macOS 26 | Worktree command-center; beta, single-maintainer (~1,574 commits by one person), "Other" license, macOS-26-only floor, ~1k Homebrew installs/qtr. |
 | **Conductor** | GUI · macOS | Cloud/GitHub-OAuth model triggered a trust backlash ("keys for the kingdom"); "silicon only." |
@@ -70,6 +82,114 @@ The crowdedness is itself a documented user complaint:
 
 **Takeaway:** mindshare is now a moat. spyc needs a sharp one-line wedge or it
 disappears into this list.
+
+---
+
+## 1a. herdr — the closest twin (deep dive, June 2026)
+
+[herdr](https://github.com/ogulcancelik/herdr) — *"agent multiplexer that lives
+in your terminal."* Rust TUI, ~7.4k★ / 457 forks, v0.7.1 (2026-06-24, ~935
+commits), single maintainer, **dual AGPL-3.0 + commercial**. A **client/server
+daemon**: PTYs live in a headless background server, the TUI is a thin client.
+Headline features: a live **agent-status sidebar** (🔴 blocked / 🟡 working / 🔵
+done / 🟢 idle), **detach/reattach** + experimental **live binary handoff**
+(processes survive an upgrade), a **Unix-socket orchestration API**, mouse-native
+panes, 18 themes, 15+ agents, remote SSH attach. No file manager, no diff/review,
+no MCP.
+
+### What users actually say (verified)
+
+Discussion footprint is **thin and GitHub-star-driven, not community-driven** —
+herdr's own Show HN scored **5 points, 0 comments**
+([48247248](https://news.ycombinator.com/item?id=48247248)); most "reviews" are
+SEO/AI blog spam. The genuine voices, fetched and verified:
+
+- **The agent-status sidebar is the real hook.** "The one thing that [tmux] never
+  did well was tell me which agent needed me. In tmux I cycle through windows …
+  the only way to find out is to go and look at each." — Matt Coles,
+  [coles.codes](https://coles.codes/posts/herding-agents-with-herdr/). "Herdr
+  gives you a shared screen: who's blocked, who finished, who's still working."
+  — max_tokens, [maxtokens.ai](https://maxtokens.ai/posts/herdr-agent-multiplexer/).
+- **Detach/reattach over SSH + single Rust binary (no Electron)** is the #2 loved
+  trait. "The part that wins me over on a flaky ssh connection is detach and
+  reattach … the most natural fit I've come across." — Matt Coles (ibid).
+- **It beat cmux on cross-platform + remote** — the same wedge spyc claims:
+  > "a week ago I was using cmux but its osx only and doen't work on remote
+  > terminals. then I switched to herdr" — cultofmetatron,
+  > [HN](https://news.ycombinator.com/item?id=48220211)
+- **Young-project caution is universal** — both independent reviewers keep tmux
+  as a fallback. "It's brand new, v0.1.x … you're betting on something young, so
+  I've kept my tmux config around as a fallback." — Matt Coles (ibid).
+- **No sandboxing is a noted gap;** one user is openly tempted to a non-terminal
+  tool over it. "i'm currently using herd[r] … along with Nono for sandboxing …
+  I do think about something that works outside the terminal may be nicer." —
+  jpeeler, [HN](https://news.ycombinator.com/item?id=48424303).
+
+### The decisive signal: its two headline features are its two biggest bug clusters
+
+herdr's issue tracker (surveyed via `gh`, 2026-06-26) tells the strategic story.
+Of the last ~120 closed issues, **46+ are agent-detection failures** — because
+detection is **screen-scraping** the agent's terminal UI (OSC titles + Braille
+spinner glyphs + body text). Every agent-side cosmetic change or non-standard
+launcher silently breaks it:
+
+- Claude moved its spinner into the body → status stuck
+  ([#671](https://github.com/ogulcancelik/herdr/issues/671),
+  [#634](https://github.com/ogulcancelik/herdr/issues/634),
+  [#673](https://github.com/ogulcancelik/herdr/issues/673)).
+- nix/Happy-wrapped Claude is invisible to process-name matching
+  ([#803](https://github.com/ogulcancelik/herdr/issues/803),
+  [#773](https://github.com/ogulcancelik/herdr/issues/773)).
+- On **Linux, live agent status was a no-op entirely** until v0.7.0
+  ([#656](https://github.com/ogulcancelik/herdr/issues/656),
+  [#655](https://github.com/ogulcancelik/herdr/issues/655)) — detection is
+  macOS-first.
+
+Because herdr **owns a full terminal emulator**, it also inherits every VT/PTY
+bug a multiplexer has — and the worst one is a clean spyc win: `less` / `man` /
+git-pager are *"unusable inside panes"* because OSC 2/7 leak as literal text
+([#816](https://github.com/ogulcancelik/herdr/issues/816)). And the daemon
+architecture bites in macOS-specific ways — the live-handoff server loses
+responsible-process attribution, breaking the 1Password CLI forever
+([#808](https://github.com/ogulcancelik/herdr/issues/808)). Notably, herdr users
+are *requesting* the `<repo>.worktrees/<branch>` sibling layout
+([#261](https://github.com/ogulcancelik/herdr/issues/261)) that spyc already does
+natively, and the most-discussed open feature is a re-think of the agent panel to
+lead with *agent + task*, not folder
+([#222](https://github.com/ogulcancelik/herdr/issues/222), 10 comments).
+
+### Strategic read
+
+**What herdr validates (good news):** the cross-platform Rust-TUI bet, the
+terminal-native trust pitch, and — independently — the *"agents drive the
+manager"* pattern (its socket API is the same idea as spyc's MCP bridge). The
+demand for "which agent needs me" is now proven, not hypothetical.
+
+**Where herdr beats spyc (be honest):**
+- **Persistent detach/reattach of *running* processes** (daemon + live handoff).
+  spyc is single-process; `-r` restores tabs + agent conversations, not live
+  PTYs. This is a structural advantage we cannot claim parity on — and **should
+  not chase**: a daemon fights spyc's single-process MVU/sync core (see §6).
+- **A live, multi-pane agent-status panel shipped.** spyc's is still on the
+  backlog. This is a shared gap where herdr is ahead in *ambition*.
+
+**Where spyc wins (the sharpened moat):** all three confirmed absent from herdr —
+- **File manager.** herdr is panes/tabs/workspaces; spyc *is* a vi file manager
+  (git gutter, marks, harpoon, picks, frecency). Clearest unique identity.
+- **In-process diff/review loop.** herdr's own marketing concedes it ("Conductor,
+  Emdash, Superset … review diffs; Herdr orchestrates live terminals and agent
+  state"). Unmet need #3 is now **uncontested** in the TUI lane.
+- **MCP.** herdr's socket is proprietary and drives *its own* panes; spyc speaks
+  the protocol agents already discover natively, and grounds the agent in *your
+  view* (cwd/cursor/picks/git) — a different, richer axis.
+
+**The one insight that turns herdr's weakness into spyc's feature:** herdr's
+status detection is fragile *because it screen-scrapes*. spyc already owns an MCP
+server and already lazily writes per-agent config (`ensure_agent_mcp_config`).
+Building agent-status on the **MCP/hook channel** — a cooperative agent
+*self-reporting* working/blocked, plus a tunable scrape *fallback* — dodges the
+entire #671/#803 fragility class. That is how spyc wins a feature herdr struggles
+to keep working. The implementation plan is **`docs/AGENT_AWARENESS_PLAN.md`**.
 
 ---
 
@@ -144,6 +264,16 @@ liveness and PTY state; never trust hooks alone.
 > agent PID is still registered." —
 > [cmux #3751](https://github.com/manaflow-ai/cmux/issues/3751)
 
+**herdr update (now competitively urgent):** herdr *shipped* this — a live
+blocked/working/done/idle sidebar — and it's their #1 loved feature. But they
+build it by **screen-scraping** the agent's terminal UI, so it's their #1 bug
+source (46+ detection issues; broke when Claude moved its spinner; invisible to
+nix/Happy wrappers; was a no-op on Linux until v0.7.0). The differentiator is no
+longer "spyc has agent-status" — it's **"spyc does it reliably."** spyc's win:
+build it on the **MCP/hook channel** (cooperative agents *self-report* via the
+MCP config spyc already writes) with a tunable scrape *fallback* — dodging
+herdr's entire fragility class. This is the spine of `docs/AGENT_AWARENESS_PLAN.md`.
+
 ### 3. The review loop — diff & merge across worktrees *(demand: high · effort: low, already built · asset: in-house gix diff/show/blame)*
 
 The real ceiling isn't running agents — it's reviewing them. Users sit on 5–10
@@ -159,6 +289,16 @@ review a headline workflow.
 > Parallel agents only make sense if each worktree has a tight contract." —
 > amortka, [HN](https://news.ycombinator.com/item?id=46368739)
 
+**herdr update (now uncontested):** herdr has **no** diff/review — its own
+marketing concedes it ("Conductor, Emdash, Superset … review diffs; Herdr
+orchestrates live terminals and agent state"), and Claude Squad doesn't either.
+spyc's in-house side-by-side diff/show/blame (`gd`/`gD`/`gu`) is therefore the
+**only** in-process review loop in the TUI lane. This should move to the *front*
+of the wedge, not sit at #3. (Bonus: because spyc reviews in its own pager, it
+sidesteps herdr's "`less`/`man`/git-pager unusable inside panes" OSC-leak bug,
+[#816](https://github.com/ogulcancelik/herdr/issues/816) — a whole bug category
+spyc structurally doesn't have.)
+
 ### 4. Session persistence that survives a hard kill *(demand: high · effort: medium · asset: existing session save / `-r`)*
 
 cmux's "only reason I can't use it" blocker, open 2+ months: state lost on
@@ -171,6 +311,17 @@ recovery-sufficient on their own, never a thin fallback to a quit-time flush tha
 > hasn't been prioritized. I'd like to recommend to people but it's hard to with
 > this bug." — Seluj78 / clounie,
 > [cmux #2823](https://github.com/manaflow-ai/cmux/issues/2823)
+
+**herdr update (where herdr beats spyc — and why we don't chase it):** herdr
+solves this *architecturally* with a detach/reattach daemon whose PTYs survive
+client close and even a binary upgrade (live handoff via FD-passing). That's a
+genuine advantage we can't claim parity on — but adopting a daemon would fight
+spyc's single-process MVU/sync core, and herdr pays for it (macOS responsible-
+process/TCC loss on handoff, [#808](https://github.com/ogulcancelik/herdr/issues/808);
+a 7.8k-line headless server). **spyc's answer stays "resilient autosave, not a
+daemon":** make periodic state saves recovery-sufficient against `SIGKILL`, and
+capture richer layout + per-pane cwd so `-r` rebuilds faithfully. Win the 80%
+(state survives) without the daemon's complexity tax. (Explicitly out of scope in §6.)
 
 ### 5. Resource awareness at scale *(demand: medium · effort: medium · asset: process-stat tracking)*
 
@@ -205,17 +356,26 @@ vi-navigation: **keep pane indices stable.**
 
 ### The one-line wedge
 
-> The cross-platform, terminal-native one you already live in — a vi-driven
-> file, process & agent manager that creates worktrees, watches what each agent
-> is doing, and reviews their diffs, without leaving your terminal or trusting a
-> GUI with your repos.
+> The vi-driven **file manager** you already live in — that also spins up
+> worktrees, watches what each agent is doing, and **reviews their diffs
+> in-process** — without leaving your terminal or trusting a GUI with your repos.
+> Terminal-native and cross-platform like the multiplexers, but a real file &
+> review tool, not just a way to switch between agents.
 
-Three structural advantages back it:
+> **vs the GUIs** (cmux/Conductor/supacode): cross-platform, local-first, no
+> OAuth. **vs the Rust-TUI twin** (herdr) and Claude Squad: a *file manager* with
+> an *in-process review loop* and an *MCP bridge* — none of which they have. Lead
+> with file-manager + review; "terminal, cross-platform, Rust" is table stakes
+> now, not the wedge.
 
-- **Cross-platform moat.** The GUI leaders are macOS-only and can't easily cross
-  it (Swift/AppKit). Linux/SSH/Windows users are locked out — and are spyc's
-  natural early adopters. Demand is so large the community shipped 4+ Linux
-  forks of cmux:
+Structural advantages back it — but note which competitor each one beats:
+
+- **Cross-platform moat *(vs the GUI lane only)*.** The GUI leaders are
+  macOS-only and can't easily cross it (Swift/AppKit); Linux/SSH/Windows users
+  are locked out, and are spyc's natural early adopters. **Caveat: this does
+  *not* differentiate from herdr or Claude Squad**, which are cross-platform too
+  — against them the moat is file-manager + review, below. Demand vs the GUIs is
+  so large the community shipped 4+ Linux forks of cmux:
   > "Since last week, I've fallen in love with cmux, however as a main linux
   > user the non support broke my heart. So I decided to build my own:
   > cmux-for-linux." — cai0baa,
@@ -234,9 +394,14 @@ Three structural advantages back it:
   > executing Claude code in this terminal." — BartInTheField, on cmux silently
   > injecting `--allow-dangerously-skip-permissions`,
   > [cmux #3547](https://github.com/manaflow-ai/cmux/issues/3547)
-- **Not just a multiplexer.** Claude Squad / agent-deck switch sessions; spyc is
-  a full file/process manager with git-aware navigation and a review loop around
-  the agents.
+- **Not just a multiplexer *(vs herdr / Claude Squad)*.** This is *the* point
+  against the Rust-TUI twins. Claude Squad / agent-deck switch sessions; herdr is
+  the best-in-class multiplexer + agent-status sidebar — but all three are still
+  *multiplexers*. spyc is a full vi **file manager** (git-status gutter, marks,
+  harpoon, picks, frecency) with an **in-process review loop** (diff/show/blame,
+  `gd`/`gD`/`gu`) and an **MCP bridge** that grounds the agent in your view —
+  three things herdr's README confirms it has none of. The multiplexer is a
+  feature of spyc; for herdr it is the whole product.
 
 ### Objections to pre-empt at launch
 
@@ -299,6 +464,13 @@ authors' own Show HN.
 **Implication:** seed early to a friendly niche (r/rust, r/commandline), make it
 demoable enough that fans carry it to HN. Don't bank on your own submission.
 
+**herdr is a fresh cautionary datapoint:** despite ~7.4k stars, herdr's own Show
+HN scored **5 points, 0 comments** ([48247248](https://news.ycombinator.com/item?id=48247248)),
+and it has effectively *no* organic Reddit/lobste.rs/HN-front-page discussion —
+its momentum is GitHub-star + SEO-blog amplification, not community debate. Stars
+are not the same as a discussion breakout; the organic-repost pattern above is
+still the lever that matters.
+
 ### The repeatable levers a solo/small team controls
 
 - **The README is the storefront.** "I don't have a standalone landing page or
@@ -340,22 +512,34 @@ lobste.rs (niche, low reach).
 
 ## 6. Immediate next moves, ranked
 
-1. **Ship the worktree-bootstrap story** *(highest unmet demand; design spike
+Reordered after the herdr deep dive (§1a): the **review loop is now the single
+uncontested wedge**, and **agent-status is competitively urgent but must be done
+the reliable (MCP/hook) way**, not herdr's fragile scrape.
+
+1. **Make per-worktree diff review a headline workflow** *(now THE wedge; mostly
+   built).* No other TUI-lane tool has an in-process review loop — herdr concedes
+   it outright. spyc has in-house diff/show/blame (`gd`/`gD`/`gu`); surface it as
+   "review & merge across your agents," and lead the README with it.
+2. **Reliable agent-status — the differentiated way** *(founding pain; herdr
+   shipped it fragile).* Per-pane running/blocked/idle/done, but built on the
+   **MCP/hook self-report channel** (cooperative agents report via the config
+   spyc already writes) with a tunable scrape *fallback* — dodging herdr's 46+
+   detection bugs. Stable pane indices for vi muscle memory. Plan:
+   **`docs/AGENT_AWARENESS_PLAN.md`**.
+3. **Ship the worktree-bootstrap story** *(highest unmet demand; design spike
    first).* Make "new worktree carries your untracked files / runs your setup
    hook" first-class. Nobody owns it; spyc's graveyard machinery is the start.
-2. **Make per-worktree diff review a headline workflow** *(high demand; mostly
-   built).* spyc already has in-house diff/show/blame — surface it as "review &
-   merge across your agents."
-3. **Reliable agent-status indicators** *(founding pain; design spike).* Running
-   / needs-input / idle per pane, corroborated by PID + PTY state, with **stable
-   pane indices** for vi muscle memory. (Already on the backlog — worth its own
-   worktree + plan.)
-4. **Land the discovery PRs + Terminal Trove** *(low effort; demo GIF ready).*
+4. **Resilient session autosave (NOT a daemon)** *(herdr beats us architecturally
+   — pick the cheaper win).* Make periodic saves `SIGKILL`-recovery-sufficient
+   and capture richer layout + per-pane cwd for `-r`. Explicitly **do not** build
+   a detach/reattach daemon — it fights spyc's single-process MVU/sync core.
+5. **Land the discovery PRs + Terminal Trove** *(low effort; demo GIF ready).*
    awesome-ratatui, awesome-tuis, Terminal Trove. Permanent, on-audience, before
    any HN attempt.
-5. **Tighten the README around the wedge** *(low effort).* Lead with the workflow
-   pain and the "one tool you already live in" wedge; pre-empt the tmux
-   objection. (v1 reframe + demo GIF landed in PR #507.)
+6. **Tighten the README around the sharpened wedge** *(low effort).* Lead with
+   file-manager + in-process review (the uncontested ground), not
+   "cross-platform Rust TUI" (herdr owns that too). Pre-empt the tmux objection.
+   (v1 reframe + demo GIF landed in PR #507.)
 
 ---
 
@@ -373,6 +557,17 @@ Primary sources, all fetched and verified:
 - **GitHub issues:** manaflow-ai/cmux (#330, #1012, #2322, #2823, #3547, #3751,
   #4529, #6584, #6593, #6598, #6599) · supabitapp/supacode (#436, #441, #443,
   #444, #445, #448) · smtg-ai/claude-squad and asheshgoplani/agent-deck repos.
+- **herdr (§1a):** [repo](https://github.com/ogulcancelik/herdr) + issues (open +
+  closed, surveyed via `gh` 2026-06-26: detection cluster #671/#634/#673/#803/#773/#656/#655,
+  terminal-emulation #816/#696/#722/#283, daemon/macOS #808/#774, features
+  #222/#261/#303) · source deep-dive of v0.7.1 (detection manifests, the
+  line-delimited-JSON socket API with `events.subscribe`/`pane.wait_for_output`,
+  the two-tier hook integration, SCM_RIGHTS live handoff) — **AGPL-3.0; ideas
+  only, no code reused.** Verified user voices: [coles.codes](https://coles.codes/posts/herding-agents-with-herdr/) ·
+  [maxtokens.ai](https://maxtokens.ai/posts/herdr-agent-multiplexer/) · HN
+  [48220211](https://news.ycombinator.com/item?id=48220211),
+  [48424303](https://news.ycombinator.com/item?id=48424303),
+  [48247248](https://news.ycombinator.com/item?id=48247248) (its flat Show HN).
 - **GTM:** [lazygit "5 Years On"](https://jesseduffield.com/Lazygit-5-Years-On/) ·
   [Atuin / Changelog #579](https://changelog.com/podcast/579) ·
   [Why Zellij?](https://poor.dev/blog/why-zellij/) ·
