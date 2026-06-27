@@ -322,9 +322,10 @@ impl App {
     }
 
     /// Render the which-key chord-hint popup: a centered box listing the armed
-    /// chord's continuations (`keys → label`), flowed into as many columns as
-    /// fit. Drawn from `view.chord_hint` (built in `settle_chord_hint`); a pure
-    /// `&self` read. No-op when no popup is active.
+    /// chord's continuations (`keys → label`). Long labels **wrap** onto indented
+    /// continuation lines (never truncated); entries flow into as many columns as
+    /// the terminal height needs. Drawn from `view.chord_hint` (built in
+    /// `settle_chord_hint`); a pure `&self` read. No-op when no popup is active.
     pub(super) fn render_chord_hint(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
         use ratatui::{
             layout::Rect,
@@ -339,9 +340,11 @@ impl App {
             return;
         }
 
-        // Column geometry. Labels are capped so one verbose entry can't blow
-        // the box past the screen width.
-        const LABEL_CAP: usize = 34;
+        // Column geometry. The label column is capped so a verbose entry wraps
+        // instead of widening the box past a comfortable size; the key column is
+        // the widest key. One rendered cell line is exactly `col_w` wide:
+        // " <key padded>  <label padded> ".
+        const LABEL_MAX: usize = 38;
         let key_w = hint
             .rows
             .iter()
@@ -351,22 +354,67 @@ impl App {
         let label_w = hint
             .rows
             .iter()
-            .map(|(_, l)| crate::ui::display_width(l).min(LABEL_CAP))
+            .map(|(_, l)| crate::ui::display_width(l))
             .max()
-            .unwrap_or(0);
-        let col_w = key_w + 2 + label_w + 1; // " <key>  <label> "
+            .unwrap_or(0)
+            .clamp(1, LABEL_MAX);
+        let col_w = key_w + label_w + 4;
 
-        // Flow into columns: enough columns that each fits the available height,
-        // capped by the available width.
-        let margin = 4u16;
-        let body_h_max = (area.height.saturating_sub(margin)).max(1) as usize;
-        let max_cols = ((area.width.saturating_sub(margin)) as usize / col_w.max(1)).max(1);
-        let n_cols = hint.rows.len().div_ceil(body_h_max).clamp(1, max_cols);
-        let col_h = hint.rows.len().div_ceil(n_cols);
+        let key_style = Style::default()
+            .fg(self.view.theme.pick)
+            .add_modifier(Modifier::BOLD);
+        let label_style = Style::default().fg(self.view.theme.status_path);
 
-        let inner_w = (n_cols * col_w) as u16;
-        let width = (inner_w + 2).min(area.width);
-        let height = (col_h as u16 + 2).min(area.height);
+        // Build one cell per entry: its key on the first line, the label
+        // word-wrapped to `label_w` across as many lines as it needs (the
+        // continuation lines leave the key column blank).
+        let cells: Vec<Vec<Line>> = hint
+            .rows
+            .iter()
+            .map(|(keys, label)| {
+                let segs = wrap_label(label, label_w);
+                segs.iter()
+                    .enumerate()
+                    .map(|(i, seg)| {
+                        let key_cell = if i == 0 {
+                            format!(" {keys:>key_w$}  ")
+                        } else {
+                            " ".repeat(key_w + 3)
+                        };
+                        Line::from(vec![
+                            Span::styled(key_cell, key_style),
+                            Span::styled(format!("{seg:<label_w$} "), label_style),
+                        ])
+                    })
+                    .collect()
+            })
+            .collect();
+
+        // Flow cells into columns, balancing by rendered-line count so a tall
+        // menu (or one with wrapped labels) splits into columns rather than
+        // overflowing the screen height. An entry never splits across columns.
+        let body_h = (area.height as usize).saturating_sub(2).max(1);
+        let total_lines: usize = cells.iter().map(Vec::len).sum();
+        let max_cols = ((area.width as usize).saturating_sub(2) / col_w.max(1)).max(1);
+        let n_cols = total_lines.div_ceil(body_h).clamp(1, max_cols);
+        let target = total_lines.div_ceil(n_cols).max(1);
+
+        let mut columns: Vec<Vec<Line>> = Vec::new();
+        let mut cur: Vec<Line> = Vec::new();
+        for cell in cells {
+            if !cur.is_empty() && cur.len() + cell.len() > target {
+                columns.push(std::mem::take(&mut cur));
+            }
+            cur.extend(cell);
+        }
+        if !cur.is_empty() {
+            columns.push(cur);
+        }
+
+        let n = columns.len().max(1);
+        let rows_tall = columns.iter().map(Vec::len).max().unwrap_or(0);
+        let width = ((n * col_w) as u16 + 2).min(area.width);
+        let height = (rows_tall as u16 + 2).min(area.height);
         let x = area.x + area.width.saturating_sub(width) / 2;
         let y = area.y + area.height.saturating_sub(height) / 2;
         let rect = Rect {
@@ -384,33 +432,52 @@ impl App {
         let inner = block.inner(rect);
         frame.render_widget(block, rect);
 
-        let key_style = Style::default()
-            .fg(self.view.theme.pick)
-            .add_modifier(Modifier::BOLD);
-        let label_style = Style::default().fg(self.view.theme.status_path);
-        let mut lines: Vec<Line> = Vec::with_capacity(col_h);
-        for r in 0..col_h {
-            let mut spans: Vec<Span> = Vec::with_capacity(n_cols * 2);
-            for c in 0..n_cols {
-                // Column-major fill: column 0 top-to-bottom, then column 1, …
-                let Some(&(keys, label)) = hint.rows.get(c * col_h + r) else {
-                    continue;
-                };
-                let mut lbl = label.to_string();
-                if crate::ui::display_width(&lbl) > LABEL_CAP {
-                    lbl = lbl
-                        .chars()
-                        .take(LABEL_CAP.saturating_sub(1))
-                        .collect::<String>();
-                    lbl.push('…');
+        // Stitch the columns side by side row-by-row; pad missing cells with a
+        // blank `col_w`-wide span so columns stay aligned.
+        let blank = Span::styled(" ".repeat(col_w), label_style);
+        let mut lines: Vec<Line> = Vec::with_capacity(rows_tall);
+        for r in 0..rows_tall {
+            let mut spans: Vec<Span> = Vec::with_capacity(n * 2);
+            for col in &columns {
+                match col.get(r) {
+                    Some(line) => spans.extend(line.spans.iter().cloned()),
+                    None => spans.push(blank.clone()),
                 }
-                let key_pad = " ".repeat(key_w.saturating_sub(crate::ui::display_width(keys)));
-                let lbl_pad = " ".repeat(label_w.saturating_sub(crate::ui::display_width(&lbl)));
-                spans.push(Span::styled(format!(" {key_pad}{keys}  "), key_style));
-                spans.push(Span::styled(format!("{lbl}{lbl_pad} "), label_style));
             }
             lines.push(Line::from(spans));
         }
         frame.render_widget(Paragraph::new(lines), inner);
     }
+}
+
+/// Greedy word-wrap a popup label to `width` display columns. Returns one
+/// segment per line. A single word longer than `width` lands on its own line
+/// (popup labels never contain such words, so this stays simple).
+fn wrap_label(label: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    if crate::ui::display_width(label) <= width {
+        return vec![label.to_string()];
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut cur_w = 0usize;
+    for word in label.split(' ') {
+        let ww = crate::ui::display_width(word);
+        if cur_w == 0 {
+            cur.push_str(word);
+            cur_w = ww;
+        } else if cur_w + 1 + ww <= width {
+            cur.push(' ');
+            cur.push_str(word);
+            cur_w += 1 + ww;
+        } else {
+            lines.push(std::mem::take(&mut cur));
+            cur.push_str(word);
+            cur_w = ww;
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
 }
