@@ -225,6 +225,10 @@ const SECTIONS: &[Section] = &[
             ("^a r", "rename active tab"),
             ("^a R", "restart active tab command"),
             (
+                "● / ·",
+                "agent tab activity dot: spicy pulse = working, dim = idle (:why-status explains)",
+            ),
+            (
                 "^a +  ^a -",
                 "grow / shrink the focused split (pane height / vsplit width)",
             ),

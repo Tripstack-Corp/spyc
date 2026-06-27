@@ -166,6 +166,41 @@ pub(super) fn cmd_date(app: &mut App, _args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
+/// `:why-status` — explain the active tab's agent-activity classification (P0
+/// debug aid, `docs/AGENT_AWARENESS_PLAN.md`): the derived state and how long
+/// since its last pane output. The state is the coarse output-timing signal
+/// (`App::settle_agent_activity`) — a silent thinking pause reads as idle until
+/// the P1 semantic hook lands. App-layer (reads the live pane tabs + clock).
+pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
+    use crate::pane::AgentActivity;
+    use crate::state::sessions::AgentKind;
+    let Some(tabs) = app.runtime.pane_tabs.as_ref() else {
+        app.state.flash_info("why-status: no pane open");
+        return Vec::new();
+    };
+    let info = tabs.active_info();
+    let is_agent = crate::agent::detect(&info.command).kind() != AgentKind::Other;
+    let age = match info.last_output_at {
+        Some(at) => format!("{:.1}s since last output", at.elapsed().as_secs_f32()),
+        None => "no output yet".to_string(),
+    };
+    let msg = if is_agent {
+        let state = match info.activity {
+            AgentActivity::Working => "working",
+            AgentActivity::Idle => "idle",
+            AgentActivity::Unknown => "unknown",
+        };
+        format!(
+            "why-status [{}]: {state} — {age} (output-timing signal)",
+            info.label
+        )
+    } else {
+        format!("why-status: '{}' is not a known agent — no dot", info.label)
+    };
+    app.state.flash_info(msg);
+    Vec::new()
+}
+
 /// `:dump-scrollback` — diagnostic for the ^a-v snapshot path. Drains the active
 /// pane and writes the snapshot (one line per row) to /tmp/spyc-scrollback.txt;
 /// useful when content visible on the live pane seems to go missing in the pager

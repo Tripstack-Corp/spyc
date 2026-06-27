@@ -95,10 +95,19 @@ impl App {
                     entry.info.label.clone()
                 };
                 let tab_text = format!("[{}{star}{activity}] {label} ", i + 1);
+                // The live agent-activity dot (P0): a spicy heat-pulse `●` while
+                // the agent is Working, a quiet `·` when Idle, nothing for a
+                // non-agent tab. A separate span so it carries its own (pulsing)
+                // color independent of the tab label's style.
+                let dot = self.agent_activity_span(entry.info.activity);
+                let dot_w = dot
+                    .as_ref()
+                    .map_or(0, |s| crate::ui::display_width(s.content.as_ref()));
                 // Measure in display columns, not bytes — `sep` ("─") is 3
                 // bytes but 1 column, and a label can carry multibyte chars;
                 // `used`/`width` are column budgets.
-                let tab_len = crate::ui::display_width(sep) + crate::ui::display_width(&tab_text);
+                let tab_len =
+                    crate::ui::display_width(sep) + crate::ui::display_width(&tab_text) + dot_w;
                 if used + tab_len > width {
                     break;
                 }
@@ -111,6 +120,9 @@ impl App {
                     inactive_tab_style
                 };
                 spans.push(Span::styled(tab_text, style));
+                if let Some(dot) = dot {
+                    spans.push(dot);
+                }
                 used += tab_len;
             }
         }
@@ -242,6 +254,60 @@ impl App {
         let _ = used;
 
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    }
+
+    /// The per-tab agent-activity dot span (P0): a spicy heat-pulse `●` while
+    /// the agent is Working, a quiet `·` when Idle, `None` for a non-agent /
+    /// never-output tab (so only agent tabs carry a dot). PURE — reads the theme
+    /// and the already-settled `agent_anim_frame` (advanced off the draw path in
+    /// `settle_agent_activity`); the draw never touches the clock.
+    fn agent_activity_span(
+        &self,
+        activity: crate::pane::AgentActivity,
+    ) -> Option<ratatui::text::Span<'static>> {
+        use crate::pane::AgentActivity;
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::Span;
+        match activity {
+            AgentActivity::Unknown => None,
+            AgentActivity::Idle => Some(Span::styled(
+                " ·",
+                Style::default().fg(self.view.theme.status_suffix),
+            )),
+            AgentActivity::Working => Some(Span::styled(
+                " \u{25cf}", // ●
+                Style::default()
+                    .fg(self.spicy_pulse_color(self.view.agent_anim_frame))
+                    .add_modifier(Modifier::BOLD),
+            )),
+        }
+    }
+
+    /// Map a "spicy pulse" frame to a warm pepper-heat color: a 6-phase
+    /// ping-pong (deep-red → ember → orange → spark and back) so the Working dot
+    /// *breathes* like a heating pepper rather than blinking. Truecolor walks an
+    /// RGB gradient; a 16/256-color terminal alternates two warm ANSI hues; a
+    /// mono theme drops to the single accent (no pulse). PURE.
+    const fn spicy_pulse_color(&self, frame: u64) -> ratatui::style::Color {
+        use ratatui::style::Color;
+        if self.view.theme.mono {
+            return self.view.theme.prompt_prefix;
+        }
+        if self.view.hud_truecolor {
+            const HEAT: [(u8, u8, u8); 4] = [
+                (0xE0, 0x32, 0x22), // pepper red
+                (0xF4, 0x62, 0x12), // ember
+                (0xFF, 0x95, 0x12), // orange
+                (0xFF, 0xC4, 0x36), // spark
+            ];
+            const PHASE: [usize; 6] = [0, 1, 2, 3, 2, 1];
+            let (r, g, b) = HEAT[PHASE[(frame % PHASE.len() as u64) as usize]];
+            Color::Rgb(r, g, b)
+        } else if frame.is_multiple_of(2) {
+            Color::Red
+        } else {
+            Color::LightYellow
+        }
     }
 
     /// Status-bar header: the left (path / view name) and right

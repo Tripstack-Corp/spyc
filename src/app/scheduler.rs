@@ -45,6 +45,15 @@ pub enum Deadline {
     /// `MAX_IDLE_CAP` gone (3d), nothing else wakes the loop to advance the
     /// displayed seconds on a quiet child. POST-recv (like `ActivityRollover`).
     CaptureTick,
+    /// Agent-activity (P0): wake to flip a Working tab to Idle once its
+    /// `last_output_at` is older than `AGENT_ACTIVE_WINDOW`. Armed at the
+    /// earliest such flip across agent tabs, disarmed when none is Working.
+    /// PRE-recv (`settle_agent_activity`).
+    AgentIdle,
+    /// Agent-activity (P0): ~4 Hz tick that advances the "spicy pulse"
+    /// animation frame while ≥1 agent tab is Working. Disarmed when all tabs
+    /// are quiet, so idle stays 0 dps. PRE-recv (`settle_agent_activity`).
+    AgentAnim,
 }
 
 /// Run()-local deadline scheduler (MVU Phase 2). **Advisory** — it only

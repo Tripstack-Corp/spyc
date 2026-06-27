@@ -67,8 +67,18 @@ and a **notification/bell** when a backgrounded agent needs you.
 
 ## Phase 0 — Status vocabulary + a place to show it *(low effort, no new deps)*
 
-Foundation the rest builds on. spyc already computes a coarse agent status
-off-thread; this formalizes it and gives it a render surface.
+> **Status: SHIPPED.** P0 landed as the `AgentActivity { Working, Idle, Unknown }`
+> vocabulary + a per-agent-tab dot in the divider — a **spicy heat-pulse `●`**
+> (the pepper-red→ember→orange→spark "working animation") while output flows,
+> `·` when idle — plus `:why-status`. Note the build revealed P0's premise was
+> wrong: spyc computed agent *identity* (the `claude:<sha>` short-id), **not**
+> activity. So P0 also introduced the first real (agent-agnostic, scrape-free)
+> activity signal: per-tab `last_output_at` timing (`settle_agent_activity`,
+> debounced via the `AgentIdle`/`AgentAnim` scheduler deadlines). `Blocked`,
+> `Done`, and staying-Working-through-a-silent-thinking-pause remain P1 (they
+> need the semantic hook — output timing reads a silent agent as `Idle`).
+
+Foundation the rest builds on.
 
 **P0-1 · Explicit status vocabulary.**
 A small enum — `{ Idle, Working, Blocked, Unknown }` — plus a derived `Done`

@@ -61,6 +61,28 @@ pub fn resume_still_unsubmitted(tail_lines: &[String], sid: &str) -> bool {
     tail_lines.iter().any(|l| l.contains(sid))
 }
 
+/// Coarse activity state of a tab's process, derived from output timing
+/// (`App::settle_agent_activity`) and shown as a colored dot per **agent** tab
+/// in the divider.
+///
+/// This is the P0 vocabulary from `docs/AGENT_AWARENESS_PLAN.md`. It is a
+/// deliberately coarse *"is output flowing"* signal: `Working` while a tab has
+/// produced output within `AGENT_ACTIVE_WINDOW`, `Idle` once it has gone quiet,
+/// `Unknown` for a non-agent tab or one that has never produced output (no dot).
+/// The richer `Blocked` / `Done` states — and staying `Working` through a silent
+/// thinking pause — need the semantic self-report channel planned for P1, not
+/// output timing; an agent thinking with no output reads as `Idle` here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum AgentActivity {
+    /// Output produced within the active window — the agent is doing something.
+    Working,
+    /// Quiet for the active window — finished, or thinking silently.
+    Idle,
+    /// Not an agent tab, or no output seen yet. Renders no dot.
+    #[default]
+    Unknown,
+}
+
 /// Per-tab metadata displayed in the status line.
 pub struct TabInfo {
     /// Full command string passed to `Pane::spawn`.
@@ -71,6 +93,13 @@ pub struct TabInfo {
     pub cwd: PathBuf,
     /// True when a background tab received output since last viewed.
     pub has_activity: bool,
+    /// Monotonic instant of this tab's most recent pane output, stamped in
+    /// `App::drain_pane_output`. `None` until the first output. Drives
+    /// [`AgentActivity`] via `App::settle_agent_activity`.
+    pub last_output_at: Option<std::time::Instant>,
+    /// Cached coarse activity state, recomputed OFF the draw path in
+    /// `App::settle_agent_activity` (render is pure and can't read `now`).
+    pub activity: AgentActivity,
     /// Set when the tab was spawned by session restore as a `claude
     /// --resume`. On a non-zero exit shortly after spawn we treat the
     /// resume as failed and replace the tab with a fresh spawn of this
@@ -120,6 +149,8 @@ impl TabInfo {
             label,
             cwd,
             has_activity: false,
+            last_output_at: None,
+            activity: AgentActivity::Unknown,
             restore_fallback: None,
             pending_resume_send: None,
             spawn_at: std::time::Instant::now(),

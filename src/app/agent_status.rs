@@ -11,7 +11,21 @@
 //! worker that wakes the loop on completion; render reads the cache and never
 //! blocks.
 
-use super::{AGENT_STATUS_TTL, AgentKind, AgentStatusCache, App, Message};
+use std::time::{Duration, Instant};
+
+use super::{AGENT_STATUS_TTL, AgentKind, AgentStatusCache, App, Deadline, Message, RunCtx};
+use crate::pane::AgentActivity;
+
+/// How long after a tab's last pane output it still counts as `Working`. Long
+/// enough to bridge the sub-second gaps between streamed token chunks; short
+/// enough that "the agent stopped" reads as `Idle` promptly. A silent thinking
+/// pause longer than this reads as `Idle` — true working-through-silence needs
+/// the P1 semantic hook (`docs/AGENT_AWARENESS_PLAN.md`), not output timing.
+const AGENT_ACTIVE_WINDOW: Duration = Duration::from_secs(2);
+
+/// Cadence of the "spicy pulse" working animation (~4 Hz). Armed only while
+/// ≥1 agent tab is `Working`, so an all-idle pane set still draws 0 fps.
+const AGENT_ANIM_INTERVAL: Duration = Duration::from_millis(250);
 
 impl App {
     /// PURE `&self` read for the draw pass: the active pane's cached agent
@@ -165,6 +179,91 @@ impl App {
         }
         matches
     }
+
+    /// Pure derivation of a tab's [`AgentActivity`] from output timing — the
+    /// testable core of [`Self::settle_agent_activity`]. A non-agent tab is
+    /// `Unknown` (no dot); an agent tab is `Working` while its last output is
+    /// within [`AGENT_ACTIVE_WINDOW`], else `Idle` (including before any output).
+    fn activity_for(
+        is_agent: bool,
+        last_output_at: Option<Instant>,
+        now: Instant,
+    ) -> AgentActivity {
+        if !is_agent {
+            return AgentActivity::Unknown;
+        }
+        match last_output_at {
+            Some(at) if now.saturating_duration_since(at) < AGENT_ACTIVE_WINDOW => {
+                AgentActivity::Working
+            }
+            _ => AgentActivity::Idle,
+        }
+    }
+
+    /// Agent-activity (P0): derive each agent tab's [`AgentActivity`] from the
+    /// `last_output_at` that `drain_pane_output` stamps, advance the spicy
+    /// pulse, and arm the two activity deadlines. Returns whether the frame
+    /// changed (the caller marks a redraw).
+    ///
+    /// `&mut` settle point (pre-recv) — NOT the pure draw — because it reads the
+    /// clock (`now`) and re-arms timers. A tab counts as `Working` while its
+    /// last output is within [`AGENT_ACTIVE_WINDOW`]; `AgentIdle` is armed at the
+    /// earliest pending flip so the loop wakes to drop it to `Idle`, and
+    /// `AgentAnim` ticks the pulse while any tab is Working. When no tab is
+    /// Working both are disarmed, so an all-idle pane set draws 0 fps (the idle
+    /// invariant). Non-agent tabs are left `Unknown` (no dot).
+    pub(crate) fn settle_agent_activity(&mut self, now: Instant, ctx: &mut RunCtx) -> bool {
+        // Snapshot the anim epoch up front so the `pane_tabs` mutable borrow
+        // below doesn't overlap the `self.view` read.
+        let anim_epoch = self.view.started_at;
+        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+            ctx.scheduler.disarm(Deadline::AgentIdle);
+            ctx.scheduler.disarm(Deadline::AgentAnim);
+            return false;
+        };
+
+        let mut changed = false;
+        let mut earliest_flip: Option<Instant> = None;
+        let mut any_working = false;
+        for entry in tabs.tabs_mut() {
+            let is_agent = crate::agent::detect(&entry.info.command).kind() != AgentKind::Other;
+            let new = Self::activity_for(is_agent, entry.info.last_output_at, now);
+            if new == AgentActivity::Working
+                && let Some(at) = entry.info.last_output_at
+            {
+                let flip = at + AGENT_ACTIVE_WINDOW;
+                earliest_flip = Some(earliest_flip.map_or(flip, |m: Instant| m.min(flip)));
+                any_working = true;
+            }
+            if entry.info.activity != new {
+                entry.info.activity = new;
+                changed = true;
+            }
+        }
+
+        // Wake to flip Working→Idle at the earliest pending boundary.
+        match earliest_flip {
+            Some(t) => ctx.scheduler.arm(Deadline::AgentIdle, t),
+            None => ctx.scheduler.disarm(Deadline::AgentIdle),
+        }
+        // Advance + keep ticking the pulse while anything works; freeze otherwise.
+        if any_working {
+            let frame = u64::try_from(
+                now.saturating_duration_since(anim_epoch).as_millis()
+                    / AGENT_ANIM_INTERVAL.as_millis(),
+            )
+            .unwrap_or(0);
+            if frame != self.view.agent_anim_frame {
+                self.view.agent_anim_frame = frame;
+                changed = true;
+            }
+            ctx.scheduler
+                .arm(Deadline::AgentAnim, now + AGENT_ANIM_INTERVAL);
+        } else {
+            ctx.scheduler.disarm(Deadline::AgentAnim);
+        }
+        changed
+    }
 }
 
 #[cfg(test)]
@@ -212,6 +311,40 @@ mod tests {
             !app.runtime
                 .agent_status_refreshing
                 .load(std::sync::atomic::Ordering::Acquire)
+        );
+    }
+
+    // Agent-activity (P0): the requirement behind the dot — Working only while
+    // output is within the active window, Idle once quiet, Unknown (no dot) for
+    // a non-agent tab. Tests the pure derivation directly (no RunCtx needed).
+    #[test]
+    fn activity_for_tracks_the_output_window() {
+        use crate::pane::AgentActivity;
+        use std::time::{Duration, Instant};
+        // `base` is the output time; advance `now` past it by adding (Instant +
+        // Duration is allowed; `Instant - Duration` trips the no-unchecked-time
+        // lint and could underflow near process start).
+        let base = Instant::now();
+        // A non-agent tab never gets a dot, even with fresh output.
+        assert_eq!(
+            App::activity_for(false, Some(base), base),
+            AgentActivity::Unknown
+        );
+        // An agent tab with no output yet is Idle (alive but quiet), not Unknown.
+        assert_eq!(App::activity_for(true, None, base), AgentActivity::Idle);
+        // Output at/within the window → Working.
+        assert_eq!(
+            App::activity_for(true, Some(base), base),
+            AgentActivity::Working
+        );
+        assert_eq!(
+            App::activity_for(true, Some(base), base + Duration::from_millis(500)),
+            AgentActivity::Working
+        );
+        // Output older than the window → Idle (the "agent stopped" signal).
+        assert_eq!(
+            App::activity_for(true, Some(base), base + Duration::from_millis(2500)),
+            AgentActivity::Idle
         );
     }
 }

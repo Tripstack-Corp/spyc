@@ -712,6 +712,11 @@ pub struct ViewState {
     pub pane_send_at: Option<std::time::Instant>,
     /// `App::run` process start (activity-monitor uptime).
     pub started_at: std::time::Instant,
+    /// Agent-activity (P0) "spicy pulse" animation frame, advanced in
+    /// `settle_agent_activity` (a `&mut` settle point — render is pure and
+    /// can't read the clock) while ≥1 agent tab is Working. The pure draw maps
+    /// it to a warm heat color for the per-tab dot.
+    pub agent_anim_frame: u64,
     /// Process-lifetime constants for the activity HUD, snapshotted ONCE at
     /// construction so the pure `&self` render pass never reads the OS / env
     /// per frame (the render-purity contract): the pid (for `sample`/lldb),
@@ -780,6 +785,7 @@ impl ViewState {
             activity: activity::ActivityMonitor::new(std::time::Instant::now()),
             pane_send_at: None,
             started_at: std::time::Instant::now(),
+            agent_anim_frame: 0,
             hud_pid: std::process::id(),
             hud_term: std::env::var("TERM").unwrap_or_else(|_| "?".to_string()),
             hud_truecolor: std::env::var("COLORTERM")

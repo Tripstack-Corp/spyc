@@ -617,6 +617,15 @@ impl App {
                 ctx.draw.mark(3);
             }
 
+            // Agent-activity (P0): derive each agent tab's Working/Idle from the
+            // `last_output_at` stamped in `drain_pane_output`, advance the spicy
+            // pulse frame, and arm AgentIdle (flip Working→Idle) + AgentAnim
+            // (pulse while working). Idle when all tabs quiet ⇒ both disarmed ⇒
+            // 0 dps preserved (see `settle_agent_activity`).
+            if self.settle_agent_activity(now_pre, &mut ctx) {
+                ctx.draw.mark(3);
+            }
+
             // Execute writable MCP commands buffered into `ctx.mcp_pending` (see
             // `drain_mcp_pending` — kept at this early loop position for the
             // 5s read-after-write timeout contract).

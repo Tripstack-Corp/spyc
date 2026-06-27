@@ -120,6 +120,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     app("undo", commands::cmd_undo),
     pure("version"),
     pure("whoami"),
+    app("why-status", commands::cmd_why_status),
 ];
 
 /// The registered spec for `name` (the first whitespace-delimited word of a

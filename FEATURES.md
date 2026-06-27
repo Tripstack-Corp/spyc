@@ -167,6 +167,16 @@ spyc's workflow: browse files above, talk to Claude below.
   new pane reveals the split. Focus stays where it is, `^a j` / `^a k` are
   inert while zoomed (only `^a z` exits), and the prior split is restored on
   un-zoom.
+- **Agent-activity dots** — each **agent** pane tab shows a live activity dot
+  in the divider, derived purely from pane-output timing (no hooks, no
+  screen-scraping): a **spicy heat-pulse `●`** — a pepper-red → ember → orange
+  → spark color *breath* (~4 Hz) — while output is flowing, fading to a quiet
+  `·` once the agent goes silent. Non-agent tabs (a plain shell) get no dot.
+  The pulse animates only while something is working, so a fully-idle pane set
+  still renders at 0 fps. It's a coarse *"output is flowing"* signal: a long
+  silent thinking pause reads as idle, and "blocked / waiting on you" + "done"
+  come with the planned semantic hook. **`:why-status`** flashes the active
+  tab's classification (state + seconds since last output) for debugging.
 - **^a |** vertical (left/right) split of the file area. Opens (50/50) with a
   **preview of the file under the cursor** (markdown rendered) in the right
   column. Press it again **on a different file** to swap the preview to that

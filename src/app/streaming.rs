@@ -314,11 +314,18 @@ impl App {
         let mut pane_had_output = false;
         if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
             let active_idx = tabs.active_index();
+            // Stamp the moment of output for the agent-activity signal (P0).
+            // `&mut` settle step, so reading the clock here is fine (render is
+            // the pure half). The Working↔Idle derive is `settle_agent_activity`.
+            let now = std::time::Instant::now();
             for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
                 // Clear the wake edge BEFORE the gen load (clear-before-read).
                 // SOLE clear site — see the fn doc.
                 entry.pane.clear_wake();
                 if entry.pane.drain_output() {
+                    // Output stamp for EVERY tab (active + background) — the
+                    // activity dot tracks live output, not just unseen output.
+                    entry.info.last_output_at = Some(now);
                     if i == active_idx {
                         pane_had_output = true;
                     } else {
