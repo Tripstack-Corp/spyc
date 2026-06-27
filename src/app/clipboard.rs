@@ -126,6 +126,23 @@ impl App {
         }]
     }
 
+    /// `^a ↓` — send a single literal Ctrl-A (0x01) to the active pane.
+    /// `^a` is spyc's pane prefix, so the child can never receive the byte
+    /// through normal input; this is the tmux `send-prefix` escape hatch
+    /// (Claude binds ^a, e.g. to expand notes).
+    pub fn send_prefix_to_pane(&mut self) -> Vec<Effect> {
+        if self.runtime.pane_tabs.is_none() {
+            self.state.flash_error("no pane open (Ctrl-\\ to open one)");
+            return Vec::new();
+        }
+        vec![Effect::SendToPane {
+            target: PaneTarget::Active,
+            input: PaneInput::Bytes(vec![0x01]),
+            on_ok: None,
+            err_prefix: Some("send failed"),
+        }]
+    }
+
     /// ^W p / ^W i — read file contents of selection (or inventory) and
     /// send them to the active pane tab as bracketed paste. Each file is
     /// wrapped with a header so the recipient (e.g. Claude) knows what

@@ -155,6 +155,9 @@ spyc's workflow: browse files above, talk to Claude below.
 - **^a j / ^a k** switch focus between the file list and the pane
   (`^w` also works as an alias for `^a`)
 - **^a s** send the current selection (file paths) to the pane as stdin
+- **^a ↓** send a literal `^a` to the pane — the prefix is otherwise
+  unreachable by the child, but Claude binds `^a` (e.g. to expand notes),
+  so this is the tmux-style "send-prefix" escape hatch
 - **^a P** pipe file contents of the selection to the pane
 - **^a i** pipe inventory file contents to the pane
 - **^a + / ^a -** grow or shrink the pane

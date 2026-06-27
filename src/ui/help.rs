@@ -251,6 +251,10 @@ const SECTIONS: &[Section] = &[
             ),
             ("^a u", "quick select — pick URL/path/SHA/IP from pane"),
             ("^a s", "send selection paths to pane stdin"),
+            (
+                "^a ↓",
+                "send a literal ^a to the pane (e.g. so Claude receives it)",
+            ),
             ("^a P", "pipe file contents of selection to pane"),
             ("^a i", "pipe inventory file contents to pane"),
             ("Ctrl+J", "newline in pane (multi-line input)"),

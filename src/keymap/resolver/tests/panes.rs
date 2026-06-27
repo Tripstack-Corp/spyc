@@ -118,6 +118,18 @@ fn ctrl_w_s_sends_selection() {
 }
 
 #[test]
+fn ctrl_a_down_sends_literal_prefix() {
+    let mut r = Resolver::new();
+    feed(&mut r, ctrl('a'));
+    assert_eq!(
+        feed(&mut r, special(KeyCode::Down)),
+        ResolverOutcome::Action(Action::PaneSendPrefix)
+    );
+    // The chord must reset so a following Down is a plain motion again.
+    assert!(!r.is_pending());
+}
+
+#[test]
 fn ctrl_w_v_enters_scroll() {
     let mut r = Resolver::new();
     feed(&mut r, ctrl('w'));

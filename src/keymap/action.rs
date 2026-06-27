@@ -117,6 +117,7 @@ pub enum Action {
     PaneFocusDown,      // ^W j — move focus down (to pane)
     PaneFocusUp,        // ^W k — move focus up (to list)
     PaneSendSelection,  // ^W s — send shell-quoted selection to pane stdin
+    PaneSendPrefix,     // ^a ↓ — send literal Ctrl-A (0x01) to the active pane (send-prefix)
     PaneGrow,           // ^W + — bottom pane takes more height
     PaneShrink,         // ^W - — bottom pane takes less height
     TogglePaneZoom,     // ^W z — zoom (fullscreen) the pane / restore split
@@ -266,6 +267,7 @@ impl Action {
             Self::PaneFocusDown => "focus pane (down)",
             Self::PaneFocusUp => "focus list (up)",
             Self::PaneSendSelection => "send selection to pane",
+            Self::PaneSendPrefix => "send literal ^a to pane",
             Self::PaneGrow => "grow pane",
             Self::PaneShrink => "shrink pane",
             Self::TogglePaneZoom => "zoom pane (toggle fullscreen)",

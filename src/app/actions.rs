@@ -290,6 +290,7 @@ impl App {
             | Action::PaneFocusDown
             | Action::PaneFocusUp
             | Action::PaneSendSelection
+            | Action::PaneSendPrefix
             | Action::PaneGrow
             | Action::PaneShrink
             | Action::TogglePaneZoom
@@ -332,6 +333,7 @@ impl App {
             Action::PaneFocusDown => self.set_pane_focus(true),
             Action::PaneFocusUp => self.set_pane_focus(false),
             Action::PaneSendSelection => effects = self.send_selection_to_pane(),
+            Action::PaneSendPrefix => effects = self.send_prefix_to_pane(),
             // Context-sensitive: resize the split the focused pane belongs to
             // — the vertical split's width when a column is focused, else the
             // bottom pane's height.
