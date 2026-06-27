@@ -115,6 +115,13 @@ pub enum BoundAction {
     PatternPick(String),
     Jump(String),
     ToggleMaskFixed(u8),
+    /// `map KEY command <name [args]>` — run a `:` command on keypress (e.g.
+    /// `command graveyard`). The string is dispatched exactly like typed `:`
+    /// input, so it can reach the `:!`/`:;` shell symbols — which is why this
+    /// is [`is_executing`](Self::is_executing) (only `$HOME/.spycrc.toml` may
+    /// bind it). Lets a user re-bind any feature that ships only as a `:`
+    /// command (graveyard, activity, …).
+    Command(String),
 }
 
 impl BoundAction {
@@ -126,6 +133,7 @@ impl BoundAction {
             Self::PatternPick(pat) => format!("pick pattern {pat}"),
             Self::Jump(path) => format!("jump to {path}"),
             Self::ToggleMaskFixed(n) => format!("toggle mask {n}"),
+            Self::Command(cmd) => format!(":{cmd}"),
         }
     }
 
@@ -135,9 +143,10 @@ impl BoundAction {
     /// `Config::load_default`). `Plain` built-in actions (incl. the
     /// copy/move/remove *prompts*, which carry no payload — the user still
     /// types the target) and the harmless `PatternPick`/`ToggleMaskFixed`
-    /// are not executing.
+    /// are not executing. `Command` is — it dispatches arbitrary `:` input,
+    /// including the `:!`/`:;` shell symbols.
     pub const fn is_executing(&self) -> bool {
-        matches!(self, Self::UnixCmd(_) | Self::Jump(_))
+        matches!(self, Self::UnixCmd(_) | Self::Jump(_) | Self::Command(_))
     }
 }
 

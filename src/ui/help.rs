@@ -122,9 +122,9 @@ const SECTIONS: &[Section] = &[
             ("Ndd", "remove cursor + N-1 entries below (e.g. 4dd)"),
             ("+", "make a new directory (prompt)"),
             ("O", "create new file in $EDITOR (prompt)"),
-            ("L", "long listing (wide aligned table)"),
-            ("f", "file(1) on selection"),
-            ("^X", "chmod +x on selection"),
+            ("L  :longlist", "long listing (wide aligned table)"),
+            ("f  :filetype", "file(1) on selection"),
+            ("^X  :chmod", "chmod +x on selection"),
         ],
     },
     Section {
@@ -191,10 +191,10 @@ const SECTIONS: &[Section] = &[
             ("I", "session info (pid, rss, counts)"),
             ("C", "toggle colors / mono"),
             (
-                "A",
+                "A  :activity",
                 "toggle activity monitor (throughput + internals + pid/rss/threads + mcp call counts)",
             ),
-            ("s", "set environment variable (NAME=VALUE)"),
+            ("s  :set", "set environment variable (NAME=VALUE)"),
         ],
     },
     Section {

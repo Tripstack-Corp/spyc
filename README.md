@@ -378,10 +378,13 @@ Selected options:
 [layout]
 status_position = "bottom"
 
-# Keymap: rebind keys to any action. Chord bindings supported.
+# Keymap: rebind keys to any action. Keys are single chars, Ctrl-combos
+# (^P), or named keys (<F2>). `command` binds a key to a : command — handy
+# for the less-frequent features that ship without a default key.
 keymap = [
     "map f unix file %",
-    "map gh jump ~",
+    "map A command activity",
+    "map ^Y command graveyard",
 ]
 
 # Color overrides: customize the palette.

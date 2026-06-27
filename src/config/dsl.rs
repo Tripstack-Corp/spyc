@@ -16,9 +16,11 @@
 //! - `ACTION` is one of the identifiers below. Most take no args.
 //! - For actions that take a preset argument the syntax is `=value`
 //!   (e.g. `map h jump =$HFS/houdini`).
-//! - For `unix`, **the rest of the line after `unix`** is taken verbatim
-//!   as a shell command template (with `%` expanded to the selection at
-//!   run time).
+//! - For `unix` and `command`, **the rest of the line after the verb** is
+//!   taken verbatim — a shell command template for `unix` (with `%` expanded
+//!   to the selection at run time), or a `:` command line for `command` (e.g.
+//!   `command graveyard`). Both are `is_executing`, so only `$HOME` config
+//!   may bind them.
 //!
 //! Supported action verbs (the identifiers accepted after `map KEY`):
 //!
@@ -32,6 +34,8 @@
 //!   not search-previous — use `searchprev` to rebind backward search.
 //! - startshell; unix CMD (verbatim template); unix_cmd (prompted, captured
 //!   into the pager); foreground_cmd (prompted, run in the foreground like `;`)
+//! - command CMD ($HOME only) — bind a key to a `:` command (e.g.
+//!   `command graveyard`, `command activity`)
 //! - longlist, file, copy, move, remove, makedirs
 //! - ignoretoggle =N, patternpick =GLOB, jump =PATH
 //! - panescroll, panesave
@@ -176,6 +180,16 @@ fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
                 Ok(BoundAction::UnixCmd(tail.to_string()))
             }
         }
+        // `command <name [args]>` — bind a key to a `:` command (the rest of
+        // the line is the command, e.g. `command graveyard`). Only honored in
+        // $HOME config (it's `is_executing` — it can reach `:!`/`:;` shell).
+        "command" => {
+            if tail.is_empty() {
+                Err("`command` needs a : command (e.g. `command graveyard`)".to_string())
+            } else {
+                Ok(BoundAction::Command(tail.to_string()))
+            }
+        }
 
         "longlist" => Ok(BoundAction::Plain(Action::LongList)),
         "file" => Ok(BoundAction::Plain(Action::FileType)),
@@ -246,6 +260,33 @@ mod tests {
     fn parses_control_key() {
         let b = parse("map ^P unix ps -u $USER").unwrap().unwrap();
         assert_eq!(b.chord, KeyChord::Ctrl('p'));
+    }
+
+    #[test]
+    fn parses_command_verb_with_rest_of_line() {
+        let b = parse("map A command activity").unwrap().unwrap();
+        match &b.action {
+            BoundAction::Command(s) => assert_eq!(s, "activity"),
+            other => panic!("expected Command, got {other:?}"),
+        }
+        // The whole tail is the command line, args included.
+        let b = parse("map ^G command project .").unwrap().unwrap();
+        match &b.action {
+            BoundAction::Command(s) => assert_eq!(s, "project ."),
+            other => panic!("expected Command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn command_verb_is_executing() {
+        // So the project-config security gate ($HOME-only) covers it.
+        let b = parse("map A command activity").unwrap().unwrap();
+        assert!(b.action.is_executing());
+    }
+
+    #[test]
+    fn empty_command_is_an_error() {
+        assert!(parse("map A command").is_err());
     }
 
     #[test]

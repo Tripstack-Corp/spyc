@@ -222,6 +222,31 @@ pub(super) fn cmd_graveyard(app: &mut App, _args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
+// `:activity` / `:longlist` / `:filetype` / `:chmod` — typed entry points for
+// features that are losing (or have lost) their default key, so they stay
+// reachable and re-bindable (`map KEY command <name>`). Each just runs the
+// same `Action` the key fired, returning its effects to the caller.
+
+/// `:activity` — toggle the activity monitor overlay (was `A`).
+pub(super) fn cmd_activity(app: &mut App, _args: &str) -> Vec<Effect> {
+    app.apply(&Action::ToggleActivity).unwrap_or_default()
+}
+
+/// `:longlist` — long `ls -lh`-style listing of the selection (was `L`).
+pub(super) fn cmd_longlist(app: &mut App, _args: &str) -> Vec<Effect> {
+    app.apply(&Action::LongList).unwrap_or_default()
+}
+
+/// `:filetype` — run `file(1)` on the selection (was `f`).
+pub(super) fn cmd_filetype(app: &mut App, _args: &str) -> Vec<Effect> {
+    app.apply(&Action::FileType).unwrap_or_default()
+}
+
+/// `:chmod` — `chmod +x` the selection (was `^X`).
+pub(super) fn cmd_chmod(app: &mut App, _args: &str) -> Vec<Effect> {
+    app.apply(&Action::ChmodAdd('x')).unwrap_or_default()
+}
+
 /// Outcome of parsing an optional numeric task-id `:command` argument.
 enum TaskIdArg {
     /// No argument — use the command's "most-recent / default" path.

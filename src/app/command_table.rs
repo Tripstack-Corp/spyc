@@ -95,15 +95,19 @@ const fn app(name: &'static str, handler: fn(&mut App, &str) -> Vec<Effect>) -> 
 /// The command registry. Sorted by `name` for deterministic completion
 /// output (enforced by `command_table_is_sorted_and_unique`).
 pub const COMMAND_TABLE: &[CommandSpec] = &[
+    app("activity", commands::cmd_activity),
     app("bnext", commands::cmd_bnext),
     app("bprev", commands::cmd_bprev),
     pure("cd"),
+    app("chmod", commands::cmd_chmod),
     app("date", commands::cmd_date),
     app("dump-scrollback", commands::cmd_dump_scrollback),
     app("fg", commands::cmd_fg),
+    app("filetype", commands::cmd_filetype),
     app("graveyard", commands::cmd_graveyard),
     app("grep", commands::cmd_grep),
     pure("limit"),
+    app("longlist", commands::cmd_longlist),
     pure("marks"),
     pure("name"),
     app("pane-to-task", commands::cmd_pane_to_task),

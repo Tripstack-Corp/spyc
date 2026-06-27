@@ -579,6 +579,11 @@ impl App {
             BoundAction::Jump(path) => {
                 let _ = self.state.jump_to(path);
             }
+            BoundAction::Command(cmd) => {
+                // Dispatch exactly like typed `:` input (table commands +
+                // `:!`/`:;` shell). Gated to $HOME config via `is_executing`.
+                return Ok(self.dispatch_command(cmd));
+            }
             BoundAction::ToggleMaskFixed(n) => {
                 if *n == 1 {
                     self.state.cur_mut().masks.toggle_mask1();
