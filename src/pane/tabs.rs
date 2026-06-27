@@ -107,6 +107,11 @@ pub struct ReportedStatus {
 
 /// Per-tab metadata displayed in the status line.
 pub struct TabInfo {
+    /// Stable per-tab id (uuid), assigned at construction and never reused.
+    /// Injected as `SPYC_PANE_ID` into the agent pane's env so an agent's
+    /// `report_status` hook can target THIS tab regardless of its (mutable)
+    /// 1-based index. Survives reorder/insert/remove; not persisted.
+    pub id: String,
     /// Full command string passed to `Pane::spawn`.
     pub command: String,
     /// Short display name — defaults to first word of command, user can rename.
@@ -171,6 +176,7 @@ impl TabInfo {
             .to_string();
         let cwd = cwd.into();
         Self {
+            id: uuid::Uuid::now_v7().to_string(),
             command,
             label,
             cwd,

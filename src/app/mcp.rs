@@ -108,8 +108,9 @@ impl App {
     /// `run_teardown` after the terminal is restored, so warnings are visible.
     pub fn cleanup_written_mcp_configs(&mut self) {
         for dir in std::mem::take(&mut self.runtime.mcp_config_dirs) {
-            // Try both shapes per dir; each is a no-op unless it finds an entry
-            // pointing at *our* socket, so attempting the wrong one is harmless.
+            // Try each shape per dir; each is a no-op unless it finds an entry
+            // that's *ours*, so attempting the wrong one is harmless. The Claude
+            // status hooks (`.claude/settings.json`) ride the same dir set.
             for tracked_path in [
                 matches!(
                     crate::mcp::cleanup_mcp_json(&dir),
@@ -375,6 +376,7 @@ impl App {
                 }
             }
             McpCommand::ReportStatus {
+                pane_id,
                 pane,
                 status,
                 ttl_ms,
@@ -396,15 +398,15 @@ impl App {
                         message: "no pane open".into(),
                     };
                 };
-                // 1-based `pane` targets a specific tab; default the focused one.
-                let idx = match pane {
-                    Some(n) if (1..=tabs.tabs().len()).contains(&n) => n - 1,
-                    Some(n) => {
-                        return McpResponse::Error {
-                            message: format!("no pane {n} (have {})", tabs.tabs().len()),
-                        };
-                    }
-                    None => tabs.active_index(),
+                let ids: Vec<&str> = tabs.tabs().iter().map(|t| t.info.id.as_str()).collect();
+                let idx = match resolve_report_target(
+                    pane_id.as_deref(),
+                    pane,
+                    &ids,
+                    tabs.active_index(),
+                ) {
+                    Ok(i) => i,
+                    Err(message) => return McpResponse::Error { message },
                 };
                 let now = std::time::Instant::now();
                 let ttl = std::time::Duration::from_millis(ttl_ms.unwrap_or(DEFAULT_REPORT_TTL_MS));
@@ -445,5 +447,52 @@ impl App {
                 }
             }
         }
+    }
+}
+
+/// Resolve a `report_status` target tab index from its optional pane id (uuid)
+/// / 1-based `pane` index / focused fallback — the testable core of the
+/// `ReportStatus` arm. Priority: `pane_id` (the stable `SPYC_PANE_ID` the hook
+/// sends — survives reorder) → `pane` → `active`. A `pane_id` matching no live
+/// tab is an **error**, not a silent fall-through: a stale report from a closed
+/// pane must never clobber whatever tab happens to be focused. `ids` are the
+/// tabs' ids in order; `active` is the focused index.
+fn resolve_report_target(
+    pane_id: Option<&str>,
+    pane: Option<usize>,
+    ids: &[&str],
+    active: usize,
+) -> Result<usize, String> {
+    if let Some(pid) = pane_id {
+        return ids
+            .iter()
+            .position(|id| *id == pid)
+            .ok_or_else(|| format!("no pane with id {pid} (closed?)"));
+    }
+    match pane {
+        Some(n) if (1..=ids.len()).contains(&n) => Ok(n - 1),
+        Some(n) => Err(format!("no pane {n} (have {})", ids.len())),
+        None => Ok(active),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_report_target;
+
+    #[test]
+    fn report_target_prefers_pane_id_then_index_then_focused() {
+        let ids = ["aaa", "bbb", "ccc"];
+        // pane_id wins and resolves to its position, regardless of `pane`.
+        assert_eq!(resolve_report_target(Some("bbb"), Some(1), &ids, 0), Ok(1));
+        // A pane_id for a closed/unknown pane is an error (no silent fallback).
+        assert!(resolve_report_target(Some("zzz"), None, &ids, 0).is_err());
+        // No pane_id: 1-based `pane` index.
+        assert_eq!(resolve_report_target(None, Some(3), &ids, 0), Ok(2));
+        // Out-of-range index errors.
+        assert!(resolve_report_target(None, Some(9), &ids, 0).is_err());
+        assert!(resolve_report_target(None, Some(0), &ids, 0).is_err());
+        // Neither → the focused tab.
+        assert_eq!(resolve_report_target(None, None, &ids, 2), Ok(2));
     }
 }

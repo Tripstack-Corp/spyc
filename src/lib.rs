@@ -145,6 +145,12 @@ struct Cli {
     #[arg(long)]
     mcp: bool,
 
+    /// Report this pane's agent activity to the running spyc and exit. Invoked
+    /// by the Claude hooks spyc installs; reads `SPYC_MCP_SOCK` + `SPYC_PANE_ID`
+    /// from the environment. One of: working | blocked | idle | done.
+    #[arg(long, value_name = "STATE")]
+    report_status: Option<String>,
+
     /// Show extended build info with --version
     #[arg(long)]
     verbose: bool,
@@ -200,6 +206,13 @@ pub fn run() -> Result<()> {
     if cli.mcp {
         let root = std::env::current_dir()?;
         return mcp::run(root);
+    }
+    // Agent status hook reporter: a tiny one-shot that pings the running spyc.
+    // Best-effort — never errors out (it runs inside the agent's lifecycle
+    // hook, and must not block/break the agent if spyc is gone).
+    if let Some(state) = cli.report_status.as_deref() {
+        mcp::report_status_to_socket(state);
+        return Ok(());
     }
     if cli.verbose {
         println!("\u{1f336}\u{fe0f} spyc {}", env!("CARGO_PKG_VERSION"));

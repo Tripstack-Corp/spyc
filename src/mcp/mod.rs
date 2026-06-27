@@ -157,6 +157,53 @@ fn resolve_context_path(project_root: &Path) -> PathBuf {
     context::context_path(project_root)
 }
 
+/// Agent status-hook reporter (`spyc --report-status <state>`): a one-shot that
+/// pings the running spyc so it can set this pane's activity dot. Reads
+/// `SPYC_MCP_SOCK` (the socket) + `SPYC_PANE_ID` (which tab) from the
+/// environment — both injected into the agent pane by spyc and inherited by the
+/// agent's lifecycle hook.
+///
+/// **Best-effort and silent by contract:** it runs *inside* the agent's hook,
+/// so a missing socket / dead spyc / wedged server must NEVER error or block
+/// the agent — every failure path just returns. A tight 2 s IO timeout (far
+/// below the proxy's 20 s) bounds the worst case so the hook can't stall the
+/// agent's turn.
+pub fn report_status_to_socket(state: &str) {
+    use std::io::{BufRead, BufReader, Write};
+    const REPORT_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+    let Ok(sock) = std::env::var("SPYC_MCP_SOCK") else {
+        return;
+    };
+    if sock.is_empty() {
+        return;
+    }
+    let pane_id = std::env::var("SPYC_PANE_ID").ok();
+    let Ok(mut stream) = UnixStream::connect(&sock) else {
+        return; // spyc not running / different instance — nothing to update
+    };
+    let _ = stream.set_read_timeout(Some(REPORT_IO_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(REPORT_IO_TIMEOUT));
+    let req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "report_status",
+            "arguments": { "status": state, "pane_id": pane_id },
+        },
+    });
+    if writeln!(stream, "{req}").is_err() {
+        return;
+    }
+    let _ = stream.flush();
+    // Read the one-line reply so spyc has applied the command before we exit —
+    // closing the socket immediately would otherwise race the main-loop apply.
+    // Best-effort: a timeout/EOF here doesn't matter, the command is queued.
+    let mut line = String::new();
+    let _ = BufReader::new(stream).read_line(&mut line);
+}
+
 /// Run the stdio MCP server. Reads JSONL from stdin, dispatches
 /// locally, writes JSONL to stdout. If the running spyc instance's
 /// Unix socket is available, proxies through it for writable access.

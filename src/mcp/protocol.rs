@@ -150,6 +150,10 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                                 "enum": ["working", "blocked", "idle", "done"],
                                 "description": "working = actively doing a task; blocked = waiting on the user (needs attention); done = finished a turn; idle = nothing pending."
                             },
+                            "pane_id": {
+                                "type": "string",
+                                "description": "Optional stable pane id (the `SPYC_PANE_ID` env var spyc set for your pane). The auto-hook passes this; you normally don't need it."
+                            },
                             "pane": {
                                 "type": "integer",
                                 "description": "Optional 1-based tab number (the `[N]` in the divider) to report for. Defaults to the focused tab — normally omit it."
@@ -669,9 +673,11 @@ fn handle_tools_call(
                             "status must be one of: working, blocked, idle, done",
                         );
                     }
+                    let pane_id = args["pane_id"].as_str().map(String::from);
                     let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
                     let ttl_ms = args["ttl_ms"].as_u64();
                     McpCommand::ReportStatus {
+                        pane_id,
                         pane,
                         status,
                         ttl_ms,

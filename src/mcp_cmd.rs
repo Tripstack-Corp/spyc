@@ -50,10 +50,12 @@ pub enum McpCommand {
     /// Re-targets `b` if it's already open. The "work in it in b" step.
     OpenWorktree { path: String },
     /// Agent self-reports its activity for the per-tab dot (P1 semantic
-    /// channel). `status` is `working`/`blocked`/`idle`/`done`; `pane` targets a
-    /// 1-based tab (the divider `[N]`), defaulting to the focused tab; `ttl_ms`
-    /// overrides the backstop expiry. Overrides output timing while live.
+    /// channel). `status` is `working`/`blocked`/`idle`/`done`. Targeting, in
+    /// priority order: `pane_id` (the stable `SPYC_PANE_ID` uuid — what the
+    /// auto-hook sends), else `pane` (a 1-based divider `[N]`), else the focused
+    /// tab. `ttl_ms` overrides the backstop expiry. Overrides output timing.
     ReportStatus {
+        pane_id: Option<String>,
         pane: Option<usize>,
         status: String,
         ttl_ms: Option<u64>,

@@ -106,19 +106,43 @@ impl App {
         // spyc's socket on startup. Gated on the agent here, so directories where
         // no agent is ever launched don't get a stray config dir. No-op otherwise.
         self.ensure_agent_mcp_config(cmd, cwd);
-        match Pane::spawn_with_env(cmd, rows, cols, cwd, &self.view.context_path, &[], wake) {
+        // Build the tab metadata up front so its stable id is available to
+        // inject as `SPYC_PANE_ID` (below). Option B: a `codex resume <uuid>`
+        // pane knows its session id immediately — pin it now so `^a v` is exact
+        // from the first keypress (the spawn-time scan handles fresh codex panes).
+        let mut info = TabInfo::new(cmd, cwd);
+        let is_agent = crate::agent::detect(cmd).kind() != crate::state::sessions::AgentKind::Other;
+        if crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex {
+            info.codex_session_id = crate::state::codex_transcript::resume_uuid_from_command(cmd);
+        }
+        // Agent panes get SPYC_MCP_SOCK + SPYC_PANE_ID in their env so the
+        // `report_status` hook (a child of the agent, inheriting its env) can
+        // reach this spyc instance's socket and target THIS tab by id. Owned
+        // locals so the `&str` env slice outlives the spawn call; `info` is then
+        // free to move into the `TabEntry`.
+        let sock_str = crate::mcp::socket_path().to_string_lossy().into_owned();
+        let pane_id = info.id.clone();
+        let extra_env: Vec<(&str, &str)> = if is_agent {
+            vec![
+                ("SPYC_MCP_SOCK", sock_str.as_str()),
+                ("SPYC_PANE_ID", pane_id.as_str()),
+            ]
+        } else {
+            Vec::new()
+        };
+        match Pane::spawn_with_env(
+            cmd,
+            rows,
+            cols,
+            cwd,
+            &self.view.context_path,
+            &extra_env,
+            wake,
+        ) {
             Ok(p) => {
                 self.state.focus = state::Focus::Pane;
                 self.state
                     .flash_info(format!("pane: {cmd} (^W k for list)"));
-                let mut info = TabInfo::new(cmd, cwd);
-                // Option B: a `codex resume <uuid>` pane knows its session id up
-                // front — pin it now so `^a v` is exact from the first keypress
-                // (the spawn-time scan handles fresh codex panes instead).
-                if crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex {
-                    info.codex_session_id =
-                        crate::state::codex_transcript::resume_uuid_from_command(cmd);
-                }
                 let entry = TabEntry::new(p, info);
                 if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                     tabs.push(entry);
