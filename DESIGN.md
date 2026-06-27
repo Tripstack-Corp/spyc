@@ -135,23 +135,45 @@ text selection works). Every action has a keybinding; every
 keybinding maps to an `Action` enum variant. New features add a
 variant, a default binding in the resolver, and a help-table row.
 
-### Vi where it fits, screen/tmux where it doesn't
+### Binding taxonomy — global / frame / pane
 
-- Movement, marks, prompt editing → vi.
-- Pane prefix, tab switching → screen (`^a` family).
-- Worktree management → `W` family (uppercase = "weighty"
-  operation that touches git state).
+Every binding lives in one of three tiers, each with one home. The tier is
+tagged on `Action::tier()` and the namespace placement is guarded by
+`leader_and_pane_namespaces_respect_tiers` (the leader carries only
+`Global`/`Meta`, the `^a` prefix only `Pane`/`Meta`) — so the split is a
+build-checked contract, not just a convention.
 
-When inventing a new chord, prefer:
-- Single-letter for common single-file ops (`R`, `f`, `+`).
-- `g <x>` for "go-to" or read-only git commands (`gh`, `gP`,
-  `gd`, `gb`, `gf`).
-- `^a <x>` for pane-tab scope.
-- `:cmd` for one-shot ops that don't deserve a binding.
+- **GLOBAL** (`Tier::Global`) — workspace ops that make sense from *any*
+  focus: worktree, project home, session. Home: the **leader** — `Space`
+  in the file list. From the agent pane it's **`^a Space`**: a bare `Space`
+  is literal text to the child, so it can't be intercepted there; the
+  existing `^a` interception (`is_spyc_meta_when_pane_focused`) wakes spyc
+  and `Space` enters the menu.
+- **FRAME** (`Tier::Frame`) — acts on the file commander: nav, picks,
+  filter, sort, marks, harpoon, git, file ops. Home: the letter / `g` /
+  `H` / `[`/`]` chords (list focus only).
+- **PANE** (`Tier::Pane`) — the pty pane + vertical split: tabs, focus,
+  zoom, scroll, send. Home: the `^a` (`^w`) prefix (fires from any focus).
+- `Tier::Meta` (help, version, redraw) is allowed in any namespace.
 
-Capital is a **stronger** variant of the lowercase, where it makes
-sense (`y`/`Y`, `c`/`C` is *not* this — `C` predates and is mono
-toggle; document exceptions).
+Vi where it fits, screen/tmux where it doesn't: movement / marks / prompt
+editing → vi; pane prefix + tabs → screen (`^a`); worktree (`W` family,
+uppercase = "weighty" git-state op) is mirrored under the leader.
+
+When inventing a chord, prefer:
+- Single-letter for common file ops (`R`, `c`, `+`).
+- `g <x>` for go-to / read-only git (`gd`, `gb`, `gw`, `gf`).
+- `^a <x>` for pane scope; `Space <x>` for a global op.
+- `:cmd` for a one-shot op that doesn't deserve a default key — and the
+  **policy is to keep rarely-used features `:`-only**, re-bindable via
+  `map KEY command <name>` (commented examples ship in `--print-config`).
+  A dense default keymap is the thing the which-key popup + this tiering
+  exist to tame; don't spend a default key on a feature most users won't
+  reach for.
+
+Capital is a **stronger** variant of the lowercase where it makes sense
+(`y`/`Y`); `c`/`C` is *not* this (`C` predates and is a mono toggle —
+document exceptions).
 
 ### One shape per job
 

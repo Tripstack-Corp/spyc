@@ -17,6 +17,37 @@ struct Section {
 }
 
 const SECTIONS: &[Section] = &[
+    // Tier legend + the global (leader) menu lead the reference; the rest is
+    // the frame (file-view) chords, then the pane (`^a`) chords. Hold any
+    // prefix to get the which-key popup of what completes it.
+    Section {
+        title: "Key tiers",
+        rows: &[
+            (
+                "GLOBAL",
+                "Space (or ^a Space from the pane) — worktree, project, session",
+            ),
+            (
+                "FRAME",
+                "letter / g / H / [ ] chords — the file view (git, picks, sort, …)",
+            ),
+            (
+                "PANE",
+                "^a (^w) prefix — the pty pane + split (tabs, focus, zoom, send)",
+            ),
+            ("(hold a prefix)", "which-key popup lists what completes it"),
+        ],
+    },
+    Section {
+        title: "Global menu (leader: Space, or ^a Space from the pane)",
+        rows: &[
+            ("Space w l|n|d", "worktree: list / new / delete"),
+            ("Space p", "jump to PROJECT_HOME (overall project)"),
+            ("Space P", "set PROJECT_HOME to current directory"),
+            ("Space s", "session info"),
+            ("Space ?", "this help"),
+        ],
+    },
     Section {
         title: "Navigation",
         rows: &[
@@ -144,16 +175,6 @@ const SECTIONS: &[Section] = &[
             ("H1..H9", "jump to harpoon slot N (chdir + focus)"),
             ("Hh", "open harpoon menu (j/k, K/J reorder, dd delete)"),
             ("=h", "limit listing to harpoon (incl. ancestor dirs)"),
-        ],
-    },
-    Section {
-        title: "Global menu (leader: Space, or ^a Space from the pane)",
-        rows: &[
-            ("Space w l|n|d", "worktree: list / new / delete"),
-            ("Space p", "jump to PROJECT_HOME (overall project)"),
-            ("Space P", "set PROJECT_HOME to current directory"),
-            ("Space s", "session info"),
-            ("Space ?", "this help"),
         ],
     },
     Section {

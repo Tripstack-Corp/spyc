@@ -319,3 +319,48 @@ fn gh_no_longer_jumps_project_home() {
     feed(&mut r, key('g'));
     assert_eq!(feed(&mut r, key('h')), ResolverOutcome::Ignored);
 }
+
+/// The documented binding taxonomy (DESIGN.md): the leader namespace carries
+/// only Global/Meta actions, and the `^a` pane prefix only Pane/Meta. This
+/// guards against drift — e.g. a pane op accidentally added to the leader, or
+/// a frame/global op landing on `^a`. Drives it through the resolver's own
+/// `continuations()` so it tracks the real bindings.
+#[test]
+fn leader_and_pane_namespaces_respect_tiers() {
+    use crate::keymap::Tier;
+
+    // The `Act` actions reachable after arming the keys in `entry`.
+    fn actions_after(entry: &[crossterm::event::KeyEvent]) -> Vec<Action> {
+        let mut r = Resolver::new();
+        for ev in entry {
+            feed(&mut r, *ev);
+        }
+        r.continuations()
+            .into_iter()
+            .filter_map(|e| match e {
+                ChordEntry::Act(_, a) => Some(a),
+                ChordEntry::Sub(..) => None,
+            })
+            .collect()
+    }
+
+    // Leader (`Space`) and its worktree submenu (`Space w`) → Global/Meta only.
+    let mut leader = actions_after(&[key(' ')]);
+    leader.extend(actions_after(&[key(' '), key('w')]));
+    for a in leader {
+        assert!(
+            matches!(a.tier(), Tier::Global | Tier::Meta),
+            "leader action {a:?} is {:?}; the leader namespace is Global/Meta only",
+            a.tier()
+        );
+    }
+
+    // Pane prefix (`^a`) → Pane/Meta only.
+    for a in actions_after(&[ctrl('w')]) {
+        assert!(
+            matches!(a.tier(), Tier::Pane | Tier::Meta),
+            "^a action {a:?} is {:?}; the pane namespace is Pane/Meta only",
+            a.tier()
+        );
+    }
+}

@@ -9,5 +9,7 @@ pub mod resolver;
 pub mod user;
 
 pub use action::Action;
+#[cfg(test)]
+pub use action::Tier;
 pub use resolver::{ChordEntry, Resolver, ResolverOutcome};
 pub use user::{BoundAction, UserKeymap};

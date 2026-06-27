@@ -208,7 +208,89 @@ pub enum Action {
     Noop,
 }
 
+/// Which namespace tier an action belongs to — the documented binding taxonomy
+/// (see DESIGN.md "Binding taxonomy"). Tagged on [`Action::tier`] and consumed
+/// by the `leader_and_pane_namespaces_respect_tiers` guard: the leader (`Space`
+/// / `^a Space`) carries only `Global`/`Meta`, the `^a` pane prefix only
+/// `Pane`/`Meta`. `Frame` ops act on the file view and live on the
+/// letter / `g` / `H` / `[`/`]` chords. Test-scoped: the tier exists to make
+/// the namespace split a build-checked contract, not for runtime branching.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tier {
+    /// Workspace-level, meaningful from any focus (worktree, project, session).
+    Global,
+    /// Acts on the file-commander view (nav, picks, git, sort, marks, files).
+    Frame,
+    /// Acts on the pty pane / split layout (tabs, focus, zoom, scroll, send).
+    Pane,
+    /// Cross-cutting / informational (help, version, redraw) — allowed anywhere.
+    Meta,
+}
+
 impl Action {
+    /// The binding-taxonomy tier this action belongs to. Explicitly enumerates
+    /// the `Global` / `Pane` / `Meta` actions; everything else is `Frame` (the
+    /// default), so a new global/pane action must be tagged here or the
+    /// namespace guard rejects placing it on the leader / pane prefix.
+    #[cfg(test)]
+    pub const fn tier(&self) -> Tier {
+        match self {
+            // Global — workspace ops (the leader namespace).
+            Self::WorktreeList
+            | Self::WorktreeNew
+            | Self::WorktreeDelete
+            | Self::JumpProjectHome
+            | Self::SetProjectHomeHere
+            | Self::ShowMemory => Tier::Global,
+            // Pane — the pty pane + vertical split (the `^a` prefix).
+            Self::TogglePane
+            | Self::ResumePane
+            | Self::PaneFocusDown
+            | Self::PaneFocusUp
+            | Self::PaneSendSelection
+            | Self::PaneSendPrefix
+            | Self::PaneGrow
+            | Self::PaneShrink
+            | Self::TogglePaneZoom
+            | Self::PaneScrollEnter
+            | Self::PaneScrollSave
+            | Self::PaneNewTab
+            | Self::PaneCloseTab
+            | Self::PaneTabByIndex(_)
+            | Self::PaneNextTab
+            | Self::PanePrevTab
+            | Self::PaneLastTab
+            | Self::PaneRenameTab
+            | Self::PaneRestartTab
+            | Self::PanePipeContent
+            | Self::PanePipeInventory
+            | Self::VsplitCycle
+            | Self::VsplitFocusLeft
+            | Self::VsplitFocusRight
+            | Self::ToggleDim
+            | Self::OpenSecondCommander
+            | Self::CloseSecondCommander
+            | Self::QuitOrCloseCommander
+            | Self::QuickSelectOpen => Tier::Pane,
+            // Meta — cross-cutting / informational.
+            Self::Help
+            | Self::Version
+            | Self::Redraw
+            | Self::ReloadConfig
+            | Self::Date
+            | Self::ColorToggle
+            | Self::ToggleActivity
+            | Self::ShowUserHost
+            | Self::Quit
+            | Self::MacroRecordReserved
+            | Self::Noop => Tier::Meta,
+            // Frame — everything else (nav, picks, files, git, sort, marks,
+            // harpoon, filter, search, inventory, …).
+            _ => Tier::Frame,
+        }
+    }
+
     /// Short, present-tense description for the help overlay.
     pub const fn describe(&self) -> &'static str {
         match self {
