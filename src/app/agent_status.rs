@@ -27,6 +27,31 @@ const AGENT_ACTIVE_WINDOW: Duration = Duration::from_secs(2);
 /// ≥1 agent tab is `Working`, so an all-idle pane set still draws 0 fps.
 const AGENT_ANIM_INTERVAL: Duration = Duration::from_millis(250);
 
+/// Grace window protecting a `Blocked` self-report from its own prompt's render
+/// output. When an agent reports `blocked` (e.g. Claude's `PermissionRequest`
+/// hook firing as a permission prompt opens), the prompt UI then renders into
+/// the pane — that render is pane output, which would otherwise instantly
+/// supersede the report and bounce the dot back to the working pulse. Output
+/// within this window of a `blocked` report is taken as that render burst and
+/// ignored; output after it (the agent resuming once the user acts) still
+/// supersedes, so the dot auto-recovers without a fresh report. Claude's
+/// permission menu is static while waiting (re-renders on keypress, not a
+/// timer), so `blocked` holds until the user responds.
+const BLOCKED_RENDER_GRACE: Duration = Duration::from_secs(2);
+
+/// Whether pane output at `last_output_at` supersedes a live report (the agent
+/// resumed → drop the report, fall back to timing). A `Blocked` report ignores
+/// output within [`BLOCKED_RENDER_GRACE`] of itself (its own prompt rendering);
+/// every other status is superseded by any output after it.
+fn report_superseded_by_output(r: ReportedStatus, last_output_at: Option<Instant>) -> bool {
+    let grace = if r.status == AgentActivity::Blocked {
+        BLOCKED_RENDER_GRACE
+    } else {
+        Duration::ZERO
+    };
+    last_output_at.is_some_and(|o| o > r.at + grace)
+}
+
 impl App {
     /// PURE `&self` read for the draw pass: the active pane's cached agent
     /// short-id, or the bare agent label until the first refresh lands. Never
@@ -217,7 +242,7 @@ impl App {
         }
         if let Some(r) = reported {
             let expired = now >= r.expiry;
-            let superseded = last_output_at.is_some_and(|o| o > r.at);
+            let superseded = report_superseded_by_output(r, last_output_at);
             if !expired && !superseded {
                 return r.status;
             }
@@ -255,7 +280,7 @@ impl App {
             // Drop a report that's no longer authoritative (expired, or the tab
             // resumed output after it) so state + `:why-status` stay honest.
             if let Some(r) = entry.info.reported
-                && (now >= r.expiry || entry.info.last_output_at.is_some_and(|o| o > r.at))
+                && (now >= r.expiry || report_superseded_by_output(r, entry.info.last_output_at))
             {
                 entry.info.reported = None;
             }
@@ -451,6 +476,63 @@ mod tests {
                 base,
             ),
             AgentActivity::Unknown
+        );
+    }
+
+    // A `blocked` report must survive its own prompt's render output (the bug
+    // where the permission prompt's pane output instantly superseded `blocked`
+    // and bounced the dot back to the working pulse), yet still hand back to
+    // timing once the agent resumes after the user acts.
+    #[test]
+    fn blocked_report_survives_its_own_prompt_render_output() {
+        use crate::pane::{AgentActivity, ReportedStatus};
+        use std::time::{Duration, Instant};
+        let base = Instant::now();
+        let expiry = base + Duration::from_secs(300);
+        let blocked = Some(ReportedStatus {
+            status: AgentActivity::Blocked,
+            at: base,
+            expiry,
+        });
+
+        // Output within the render-grace (the permission prompt drawing itself)
+        // does NOT supersede — the dot stays Blocked.
+        assert_eq!(
+            App::effective_activity(
+                blocked,
+                true,
+                Some(base + Duration::from_millis(200)),
+                base + Duration::from_millis(300),
+            ),
+            AgentActivity::Blocked,
+            "prompt-render output must not bounce blocked back to working"
+        );
+
+        // Output past the grace (the agent resumed once the user acted) DOES
+        // supersede → timing takes back over (recent output → Working).
+        let resumed = base + super::BLOCKED_RENDER_GRACE + Duration::from_millis(500);
+        assert_eq!(
+            App::effective_activity(blocked, true, Some(resumed), resumed),
+            AgentActivity::Working,
+            "post-grace output should hand back to timing"
+        );
+
+        // Contrast: a non-blocked report gets no grace — any later output
+        // supersedes it immediately (unchanged behavior).
+        let done = Some(ReportedStatus {
+            status: AgentActivity::Done,
+            at: base,
+            expiry,
+        });
+        assert_eq!(
+            App::effective_activity(
+                done,
+                true,
+                Some(base + Duration::from_millis(200)),
+                base + Duration::from_millis(300),
+            ),
+            AgentActivity::Working,
+            "done has no grace — output supersedes at once"
         );
     }
 }
