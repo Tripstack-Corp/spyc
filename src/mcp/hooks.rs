@@ -55,32 +55,51 @@ fn group_is_ours(group: &Value) -> bool {
 }
 
 /// Write/merge the spyc status hooks into `<dir>/.claude/settings.json`,
-/// preserving any existing settings + the user's own hooks. Idempotent: a prior
-/// spyc hook group for each event is replaced (not duplicated) on re-launch.
-/// Returns whether we wrote the file (so teardown knows to clean it). No-op
-/// (returns `false`) if the file is git-tracked — we never dirty a committed
-/// config.
+/// preserving any existing settings + the user's own hooks. Idempotent at the
+/// byte level: when the file already holds exactly the merged content the write
+/// is **skipped**, so re-launching a pane in a cwd whose hooks are already
+/// installed doesn't touch the file. (All agent panes in a repo share one
+/// settings.json and Claude reloads it live — an identical rewrite still bumps
+/// mtime and would trip every sibling agent's hook reload for nothing.)
+/// Returns whether our hooks are present in a file we own (so teardown knows to
+/// clean it) — `true` both when we wrote and when an already-current file let us
+/// skip. `false` if the file is git-tracked (we never dirty a committed config)
+/// or its `hooks` value is a non-object we won't clobber.
 pub fn ensure_claude_status_hooks(dir: &Path) -> bool {
     let path = dir.join(".claude").join("settings.json");
     if crate::git::discovery::is_tracked(&path) {
         return false;
     }
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
-    let exe = exe.to_string_lossy();
+    let existing = std::fs::read_to_string(&path).ok();
+    let Some(out) = merged_status_hooks_json(existing.as_deref(), &exe.to_string_lossy()) else {
+        return false;
+    };
+    // Already current → skip the write (and its mtime bump), but still report
+    // `true`: our hooks ARE present, so teardown must track this dir.
+    if existing.as_deref() == Some(out.as_str()) {
+        return true;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    crate::fs::write_atomic(&path, out.as_bytes()).is_ok()
+}
 
-    // Start from the existing object (if parseable), else a fresh `{}`.
-    let mut root = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+/// Merge spyc's status hooks into `existing` settings.json content (or a fresh
+/// `{}` when absent/unparseable), returning the serialized result with a
+/// trailing newline. `None` when the existing `hooks` value is a non-object we
+/// refuse to clobber, or on a serialization failure. Pure (no I/O) so the merge
+/// — and its byte-level idempotency, which is what makes the write skippable —
+/// is unit-testable.
+fn merged_status_hooks_json(existing: Option<&str>, exe: &str) -> Option<String> {
+    let mut root = existing
+        .and_then(|t| serde_json::from_str::<Value>(t).ok())
         .filter(Value::is_object)
         .unwrap_or_else(|| json!({}));
-    let Some(obj) = root.as_object_mut() else {
-        return false;
-    };
+    let obj = root.as_object_mut()?;
     let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
-    let Some(hooks_obj) = hooks.as_object_mut() else {
-        return false;
-    };
+    let hooks_obj = hooks.as_object_mut()?;
     for (event, state) in STATUS_HOOKS {
         let group = json!({
             "matcher": "",
@@ -94,14 +113,9 @@ pub fn ensure_claude_status_hooks(dir: &Path) -> bool {
         list.retain(|g| !group_is_ours(g));
         list.push(group);
     }
-
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    match serde_json::to_string_pretty(&root) {
-        Ok(out) => crate::fs::write_atomic(&path, (out + "\n").as_bytes()).is_ok(),
-        Err(_) => false,
-    }
+    serde_json::to_string_pretty(&root)
+        .ok()
+        .map(|out| out + "\n")
 }
 
 /// Teardown counterpart: remove only the hook entries spyc wrote from
@@ -255,5 +269,61 @@ mod tests {
             ConfigCleanup::NothingToDo
         ));
         assert!(dir.join(".claude/settings.json").exists());
+    }
+
+    #[test]
+    fn merge_is_byte_idempotent() {
+        // Applying the merge to its own output must reproduce it byte-for-byte —
+        // this is the invariant that lets `ensure_claude_status_hooks` skip the
+        // write (and the mtime bump) on a re-launch instead of churning the
+        // shared settings.json.
+        let once = merged_status_hooks_json(None, "spyc").expect("fresh merge");
+        let twice = merged_status_hooks_json(Some(&once), "spyc").expect("re-merge");
+        assert_eq!(once, twice, "re-applying the merge changed a byte");
+        // It really installed our hooks (guards against a vacuous equality).
+        assert!(once.contains("--report-status blocked"));
+        // A user's own settings/hooks survive the round-trip unchanged too.
+        let with_user = merged_status_hooks_json(
+            Some(r#"{"theme":"dark","hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo bye"}]}]}}"#),
+            "spyc",
+        )
+        .expect("merge over user config");
+        assert_eq!(
+            with_user,
+            merged_status_hooks_json(Some(&with_user), "spyc").expect("re-merge over user config"),
+            "merge over a user config is not idempotent"
+        );
+        assert!(with_user.contains("echo bye"), "user hook dropped");
+    }
+
+    #[test]
+    fn relaunch_does_not_rewrite_an_already_current_file() {
+        use std::time::{Duration, SystemTime};
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        assert!(ensure_claude_status_hooks(dir));
+        let path = dir.join(".claude/settings.json");
+
+        // Backdate mtime far enough that a rewrite is unambiguous regardless of
+        // the filesystem's timestamp resolution.
+        let backdated = SystemTime::now() - Duration::from_secs(3600);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(backdated)
+            .unwrap();
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+        // Second launch: hooks already current → must skip the write...
+        assert!(
+            ensure_claude_status_hooks(dir),
+            "still reports present (track for cleanup)"
+        );
+        let after = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(
+            before, after,
+            "an already-current settings.json was rewritten (mtime bumped → would trip Claude's live-reload)"
+        );
     }
 }
