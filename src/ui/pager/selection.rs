@@ -356,29 +356,28 @@ impl PagerView {
     /// number of rows yanked. The header rule is the same as the
     /// full-buffer yank — when partial-range, the source context
     /// is *more* useful, not less.
-    pub fn yank_visual_to_clipboard(&mut self, include_title: bool) -> std::io::Result<usize> {
-        let Some(sel) = self.visual else {
-            return Ok(0);
-        };
+    /// Extract the visual selection text for clipboard yank (`y/Y` in visual
+    /// mode). Clears the selection. Returns `(text, count, in_block)` where
+    /// `count` is the number of lines/rows and `in_block` distinguishes block
+    /// vs. line mode for the flash message. Returns `None` on no selection or
+    /// empty buffer — caller can skip the copy.
+    pub fn visual_yank_text(&mut self, include_title: bool) -> Option<(String, usize, bool)> {
+        let sel = self.visual?;
         if self.lines.is_empty() {
             self.visual = None;
-            return Ok(0);
+            return None;
         }
-        // Clamp BOTH ends to the current buffer. The buffer can shrink under
-        // an active selection (a streaming task viewer front-trims at
-        // TASK_BUFFER_CAP), and `range()` may then return `lo`/`hi` past the
-        // end. Clamping only `hi` leaves `lo > hi`, so `self.lines[lo..=hi]`
-        // panics. Clamping both to the same ceiling preserves `lo <= hi`.
+        let in_block = sel.kind == crate::ui::pager::VisualKind::Block;
         let max = self.lines.len() - 1;
         let (lo, hi) = sel.range();
         let (lo, hi) = (lo.min(max), hi.min(max));
         let text = match sel.kind {
-            VisualKind::Line => self.lines[lo..=hi]
+            crate::ui::pager::VisualKind::Line => self.lines[lo..=hi]
                 .iter()
                 .map(line_plain_text)
                 .collect::<Vec<_>>()
                 .join("\n"),
-            VisualKind::Block => {
+            crate::ui::pager::VisualKind::Block => {
                 let (lo_col, hi_col) = sel.col_range();
                 self.lines[lo..=hi]
                     .iter()
@@ -394,10 +393,9 @@ impl PagerView {
                     .join("\n")
             }
         };
-        crate::clipboard::copy(&self.with_title_header(text, include_title))?;
         let count = hi - lo + 1;
         self.visual = None;
-        Ok(count)
+        Some((self.with_title_header(text, include_title), count, in_block))
     }
 
     /// Clamp any state holding line indices into the buffer after `lines`

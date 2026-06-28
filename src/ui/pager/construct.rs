@@ -95,15 +95,12 @@ impl PagerView {
             .join("\n")
     }
 
-    /// Save the source content to a timestamped file in the current
-    /// directory. Returns the path on success.
-    pub fn save_to_file(&self) -> std::io::Result<std::path::PathBuf> {
-        let now = crate::sysinfo::format_now().replace([' ', ':'], "_");
-        let stamp = now.trim_end_matches("_UTC");
-        let filename = format!("spyc_output_{stamp}.txt");
-        let path = std::env::current_dir()?.join(&filename);
-        std::fs::write(&path, self.source_text() + "\n")?;
-        Ok(path)
+    /// The source content + trailing newline, for `Effect::SavePagerOutput`.
+    /// The executor owns the timestamped filename, the cwd, and the write, so
+    /// the file IO stays out of the pure pager type and off the input thread's
+    /// inline path.
+    pub fn save_content(&self) -> String {
+        self.source_text() + "\n"
     }
 
     /// Write the source content to a temp file for editing.
@@ -150,32 +147,26 @@ impl PagerView {
 
     // ---- Visual line mode ------------------------------------------------
 
-    /// Yank the *source* content to the system clipboard. For
-    /// Markdown views this is always the underlying markdown text,
-    /// even when the pager is showing the rendered view -- POLA for
-    /// "I want to paste this README into a chat."
-    ///
-    /// When `include_title` is true, prepend the pager's title as a
-    /// `# {title}` header (with one blank line of separation) so the
-    /// pasted content keeps its source context.
-    pub fn yank_to_clipboard(&self, include_title: bool) -> std::io::Result<()> {
-        crate::clipboard::copy(&self.with_title_header(self.source_text(), include_title))
+    /// Extract the *source* content for clipboard yank (`y` key). For Markdown
+    /// views this is always the underlying markdown text (POLA for "paste into
+    /// chat"). `include_title` prepends a `# {title}` header when true.
+    /// Returns the string without touching the clipboard — callers route through
+    /// `Effect::CopyToClipboard` so the copy stays in `run_effects`.
+    pub fn source_yank_text(&self, include_title: bool) -> String {
+        self.with_title_header(self.source_text(), include_title)
     }
 
-    /// Yank the *visible* content to the system clipboard. For
-    /// Markdown views in rendered mode this gives back the styled-
-    /// but-plain-text rendering (headings with `#`, bullets, etc.,
-    /// wrapped at 80 cols); in source mode it's identical to
-    /// `yank_to_clipboard`. Useful when the rendered version is
-    /// what you want to paste.
-    pub fn yank_visible_to_clipboard(&self, include_title: bool) -> std::io::Result<()> {
+    /// Extract the *visible* content for clipboard yank (`Y` key). For Markdown
+    /// in rendered mode this is the styled-but-plain-text rendering; in source
+    /// mode it equals `source_yank_text`. Returns the string without copying.
+    pub fn visible_yank_text(&self, include_title: bool) -> String {
         let text = self
             .lines
             .iter()
             .map(line_plain_text)
             .collect::<Vec<_>>()
             .join("\n");
-        crate::clipboard::copy(&self.with_title_header(text, include_title))
+        self.with_title_header(text, include_title)
     }
 }
 

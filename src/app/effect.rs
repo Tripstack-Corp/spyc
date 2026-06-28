@@ -55,6 +55,23 @@ pub enum Effect {
     /// copy-out is the regression Phase 5's `PaneSnapshot` avoids.
     CopyToClipboard { text: String, ok: ClipMsg },
 
+    /// A-class. Copy `text` to the system clipboard, then flash `ok_msg` (on
+    /// success) or `"yank failed: {e}"` (on error) in the **active pager's**
+    /// title bar — the pager yank (`y`/`Y`/visual), routed through the executor
+    /// instead of an inline `clipboard::copy` in the motion/visual handlers.
+    /// Distinct from [`Self::CopyToClipboard`] (which flashes the status bar):
+    /// the pager confirms in its own title where the user is looking. The
+    /// success message is composed in the producer (it knows the line count).
+    CopyToPagerClipboard { text: String, ok_msg: String },
+
+    /// A-class. Write `content` to a timestamped `spyc_output_*.txt` in the
+    /// process cwd (the focused column), then flash the saved path or the error
+    /// in the active pager's title — the pager `s` save, routed through the
+    /// executor instead of an inline `std::fs::write` in the motion handler (the
+    /// effects-as-data contract). `content` is materialized in the producer; the
+    /// write is bounded (pager output, not a streaming source).
+    SavePagerOutput { content: String },
+
     /// A-class. Send `sig` to the task's process group (`kill_pg` applies
     /// the negative-pid / group convention), then on success toggle the
     /// task's `paused` flag and flash per `on_ok`, or flash `on_err` on
@@ -387,6 +404,36 @@ impl App {
                     Ok(()) => self.state.flash_info(ok.success(&text)),
                     Err(e) => self.state.flash_error(format!("yank failed: {e}")),
                 },
+                // A-class: copy + flash the ACTIVE PAGER's title (not the status
+                // bar), so a yank inside a pager confirms where the user is
+                // looking — the former inline `view.flash` behavior, now after a
+                // copy that runs in the executor.
+                Effect::CopyToPagerClipboard { text, ok_msg } => {
+                    let msg = match crate::clipboard::copy(&text) {
+                        Ok(()) => ok_msg,
+                        Err(e) => format!("yank failed: {e}"),
+                    };
+                    self.set_active_pager_flash(msg);
+                }
+                // A-class: write the pager body to a timestamped file in the
+                // process cwd, then flash the path/error in the active pager's
+                // title (mirrors the former inline `save_to_file` + `view.flash`).
+                Effect::SavePagerOutput { content } => {
+                    let stamp = crate::sysinfo::format_now().replace([' ', ':'], "_");
+                    let stamp = stamp.trim_end_matches("_UTC");
+                    let filename = format!("spyc_output_{stamp}.txt");
+                    let msg = match std::env::current_dir() {
+                        Ok(dir) => {
+                            let path = dir.join(&filename);
+                            match std::fs::write(&path, &content) {
+                                Ok(()) => format!("saved: {}", path.display()),
+                                Err(e) => format!("save failed: {e}"),
+                            }
+                        }
+                        Err(e) => format!("save failed: {e}"),
+                    };
+                    self.set_active_pager_flash(msg);
+                }
                 // Read the active pane's text from the live host (bounded,
                 // yank-/gf-gated), then route per `then`. The no-pane guard +
                 // the pane read moved here from the former yank / gf handlers.

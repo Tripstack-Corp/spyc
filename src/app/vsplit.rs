@@ -281,7 +281,7 @@ impl App {
     /// so the preview wraps to the column it lands in. (`build_pager_view_for_file`
     /// subtracts the gutter/padding from this.) Falls back to ~half on no split.
     pub(super) fn right_preview_body_width(&self) -> u16 {
-        let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
+        let (term_w, _) = self.view.term_size;
         let pct = self
             .state
             .vsplit

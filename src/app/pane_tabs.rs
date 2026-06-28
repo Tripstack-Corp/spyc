@@ -878,7 +878,7 @@ impl App {
     /// pane to a tab bar (`compute_layout` yields `pane: None` at pct 0), so
     /// the pty keeps its prior size, ready the instant the pane is revealed.
     pub(super) fn resize_panes_to_layout(&mut self) {
-        let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+        let (cols, rows) = self.view.term_size;
         let area = ratatui::layout::Rect::new(0, 0, cols, rows);
         let pane_open = self.runtime.pane_tabs.is_some() && !self.state.pane.pane_hidden;
         let layout = Self::compute_layout(

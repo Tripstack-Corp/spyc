@@ -750,6 +750,11 @@ pub struct ViewState {
     tab_state: Option<TabState>,
     /// Scroll throttle: timestamp + direction of last processed arrow key.
     pub scroll_last: Option<(std::time::Instant, KeyCode)>,
+    /// Cached terminal dimensions (columns, rows). Read once at startup via
+    /// `crossterm::terminal::size()` and refreshed on every `Event::Resize` in
+    /// `handle_resize`. Handlers read this instead of calling `terminal::size()`
+    /// inline, which avoids the repeated syscall and keeps them OS-call-free.
+    pub term_size: (u16, u16),
 }
 
 impl ViewState {
@@ -814,6 +819,7 @@ impl ViewState {
                 .is_ok_and(|c| c.contains("truecolor") || c.contains("24bit")),
             tab_state: None,
             scroll_last: None,
+            term_size: crossterm::terminal::size().unwrap_or((80, 24)),
         }
     }
 }
@@ -1015,7 +1021,7 @@ impl App {
     /// terminal resize (to re-wrap descriptions for the new width and
     /// pick the right column count).
     fn open_help(&mut self) {
-        let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
+        let (term_w, _) = self.view.term_size;
         // Require at least ~40 chars of description space per column
         // before committing to 2-col (prefix is ~30 chars, so col_w ≥ 70,
         // body ≥ 140). Below that, 2-col cramps descriptions more than a

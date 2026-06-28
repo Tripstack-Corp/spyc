@@ -563,6 +563,7 @@ impl App {
     /// and rebuild the help overlay (its wrap points are baked at open time).
     /// Verbatim move of the loop's `Event::Resize` arm.
     pub(crate) fn handle_resize(&mut self, cols: u16, rows: u16) {
+        self.view.term_size = (cols, rows);
         let area = ratatui::layout::Rect::new(0, 0, cols, rows);
         let pane_pct = self.effective_pane_pct();
         if let Some(tabs) = self.runtime.pane_tabs.as_mut() {

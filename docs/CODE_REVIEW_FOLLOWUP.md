@@ -31,7 +31,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 - **PR11** — MCP scope/robustness + path/env overlay _(3 findings; clusters: mcp)_
 - **PR12** — Misc correctness batch _(11 findings; clusters: resume, other, fs-watch-topology, prompt-allowlist-drift, perf-linear-scan, perf-sort-alloc, pager-truncation-bytes, pane-vt100-recovery-size)_
 
-**Remaining: 13** (after PR #583; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
+**Remaining: 11** (after PR #588; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
 
 ## To fix — by cluster
 
@@ -82,14 +82,14 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/state/sessions/mod.rs:579` | find_claude_session_name reads the entire conversation JSONL (100+ MB) into memory | medium | S | ✅ PR #583 |
 | `src/agent/resume.rs:298` | gemini_resume_index_for runs `gemini --list-sessions` synchronously with no timeout on the session-restore path | medium | M | ✅ PR #583 |
 | `src/app/key_dispatch/mod.rs:315` | Capture-pty writes bypass the Effect executor while sibling sinks in the same match use Effect::SendToPane | medium | M | ✅ PR #581 |
-| `src/app/mod.rs:793` | crossterm::terminal::size() called inside key/action handlers (8 sites), against the effects-as-data contract | medium | M | REAL |
+| `src/app/mod.rs:793` | crossterm::terminal::size() called inside key/action handlers (8 sites), against the effects-as-data contract | medium | M | ✅ PR #588 |
 | `src/app/state/apply.rs:320` | format_long_listing and file_type_label do per-file IO inside the pure apply dispatcher | medium | M | ✅ PR #548 |
 | `src/fs/long_listing.rs:155` | format_long_listing does an unmemoized getpwuid/getgrgid NSS lookup per row — L on a large listing can stall seconds-to-minutes on LDAP-backed machines | medium | M | ✅ PR #547 |
 | `src/git/worktree.rs:188` | worktree::add performs a full-tree checkout synchronously on the main input thread | high | M | ✅ PR #582 |
 | `src/pane/widget.rs:37` | Parser mutex held across the whole pane draw — per-frame O(cells) set_string under the lock contends with the parser worker | medium | M | ✅ #581 (already-fixed: `with_screen` scopes the lock) |
 | `src/ui/blame_render.rs:44` | render_blame joins and syntect-highlights the whole file on the main thread with no size cap | medium | M | REAL |
 | `src/ui/diff_render/mod.rs:149` | Diff render syntect-highlights both full sides on the main thread, and re-highlights from scratch on every layout toggle | medium | M | REAL |
-| `src/ui/pager/construct.rs:182` | Pager yank/save methods do inline OS side effects, bypassing the existing Effect::CopyToClipboard path | medium | M | REAL |
+| `src/ui/pager/construct.rs:182` | Pager yank/save methods do inline OS side effects, bypassing the existing Effect::CopyToClipboard path | medium | M | ✅ PR #588 |
 | `src/app/sources.rs:293` | Watcher-driven `refresh_listing` does a synchronous 50k-entry disk walk + allocation-heavy sort on the event-loop thread | medium | L | PARTIAL |
 
 ### PR9 · Dedup / shared-helper cleanups — ✅ done (PRs #517, #518; see closed log)
@@ -131,6 +131,10 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
+
+**✅ PR #588 — route pager yank/save through the executor + cache terminal size (2026-06-28):**
+- `ui/pager/construct.rs:182` — the pager `y`/`Y`/visual yanks and the `s` save did inline `clipboard::copy` / `std::fs::write` in the motion/visual handlers, bypassing the sole effect executor. New `Effect::CopyToPagerClipboard { text, ok_msg }` and `Effect::SavePagerOutput { content }` move the IO into `run_effects`. The confirmation still lands in the **active pager's title** (new `set_active_pager_flash`), not the status bar — `Effect::CopyToClipboard` flashes the status bar, which a pager overlay would hide, so the pager keeps its own title flash + exact former messages. `PagerView` exposes pure text extractors (`source_yank_text` / `visible_yank_text` / `visual_yank_text` / `save_content`); the copy/write is the executor's.
+- `app/mod.rs:793` — 8 `&self`/`&mut self` handler sites called `crossterm::terminal::size()` inline (a syscall on the input path, against effects-as-data). Cached in `ViewState.term_size`, seeded at startup and refreshed in `handle_resize`; the handlers (open_help, right_preview_body_width, pane_scroll, pager body/wrap, image render, mermaid view, resize_panes_to_layout) read the cache. Off-thread / associated-fn sites without a `self` handle (`build_pager_view`, `pane_spawn_size`, `top_overlay_size`, `git_view_body_width`, `spawn_capture`) keep the live call.
 
 **✅ Follow-up to #583 — fix UTF-8 crash-to-skip in the session-title tail-read (2026-06-28):**
 - `state/sessions/mod.rs` — #583's tail-read used `read_to_string` *after* `seek(len - 64 KB)`. A seek landing mid-UTF-8-codepoint makes `read_to_string`'s strict validation fail, so the whole file was silently dropped and the title went missing in the `spyc -r` picker — intermittent and data-dependent (ASCII files dodged it, real conversations with Unicode didn't). Now reads bytes + `String::from_utf8_lossy`, extracted into a testable `title_from_jsonl_tail` helper. Two regression tests (small-file path + a deterministic mid-codepoint seek boundary). Found by the Opus audit pass; the fast tail-read design is kept (the ≤64 KB early-title window is an accepted speed tradeoff on restore).

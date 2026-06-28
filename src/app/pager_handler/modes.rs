@@ -395,15 +395,13 @@ impl App {
             match key.code {
                 KeyCode::Char('y' | 'Y') => {
                     let include_title = self.state.config.yank.include_pager_title;
-                    match view.yank_visual_to_clipboard(include_title) {
-                        Ok(n) => {
-                            let unit = if in_block { "row" } else { "line" };
-                            view.flash = Some(format!(
-                                "yanked {n} {unit}{} to clipboard",
-                                if n == 1 { "" } else { "s" }
-                            ));
-                        }
-                        Err(e) => view.flash = Some(format!("yank failed: {e}")),
+                    if let Some((text, n, _)) = view.visual_yank_text(include_title) {
+                        let unit = if in_block { "row" } else { "line" };
+                        let ok_msg = format!(
+                            "yanked {n} {unit}{} to clipboard",
+                            if n == 1 { "" } else { "s" }
+                        );
+                        return Some(vec![Effect::CopyToPagerClipboard { text, ok_msg }]);
                     }
                     return Some(Vec::new());
                 }

@@ -179,17 +179,19 @@ impl App {
             }
             KeyCode::Char('y') => {
                 let include_title = self.state.config.yank.include_pager_title;
-                match view.yank_to_clipboard(include_title) {
-                    Ok(()) => view.flash = Some("yanked source to clipboard".into()),
-                    Err(e) => view.flash = Some(format!("yank failed: {e}")),
-                }
+                let text = view.source_yank_text(include_title);
+                return vec![Effect::CopyToPagerClipboard {
+                    text,
+                    ok_msg: "yanked source to clipboard".to_string(),
+                }];
             }
             KeyCode::Char('Y') => {
                 let include_title = self.state.config.yank.include_pager_title;
-                match view.yank_visible_to_clipboard(include_title) {
-                    Ok(()) => view.flash = Some("yanked visible to clipboard".into()),
-                    Err(e) => view.flash = Some(format!("yank failed: {e}")),
-                }
+                let text = view.visible_yank_text(include_title);
+                return vec![Effect::CopyToPagerClipboard {
+                    text,
+                    ok_msg: "yanked visible to clipboard".to_string(),
+                }];
             }
             KeyCode::Char('V') => {
                 // Enter visual line mode -- anchor at the top visible
@@ -248,10 +250,10 @@ impl App {
                 self.view.needs_full_repaint = true;
                 return sh_c(&format!("{pager_cmd} {path_quoted}"), false);
             }
-            KeyCode::Char('s') if view.saveable => match view.save_to_file() {
-                Ok(path) => view.flash = Some(format!("saved: {}", path.display())),
-                Err(e) => view.flash = Some(format!("save failed: {e}")),
-            },
+            KeyCode::Char('s') if view.saveable => {
+                let content = view.save_content();
+                return vec![Effect::SavePagerOutput { content }];
+            }
             KeyCode::Char('v') => {
                 let argv = shell::resolve_editor();
                 if argv.is_empty() {
@@ -379,7 +381,7 @@ impl App {
                     Some(source) => {
                         view.flash = Some("rendering mermaid diagram\u{2026}".to_string());
                         let mode = if key.code == KeyCode::Char('i') {
-                            let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+                            let (cols, rows) = self.view.term_size;
                             // Reserve the bottom row for the dismiss hint, so the
                             // protocol is sized to the *actual* draw area — else
                             // ratatui-image's Image refuses to render (size > area).

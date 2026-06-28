@@ -50,8 +50,9 @@ impl App {
     }
 
     /// `s` in the image overlay: write the rendered PNG to the cwd, reporting
-    /// the path (or error) in the overlay footer. Small write, done inline like
-    /// the pager's text `save_to_file`.
+    /// the path (or error) in the overlay footer. A small bounded write, kept
+    /// inline in this overlay handler (the image overlay has no effect path of
+    /// its own; the pager's text save routes through `Effect::SavePagerOutput`).
     fn save_image_view(&mut self) {
         let Some(iv) = self.view.image_view.as_mut() else {
             return;
@@ -123,7 +124,7 @@ impl App {
             if dark { "dark" } else { "light" }
         ));
         self.view.needs_full_repaint = true;
-        let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+        let (cols, rows) = self.view.term_size;
         vec![Effect::RenderMermaid(
             crate::app::mermaid_ops::MermaidRenderOp {
                 source,

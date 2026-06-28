@@ -133,7 +133,7 @@ impl App {
             if cached >= 2 {
                 cached
             } else {
-                let (_, term_h) = crossterm::terminal::size().unwrap_or((80, 24));
+                let (_, term_h) = self.view.term_size;
                 let pager_h = if view.full_width {
                     term_h
                 } else {
@@ -327,6 +327,25 @@ impl App {
         }
     }
 
+    /// Set the flash line on whichever pager currently owns input — how the
+    /// `CopyToPagerClipboard` / `SavePagerOutput` executors land a yank/save
+    /// confirmation in the pager title (where the user is looking). Mirrors
+    /// `active_pager_mut!` without the macro, which the `effect` module can't see.
+    pub(crate) fn set_active_pager_flash(&mut self, msg: String) {
+        let view = match self.active_pager_slot() {
+            PagerSlot::Modal | PagerSlot::Top => self.view.pager.as_mut(),
+            PagerSlot::Scrollback => self.view.scroll_pager.as_mut(),
+            PagerSlot::Right => self
+                .view
+                .pager_right
+                .as_mut()
+                .or(self.view.right_pager.as_mut()),
+        };
+        if let Some(view) = view {
+            view.flash = Some(msg);
+        }
+    }
+
     /// Decide which pager slot owns input — the single source of truth shared by
     /// [`Self::active_pager_ref`] and the `active_pager_mut!` macro. A flat
     /// priority ladder: a full-frame modal first, then the focused region (right
@@ -443,7 +462,7 @@ impl App {
         // width — not the full terminal, or the markdown overflows the narrow
         // column. (`None` = full width, used when there's no split.)
         let wrap = self.state.vsplit.and_then(|v| {
-            let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
+            let (term_w, _) = self.view.term_size;
             super::vsplit::vsplit_column_widths(term_w, v.width_pct).map(
                 |(left_w, right_w)| match v.focus {
                     state::Side::Left => left_w,

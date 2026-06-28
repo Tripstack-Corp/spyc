@@ -219,7 +219,7 @@ impl App {
                 // terminal width minus the block's two border columns. Computed
                 // on the main thread (the worker has no terminal handle) and
                 // captured into the producer; `r` re-runs this after a resize.
-                let (term_w, _) = crossterm::terminal::size().unwrap_or((80, 24));
+                let (term_w, _) = self.view.term_size;
                 let width = Some(usize::from(term_w.saturating_sub(2)));
                 self.spawn_pager_stream(
                     PagerStreamMount::LowerPane { title },

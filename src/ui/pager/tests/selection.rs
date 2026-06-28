@@ -149,10 +149,8 @@ fn clamp_scroll_auto_leaves_in_range_scroll_untouched() {
     assert_eq!(view.scroll, 3, "an already-valid scroll is left alone");
 }
 
-#[cfg(unix)]
 #[test]
 fn yank_visual_past_end_clamps_instead_of_panicking() {
-    use std::os::unix::fs::PermissionsExt;
     // Selection sits entirely past the (shrunk) buffer: range() returns
     // lo=10,hi=15 but len=3. Pre-fix this slice panicked.
     let mut view = PagerView::new_plain(
@@ -171,24 +169,11 @@ fn yank_visual_past_end_clamps_instead_of_panicking() {
         kind: VisualKind::Line,
     });
 
-    let tmp = tempfile::tempdir().unwrap();
-    let stub = tmp.path().join("clip.sh");
-    let sidecar = tmp.path().join("out.txt");
-    std::fs::write(&stub, format!("#!/bin/sh\ncat > {}\n", sidecar.display())).unwrap();
-    let mut perms = std::fs::metadata(&stub).unwrap().permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&stub, perms).unwrap();
-
-    let n =
-        crate::clipboard::with_clipboard_override(&stub, || view.yank_visual_to_clipboard(false))
-            .expect("yank should not panic or error");
+    let result = view.visual_yank_text(false);
+    let (text, n, _in_block) = result.expect("clamped selection should extract text");
     assert_eq!(n, 1, "clamped to the single last line");
-    let captured = std::fs::read_to_string(&sidecar).unwrap();
-    assert!(
-        captured.contains("line 2"),
-        "yanked the clamped tail: {captured:?}"
-    );
-    assert!(!captured.contains("line 0"));
+    assert!(text.contains("line 2"), "yanked the clamped tail: {text:?}");
+    assert!(!text.contains("line 0"));
 }
 
 #[test]
