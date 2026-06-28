@@ -115,7 +115,7 @@ impl App {
                         Style::default().fg(self.view.theme.status_suffix),
                     ))
                 } else if is_agent {
-                    self.agent_activity_span(entry.info.activity)
+                    self.agent_activity_span(entry.info.activity, entry.info.anim_phase_offset)
                 } else {
                     None
                 };
@@ -304,6 +304,7 @@ impl App {
     fn agent_activity_span(
         &self,
         activity: crate::pane::AgentActivity,
+        phase_offset: u64,
     ) -> Option<ratatui::text::Span<'static>> {
         use crate::pane::AgentActivity;
         use ratatui::style::Color;
@@ -318,7 +319,8 @@ impl App {
             AgentActivity::Working => Some(Span::styled(
                 "\u{25cf}", // ●
                 Style::default()
-                    .fg(self.spicy_pulse_color(self.view.agent_anim_frame))
+                    .fg(self
+                        .spicy_pulse_color(self.view.agent_anim_frame.wrapping_add(phase_offset)))
                     .add_modifier(Modifier::BOLD),
             )),
             // Blocked = "needs me": a STEADY hot red `●` (not the pulse) so it
@@ -533,7 +535,7 @@ mod tests {
             AgentActivity::Done,
         ] {
             let span = app
-                .agent_activity_span(activity)
+                .agent_activity_span(activity, 0)
                 .unwrap_or_else(|| panic!("agent activity {activity:?} should render a dot"));
             assert_eq!(
                 crate::ui::display_width(span.content.as_ref()),
@@ -542,8 +544,35 @@ mod tests {
             );
         }
         assert!(
-            app.agent_activity_span(AgentActivity::Unknown).is_none(),
+            app.agent_activity_span(AgentActivity::Unknown, 0).is_none(),
             "a non-agent tab carries no dot"
         );
+    }
+
+    /// The requirement behind `anim_phase_offset`: two Working tabs at the SAME
+    /// shared frame but different phase seeds land on different heat colors, so
+    /// the dots don't breathe in lockstep. Also pins the overflow contract — a
+    /// full-range seed must `wrapping_add` onto the frame, not panic.
+    #[test]
+    fn working_pulse_phase_offset_desyncs_tabs() {
+        let mut app = App::test_app(PathBuf::from("/tmp/proj"));
+        // Force the truecolor gradient path (env-independent) so the seed maps
+        // through the 6-phase HEAT walk rather than the 2-hue fallback.
+        app.view.hud_truecolor = true;
+        app.view.theme.mono = false;
+        app.view.agent_anim_frame = 1;
+
+        // Offsets 0 and 3 sit at opposite ends of the ping-pong (pepper red vs
+        // spark) — distinct seeds, distinct colors at one instant.
+        let a = app.spicy_pulse_color(app.view.agent_anim_frame.wrapping_add(0));
+        let b = app.spicy_pulse_color(app.view.agent_anim_frame.wrapping_add(3));
+        assert_ne!(
+            a, b,
+            "distinct phase seeds must yield distinct pulse colors"
+        );
+
+        // A near-max seed added to a non-zero frame must not overflow — the
+        // call site wraps. (A raw `+` would panic here in a checked build.)
+        let _ = app.agent_activity_span(AgentActivity::Working, u64::MAX);
     }
 }

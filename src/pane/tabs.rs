@@ -154,6 +154,12 @@ pub struct TabInfo {
     /// command is still visibly unsubmitted — async startup work can
     /// eat a lone Enter seconds after the banner looks settled.
     pub pending_resume_send: Option<PendingResumeSend>,
+    /// Phase seed for the "spicy pulse" animation: a per-tab `u64` added
+    /// (wrapping) to the shared anim frame before the color lookup, so every
+    /// tab starts at a distinct point in the 6-phase cycle and the dots don't
+    /// breathe in lockstep. Seeded from the tab's UUID at construction; only
+    /// its value mod the cycle length matters.
+    pub anim_phase_offset: u64,
     /// When the tab's subprocess was launched. Bounds the
     /// restore-fallback window so a real user-driven exit much later
     /// doesn't trigger an automatic respawn.
@@ -182,8 +188,13 @@ impl TabInfo {
             .unwrap_or("???")
             .to_string();
         let cwd = cwd.into();
+        let uid = uuid::Uuid::now_v7();
+        // Phase seed = the UUID's low 64 bits. v7's high bits are a millisecond
+        // timestamp (tabs spawned together would collide mod the cycle length),
+        // so take the random tail — `.1` is exactly that, no byte-slicing.
+        let anim_phase_offset = uid.as_u64_pair().1;
         Self {
-            id: uuid::Uuid::now_v7().to_string(),
+            id: uid.to_string(),
             command,
             label,
             cwd,
@@ -194,6 +205,7 @@ impl TabInfo {
             reported: None,
             restore_fallback: None,
             pending_resume_send: None,
+            anim_phase_offset,
             spawn_at: std::time::Instant::now(),
             spawn_epoch_secs: crate::sysinfo::epoch_secs(),
             codex_session_id: None,
