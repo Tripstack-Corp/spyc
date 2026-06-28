@@ -117,6 +117,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     pure("quit"),
     app("resume", commands::cmd_resume),
     pure("set"),
+    app("setenv", commands::cmd_setenv),
     pure("sort"),
     pure("startdir"),
     app("task", commands::cmd_task),

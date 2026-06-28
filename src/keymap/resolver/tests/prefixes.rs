@@ -320,6 +320,21 @@ fn gh_no_longer_jumps_project_home() {
     assert_eq!(feed(&mut r, key('h')), ResolverOutcome::Ignored);
 }
 
+#[test]
+fn demoted_g_chord_keys_are_unbound() {
+    // gy (:graveyard), gU (:whoami), gs (:sort) demoted to `:`-only in the
+    // keymap slim; gw / gP / gd … stay on the g chord.
+    for c in ['y', 'U', 's'] {
+        let mut r = Resolver::new();
+        feed(&mut r, key('g'));
+        assert_eq!(
+            feed(&mut r, key(c)),
+            ResolverOutcome::Ignored,
+            "`g{c}` should be unbound after the demotion"
+        );
+    }
+}
+
 /// The documented binding taxonomy (DESIGN.md): the leader namespace carries
 /// only Global/Meta actions, and the `^a` pane prefix only Pane/Meta. This
 /// guards against drift — e.g. a pane op accidentally added to the leader, or

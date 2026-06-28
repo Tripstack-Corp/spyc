@@ -430,7 +430,6 @@ impl AppState {
                 self.flash_info(format!("start dir: {}", dir.display()));
                 self.start_dir = dir;
             }
-            Action::ShowUserHost => self.flash_info(self.user_host.clone()),
             Action::JumpPrevDir => match self.prev_dir.clone() {
                 Some(prev) => {
                     return ApplyResult::Post(vec![Effect::ChangeDir {

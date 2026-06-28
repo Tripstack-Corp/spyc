@@ -189,13 +189,13 @@ file cache that survives across sessions.
 
 Files removed with **`R`** (and items expelled from inventory) go
 to a per-user **graveyard** as compressed `tar.zst` blobs (mode
-bits + mtime preserved). Recover with `gy` or `:undo`. When the
+bits + mtime preserved). Recover with `:graveyard` or `:undo`. When the
 graveyard exceeds 500 MB the oldest entries cascade to the system
 trash so OS-native recovery still works.
 
 | Key | Action |
 |-----|--------|
-| `gy` | Open graveyard view (newest first) |
+| `:graveyard` | Open graveyard view (newest first; bind a key with `map KEY command graveyard`) |
 | `:undo` | Restore most-recent removal to its original path |
 | `p` (in view) | Restore cursor entry to cwd |
 | `P` (in view) | Restore cursor entry to original path |
@@ -337,7 +337,7 @@ on the top bar and persist across `spyc -r`.
 | `Space p` | Jump to `PROJECT_HOME` (leader; `^a Space p` from the pane) |
 | `gP` / `Space P` | Set `PROJECT_HOME` to current directory |
 | `gS` | Set start dir (target of `` ` ``) to current directory |
-| `gU` | Flash `user@host` in the status line |
+| `:whoami` | Flash `user@host` in the status line |
 | `:project [.\|<path>\|clear]` | Manage `PROJECT_HOME` |
 | `:startdir [.\|<path>]` | Manage start dir |
 | `:name <NEW>` | Rename the active session |

@@ -255,19 +255,6 @@ impl App {
                     .flash_info(format!("sort: {}{}", self.state.cur().sort_order, suffix));
             }
 
-            Action::SortReverse => {
-                let rev = !self.state.cur().sort_reversed;
-                self.state.cur_mut().sort_reversed = rev;
-                self.state.apply_sort();
-                let suffix = if self.state.cur().sort_reversed {
-                    " (reversed)"
-                } else {
-                    ""
-                };
-                self.state
-                    .flash_info(format!("sort: {}{}", self.state.cur().sort_order, suffix));
-            }
-
             Action::OpenTaskViewer => self.open_task_viewer(None),
 
             Action::ReopenLastBuffer => {

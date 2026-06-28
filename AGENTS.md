@@ -22,14 +22,14 @@ One line per feature; see [`FEATURES.md`](FEATURES.md) for the full reference.
 - **`^a u` Quick Select** (wezterm-style) — label URLs / paths / SHAs / IPv4 / custom-regex matches in the visible pane; lowercase yanks, uppercase opens. Custom patterns in `.spycrc.toml` `[[scan.patterns]]`.
 - **In-app pager** — search, ANSI, hex-dump, line numbers, `:N` jump, save. Closed views go on a back/forward buffer history (`:bprev`/`:bnext`, `[b`/`]b`, `gp`).
 - **Shell prompt** — vi-editable, persistent history (`!` capture, `;` foreground, `$` interactive shell); `!?` history editor.
-- **`:` command line** — vim-style (`:limit`, `:!cmd`, `:!!`, `:;cmd`, `:fg`, `:task`, `:grep`, `:bprev`/`:bnext`, `:why-status`, `:graveyard`, `:activity`, `:longlist`, `:filetype`, `:chmod`, `:q`, …). Less-frequent features ship as `:` commands so they don't each consume a default key; re-bind one via `map KEY command <name>`.
+- **`:` command line** — vim-style (`:limit`, `:!cmd`, `:!!`, `:;cmd`, `:fg`, `:task`, `:grep`, `:bprev`/`:bnext`, `:why-status`, `:graveyard`, `:activity`, `:longlist`, `:filetype`, `:chmod`, `:setenv`, `:q`, …). Less-frequent features ship as `:` commands so they don't each consume a default key; re-bind one via `map KEY command <name>`.
 - **Agent-activity dots** — each agent tab carries a live activity dot: P0 output-timing (spicy heat-pulse `●` while output flows, quiet `·` when idle) overridden by P1 semantic self-report via the `report_status` MCP tool (`Working`/`Blocked`/`Done`). `:why-status` explains the active tab. For *auto*-report, spyc injects `SPYC_MCP_SOCK` + a stable `SPYC_PANE_ID` into the agent pane and ships a one-shot `spyc --report-status <state>` reporter (`mcp::report_status_to_socket`). Charter: `docs/AGENT_AWARENESS_PLAN.md`.
 - **Project-wide search** — `F` fuzzy filename finder (gitignore-aware walker); `:grep` content search via embedded ripgrep, streamed into a pager so `gf`/`gF` work.
 - **Background tasks** — `^Z` backgrounds a running `!` capture; `:fg` resumes, `gB`/`:task N`/`[t`/`]t` peek. Rendered `[N+]`/`[N●]`/`[N✓]`/`[N✗]` in the divider.
 - **`=` limit filter** — temporary glob (`=*.rs`, `=!` picks, `=git`/`=g` git status, `=h` harpoon, `=` clears).
 - **Harpoon** — per-worktree pinned file/dir list (max 9). `H` chord: `Ha` append, `Hx` remove, `H1`..`H9` jump, `Hh` menu. Per-column (lives on `Commander`), keyed by worktree root.
 - **Picks** (per-dir multi-select) + **inventory** (persistent file cache).
-- **Graveyard** — soft-delete recovery for `R` / inventory expulsions (`<uuid>.json` + `.tar.zst`). `gy` viewer, `p`/`P` restore, `:undo`. FIFO-cascade to trash at 500 MB.
+- **Graveyard** — soft-delete recovery for `R` / inventory expulsions (`<uuid>.json` + `.tar.zst`). `:graveyard` viewer (no default key — keymap-slimmed; re-bind via `map KEY command graveyard`), `p`/`P` restore, `:undo`. FIFO-cascade to trash at 500 MB.
 - **Session save/restore** — auto-saved on quit with a spice name (e.g. `SAFFRON_CUMIN`); `spyc -r` resumes tabs, agent conversations, and the vsplit.
 - **`PROJECT_HOME`** — sticky per-session project root (auto-set from `.git`). `Space p` jumps, `gP`/`Space P` sets, `:project` manages. New panes default here. Exposed via MCP.
 - **Status bar** — `🌶️ | PROJECT_HOME | SESSION | path | git | suffix`; `[layout] status_position` flips top/bottom. Host terminal title set to `🌶️: <project> · <session>`.
@@ -54,7 +54,7 @@ Deep design decisions live in [`ARCHITECTURE.md`](ARCHITECTURE.md) (sync-only, M
 - Panes — **`pane_tabs.rs`** (tab lifecycle/focus), **`pane_scroll.rs`** (scroll mode + scrollback; `^a v` auto-engages an alt-screen agent's on-disk transcript), **`codex_pin.rs`** (spawn-ordered rollout claim), **`navigate.rs`**, **`quick_select.rs`** (`^a u`).
 - Vsplit — **`vsplit.rs`** (`^a |` preview cycle; `^s n`/`^s x` second Commander; `cur()`/`col(side)`; `carve_vsplit` geometry), **`preview_ops.rs`** (off-thread live-reload of the split preview).
 - Off-thread workers (Effect → detached worker → Runtime slot → payloadless Message → pre-recv drain) — **`file_ops.rs`** (copy/move/pipe + `OpenSpecialFile`), **`inventory_ops.rs`**, **`graveyard_ops.rs`**, **`mermaid_ops.rs`**, **`worktree_ops.rs`** (MCP worktree create/remove/clean), **`worktree_clean.rs`** (`safe_remove_worktree`, the shared safe teardown).
-- App-layer result handlers — **`git_state.rs`**, **`harpoon.rs`**, **`graveyard.rs`** (`gy` viewer), **`clipboard.rs`**, **`mcp.rs`**, **`agent_status.rs`** (status short-id + P0 activity derive), **`config.rs`** (live reload).
+- App-layer result handlers — **`git_state.rs`**, **`harpoon.rs`**, **`graveyard.rs`** (`:graveyard` viewer), **`clipboard.rs`**, **`mcp.rs`**, **`agent_status.rs`** (status short-id + P0 activity derive), **`config.rs`** (live reload).
 - Session / misc state — **`session.rs`** (save/restore, `-r` picker), **`tasks.rs`** + **`capture.rs`** (`!` shell-capture state), **`find_picker.rs`** + **`prompt.rs`** (small data structs), **`activity.rs`** (`A`-overlay monitor).
 
 **Other crates:**

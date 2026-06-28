@@ -216,10 +216,10 @@ pub(super) fn cmd_dump_scrollback(app: &mut App, _args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
-/// `:graveyard` — open the graveyard viewer (typed alias for `gy`).
+/// `:graveyard` — open the graveyard viewer (the default key was dropped in the
+/// keymap slim). Routes through the action so its entry-hint flash fires.
 pub(super) fn cmd_graveyard(app: &mut App, _args: &str) -> Vec<Effect> {
-    app.state.open_graveyard_view();
-    Vec::new()
+    app.apply(&Action::OpenGraveyardView).unwrap_or_default()
 }
 
 // `:activity` / `:longlist` / `:filetype` / `:chmod` — typed entry points for
@@ -245,6 +245,12 @@ pub(super) fn cmd_filetype(app: &mut App, _args: &str) -> Vec<Effect> {
 /// `:chmod` — `chmod +x` the selection (was `^X`).
 pub(super) fn cmd_chmod(app: &mut App, _args: &str) -> Vec<Effect> {
     app.apply(&Action::ChmodAdd('x')).unwrap_or_default()
+}
+
+/// `:setenv` — open the `NAME=VALUE` env-var prompt (was `s`). `:set` is for
+/// app settings (`:set sort=…`), so the env-var setter gets its own command.
+pub(super) fn cmd_setenv(app: &mut App, _args: &str) -> Vec<Effect> {
+    app.apply(&Action::SetEnvPrompt).unwrap_or_default()
 }
 
 /// Outcome of parsing an optional numeric task-id `:command` argument.

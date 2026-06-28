@@ -52,12 +52,26 @@ fn ctrl_t_toggles_all_picks() {
 }
 
 #[test]
-fn ctrl_x_chmod() {
+fn ctrl_x_is_unbound_after_chmod_demotion() {
+    // `^X` (chmod +x) was demoted to `:chmod` to slim the default map; the
+    // key is now free (re-bind via `map ^X command chmod`).
     let mut r = Resolver::new();
-    assert_eq!(
-        feed(&mut r, ctrl('x')),
-        ResolverOutcome::Action(Action::ChmodAdd('x'))
-    );
+    assert_eq!(feed(&mut r, ctrl('x')), ResolverOutcome::Ignored);
+}
+
+#[test]
+fn demoted_standalone_keys_are_unbound() {
+    // A (:activity), s (:set), L (:longlist), f (:filetype) lost their default
+    // key in the keymap slim — each is now free, reached via its : command and
+    // re-bindable with `map KEY command <name>`.
+    for c in ['A', 's', 'L', 'f'] {
+        let mut r = Resolver::new();
+        assert_eq!(
+            feed(&mut r, key(c)),
+            ResolverOutcome::Ignored,
+            "`{c}` should be unbound after the demotion"
+        );
+    }
 }
 
 #[test]

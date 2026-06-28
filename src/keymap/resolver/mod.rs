@@ -163,11 +163,8 @@ impl Resolver {
                 Act("w", A::JumpWorktreeRoot),
                 Act("P", A::SetProjectHomeHere),
                 Act("S", A::SetStartDirHere),
-                Act("s", A::SortReverse),
                 Act("p", A::ReopenLastBuffer),
-                Act("y", A::OpenGraveyardView),
                 Act("B", A::OpenTaskViewer),
-                Act("U", A::ShowUserHost),
                 Act("V", A::Version),
             ],
             PendingSeq::W => vec![
@@ -387,7 +384,7 @@ impl Resolver {
                     self.pending = PendingSeq::CtrlS;
                     return ResolverOutcome::Pending;
                 }
-                KeyCode::Char('x' | 'X') => ResolverOutcome::Action(Action::ChmodAdd('x')),
+                // `^X` (chmod +x) demoted to `:chmod` to free the key.
                 KeyCode::Char('r' | 'R') => ResolverOutcome::Action(Action::ReloadConfig),
                 // Ctrl-backslash toggles the split pane. Some terminals
                 // deliver this as `Char('\\')` with CONTROL (handled
@@ -449,11 +446,11 @@ impl Resolver {
                 KeyCode::Char('w') => ResolverOutcome::Action(Action::JumpWorktreeRoot),
                 KeyCode::Char('P') => ResolverOutcome::Action(Action::SetProjectHomeHere),
                 KeyCode::Char('S') => ResolverOutcome::Action(Action::SetStartDirHere),
-                KeyCode::Char('s') => ResolverOutcome::Action(Action::SortReverse),
-                KeyCode::Char('U') => ResolverOutcome::Action(Action::ShowUserHost),
                 KeyCode::Char('B') => ResolverOutcome::Action(Action::OpenTaskViewer),
                 KeyCode::Char('p') => ResolverOutcome::Action(Action::ReopenLastBuffer),
-                KeyCode::Char('y') => ResolverOutcome::Action(Action::OpenGraveyardView),
+                // `gs` (sort reverse → :sort), `gU` (user@host → :whoami), and
+                // `gy` (graveyard → :graveyard) were demoted to `:`-only to slim
+                // the default map; re-bind via `map KEY command <name>`.
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
@@ -803,14 +800,8 @@ impl Resolver {
                 self.reset();
                 ResolverOutcome::Action(Action::NewFilePrompt)
             }
-            KeyCode::Char('L') => {
-                self.reset();
-                ResolverOutcome::Action(Action::LongList)
-            }
-            KeyCode::Char('f') => {
-                self.reset();
-                ResolverOutcome::Action(Action::FileType)
-            }
+            // `L` (long list → :longlist) and `f` (file type → :filetype)
+            // demoted to `:`-only to slim the default map.
             KeyCode::Char('S') => {
                 self.reset();
                 ResolverOutcome::Action(Action::SortCycle)
@@ -839,14 +830,8 @@ impl Resolver {
                 self.reset();
                 ResolverOutcome::Action(Action::ColorToggle)
             }
-            KeyCode::Char('A') => {
-                self.reset();
-                ResolverOutcome::Action(Action::ToggleActivity)
-            }
-            KeyCode::Char('s') => {
-                self.reset();
-                ResolverOutcome::Action(Action::SetEnvPrompt)
-            }
+            // `A` (activity monitor → :activity) and `s` (set env → :set)
+            // demoted to `:`-only to slim the default map.
 
             // Git worktree prefix.
             KeyCode::Char('W') => {

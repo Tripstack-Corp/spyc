@@ -70,11 +70,10 @@ pub enum Action {
     LongList,      // L — ls -lh selection | $PAGER
     FileType,      // f — file(1) on selection, paged output
 
-    // Sort.
+    // Sort. (Reverse-toggle lives on the `:sort reverse` command — no
+    // default key since the keymap slim.)
     /// `S` — cycle through sort modes (Name → Size → Mtime → Ext → Name).
     SortCycle,
-    /// `gs` — toggle the reverse flag on the current sort mode.
-    SortReverse,
 
     // Marks (vi-style named bookmarks).
     SetMark(char),  // m{a-z}
@@ -90,8 +89,7 @@ pub enum Action {
     // Start dir (target of backtick `).
     SetStartDirHere, // gS — set start_dir to current directory
 
-    // Identity.
-    ShowUserHost, // gU — flash user@host in the status line
+    // (user@host lives on the `:whoami` command — no default key.)
 
     // Edit / display in top pane.
     EditInPane,    // V — open $EDITOR in top overlay (bottom pane stays visible)
@@ -102,8 +100,8 @@ pub enum Action {
     Version,        // gV / :version — show spyc version
     ShowMemory,     // I — session info pager (version, pid, rss, counts)
     ColorToggle,    // C — toggle color theme on/off
-    SetEnvPrompt,   // s — NAME=VALUE prompt
-    ToggleActivity, // A — toggle draws/sec, bytes/sec overlay
+    SetEnvPrompt,   // :setenv — open the NAME=VALUE prompt (no default key)
+    ToggleActivity, // :activity — toggle draws/sec, bytes/sec overlay
 
     // Help.
     Help, // ? or F1 — key bindings overlay
@@ -146,8 +144,9 @@ pub enum Action {
     // no-split quit keeps its own "press again to quit" confirm).
     QuitOrCloseCommander,
 
-    // Graveyard.
-    OpenGraveyardView, // g y — open the graveyard viewer
+    // Graveyard. No default key since the keymap slim — reached via the
+    // `:graveyard` command (which dispatches this action for its entry hint).
+    OpenGraveyardView,
 
     // Quick Select — wezterm-style labeled overlay over pane output.
     QuickSelectOpen, // ^a u — scan visible pane, label matches, pick to yank/open
@@ -281,7 +280,6 @@ impl Action {
             | Self::Date
             | Self::ColorToggle
             | Self::ToggleActivity
-            | Self::ShowUserHost
             | Self::Quit
             | Self::MacroRecordReserved
             | Self::Noop => Tier::Meta,
@@ -341,7 +339,6 @@ impl Action {
             Self::LongList => "long listing",
             Self::FileType => "file type",
             Self::SortCycle => "cycle sort (name/size/mtime/ext)",
-            Self::SortReverse => "toggle reverse sort",
             Self::Help => "help",
             Self::ReloadConfig => "reload config",
             Self::TogglePane => "toggle split pane",
@@ -395,7 +392,6 @@ impl Action {
             Self::JumpWorktreeRoot => "jump the focused column to its worktree/repo root",
             Self::SetProjectHomeHere => "set PROJECT_HOME to current dir",
             Self::SetStartDirHere => "set start dir to current dir (target of `)",
-            Self::ShowUserHost => "flash user@host",
             Self::Date => "show date",
             Self::Version => "show version",
             Self::ShowMemory => "session info",

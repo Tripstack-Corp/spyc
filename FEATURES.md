@@ -152,13 +152,17 @@ become `%` in shell expansion.
   files inside any selected directory and surfaces the total
   ("remove DIR (recursive, N files) + M file(s)?") so the blast
   radius is visible before you press `y`. Removed items go to the
-  **graveyard** (see below) — recover with `gy` or `:undo`.
+  **graveyard** (see below) — recover with `:graveyard` or `:undo`.
 - **+** create a new directory
-- **L** long listing -- aligned table with inode, mode, octal,
+- **:longlist** long listing -- aligned table with inode, mode, octal,
   links, owner, group, size, bytes, blocks, mtime/atime/ctime/birth,
   name (symlinks as `name -> target`). Pager height fits to content.
-- **f** run `file(1)` on the selection
-- **^X** chmod +x
+- **:filetype** run `file(1)` on the selection
+- **:chmod** chmod +x
+
+  *(`:longlist` / `:filetype` / `:chmod` are the rarely-used file ops —
+  kept off the default keymap to keep it lean; bind a key if you use them,
+  e.g. `map L command longlist`.)*
 
 ## Split pane with multi-tab pty
 
@@ -412,7 +416,7 @@ end).
 
 - **`:cd <path>`** — change directory (`~` and `$VAR` expanded, bare `:cd` goes home)
 - **`:sort <mode>`** — sort listing by `name`, `size`, `mtime`, or `ext`
-  (persists across chdir); **`gs`** toggles reverse order for the current sort
+  (persists across chdir); **`:sort reverse`** toggles reverse order
 - **`:marks`** — show all marks in a pager popup
 - **`:set key=value`** — runtime settings (e.g. `:set sort=mtime`)
 - **`:bprev`** / **`:bnext`** — navigate pager buffer history (also `[b`/`]b` in pager)
@@ -657,7 +661,7 @@ shown on the top bar and persist across `spyc -r`.
 - **Commands** — `:project` prints; `:project .`, `:project <path>`,
   `:project clear` manage the value. `:startdir` manages start dir.
   `:name <NEW>` renames the session (normalized to
-  `[A-Z0-9_]`). `:whoami` / `gU` flashes `user@host`.
+  `[A-Z0-9_]`). `:whoami` flashes `user@host`.
 - **New pane tabs** default their cwd to `PROJECT_HOME` when set,
   otherwise to the current listing dir.
 - **Session names** are generated at session creation from ~30
@@ -702,8 +706,8 @@ Under width pressure, segments are dropped in reverse priority:
 suffix → path becomes basename → git branch. `PROJECT_HOME` and
 session name are retained as the primary workspace identifiers.
 
-`user@host` is no longer in the top bar — press `gU` (or run
-`:whoami`) to flash it in the status line, or open the `I` info
+`user@host` is no longer in the top bar — run `:whoami` to flash it
+in the status line, or open the `I` info
 overlay where it appears alongside the session name, project home,
 and start directory.
 
@@ -917,14 +921,14 @@ jump from Claude's output back to the file list.
 - **:date** show date and time (UTC)
 - **gV** show spyc version (also `:version`)
 - **I** session info: PID, RSS memory usage, entry counts
-- **A** activity monitor: live draws/sec, cells/sec, draw reason
+- **:activity** activity monitor: live draws/sec, cells/sec, draw reason
   breakdown (pane/event/other), frame/render/echo peak latencies,
   bg-task / git / fs / mcp rates, pid/rss/threads, build identity —
   fixed-width so it doesn't bounce as rates rise and fall — plus an
   extended section tallying cumulative per-tool **MCP call counts**
   (every agent `tools/call`, read tools included)
 - **C** toggle between color and mono themes
-- **s** set an environment variable (`NAME=VALUE`)
+- **:setenv NAME=VALUE** set an environment variable
 - **:dump-scrollback** write the active pane's scrollback snapshot
   (one line per row) to `/tmp/spyc-scrollback.txt` — diagnostic for
   the `^a v` capture path when visible content seems to go missing

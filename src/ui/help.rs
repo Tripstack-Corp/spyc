@@ -118,9 +118,11 @@ const SECTIONS: &[Section] = &[
     Section {
         title: "Graveyard (soft-delete recovery, R-undo)",
         rows: &[
-            ("g y", "open graveyard view"),
+            (
+                ":graveyard",
+                "open graveyard view (map a key: command graveyard)",
+            ),
             (":undo", "restore most-recent removal to original path"),
-            (":graveyard", "open graveyard view (typed)"),
             ("p", "(in view) restore cursor entry to cwd"),
             ("P", "(in view) restore cursor entry to original path"),
             ("dd  x", "(in view) purge cursor entry to system trash"),
@@ -153,9 +155,9 @@ const SECTIONS: &[Section] = &[
             ("Ndd", "remove cursor + N-1 entries below (e.g. 4dd)"),
             ("+", "make a new directory (prompt)"),
             ("O", "create new file in $EDITOR (prompt)"),
-            ("L  :longlist", "long listing (wide aligned table)"),
-            ("f  :filetype", "file(1) on selection"),
-            ("^X  :chmod", "chmod +x on selection"),
+            (":longlist", "long listing (wide aligned table)"),
+            (":filetype", "file(1) on selection"),
+            (":chmod", "chmod +x on selection"),
         ],
     },
     Section {
@@ -183,7 +185,6 @@ const SECTIONS: &[Section] = &[
             ("g w", "jump the focused column to its worktree / repo root"),
             ("g P", "set PROJECT_HOME to current directory"),
             ("g S", "set start dir (target of `) to current directory"),
-            ("g U", "flash user@host in status line"),
             (":project [.|<path>|clear]", "manage PROJECT_HOME"),
             (":startdir [.|<path>]", "manage start directory"),
             (
@@ -197,7 +198,6 @@ const SECTIONS: &[Section] = &[
         title: "Sort",
         rows: &[
             ("S", "cycle sort: name → size → mtime → ext"),
-            ("g s", "toggle reverse on the current sort mode"),
             (
                 ":sort <mode>|reverse|-",
                 "set explicitly (name/size/mtime/ext) or toggle reverse",
@@ -212,10 +212,10 @@ const SECTIONS: &[Section] = &[
             ("I", "session info (pid, rss, counts)"),
             ("C", "toggle colors / mono"),
             (
-                "A  :activity",
+                ":activity",
                 "toggle activity monitor (throughput + internals + pid/rss/threads + mcp call counts)",
             ),
-            ("s  :set", "set environment variable (NAME=VALUE)"),
+            (":setenv NAME=VALUE", "set an environment variable"),
         ],
     },
     Section {
