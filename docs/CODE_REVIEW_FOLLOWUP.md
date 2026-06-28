@@ -132,6 +132,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 ## Closed / resolved (running log)
 
+**✅ Follow-up to #583 — fix UTF-8 crash-to-skip in the session-title tail-read (2026-06-28):**
+- `state/sessions/mod.rs` — #583's tail-read used `read_to_string` *after* `seek(len - 64 KB)`. A seek landing mid-UTF-8-codepoint makes `read_to_string`'s strict validation fail, so the whole file was silently dropped and the title went missing in the `spyc -r` picker — intermittent and data-dependent (ASCII files dodged it, real conversations with Unicode didn't). Now reads bytes + `String::from_utf8_lossy`, extracted into a testable `title_from_jsonl_tail` helper. Two regression tests (small-file path + a deterministic mid-codepoint seek boundary). Found by the Opus audit pass; the fast tail-read design is kept (the ≤64 KB early-title window is an accepted speed tradeoff on restore).
+
 **✅ PR #583 — cheap blocking-IO trio: session tail-read, gemini timeout, finder depth cap (2026-06-28):**
 - `state/sessions/mod.rs:579` — `find_claude_session_name` read the entire JSONL with `read_to_string`, loading 100+ MB session files into memory on the session-restore path. Now tail-reads the last 64 KB via `Seek::seek(SeekFrom::Start(len - TAIL))` + `read_to_string`; skips the leading partial line when a seek happened. The `custom-title` entry is searched in reverse so the most recent title wins regardless of file position.
 - `agent/resume.rs:298` — `gemini_resume_index_for` called `Command::output()` (blocking, no timeout) on the restore path. A hung `gemini --list-sessions` (first invocation, network issues) would freeze spyc's session restore indefinitely. Now spawns the child with `Stdio::piped`, reads stdout in a detached thread, and uses `mpsc::recv_timeout(2s)` — if the child doesn't respond in time, it gets killed and the restore falls back to bare `gemini` (existing error path unchanged).

@@ -587,11 +587,6 @@ pub fn parse_iso8601_to_epoch_secs(s: &str) -> Option<u64> {
 /// (`pub`, not `pub(crate)`: the enclosing `sessions` module is private, so
 /// clippy's `redundant_pub_crate` rejects `pub(crate)` here.)
 pub fn find_claude_session_name(session_id: &str) -> Option<String> {
-    use std::io::{Read, Seek, SeekFrom};
-    // Tail-read: custom-title is appended as a conversation progresses; reading
-    // the last 64 KB is enough to find the most recent entry and avoids loading
-    // 100+ MB JSONL files entirely into memory on the session-restore path.
-    const TAIL: u64 = 64 * 1024;
     let home = std::env::var_os("HOME")?;
     let projects_dir = PathBuf::from(home).join(".claude/projects");
     let entries = std::fs::read_dir(&projects_dir).ok()?;
@@ -601,35 +596,46 @@ pub fn find_claude_session_name(session_id: &str) -> Option<String> {
         if !jsonl_path.exists() {
             continue;
         }
-        let Ok(mut file) = std::fs::File::open(&jsonl_path) else {
-            continue;
-        };
-        let Ok(meta) = file.metadata() else {
-            continue;
-        };
-        let len = meta.len();
-        if len > TAIL {
-            let _ = file.seek(SeekFrom::Start(len - TAIL));
+        if let Some(title) = title_from_jsonl_tail(&jsonl_path) {
+            return Some(title);
         }
-        let mut buf = String::new();
-        if file.read_to_string(&mut buf).is_err() {
-            continue;
-        }
-        // When we seeked mid-file the first bytes may be a partial line — skip it.
-        let scan = if len > TAIL {
-            buf.find('\n').map_or(buf.as_str(), |i| &buf[i + 1..])
-        } else {
-            buf.as_str()
-        };
-        // Scan lines in reverse — last custom-title wins.
-        for line in scan.lines().rev() {
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(line)
-                && val["type"].as_str() == Some("custom-title")
-                && let Some(title) = val["customTitle"].as_str()
-                && !title.is_empty()
-            {
-                return Some(title.to_string());
-            }
+    }
+    None
+}
+
+/// Read the tail of a Claude conversation JSONL and return its most recent
+/// non-empty `custom-title`. Tail-reads the last 64 KB (bounded memory on the
+/// 100+ MB files that pile up on the session-restore path) and decodes lossily
+/// so a mid-codepoint seek boundary can't drop the whole file.
+fn title_from_jsonl_tail(path: &std::path::Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    const TAIL: u64 = 64 * 1024;
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    if len > TAIL {
+        let _ = file.seek(SeekFrom::Start(len - TAIL));
+    }
+    // Read bytes + decode lossily, NOT `read_to_string`: a mid-file seek can
+    // land in the middle of a multi-byte UTF-8 codepoint, which makes the
+    // strict decode in `read_to_string` fail and silently drop the whole file
+    // (so a title would be missed at random byte alignments).
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    let buf = String::from_utf8_lossy(&bytes);
+    // When we seeked mid-file the first bytes may be a partial line — skip it.
+    let scan = if len > TAIL {
+        buf.find('\n').map_or(buf.as_ref(), |i| &buf[i + 1..])
+    } else {
+        buf.as_ref()
+    };
+    // Scan lines in reverse — last custom-title wins.
+    for line in scan.lines().rev() {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line)
+            && val["type"].as_str() == Some("custom-title")
+            && let Some(title) = val["customTitle"].as_str()
+            && !title.is_empty()
+        {
+            return Some(title.to_string());
         }
     }
     None

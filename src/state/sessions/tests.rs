@@ -642,3 +642,52 @@ fn tab_omits_absent_session_id_in_json() {
         Some("sid")
     );
 }
+
+#[test]
+fn title_from_tail_reads_small_file() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("small.jsonl");
+    std::fs::write(
+        &path,
+        "{\"type\":\"user\"}\n{\"type\":\"custom-title\",\"customTitle\":\"Hi\"}\n",
+    )
+    .unwrap();
+    assert_eq!(title_from_jsonl_tail(&path), Some("Hi".to_string()));
+}
+
+#[test]
+fn title_from_tail_survives_midcodepoint_seek_boundary() {
+    const TAIL: usize = 64 * 1024;
+    let title_line = "{\"type\":\"custom-title\",\"customTitle\":\"Recovered Title\"}\n";
+    // Build a >64KB file whose 64KB-from-end seek boundary lands in the MIDDLE
+    // of a 3-byte '✓' codepoint. A strict `read_to_string` after that seek would
+    // fail (invalid leading continuation byte) and drop the file; the lossy read
+    // must still recover the title. Append ASCII filler one byte at a time until
+    // the boundary byte is a UTF-8 continuation byte (0x80..=0xBF), guaranteeing
+    // the regression condition deterministically.
+    let mut filler = 0usize;
+    let (content, seek_off) = loop {
+        let pad = "✓".repeat(30_000);
+        let junk = "x".repeat(filler);
+        let content = format!("{pad}\n{title_line}{junk}\n");
+        let seek_off = content.len() - TAIL;
+        if (0x80..=0xBF).contains(&content.as_bytes()[seek_off]) {
+            break (content, seek_off);
+        }
+        filler += 1;
+    };
+    assert!(
+        (0x80..=0xBF).contains(&content.as_bytes()[seek_off]),
+        "test precondition: seek boundary must be mid-codepoint"
+    );
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("convo.jsonl");
+    std::fs::write(&path, &content).unwrap();
+
+    assert_eq!(
+        title_from_jsonl_tail(&path),
+        Some("Recovered Title".to_string()),
+        "title must survive a 64KB seek that lands mid-UTF-8-codepoint"
+    );
+}
