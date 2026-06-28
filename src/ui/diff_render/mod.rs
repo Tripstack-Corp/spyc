@@ -54,11 +54,70 @@ const LNUM_W: usize = 4;
 /// source line.
 const MAX_WRAP_ROWS_PER_CELL: usize = 512;
 
+/// A diff's syntax highlight, computed once and reused across every
+/// layout/width re-render. syntect (in [`highlight_side`]) is by far the most
+/// expensive part of rendering a diff, and it depends only on the model — not
+/// on the theme (syntect carries its own palette; the diff wash/word colors are
+/// overlaid later) nor the width/layout. So the `|` layout toggle, `f`
+/// full-width toggle, and a terminal resize re-lay-out from this cache instead
+/// of re-highlighting up to [`crate::git::diff_model::MAX_DIFF_LINES`] lines
+/// each time. Index-aligned with `model.files`. Build with [`highlight_diff`].
+pub struct DiffHighlight {
+    files: Vec<FileHighlight>,
+}
+
+/// One file's cached per-side highlight (`None` per side for an unknown
+/// language or a non-text kind — callers fall back to flat `+`/`-` text).
+struct FileHighlight {
+    new_hl: Option<Vec<Line<'static>>>,
+    old_hl: Option<Vec<Line<'static>>>,
+}
+
+/// Syntax-highlight every file in `model`, once, into a reusable [`DiffHighlight`].
+/// This is the expensive (syntect) half of rendering; [`render_diff_highlighted`]
+/// is the cheap width-dependent layout half that consumes the result.
+pub fn highlight_diff(model: &DiffModel) -> DiffHighlight {
+    DiffHighlight {
+        files: model.files.iter().map(highlight_file).collect(),
+    }
+}
+
+/// Highlight one file's two sides. Non-text kinds (binary / submodule / error)
+/// carry no highlight — the layout pass renders their one-line explanation.
+fn highlight_file(file: &FileDiff) -> FileHighlight {
+    let DiffKind::Text(hunks) = &file.kind else {
+        return FileHighlight {
+            new_hl: None,
+            old_hl: None,
+        };
+    };
+    let (new_text, old_text) = side_texts(hunks);
+    FileHighlight {
+        new_hl: highlight_side(file_name(file), &new_text),
+        old_hl: highlight_side(file_name(file), &old_text),
+    }
+}
+
 /// Render a whole diff to styled lines in the chosen `layout`. `width` is the
 /// total viewport width in columns (used only by [`DiffLayout::SideBySide`] to
-/// size its two columns; ignored for unified).
+/// size its two columns; ignored for unified). Highlights the diff inline;
+/// callers that re-render the same model at multiple widths/layouts should
+/// cache [`highlight_diff`] and call [`render_diff_highlighted`] instead.
 pub fn render_diff(
     model: &DiffModel,
+    theme: &Theme,
+    layout: DiffLayout,
+    width: usize,
+) -> Vec<Line<'static>> {
+    render_diff_highlighted(model, &highlight_diff(model), theme, layout, width)
+}
+
+/// Lay out a diff at `width`/`layout` using a precomputed [`DiffHighlight`].
+/// `hl` must come from `highlight_diff(model)` (index-aligned with
+/// `model.files`); a mismatched/short entry falls back to unhighlighted text.
+pub fn render_diff_highlighted(
+    model: &DiffModel,
+    hl: &DiffHighlight,
     theme: &Theme,
     layout: DiffLayout,
     width: usize,
@@ -72,9 +131,10 @@ pub fn render_diff(
         if i > 0 {
             out.push(Line::default()); // blank separator between files
         }
+        let fhl = hl.files.get(i);
         match layout {
-            DiffLayout::Unified => render_file_unified(file, theme, &mut out),
-            DiffLayout::SideBySide => render_file_split(file, theme, width, &mut out),
+            DiffLayout::Unified => render_file_unified(file, fhl, theme, &mut out),
+            DiffLayout::SideBySide => render_file_split(file, fhl, theme, width, &mut out),
         }
     }
     if model.truncated {
@@ -88,7 +148,8 @@ pub fn render_diff(
 }
 
 /// Render `git show <rev>`: the commit-metadata header block followed by the
-/// commit's diff in the chosen `layout`.
+/// commit's diff in the chosen `layout`. Highlights inline; see
+/// [`render_show_highlighted`] for the cached-highlight variant.
 pub fn render_show(
     meta: &CommitMeta,
     model: &DiffModel,
@@ -96,8 +157,20 @@ pub fn render_show(
     layout: DiffLayout,
     width: usize,
 ) -> Vec<Line<'static>> {
+    render_show_highlighted(meta, model, &highlight_diff(model), theme, layout, width)
+}
+
+/// Lay out `git show <rev>` using a precomputed [`DiffHighlight`].
+pub fn render_show_highlighted(
+    meta: &CommitMeta,
+    model: &DiffModel,
+    hl: &DiffHighlight,
+    theme: &Theme,
+    layout: DiffLayout,
+    width: usize,
+) -> Vec<Line<'static>> {
     let mut out = commit_header(meta, theme);
-    out.extend(render_diff(model, theme, layout, width));
+    out.extend(render_diff_highlighted(model, hl, theme, layout, width));
     out
 }
 
@@ -135,11 +208,16 @@ fn commit_header(meta: &CommitMeta, theme: &Theme) -> Vec<Line<'static>> {
 
 // ── unified layout ──────────────────────────────────────────────────────
 
-fn render_file_unified(file: &FileDiff, theme: &Theme, out: &mut Vec<Line<'static>>) {
-    let Some(prep) = prepare_file(file, theme, out) else {
+fn render_file_unified(
+    file: &FileDiff,
+    hl: Option<&FileHighlight>,
+    theme: &Theme,
+    out: &mut Vec<Line<'static>>,
+) {
+    let Some(prep) = prepare_file(file, hl, theme, out) else {
         return;
     };
-    let (new_ref, old_ref) = (prep.new_hl.as_deref(), prep.old_hl.as_deref());
+    let (new_ref, old_ref) = (prep.new_hl, prep.old_hl);
 
     let (mut oi, mut ni) = (0usize, 0usize);
     for h in prep.hunks {
@@ -209,11 +287,17 @@ fn unified_row(
 
 // ── side-by-side layout ───────────────────────────────────────────────────
 
-fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec<Line<'static>>) {
-    let Some(prep) = prepare_file(file, theme, out) else {
+fn render_file_split(
+    file: &FileDiff,
+    hl: Option<&FileHighlight>,
+    theme: &Theme,
+    width: usize,
+    out: &mut Vec<Line<'static>>,
+) {
+    let Some(prep) = prepare_file(file, hl, theme, out) else {
         return;
     };
-    let (new_ref, old_ref) = (prep.new_hl.as_deref(), prep.old_hl.as_deref());
+    let (new_ref, old_ref) = (prep.new_hl, prep.old_hl);
     let col_w = width.saturating_sub(SEP_W) / 2;
     // Size the line-number field to the file's largest number so 5-digit+
     // files don't overflow the gutter and break column alignment.
@@ -412,23 +496,25 @@ fn split_row(left: Vec<Span<'static>>, right: Vec<Span<'static>>, theme: &Theme)
 
 // ── shared helpers ────────────────────────────────────────────────────────
 
-/// A text file's hunks plus each side highlighted once, ready for layout.
+/// A text file's hunks plus borrowed references into the cached per-side
+/// highlight, ready for layout.
 struct PreparedFile<'a> {
     hunks: &'a [Hunk],
     /// New-side syntax highlight (context + adds), `None` if syntect didn't
     /// recognize the language — callers fall back to flat `+`/`-` text.
-    new_hl: Option<Vec<Line<'static>>>,
+    new_hl: Option<&'a [Line<'static>]>,
     /// Old-side syntax highlight (context + removes).
-    old_hl: Option<Vec<Line<'static>>>,
+    old_hl: Option<&'a [Line<'static>]>,
 }
 
 /// Shared prologue for both layouts: push the file header, then resolve the
 /// hunks. The non-text kinds (binary / submodule / error) push their
-/// one-line explanation and return `None`, signaling the caller to stop. On
-/// a text diff, each side is syntax-highlighted once (syntect is stateful
-/// across lines, so per-line calls would break multi-line constructs).
+/// one-line explanation and return `None`, signaling the caller to stop. The
+/// per-side highlight comes from the precomputed `hl` (see [`highlight_diff`]);
+/// a missing entry falls back to unhighlighted `+`/`-` text.
 fn prepare_file<'a>(
     file: &'a FileDiff,
+    hl: Option<&'a FileHighlight>,
     theme: &Theme,
     out: &mut Vec<Line<'static>>,
 ) -> Option<PreparedFile<'a>> {
@@ -454,13 +540,10 @@ fn prepare_file<'a>(
             return None;
         }
     };
-    let (new_text, old_text) = side_texts(hunks);
-    let new_hl = highlight_side(file_name(file), &new_text);
-    let old_hl = highlight_side(file_name(file), &old_text);
     Some(PreparedFile {
         hunks,
-        new_hl,
-        old_hl,
+        new_hl: hl.and_then(|h| h.new_hl.as_deref()),
+        old_hl: hl.and_then(|h| h.old_hl.as_deref()),
     })
 }
 

@@ -546,3 +546,107 @@ fn wrap_spans_splits_at_width_boundary() {
     assert_eq!(rows[1][0].content.as_ref(), " worl");
     assert_eq!(rows[2][0].content.as_ref(), "d");
 }
+
+/// Encode styled lines as one debug string per line — glyphs plus every span's
+/// fg/bg — so a cache mismatch in colors (not just glyphs) is caught by a plain
+/// string compare.
+fn styled_fingerprint(lines: &[Line]) -> Vec<String> {
+    lines
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| format!("{:?}|{:?}|{:?}", s.content, s.style.fg, s.style.bg))
+                .collect::<Vec<_>>()
+                .join("⟂")
+        })
+        .collect()
+}
+
+#[test]
+fn cached_highlight_render_matches_inline_render() {
+    // `render_diff_highlighted` with a precomputed highlight must be byte-for-
+    // byte identical to `render_diff` (which highlights inline) — the resize/
+    // toggle cache is a pure optimization, not a behavior change. Exercise a
+    // syntect-known language (.rs) in both layouts so the highlight cache is
+    // actually populated and flows through identically.
+    let theme = Theme::default();
+    let model = single_file(
+        FileStatus::Modified,
+        DiffKind::Text(vec![Hunk {
+            old_start: 1,
+            old_lines: 2,
+            new_start: 1,
+            new_lines: 2,
+            lines: vec![
+                ctx("fn main() {"),
+                rem("    let x = 1;"),
+                add("    let x = 2;"),
+                ctx("}"),
+            ],
+        }]),
+        Some("f.rs"),
+        Some("f.rs"),
+    );
+    let hl = super::highlight_diff(&model);
+    for layout in [DiffLayout::Unified, DiffLayout::SideBySide] {
+        for width in [40usize, 80, 137] {
+            let inline = render_diff(&model, &theme, layout, width);
+            let cached = super::render_diff_highlighted(&model, &hl, &theme, layout, width);
+            assert_eq!(
+                styled_fingerprint(&inline),
+                styled_fingerprint(&cached),
+                "cached render diverged from inline at {layout:?} width {width}"
+            );
+        }
+    }
+}
+
+#[test]
+fn cached_highlight_relayout_reflows_at_new_width() {
+    // The whole point of the cache: re-lay-out the SAME highlight at a new
+    // width and the side-by-side rows must reflow (column width changes), not
+    // stay frozen at the first width.
+    let theme = Theme::default();
+    let model = single_file(
+        FileStatus::Modified,
+        DiffKind::Text(vec![Hunk {
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 1,
+            lines: vec![rem(&"x".repeat(120)), add(&"y".repeat(120))],
+        }]),
+        Some("f.txt"),
+        Some("f.txt"),
+    );
+    let hl = super::highlight_diff(&model);
+    let widest = |lines: &[Line]| {
+        lines
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| crate::ui::display_width(s.content.as_ref()))
+                    .sum::<usize>()
+            })
+            .max()
+            .unwrap_or(0)
+    };
+    let narrow = super::render_diff_highlighted(&model, &hl, &theme, DiffLayout::SideBySide, 80);
+    let wide = super::render_diff_highlighted(&model, &hl, &theme, DiffLayout::SideBySide, 160);
+    // Rows are sized to the body width, so a wider render produces wider rows…
+    assert!(
+        widest(&wide) > widest(&narrow),
+        "wider re-layout must widen rows: {} → {}",
+        widest(&narrow),
+        widest(&wide)
+    );
+    // …and a 120-col line fits in fewer wrapped rows when the column is wider.
+    assert!(
+        wide.len() < narrow.len(),
+        "wider re-layout must wrap into fewer rows: {} → {}",
+        narrow.len(),
+        wide.len()
+    );
+}

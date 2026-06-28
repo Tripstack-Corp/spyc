@@ -593,6 +593,11 @@ impl App {
         // open). The in-flight guard collapses a resize-drag's event burst to a
         // single trailing re-render.
         self.kick_preview_reload();
+        // A git-view pager (diff/show) bakes its side-by-side columns and
+        // wrapped long lines to a fixed body width — re-lay-out at the new
+        // width so it reflows. No-op when no git-view pager is open; the syntax
+        // highlight is cached on the stream, so this is layout-only (no syntect).
+        self.dispatch_pager_command(crate::app::pager_stream::PagerStreamCmd::Rerender);
     }
 
     /// Dispatch a user-defined binding. Inline-data actions (unix command,

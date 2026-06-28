@@ -124,23 +124,39 @@ struct Rendered {
     wrap: bool,
 }
 
-/// Render a retained model at the given `width`/`layout`. The side-by-side rows
-/// are sized to exactly `width`, so `width` MUST be the pager's true text-body
-/// width (see [`git_view_body_width`]) or the rows wrap into stray tinted bars.
-fn render_model(model: &GitViewModel, theme: &Theme, layout: DiffLayout, width: usize) -> Rendered {
+/// Render a retained model at the given `width`/`layout`, reusing the model's
+/// precomputed `hl` (syntax highlight) so a re-render — `|`, `f`, or a resize —
+/// never re-runs syntect. The side-by-side rows are sized to exactly `width`,
+/// so `width` MUST be the pager's true text-body width (see
+/// [`git_view_body_width`]) or the rows wrap into stray tinted bars.
+fn render_model(
+    model: &GitViewModel,
+    hl: Option<&diff_render::DiffHighlight>,
+    theme: &Theme,
+    layout: DiffLayout,
+    width: usize,
+) -> Rendered {
     match model {
         GitViewModel::Diff(m) => {
             let eff = effective_layout(layout, width);
+            let lines = match hl {
+                Some(h) => diff_render::render_diff_highlighted(m, h, theme, eff, width),
+                None => diff_render::render_diff(m, theme, eff, width),
+            };
             Rendered {
-                lines: diff_render::render_diff(m, theme, eff, width),
+                lines,
                 line_numbers: false,
                 wrap: matches!(eff, DiffLayout::Unified),
             }
         }
         GitViewModel::Show(b) => {
             let eff = effective_layout(layout, width);
+            let lines = match hl {
+                Some(h) => diff_render::render_show_highlighted(&b.0, &b.1, h, theme, eff, width),
+                None => diff_render::render_show(&b.0, &b.1, theme, eff, width),
+            };
             Rendered {
-                lines: diff_render::render_show(&b.0, &b.1, theme, eff, width),
+                lines,
                 line_numbers: false,
                 wrap: matches!(eff, DiffLayout::Unified),
             }
@@ -193,6 +209,10 @@ pub struct GitViewStream {
     layout: DiffLayout,
     /// The built model, rendered at mount and re-rendered on `|`.
     model: GitViewModel,
+    /// The model's syntax highlight, computed once at build time and reused for
+    /// every re-render (`|`, `f`, resize) — see [`render_model`]. `None` for
+    /// blame (which has its own renderer).
+    highlight: Option<diff_render::DiffHighlight>,
     /// The pager title.
     title: String,
 }
@@ -203,7 +223,13 @@ impl GitViewStream {
     /// fixed-width side-by-side rows wrap into stray tinted bars.
     fn render_into(&self, view: &mut PagerView, ctx: &RenderCtx) {
         let width = git_view_body_width(ctx.full_width);
-        let rendered = render_model(&self.model, &ctx.theme, self.layout, width);
+        let rendered = render_model(
+            &self.model,
+            self.highlight.as_ref(),
+            &ctx.theme,
+            self.layout,
+            width,
+        );
         view.lines = rendered.lines;
         view.show_line_numbers = rendered.line_numbers;
         view.wrap = rendered.wrap;
@@ -343,10 +369,18 @@ impl App {
             },
             pending.id,
         );
+        // Highlight once now (off the per-render path) so `|`, `f`, and resize
+        // re-renders only re-lay-out. Blame has its own renderer — no highlight.
+        let highlight = match &model {
+            GitViewModel::Diff(m) => Some(diff_render::highlight_diff(m)),
+            GitViewModel::Show(b) => Some(diff_render::highlight_diff(&b.1)),
+            GitViewModel::Blame(_) => None,
+        };
         let stream = GitViewStream {
             id: pending.id,
             layout: pending.layout,
             model,
+            highlight,
             title: pending.title,
         };
         let full_width = self.view.pager.as_ref().is_some_and(|p| p.full_width);
