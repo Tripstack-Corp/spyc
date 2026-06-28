@@ -6,10 +6,14 @@
 //! env spyc injects into the pane (inherited by the hook).
 //!
 //! Event → state (verified against the Claude Code hooks docs):
-//! * `UserPromptSubmit` → `working` (the agent just got a prompt)
-//! * `Notification`     → `blocked` (Claude is asking the user for input / a
-//!   permission decision — the "which agent needs me" signal)
-//! * `Stop`             → `done`    (the agent finished its turn)
+//! * `UserPromptSubmit`  → `working` (the agent just got a prompt)
+//! * `PermissionRequest` → `blocked` (Claude is asking to use a tool — the
+//!   real-time "which agent needs me" signal; fires the instant the permission
+//!   prompt appears)
+//! * `Notification`      → `blocked` (Claude's "waiting for your input" idle
+//!   notification — a slower backstop. It does NOT fire on permission prompts,
+//!   so `PermissionRequest` is what carries the immediate blocked signal.)
+//! * `Stop`              → `done`    (the agent finished its turn)
 //!
 //! Merge/cleanup mirrors the `.mcp.json` policy in [`super::config`]: merge our
 //! entries into an existing file without disturbing the user's other hooks or
@@ -23,9 +27,12 @@ use serde_json::{Value, json};
 
 use super::config::ConfigCleanup;
 
-/// The three (event, reported-state) hooks spyc installs.
-const STATUS_HOOKS: [(&str, &str); 3] = [
+/// The (event, reported-state) hooks spyc installs. Two events map to `blocked`:
+/// `PermissionRequest` (the real-time permission-prompt signal) and
+/// `Notification` (the slower idle "waiting for input" backstop).
+const STATUS_HOOKS: [(&str, &str); 4] = [
     ("UserPromptSubmit", "working"),
+    ("PermissionRequest", "blocked"),
     ("Notification", "blocked"),
     ("Stop", "done"),
 ];
@@ -173,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_three_hooks_then_cleans_them_leaving_no_file() {
+    fn writes_status_hooks_then_cleans_them_leaving_no_file() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
         assert!(ensure_claude_status_hooks(dir));
