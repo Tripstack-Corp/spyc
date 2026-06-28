@@ -25,10 +25,11 @@ use std::ops::Range;
 
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
+use unicode_width::UnicodeWidthChar;
 
 use crate::git::model::{CommitMeta, DiffKind, DiffModel, FileDiff, FileStatus, Hunk, LineOrigin};
+use crate::ui::display_width;
 use crate::ui::theme::Theme;
-use crate::ui::{display_truncate, display_width};
 
 /// How a diff is laid out in the pager.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +48,11 @@ const SEP_W: usize = 3;
 /// field to fit (see [`lnum_width`]) so the marker / separator / right
 /// column stay aligned; smaller files keep this stable narrow gutter.
 const LNUM_W: usize = 4;
+/// Cap on the visual rows a single side-by-side cell wraps into (see
+/// [`wrap_spans`]) — a backstop that bounds allocation on a pathological
+/// line (e.g. minified JS on one diff line) without truncating any realistic
+/// source line.
+const MAX_WRAP_ROWS_PER_CELL: usize = 512;
 
 /// Render a whole diff to styled lines in the chosen `layout`. `width` is the
 /// total viewport width in columns (used only by [`DiffLayout::SideBySide`] to
@@ -223,7 +229,7 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
         let mut i = 0;
         while i < lines.len() {
             if lines[i].origin == LineOrigin::Context {
-                let left = split_cell(
+                let left_rows = split_cell_rows(
                     theme,
                     Some(old_no),
                     LineOrigin::Context,
@@ -231,7 +237,7 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
                     col_w,
                     lnum_w,
                 );
-                let right = split_cell(
+                let right_rows = split_cell_rows(
                     theme,
                     Some(new_no),
                     LineOrigin::Context,
@@ -239,7 +245,7 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
                     col_w,
                     lnum_w,
                 );
-                out.push(split_row(left, right, theme));
+                push_split_rows(out, left_rows, right_rows, col_w, theme);
                 old_no += 1;
                 new_no += 1;
                 oi += 1;
@@ -248,9 +254,11 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
                 continue;
             }
             // A change region: the run of consecutive removes, then the run of
-            // consecutive adds (PR 7 always emits removes before adds within a
+            // consecutive adds (git always emits removes before adds within a
             // region). Pair them row-for-row, padding the shorter side blank;
-            // paired lines get the word-level highlight from `intra`.
+            // paired lines get the word-level highlight from `intra`. Each
+            // logical diff line may wrap to multiple visual rows; the two sides
+            // are zipped together, padding the shorter side with blank rows.
             let r_lo = i;
             while i < lines.len() && lines[i].origin == LineOrigin::Remove {
                 i += 1;
@@ -261,16 +269,16 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
                 i += 1;
             }
             let a_hi = i;
-            let rows = (r_hi - r_lo).max(a_hi - a_lo);
-            for k in 0..rows {
-                let left = if r_lo + k < r_hi {
+            let pairs = (r_hi - r_lo).max(a_hi - a_lo);
+            for k in 0..pairs {
+                let left_rows = if r_lo + k < r_hi {
                     let word = word_hl(intra[r_lo + k].as_ref(), theme.diff_word_bg(false));
                     let content = styled_content(
                         pick(old_ref, oi, &lines[r_lo + k].text, theme, Some(false)),
                         theme.diff_row_bg(false),
                         word,
                     );
-                    let cell = split_cell(
+                    let rows = split_cell_rows(
                         theme,
                         Some(old_no),
                         LineOrigin::Remove,
@@ -280,44 +288,70 @@ fn render_file_split(file: &FileDiff, theme: &Theme, width: usize, out: &mut Vec
                     );
                     old_no += 1;
                     oi += 1;
-                    cell
+                    rows
                 } else {
-                    blank_cell(col_w)
+                    vec![blank_cell_row(col_w)]
                 };
-                let right = if a_lo + k < a_hi {
+                let right_rows = if a_lo + k < a_hi {
                     let word = word_hl(intra[a_lo + k].as_ref(), theme.diff_word_bg(true));
                     let content = styled_content(
                         pick(new_ref, ni, &lines[a_lo + k].text, theme, Some(true)),
                         theme.diff_row_bg(true),
                         word,
                     );
-                    let cell =
-                        split_cell(theme, Some(new_no), LineOrigin::Add, content, col_w, lnum_w);
+                    let rows = split_cell_rows(
+                        theme,
+                        Some(new_no),
+                        LineOrigin::Add,
+                        content,
+                        col_w,
+                        lnum_w,
+                    );
                     new_no += 1;
                     ni += 1;
-                    cell
+                    rows
                 } else {
-                    blank_cell(col_w)
+                    vec![blank_cell_row(col_w)]
                 };
-                out.push(split_row(left, right, theme));
+                push_split_rows(out, left_rows, right_rows, col_w, theme);
             }
         }
     }
 }
 
-/// One side-by-side cell: `[lnum][space][marker][content…]`, padded/truncated
-/// to exactly `col_w` columns. `lnum_w` is the file's line-number field width
-/// (see [`lnum_width`]) — the prefix is `lnum_w + 2` columns. `content` is
-/// already styled (wash + word highlight via [`styled_content`]); the prefix
-/// + padding carry `row_bg`.
-fn split_cell(
+/// Pair the wrapped visual rows of a left and right cell into `split_row`s,
+/// padding the shorter side with a blank cell so both columns stay aligned.
+/// Consumes both row vecs (no per-row clone).
+fn push_split_rows(
+    out: &mut Vec<Line<'static>>,
+    left_rows: Vec<Vec<Span<'static>>>,
+    right_rows: Vec<Vec<Span<'static>>>,
+    col_w: usize,
+    theme: &Theme,
+) {
+    let n = left_rows.len().max(right_rows.len());
+    let mut left = left_rows.into_iter();
+    let mut right = right_rows.into_iter();
+    for _ in 0..n {
+        let l = left.next().unwrap_or_else(|| blank_cell_row(col_w));
+        let r = right.next().unwrap_or_else(|| blank_cell_row(col_w));
+        out.push(split_row(l, r, theme));
+    }
+}
+
+/// One side-by-side cell split into wrapped visual rows. Each row is exactly
+/// `col_w` columns wide. The first row carries `[lnum][space][marker]`;
+/// continuation rows have a blank prefix of the same width so the content
+/// indent stays consistent. `content` is already styled (wash + word highlight
+/// via [`styled_content`]); background colors are applied to prefix + padding.
+fn split_cell_rows(
     theme: &Theme,
     lnum: Option<u32>,
     origin: LineOrigin,
     content: Vec<Span<'static>>,
     col_w: usize,
     lnum_w: usize,
-) -> Vec<Span<'static>> {
+) -> Vec<Vec<Span<'static>>> {
     let (marker, row_bg, gutter_style) = match origin {
         LineOrigin::Context => (' ', None, Style::default()),
         LineOrigin::Add => ('+', theme.diff_row_bg(true), theme.diff_gutter_style(true)),
@@ -328,23 +362,43 @@ fn split_cell(
         ),
     };
     let lnum_str = lnum.map_or_else(|| " ".repeat(lnum_w), |n| format!("{n:>lnum_w$}"));
-    let content_w = col_w.saturating_sub(lnum_w + 2);
+    let prefix_w = lnum_w + 2; // lnum + space + marker
+    let content_w = col_w.saturating_sub(prefix_w);
+    let pad_style = row_bg.map_or_else(Style::default, |c| Style::default().bg(c));
 
-    let mut spans = Vec::with_capacity(content.len() + 3);
-    spans.push(Span::styled(
-        format!("{lnum_str} "),
-        apply_bg(theme.diff_meta_style(), row_bg),
-    ));
-    spans.push(Span::styled(
-        marker.to_string(),
-        apply_bg(gutter_style, row_bg),
-    ));
-    spans.extend(fit_spans(&content, content_w, row_bg));
-    spans
+    wrap_spans(&content, content_w)
+        .into_iter()
+        .enumerate()
+        .map(|(i, row_spans)| {
+            let mut spans = Vec::with_capacity(row_spans.len() + 3);
+            if i == 0 {
+                spans.push(Span::styled(
+                    format!("{lnum_str} "),
+                    apply_bg(theme.diff_meta_style(), row_bg),
+                ));
+                spans.push(Span::styled(
+                    marker.to_string(),
+                    apply_bg(gutter_style, row_bg),
+                ));
+            } else {
+                spans.push(Span::styled(" ".repeat(prefix_w), pad_style));
+            }
+            let used: usize = row_spans
+                .iter()
+                .map(|s| display_width(s.content.as_ref()))
+                .sum();
+            spans.extend(row_spans);
+            if used < content_w {
+                spans.push(Span::styled(" ".repeat(content_w - used), pad_style));
+            }
+            spans
+        })
+        .collect()
 }
 
-/// A fully-blank side-by-side cell (the absent side of an unbalanced change).
-fn blank_cell(col_w: usize) -> Vec<Span<'static>> {
+/// A fully-blank side-by-side cell row (the absent side of an unbalanced
+/// change, or the shorter side when a paired line wraps to more rows).
+fn blank_cell_row(col_w: usize) -> Vec<Span<'static>> {
     vec![Span::raw(" ".repeat(col_w))]
 }
 
@@ -493,37 +547,65 @@ fn pick(
     vec![Span::styled(fallback.to_string(), style)]
 }
 
-/// Truncate the (already-styled) `spans` to at most `width` display columns and
-/// pad to exactly `width` with trailing spaces in `pad_bg`. Content span styles
-/// are preserved verbatim (they already carry the row wash + any word
-/// highlight); only the padding gets `pad_bg`. Keeps every side-by-side cell
-/// the same width so columns stay aligned.
-fn fit_spans(spans: &[Span<'static>], width: usize, pad_bg: Option<Color>) -> Vec<Span<'static>> {
-    let mut out = Vec::new();
-    let mut used = 0usize;
-    for sp in spans {
-        if used >= width {
-            break;
-        }
-        let content = sp.content.as_ref();
-        let w = display_width(content);
-        if used + w <= width {
-            out.push(sp.clone());
-            used += w;
-        } else {
-            let trunc = display_truncate(content, width - used);
-            used += display_width(trunc);
-            out.push(Span::styled(trunc.to_string(), sp.style));
-            break;
+/// Split `spans` into visual rows of at most `width` display columns each,
+/// preserving span styles across row boundaries. Returns at least one row
+/// (an empty row when `spans` is empty or `width` is zero).
+fn wrap_spans(spans: &[Span<'static>], width: usize) -> Vec<Vec<Span<'static>>> {
+    if width == 0 {
+        return vec![spans.to_vec()];
+    }
+    let mut pieces: Vec<Vec<Span<'static>>> = vec![Vec::new()];
+    let mut current_w = 0usize;
+    'outer: for span in spans {
+        let mut rest: &str = span.content.as_ref();
+        while !rest.is_empty() {
+            let remaining = width.saturating_sub(current_w);
+            if remaining == 0 {
+                pieces.push(Vec::new());
+                current_w = 0;
+                continue;
+            }
+            let mut consumed_bytes = 0usize;
+            let mut visual = 0usize;
+            for (idx, ch) in rest.char_indices() {
+                let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+                if visual + w > remaining {
+                    break;
+                }
+                consumed_bytes = idx + ch.len_utf8();
+                visual += w;
+            }
+            // Force at least one char even if it's wider than `remaining`
+            // so a 2-col glyph in a 1-col viewport doesn't infinite-loop.
+            if consumed_bytes == 0
+                && let Some(first) = rest.chars().next()
+            {
+                consumed_bytes = first.len_utf8();
+                visual = UnicodeWidthChar::width(first).unwrap_or(1);
+            }
+            let chunk = rest[..consumed_bytes].to_string();
+            rest = &rest[consumed_bytes..];
+            if !chunk.is_empty() {
+                pieces
+                    .last_mut()
+                    .expect("pieces seeded with one element, never emptied")
+                    .push(Span::styled(chunk, span.style));
+                current_w += visual;
+            }
+            if !rest.is_empty() {
+                if pieces.len() >= MAX_WRAP_ROWS_PER_CELL {
+                    break 'outer;
+                }
+                pieces.push(Vec::new());
+                current_w = 0;
+            }
         }
     }
-    if used < width {
-        out.push(Span::styled(
-            " ".repeat(width - used),
-            pad_bg.map_or_else(Style::default, |c| Style::default().bg(c)),
-        ));
+    // Drop a trailing empty piece created when a span exactly fills a row.
+    if pieces.last().is_some_and(Vec::is_empty) && pieces.len() > 1 {
+        pieces.pop();
     }
-    out
+    pieces
 }
 
 /// Overlay a background color onto a style (non-destructive — syntect set only

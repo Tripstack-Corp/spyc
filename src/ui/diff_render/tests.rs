@@ -477,3 +477,72 @@ fn show_renders_commit_header_then_diff() {
     // The diff body follows.
     assert!(rendered.contains("@@ -1,5 +1,5 @@"));
 }
+
+#[test]
+fn side_by_side_long_lines_wrap_not_truncate() {
+    // A line longer than the column content width must wrap into extra visual
+    // rows rather than being silently clipped. The full text must survive in
+    // the rendered output.
+    let long = "a".repeat(200);
+    let theme = Theme::default();
+    let model = single_file(
+        FileStatus::Modified,
+        DiffKind::Text(vec![Hunk {
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 1,
+            lines: vec![rem(&long), add(&long)],
+        }]),
+        Some("f.txt"),
+        Some("f.txt"),
+    );
+    let width = 80usize;
+    let out = render_diff(&model, &theme, DiffLayout::SideBySide, width);
+
+    // Every row still fits within `width`.
+    for line in &out {
+        let w: usize = line
+            .spans
+            .iter()
+            .map(|s| crate::ui::display_width(s.content.as_ref()))
+            .sum();
+        assert!(
+            w <= width,
+            "wrapped row width {w} exceeds {width}: {line:?}"
+        );
+    }
+
+    // The full content must appear across the wrapped rows (not truncated).
+    let all_text: String = out
+        .iter()
+        .flat_map(|l| l.spans.iter())
+        .map(|s| s.content.as_ref())
+        .collect();
+    let count = all_text.matches('a').count();
+    // Both remove and add sides carry 200 'a's — expect ≥ 400.
+    assert!(
+        count >= 400,
+        "expected ≥400 'a' chars but got {count}; content was truncated"
+    );
+
+    // More than one visual row must have been emitted per diff line.
+    // header + hunk-header + at least 2 content rows = > 3 total.
+    assert!(
+        out.len() > 3,
+        "expected wrapped output but got only {} rows",
+        out.len()
+    );
+}
+
+#[test]
+fn wrap_spans_splits_at_width_boundary() {
+    use ratatui::text::Span;
+    let spans = vec![Span::raw("hello world")];
+    // Width 5: "hello" | " worl" | "d"
+    let rows = super::wrap_spans(&spans, 5);
+    assert_eq!(rows.len(), 3, "expected 3 rows, got {rows:?}");
+    assert_eq!(rows[0][0].content.as_ref(), "hello");
+    assert_eq!(rows[1][0].content.as_ref(), " worl");
+    assert_eq!(rows[2][0].content.as_ref(), "d");
+}
