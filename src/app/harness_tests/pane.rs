@@ -7,26 +7,64 @@ use super::*;
 // logic (decide_scroll_source, PaneTabs index math) is unit-tested in
 // src/pane.
 
-/// Opening a bare pane tab spawns it in the *current listing dir*
-/// (deliberately not PROJECT_HOME — see `open_pane_tab` docs) and moves
+/// By default (`new_tab_cwd = project_home`) a bare pane tab spawns at
+/// PROJECT_HOME — not wherever the file list has been browsed to — and moves
 /// focus into the pane.
 #[test]
-fn open_pane_tab_spawns_in_listing_dir_and_focuses_pane() {
+fn open_pane_tab_defaults_to_project_home_and_focuses_pane() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().join("work");
-        std::fs::create_dir(&dir).unwrap();
-        let mut app = App::test_app(dir.clone());
+        let home = tmp.path().join("proj");
+        let browsed = tmp.path().join("proj/sub");
+        std::fs::create_dir_all(&browsed).unwrap();
+        // Browsing has moved the list into a subdir, but PROJECT_HOME is the
+        // project root — the pane must anchor to the root.
+        let mut app = App::test_app(browsed.clone());
+        app.state.project_home = Some(home.clone());
         assert!(app.runtime.pane_tabs.is_none());
         app.open_pane_tab("cat");
         let tabs = app.runtime.pane_tabs.as_ref().expect("a tab was opened");
-        assert_eq!(tabs.active_info().cwd, app.state.left.listing.dir);
-        assert_eq!(tabs.active_info().cwd, dir);
+        assert_eq!(tabs.active_info().cwd, home, "anchors at PROJECT_HOME");
+        assert_ne!(tabs.active_info().cwd, browsed, "not the browsed dir");
         assert_eq!(
             app.state.focus,
             state::Focus::Pane,
             "opening a pane focuses it"
         );
+    });
+}
+
+/// `new_tab_cwd = browse_dir` restores the "open here" behavior: the pane
+/// spawns in the focused column's current listing dir, ignoring PROJECT_HOME.
+#[test]
+fn open_pane_tab_browse_dir_uses_listing_dir() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("proj");
+        let browsed = tmp.path().join("proj/sub");
+        std::fs::create_dir_all(&browsed).unwrap();
+        let mut app = App::test_app(browsed.clone());
+        app.state.project_home = Some(home);
+        app.state.config.pane.new_tab_cwd = crate::config::NewTabCwd::BrowseDir;
+        app.open_pane_tab("cat");
+        let tabs = app.runtime.pane_tabs.as_ref().expect("a tab was opened");
+        assert_eq!(tabs.active_info().cwd, browsed, "opens in the browsed dir");
+    });
+}
+
+/// With no PROJECT_HOME set, the project_home default falls back to the
+/// browsed dir rather than spawning at an empty path.
+#[test]
+fn open_pane_tab_falls_back_to_listing_dir_without_project_home() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        assert!(app.state.project_home.is_none());
+        app.open_pane_tab("cat");
+        let tabs = app.runtime.pane_tabs.as_ref().expect("a tab was opened");
+        assert_eq!(tabs.active_info().cwd, dir);
     });
 }
 

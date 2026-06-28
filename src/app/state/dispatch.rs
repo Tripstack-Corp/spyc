@@ -362,7 +362,10 @@ impl AppState {
                     return PromptResult::Handled;
                 }
                 self.pending_new_tab_cmd = Some(cmd);
-                let cwd_default = self.cur().listing.dir.display().to_string();
+                // Pre-fill the same cwd the bare-spawn path would use, so the
+                // prompted (`^a c`) and unprompted spawns agree — PROJECT_HOME
+                // by default, the browse dir under `[pane] new_tab_cwd`.
+                let cwd_default = self.default_pane_cwd().display().to_string();
                 let mut p = Prompt::shell(PromptKind::PaneNewTabCwd, "pane cwd: ");
                 p.buffer.clone_from(&cwd_default);
                 if let Some(ed) = p.editor.as_mut() {

@@ -111,7 +111,22 @@ struct FileLayout {
     chord_hint_delay_ms: Option<u64>,
 }
 
-/// Pane / pty defaults. Currently just the default command for `^a c`.
+/// Working directory a freshly-spawned pane tab opens in (the `^a c`
+/// prompt pre-fill and the bare-spawn / `F9 resume` paths).
+/// `ProjectHome` (the default) anchors new panes to the sticky session
+/// project root, so a pane lands at the project regardless of where the
+/// file list has been browsed to; `BrowseDir` opens "here" — the focused
+/// column's current listing dir. When `ProjectHome` is selected but no
+/// PROJECT_HOME is set, both fall back to the browse dir.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NewTabCwd {
+    #[default]
+    ProjectHome,
+    BrowseDir,
+}
+
+/// Pane / pty defaults — the default command and cwd for `^a c`.
 #[derive(Debug, Clone)]
 pub struct PaneConfig {
     /// Default command pre-filled into the `^a c` (new tab) prompt.
@@ -119,6 +134,8 @@ pub struct PaneConfig {
     /// are unset, preserving long-standing behavior. The env var
     /// still wins so users can override per-shell on the fly.
     pub default_command: Option<String>,
+    /// Where a new pane tab opens by default. See [`NewTabCwd`].
+    pub new_tab_cwd: NewTabCwd,
     /// When true, `^a v` on a *Claude* pane reads Claude's on-disk
     /// conversation JSONL and renders the transcript, instead of
     /// the default terminal-scrollback capture. Codex always uses
@@ -134,6 +151,7 @@ impl Default for PaneConfig {
     fn default() -> Self {
         Self {
             default_command: None,
+            new_tab_cwd: NewTabCwd::default(),
             claude_transcript_scrollback: false,
             agy_transcript_scrollback: true,
         }
@@ -162,6 +180,8 @@ impl PaneConfig {
 struct FilePane {
     #[serde(default)]
     default_command: Option<String>,
+    #[serde(default)]
+    new_tab_cwd: Option<NewTabCwd>,
     #[serde(default)]
     claude_transcript_scrollback: Option<bool>,
     #[serde(default)]
@@ -418,6 +438,9 @@ impl Config {
         if let Some(cmd) = file.pane.default_command {
             self.pane.default_command = Some(cmd);
         }
+        if let Some(v) = file.pane.new_tab_cwd {
+            self.pane.new_tab_cwd = v;
+        }
         if let Some(b) = file.pane.claude_transcript_scrollback {
             self.pane.claude_transcript_scrollback = b;
         }
@@ -518,8 +541,35 @@ mod tests {
         assert!(file.ignore_masks.is_empty());
         assert!(file.layout.status_position.is_none());
         assert!(file.pane.default_command.is_none());
+        assert!(file.pane.new_tab_cwd.is_none());
         assert!(file.yank.include_pager_title.is_none());
         assert!(file.markdown.open_as_rendered.is_none());
+    }
+
+    #[test]
+    fn new_tab_cwd_defaults_to_project_home() {
+        assert_eq!(Config::default().pane.new_tab_cwd, NewTabCwd::ProjectHome);
+    }
+
+    #[test]
+    fn parses_pane_new_tab_cwd_browse_dir() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[pane]\nnew_tab_cwd = \"browse_dir\"\n").unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert_eq!(cfg.pane.new_tab_cwd, NewTabCwd::BrowseDir);
+    }
+
+    #[test]
+    fn project_without_pane_does_not_clobber_user_new_tab_cwd() {
+        let tmp = tempdir().unwrap();
+        let user = tmp.path().join("user.toml");
+        let project = tmp.path().join("project.toml");
+        std::fs::write(&user, "[pane]\nnew_tab_cwd = \"browse_dir\"\n").unwrap();
+        // Project file has no [pane] — must not reset to the default.
+        std::fs::write(&project, "[colors]\ndir = \"blue\"\n").unwrap();
+        let cfg = Config::load_from(&[Some(&user), Some(&project)]).unwrap();
+        assert_eq!(cfg.pane.new_tab_cwd, NewTabCwd::BrowseDir);
     }
 
     #[test]

@@ -690,6 +690,22 @@ impl AppState {
         }
     }
 
+    /// The working directory a freshly-spawned pane tab opens in, honoring
+    /// `[pane] new_tab_cwd`. `ProjectHome` (the default) anchors the pane to
+    /// the sticky session project root; `BrowseDir` opens at the focused
+    /// column's current listing dir. Falls back to the browse dir when
+    /// PROJECT_HOME is requested but unset. Goes through `cur()` so a focused
+    /// second commander is honored (`state_left_listing_dir_uses_are_allowlisted`).
+    pub fn default_pane_cwd(&self) -> std::path::PathBuf {
+        match self.config.pane.new_tab_cwd {
+            crate::config::NewTabCwd::ProjectHome => self
+                .project_home
+                .clone()
+                .unwrap_or_else(|| self.cur().listing.dir.clone()),
+            crate::config::NewTabCwd::BrowseDir => self.cur().listing.dir.clone(),
+        }
+    }
+
     /// The commander for an EXPLICIT column (not focus-based, unlike `cur`).
     /// `Right` with no second commander falls back to `left` (safe no-op for
     /// the per-column git refresh loop). Used to drive git per-Side.

@@ -523,11 +523,11 @@ impl App {
             PromptKind::PaneNewTabCwd => {
                 let cwd = prompt.buffer.trim().to_string();
                 if let Some(cmd) = self.state.pending_new_tab_cmd.take() {
+                    // Empty = the user cleared the pre-fill; fall back to the
+                    // configured default cwd (so clearing it agrees with what
+                    // the prompt was pre-filled with under either mode).
                     let cwd_path = if cwd.is_empty() {
-                        self.state
-                            .project_home
-                            .clone()
-                            .unwrap_or_else(|| self.state.cur().listing.dir.clone())
+                        self.state.default_pane_cwd()
                     } else if cwd.starts_with('~') {
                         let home = std::env::var("HOME").unwrap_or_default();
                         std::path::PathBuf::from(cwd.replacen('~', &home, 1))
