@@ -8,6 +8,8 @@ use serde_json::{Value, json};
 
 use super::server::{notify_disconnect, pid_from_sock_path};
 use super::{mcp_log, socket_path};
+
+/// Status of MCP configuration for this directory.
 pub enum McpConfigStatus {
     /// .mcp.json written/updated to point at our socket.
     Configured,
@@ -172,7 +174,9 @@ pub fn enterprise_defines_spyc() -> bool {
     false
 }
 
-/// Extract the PID from a socket path like `mcp-12345.sock`.
+/// Ensure `.mcp.json` has the spyc entry using stdio transport.
+/// Checks enterprise policy first. If another spyc instance owns
+/// the entry, sends it a disconnect notification and takes over.
 pub fn ensure_mcp_json(dir: &Path, takeover_allowed: bool) -> Result<McpConfigStatus, io::Error> {
     if enterprise_allows_spyc() == Some(false) {
         return Ok(McpConfigStatus::BlockedByEnterprise);

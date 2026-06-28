@@ -12,7 +12,47 @@ use super::readers::{
     grep_matches_to_json, list_worktrees_json, read_context_or_empty, read_file_content,
     read_inventory_from_context, read_picks_from_context, release_worktree_result,
 };
-use super::{CONTEXT_URI, PROTOCOL_VERSION, SERVER_INSTRUCTIONS, SERVER_NAME, SERVER_VERSION};
+use super::{
+    CONTEXT_URI, PROTOCOL_VERSION, PROXY_IO_TIMEOUT, SERVER_INSTRUCTIONS, SERVER_NAME,
+    SERVER_VERSION,
+};
+
+/// Per-call ceiling for the read tools that walk the filesystem / git (search,
+/// git status / log / diff, worktree listing). Kept a few seconds below
+/// `PROXY_IO_TIMEOUT` so a slow call fails *server-side* with a clean JSON-RPC
+/// error first: the stdio proxy reacts to its own read timeout by killing the
+/// whole MCP connection, so the server must reply before that fires. Derived
+/// from `PROXY_IO_TIMEOUT` so the two can't drift apart.
+const READ_TOOL_TIMEOUT: std::time::Duration = {
+    let proxy_secs = PROXY_IO_TIMEOUT.as_secs();
+    std::time::Duration::from_secs(if proxy_secs > 5 {
+        proxy_secs - 5
+    } else {
+        proxy_secs
+    })
+};
+
+/// Run `f` on a detached thread and wait at most `timeout` for its result,
+/// returning `Err` on timeout. There is no cancellation: a timed-out thread
+/// runs to completion in the background — acceptable because the work is pure
+/// reads and the alternative (blocking until the proxy's socket timeout) kills
+/// the whole MCP connection.
+fn call_with_timeout<T, F>(timeout: std::time::Duration, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(timeout)
+        .map_err(|_| "timed out".to_string())
+}
+
+/// Dispatch a JSON-RPC request and write the response to `w`.
+/// `cmd_tx` is `Some` when running as the socket server
+/// (writable actions available), `None` for read-only fallback.
 pub(super) fn dispatch(
     w: &mut impl Write,
     msg: &str,
@@ -54,13 +94,8 @@ pub(super) fn dispatch(
     }
 }
 
-// ── Stdio transport (spyc --mcp) ────────────────────────────────
-//
-// Proxies JSON-RPC from stdin/stdout to the running spyc instance's
-// Unix domain socket. Falls back to read-only local dispatch if the
-// socket isn't available (no running spyc).
+// ── Protocol handlers ────────────────────────────────────────────
 
-/// Resolve context path from env var or project root.
 fn handle_initialize(w: &mut impl Write, id: &Value, _params: &Value) -> io::Result<()> {
     send_result(
         w,
@@ -549,26 +584,36 @@ fn handle_tools_call(
                 Ok(r) => r,
                 Err(e) => return send_tool_error(w, id, &e),
             };
-            let paths = crate::fs::finder::find_paths(&root, &query, limit);
-            let arr: Vec<Value> = paths
-                .iter()
-                .map(|p| Value::String(p.to_string_lossy().into_owned()))
-                .collect();
-            send_tool_result(w, id, &Value::Array(arr).to_string())
+            match call_with_timeout(READ_TOOL_TIMEOUT, move || {
+                crate::fs::finder::find_paths(&root, &query, limit)
+            }) {
+                Ok(paths) => {
+                    let arr: Vec<Value> = paths
+                        .iter()
+                        .map(|p| Value::String(p.to_string_lossy().into_owned()))
+                        .collect();
+                    send_tool_result(w, id, &Value::Array(arr).to_string())
+                }
+                Err(msg) => send_tool_error(w, id, &format!("search_paths timed out: {msg}")),
+            }
         }
         "search_content" => {
             let pattern = args["pattern"].as_str().unwrap_or("");
             if pattern.is_empty() {
                 return send_tool_error(w, id, "missing required parameter: pattern");
             }
+            let pattern = pattern.to_string();
             let limit = args["limit"].as_u64().map_or(200, |n| n.min(5000) as usize);
             let root = match effective_root(args, ctx_path) {
                 Ok(r) => r,
                 Err(e) => return send_tool_error(w, id, &e),
             };
-            match crate::fs::grep::search_to_vec(&root, pattern, limit) {
-                Ok(hits) => send_tool_result(w, id, &grep_matches_to_json(&hits).to_string()),
-                Err(e) => send_tool_error(w, id, &e),
+            match call_with_timeout(READ_TOOL_TIMEOUT, move || {
+                crate::fs::grep::search_to_vec(&root, &pattern, limit)
+            }) {
+                Ok(Ok(hits)) => send_tool_result(w, id, &grep_matches_to_json(&hits).to_string()),
+                Ok(Err(e)) => send_tool_error(w, id, &e),
+                Err(msg) => send_tool_error(w, id, &format!("search_content timed out: {msg}")),
             }
         }
         "search_picks" => {
@@ -597,13 +642,22 @@ fn handle_tools_call(
                 Err(e) => send_tool_error(w, id, &e),
             }
         }
-        "list_worktrees" => send_tool_result(w, id, &list_worktrees_json(ctx_path)),
+        "list_worktrees" => {
+            let ctx = ctx_path.to_path_buf();
+            match call_with_timeout(READ_TOOL_TIMEOUT, move || list_worktrees_json(&ctx)) {
+                Ok(text) => send_tool_result(w, id, &text),
+                Err(msg) => send_tool_error(w, id, &format!("list_worktrees timed out: {msg}")),
+            }
+        }
         "git_status" => {
             let root = match effective_root(args, ctx_path) {
                 Ok(r) => r,
                 Err(e) => return send_tool_error(w, id, &e),
             };
-            send_tool_result(w, id, &git_status_json(&root))
+            match call_with_timeout(READ_TOOL_TIMEOUT, move || git_status_json(&root)) {
+                Ok(text) => send_tool_result(w, id, &text),
+                Err(msg) => send_tool_error(w, id, &format!("git_status timed out: {msg}")),
+            }
         }
         "git_log" => {
             let limit = args["limit"].as_u64().map_or(20, |n| n.min(500) as usize);
@@ -611,7 +665,10 @@ fn handle_tools_call(
                 Ok(r) => r,
                 Err(e) => return send_tool_error(w, id, &e),
             };
-            send_tool_result(w, id, &git_log_json(&root, limit))
+            match call_with_timeout(READ_TOOL_TIMEOUT, move || git_log_json(&root, limit)) {
+                Ok(text) => send_tool_result(w, id, &text),
+                Err(msg) => send_tool_error(w, id, &format!("git_log timed out: {msg}")),
+            }
         }
         "git_diff" => {
             let root = match effective_root(args, ctx_path) {
@@ -635,7 +692,12 @@ fn handle_tools_call(
                         .collect()
                 })
                 .unwrap_or_default();
-            send_tool_result(w, id, &git_diff_text(&root, mode, &paths))
+            match call_with_timeout(READ_TOOL_TIMEOUT, move || {
+                git_diff_text(&root, mode, &paths)
+            }) {
+                Ok(text) => send_tool_result(w, id, &text),
+                Err(msg) => send_tool_error(w, id, &format!("git_diff timed out: {msg}")),
+            }
         }
         "claim_worktree" => {
             let path = args["path"].as_str().unwrap_or("");
@@ -796,10 +858,6 @@ fn send_tool_error(w: &mut impl Write, id: &Value, text: &str) -> io::Result<()>
     )
 }
 
-/// Pick the search root: prefer `search_root` from the context file (the
-/// focused commander's worktree root), then `project_home`, then `cwd`.
-/// Used by `search_paths` and `search_content` so the MCP tools scope
-/// themselves to the same worktree the in-TUI `F` and `:grep` commands do.
 /// Upper bound on a single MCP message body. The header's `Content-Length`
 /// is untrusted; we refuse anything larger rather than pre-allocate it.
 const MAX_LSP_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
@@ -886,5 +944,31 @@ mod tests {
         let err = read_lsp_message(&mut c).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("exceeds"));
+    }
+
+    #[test]
+    fn call_with_timeout_returns_value_when_work_completes_in_time() {
+        let got = call_with_timeout(std::time::Duration::from_secs(5), || 6 * 7);
+        assert_eq!(got, Ok(42));
+    }
+
+    #[test]
+    fn call_with_timeout_errs_when_work_outlasts_the_deadline() {
+        // The slow closure outlives a tiny deadline, so the caller gets a clean
+        // Err rather than blocking — the property that keeps a slow tool call
+        // from stalling past the proxy's socket timeout and dropping the
+        // connection. (The detached thread finishes its sleep harmlessly.)
+        let got = call_with_timeout(std::time::Duration::from_millis(20), || {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            1
+        });
+        assert_eq!(got, Err("timed out".to_string()));
+    }
+
+    /// The read-tool deadline must sit strictly below the proxy's socket
+    /// timeout, or a slow call races the proxy and the connection dies anyway.
+    #[test]
+    fn read_tool_timeout_stays_below_proxy_timeout() {
+        assert!(READ_TOOL_TIMEOUT < PROXY_IO_TIMEOUT);
     }
 }

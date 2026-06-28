@@ -131,9 +131,6 @@ pub fn socket_path() -> PathBuf {
     socket_path_for(std::process::id())
 }
 
-/// Dispatch a JSON-RPC request and write the response to `w`.
-/// `cmd_tx` is `Some` when running as the socket server
-/// (writable actions available), `None` for read-only fallback.
 mod config;
 mod hooks;
 mod protocol;
@@ -150,6 +147,7 @@ pub use server::{cleanup_socket, start_socket_server};
 
 use server::{discover_live_socket, run_direct, run_proxy};
 
+/// Resolve context path from env var or project root.
 fn resolve_context_path(project_root: &Path) -> PathBuf {
     if let Ok(p) = std::env::var(context::CONTEXT_ENV_VAR)
         && !p.is_empty()

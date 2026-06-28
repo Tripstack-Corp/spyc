@@ -28,6 +28,9 @@ pub(super) fn effective_root(args: &Value, ctx_path: &Path) -> Result<PathBuf, S
     Ok(search_root(ctx_path))
 }
 
+/// Pick the search root: prefer `search_root` from the context file (the
+/// focused commander's worktree root), then `project_home`, then `cwd`. The
+/// MCP search tools scope themselves to it, matching the in-TUI `F` / `:grep`.
 pub(super) fn search_root(ctx_path: &Path) -> PathBuf {
     if let Ok(text) = std::fs::read_to_string(ctx_path)
         && let Ok(v) = serde_json::from_str::<Value>(&text)

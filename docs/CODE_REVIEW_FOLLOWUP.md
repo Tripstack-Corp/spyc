@@ -31,7 +31,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 - **PR11** — MCP scope/robustness + path/env overlay _(3 findings; clusters: mcp)_
 - **PR12** — Misc correctness batch _(11 findings; clusters: resume, other, fs-watch-topology, prompt-allowlist-drift, perf-linear-scan, perf-sort-alloc, pager-truncation-bytes, pane-vt100-recovery-size)_
 
-**Remaining: 11** (after PR #588; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
+**Remaining: 9** (after PR #590; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings, #590 fixed the 2 MCP-robustness findings). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
 
 ## To fix — by cluster
 
@@ -108,8 +108,8 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 
 | Where | Finding | Sev | Eff | Verdict |
 |---|---|---|---|---|
-| `src/mcp/server.rs:259` | One slow tool call (>20s) kills the entire MCP connection, and the server's searches are unbounded | medium | M | REAL |
-| `src/mcp/protocol.rs:62` | Nine doc comments detached from their functions by the verbatim mcp.rs split (deferred here from PR10) | medium | S | REAL |
+| `src/mcp/server.rs:259` | One slow tool call (>20s) kills the entire MCP connection, and the server's searches are unbounded | medium | M | ✅ PR #590 |
+| `src/mcp/protocol.rs:62` | Nine doc comments detached from their functions by the verbatim mcp.rs split (deferred here from PR10) | medium | S | ✅ PR #590 |
 
 ### PR12 · Misc correctness batch
 
@@ -131,6 +131,10 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
+
+**✅ PR #590 — bound slow MCP read tools + reattach detached doc comments (2026-06-28):**
+- `mcp/server.rs:259` — the stdio proxy bounds its socket read with `PROXY_IO_TIMEOUT` (20 s) and, on timeout, sends the agent an error *and then breaks the loop*, ending the whole MCP stdio process. So any single read tool that walked a large tree for >20 s killed the entire MCP connection, not just that call. The tree-walking read tools (`search_paths`/`search_content`, `git_status`/`git_log`/`git_diff`, `list_worktrees`) now run through a new `call_with_timeout` (detached thread + `recv_timeout`, the same pattern the writable-action path already uses) bounded by `READ_TOOL_TIMEOUT` — derived a few seconds below `PROXY_IO_TIMEOUT` so they can't drift apart. A slow call returns a clean JSON-RPC error server-side before the proxy gives up. No cancellation (a timed-out thread runs to completion — pure reads, harmless). The bounded-list tools (`search_picks`/`search_inventory`) and byte-capped `get_file_content` stay direct — they can't run away on tree size. 3 new tests (fast→Ok, slow→Err, `READ_TOOL_TIMEOUT < PROXY_IO_TIMEOUT` invariant).
+- `mcp/protocol.rs:62` — the verbatim `mcp.rs` → `mcp/` split detached doc comments from their functions. Mapped each back against the **pre-split `mcp.rs`** (authoritative via `git show`): a rotation chain — `resolve_context_path` (→ mod.rs, was on `handle_initialize`), `search_root` (→ readers.rs, was orphaned before `MAX_LSP_MESSAGE_BYTES`), `McpConfigStatus` (→ config.rs, was on `pid_from_sock_path`), `pid_from_sock_path` (→ server.rs, was on `ensure_mcp_json`), `ensure_mcp_json` (→ config.rs, was on `handle_socket_connection`) — plus two merged blocks (`dispatch`'s doc stranded on `mod config;`; `start_socket_server`'s on `socket_bind_error`). All now sit on their real owners; legitimate later content updates (`cleanup_socket`, `clean_local_mcp_entry`, `mcp_log`) left as-is.
 
 **✅ PR #588 — route pager yank/save through the executor + cache terminal size (2026-06-28):**
 - `ui/pager/construct.rs:182` — the pager `y`/`Y`/visual yanks and the `s` save did inline `clipboard::copy` / `std::fs::write` in the motion/visual handlers, bypassing the sole effect executor. New `Effect::CopyToPagerClipboard { text, ok_msg }` and `Effect::SavePagerOutput { content }` move the IO into `run_effects`. The confirmation still lands in the **active pager's title** (new `set_active_pager_flash`), not the status bar — `Effect::CopyToClipboard` flashes the status bar, which a pager overlay would hide, so the pager keeps its own title flash + exact former messages. `PagerView` exposes pure text extractors (`source_yank_text` / `visible_yank_text` / `visual_yank_text` / `save_content`); the copy/write is the executor's.

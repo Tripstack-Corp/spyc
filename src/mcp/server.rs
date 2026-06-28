@@ -345,11 +345,6 @@ pub(super) fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
 
 // ── Unix socket server (background thread) ──────────────────────
 
-/// Start the MCP server on a Unix domain socket. The socket path is
-/// `~/.local/state/spyc/mcp-<PID>.sock`. The server runs on a
-/// background thread and reads context from `ctx_path`. `cmd_tx` is the
-/// write end of the command channel — writable actions go through it to
-/// the main event loop.
 /// Turn a failed MCP socket bind into a helpful error. A permission-denied
 /// bind (EACCES / EPERM) almost always means a restricted sandbox refused the
 /// bind — not a real misconfiguration — so point the user at rerunning under
@@ -367,6 +362,11 @@ pub(super) fn socket_bind_error(err: std::io::Error, sock: &Path) -> anyhow::Err
     }
 }
 
+/// Start the MCP server on a Unix domain socket. The socket path is
+/// `~/.local/state/spyc/mcp-<PID>.sock`. The server runs on a
+/// background thread and reads context from `ctx_path`. `cmd_tx` is the
+/// write end of the command channel — writable actions go through it to
+/// the main event loop.
 pub fn start_socket_server(
     ctx_path: PathBuf,
     cmd_tx: std::sync::mpsc::Sender<McpRequest>,
@@ -435,7 +435,7 @@ pub fn cleanup_socket() {
     let _ = std::fs::remove_file(root_marker_path_in(&state_dir(), std::process::id()));
 }
 
-/// Status of MCP configuration for this directory.
+/// Extract the PID from a socket path like `mcp-12345.sock`.
 pub(super) fn pid_from_sock_path(path: &str) -> Option<u32> {
     let fname = Path::new(path).file_name()?.to_str()?;
     let stripped = fname.strip_prefix("mcp-")?.strip_suffix(".sock")?;
@@ -457,9 +457,6 @@ pub(super) fn notify_disconnect(old_sock: &Path, new_pid: u32) {
     mcp_log(&format!("sent spyc/disconnected to {}", old_sock.display()));
 }
 
-/// Ensure `.mcp.json` has the spyc entry using stdio transport.
-/// Checks enterprise policy first. If another spyc instance owns
-/// the entry, sends it a disconnect notification and takes over.
 /// Handle a single Unix socket connection. Uses the same Content-Length
 /// framing as the stdio transport.
 pub(super) fn handle_socket_connection(
