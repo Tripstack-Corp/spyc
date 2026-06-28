@@ -77,17 +77,23 @@ impl Inventory {
         if !meta.is_file() {
             return Err(format!("{}: not a regular file", path.display()));
         }
-        // Skip if already in inventory (by original path).
-        if self.contains(path) {
-            return Ok(());
-        }
         let filename = path
             .file_name()
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
-        // UUIDv7 — time-ordered, no collision risk on rapid yanks.
-        let id = uuid::Uuid::now_v7().simple().to_string();
+        // Reuse the existing entry for this path so re-yanking a modified file
+        // refreshes its cached content (size + bytes) instead of keeping the
+        // stale copy. A path not yet cached gets a fresh time-ordered UUIDv7
+        // (no collision risk on rapid yanks).
+        let id = self
+            .items
+            .values()
+            .find(|item| item.orig_path == path)
+            .map_or_else(
+                || uuid::Uuid::now_v7().simple().to_string(),
+                |item| item.id.clone(),
+            );
         let item = CachedItem {
             id: id.clone(),
             orig_path: path.to_path_buf(),
@@ -355,11 +361,25 @@ mod tests {
             let err = inv.yank(&subdir).unwrap_err();
             assert!(err.contains("not a regular file"));
 
-            // --- yank deduplicates ---
+            // --- re-yank keeps one entry per path but refreshes content ---
             let dedup = make_test_file(tmp.path(), "dedup.txt", "dup");
             inv.yank(&dedup).unwrap();
-            inv.yank(&dedup).unwrap(); // no error, just skips
+            std::fs::write(&dedup, "modified-and-longer").unwrap();
+            inv.yank(&dedup).unwrap(); // no error, no duplicate, refreshes cache
             assert_eq!(inv.len(), 1);
+            // The cached size tracks the new content, not the stale yank.
+            assert_eq!(
+                inv.items().next().unwrap().size,
+                "modified-and-longer".len() as u64
+            );
+            // And `put` delivers the refreshed bytes, not the stale copy.
+            let refresh_dest = tmp.path().join("refresh");
+            std::fs::create_dir(&refresh_dest).unwrap();
+            inv.put_to(&refresh_dest);
+            assert_eq!(
+                std::fs::read_to_string(refresh_dest.join("dedup.txt")).unwrap(),
+                "modified-and-longer"
+            );
             inv.clear();
 
             // --- put copies to dest ---

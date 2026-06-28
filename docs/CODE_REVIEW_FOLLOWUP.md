@@ -31,7 +31,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 - **PR11** — MCP scope/robustness + path/env overlay _(3 findings; clusters: mcp)_
 - **PR12** — Misc correctness batch _(11 findings; clusters: resume, other, fs-watch-topology, prompt-allowlist-drift, perf-linear-scan, perf-sort-alloc, pager-truncation-bytes, pane-vt100-recovery-size)_
 
-**Remaining: 9** (after PR #590; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings, #590 fixed the 2 MCP-robustness findings). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
+**Remaining: 8** (after PR #592; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings, #590 fixed the 2 MCP-robustness findings). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
 
 ## To fix — by cluster
 
@@ -126,11 +126,14 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/pane/mod.rs:607` | vt100 panic recovery rebuilds the parser at the adopt-time size, and the resize coalescer guarantees it never gets corrected | medium | S | REAL |
 | `src/app/run.rs:54` | Config-file watch on $HOME is permanently destroyed when the listing watch passes through the same directory | medium | M | ✅ #581 (already-fixed: watches keyed by purpose) |
 | `src/pane/tabs.rs:20` | Claude-specific session-restore state machine (PendingResumeSend) lives in the generic pane layer | medium | M | ✅ #581 (closed: by-design) |
-| `src/state/inventory.rs:85` | Re-yanking a modified file silently keeps the stale cached content (moved from PR9 — dedup *behavior*, not code dup) | medium | S | REAL |
+| `src/state/inventory.rs:85` | Re-yanking a modified file silently keeps the stale cached content (moved from PR9 — dedup *behavior*, not code dup) | medium | S | ✅ PR #592 |
 | `src/state/sessions/mod.rs:127` | load_sessions dedup collapses distinct resumable sessions that share cwd + commands (moved from PR9) | medium | S | REAL |
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
+
+**✅ PR #592 — re-yank refreshes stale inventory content (2026-06-28):**
+- `state/inventory.rs:85` — `yank` early-returned when the path was already cached (`if self.contains(path) { return Ok(()) }`), so re-yanking an *edited* file silently kept the stale bytes — a later `put` wrote the old content. Now `yank` reuses the existing entry's id and overwrites its `.dat` + metadata, so a path keeps one entry (dedup intent preserved) but always caches the current content/size; an uncached path still gets a fresh UUIDv7. Test updated to edit-then-re-yank and assert the cached size + the bytes `put` delivers track the new content.
 
 **✅ PR #590 — bound slow MCP read tools + reattach detached doc comments (2026-06-28):**
 - `mcp/server.rs:259` — the stdio proxy bounds its socket read with `PROXY_IO_TIMEOUT` (20 s) and, on timeout, sends the agent an error *and then breaks the loop*, ending the whole MCP stdio process. So any single read tool that walked a large tree for >20 s killed the entire MCP connection, not just that call. The tree-walking read tools (`search_paths`/`search_content`, `git_status`/`git_log`/`git_diff`, `list_worktrees`) now run through a new `call_with_timeout` (detached thread + `recv_timeout`, the same pattern the writable-action path already uses) bounded by `READ_TOOL_TIMEOUT` — derived a few seconds below `PROXY_IO_TIMEOUT` so they can't drift apart. A slow call returns a clean JSON-RPC error server-side before the proxy gives up. No cancellation (a timed-out thread runs to completion — pure reads, harmless). The bounded-list tools (`search_picks`/`search_inventory`) and byte-capped `get_file_content` stay direct — they can't run away on tree size. 3 new tests (fast→Ok, slow→Err, `READ_TOOL_TIMEOUT < PROXY_IO_TIMEOUT` invariant).
