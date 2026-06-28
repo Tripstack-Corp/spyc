@@ -149,11 +149,246 @@ impl App {
                 } else {
                     self.runtime.pane_tabs = Some(PaneTabs::new(entry));
                 }
+                // Claude status hooks: install (consented), skip (denied), or
+                // raise the first-launch per-project consent popup. After the
+                // tab exists so a Yes can target it; the env (SPYC_PANE_ID/SOCK)
+                // is already in place from the spawn above.
+                self.maybe_offer_status_hooks(cmd, cwd);
                 true
             }
             Err(e) => {
                 self.state.flash_error(format!("pane spawn failed: {e}"));
                 false
+            }
+        }
+    }
+
+    /// After launching a Claude pane: install the status hooks if this project
+    /// has already consented, do nothing if it declined, else raise the
+    /// first-launch consent popup (`HookConsent`). Consent is keyed by the
+    /// **project root** (`find_repo_root`, else the cwd) and saved, so a given
+    /// repo is asked exactly once. Gated on MCP running (the hooks report over
+    /// the socket) and the agent being Claude.
+    fn maybe_offer_status_hooks(&mut self, cmd: &str, cwd: &std::path::Path) {
+        if !self.view.mcp_running
+            || crate::agent::detect(cmd).kind() != crate::state::sessions::AgentKind::Claude
+        {
+            return;
+        }
+        let root = state::find_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+        match crate::state::hook_consent::consent_for(&root) {
+            Some(true) => self.install_status_hooks(cwd),
+            Some(false) => {}
+            None => {
+                self.state.mode = Mode::Prompting(Prompt::simple(
+                    PromptKind::HookConsent {
+                        root,
+                        cwd: cwd.to_path_buf(),
+                    },
+                    "Let spyc show this agent's live status? Writes hooks to .claude/settings.json (removed on exit). [y]es / [n]o / esc=ask later ",
+                ));
+            }
+        }
+    }
+
+    /// Write the Claude status hooks into `cwd` and record the dir so teardown
+    /// cleans them (shares `mcp_config_dirs` with the `.mcp.json` cleanup).
+    /// Assumes consent is already granted. A no-op-returning write (git-tracked
+    /// settings.json) simply isn't tracked.
+    pub(super) fn install_status_hooks(&mut self, cwd: &std::path::Path) {
+        if crate::mcp::ensure_claude_status_hooks(cwd)
+            && !self.runtime.mcp_config_dirs.iter().any(|d| d == cwd)
+        {
+            self.runtime.mcp_config_dirs.push(cwd.to_path_buf());
+        }
+    }
+
+    /// The project root `:hooks` acts on: the active pane's cwd's repo root
+    /// (the agent the user means), else the focused commander's. Falls back to
+    /// the dir itself when it isn't in a repo. Consent is keyed by this root.
+    pub(super) fn status_hooks_target_root(&self) -> std::path::PathBuf {
+        let dir = self.runtime.pane_tabs.as_ref().map_or_else(
+            || self.state.cur().listing.dir.clone(),
+            |t| t.active_info().cwd.clone(),
+        );
+        state::find_repo_root(&dir).unwrap_or(dir)
+    }
+
+    /// `:hooks on|off` — grant/revoke per-project consent for Claude status
+    /// hooks and (un)install them for every open **claude** pane in that project
+    /// (so a *running* agent gains/loses the hooks, not just future launches).
+    /// Claude reloads `.claude/settings.json` live, so the change takes effect on
+    /// the agent's next message — no restart, no lost conversation. This is the
+    /// escape hatch from an accidental `no` at launch.
+    pub(super) fn set_status_hooks(&mut self, enable: bool) {
+        let root = self.status_hooks_target_root();
+        crate::state::hook_consent::set_consent(&root, enable);
+        // Claude panes whose project root matches — collect first (immutable
+        // borrow) so the install/cleanup mutations below don't alias.
+        let cwds: Vec<std::path::PathBuf> = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .map(|tabs| {
+                tabs.tabs()
+                    .iter()
+                    .filter(|t| {
+                        crate::agent::detect(&t.info.command).kind()
+                            == crate::state::sessions::AgentKind::Claude
+                    })
+                    .map(|t| t.info.cwd.clone())
+                    .filter(|cwd| state::find_repo_root(cwd).as_deref().unwrap_or(cwd) == root)
+                    .collect()
+            })
+            .unwrap_or_default();
+        for cwd in &cwds {
+            if enable {
+                self.install_status_hooks(cwd);
+            } else {
+                crate::mcp::cleanup_claude_status_hooks(cwd);
+                self.runtime.mcp_config_dirs.retain(|d| d != cwd);
+            }
+        }
+        let proj = crate::paths::display_tilde(&root);
+        if enable {
+            let note = Self::ephemeral_hook_binary_note();
+            self.state.flash_info(format!(
+                "status hooks ON for {proj} ({} pane(s)) — live on Claude's next message (`:hooks on!` to force-restart+resume){note}",
+                cwds.len()
+            ));
+        } else {
+            self.state
+                .flash_info(format!("status hooks OFF for {proj}"));
+        }
+    }
+
+    /// A trailing flash note (or empty) warning that the running binary lives
+    /// in a `target/{debug,release}` build dir — its absolute path is baked
+    /// into the hook command (`current_exe()`), so it goes stale if that tree
+    /// (e.g. a throwaway worktree) is cleaned. `make install` + running from a
+    /// stable path avoids it. Cheap; computed only on user-initiated enable.
+    fn ephemeral_hook_binary_note() -> String {
+        let in_build_dir = std::env::current_exe().is_ok_and(|exe| {
+            let has = |name: &str| {
+                exe.components()
+                    .any(|c| c.as_os_str().to_str() == Some(name))
+            };
+            has("target") && (has("debug") || has("release"))
+        });
+        if in_build_dir {
+            " — note: build-dir binary, `make install` for a stable hook path".to_string()
+        } else {
+            String::new()
+        }
+    }
+
+    /// Respawn `cmd` (an agent) into the tab at `tab_idx`, replacing whatever
+    /// is there, with the agent env (`SPYC_MCP_SOCK` + `SPYC_PANE_ID`) injected
+    /// so the fresh process can report status — the same env `open_pane_tab_in`
+    /// gives a launched agent. The CALLER kills the prior child first. When
+    /// `resume_sid` is `Some`, arms the `/resume <sid>` stdin injection (shared
+    /// with session restore) so a Claude conversation is recovered after the
+    /// banner settles. Returns whether the spawn succeeded; prunes any orphaned
+    /// scrollback stream left by the replaced entry.
+    pub(super) fn spawn_agent_into_tab(
+        &mut self,
+        tab_idx: usize,
+        cmd: &str,
+        cwd: &std::path::Path,
+        resume_sid: Option<String>,
+    ) -> bool {
+        let (rows, cols) = Self::pane_spawn_size(
+            self.effective_pane_pct(),
+            self.state.config.layout.status_position,
+        );
+        let wake = self.make_pane_wake();
+        let mut info = TabInfo::new(cmd, cwd);
+        if let Some(sid) = resume_sid {
+            info.pending_resume_send = Some(crate::pane::tabs::PendingResumeSend::Text {
+                sid,
+                after: std::time::Instant::now() + super::RESTORE_BANNER_SETTLE,
+            });
+        }
+        // Owned locals so the `&str` env slice outlives the spawn call.
+        let sock_str = crate::mcp::socket_path().to_string_lossy().into_owned();
+        let pane_id = info.id.clone();
+        let extra_env = [
+            ("SPYC_MCP_SOCK", sock_str.as_str()),
+            ("SPYC_PANE_ID", pane_id.as_str()),
+        ];
+        match Pane::spawn_with_env(
+            cmd,
+            rows,
+            cols,
+            cwd,
+            &self.view.context_path,
+            &extra_env,
+            wake,
+        ) {
+            Ok(p) => {
+                let entry = TabEntry::new(p, info);
+                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+                    tabs.replace_at(tab_idx, entry);
+                }
+                // The replaced entry (and any stashed scrollback pager) was
+                // dropped; reclaim its parked stream so it doesn't leak.
+                self.prune_orphaned_pager_streams();
+                true
+            }
+            Err(e) => {
+                self.state.flash_error(format!("pane respawn failed: {e}"));
+                false
+            }
+        }
+    }
+
+    /// `:hooks on!` — grant consent + install the hooks, then **restart the
+    /// active claude pane** (fresh env + hooks present from launch) and
+    /// auto-`/resume` its conversation. The forceful escape hatch for when a
+    /// live-reload `:hooks on` doesn't take (a stale baked binary path, or
+    /// Claude not picking up the settings change). Reuses the session-restore
+    /// `/resume` injection; falls back to a fresh claude + "type /resume" when
+    /// the live session id can't be resolved.
+    pub(super) fn force_restart_status_hooks(&mut self) {
+        let root = self.status_hooks_target_root();
+        crate::state::hook_consent::set_consent(&root, true);
+
+        let Some((tab_idx, cmd, cwd)) = self.runtime.pane_tabs.as_ref().map(|t| {
+            let info = t.active_info();
+            (t.active_index(), info.command.clone(), info.cwd.clone())
+        }) else {
+            self.state
+                .flash_error(":hooks on! — no active pane to restart");
+            return;
+        };
+        if crate::agent::detect(&cmd).kind() != crate::state::sessions::AgentKind::Claude {
+            self.state
+                .flash_error(":hooks on! — active pane is not claude");
+            return;
+        }
+        self.install_status_hooks(&cwd);
+
+        // Resolve the live session id (newest claude jsonl for this cwd) so we
+        // can auto-`/resume`. Strip any `--resume` from the command so we
+        // relaunch clean and drive the recovery via the stdin dance (claude's
+        // `--resume` flag crashes at mount — same reason restore avoids it).
+        let sid = crate::state::sessions::most_recent_jsonl_for_cwd(&cwd);
+        let resumed = sid.is_some();
+        let cmd_fresh = crate::agent::resume::command_without_resume(&cmd);
+
+        if let Some(tabs) = self.runtime.pane_tabs.as_mut()
+            && let Some(entry) = tabs.tabs_mut().get_mut(tab_idx)
+        {
+            entry.pane.try_kill();
+        }
+        if self.spawn_agent_into_tab(tab_idx, &cmd_fresh, &cwd, sid) {
+            self.state.focus = state::Focus::Pane;
+            if resumed {
+                self.state
+                    .flash_info("status hooks on — restarting claude + resuming…");
+            } else {
+                self.state
+                    .flash_info("status hooks on — fresh claude (no session found; type /resume)");
             }
         }
     }

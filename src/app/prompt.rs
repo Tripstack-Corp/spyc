@@ -94,6 +94,15 @@ pub enum PromptKind {
     ClaudeCrashRecover {
         tab_idx: usize,
     },
+    /// First-launch consent (per project, saved) before spyc writes Claude
+    /// status hooks into `root`'s `.claude/settings.json`. `y`/`Y`/Enter →
+    /// remember-allow + install hooks for `cwd`; anything else → remember-deny.
+    /// `root` keys the persisted consent (`state::hook_consent`); `cwd` is the
+    /// launching pane's dir (where the hooks are written).
+    HookConsent {
+        root: std::path::PathBuf,
+        cwd: std::path::PathBuf,
+    },
     /// `^a x` on a tab whose child is still running — confirm before killing it
     /// (closing a live claude loses the session). Single-key: `y`/`Y` closes,
     /// anything else keeps it. Always targets the active tab (the modal prompt
@@ -783,6 +792,13 @@ mod tests {
             ("WorktreeDeleteConfirm", K::WorktreeDeleteConfirm),
             ("Limit", K::Limit),
             ("ClaudeCrashRecover", K::ClaudeCrashRecover { tab_idx: 0 }),
+            (
+                "HookConsent",
+                K::HookConsent {
+                    root: std::path::PathBuf::new(),
+                    cwd: std::path::PathBuf::new(),
+                },
+            ),
             ("ClosePane", K::ClosePane),
         ] {
             assert!(

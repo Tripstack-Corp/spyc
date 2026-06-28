@@ -206,6 +206,37 @@ pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
+/// `:hooks [on|on!|off]` — manage Claude status-hook consent for the current
+/// project: the escape hatch from the first-launch popup (e.g. an accidental
+/// `no`). `on` grants consent + installs the hooks for any running claude panes
+/// in this project (Claude live-reloads them, so it takes on the next message);
+/// `on!` additionally **restarts the active claude pane and resumes** it, for
+/// when the live reload doesn't take; `off` revokes + uninstalls; no arg reports
+/// the current state. Consent is keyed by the project root and saved.
+pub(super) fn cmd_hooks(app: &mut App, args: &str) -> Vec<Effect> {
+    match args.trim() {
+        "on!" | "enable!" => app.force_restart_status_hooks(),
+        "on" | "enable" | "yes" | "y" => app.set_status_hooks(true),
+        "off" | "disable" | "no" | "n" => app.set_status_hooks(false),
+        "" | "status" => {
+            let root = app.status_hooks_target_root();
+            let state = match crate::state::hook_consent::consent_for(&root) {
+                Some(true) => "on",
+                Some(false) => "off",
+                None => "unset (asks on next claude launch)",
+            };
+            app.state.flash_info(format!(
+                "status hooks: {state} for {} — `:hooks on|on!|off` to change",
+                crate::paths::display_tilde(&root)
+            ));
+        }
+        other => app
+            .state
+            .flash_error(format!("usage: :hooks on|on!|off  (got `{other}`)")),
+    }
+    Vec::new()
+}
+
 /// `:dump-scrollback` — diagnostic for the ^a-v snapshot path. Drains the active
 /// pane and writes the snapshot (one line per row) to /tmp/spyc-scrollback.txt;
 /// useful when content visible on the live pane seems to go missing in the pager

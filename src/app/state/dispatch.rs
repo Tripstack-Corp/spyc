@@ -373,6 +373,7 @@ impl AppState {
             }
             PromptKind::RemoveConfirm
             | PromptKind::ClaudeCrashRecover { .. }
+            | PromptKind::HookConsent { .. }
             | PromptKind::ClosePane
             | PromptKind::GraveyardPurgeAllConfirm => PromptResult::Handled,
             // These need terminal/overlay/pager — caller handles them.

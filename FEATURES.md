@@ -210,6 +210,21 @@ spyc's workflow: browse files above, talk to Claude below.
     **hot-red `●`** — the "which agent needs me" signal), or `done` (a calm
     teal `●`). A live report overrides the timing guess until it expires or the
     agent resumes output. Non-agent tabs (a plain shell) get no dot.
+  - **Auto-reporting (Claude)** — so it works without the agent choosing to call
+    the tool, spyc installs Claude lifecycle hooks (prompt-submit → working,
+    needs-input → blocked, turn-end → done) that run `spyc --report-status`.
+    **It asks first**, once per project: the first `claude` launch in a repo
+    pops a `[Y/n]` ("let spyc show this agent's live status? writes
+    `.claude/settings.json`, removed on exit"), and the answer is **saved per
+    repo** — never nags again. The write preserves your existing hooks/settings;
+    on exit spyc removes only what it added (and never a git-tracked file). The
+    popup is forgiving (only an explicit `y`/`n` sticks; Esc just asks again), and
+    **`:hooks on|on!|off`** changes a project's choice later — `on` also installs
+    the hooks for an already-running agent (Claude live-reloads, so it kicks in on
+    the next message; no restart). That's the undo for an accidental "no". If the
+    live reload doesn't take (e.g. the running spyc is a throwaway build-dir
+    binary whose path went stale), **`:hooks on!`** force-restarts the active
+    claude pane and resumes the conversation so the hooks load from launch.
 
   **`:why-status`** flashes the active tab's state, its source (self-reported
   vs output-timing), and seconds since last output, for debugging.

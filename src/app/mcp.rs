@@ -122,6 +122,11 @@ impl App {
                     crate::mcp::ConfigCleanup::SkippedTracked
                 )
                 .then(|| dir.join(".codex").join("config.toml")),
+                matches!(
+                    crate::mcp::cleanup_claude_status_hooks(&dir),
+                    crate::mcp::ConfigCleanup::SkippedTracked
+                )
+                .then(|| dir.join(".claude").join("settings.json")),
             ]
             .into_iter()
             .flatten()

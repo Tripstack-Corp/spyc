@@ -5,8 +5,6 @@ use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::pane::{Pane, TabEntry, TabInfo};
-
 use crate::app::graveyard_ops::GraveyardOp;
 use crate::app::{App, Effect, Mode, Prompt, PromptKind};
 
@@ -156,33 +154,54 @@ impl App {
             return Vec::new();
         }
 
-        let (rows, cols) = Self::pane_spawn_size(
-            self.effective_pane_pct(),
-            self.state.config.layout.status_position,
-        );
-        let wake = self.make_pane_wake();
-        match Pane::spawn_with_env(
-            &fallback,
-            rows,
-            cols,
-            &cwd,
-            &self.view.context_path,
-            &[],
-            wake,
-        ) {
-            Ok(p) => {
-                let entry = TabEntry::new(p, TabInfo::new(&fallback, &cwd));
-                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
-                    tabs.replace_at(tab_idx, entry);
-                }
-                // The replaced tab's old entry (and any stashed scrollback pager)
-                // was dropped; reclaim its parked stream so it doesn't leak.
-                self.prune_orphaned_pager_streams();
-                self.state
-                    .flash_info("started fresh claude — type /resume to recover");
-            }
-            Err(e) => self.state.flash_error(format!("claude spawn failed: {e}")),
+        // Respawn fresh claude into the tab with the agent env injected (so
+        // the recovered pane can report status via its hooks) — shared with
+        // `:hooks on!`. No `/resume` arm here: the user types it manually after
+        // a crash so they can decide whether to recover or start clean.
+        if self.spawn_agent_into_tab(tab_idx, &fallback, &cwd, None) {
+            self.state
+                .flash_info("started fresh claude — type /resume to recover");
         }
+        Vec::new()
+    }
+
+    /// First-launch consent before spyc writes Claude status hooks. Three-way,
+    /// so an accidental keystroke can't permanently deny: only an **explicit**
+    /// `y`/`n` records a (saved, per-project) decision — `y` installs the hooks
+    /// for the launching cwd (Claude live-reloads `.claude/settings.json`), `n`
+    /// remembers the denial. **Anything else (Esc, Enter, a stray key) just
+    /// defers** — no decision saved, so the popup returns on the next launch and
+    /// the user can still `:hooks on` to enable. (The accidental-`no`-is-forever
+    /// trap this avoids was a real report.)
+    pub(super) fn handle_hook_consent_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        let prev_mode = std::mem::replace(&mut self.state.mode, Mode::Normal);
+        let Mode::Prompting(Prompt {
+            kind: PromptKind::HookConsent { root, cwd },
+            ..
+        }) = prev_mode
+        else {
+            return Vec::new();
+        };
+        match key.code {
+            KeyCode::Char('y' | 'Y') => {
+                crate::state::hook_consent::set_consent(&root, true);
+                self.install_status_hooks(&cwd);
+                self.state.flash_info(
+                    "status hooks on — Claude reports its activity (saved; `:hooks off` to undo)",
+                );
+            }
+            KeyCode::Char('n' | 'N') => {
+                crate::state::hook_consent::set_consent(&root, false);
+                self.state
+                    .flash_info("status hooks declined for this project (`:hooks on` to enable)");
+            }
+            _ => {
+                self.state.flash_info(
+                    "status hooks: skipped — will ask again (`:hooks on` to enable now)",
+                );
+            }
+        }
+        self.view.needs_full_repaint = true;
         Vec::new()
     }
 }

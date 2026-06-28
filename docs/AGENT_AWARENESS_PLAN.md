@@ -110,17 +110,23 @@ hard to debug. Build this early.
 
 The heart of the plan: semantic self-report first, tunable scrape fallback.
 
-> **Status: P1-1 tool + authority SHIPPED; auto-hook still pending.** The
-> `report_status` MCP tool + the authority model (`App::effective_activity`: a
-> live report with a `ttl_ms` backstop overrides output timing, and fresh output
-> supersedes a stale report) + the `Blocked`/`Done` states + render + a
-> `SERVER_INSTRUCTIONS` nudge all landed. So a cooperative agent that *calls*
-> `report_status` (instruction-driven) gets accurate working/blocked/done now.
-> **Still TODO:** the auto-firing **hook** (so it's reliable without the agent
-> choosing to call it) — env `SPYC_PANE_ID` injection + a `spyc --report-status`
-> reporter + Claude `Stop`/`Notification`/`UserPromptSubmit` hooks written via
-> `ensure_agent_mcp_config`. And `seq` ordering (deferred — reports are serial
-> enough today; `at`-based supersede covers it).
+> **Status: P1-1 SHIPPED (tool + authority + auto-hook).** The `report_status`
+> MCP tool + authority model (`App::effective_activity`: a live report with a
+> `ttl_ms` backstop overrides output timing; fresh output supersedes a stale
+> report) + `Blocked`/`Done` states + render + `SERVER_INSTRUCTIONS` nudge landed
+> first. Then the *mechanism* (pane uuid `SPYC_PANE_ID` + `SPYC_MCP_SOCK` env +
+> `spyc --report-status` reporter + `pane_id` targeting). Then the **auto-hook**:
+> spyc writes Claude lifecycle hooks (`UserPromptSubmit`→working,
+> `Notification`→blocked, `Stop`→done) into the project's `.claude/settings.json`
+> (`mcp::hooks`), **consent-gated per project, saved** — a first-launch `[Y/n]`
+> popup (`PromptKind::HookConsent`) whose answer persists in `state::hook_consent`
+> keyed by `find_repo_root`. Merge preserves the user's hooks/settings; teardown
+> removes only ours, skips git-tracked files. So Claude now reports
+> working/blocked/done *automatically*, once the user consents.
+> **Deferred:** `seq` ordering (reports are serial enough; `at`-based supersede
+> covers it); codex auto-hooks (codex's lifecycle-hook surface differs);
+> re-installing hooks for *sibling* claude panes in a repo whose consent is
+> granted mid-session (self-heals on their next launch — consent is saved).
 
 **P1-1 · `report_status` MCP tool + a self-report agent hook.**
 Add an MCP tool the agent can call to set its own pane status

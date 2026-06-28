@@ -262,6 +262,10 @@ const SECTIONS: &[Section] = &[
                 "agent tab dot: spicy pulse=working, red=blocked, teal=done, dim=idle (:why-status)",
             ),
             (
+                ":hooks on|on!|off",
+                "Claude auto-status hooks (asked once on launch); on! restarts+resumes the pane",
+            ),
+            (
                 "^a +  ^a -",
                 "grow / shrink the focused split (pane height / vsplit width)",
             ),

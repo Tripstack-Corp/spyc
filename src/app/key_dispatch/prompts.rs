@@ -33,6 +33,12 @@ impl App {
         }
         if matches!(
             &self.state.mode,
+            Mode::Prompting(p) if matches!(p.kind, PromptKind::HookConsent { .. })
+        ) {
+            return self.handle_hook_consent_key(key);
+        }
+        if matches!(
+            &self.state.mode,
             Mode::Prompting(p) if matches!(p.kind, PromptKind::ClosePane)
         ) {
             return self.handle_close_pane_confirm_key(key);

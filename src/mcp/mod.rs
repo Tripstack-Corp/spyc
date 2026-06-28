@@ -135,6 +135,7 @@ pub fn socket_path() -> PathBuf {
 /// `cmd_tx` is `Some` when running as the socket server
 /// (writable actions available), `None` for read-only fallback.
 mod config;
+mod hooks;
 mod protocol;
 mod readers;
 mod server;
@@ -144,6 +145,7 @@ pub use config::{
     detect_existing_spyc_codex, ensure_codex_config_toml, ensure_mcp_json, enterprise_defines_spyc,
     sweep_orphan_spyc_configs,
 };
+pub use hooks::{cleanup_claude_status_hooks, ensure_claude_status_hooks};
 pub use server::{cleanup_socket, start_socket_server};
 
 use server::{discover_live_socket, run_direct, run_proxy};

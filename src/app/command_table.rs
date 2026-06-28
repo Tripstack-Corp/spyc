@@ -106,6 +106,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     app("filetype", commands::cmd_filetype),
     app("graveyard", commands::cmd_graveyard),
     app("grep", commands::cmd_grep),
+    app("hooks", commands::cmd_hooks),
     pure("limit"),
     app("longlist", commands::cmd_longlist),
     pure("marks"),
