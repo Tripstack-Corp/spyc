@@ -514,3 +514,39 @@ fn quick_select_two_letter_uppercase_first_arms_open_intent() {
         assert!(qs.open_intent, "uppercase first keystroke arms open intent");
     });
 }
+
+/// `^a x` on a tab whose child is still running confirms before closing —
+/// killing a live agent would lose the session. `n` keeps it, `y` closes it.
+/// (An exited tab closes silently, so it never reaches this prompt.)
+#[test]
+fn closing_a_running_tab_confirms_first() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat"); // cat blocks on stdin → the tab stays live
+        app.open_pane_tab("cat"); // two live tabs
+        let count = |app: &App| app.runtime.pane_tabs.as_ref().map_or(0, |t| t.tabs().len());
+        assert_eq!(count(&app), 2);
+
+        // Closing the active (running) tab opens a confirm — nothing closes yet.
+        app.close_active_tab();
+        assert!(
+            matches!(&app.state.mode, Mode::Prompting(p) if matches!(p.kind, PromptKind::ClosePane)),
+            "closing a running tab opens the ClosePane confirm"
+        );
+        assert_eq!(count(&app), 2, "nothing closes before confirming");
+
+        // `n` keeps the tab.
+        app.handle_key(key('n')).unwrap();
+        assert!(matches!(app.state.mode, Mode::Normal));
+        assert_eq!(count(&app), 2, "n cancels the close");
+
+        // `y` closes it.
+        app.close_active_tab();
+        app.handle_key(key('y')).unwrap();
+        assert!(matches!(app.state.mode, Mode::Normal));
+        assert_eq!(count(&app), 1, "y closes the running tab");
+    });
+}

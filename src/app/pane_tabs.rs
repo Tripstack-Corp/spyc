@@ -282,8 +282,29 @@ impl App {
         self.state.mode = Mode::Prompting(p);
     }
 
-    /// ^W x — close the active pane tab.
+    /// ^W x — close the active pane tab. If its child is still running (a live
+    /// claude, a shell mid-task), confirm first — closing it loses that
+    /// session. An already-exited tab closes silently.
     pub fn close_active_tab(&mut self) {
+        let running_label = self.runtime.pane_tabs.as_ref().and_then(|tabs| {
+            let p = tabs.active();
+            (!p.is_closed() && p.exit_status().is_none()).then(|| tabs.active_info().label.clone())
+        });
+        if let Some(label) = running_label
+            && matches!(self.state.mode, Mode::Normal)
+        {
+            self.state.mode = Mode::Prompting(Prompt::simple(
+                PromptKind::ClosePane,
+                format!("close running tab '{label}'? [y/N] "),
+            ));
+            return;
+        }
+        self.close_active_tab_now();
+    }
+
+    /// Close the active pane tab unconditionally — the shared body reached
+    /// directly for an exited tab, or after the running-tab confirm.
+    pub(crate) fn close_active_tab_now(&mut self) {
         if let Some(tabs) = self.runtime.pane_tabs.as_mut()
             && !tabs.close_active()
         {

@@ -291,7 +291,9 @@ spyc's workflow: browse files above, talk to Claude below.
 Multiple tabs, each running an independent pty:
 
 - **^a c** new tab (prompts for command and working directory)
-- **^a K / ^a x** close the active tab
+- **^a K / ^a x** close the active tab — confirms first (`y`/`N`) when the
+  tab's child is still running, so a stray keystroke can't kill a live agent
+  session; an already-exited tab closes silently
 - **^a 1..9** switch to tab N
 - **^a p / ^a [** prev tab
 - **^a n / ^a ]** next tab

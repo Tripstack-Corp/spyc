@@ -31,6 +31,12 @@ impl App {
         ) {
             return self.handle_claude_crash_recover_key(key);
         }
+        if matches!(
+            &self.state.mode,
+            Mode::Prompting(p) if matches!(p.kind, PromptKind::ClosePane)
+        ) {
+            return self.handle_close_pane_confirm_key(key);
+        }
         // Shell prompts (`!` / `;`) use the vi line editor + history.
         let has_editor = matches!(
             &self.state.mode,

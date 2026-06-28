@@ -94,6 +94,11 @@ pub enum PromptKind {
     ClaudeCrashRecover {
         tab_idx: usize,
     },
+    /// `^a x` on a tab whose child is still running — confirm before killing it
+    /// (closing a live claude loses the session). Single-key: `y`/`Y` closes,
+    /// anything else keeps it. Always targets the active tab (the modal prompt
+    /// blocks tab switching), so it needs no index. An exited tab skips this.
+    ClosePane,
 }
 
 impl PromptKind {
@@ -778,6 +783,7 @@ mod tests {
             ("WorktreeDeleteConfirm", K::WorktreeDeleteConfirm),
             ("Limit", K::Limit),
             ("ClaudeCrashRecover", K::ClaudeCrashRecover { tab_idx: 0 }),
+            ("ClosePane", K::ClosePane),
         ] {
             assert!(
                 !k.wants_path_completion(),
