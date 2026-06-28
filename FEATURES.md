@@ -218,7 +218,8 @@ spyc's workflow: browse files above, talk to Claude below.
     `.claude/settings.json`, removed on exit"), and the answer is **saved per
     repo** — never nags again. The write preserves your existing hooks/settings;
     on exit spyc removes only what it added (and never a git-tracked file). The
-    popup is forgiving (only an explicit `y`/`n` sticks; Esc just asks again), and
+    popup requires an explicit decision — `y` or `n`; Esc and any other key keep
+    it up (it can't be dismissed accidentally), and a saved `n` is undoable, so
     **`:hooks on|on!|off`** changes a project's choice later — `on` also installs
     the hooks for an already-running agent (Claude live-reloads, so it kicks in on
     the next message; no restart). That's the undo for an accidental "no". If the

@@ -185,7 +185,7 @@ impl App {
                         root,
                         cwd: cwd.to_path_buf(),
                     },
-                    "Let spyc show this agent's live status? Writes hooks to .claude/settings.json (removed on exit). [y]es / [n]o / esc=ask later ",
+                    "Let spyc show this agent's live status? Writes hooks to .claude/settings.json (removed on exit). [y]es / [n]o ",
                 ));
             }
         }

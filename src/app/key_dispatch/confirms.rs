@@ -165,19 +165,17 @@ impl App {
         Vec::new()
     }
 
-    /// First-launch consent before spyc writes Claude status hooks. Three-way,
-    /// so an accidental keystroke can't permanently deny: only an **explicit**
-    /// `y`/`n` records a (saved, per-project) decision — `y` installs the hooks
-    /// for the launching cwd (Claude live-reloads `.claude/settings.json`), `n`
-    /// remembers the denial. **Anything else (Esc, Enter, a stray key) just
-    /// defers** — no decision saved, so the popup returns on the next launch and
-    /// the user can still `:hooks on` to enable. (The accidental-`no`-is-forever
-    /// trap this avoids was a real report.)
+    /// First-launch consent before spyc writes Claude status hooks. Only an
+    /// explicit `y`/`n` records a decision — `y` installs the hooks for the
+    /// launching cwd, `n` remembers the denial. Any other key (including Esc)
+    /// keeps the prompt open; the dialogue cannot be bypassed without choosing.
     pub(super) fn handle_hook_consent_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         let prev_mode = std::mem::replace(&mut self.state.mode, Mode::Normal);
         let Mode::Prompting(Prompt {
             kind: PromptKind::HookConsent { root, cwd },
-            ..
+            prefix,
+            buffer,
+            editor,
         }) = prev_mode
         else {
             return Vec::new();
@@ -196,12 +194,87 @@ impl App {
                     .flash_info("status hooks declined for this project (`:hooks on` to enable)");
             }
             _ => {
-                self.state.flash_info(
-                    "status hooks: skipped — will ask again (`:hooks on` to enable now)",
-                );
+                // Restore the prompt — y/n is required; Esc does not defer.
+                self.state.mode = Mode::Prompting(Prompt {
+                    kind: PromptKind::HookConsent { root, cwd },
+                    prefix,
+                    buffer,
+                    editor,
+                });
+                self.state.flash_info("press y or n");
+                return Vec::new();
             }
         }
         self.view.needs_full_repaint = true;
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyModifiers;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn seed_hook_consent(app: &mut App) {
+        app.state.mode = Mode::Prompting(Prompt::simple(
+            PromptKind::HookConsent {
+                root: PathBuf::from("/repo"),
+                cwd: PathBuf::from("/repo"),
+            },
+            "consent? [y]es / [n]o ",
+        ));
+    }
+
+    fn is_hook_consent_prompt(app: &App) -> bool {
+        matches!(
+            &app.state.mode,
+            Mode::Prompting(Prompt {
+                kind: PromptKind::HookConsent { .. },
+                ..
+            })
+        )
+    }
+
+    /// The consent dialogue cannot be dismissed without an explicit decision:
+    /// Esc (and Enter, ^C, a stray letter) leave it open with a y/n nudge.
+    #[test]
+    fn non_yn_keys_keep_hook_consent_prompt_open() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            for code in [
+                KeyCode::Esc,
+                KeyCode::Enter,
+                KeyCode::Char('q'),
+                KeyCode::Char(' '),
+            ] {
+                let mut app = App::test_app(tmp.path().to_path_buf());
+                seed_hook_consent(&mut app);
+                let _ = app.handle_key(key(code)).unwrap();
+                assert!(
+                    is_hook_consent_prompt(&app),
+                    "{code:?} must not dismiss the consent dialogue"
+                );
+                assert_eq!(app.flash_text(), Some("press y or n"));
+            }
+        });
+    }
+
+    /// An explicit `n` records the (recoverable) denial and closes the prompt.
+    #[test]
+    fn n_closes_hook_consent_prompt() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            seed_hook_consent(&mut app);
+            let _ = app.handle_key(key(KeyCode::Char('n'))).unwrap();
+            assert!(
+                matches!(app.state.mode, Mode::Normal),
+                "n must close the consent dialogue"
+            );
+        });
     }
 }

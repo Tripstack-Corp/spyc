@@ -95,8 +95,9 @@ pub enum PromptKind {
         tab_idx: usize,
     },
     /// First-launch consent (per project, saved) before spyc writes Claude
-    /// status hooks into `root`'s `.claude/settings.json`. `y`/`Y`/Enter →
-    /// remember-allow + install hooks for `cwd`; anything else → remember-deny.
+    /// status hooks into `root`'s `.claude/settings.json`. `y`/`Y` →
+    /// remember-allow + install hooks for `cwd`; `n`/`N` → remember-deny.
+    /// Any other key (including Esc) keeps the prompt open — y/n is required.
     /// `root` keys the persisted consent (`state::hook_consent`); `cwd` is the
     /// launching pane's dir (where the hooks are written).
     HookConsent {
