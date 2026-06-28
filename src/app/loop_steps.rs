@@ -107,7 +107,10 @@ impl App {
             // Everything else is served synchronously, replying inline.
             if let Some(planned) = self.plan_worktree_job(&command) {
                 match planned {
-                    Ok(job) => self.spawn_worktree_job(job, reply),
+                    Ok(job) => self.spawn_worktree_job(
+                        job,
+                        super::worktree_ops::WorktreeCompletion::Mcp(reply),
+                    ),
                     Err(resp) => {
                         let _ = reply.send(resp);
                     }

@@ -401,7 +401,7 @@ fn mcp_create_worktree_runs_off_thread_and_replies() {
             .expect("a worktree command")
             .expect("validation passes");
         let (tx, rx) = std::sync::mpsc::channel();
-        app.spawn_worktree_job(job, tx);
+        app.spawn_worktree_job(job, crate::app::worktree_ops::WorktreeCompletion::Mcp(tx));
 
         // Worker runs off-thread (no wake tx in tests); poll the landing slot.
         for _ in 0..500 {

@@ -15,11 +15,15 @@
 //!      reply — preserving the single-connection read-after-write the client
 //!      relies on (`get_spyc_context` right after a mutation sees fresh state).
 //!
-//! The interactive `W n` / `W d` keyboard path stays synchronous (a deliberate
-//! user action, not an external-client-reachable entry point). The synchronous
+//! The interactive `W n` (worktree-create) key also runs its `gix` checkout on
+//! this worker — a `WorktreeCompletion::InteractiveCreate` outcome that chdirs
+//! the focused column into the new tree when it lands, instead of an MCP reply
+//! (the full-tree checkout froze the input thread when it ran inline — the
+//! code-review HIGH). `W d` removal stays synchronous (a plain
+//! `git::worktree::remove`, no checkout). The synchronous
 //! `App::execute_mcp_command` path (direct callers / tests) and this async path
 //! share `plan_worktree_job` + `run_worktree_job` + `after_worktree_mutation`,
-//! so the IO + response logic can't diverge — only the sync-vs-async wrapping
+//! so the IO logic can't diverge — only the completion (`WorktreeCompletion`)
 //! differs. Shape mirrors `preview_ops` / `mermaid_ops`: a landing slot
 //! (`runtime.worktree_results`) drained on a `Message::WorktreeJobDone` wake.
 
@@ -64,13 +68,27 @@ pub struct WorktreeJobResult {
     /// `Some(path)` when `create_worktree` was asked to also open it — the
     /// main-thread reconcile opens column `b` there. Off-main here (no `App`).
     pub open_path: Option<std::path::PathBuf>,
+    /// `Some(path)` on any `Create` success — the new worktree. The interactive
+    /// `W n` completion chdirs the focused column here (the MCP completion
+    /// ignores it and uses `open_path` / the response JSON).
+    pub created_path: Option<std::path::PathBuf>,
 }
 
-/// A landed worker result plus the one-shot reply channel to answer the MCP
-/// client once the main loop has re-applied the listing/context update.
+/// What to do on the loop once a [`WorktreeJob`] lands: answer the MCP client,
+/// or (interactive `W n`) chdir the focused column into the new worktree.
+pub enum WorktreeCompletion {
+    /// Reply to the MCP client after the loop re-applies listing/context.
+    Mcp(Sender<McpResponse>),
+    /// Interactive `W n`: chdir the focused column into the created worktree
+    /// (+ flash + reconcile harpoon), instead of an MCP reply.
+    InteractiveCreate,
+}
+
+/// A landed worker result plus its completion (MCP reply or interactive chdir),
+/// applied once the main loop has re-coupled.
 pub struct WorktreeOutcome {
     pub result: WorktreeJobResult,
-    pub reply: Sender<McpResponse>,
+    pub completion: WorktreeCompletion,
 }
 
 const fn err_result(message: String) -> WorktreeJobResult {
@@ -79,6 +97,7 @@ const fn err_result(message: String) -> WorktreeJobResult {
         flash: None,
         mutated: false,
         open_path: None,
+        created_path: None,
     }
 }
 
@@ -111,6 +130,7 @@ pub fn run_worktree_job(job: WorktreeJob) -> WorktreeJobResult {
                         mutated: true,
                         // The main-thread reconcile opens `b` here (off-main can't).
                         open_path: open.then(|| path.clone()),
+                        created_path: Some(path),
                     }
                 }
                 Err(e) => err_result(format!("worktree add: {e}")),
@@ -128,6 +148,7 @@ pub fn run_worktree_job(job: WorktreeJob) -> WorktreeJobResult {
                         response: McpResponse::Ok { message },
                         mutated: true,
                         open_path: None,
+                        created_path: None,
                     }
                 }
                 Err(e) => err_result(format!("worktree remove: {e}")),
@@ -224,6 +245,7 @@ impl App {
             flash,
             mutated,
             open_path,
+            created_path: _,
         } = run_worktree_job(job);
         if mutated {
             self.after_worktree_mutation(flash, open_path);
@@ -235,7 +257,7 @@ impl App {
     /// heavy IO, lands the result + the MCP reply channel in
     /// `runtime.worktree_results`, and wakes the loop; `apply_worktree_outcomes`
     /// re-applies + answers the client.
-    pub(crate) fn spawn_worktree_job(&self, job: WorktreeJob, reply: Sender<McpResponse>) {
+    pub(crate) fn spawn_worktree_job(&self, job: WorktreeJob, completion: WorktreeCompletion) {
         let results = std::sync::Arc::clone(&self.runtime.worktree_results);
         let wake = self.runtime.pane_wake_tx.clone();
         std::thread::spawn(move || {
@@ -243,7 +265,7 @@ impl App {
             results
                 .lock()
                 .unwrap()
-                .push(WorktreeOutcome { result, reply });
+                .push(WorktreeOutcome { result, completion });
             // Wake AFTER the outcome is stored, so the pre-recv scan sees it.
             if let Some(tx) = wake {
                 let _ = tx.send(Message::WorktreeJobDone);
@@ -260,19 +282,47 @@ impl App {
         if outcomes.is_empty() {
             return false;
         }
-        for WorktreeOutcome { result, reply } in outcomes {
+        for WorktreeOutcome { result, completion } in outcomes {
             let WorktreeJobResult {
                 response,
                 flash,
                 mutated,
                 open_path,
+                created_path,
             } = result;
-            if mutated {
-                self.after_worktree_mutation(flash, open_path);
+            match completion {
+                WorktreeCompletion::Mcp(reply) => {
+                    if mutated {
+                        self.after_worktree_mutation(flash, open_path);
+                    }
+                    // The client may have timed out (5 s) and dropped its
+                    // receiver — a failed send is fine; the refresh/context
+                    // update already happened.
+                    let _ = reply.send(response);
+                }
+                WorktreeCompletion::InteractiveCreate => {
+                    // Mirror the former synchronous `W n` completion, now that the
+                    // checkout ran off-thread: chdir the focused column into the
+                    // new tree (`chdir` refreshes its listing), or surface the
+                    // add error. Harpoon reconciles either way (as the inline
+                    // handler did).
+                    match created_path {
+                        Some(path) => {
+                            self.state
+                                .flash_info(format!("created worktree: {}", path.display()));
+                            if let Err(e) = self.state.chdir(&path) {
+                                self.state.flash_error(format!("chdir: {e}"));
+                            }
+                        }
+                        None => {
+                            if let McpResponse::Error { message } = response {
+                                self.state.flash_error(message);
+                            }
+                        }
+                    }
+                    self.reconcile_harpoon();
+                }
             }
-            // The client may have timed out (5 s) and dropped its receiver — a
-            // failed send is fine; the refresh/context update already happened.
-            let _ = reply.send(response);
         }
         true
     }

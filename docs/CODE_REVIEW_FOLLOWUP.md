@@ -31,7 +31,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 - **PR11** — MCP scope/robustness + path/env overlay _(3 findings; clusters: mcp)_
 - **PR12** — Misc correctness batch _(11 findings; clusters: resume, other, fs-watch-topology, prompt-allowlist-drift, perf-linear-scan, perf-sort-alloc, pager-truncation-bytes, pane-vt100-recovery-size)_
 
-**Remaining: 17** (after PR #581; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design and #581 fixed 1). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
+**Remaining: 16** (after PR #582; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
 
 ## To fix — by cluster
 
@@ -85,7 +85,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/mod.rs:793` | crossterm::terminal::size() called inside key/action handlers (8 sites), against the effects-as-data contract | medium | M | REAL |
 | `src/app/state/apply.rs:320` | format_long_listing and file_type_label do per-file IO inside the pure apply dispatcher | medium | M | ✅ PR #548 |
 | `src/fs/long_listing.rs:155` | format_long_listing does an unmemoized getpwuid/getgrgid NSS lookup per row — L on a large listing can stall seconds-to-minutes on LDAP-backed machines | medium | M | ✅ PR #547 |
-| `src/git/worktree.rs:188` | worktree::add performs a full-tree checkout synchronously on the main input thread | high | M | PARTIAL |
+| `src/git/worktree.rs:188` | worktree::add performs a full-tree checkout synchronously on the main input thread | high | M | ✅ PR #582 |
 | `src/pane/widget.rs:37` | Parser mutex held across the whole pane draw — per-frame O(cells) set_string under the lock contends with the parser worker | medium | M | ✅ #581 (already-fixed: `with_screen` scopes the lock) |
 | `src/ui/blame_render.rs:44` | render_blame joins and syntect-highlights the whole file on the main thread with no size cap | medium | M | REAL |
 | `src/ui/diff_render/mod.rs:149` | Diff render syntect-highlights both full sides on the main thread, and re-highlights from scratch on every layout toggle | medium | M | REAL |
@@ -131,6 +131,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
+
+**✅ PR #582 — interactive `W n` worktree checkout off-thread (the lone HIGH; 2026-06-28):**
+- `git/worktree.rs:188` — interactive `W n` ran its full-tree `gix` checkout synchronously on the input thread (`prompt.rs` → `git::worktree::add`), freezing the whole UI (panes, agent, input) for seconds on a big repo. The MCP `create_worktree` was already off-thread; this routes the key through the same worker. New `Effect::WorktreeCreateInteractive`; `WorktreeOutcome.reply` → `WorktreeCompletion {Mcp | InteractiveCreate}`; `apply_worktree_outcomes` chdirs the focused column into the new tree (+ flash + reconcile harpoon) when it lands — mirrors the former synchronous completion; `WorktreeJobResult.created_path` carries the new tree. Reuses the `worktree_results` slot + `Message::WorktreeJobDone` (no new variant). `W d` removal stays synchronous (plain `git::worktree::remove`, no checkout — not the HIGH). Behavior change on a daily-driver key → owner live-test before merge.
 
 **✅ PR #581 — capture-pty writes → `Effect::SendToCapture`; 3 findings closed (2026-06-27):**
 - `key_dispatch/mod.rs:315` — the `!`-capture child's keystroke + paste writes bypassed the sole effect executor (inline `capture.host.writer.write_all`) while sibling input sinks route through `Effect::SendToPane`. Added `Effect::SendToCapture { bytes }` (the capture child is a bare `PtyHost`, not a `Pane`, so it gets its own variant); `handle_capture_key` + the `handle_paste` capture arm now emit it and `run_effects` does the write. Behavior-preserving: same master writer, same `let _ =` ignore-on-error, same tick. Live-pty path → owner test (type into a `!sudo`/ssh prompt, paste into one).

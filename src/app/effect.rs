@@ -28,7 +28,7 @@ use crate::ui::pager::PagerView;
 
 use super::{
     App, ForegroundExec, Message, PagerReturn, PostAction, file_ops, graveyard_ops, inventory_ops,
-    mermaid_ops,
+    mermaid_ops, worktree_ops,
 };
 
 /// A side effect for the run loop to execute. Producers (handlers) return
@@ -179,6 +179,18 @@ pub enum Effect {
     /// pushes its outcome onto `runtime.inventory_results` and wakes with
     /// `Message::InventoryDone`.
     Inventory(inventory_ops::InventoryOp),
+
+    /// Tier 5. Interactive `W n`: create a worktree for `branch` off `base`,
+    /// discovering the repo from `dir`. The `gix` full-tree checkout runs on the
+    /// shared worktree worker (running it inline froze the input thread — the
+    /// code-review HIGH); `apply_worktree_outcomes` chdirs the focused column
+    /// into the new tree when it lands. The MCP `create_worktree` already used
+    /// this worker.
+    WorktreeCreateInteractive {
+        dir: PathBuf,
+        branch: String,
+        base: Option<String>,
+    },
 }
 
 /// Which slice of the active pane's text to materialize (MVU Phase 5).
@@ -711,6 +723,18 @@ impl App {
                 // The single spawn site lives in `file_ops` (shared with the gF
                 // executor open); this arm just hands it the op.
                 Effect::FileOp(op) => self.spawn_file_op(op),
+                // Interactive `W n`: hand the create job to the shared worktree
+                // worker with an interactive completion (chdir into the new tree
+                // when it lands, not an MCP reply).
+                Effect::WorktreeCreateInteractive { dir, branch, base } => self.spawn_worktree_job(
+                    worktree_ops::WorktreeJob::Create {
+                        dir,
+                        branch,
+                        base,
+                        open: false,
+                    },
+                    worktree_ops::WorktreeCompletion::InteractiveCreate,
+                ),
                 Effect::Inventory(op) => {
                     let results = std::sync::Arc::clone(&self.runtime.inventory_results);
                     let wake = self.runtime.pane_wake_tx.clone();

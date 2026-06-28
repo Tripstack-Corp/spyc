@@ -632,27 +632,17 @@ impl App {
                     .project_home
                     .as_deref()
                     .and_then(crate::git::branch::default_base);
-                match crate::git::worktree::add(
-                    &self.state.cur().listing.dir,
-                    branch,
-                    base.as_deref(),
-                ) {
-                    Ok(path) => {
-                        self.state
-                            .flash_info(format!("created worktree: {}", path.display()));
-                        // chdir the focused column INTO the new worktree so you
-                        // can work there now. PROJECT_HOME stays the overall
-                        // project anchor — `g w` jumps to this worktree's root,
-                        // `g h` to PROJECT_HOME. (Per-column git tracks the
-                        // worktree's own markers via PR E.)
-                        if let Err(e) = self.state.chdir(&path) {
-                            self.state.flash_error(format!("chdir: {e}"));
-                        }
-                    }
-                    Err(e) => self.state.flash_error(format!("worktree add: {e}")),
-                }
-                self.reconcile_harpoon();
-                Vec::new()
+                // The `gix` checkout in `worktree::add` is a full-tree write that
+                // froze the input thread when it ran inline (code-review HIGH) —
+                // hand it to the worktree worker. `apply_worktree_outcomes`
+                // chdirs the focused column into the new tree + flashes +
+                // reconciles harpoon when it lands. `g w` then jumps to this
+                // worktree's root, `g h` to PROJECT_HOME (the overall anchor).
+                vec![Effect::WorktreeCreateInteractive {
+                    dir: self.state.cur().listing.dir.clone(),
+                    branch: branch.to_string(),
+                    base,
+                }]
             }
             PromptKind::WorktreeDeleteConfirm => {
                 let confirmed = prompt.buffer.trim().eq_ignore_ascii_case("y");
