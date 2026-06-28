@@ -373,7 +373,6 @@ impl App {
     /// guarantees `pending_capture` is `Some`.
     fn handle_capture_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         if let Some(capture) = &mut self.runtime.pending_capture {
-            use std::io::Write as _;
             // Hard-kill escape: Ctrl+\ tears the child down even if
             // it has somehow detached from the controlling tty.
             if matches!(key.code, KeyCode::Char('\\'))
@@ -408,8 +407,7 @@ impl App {
             }
             let bytes = crate::pane::input::encode_key(key);
             if !bytes.is_empty() {
-                let _ = capture.host.writer.write_all(&bytes);
-                let _ = capture.host.writer.flush();
+                return vec![Effect::SendToCapture { bytes }];
             }
             return Vec::new();
         }
@@ -471,12 +469,13 @@ impl App {
                 // wrapping would inject literal `\e[200~` escapes into the
                 // answer. Matches the raw keystroke forwarding in
                 // `handle_capture_key`. (Previously this leaked to the pane.)
-                if let Some(capture) = self.runtime.pending_capture.as_mut() {
-                    use std::io::Write as _;
-                    let _ = capture.host.writer.write_all(text.as_bytes());
-                    let _ = capture.host.writer.flush();
+                if text.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![Effect::SendToCapture {
+                        bytes: text.into_bytes(),
+                    }]
                 }
-                Vec::new()
             }
             route::InputSink::OverlayDismiss => {
                 // Any input dismisses a held, exited overlay — a paste too.

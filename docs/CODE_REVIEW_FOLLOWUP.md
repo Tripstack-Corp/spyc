@@ -31,7 +31,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 - **PR11** — MCP scope/robustness + path/env overlay _(3 findings; clusters: mcp)_
 - **PR12** — Misc correctness batch _(11 findings; clusters: resume, other, fs-watch-topology, prompt-allowlist-drift, perf-linear-scan, perf-sort-alloc, pager-truncation-bytes, pane-vt100-recovery-size)_
 
-**To fix: 67** (62 REAL + 5 PARTIAL).
+**Remaining: 17** (after PR #581; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design and #581 fixed 1). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
 
 ## To fix — by cluster
 
@@ -81,12 +81,12 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/pane/pty_host.rs:208` | Unbounded reader->parser channel with a reader that never stops reading: no backpressure, unbounded memory under a firehose child | medium | S | REAL |
 | `src/state/sessions/mod.rs:579` | find_claude_session_name reads the entire conversation JSONL (100+ MB) into memory | medium | S | REAL |
 | `src/agent/resume.rs:298` | gemini_resume_index_for runs `gemini --list-sessions` synchronously with no timeout on the session-restore path | medium | M | REAL |
-| `src/app/key_dispatch/mod.rs:315` | Capture-pty writes bypass the Effect executor while sibling sinks in the same match use Effect::SendToPane | medium | M | REAL |
+| `src/app/key_dispatch/mod.rs:315` | Capture-pty writes bypass the Effect executor while sibling sinks in the same match use Effect::SendToPane | medium | M | ✅ PR #581 |
 | `src/app/mod.rs:793` | crossterm::terminal::size() called inside key/action handlers (8 sites), against the effects-as-data contract | medium | M | REAL |
 | `src/app/state/apply.rs:320` | format_long_listing and file_type_label do per-file IO inside the pure apply dispatcher | medium | M | ✅ PR #548 |
 | `src/fs/long_listing.rs:155` | format_long_listing does an unmemoized getpwuid/getgrgid NSS lookup per row — L on a large listing can stall seconds-to-minutes on LDAP-backed machines | medium | M | ✅ PR #547 |
 | `src/git/worktree.rs:188` | worktree::add performs a full-tree checkout synchronously on the main input thread | high | M | PARTIAL |
-| `src/pane/widget.rs:37` | Parser mutex held across the whole pane draw — per-frame O(cells) set_string under the lock contends with the parser worker | medium | M | REAL |
+| `src/pane/widget.rs:37` | Parser mutex held across the whole pane draw — per-frame O(cells) set_string under the lock contends with the parser worker | medium | M | ✅ #581 (already-fixed: `with_screen` scopes the lock) |
 | `src/ui/blame_render.rs:44` | render_blame joins and syntect-highlights the whole file on the main thread with no size cap | medium | M | REAL |
 | `src/ui/diff_render/mod.rs:149` | Diff render syntect-highlights both full sides on the main thread, and re-highlights from scratch on every layout toggle | medium | M | REAL |
 | `src/ui/pager/construct.rs:182` | Pager yank/save methods do inline OS side effects, bypassing the existing Effect::CopyToClipboard path | medium | M | REAL |
@@ -124,13 +124,19 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/git/diff_model/build.rs:559` | Rename similarity recomputed with a second full-blob diff that gix already performed | medium | S | REAL |
 | `src/main.rs:87` | Panic hook doesn't pop kitty keyboard-enhancement flags or alternate-scroll mode — terminal left misbehaving after a panic | medium | S | ✅ PR #529 |
 | `src/pane/mod.rs:607` | vt100 panic recovery rebuilds the parser at the adopt-time size, and the resize coalescer guarantees it never gets corrected | medium | S | REAL |
-| `src/app/run.rs:54` | Config-file watch on $HOME is permanently destroyed when the listing watch passes through the same directory | medium | M | REAL |
-| `src/pane/tabs.rs:20` | Claude-specific session-restore state machine (PendingResumeSend) lives in the generic pane layer | medium | M | REAL |
+| `src/app/run.rs:54` | Config-file watch on $HOME is permanently destroyed when the listing watch passes through the same directory | medium | M | ✅ #581 (already-fixed: watches keyed by purpose) |
+| `src/pane/tabs.rs:20` | Claude-specific session-restore state machine (PendingResumeSend) lives in the generic pane layer | medium | M | ✅ #581 (closed: by-design) |
 | `src/state/inventory.rs:85` | Re-yanking a modified file silently keeps the stale cached content (moved from PR9 — dedup *behavior*, not code dup) | medium | S | REAL |
 | `src/state/sessions/mod.rs:127` | load_sessions dedup collapses distinct resumable sessions that share cwd + commands (moved from PR9) | medium | S | REAL |
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
+
+**✅ PR #581 — capture-pty writes → `Effect::SendToCapture`; 3 findings closed (2026-06-27):**
+- `key_dispatch/mod.rs:315` — the `!`-capture child's keystroke + paste writes bypassed the sole effect executor (inline `capture.host.writer.write_all`) while sibling input sinks route through `Effect::SendToPane`. Added `Effect::SendToCapture { bytes }` (the capture child is a bare `PtyHost`, not a `Pane`, so it gets its own variant); `handle_capture_key` + the `handle_paste` capture arm now emit it and `run_effects` does the write. Behavior-preserving: same master writer, same `let _ =` ignore-on-error, same tick. Live-pty path → owner test (type into a `!sudo`/ssh prompt, paste into one).
+- `pane/widget.rs:37` — **already fixed**: the vt100 parser lock is now taken in tight `with_screen()` closures and released before the per-cell paint, not held across the draw. No change.
+- `app/run.rs:54` — **already fixed**: `watch.rs` keys each fs-watch by *purpose* (listing / git / preview / config) in a never-cleared set, so a listing walk through `$HOME` can't destroy the config watch. No change.
+- `pane/tabs.rs:20` — **by-design**: `PendingResumeSend` lives in the pane layer as a deliberate pane-lifecycle tradeoff (a generic per-tab `Option`; non-Claude agents leave it `None`). Revisit only if a 2nd agent needs restore.
 
 **✅ PR #554 — off-thread special-file open (completes the #550 follow-up; 2026-06-25):**
 - `pager_handler/mod.rs` / `navigate.rs` / `file_ops.rs` — #550 made the shared pager builder *refuse* a tty/FIFO/socket and *sample* readable devices, but the open stayed **synchronous on the input thread**: an exotic non-tty blocking-read char device (`/dev/input/*`, or a regular file on a hung mount) could still freeze the UI. The owner asked for fully-off-thread "nothing ever freezes." Now a cheap stat (`pager_handler::plan_pager_open`, never blocks) splits the open: a **regular file** builds + installs **inline** (unchanged — no thread spawn, no flicker, immediate read error), while a **non-regular file** is read on the file-op worker via `FileOp::OpenSpecialFile { path, theme, open_as_rendered, wrap, dest }` → `build_pager_view` off-thread → `FileOutcome::SpecialFileOpened` → `install_pager_at_dest` at the carried `PagerDest` (`Overlay { scroll }` for Enter/`gF`, `TopPane` for `D`). A readable device samples and lands a pager a tick later; a truly-blocking one parks the worker — the input thread never blocks. The three open sites (Enter `activate`, `D` `display_in_pane`, `gF` `goto_file_navigate`) all route through `plan_pager_open`; the single worker-spawn (`App::spawn_file_op`) is shared between the `Effect::FileOp` executor arm and the `gF` executor open. Reused `Message::FileOpDone` (no new variant → sidesteps the #531 3-list-lockstep trap). **Limitation (documented):** a parked worker on a never-readable device leaks its thread + fd (no portable way to interrupt a blocking `read(2)`); the invariant held is *the UI never freezes*, not *the read always completes*. 6 new tests (worker build/refuse, drain install/flash at each dest, gF off-thread diversion); the old synchronous gF-refusal test became the `plan_pager_open`-diverts-off-thread test.

@@ -100,6 +100,15 @@ pub enum Effect {
         err_prefix: Option<&'static str>,
     },
 
+    /// A-class. Write `bytes` (a pre-encoded key or raw paste) to the running
+    /// `!`-capture child's master writer, so prompts (sudo / ssh passwords) are
+    /// answered through the sole executor instead of an inline write in the
+    /// key/paste handlers — the same effects-as-data routing the pane sinks use
+    /// via [`Effect::SendToPane`]. The capture child is a bare `PtyHost` (not a
+    /// `Pane`), so it gets its own variant; a missing `pending_capture` skips
+    /// the write silently (matches the former `if let Some(capture)` guard).
+    SendToCapture { bytes: Vec<u8> },
+
     /// A-class. Set the terminal title. The compose + dedup stay loop-side
     /// (`term_title_effect`); only the `term_title::set` IO is the effect.
     SetTerminalTitle { title: String },
@@ -474,6 +483,17 @@ impl App {
                             }
                         }
                         None => {}
+                    }
+                }
+                // A-class: write to the running capture child's master writer
+                // (raw — captures rarely enable bracketed paste). A vanished
+                // `pending_capture` skips silently, matching the former inline
+                // `if let Some(capture)` write in the key/paste handlers.
+                Effect::SendToCapture { bytes } => {
+                    if let Some(capture) = self.runtime.pending_capture.as_mut() {
+                        use std::io::Write as _;
+                        let _ = capture.host.writer.write_all(&bytes);
+                        let _ = capture.host.writer.flush();
                     }
                 }
                 // A-class: the only side effect of a terminal-title update;
