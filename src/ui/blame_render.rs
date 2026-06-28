@@ -33,13 +33,15 @@ const BLAME_PALETTE: [Color; 6] = [
     Color::Rgb(0xf7, 0x76, 0x8e), // red
 ];
 
-/// Render a whole-file blame to styled lines: one line per file line, each a
-/// `short-id author date │ <highlighted content>` row.
-pub fn render_blame(model: &BlameModel, theme: &Theme) -> Vec<Line<'static>> {
+/// Syntax-highlight a blame's file content once, into one styled line per file
+/// line — the expensive (syntect) half of rendering a blame. `None` when syntect
+/// doesn't recognize the language (callers fall back to flat text). Depends only
+/// on the model, so a re-render (`f` / resize) reuses it instead of re-running
+/// syntect; the git-view worker builds it off the main thread.
+pub fn highlight_blame(model: &BlameModel) -> Option<Vec<Line<'static>>> {
     if model.lines.is_empty() {
-        return vec![Line::styled("No blame data.", theme.diff_meta_style())];
+        return None;
     }
-
     // Highlight the full file once (syntect is stateful across lines).
     let content = model
         .lines
@@ -47,12 +49,35 @@ pub fn render_blame(model: &BlameModel, theme: &Theme) -> Vec<Line<'static>> {
         .map(|l| l.text.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    let hl = crate::ui::syntax::highlight_to_lines(&model.path, &content);
+    crate::ui::syntax::highlight_to_lines(&model.path, &content)
+}
+
+/// Render a whole-file blame to styled lines: one line per file line, each a
+/// `short-id author date │ <highlighted content>` row. A test convenience that
+/// highlights inline; the git-view session splits [`highlight_blame`] (once,
+/// off-thread) from [`render_blame_highlighted`] so `f` / resize re-renders
+/// don't re-run syntect.
+#[cfg(test)]
+pub fn render_blame(model: &BlameModel, theme: &Theme) -> Vec<Line<'static>> {
+    render_blame_highlighted(model, highlight_blame(model).as_deref(), theme)
+}
+
+/// Lay out a blame using a precomputed [`highlight_blame`] result. `hl` must be
+/// index-aligned with `model.lines` (one styled line per file line); a missing
+/// or short entry falls back to the raw line text.
+pub fn render_blame_highlighted(
+    model: &BlameModel,
+    hl: Option<&[Line<'static>]>,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
+    if model.lines.is_empty() {
+        return vec![Line::styled("No blame data.", theme.diff_meta_style())];
+    }
 
     let mut out = Vec::with_capacity(model.lines.len());
     for (i, bl) in model.lines.iter().enumerate() {
         let mut spans = vec![blame_gutter(bl, theme)];
-        match hl.as_ref().and_then(|lines| lines.get(i)) {
+        match hl.and_then(|lines| lines.get(i)) {
             Some(line) => spans.extend(line.spans.iter().cloned()),
             None => spans.push(Span::raw(bl.text.clone())),
         }

@@ -8,15 +8,18 @@
 //! one-shot transcript stream, `GitViewStream` RETAINS the built model
 //! (`retain_after_finish` = true) so the unified⇄side-by-side `|` toggle
 //! (`on_pager_command`) re-renders instantly without re-touching gix. The
-//! `GitViewKind` / `GitViewPayload` / `GitViewModel` enums + the off-thread
-//! `build_payload` + the pure layout helpers live here too; the open entry
+//! `GitViewKind` / `GitViewPayload` / `GitViewContent` enums + the off-thread
+//! `build_payload` (which also runs syntect, off the main thread) + the pure
+//! layout helpers live here too; the open entry
 //! point (`open_git_view`, called from `git_state`) mounts via
 //! `spawn_pager_stream`.
 
 use std::path::PathBuf;
 
+use ratatui::text::Line;
+
 use crate::git::model::{BlameModel, CommitMeta, DiffModel};
-use crate::ui::diff_render::{self, DiffLayout};
+use crate::ui::diff_render::{self, DiffHighlight, DiffLayout};
 use crate::ui::pager::{self, PagerView};
 use crate::ui::{blame_render, theme::Theme};
 
@@ -65,31 +68,32 @@ pub enum GitViewKind {
     },
 }
 
-/// The built model the worker sends back over `rx`. All variants are `Send`
-/// (owned `String`s / numbers). The big `Show` tuple is boxed to keep the
-/// enum small (avoids a `large_enum_variant` lint).
+/// A built git-view ready to render: the bounded model bundled with its
+/// precomputed syntax highlight. BOTH are produced off-thread in
+/// [`build_payload`] so the main thread never runs syntect — the `|` / `f` /
+/// resize re-renders only re-lay-out from the cached highlight. Diff and show
+/// share the [`DiffHighlight`] cache; blame carries one styled line per file
+/// line (`None` when syntect doesn't recognize the language). Bundling model +
+/// highlight in one variant makes a model/highlight mismatch unrepresentable.
+pub enum GitViewContent {
+    /// A diff model and its highlight.
+    Diff(DiffModel, DiffHighlight),
+    /// A `show` commit-meta + diff + highlight triple. Boxed (a `CommitMeta`
+    /// plus two heap members) to keep the enum small (`large_enum_variant`).
+    Show(Box<(CommitMeta, DiffModel, DiffHighlight)>),
+    /// A blame model and its per-line highlight.
+    Blame(BlameModel, Option<Vec<Line<'static>>>),
+}
+
+/// The worker's result over `rx`. All variants are `Send` (owned `String`s /
+/// numbers / `Line<'static>`).
 pub enum GitViewPayload {
-    /// A diff model ready to render.
-    Diff(DiffModel),
-    /// A `show` commit-meta + diff pair ready to render.
-    Show(Box<(CommitMeta, DiffModel)>),
-    /// A blame model ready to render.
-    Blame(BlameModel),
+    /// A built view (model + highlight), ready to mount and render.
+    Built(GitViewContent),
     /// The diff/show produced no changes.
     Empty,
     /// The build failed (bad rev, not tracked, not a repo, …).
     Error(String),
-}
-
-/// The model retained on the main thread once received, so the `|` layout
-/// toggle (and any re-render) can rebuild lines without re-touching gix.
-pub enum GitViewModel {
-    /// A retained diff model.
-    Diff(DiffModel),
-    /// A retained `show` commit-meta + diff pair.
-    Show(Box<(CommitMeta, DiffModel)>),
-    /// A retained blame model.
-    Blame(BlameModel),
 }
 
 /// Below this per-column width the side-by-side layout is unreadable, so the
@@ -124,45 +128,36 @@ struct Rendered {
     wrap: bool,
 }
 
-/// Render a retained model at the given `width`/`layout`, reusing the model's
-/// precomputed `hl` (syntax highlight) so a re-render — `|`, `f`, or a resize —
-/// never re-runs syntect. The side-by-side rows are sized to exactly `width`,
-/// so `width` MUST be the pager's true text-body width (see
-/// [`git_view_body_width`]) or the rows wrap into stray tinted bars.
+/// Render built content at the given `width`/`layout`, reusing its precomputed
+/// highlight so a re-render — `|`, `f`, or a resize — never re-runs syntect. The
+/// side-by-side rows are sized to exactly `width`, so `width` MUST be the pager's
+/// true text-body width (see [`git_view_body_width`]) or the rows wrap into
+/// stray tinted bars.
 fn render_model(
-    model: &GitViewModel,
-    hl: Option<&diff_render::DiffHighlight>,
+    content: &GitViewContent,
     theme: &Theme,
     layout: DiffLayout,
     width: usize,
 ) -> Rendered {
-    match model {
-        GitViewModel::Diff(m) => {
+    match content {
+        GitViewContent::Diff(m, hl) => {
             let eff = effective_layout(layout, width);
-            let lines = match hl {
-                Some(h) => diff_render::render_diff_highlighted(m, h, theme, eff, width),
-                None => diff_render::render_diff(m, theme, eff, width),
-            };
             Rendered {
-                lines,
+                lines: diff_render::render_diff_highlighted(m, hl, theme, eff, width),
                 line_numbers: false,
                 wrap: matches!(eff, DiffLayout::Unified),
             }
         }
-        GitViewModel::Show(b) => {
+        GitViewContent::Show(b) => {
             let eff = effective_layout(layout, width);
-            let lines = match hl {
-                Some(h) => diff_render::render_show_highlighted(&b.0, &b.1, h, theme, eff, width),
-                None => diff_render::render_show(&b.0, &b.1, theme, eff, width),
-            };
             Rendered {
-                lines,
+                lines: diff_render::render_show_highlighted(&b.0, &b.1, &b.2, theme, eff, width),
                 line_numbers: false,
                 wrap: matches!(eff, DiffLayout::Unified),
             }
         }
-        GitViewModel::Blame(m) => Rendered {
-            lines: blame_render::render_blame(m, theme),
+        GitViewContent::Blame(m, hl) => Rendered {
+            lines: blame_render::render_blame_highlighted(m, hl.as_deref(), theme),
             line_numbers: true,
             wrap: false,
         },
@@ -197,39 +192,31 @@ pub struct PendingGitView {
     layout: DiffLayout,
 }
 
-/// A [`PagerStream`] for a *mounted* git-view. The model is built off-thread and
-/// the overlay is mounted (by `drain_pending_git_view`) only once it arrives, so
-/// this stream always holds a ready model — `drain` is a no-op. The stream is
-/// RETAINED (`retain_after_finish`) purely so the `|` layout toggle
-/// (`on_pager_command`) can re-render from the held `model` without re-touching
-/// gix.
+/// A [`PagerStream`] for a *mounted* git-view. The content (model + highlight) is
+/// built off-thread and the overlay is mounted (by `drain_pending_git_view`) only
+/// once it arrives, so this stream always holds ready content — `drain` is a
+/// no-op. The stream is RETAINED (`retain_after_finish`) purely so the `|` layout
+/// toggle (`on_pager_command`) can re-render from the held `content` without
+/// re-touching gix or syntect.
 pub struct GitViewStream {
     id: u32,
     /// Current layout for diff/show (ignored for blame).
     layout: DiffLayout,
-    /// The built model, rendered at mount and re-rendered on `|`.
-    model: GitViewModel,
-    /// The model's syntax highlight, computed once at build time and reused for
-    /// every re-render (`|`, `f`, resize) — see [`render_model`]. `None` for
-    /// blame (which has its own renderer).
-    highlight: Option<diff_render::DiffHighlight>,
+    /// The built model bundled with its syntax highlight, both computed once at
+    /// build time (off the main thread) and reused for every re-render (`|`,
+    /// `f`, resize) — see [`render_model`].
+    content: GitViewContent,
     /// The pager title.
     title: String,
 }
 
 impl GitViewStream {
-    /// Render the held model into `view` at the pager's true body width.
+    /// Render the held content into `view` at the pager's true body width.
     /// Width must match the render path (depends on `full_width`), else the
     /// fixed-width side-by-side rows wrap into stray tinted bars.
     fn render_into(&self, view: &mut PagerView, ctx: &RenderCtx) {
         let width = git_view_body_width(ctx.full_width);
-        let rendered = render_model(
-            &self.model,
-            self.highlight.as_ref(),
-            &ctx.theme,
-            self.layout,
-            width,
-        );
+        let rendered = render_model(&self.content, &ctx.theme, self.layout, width);
         view.lines = rendered.lines;
         view.show_line_numbers = rendered.line_numbers;
         view.wrap = rendered.wrap;
@@ -266,7 +253,10 @@ impl PagerStream for GitViewStream {
         match cmd {
             PagerStreamCmd::ToggleLayout => {
                 // Only meaningful for diff/show (blame has no layout).
-                if !matches!(self.model, GitViewModel::Diff(_) | GitViewModel::Show(_)) {
+                if !matches!(
+                    self.content,
+                    GitViewContent::Diff(..) | GitViewContent::Show(_)
+                ) {
                     return false;
                 }
                 self.layout = match self.layout {
@@ -348,16 +338,16 @@ impl App {
                 return true;
             }
         };
-        // Non-empty content → mount the overlay now and render it.
+        // Non-empty content → mount the overlay now and render it. The model +
+        // highlight were both built off-thread (in `build_payload`); the main
+        // thread only lays them out.
         let pending = self
             .runtime
             .pending_git_view
             .take()
             .expect("pending git-view present (checked above)");
-        let model = match payload {
-            GitViewPayload::Diff(m) => GitViewModel::Diff(m),
-            GitViewPayload::Show(b) => GitViewModel::Show(b),
-            GitViewPayload::Blame(m) => GitViewModel::Blame(m),
+        let content = match payload {
+            GitViewPayload::Built(c) => c,
             GitViewPayload::Empty | GitViewPayload::Error(_) => {
                 unreachable!("empty/error handled above")
             }
@@ -369,18 +359,10 @@ impl App {
             },
             pending.id,
         );
-        // Highlight once now (off the per-render path) so `|`, `f`, and resize
-        // re-renders only re-lay-out. Blame has its own renderer — no highlight.
-        let highlight = match &model {
-            GitViewModel::Diff(m) => Some(diff_render::highlight_diff(m)),
-            GitViewModel::Show(b) => Some(diff_render::highlight_diff(&b.1)),
-            GitViewModel::Blame(_) => None,
-        };
         let stream = GitViewStream {
             id: pending.id,
             layout: pending.layout,
-            model,
-            highlight,
+            content,
             title: pending.title,
         };
         let full_width = self.view.pager.as_ref().is_some_and(|p| p.full_width);
@@ -397,8 +379,10 @@ impl App {
     }
 }
 
-/// Build the worker payload off-thread. Pure of any `App`/OS-handle state — it
-/// only touches the gix builders, which take owned inputs.
+/// Build the worker payload off-thread: the gix model AND its syntax highlight,
+/// so the main thread never runs syntect (the expensive part). Pure of any
+/// `App`/OS-handle state — it only touches the gix builders and the pure
+/// highlighters, all of which take owned inputs.
 fn build_payload(kind: GitViewKind) -> GitViewPayload {
     use crate::git::{blame, diff_model};
     match kind {
@@ -416,17 +400,26 @@ fn build_payload(kind: GitViewKind) -> GitViewPayload {
             };
             match m {
                 Some(model) if model.files.is_empty() => GitViewPayload::Empty,
-                Some(model) => GitViewPayload::Diff(model),
+                Some(model) => {
+                    let hl = diff_render::highlight_diff(&model);
+                    GitViewPayload::Built(GitViewContent::Diff(model, hl))
+                }
                 None => GitViewPayload::Error("git diff: not a git repository".into()),
             }
         }
         GitViewKind::Show { repo_root, rev } => match diff_model::show_model(&repo_root, &rev) {
             Some(pair) if pair.1.files.is_empty() => GitViewPayload::Empty,
-            Some(pair) => GitViewPayload::Show(Box::new(pair)),
+            Some((meta, model)) => {
+                let hl = diff_render::highlight_diff(&model);
+                GitViewPayload::Built(GitViewContent::Show(Box::new((meta, model, hl))))
+            }
             None => GitViewPayload::Error(format!("git show: bad revision {rev}")),
         },
         GitViewKind::Blame { repo_root, path } => match blame::blame(&repo_root, &path) {
-            Some(model) => GitViewPayload::Blame(model),
+            Some(model) => {
+                let hl = blame_render::highlight_blame(&model);
+                GitViewPayload::Built(GitViewContent::Blame(model, hl))
+            }
             None => GitViewPayload::Error("git blame: not tracked at HEAD".into()),
         },
     }
@@ -489,11 +482,13 @@ mod tests {
     fn pending_git_view_content_mounts_overlay() {
         with_app(|app| {
             let (tx, rx) = std::sync::mpsc::channel();
-            tx.send(GitViewPayload::Diff(DiffModel {
+            let model = DiffModel {
                 files: Vec::new(),
                 truncated: false,
-            }))
-            .unwrap();
+            };
+            let hl = diff_render::highlight_diff(&model);
+            tx.send(GitViewPayload::Built(GitViewContent::Diff(model, hl)))
+                .unwrap();
             app.runtime.pending_git_view = Some(PendingGitView {
                 id: 7,
                 rx,
@@ -554,7 +549,9 @@ mod tests {
         };
         with_app(|app| {
             let (tx, rx) = std::sync::mpsc::channel();
-            tx.send(GitViewPayload::Diff(content)).unwrap();
+            let hl = diff_render::highlight_diff(&content);
+            tx.send(GitViewPayload::Built(GitViewContent::Diff(content, hl)))
+                .unwrap();
             app.runtime.pending_git_view = Some(PendingGitView {
                 id: 9,
                 rx,
@@ -611,5 +608,60 @@ mod tests {
             effective_layout(DiffLayout::Unified, 40),
             DiffLayout::Unified
         );
+    }
+
+    /// A blame view carries its highlight in the retained stream (built
+    /// off-thread) and re-renders from it: mounting shows the file content, and
+    /// an `f` re-render reproduces it without re-touching gix/syntect.
+    #[test]
+    fn blame_view_mounts_and_rerenders_from_cached_highlight() {
+        use crate::git::model::{BlameLine, BlameModel};
+        let model = BlameModel {
+            path: "f.rs".into(),
+            lines: vec![BlameLine {
+                short_id: "abc1234".into(),
+                author: "Ada".into(),
+                date: "2026-01-02".into(),
+                lineno: 1,
+                text: "fn main() {}".into(),
+            }],
+            truncated: false,
+        };
+        let hl = blame_render::highlight_blame(&model);
+        with_app(|app| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            tx.send(GitViewPayload::Built(GitViewContent::Blame(model, hl)))
+                .unwrap();
+            app.runtime.pending_git_view = Some(PendingGitView {
+                id: 3,
+                rx,
+                title: "git blame f.rs".into(),
+                layout: DiffLayout::SideBySide, // ignored for blame
+            });
+            assert!(app.drain_pending_git_view());
+            let body = |app: &App| -> String {
+                app.view
+                    .pager
+                    .as_ref()
+                    .unwrap()
+                    .lines
+                    .iter()
+                    .map(|l| {
+                        l.spans
+                            .iter()
+                            .map(|s| s.content.as_ref())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            assert!(body(app).contains("fn main() {}"), "blame content rendered");
+            // `f` re-render path: must reproduce the content from the cache.
+            assert!(app.dispatch_pager_command(PagerStreamCmd::Rerender));
+            assert!(
+                body(app).contains("fn main() {}"),
+                "blame re-renders from the cached highlight"
+            );
+        });
     }
 }

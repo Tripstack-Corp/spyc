@@ -98,11 +98,12 @@ fn highlight_file(file: &FileDiff) -> FileHighlight {
     }
 }
 
-/// Render a whole diff to styled lines in the chosen `layout`. `width` is the
-/// total viewport width in columns (used only by [`DiffLayout::SideBySide`] to
-/// size its two columns; ignored for unified). Highlights the diff inline;
-/// callers that re-render the same model at multiple widths/layouts should
-/// cache [`highlight_diff`] and call [`render_diff_highlighted`] instead.
+/// Render a whole diff to styled lines, highlighting inline. A test convenience
+/// that pairs [`highlight_diff`] with [`render_diff_highlighted`] in one call;
+/// production always splits the two so the highlight is computed once off-thread
+/// and the layout (width/`layout`-dependent) re-runs cheaply (see
+/// [`crate::app::git_view_session`]).
+#[cfg(test)]
 pub fn render_diff(
     model: &DiffModel,
     theme: &Theme,
@@ -148,8 +149,10 @@ pub fn render_diff_highlighted(
 }
 
 /// Render `git show <rev>`: the commit-metadata header block followed by the
-/// commit's diff in the chosen `layout`. Highlights inline; see
-/// [`render_show_highlighted`] for the cached-highlight variant.
+/// commit's diff in the chosen `layout`. A test convenience that highlights
+/// inline; production splits [`highlight_diff`] (once, off-thread) from
+/// [`render_show_highlighted`] (the cached-highlight variant).
+#[cfg(test)]
 pub fn render_show(
     meta: &CommitMeta,
     model: &DiffModel,

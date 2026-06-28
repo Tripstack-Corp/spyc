@@ -31,7 +31,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 - **PR11** — MCP scope/robustness + path/env overlay _(3 findings; clusters: mcp)_
 - **PR12** — Misc correctness batch _(11 findings; clusters: resume, other, fs-watch-topology, prompt-allowlist-drift, perf-linear-scan, perf-sort-alloc, pager-truncation-bytes, pane-vt100-recovery-size)_
 
-**Remaining: 8** (after PR #592; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings, #590 fixed the 2 MCP-robustness findings). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
+**Remaining: 6** (after PR #595; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings, #590 fixed the 2 MCP-robustness findings, #592 fixed inventory re-yank, #595 fixed the 2 git-view syntect-on-main-thread findings). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
 
 ## To fix — by cluster
 
@@ -87,8 +87,8 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/fs/long_listing.rs:155` | format_long_listing does an unmemoized getpwuid/getgrgid NSS lookup per row — L on a large listing can stall seconds-to-minutes on LDAP-backed machines | medium | M | ✅ PR #547 |
 | `src/git/worktree.rs:188` | worktree::add performs a full-tree checkout synchronously on the main input thread | high | M | ✅ PR #582 |
 | `src/pane/widget.rs:37` | Parser mutex held across the whole pane draw — per-frame O(cells) set_string under the lock contends with the parser worker | medium | M | ✅ #581 (already-fixed: `with_screen` scopes the lock) |
-| `src/ui/blame_render.rs:44` | render_blame joins and syntect-highlights the whole file on the main thread with no size cap | medium | M | REAL |
-| `src/ui/diff_render/mod.rs:149` | Diff render syntect-highlights both full sides on the main thread, and re-highlights from scratch on every layout toggle | medium | M | REAL |
+| `src/ui/blame_render.rs:44` | render_blame joins and syntect-highlights the whole file on the main thread with no size cap | medium | M | ✅ PR #595 |
+| `src/ui/diff_render/mod.rs:149` | Diff render syntect-highlights both full sides on the main thread, and re-highlights from scratch on every layout toggle | medium | M | ✅ PR #595 |
 | `src/ui/pager/construct.rs:182` | Pager yank/save methods do inline OS side effects, bypassing the existing Effect::CopyToClipboard path | medium | M | ✅ PR #588 |
 | `src/app/sources.rs:293` | Watcher-driven `refresh_listing` does a synchronous 50k-entry disk walk + allocation-heavy sort on the event-loop thread | medium | L | PARTIAL |
 
@@ -131,6 +131,10 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
+
+**✅ PR #595 — git-view syntax highlights computed in the worker, off the main thread (2026-06-28):**
+- `ui/blame_render.rs:44` — `render_blame` re-ran syntect over the whole file on every render (mount, `f`, resize); no cache. Split into `highlight_blame` (the syntect pass) + `render_blame_highlighted` (the cheap layout half).
+- `ui/diff_render/mod.rs:149` — diff/show already cached `DiffHighlight` across `|`/`f`/resize, but the highlight was computed on the **main thread** (in `drain_pending_git_view`). Now both the model and its highlight are built in the off-thread `build_payload` worker and bundled in one `GitViewContent` enum (`Diff(model,hl)` / `Show(box)` / `Blame(model,hl)`) — a model/highlight mismatch is unrepresentable. The main thread only lays the cached highlight out at the current width; no syntect on the input thread for diff/show/blame. The inline `render_diff`/`render_show`/`render_blame` are now `#[cfg(test)]`. Behavior-preserving; new test covers blame mount + `f` re-render from the cache.
 
 **✅ PR #592 — re-yank refreshes stale inventory content (2026-06-28):**
 - `state/inventory.rs:85` — `yank` early-returned when the path was already cached (`if self.contains(path) { return Ok(()) }`), so re-yanking an *edited* file silently kept the stale bytes — a later `put` wrote the old content. Now `yank` reuses the existing entry's id and overwrites its `.dat` + metadata, so a path keeps one entry (dedup intent preserved) but always caches the current content/size; an uncached path still gets a fresh UUIDv7. Test updated to edit-then-re-yank and assert the cached size + the bytes `put` delivers track the new content.
