@@ -155,12 +155,18 @@ pub fn find_nested_git_repos(root: &Path) -> Vec<PathBuf> {
         "venv",
         ".venv",
     ];
+    // Cap descent at 5 levels below root to avoid runaway walks in deep trees
+    // (monorepos, HOME-level searches). Legitimate nested repos are shallower.
+    const MAX_DEPTH: usize = 5;
     let mut found = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    while let Some((dir, depth)) = stack.pop() {
         // Don't re-add the original root -- pass 1 already covered it.
         if dir != root && dir.join(".git").exists() {
             found.push(dir);
+            continue;
+        }
+        if depth >= MAX_DEPTH {
             continue;
         }
         let Ok(rd) = std::fs::read_dir(&dir) else {
@@ -175,7 +181,7 @@ pub fn find_nested_git_repos(root: &Path) -> Vec<PathBuf> {
             if name_str.starts_with('.') || SKIP.contains(&name_str.as_ref()) {
                 continue;
             }
-            stack.push(entry.path());
+            stack.push((entry.path(), depth + 1));
         }
     }
     found

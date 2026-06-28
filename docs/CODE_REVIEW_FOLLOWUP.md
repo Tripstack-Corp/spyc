@@ -31,7 +31,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 - **PR11** — MCP scope/robustness + path/env overlay _(3 findings; clusters: mcp)_
 - **PR12** — Misc correctness batch _(11 findings; clusters: resume, other, fs-watch-topology, prompt-allowlist-drift, perf-linear-scan, perf-sort-alloc, pager-truncation-bytes, pane-vt100-recovery-size)_
 
-**Remaining: 16** (after PR #582; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
+**Remaining: 13** (after PR #583; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
 
 ## To fix — by cluster
 
@@ -76,11 +76,11 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 |---|---|---|---|---|
 | `src/app/navigate.rs:160` | gF reads an attacker-controlled path fully into memory synchronously on the input thread (hang/OOM via hostile pane content) | medium | S | ✅ PR #550 |
 | `src/clipboard.rs:111` | Clipboard helper inherits stdout/stderr (garbles the raw-mode TUI) and leaks a zombie when stdin write fails | medium | S | ✅ PR #549 |
-| `src/fs/finder.rs:136` | find_nested_git_repos re-walks the entire subtree raw (no gitignore, no cap, no cancellation) on every F open / :grep in a git root | medium | S | PARTIAL |
+| `src/fs/finder.rs:136` | find_nested_git_repos re-walks the entire subtree raw (no gitignore, no cap, no cancellation) on every F open / :grep in a git root | medium | S | ✅ PR #583 |
 | `src/fs/grep.rs:353` | search_to_vec blocks on the full repo walk even after the result limit is reached | medium | S | ✅ PR #527 |
 | `src/pane/pty_host.rs:208` | Unbounded reader->parser channel with a reader that never stops reading: no backpressure, unbounded memory under a firehose child | medium | S | REAL |
-| `src/state/sessions/mod.rs:579` | find_claude_session_name reads the entire conversation JSONL (100+ MB) into memory | medium | S | REAL |
-| `src/agent/resume.rs:298` | gemini_resume_index_for runs `gemini --list-sessions` synchronously with no timeout on the session-restore path | medium | M | REAL |
+| `src/state/sessions/mod.rs:579` | find_claude_session_name reads the entire conversation JSONL (100+ MB) into memory | medium | S | ✅ PR #583 |
+| `src/agent/resume.rs:298` | gemini_resume_index_for runs `gemini --list-sessions` synchronously with no timeout on the session-restore path | medium | M | ✅ PR #583 |
 | `src/app/key_dispatch/mod.rs:315` | Capture-pty writes bypass the Effect executor while sibling sinks in the same match use Effect::SendToPane | medium | M | ✅ PR #581 |
 | `src/app/mod.rs:793` | crossterm::terminal::size() called inside key/action handlers (8 sites), against the effects-as-data contract | medium | M | REAL |
 | `src/app/state/apply.rs:320` | format_long_listing and file_type_label do per-file IO inside the pure apply dispatcher | medium | M | ✅ PR #548 |
@@ -131,6 +131,11 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
+
+**✅ PR #583 — cheap blocking-IO trio: session tail-read, gemini timeout, finder depth cap (2026-06-28):**
+- `state/sessions/mod.rs:579` — `find_claude_session_name` read the entire JSONL with `read_to_string`, loading 100+ MB session files into memory on the session-restore path. Now tail-reads the last 64 KB via `Seek::seek(SeekFrom::Start(len - TAIL))` + `read_to_string`; skips the leading partial line when a seek happened. The `custom-title` entry is searched in reverse so the most recent title wins regardless of file position.
+- `agent/resume.rs:298` — `gemini_resume_index_for` called `Command::output()` (blocking, no timeout) on the restore path. A hung `gemini --list-sessions` (first invocation, network issues) would freeze spyc's session restore indefinitely. Now spawns the child with `Stdio::piped`, reads stdout in a detached thread, and uses `mpsc::recv_timeout(2s)` — if the child doesn't respond in time, it gets killed and the restore falls back to bare `gemini` (existing error path unchanged).
+- `fs/finder.rs:136` — `find_nested_git_repos` had no depth limit; a `F` search or `:grep` launched from a shallow root (e.g. `$HOME`) could walk the entire filesystem. Added `MAX_DEPTH = 5` on the stack tuple; stops descending past 5 levels below root. Legitimate nested repos are shallower; build trees are caught by the `SKIP` list.
 
 **✅ PR #582 — interactive `W n` worktree checkout off-thread (the lone HIGH; 2026-06-28):**
 - `git/worktree.rs:188` — interactive `W n` ran its full-tree `gix` checkout synchronously on the input thread (`prompt.rs` → `git::worktree::add`), freezing the whole UI (panes, agent, input) for seconds on a big repo. The MCP `create_worktree` was already off-thread; this routes the key through the same worker. New `Effect::WorktreeCreateInteractive`; `WorktreeOutcome.reply` → `WorktreeCompletion {Mcp | InteractiveCreate}`; `apply_worktree_outcomes` chdirs the focused column into the new tree (+ flash + reconcile harpoon) when it lands — mirrors the former synchronous completion; `WorktreeJobResult.created_path` carries the new tree. Reuses the `worktree_results` slot + `Message::WorktreeJobDone` (no new variant). `W d` removal stays synchronous (plain `git::worktree::remove`, no checkout — not the HIGH). Behavior change on a daily-driver key → owner live-test before merge.

@@ -307,15 +307,27 @@ pub fn resolve_gemini_resume_target(
 /// output format drifts. Failure is recoverable: the caller falls
 /// back to spawning `gemini` bare and lets the user pick.
 pub fn gemini_resume_index_for(cwd: &std::path::Path, uuid: &str) -> Option<u32> {
-    let out = std::process::Command::new("gemini")
+    use std::io::Read;
+    // Run with a 2-second timeout: `gemini --list-sessions` can hang on first
+    // invocation or when the network is slow. A hung restore shouldn't freeze spyc.
+    let mut child = std::process::Command::new("gemini")
         .arg("--list-sessions")
         .current_dir(cwd)
-        .output()
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
         .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let text = std::str::from_utf8(&out.stdout).ok()?;
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let mut stdout = child.stdout.take()?;
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        let _ = tx.send(buf);
+    });
+    let output = rx.recv_timeout(std::time::Duration::from_secs(2)).ok()?;
+    let _ = child.kill();
+    let _ = child.wait();
+    let text = std::str::from_utf8(&output).ok()?;
     parse_gemini_list_sessions_for_uuid(text, uuid)
 }
 
