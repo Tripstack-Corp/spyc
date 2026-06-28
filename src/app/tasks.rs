@@ -756,6 +756,9 @@ fn spawn_capture(cmd: &str, cwd: &std::path::Path) -> Result<crate::pane::pty_ho
         nudge_winch: false,
         // Captures don't enable the per-byte debug dump (Pane does).
         debug_dump: false,
+        // No `exec`: a capture may be a compound command (`a && b`); exec would
+        // drop the tail. Captures are one-shot, not suspendable panes anyway.
+        exec_replace: false,
     })
 }
 

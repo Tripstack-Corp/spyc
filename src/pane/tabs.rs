@@ -127,6 +127,13 @@ pub struct TabInfo {
     /// Cached activity state, recomputed OFF the draw path in
     /// `App::settle_agent_activity` (render is pure and can't read `now`).
     pub activity: AgentActivity,
+    /// True while this pane is `^z`-suspended: spyc sent `SIGSTOP` to its
+    /// process group (the child is stopped, not exited) and the divider shows
+    /// 💤 instead of the activity dot. Set/cleared by the `^z` toggle
+    /// (`App::toggle_pane_suspend`); a `SIGCONT` resumes it. App-controlled, so
+    /// it stays accurate without probing process state. Only agent tabs reach
+    /// this (a shell's `^z` is forwarded for its own job control).
+    pub suspended: bool,
     /// Latest semantic self-report from the agent (`report_status` MCP tool),
     /// or `None`. Overrides output timing per the [`ReportedStatus`] authority
     /// model; settle clears it once expired / superseded by fresh output.
@@ -183,6 +190,7 @@ impl TabInfo {
             has_activity: false,
             last_output_at: None,
             activity: AgentActivity::Unknown,
+            suspended: false,
             reported: None,
             restore_fallback: None,
             pending_resume_send: None,

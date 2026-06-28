@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use super::{
-    App, Mode, Pane, PaneTabs, Prompt, PromptKind, RESTORE_RESUME_ENTER_DELAY,
+    App, Effect, Mode, Pane, PaneTabs, Prompt, PromptKind, RESTORE_RESUME_ENTER_DELAY,
     RESTORE_RESUME_VERIFY_DELAY, RESTORE_RESUME_VERIFY_RETRIES, RESTORE_RESUME_VERIFY_TAIL,
     StatusPosition, TabEntry, TabInfo, state,
 };
@@ -155,6 +155,53 @@ impl App {
                 self.state.flash_error(format!("pane spawn failed: {e}"));
                 false
             }
+        }
+    }
+
+    /// `^z` toggle for the active (agent) bottom pane: suspend it with
+    /// `SIGSTOP` or resume it with `SIGCONT`. spyc manages the suspend itself
+    /// (rather than forwarding `^z` for the agent to self-suspend — Claude
+    /// catches `^z`/SIGTSTP and its handler trips the macOS false-exit), so the
+    /// tab tracks the state deterministically and the divider shows 💤. The
+    /// `suspended` flip + flash are pure state here; only the signal is the
+    /// `Effect` (`SignalPane`, which uses the uncatchable `SIGSTOP`). A shell
+    /// tab's `^z` is forwarded for its own job control and never reaches this.
+    /// No-op (flash) on a non-unix build.
+    pub(super) fn toggle_pane_suspend(&mut self) -> Vec<Effect> {
+        #[cfg(unix)]
+        {
+            let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+                return Vec::new();
+            };
+            // The pty's foreground process group — the agent itself, since a
+            // pane execs the agent (direct child / session leader, no wrapper
+            // shell). This is exactly the group a real `^z` would signal.
+            // Fall back to the child pid if `tcgetpgrp` is somehow unavailable.
+            let active = tabs.active();
+            let Some(pgrp) = active.foreground_pgrp().or_else(|| active.process_id()) else {
+                self.state.flash_error("pane: no process group to suspend");
+                return Vec::new();
+            };
+            let info = tabs.active_info_mut();
+            // Currently suspended → this press RESUMES (SIGCONT); else suspends.
+            let resume = info.suspended;
+            info.suspended = !resume;
+            let label = info.label.clone();
+            if resume {
+                self.state.flash_info(format!("resumed {label}"));
+            } else {
+                self.state
+                    .flash_info(format!("suspended {label} — ^z to resume"));
+            }
+            // The frozen/woken child won't repaint the pane itself; force a
+            // redraw so the 💤 marker (and, on resume, fresh output) lands.
+            self.view.needs_full_repaint = true;
+            vec![Effect::SignalPane { pgrp, resume }]
+        }
+        #[cfg(not(unix))]
+        {
+            self.state.flash_error("pane suspend is unix-only");
+            Vec::new()
         }
     }
 

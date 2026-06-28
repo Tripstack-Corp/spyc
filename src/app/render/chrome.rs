@@ -102,15 +102,24 @@ impl App {
                 // unseen output, else a blank space (still reserved, so a shell's
                 // `+` flicking on/off — e.g. htop — no longer changes the width).
                 let is_agent = entry.info.activity != crate::pane::AgentActivity::Unknown;
+                let suspended = entry.info.suspended;
                 let bracket = format!("[{}]", i + 1);
-                // Agent → its own colored dot span; shell → a `+`/blank cell
-                // carried in the bracket run's style.
-                let dot = if is_agent {
+                // Suspended (`^z`) → 💤, overriding the activity dot; else an
+                // agent's own colored dot span; else a shell's `+`/blank cell.
+                // 💤 is 2 cols wide, so a suspended tab is 1 col wider than its
+                // running self — acceptable for a deliberate, sticky toggle
+                // (unlike the per-frame flicker the fixed-width cell prevents).
+                let dot = if suspended {
+                    Some(Span::styled(
+                        "\u{1F4A4}", // 💤
+                        Style::default().fg(self.view.theme.status_suffix),
+                    ))
+                } else if is_agent {
                     self.agent_activity_span(entry.info.activity)
                 } else {
                     None
                 };
-                let shell_cell = if is_agent {
+                let shell_cell = if is_agent || suspended {
                     "" // the dot span fills the cell instead
                 } else if entry.info.has_activity {
                     "+"

@@ -72,6 +72,20 @@ pub enum Effect {
         on_err: String,
     },
 
+    /// A-class. `^z`-toggle a bottom pane: `SIGSTOP` (`resume == false`) stops
+    /// the agent's process group, or `SIGCONT` (`resume == true`) wakes it.
+    /// `pgrp` is the pty's foreground group (`tcgetpgrp`) — the agent itself,
+    /// since a pane execs the agent (it's the direct child / session leader, no
+    /// job-control wrapper shell to reclaim the tty). **`SIGSTOP`, not
+    /// `SIGTSTP`, is deliberate**: Claude catches `SIGTSTP` and runs a
+    /// self-suspend handler that on macOS ends in the false-exit
+    /// (`[exited 146]`); `SIGSTOP` is uncatchable, so the agent just freezes and
+    /// the reader keeps blocking (never EOF, see `tasks.rs`). The
+    /// `TabInfo.suspended` flip + flash run in the producer (pure state); only
+    /// the signal is the effect. `#[cfg(unix)]`, like `SignalGroup`.
+    #[cfg(unix)]
+    SignalPane { pgrp: u32, resume: bool },
+
     /// A-class. Deliver `input` (pre-encoded key or pre-built bytes) to a
     /// pane, then flash `on_ok` on success / `"{err_prefix}: {e}"` on
     /// failure — each `None` means "ignore that outcome silently" (the
@@ -515,6 +529,24 @@ impl App {
                     }
                     Err(_) => self.state.flash_error(on_err),
                 },
+                // Pane `^z` toggle: SIGTSTP (suspend) / SIGCONT (resume) to the
+                // pane's process group. The `suspended` flip + flash already ran
+                // in the producer; only signal here (a failed kill is rare — we
+                // just read a live pid — so flash and let the loop survive).
+                #[cfg(unix)]
+                Effect::SignalPane { pgrp, resume } => {
+                    // SIGSTOP (not SIGTSTP): uncatchable, so Claude can't run
+                    // its self-suspend handler — which on macOS ends in the
+                    // false-exit. The agent just freezes; reader keeps blocking.
+                    let sig = if resume {
+                        rustix::process::Signal::CONT
+                    } else {
+                        rustix::process::Signal::STOP
+                    };
+                    if super::kill_pg(pgrp, sig).is_err() {
+                        self.state.flash_error("pane: signal failed");
+                    }
+                }
                 Effect::ForegroundExec {
                     program,
                     args,

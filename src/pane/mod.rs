@@ -145,6 +145,9 @@ impl Pane {
             // their first prompt at the right geometry.
             nudge_winch: true,
             debug_dump: std::env::var("SPYC_PTY_DEBUG").is_ok(),
+            // Interactive pane: exec the agent so it replaces the rc-sourcing
+            // shell (no job-control wrapper to fight `^z` suspend/resume).
+            exec_replace: true,
         })?;
         let parser = vt100::Parser::new(rows, cols, 10_000);
         Ok(Self::adopt(host, parser, wake))
@@ -331,6 +334,13 @@ impl Pane {
     /// has been reaped or if portable_pty couldn't surface it.
     pub fn process_id(&self) -> Option<u32> {
         self.host.process_id()
+    }
+
+    /// The pty's foreground process group (`tcgetpgrp`) — the *agent's* job
+    /// when the pane wraps it in an interactive shell, distinct from the
+    /// wrapper-shell `process_id`. Used by the `^z` suspend to stop the agent.
+    pub fn foreground_pgrp(&self) -> Option<u32> {
+        self.host.foreground_pgrp()
     }
 
     /// Best-effort kill of just the immediate child (no signal-group

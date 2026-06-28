@@ -180,6 +180,13 @@ spyc's workflow: browse files above, talk to Claude below.
   so this is the tmux-style "send-prefix" escape hatch
 - **^a P** pipe file contents of the selection to the pane
 - **^a i** pipe inventory file contents to the pane
+- **^z** suspend/resume an **agent** pane (claude/codex/…). spyc sends
+  `SIGSTOP` to the pane's process group itself and shows 💤 on the divider;
+  press `^z` again to `SIGCONT` it back. (It manages the stop rather than
+  letting the agent self-suspend: Claude catches `^z` and its handler, on
+  macOS, looked like an exit and got the pane killed — `SIGSTOP` is uncatchable,
+  so it just freezes.) A **shell** pane's `^z` is forwarded for its own job
+  control, unchanged
 - **^a + / ^a -** grow or shrink the pane
 - **^a z** zoom the **active** region (toggle fullscreen). Pane focused →
   the pane fills the screen (list collapses to 0 rows, `[ZOOM]` on the

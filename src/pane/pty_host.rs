@@ -80,6 +80,15 @@ pub struct PtySpec<'a> {
     /// startup. Cached at spawn so the per-tick drain doesn't pay a
     /// `std::env::var` lookup. `Pane` sets this; capture does not.
     pub debug_dump: bool,
+    /// Wrap the command as `exec <command>` inside the shell so the shell
+    /// sources the user's rc (PATH/aliases) and then **replaces itself** with
+    /// the command — no wrapper-shell process survives. Set for interactive
+    /// **panes** so a long-running agent IS the pty's direct child / session
+    /// leader: `^z` suspend (`SIGSTOP`) then works without an interactive
+    /// job-control shell reclaiming the tty and tearing the agent down on
+    /// resume. NOT set for `!` captures / background tasks — `exec` would drop
+    /// the tail of a compound command (`a && b`). No-op for an empty command.
+    pub exec_replace: bool,
 }
 
 /// Shared pty host: master + writer + child + reader thread + drain
@@ -177,7 +186,16 @@ impl PtyHost {
             pixel_height: 0,
         })?;
 
-        let (shell, shell_args) = crate::shell::user_shell_invocation(spec.command);
+        // For interactive panes, `exec` the command so the rc-sourcing shell
+        // replaces itself with the agent (no surviving job-control wrapper —
+        // see `PtySpec::exec_replace`). Empty command → leave it (a bare shell).
+        let invoke_cmd: std::borrow::Cow<'_, str> =
+            if spec.exec_replace && !spec.command.trim().is_empty() {
+                std::borrow::Cow::Owned(format!("exec {}", spec.command))
+            } else {
+                std::borrow::Cow::Borrowed(spec.command)
+            };
+        let (shell, shell_args) = crate::shell::user_shell_invocation(&invoke_cmd);
         let mut cmd = CommandBuilder::new(&shell);
         cmd.args(shell_args.iter().map(String::as_str));
         cmd.cwd(spec.cwd);
@@ -411,6 +429,17 @@ impl PtyHost {
         self.child.process_id()
     }
 
+    /// The pty's FOREGROUND process group (`tcgetpgrp` on the master), if
+    /// available. This is the group the kernel would signal on a real `^z` —
+    /// the *agent's* job when the pane is an interactive `zsh -i -c <agent>`
+    /// wrapper, which is a DIFFERENT group than [`Self::process_id`] (the
+    /// wrapper shell). Used to suspend/resume the actual agent, not the shell.
+    pub fn foreground_pgrp(&self) -> Option<u32> {
+        self.master
+            .process_group_leader()
+            .and_then(|p| u32::try_from(p).ok())
+    }
+
     /// Orderly shutdown: SIGTERM the child's process group, wait up
     /// to `grace` for voluntary exit, then SIGKILL the group and
     /// reap. Mirrors `Pane::shutdown` from before the refactor —
@@ -586,6 +615,7 @@ mod tests {
             term: "dumb",
             nudge_winch: false,
             debug_dump: false,
+            exec_replace: false,
         }
     }
 
