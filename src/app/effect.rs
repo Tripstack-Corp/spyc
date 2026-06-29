@@ -510,11 +510,21 @@ impl App {
                         self.view.pane_send_at = Some(std::time::Instant::now());
                     }
                     let result = match target {
-                        PaneTarget::Active => self
-                            .runtime
-                            .pane_tabs
-                            .as_mut()
-                            .map(|t| input.send_to(t.active_mut())),
+                        PaneTarget::Active => self.runtime.pane_tabs.as_mut().map(|t| {
+                            // The user is answering the active pane (e.g. a Yes/No
+                            // permission prompt) → it no longer "needs me": drop a
+                            // live `blocked` self-report (otherwise output-latched,
+                            // see `report_superseded_by_output`) so the dot leaves
+                            // red and follows the agent's resumed output again.
+                            let info = t.active_info_mut();
+                            if info
+                                .reported
+                                .is_some_and(|r| r.status == crate::pane::AgentActivity::Blocked)
+                            {
+                                info.reported = None;
+                            }
+                            input.send_to(t.active_mut())
+                        }),
                         PaneTarget::Overlay => {
                             // Route to the focused column's overlay slot: `b`'s
                             // own when the right column owns the keyboard, else
