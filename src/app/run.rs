@@ -370,6 +370,10 @@ impl App {
         // Remove the MCP client configs we wrote on agent launch — our socket
         // is about to die, so a lingering entry would point at nothing.
         self.cleanup_written_mcp_configs();
+        // Drop the `!`-capture spill dir now (it also auto-removes on Runtime
+        // drop, but do it explicitly so the temp files don't linger if the
+        // process exits without unwinding). Capture buffers are session-scoped.
+        self.runtime.capture_spill_dir.take();
         if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
             for entry in tabs.tabs_mut() {
                 let label = entry.info.label.clone();

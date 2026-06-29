@@ -480,6 +480,14 @@ struct Runtime {
     top_overlay_right: Option<Pane>,
     /// In-flight foreground `!` capture (owns a `PtyHost`).
     pending_capture: Option<PendingCapture>,
+    /// Session-scoped scratch dir for `!`-capture output spills — one file per
+    /// capture, each holding that capture's full uncapped output (the live
+    /// `PendingCapture::buffer` front-trims its head, dropping the start of a
+    /// large `git log`). Lazily created on the first capture; removed when
+    /// `Runtime` drops at shutdown (and explicitly in `run_teardown`), so
+    /// spilled buffers outlive any single pager close (they back the pager's
+    /// forward/back history) but never the session. `None` until the first capture.
+    capture_spill_dir: Option<tempfile::TempDir>,
     /// Backgrounded `!` tasks (each owns a `PtyHost`).
     background_tasks: BackgroundTasks,
     /// Active F-finder (holds the walker thread's receiver).

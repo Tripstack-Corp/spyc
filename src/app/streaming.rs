@@ -48,6 +48,27 @@ fn cap_stream_buffer(buf: &mut Vec<u8>) {
     }
 }
 
+/// Backstop for the on-disk capture spill (`PendingCapture::full_log`): far
+/// above any normal command (a full `git log` is ~1.5 MiB) — purely so a
+/// runaway `!yes` can't fill the disk. The spill keeps the HEAD, so for
+/// newest-first output like `git log` it's the newest commits that stay.
+const CAPTURE_SPILL_MAX: u64 = 64 * 1_048_576;
+
+/// Bytes to render in the FINISHED capture pager: the full on-disk spill (head
+/// intact) when present and readable, else the front-trimmed live `buffer`. The
+/// `bool` is whether the spill hit [`CAPTURE_SPILL_MAX`] (→ a "tail omitted"
+/// marker). The read/parse happens once, at exit — not per streaming tick — so
+/// being O(total) here is fine where the live path's O(CAP) cap is load-bearing.
+fn finished_capture_lines(
+    spill: Option<&super::capture::CaptureSpill>,
+    capped_buffer: &[u8],
+) -> (Vec<ratatui::text::Line<'static>>, bool) {
+    let spilled = spill.and_then(|s| std::fs::read(&s.path).ok());
+    let lines = buffer_to_lines(spilled.as_deref().unwrap_or(capped_buffer));
+    let hit_cap = spill.is_some_and(|s| s.bytes >= CAPTURE_SPILL_MAX);
+    (lines, hit_cap)
+}
+
 impl App {
     /// MVU Phase 5 PR8: finalize a child exit. The single handler the two
     /// streaming drains dispatch into once they've detected `newly_closed`
@@ -75,11 +96,21 @@ impl App {
                 };
                 let glyph = if ok { "\u{2713}" } else { "\u{2717}" }; // ✓ / ✗
                 let title = format!("{glyph} {} — {exit_info}", capture.title);
-                // Final rebuild with stderr included.
-                let lines = buffer_to_lines(&capture.buffer);
+                // Final rebuild from the FULL on-disk spill (head intact) rather
+                // than the front-trimmed live buffer, so a large capture like
+                // `git log` shows its start instead of beginning mid-output.
+                let (lines, spill_capped) =
+                    finished_capture_lines(capture.full_log.as_ref(), &capture.buffer);
                 if let Some(view) = self.view.pager.as_mut() {
                     view.title = title;
                     view.lines = lines;
+                    // If the spill hit its backstop, say so before the EOF frame.
+                    if spill_capped {
+                        view.lines.push(eof_marker_line(&format!(
+                            "capture exceeded {} MiB — tail omitted",
+                            CAPTURE_SPILL_MAX / 1_048_576
+                        )));
+                    }
                     // Anchor an EOF marker to the bottom of content so it's
                     // visible even when output exceeds viewport_h.
                     view.lines.push(eof_marker_line(&exit_info));
@@ -142,6 +173,21 @@ impl App {
             let mut chunks: Vec<Vec<u8>> = Vec::new();
             let drain = capture.host.drain(|bytes| chunks.push(bytes.to_vec()));
             for chunk in chunks {
+                // Tee the raw bytes to the on-disk spill (the full, uncapped
+                // record) BEFORE the in-memory buffer front-trims its head, so
+                // the finished pager can show what the live preview dropped —
+                // e.g. `git log`'s newest commits. Bounded by CAPTURE_SPILL_MAX;
+                // a write error gives up on the spill (fall back to the buffer).
+                if let Some(spill) = capture.full_log.as_mut()
+                    && spill.bytes < CAPTURE_SPILL_MAX
+                {
+                    use std::io::Write;
+                    if spill.file.write_all(&chunk).is_ok() {
+                        spill.bytes += chunk.len() as u64;
+                    } else {
+                        capture.full_log = None;
+                    }
+                }
                 capture.buffer.extend_from_slice(&chunk);
                 // Cap the capture buffer exactly like a background task's
                 // (drain_background_tasks). Without this, a chatty `!cargo
@@ -409,5 +455,63 @@ mod cap_buffer_tests {
         let mut buf = vec![b'z'; TASK_BUFFER_CAP];
         cap_stream_buffer(&mut buf);
         assert_eq!(buf.len(), TASK_BUFFER_CAP);
+    }
+
+    // The finished pager reads the FULL on-disk spill (head intact), not the
+    // front-trimmed live buffer — the fix for `!git log` losing its newest
+    // commits off the front. Falls back to the buffer when there's no spill,
+    // and flags a spill that hit CAPTURE_SPILL_MAX.
+    #[test]
+    fn finished_capture_prefers_full_spill_over_capped_buffer() {
+        use super::{CAPTURE_SPILL_MAX, finished_capture_lines};
+        use crate::app::capture::CaptureSpill;
+
+        let joined = |lines: &[ratatui::text::Line<'static>]| -> String {
+            lines
+                .iter()
+                .map(|l| {
+                    l.spans
+                        .iter()
+                        .map(|s| s.content.as_ref())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), b"HEAD_LINE\nmiddle\nTAIL_LINE\n").unwrap();
+        let spill = CaptureSpill {
+            file: std::fs::File::open(tmp.path()).unwrap(),
+            path: tmp.path().to_path_buf(),
+            bytes: 27,
+        };
+
+        // Live buffer holds only the front-trimmed tail; the full spill wins.
+        let (lines, capped) = finished_capture_lines(Some(&spill), b"TAIL_LINE\n");
+        let text = joined(&lines);
+        assert!(
+            text.contains("HEAD_LINE"),
+            "spill head must be present: {text:?}"
+        );
+        assert!(text.contains("TAIL_LINE"), "spill tail must be present");
+        assert!(!capped, "27 bytes is well under CAPTURE_SPILL_MAX");
+
+        // No spill → fall back to the capped buffer (only the tail).
+        let (fallback, _) = finished_capture_lines(None, b"TAIL_LINE\n");
+        let ftext = joined(&fallback);
+        assert!(
+            ftext.contains("TAIL_LINE") && !ftext.contains("HEAD_LINE"),
+            "no spill → capped buffer only: {ftext:?}"
+        );
+
+        // A spill that reached the cap is flagged (→ truncation marker).
+        let at_cap = CaptureSpill {
+            file: std::fs::File::open(tmp.path()).unwrap(),
+            path: tmp.path().to_path_buf(),
+            bytes: CAPTURE_SPILL_MAX,
+        };
+        let (_, capped2) = finished_capture_lines(Some(&at_cap), b"");
+        assert!(capped2, "spill at CAPTURE_SPILL_MAX is flagged");
     }
 }

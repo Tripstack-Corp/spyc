@@ -149,6 +149,9 @@ impl App {
                     PagerView::new_plain(format!("\u{23f3} {title} — running... (0s)"), Vec::new());
                 view.streaming = true;
                 self.set_pager(view);
+                // Spill the full output to disk so the finished pager isn't
+                // limited to the front-trimmed live `buffer` (see `full_log`).
+                let full_log = self.new_capture_spill();
                 self.runtime.pending_capture = Some(PendingCapture {
                     host,
                     buffer: Vec::new(),
@@ -157,10 +160,35 @@ impl App {
                     started: std::time::Instant::now(),
                     finished: false,
                     original_id: None,
+                    full_log,
                 });
             }
             Err(e) => self.state.flash_error(format!("exec: {e}")),
         }
+    }
+
+    /// Create a fresh on-disk spill file for a new `!` capture inside the
+    /// session-scoped spill dir (lazily creating the dir via `tempfile`, which
+    /// makes a private `0700` dir with a randomized name). Returns the open
+    /// append handle + path, or `None` if the dir / file couldn't be created —
+    /// the capture then degrades to the front-trimmed in-memory `buffer`.
+    fn new_capture_spill(&mut self) -> Option<super::capture::CaptureSpill> {
+        if self.runtime.capture_spill_dir.is_none() {
+            self.runtime.capture_spill_dir = tempfile::Builder::new()
+                .prefix("spyc-capture-")
+                .tempdir()
+                .ok();
+        }
+        let dir = self.runtime.capture_spill_dir.as_ref()?;
+        let path = dir
+            .path()
+            .join(format!("{}.log", uuid::Uuid::now_v7().simple()));
+        let file = std::fs::File::create(&path).ok()?;
+        Some(super::capture::CaptureSpill {
+            file,
+            path,
+            bytes: 0,
+        })
     }
 
     /// `^Z` from inside a streaming `!` capture pager. Move the running
@@ -564,6 +592,9 @@ impl App {
                     started: task.started,
                     finished: false,
                     original_id: Some(task.id),
+                    // A backgrounded task already front-trimmed its buffer, so
+                    // there's no full history to spill — use the capped buffer.
+                    full_log: None,
                 });
                 self.state
                     .flash_info(format!("task #{id} resumed — ^Z to background again"));

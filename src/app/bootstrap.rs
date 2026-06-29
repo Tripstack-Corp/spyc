@@ -260,6 +260,7 @@ impl App {
                 top_overlay: None,
                 top_overlay_right: None,
                 pending_capture: None,
+                capture_spill_dir: None,
                 background_tasks: BackgroundTasks::new(),
                 find_picker: None,
                 pager_stream: None,

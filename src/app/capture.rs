@@ -37,4 +37,26 @@ pub struct PendingCapture {
     /// task via `:fg`. ^Z will reuse the same id when re-backgrounding so
     /// the user sees `task #3` consistently across the round-trip.
     pub original_id: Option<u32>,
+    /// Full, uncapped output spilled to disk (see [`CaptureSpill`]). The live
+    /// `buffer` front-trims its head at `TASK_BUFFER_CAP` to bound the per-tick
+    /// re-parse, which silently drops the START of a large capture — fatal for
+    /// newest-first output like `git log`. This spill preserves everything so
+    /// the finished pager renders the whole thing. `None` when the spill file
+    /// couldn't be created (graceful fallback to `buffer`) or for a
+    /// `:fg`-promoted task (whose head was already gone).
+    pub full_log: Option<CaptureSpill>,
+}
+
+/// On-disk spill of a `!` capture's full, uncapped output. Lives in the
+/// session-scoped spill dir (`Runtime::capture_spill_dir`), so it outlives any
+/// single pager close — closed captures sit on the pager's back/forward history
+/// — but is removed with that dir at shutdown, never per-capture.
+pub struct CaptureSpill {
+    /// Append handle for the live tee.
+    pub file: std::fs::File,
+    /// Path, for reading the whole thing back when the capture finishes.
+    pub path: std::path::PathBuf,
+    /// Bytes written so far — bounds the spill to `CAPTURE_SPILL_MAX` so a
+    /// runaway `!yes` can't fill the disk.
+    pub bytes: u64,
 }
