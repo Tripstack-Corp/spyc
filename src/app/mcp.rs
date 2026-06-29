@@ -451,6 +451,24 @@ impl App {
                     message: "ok".into(),
                 }
             }
+            McpCommand::MalformedSocketMessage { detail } => {
+                // The socket server couldn't frame/parse a message and dropped
+                // it. Surface it — a silent drop hid the bare-newline
+                // report-status framing bug for days — and tally it under
+                // `malformed` in the `A`-overlay / `:activity dump` mcp counts.
+                *self
+                    .view
+                    .activity
+                    .mcp_tool_calls
+                    .entry("malformed".to_string())
+                    .or_insert(0) += 1;
+                self.state.flash_error(format!(
+                    "\u{26a0} MCP: dropped a malformed socket message ({detail}) — see mcp.log"
+                ));
+                McpResponse::Ok {
+                    message: "noted".into(),
+                }
+            }
         }
     }
 }

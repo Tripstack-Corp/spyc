@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use crate::mcp_cmd::McpRequest;
+use crate::mcp_cmd::{McpCommand, McpRequest};
 
 use super::protocol::{dispatch, read_lsp_message, send_message};
 use super::{
@@ -478,7 +478,19 @@ pub(super) fn handle_socket_connection(
                 if e.kind() == io::ErrorKind::UnexpectedEof {
                     break; // Connection closed.
                 }
-                return Err(e);
+                // A message we couldn't frame/parse. Don't drop it silently —
+                // log it AND surface a status-line warning to the TUI, then
+                // close the connection (the client reconnects). Silent drops
+                // hid the bare-newline report-status framing bug for days.
+                mcp_log(&format!("socket: dropping malformed message: {e}"));
+                let (reply_tx, _) = std::sync::mpsc::channel();
+                let _ = cmd_tx.send(McpRequest {
+                    command: McpCommand::MalformedSocketMessage {
+                        detail: e.to_string(),
+                    },
+                    reply: reply_tx,
+                });
+                break;
             }
         };
         dispatch(&mut writer, &msg, ctx_path, Some(cmd_tx))?;

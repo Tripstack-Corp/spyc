@@ -875,6 +875,18 @@ pub(super) fn read_lsp_message(reader: &mut impl BufRead) -> io::Result<String> 
         if trimmed.is_empty() {
             break;
         }
+        // A "header" line that's actually a JSON body (and we haven't seen a
+        // Content-Length yet) means the sender didn't frame the message. Flag
+        // it as malformed rather than consuming lines until EOF and dropping it
+        // silently — that silent drop is exactly what hid the bare-newline
+        // report-status reporter. (Valid frames only reach here with header
+        // lines + a blank terminator; the JSON body is read by byte count.)
+        if content_length.is_none() && (trimmed.starts_with('{') || trimmed.starts_with('[')) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unframed message: JSON body with no Content-Length header",
+            ));
+        }
         if let Some(val) = trimmed.strip_prefix("Content-Length:") {
             content_length = val.trim().parse().ok();
         }
@@ -952,10 +964,11 @@ mod tests {
         );
         // The old reporter's output: bare JSON + '\n', no Content-Length header.
         let mut bare = Cursor::new(format!("{body}\n").into_bytes());
-        assert!(
-            read_lsp_message(&mut bare).is_err(),
-            "a bare newline-delimited line must NOT parse — silently dropping it was the bug"
-        );
+        let err = read_lsp_message(&mut bare).unwrap_err();
+        // Reported as InvalidData ("unframed"), NOT a silent EOF — so the socket
+        // server can warn the user instead of dropping it unnoticed.
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("unframed"), "got {err}");
     }
 
     #[test]

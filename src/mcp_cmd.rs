@@ -69,6 +69,12 @@ pub enum McpCommand {
     /// loop), so the `A` overlay can show cumulative per-tool call counts. The
     /// reply is ignored.
     ToolCalled { name: String },
+    /// The socket server received a message it couldn't frame/parse and dropped
+    /// it. Surfaced as a status-line warning so a silent drop can't hide a
+    /// client/framing bug (a bare-newline `--report-status` reporter went
+    /// unnoticed for days exactly because the drop was silent). `detail` is the
+    /// parse error. The reply is ignored.
+    MalformedSocketMessage { detail: String },
 }
 
 /// Response sent back to the MCP thread after command execution.
