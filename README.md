@@ -259,11 +259,14 @@ in-place:
 - **`D`** opens the cursor file in the **top pane** (bottom pane
   stays visible alongside).
 - **`^a v`** mounts a frozen snapshot of pane scrollback in the
-  **bottom pane**.
+  **bottom pane** (line numbers on by default, so it reads as
+  scrolled-back rather than live).
 
 Inside the pager: `/` search with `n`/`N`, `:N` jump-to-line,
-`V` enters visual line mode (`y` yanks the line range), `^v`
-enters visual block mode for rectangular selection.
+`V` arms visual line mode — first `V` places a line cursor you
+move to the exact start line, a second `V` anchors the selection
+(`y` yanks the line range); `^v` enters visual block mode for
+rectangular selection.
 
 ### Shell
 

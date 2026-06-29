@@ -542,6 +542,7 @@ impl App {
             wrap_width,
         ) {
             Ok(mut view) => {
+                view.tab_width = self.state.config.pager.tab_width;
                 // Restore the scroll position from the previous visit (if any).
                 if let Some(saved) = self.view.pager_positions.get(path) {
                     let last = view.lines.len().saturating_sub(1);

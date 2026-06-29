@@ -764,6 +764,11 @@ pub struct ViewState {
     tab_state: Option<TabState>,
     /// Scroll throttle: timestamp + direction of last processed arrow key.
     pub scroll_last: Option<(std::time::Instant, KeyCode)>,
+    /// Whether an agent-transcript scrollback (`^a v`) renders the agent's
+    /// tool-use / tool-result lines. `t` toggles it; the transcript is
+    /// re-rendered with the new value. Session-scoped (persists across
+    /// re-opens), defaults to shown.
+    pub transcript_show_tool_calls: bool,
     /// Cached terminal dimensions (columns, rows). Read once at startup via
     /// `crossterm::terminal::size()` and refreshed on every `Event::Resize` in
     /// `handle_resize`. Handlers read this instead of calling `terminal::size()`
@@ -833,6 +838,7 @@ impl ViewState {
                 .is_ok_and(|c| c.contains("truecolor") || c.contains("24bit")),
             tab_state: None,
             scroll_last: None,
+            transcript_show_tool_calls: true,
             term_size: crossterm::terminal::size().unwrap_or((80, 24)),
         }
     }

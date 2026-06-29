@@ -325,7 +325,12 @@ fn read_session_meta(path: &Path) -> Option<(String, u64)> {
 /// chronological order. Returns an empty vec on read failure. Agent
 /// prose is rendered through the Markdown viewer (`width` hints
 /// prose/table reflow); user prompts and tool lines stay plain.
-pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
+pub fn render_transcript(
+    path: &Path,
+    theme: &Theme,
+    width: Option<usize>,
+    show_tool_calls: bool,
+) -> Vec<Line<'static>> {
     let Ok(text) = crate::state::read_tail_lossy(path, crate::state::MAX_TRANSCRIPT_TAIL_BYTES)
     else {
         return Vec::new();
@@ -368,7 +373,7 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
                 let msg = payload["message"].as_str().unwrap_or("");
                 crate::state::push_agent_markdown(&mut out, &mut last_was_blank, msg, theme, width);
             }
-            ("response_item", "function_call") => {
+            ("response_item", "function_call") if show_tool_calls => {
                 let name = payload["name"].as_str().unwrap_or("?");
                 let args = payload["arguments"].as_str().unwrap_or("");
                 let args_summary = summarize_args(args);
@@ -378,7 +383,7 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
                 )));
                 last_was_blank = false;
             }
-            ("response_item", "function_call_output") => {
+            ("response_item", "function_call_output") if show_tool_calls => {
                 let output = payload["output"].as_str().unwrap_or("");
                 let first = output.lines().next().unwrap_or("");
                 let summary = crate::state::truncate_chars(first, 100);
@@ -426,6 +431,7 @@ mod tests {
             Path::new("/nonexistent/rollout.jsonl"),
             &Theme::default(),
             None,
+            true,
         );
         assert!(lines.is_empty());
     }
@@ -445,8 +451,7 @@ mod tests {
             "\n",
         );
         std::fs::write(&path, content).unwrap();
-        let lines = render_transcript(&path, &Theme::default(), None);
-        let _ = std::fs::remove_file(&path);
+        let lines = render_transcript(&path, &Theme::default(), None, true);
         let flat: Vec<String> = lines
             .iter()
             .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
@@ -454,6 +459,19 @@ mod tests {
         assert!(flat.iter().any(|l| l.contains("hello codex")));
         assert!(flat.iter().any(|l| l.contains("hi there")));
         assert!(flat.iter().any(|l| l.contains("shell(")));
+
+        // show_tool_calls=false keeps the prose but drops the tool call.
+        let hidden = render_transcript(&path, &Theme::default(), None, false);
+        let _ = std::fs::remove_file(&path);
+        let flat_hidden: Vec<String> = hidden
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        assert!(flat_hidden.iter().any(|l| l.contains("hi there")));
+        assert!(
+            !flat_hidden.iter().any(|l| l.contains("shell(")),
+            "tool call hidden when show_tool_calls=false"
+        );
     }
 
     const UUID: &str = "019e8b21-9e7c-7553-a118-d1cdada725fd";

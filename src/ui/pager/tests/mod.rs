@@ -663,15 +663,19 @@ fn visual_rows_counts_wide_char_greedy_waste() {
     // FULLWIDTH 'A' is 2 cells. 5 of them = 10 cells. div_ceil(10,5)=2, but
     // greedy fits 2 per 5-cell row (1 cell wasted) → 3 rows, matching wrap_line.
     let wide = Line::from("\u{ff21}".repeat(5));
-    assert_eq!(visual_rows(&wide, 5), 3);
-    assert_eq!(visual_rows(&wide, 5), wrap_line(&wide, 5).len());
+    assert_eq!(visual_rows(&wide, 5, 4), 3);
+    assert_eq!(visual_rows(&wide, 5, 4), wrap_line(&wide, 5).len());
     // ASCII packs perfectly: 10 chars at width 5 = 2 rows.
     let ascii = Line::from("x".repeat(10));
-    assert_eq!(visual_rows(&ascii, 5), 2);
+    assert_eq!(visual_rows(&ascii, 5, 4), 2);
     // A glyph wider than the whole width is forced onto one row (never zero).
-    assert_eq!(visual_rows(&Line::from("\u{ff21}".to_string()), 1), 1);
+    assert_eq!(visual_rows(&Line::from("\u{ff21}".to_string()), 1, 4), 1);
     // Empty line is one visual row.
-    assert_eq!(visual_rows(&Line::from(""), 5), 1);
+    assert_eq!(visual_rows(&Line::from(""), 5, 4), 1);
+    // A tab counts as `tab_width` breakable cells: "\t\tx" at width 4, tab=4 →
+    // 8 cells of indent + 'x' = 9 cells → 3 rows (matches the expanded render).
+    let tabbed = Line::from("\t\tx");
+    assert_eq!(visual_rows(&tabbed, 4, 4), 3);
 }
 
 /// Finding `ui/pager/selection.rs:281`: the visual-cursor auto-scroll assumed

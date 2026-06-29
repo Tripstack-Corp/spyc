@@ -195,11 +195,17 @@ impl App {
                 }];
             }
             KeyCode::Char('V') => {
-                // Enter visual line mode -- anchor at the top visible
-                // line, then j/k/G/etc. extend the selection and `y`
-                // yanks the inclusive range. The interceptor above
-                // takes over all subsequent keys until Esc / V exit.
-                view.enter_visual();
+                // Double-tap `V` to select. The first `V` arms a line
+                // placement cursor at the top visible line; the user
+                // moves it (j/k/gg/G/…) to the exact start line, then
+                // a second `V` anchors the visual line selection there
+                // (placement handler → commit_placement_to_visual_line).
+                // Decoupling the anchor from "top of viewport" lets the
+                // selection start on a precise line. From the armed
+                // selection j/k/G/etc. extend it and `y` yanks the
+                // inclusive range.
+                view.enter_placement_line();
+                view.flash = Some("select: j/k move to start line · V anchor · Esc cancel".into());
             }
             KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 // ^v — enter placement mode. The user moves a
@@ -370,6 +376,12 @@ impl App {
                 // snapshot goes stale). `open_pane_scroll_pager` re-spawns into
                 // `view.scroll_pager`. (`view`'s borrow ends at the guard.)
                 self.open_pane_scroll_pager();
+            }
+            KeyCode::Char('t') if view.pane_scroll => {
+                // Toggle agent tool-use / tool-result lines in a transcript
+                // scrollback, then re-render with the new setting. (`view`'s
+                // borrow ends at the guard.)
+                self.toggle_scrollback_tool_calls();
             }
             // Mermaid diagram on screen: `o` opens it full-res in the OS viewer
             // (Preview.app / xdg-open); `i` renders it as a full-screen image

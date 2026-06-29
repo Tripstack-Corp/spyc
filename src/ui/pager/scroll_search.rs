@@ -129,7 +129,7 @@ impl PagerView {
         // viewport_h rows ending at the document's last line.
         let mut acc = 0usize;
         for (i, line) in self.lines.iter().enumerate().rev() {
-            acc = acc.saturating_add(visual_rows(line, body_w));
+            acc = acc.saturating_add(visual_rows(line, body_w, self.tab_width));
             if acc >= vh {
                 return i;
             }

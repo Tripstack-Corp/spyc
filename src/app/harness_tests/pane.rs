@@ -272,6 +272,55 @@ fn empty_scrollback_agent_pane_points_to_transcript() {
     });
 }
 
+/// `t` in a transcript scrollback flips whether the agent's tool-call lines
+/// render (and persists the choice). The tab detects as `claude` (a transcript
+/// agent) while running `cat` so it spawns in a test.
+#[test]
+fn t_toggles_transcript_tool_calls_on_an_agent_pane() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        let wake = app.make_pane_wake();
+        let pane = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
+            .expect("spawn cat");
+        let entry =
+            crate::pane::tabs::TabEntry::new(pane, crate::pane::tabs::TabInfo::new("claude", dir));
+        app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
+        assert!(app.view.transcript_show_tool_calls, "shown by default");
+        app.toggle_scrollback_tool_calls();
+        assert!(!app.view.transcript_show_tool_calls, "t hides tool calls");
+        assert_eq!(app.flash_text(), Some("tool calls: hidden"));
+        app.toggle_scrollback_tool_calls();
+        assert!(app.view.transcript_show_tool_calls, "t shows them again");
+        assert_eq!(app.flash_text(), Some("tool calls: shown"));
+    });
+}
+
+/// `t` on a plain (non-agent) pane is a no-op with a hint — there are no tool
+/// calls in vt100 scrollback to toggle.
+#[test]
+fn toggle_tool_calls_on_a_plain_pane_is_a_hinted_noop() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat"); // plain shell — no transcript spec
+        let before = app.view.transcript_show_tool_calls;
+        app.toggle_scrollback_tool_calls();
+        assert_eq!(
+            app.view.transcript_show_tool_calls, before,
+            "flag untouched on a non-agent pane"
+        );
+        assert_eq!(
+            app.flash_text(),
+            Some("tool calls: only in an agent transcript view")
+        );
+    });
+}
+
 /// `^a n` / `^a p` cycle tabs on *every* chord, including back-to-back with
 /// no loop iteration between — a routing-level guard for the "rapid `^a-n`
 /// eats the command" class. Exercises the full `handle_key` path with the

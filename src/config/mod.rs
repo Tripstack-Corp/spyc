@@ -39,6 +39,9 @@ pub struct Config {
     /// Yank / clipboard behavior knobs.
     pub yank: YankConfig,
 
+    /// Pager / viewer behavior knobs.
+    pub pager: PagerConfig,
+
     /// Markdown viewer behavior knobs.
     pub markdown: MarkdownConfig,
 
@@ -216,6 +219,31 @@ struct FileYank {
     include_pager_title: Option<bool>,
 }
 
+/// Pager / viewer knobs.
+#[derive(Debug, Clone)]
+pub struct PagerConfig {
+    /// How many columns a tab character expands to in the pager (and
+    /// the `^a v` scrollback). Default 4. `w` reveals each expanded tab
+    /// with a `→` marker; with `w` off the tab is plain indentation.
+    /// Clamped to at least 1 on load (a 0-width tab would vanish).
+    pub tab_width: usize,
+}
+
+impl Default for PagerConfig {
+    fn default() -> Self {
+        Self { tab_width: 4 }
+    }
+}
+
+/// On-disk shape of `[pager]`. `Option` for the same "didn't set"
+/// distinguishability as the other tables.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FilePager {
+    #[serde(default)]
+    tab_width: Option<usize>,
+}
+
 /// Markdown viewer knobs.
 #[derive(Debug, Clone)]
 pub struct MarkdownConfig {
@@ -327,6 +355,8 @@ struct FileConfig {
     pane: FilePane,
     #[serde(default)]
     yank: FileYank,
+    #[serde(default)]
+    pager: FilePager,
     #[serde(default)]
     markdown: FileMarkdown,
     #[serde(default)]
@@ -451,6 +481,12 @@ impl Config {
         // Yank: per-field merge.
         if let Some(b) = file.yank.include_pager_title {
             self.yank.include_pager_title = b;
+        }
+
+        // Pager: per-field merge. Clamp tab_width to >= 1 so a 0 in the
+        // config can't make tabs render as zero-width (invisible).
+        if let Some(w) = file.pager.tab_width {
+            self.pager.tab_width = w.max(1);
         }
 
         // Markdown: per-field merge.
@@ -620,6 +656,29 @@ mod tests {
         std::fs::write(&project, "[colors]\ndir = \"#abcdef\"\n").unwrap();
         let cfg = Config::load_from(&[Some(&user), Some(&project)]).unwrap();
         assert!(!cfg.yank.include_pager_title);
+    }
+
+    #[test]
+    fn pager_tab_width_defaults_to_four() {
+        assert_eq!(Config::default().pager.tab_width, 4);
+    }
+
+    #[test]
+    fn parses_pager_tab_width() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[pager]\ntab_width = 8\n").unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert_eq!(cfg.pager.tab_width, 8);
+    }
+
+    #[test]
+    fn pager_tab_width_zero_is_clamped_to_one() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[pager]\ntab_width = 0\n").unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert_eq!(cfg.pager.tab_width, 1, "a 0-width tab would vanish");
     }
 
     #[test]

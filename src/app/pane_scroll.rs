@@ -221,6 +221,10 @@ impl App {
                 // captured into the producer; `r` re-runs this after a resize.
                 let (term_w, _) = self.view.term_size;
                 let width = Some(usize::from(term_w.saturating_sub(2)));
+                // `t` toggles whether the agent's tool-use / tool-result lines
+                // are rendered; the worker re-runs `render` with the current
+                // value, so the toggle takes effect on the next mount / reload.
+                let show_tool_calls = self.view.transcript_show_tool_calls;
                 self.spawn_pager_stream(
                     PagerStreamMount::LowerPane { title },
                     move |tx| {
@@ -231,7 +235,7 @@ impl App {
                             session_id: session_id.as_deref(),
                         };
                         let lines = match resolve(query) {
-                            Some(path) => render(&path, &theme, width),
+                            Some(path) => render(&path, &theme, width, show_tool_calls),
                             None => Vec::new(),
                         };
                         let _ = tx.send(lines);
@@ -327,6 +331,31 @@ impl App {
     /// and flash. Shared by the static `mount_scroll_pager` and the streaming
     /// `pager_stream::mount_stream_pager` LowerPane arm (`stream_id` set → the
     /// view is a live stream). The two used to set this flag block independently.
+    /// `t` in an agent-transcript scrollback: flip whether the agent's
+    /// tool-use / tool-result lines render, then re-spawn so the change
+    /// shows (the worker re-runs `render` with the new flag). A no-op with
+    /// a hint on a plain vt100 scrollback — there are no tool calls there.
+    pub(crate) fn toggle_scrollback_tool_calls(&mut self) {
+        let has_transcript = self.runtime.pane_tabs.as_ref().is_some_and(|tabs| {
+            crate::agent::detect(&tabs.active_info().command)
+                .transcript()
+                .is_some()
+        });
+        if !has_transcript {
+            self.state
+                .flash_info("tool calls: only in an agent transcript view");
+            return;
+        }
+        self.view.transcript_show_tool_calls = !self.view.transcript_show_tool_calls;
+        self.open_pane_scroll_pager();
+        let shown = if self.view.transcript_show_tool_calls {
+            "shown"
+        } else {
+            "hidden"
+        };
+        self.state.flash_info(format!("tool calls: {shown}"));
+    }
+
     pub(crate) fn install_lower_pane_scroll_view(
         &mut self,
         title: String,
@@ -339,7 +368,11 @@ impl App {
         let mut view = crate::ui::pager::PagerView::new_styled(title, lines);
         view.mount = crate::ui::pager::Mount::LowerPane;
         view.pane_scroll = true;
-        view.show_line_numbers = false;
+        view.tab_width = self.state.config.pager.tab_width;
+        // Line numbers on by default: a gutter the live pane never has,
+        // so it reads at a glance as "scrolled back, not live" (and `:N`
+        // / `V` line targeting is legible). `l` toggles it off.
+        view.show_line_numbers = true;
         view.no_history = true;
         view.wrap = true;
         view.pending_scroll_to_bottom.set(true);

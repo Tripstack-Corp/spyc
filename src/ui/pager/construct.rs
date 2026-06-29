@@ -24,6 +24,7 @@ impl PagerView {
             search: Search::Off,
             show_line_numbers: true,
             show_whitespace: false,
+            tab_width: 4,
             saveable: false,
             full_width: false,
             fit_to_content: false,

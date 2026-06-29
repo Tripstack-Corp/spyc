@@ -75,7 +75,9 @@ pub struct TranscriptSpec {
     /// Render that file into pager lines. `width` is the pager body-width
     /// hint (cells) so agent prose reflows to the scrollback pane width
     /// when rendered as Markdown; `None` falls back to the default.
-    pub render: fn(&Path, &Theme, Option<usize>) -> Vec<Line<'static>>,
+    /// `show_tool_calls` keeps the agent's tool-use / tool-result lines
+    /// (`t` toggles them in the scrollback) — `false` renders prose only.
+    pub render: fn(&Path, &Theme, Option<usize>, bool) -> Vec<Line<'static>>,
     /// Config key gating the view; `None` = always-on (codex).
     pub config_key: Option<&'static str>,
     /// Default when the config key is unset.

@@ -212,9 +212,9 @@ pub enum Action {
 /// by the `leader_and_pane_namespaces_respect_tiers` guard: the leader (`Space`
 /// / `^a Space`) carries only `Global`/`Meta`, the `^a` pane prefix only
 /// `Pane`/`Meta`. `Frame` ops act on the file view and live on the
-/// letter / `g` / `H` / `[`/`]` chords. Test-scoped: the tier exists to make
-/// the namespace split a build-checked contract, not for runtime branching.
-#[cfg(test)]
+/// letter / `g` / `H` / `[`/`]` chords. The tier makes the namespace split a
+/// build-checked contract (the guard) and is also read at runtime to pause
+/// `Pane`-tier commands while a top-overlay editor / foreground command is up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
     /// Workspace-level, meaningful from any focus (worktree, project, session).
@@ -232,7 +232,8 @@ impl Action {
     /// the `Global` / `Pane` / `Meta` actions; everything else is `Frame` (the
     /// default), so a new global/pane action must be tagged here or the
     /// namespace guard rejects placing it on the leader / pane prefix.
-    #[cfg(test)]
+    /// Also consulted at runtime to pause `Pane`-tier commands while a
+    /// top-overlay editor / foreground command owns the screen.
     pub const fn tier(&self) -> Tier {
         match self {
             // Global — workspace ops (the leader namespace).

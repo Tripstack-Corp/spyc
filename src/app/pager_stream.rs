@@ -187,6 +187,7 @@ impl App {
                 view.line_count_hint = line_count_hint;
                 view.stream_id = Some(id);
                 view.saveable = true;
+                view.tab_width = self.state.config.pager.tab_width;
                 // Push any open pager onto the back stack so `:bprev` returns
                 // to it; save its scroll first (mirrors the old grep/git-view).
                 self.remember_pager_position();

@@ -17,7 +17,7 @@
 use anyhow::Result;
 
 use crate::fs;
-use crate::keymap::Action;
+use crate::keymap::{Action, Tier};
 use crate::pane::PaneTabs;
 use crate::spyc_debug;
 use crate::state::Harpoon;
@@ -106,6 +106,20 @@ impl App {
     }
 
     fn apply_inner(&mut self, action: &Action) -> Result<Vec<Effect>> {
+        // While a top-overlay editor (`V`) or foreground command (`;`) owns the
+        // top region (`Focus::Overlay`), the `^a …` pane-prefix chord still
+        // resolves (meta chords escape the overlay in `route_input`) — but
+        // acting on it here would mutate panes hidden *behind* the editor (the
+        // reported `^a c`-creates-a-hidden-tab confusion) and the user can't
+        // see the status line those commands rely on. The chord is already
+        // fully consumed by the resolver, so nothing leaks to the editor;
+        // swallow the Pane-tier action with a hint. Quit the editor to resume.
+        if matches!(self.state.focus, state::Focus::Overlay) && action.tier() == Tier::Pane {
+            self.state
+                .flash_info("pane commands paused while editing — quit the editor first");
+            return Ok(Vec::new());
+        }
+
         spyc_debug!(
             "apply {:?}: cursor={} vt={} grid={}x{} pp={} len={}",
             action,
@@ -527,5 +541,49 @@ impl App {
         let row_count = self.state.cur().rows.len();
         self.state.cur_mut().cursor.clamp(row_count);
         Ok(effects)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::state;
+    use crate::app::{App, Mode};
+    use crate::keymap::Action;
+
+    #[test]
+    fn pane_commands_are_paused_while_the_editor_overlay_is_focused() {
+        let mut app = App::test_app(std::env::temp_dir());
+        // The `V` editor / `;` command overlay owns the top region.
+        app.state.focus = state::Focus::Overlay;
+        // `^a c` resolves to PaneNewTab (a Pane-tier action); it must be
+        // swallowed, not open the new-tab prompt hidden behind the editor.
+        let fx = app.apply(&Action::PaneNewTab).expect("apply ok");
+        assert!(fx.is_empty(), "a paused pane action emits no effects");
+        assert!(
+            matches!(app.state.mode, Mode::Normal),
+            "no new-tab prompt opened behind the editor"
+        );
+        assert!(
+            app.state
+                .flash
+                .as_ref()
+                .is_some_and(|f| f.text.contains("paused")),
+            "a hint explains why the pane command did nothing"
+        );
+    }
+
+    #[test]
+    fn frame_actions_still_run_under_the_editor_overlay() {
+        let mut app = App::test_app(std::env::temp_dir());
+        app.state.focus = state::Focus::Overlay;
+        // A Frame-tier action (cursor move) is not a pane command — the
+        // overlay guard must not swallow it.
+        app.apply(&Action::Down(1)).expect("apply ok");
+        let paused = app
+            .state
+            .flash
+            .as_ref()
+            .is_some_and(|f| f.text.contains("paused"));
+        assert!(!paused, "frame actions are not paused by the overlay guard");
     }
 }

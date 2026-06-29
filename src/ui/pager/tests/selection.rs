@@ -257,6 +257,30 @@ fn placement_uppercase_v_commits_to_line_at_cursor_row() {
 }
 
 #[test]
+fn v_arm_places_a_line_cursor_then_anchors_at_the_chosen_line() {
+    // The double-tap `V`: first `V` arms a Line placement (no selection
+    // yet), motions move the cursor to the exact start line, second `V`
+    // anchors the line visual there.
+    let mut view = block_view_with(&["aaa", "bbb", "ccc", "ddd"]);
+    view.enter_placement_line();
+    let p = view.placement.expect("line placement armed");
+    assert_eq!(p.kind, VisualKind::Line, "armed as a Line cursor");
+    assert_eq!((p.row, p.col), (0, 0));
+    assert!(view.visual.is_none(), "no selection until the second V");
+    // Move down to the desired start line, then anchor.
+    view.placement_move(2, 0, 5);
+    view.commit_placement_to_visual_line();
+    assert!(view.placement.is_none(), "placement consumed on commit");
+    let sel = view.visual.expect("line visual armed");
+    assert_eq!(sel.kind, VisualKind::Line);
+    assert_eq!(
+        (sel.anchor, sel.cursor),
+        (2, 2),
+        "anchored at the chosen line"
+    );
+}
+
+#[test]
 fn picker_move_autoscrolls_via_shared_keep_visible() {
     let mut view = block_view_with(&["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
     view.picker_cursor = Some(0);

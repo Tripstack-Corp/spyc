@@ -61,6 +61,15 @@
 [yank]
 # include_pager_title = true
 
+# ── pager ─────────────────────────────────────────────────────────────
+# In-app pager / viewer (including the `^a v` pane scrollback).
+# `tab_width` (default 4) is how many columns a tab character expands
+# to. `w` reveals each expanded tab with a `→` marker; with `w` off the
+# tab is plain indentation. Minimum 1 (a 0 is clamped — a zero-width
+# tab would vanish).
+[pager]
+# tab_width = 4
+
 # ── markdown ──────────────────────────────────────────────────────────
 # Default view for `.md` / `.markdown` files in the pager.
 # `open_as_rendered` (default true) opens them in the rendered view;

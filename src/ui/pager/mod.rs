@@ -124,19 +124,27 @@ impl VisualSelection {
     }
 }
 
-/// A pre-visual-block "navigation cursor" used to position the
-/// anchor before committing to a visual block selection. The user
-/// presses `^v` once to enter this state, moves the cursor with vi
-/// motions, then presses `^v` again to commit at the current
-/// position (or `V` to commit to Line visual at the current row).
-/// `Esc` cancels. Stored on [`PagerView::placement`].
+/// A "navigation cursor" used to position the anchor before
+/// committing to a visual selection. Two entry points: `^v` once
+/// (`kind == Block`) lets the user place a cell cursor before
+/// committing to a visual block; `V` once (`kind == Line`) lets
+/// the user place a line cursor before arming a visual *line*
+/// selection at the exact start line. From either, vi motions move
+/// the cursor, a second `^v` commits to Block, a second `V` commits
+/// to Line, and `Esc` cancels. `kind` only drives the placement
+/// highlight (a single cell for Block, the whole row for Line) and
+/// which commit key is the "natural" one — both commits work from
+/// either kind. Stored on [`PagerView::placement`].
 #[derive(Debug, Clone, Copy)]
 pub struct PlacementCursor {
     /// 0-indexed line in `lines`.
     pub row: usize,
     /// 0-indexed character column within that line. Column 0 is
-    /// the leftmost cell.
+    /// the leftmost cell. Ignored when committing to a Line selection.
     pub col: usize,
+    /// What the eventual commit defaults to, and how the cursor is
+    /// drawn while positioning (cell for Block, full row for Line).
+    pub kind: VisualKind,
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -156,6 +164,10 @@ pub struct PagerView {
     pub show_line_numbers: bool,
     /// When true, show whitespace markers (·, ↲, etc.).
     pub show_whitespace: bool,
+    /// Columns a tab expands to (render + scroll math share this so wrap
+    /// and scroll-clamp agree). Defaults to 4; set from `[pager] tab_width`
+    /// where a pager shows file / transcript content.
+    pub tab_width: usize,
     /// When true, `s` saves the content to a file. Only for command
     /// output — not for files the user opened with `d`/Enter (they
     /// already exist on disk).

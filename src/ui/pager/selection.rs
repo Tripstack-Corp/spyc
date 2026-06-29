@@ -11,10 +11,12 @@ impl PagerView {
         self.visual.is_some()
     }
 
-    /// Enter visual line mode, anchoring the selection at the top
-    /// visible line. `j`/`k`/`G`/etc. then move the cursor end (with
-    /// auto-scroll) and `y` yanks the inclusive range. No-op on an
-    /// empty buffer (nothing to select).
+    /// Start a line visual selection immediately at the top visible
+    /// line, skipping the placement-arm step. Test-only: the `V` key
+    /// arms a line placement first (see [`Self::enter_placement_line`]),
+    /// so production never enters a line visual without a chosen anchor.
+    /// Tests use this to exercise the visual-mode mechanics directly.
+    #[cfg(test)]
     pub fn enter_visual(&mut self) {
         self.enter_visual_with_kind(VisualKind::Line);
     }
@@ -34,12 +36,25 @@ impl PagerView {
         }
     }
 
-    /// Enter pre-visual-block "placement" state. A navigation
+    /// Enter pre-visual-block "placement" state (`^v`). A navigation
     /// cursor lands at (top visible line, col 0); the user can
     /// then move it with vi motions (`hjkl`, `w`/`b`, `0`/`$`,
     /// `gg`/`G`) before committing to a visual block selection
     /// via a second `^v` or to Line visual via `V`. `Esc` cancels.
     pub fn enter_placement(&mut self) {
+        self.enter_placement_with_kind(VisualKind::Block);
+    }
+
+    /// Enter line "placement" state (`V`). The double-tap `V` arm:
+    /// the first `V` drops a line cursor at the top visible line so
+    /// the user can move it (`j`/`k`/`gg`/`G`/…) to the *exact* line
+    /// the selection should start on; the second `V` anchors a visual
+    /// line selection there. `Esc` cancels.
+    pub fn enter_placement_line(&mut self) {
+        self.enter_placement_with_kind(VisualKind::Line);
+    }
+
+    fn enter_placement_with_kind(&mut self, kind: VisualKind) {
         if self.lines.is_empty() {
             return;
         }
@@ -47,7 +62,7 @@ impl PagerView {
         // mutually exclusive (they share the cursor highlight).
         self.visual = None;
         let row = self.scroll.min(self.lines.len() - 1);
-        self.placement = Some(PlacementCursor { row, col: 0 });
+        self.placement = Some(PlacementCursor { row, col: 0, kind });
     }
 
     pub const fn cancel_placement(&mut self) {
@@ -317,7 +332,7 @@ impl PagerView {
         let mut acc = 0usize;
         let mut new_top = line;
         for i in (0..=line).rev() {
-            acc += visual_rows(&self.lines[i], body_w);
+            acc += visual_rows(&self.lines[i], body_w, self.tab_width);
             if acc > vh {
                 break;
             }

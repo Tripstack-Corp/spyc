@@ -263,12 +263,12 @@ impl App {
         viewport: u16,
     ) -> Option<Vec<Effect>> {
         let view = active_pager_mut!(self)?;
-        // Placement mode: pre-visual-block cursor positioning.
-        // First `^v` enters this state; vi motions move the cursor
-        // without defining a selection yet. Second `^v` commits to
-        // visual block at the cursor; `V` commits to visual line at
-        // the cursor's row; `Esc` cancels. We swallow keys that are
-        // motion-related so they don't fall through to scroll.
+        // Placement mode: cursor positioning before a visual commit.
+        // A first `^v` (block intent) or `V` (line intent) enters this
+        // state; vi motions move the cursor without defining a selection
+        // yet. Second `^v` commits to visual block at the cursor; `V`
+        // commits to visual line at the cursor's row; `Esc` cancels. We
+        // swallow motion-related keys so they don't fall through to scroll.
         if view.is_placement() {
             match key.code {
                 KeyCode::Esc => {

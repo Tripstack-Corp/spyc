@@ -269,12 +269,15 @@ spyc's workflow: browse files above, talk to Claude below.
   open it in `b`, work, and tear it down — while `a` stays on the main
   branch.
 - **^a v** enter scrollback view — browse up to 10K lines of pane
-  history in the **in-app pager** (v1.5). All pager keys work: `/`
-  search with `n` / `N`, `:N` jump, `V` visual line, `^v` visual
-  block, `y` yanks the selection, `l` toggles line numbers, `w`
-  whitespace markers. The pty keeps running off-screen — output
-  you miss while reading lands in scrollback for the next view.
-  `Esc` snaps back to live.
+  history in the **in-app pager** (v1.5). Line numbers are on by
+  default here (a gutter the live pane never shows, so it reads at a
+  glance as scrolled-back rather than live; `l` toggles). All pager
+  keys work: `/` search with `n` / `N`, `:N` jump, `V` visual line,
+  `^v` visual block, `y` yanks the selection, `l` toggles line
+  numbers, `w` whitespace markers, and (in an agent transcript) `t`
+  toggles tool-call lines. The pty keeps running off-screen — output
+  you miss while reading lands in scrollback for the next view. `Esc`
+  snaps back to live.
   - The fundamental limit is that full-screen TUIs do *virtual
     scrolling* inside a fixed grid — old content lives in app
     memory, not the terminal — so even a parallel vt100 parser
@@ -308,6 +311,11 @@ spyc's workflow: browse files above, talk to Claude below.
     inline claude captures fine from the terminal) and
     `[pane] agy_transcript_scrollback` (on by default). Codex
     transcripts are always on — there is no config gate.
+  - **`t` toggles tool calls.** In a transcript scrollback, `t`
+    shows / hides the agent's tool-use and tool-result lines (the
+    `⚙`/`└` entries) so you can skim just the conversation prose,
+    then bring the tool activity back. Shown by default; the choice
+    persists across `^a v` re-opens for the session.
 - **Ctrl+J** newline in pane (multi-line input for Claude CLI)
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of
@@ -354,7 +362,10 @@ spyc.
   repeat in / against the search direction (vim/less semantics)
 - **:N** jump to line N
 - **l** toggle line numbers (on by default)
-- **w** toggle whitespace markers (·, ↲, $)
+- **w** toggle whitespace markers (·, ↲, $) — including a `→` marker
+  on each tab. Tabs always expand to `[pager] tab_width` columns
+  (default 4) so indentation lines up whether or not markers are on;
+  `w` just reveals them.
 - **W** toggle line wrap (default on for content; off for picker UIs)
 - **m** toggle Markdown rendered ↔ source view (`.md`/`.markdown` only;
   flashes "not a markdown file" otherwise)
@@ -364,12 +375,17 @@ spyc.
 - **y** yank pager content to the system clipboard (always operates
   on the *source* — yanking a rendered Markdown view gives you back
   the markdown text, not the styled rendering)
-- **V** enter vi-style **visual line mode** to yank a line range:
-  the anchor sets at the top visible line, `j` / `k` / `^d` / `^u`
-  / `^f` / `^b` / `g` / `G` / `Home` / `End` extend the selection
-  (auto-scrolling), the status footer shows `L{lo}-L{hi}` and the
-  line count, `y` yanks the inclusive range to the clipboard and
-  exits, `Esc` / `V` cancel
+- **V** vi-style **visual line mode** to yank a line range, with a
+  double-tap to arm. The first `V` drops a line cursor at the top
+  visible line (the whole candidate row highlights); move it with
+  `j` / `k` / `gg` / `G` / `^d` / `^u` / … to the *exact* line the
+  selection should start on, then a second `V` anchors the selection
+  there. From the armed selection `j` / `k` / `^d` / `^u` / `^f` /
+  `^b` / `g` / `G` / `Home` / `End` extend it (auto-scrolling), the
+  status footer shows `L{lo}-L{hi}` and the line count, `y` yanks the
+  inclusive range to the clipboard and exits, `Esc` / `V` cancel.
+  (Decoupling the anchor from the top of the viewport lets a
+  selection begin on a precise line.)
 - **^v** enter **visual block (columnar) mode** — vi's rectangle.
   `j` / `k` extend rows, `h` / `l` extend columns; `y` yanks the
   rectangle (each row contributes `chars[lo_col..=hi_col]`, rows

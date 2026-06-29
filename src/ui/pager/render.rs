@@ -179,6 +179,11 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
         // end-of-line marker naturally ends up on the last wrapped
         // piece because we apply markers *before* wrap.
         let styled = apply_row_styling(line, view, abs_idx, theme);
+        // Tabs always expand to `view.tab_width` columns so indentation lines
+        // up (a raw `\t` would otherwise collapse or misalign). With `w` on the
+        // expansion shows a `→` marker; with `w` off it's plain indentation.
+        // `visual_rows` (scroll math) uses the same width, so wrap/scroll agree.
+        let styled = expand_tabs(&styled, view.tab_width, view.show_whitespace, theme);
         let styled = if view.show_whitespace {
             apply_whitespace_markers(&styled, theme)
         } else {
@@ -381,20 +386,36 @@ fn apply_row_styling(
             }
         }
     }
-    // Placement cursor: single reverse-video cell at the current
-    // (row, col). The visual cue the user asked for so they can see
-    // where the anchor will land when they commit with `^v` / `V`.
+    // Placement cursor: where the anchor will land when the user
+    // commits with `^v` / `V`. Block placement (`^v`) shows a single
+    // reverse-video cell at (row, col) since the column matters; Line
+    // placement (the first `V` of the double-tap arm) highlights the
+    // whole candidate row so it previews exactly which line the line
+    // selection will start on.
     if let Some(p) = view.placement
         && p.row == abs_idx
     {
-        // Re-style only the cursor cell so the rest of the row keeps its
-        // syntax-highlight / search styling while the user positions the
-        // placement anchor.
-        let cursor_style = Style::default()
-            .bg(theme.cursor_bg)
-            .fg(theme.cursor_fg)
-            .add_modifier(Modifier::REVERSED | Modifier::BOLD);
-        styled = restyle_cursor_cell(&styled, p.col, cursor_style);
+        match p.kind {
+            VisualKind::Line => {
+                styled = Line::from(
+                    styled
+                        .spans
+                        .into_iter()
+                        .map(|s| Span::styled(s.content, s.style.bg(theme.cursor_bg)))
+                        .collect::<Vec<_>>(),
+                );
+            }
+            VisualKind::Block => {
+                // Re-style only the cursor cell so the rest of the row keeps
+                // its syntax-highlight / search styling while the user
+                // positions the placement anchor.
+                let cursor_style = Style::default()
+                    .bg(theme.cursor_bg)
+                    .fg(theme.cursor_fg)
+                    .add_modifier(Modifier::REVERSED | Modifier::BOLD);
+                styled = restyle_cursor_cell(&styled, p.col, cursor_style);
+            }
+        }
     }
 
     if view.picker_cursor == Some(abs_idx) {
@@ -590,9 +611,54 @@ fn styled_line_for_render(
     Line::from(spans)
 }
 
+/// Expand tab characters to `tab_width` columns so indentation lines up in the
+/// pager (a raw `\t` renders as a single cell / gets dropped otherwise). With
+/// `show_marker` the first cell of each expanded tab is a `→` in the
+/// whitespace-marker style and the rest is blank fill; otherwise the tab
+/// becomes plain spaces carrying the original span's style. Fixed width per tab
+/// — one indent level = one `tab_width`, matching how editors show a tab
+/// indent. A line with no tabs is returned untouched (the common fast path).
+fn expand_tabs(
+    line: &Line<'static>,
+    tab_width: usize,
+    show_marker: bool,
+    theme: &Theme,
+) -> Line<'static> {
+    if !line.spans.iter().any(|s| s.content.contains('\t')) {
+        return line.clone();
+    }
+    let width = tab_width.max(1);
+    let ws_style = Style::default().fg(theme.pick).add_modifier(Modifier::DIM);
+    let mut out: Vec<Span<'static>> = Vec::new();
+    for span in &line.spans {
+        let mut segment = String::new();
+        for ch in span.content.chars() {
+            if ch == '\t' {
+                if !segment.is_empty() {
+                    out.push(Span::styled(std::mem::take(&mut segment), span.style));
+                }
+                if show_marker {
+                    out.push(Span::styled("→", ws_style));
+                    if width > 1 {
+                        out.push(Span::styled(" ".repeat(width - 1), ws_style));
+                    }
+                } else {
+                    out.push(Span::styled(" ".repeat(width), span.style));
+                }
+            } else {
+                segment.push(ch);
+            }
+        }
+        if !segment.is_empty() {
+            out.push(Span::styled(segment, span.style));
+        }
+    }
+    Line::from(out)
+}
+
 /// Vim-style whitespace substitution. Applied per span to keep existing
-/// colors. Visual cues:
-///   `→`  tab
+/// colors. Tabs are already expanded by [`expand_tabs`] before this runs, so
+/// only the remaining cues are handled here. Visual cues:
 ///   `·`  trailing space
 ///   `^M` carriage return
 ///   `$`  end-of-line (non-empty lines only — blank lines are obviously blank)
@@ -614,12 +680,6 @@ fn apply_whitespace_markers(line: &Line<'static>, theme: &Theme) -> Line<'static
         let mut segment = String::new();
         for ch in text.chars() {
             match ch {
-                '\t' => {
-                    if !segment.is_empty() {
-                        out.push(Span::styled(std::mem::take(&mut segment), span.style));
-                    }
-                    out.push(Span::styled("→", ws_style));
-                }
                 '\r' => {
                     if !segment.is_empty() {
                         out.push(Span::styled(std::mem::take(&mut segment), span.style));
@@ -672,6 +732,45 @@ mod tests {
             Span::styled("ab", Style::default().fg(Color::Red)),
             Span::styled("cd", Style::default().fg(Color::Blue)),
         ])
+    }
+
+    #[test]
+    fn expand_tabs_off_marker_uses_plain_spaces_at_tab_width() {
+        let theme = crate::ui::theme::Theme::default();
+        let line = Line::from(Span::styled("\tx", Style::default().fg(Color::Red)));
+        // tab_width 4, no marker: a leading tab becomes 4 plain spaces that
+        // keep the surrounding span's color, so indentation aligns invisibly.
+        let out = super::expand_tabs(&line, 4, false, &theme);
+        let text: String = out.spans.iter().map(|s| s.content.to_string()).collect();
+        assert_eq!(text, "    x");
+        assert!(!text.contains('→'), "no marker when whitespace is off");
+    }
+
+    #[test]
+    fn expand_tabs_with_marker_shows_arrow_then_fill() {
+        let theme = crate::ui::theme::Theme::default();
+        let line = Line::from(Span::raw("\tx"));
+        // tab_width 4, marker on: `→` then 3 fill columns, total width 4.
+        let out = super::expand_tabs(&line, 4, true, &theme);
+        let text: String = out.spans.iter().map(|s| s.content.to_string()).collect();
+        assert_eq!(text, "→   x");
+    }
+
+    #[test]
+    fn expand_tabs_respects_configured_width() {
+        let theme = crate::ui::theme::Theme::default();
+        let line = Line::from(Span::raw("\tx"));
+        let out = super::expand_tabs(&line, 2, false, &theme);
+        let text: String = out.spans.iter().map(|s| s.content.to_string()).collect();
+        assert_eq!(text, "  x", "two-column tab");
+    }
+
+    #[test]
+    fn expand_tabs_leaves_tab_free_lines_untouched() {
+        let theme = crate::ui::theme::Theme::default();
+        let line = two_color_line();
+        let out = super::expand_tabs(&line, 4, true, &theme);
+        assert_eq!(runs(&out), runs(&line), "no tabs → unchanged");
     }
 
     #[test]

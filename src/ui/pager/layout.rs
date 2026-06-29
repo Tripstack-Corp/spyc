@@ -119,13 +119,27 @@ pub(super) fn prev_word_start(chars: &[char], col: usize) -> Option<usize> {
 /// short-circuit. A char wider than `width` is forced onto a row by
 /// itself (matching `wrap_line`'s "force at least one char" guard), so a
 /// row is never left empty.
-pub(super) fn visual_rows(line: &Line<'_>, width: usize) -> usize {
+pub(super) fn visual_rows(line: &Line<'_>, width: usize, tab_width: usize) -> usize {
     if width == 0 {
         return 1;
     }
     let mut rows = 1usize;
     let mut col = 0usize;
     for ch in line.spans.iter().flat_map(|s| s.content.chars()) {
+        // A tab expands to `tab_width` width-1 cells (see `expand_tabs`), and
+        // those cells can break across rows like any spaces — count it that way
+        // so the scroll-clamp math matches the rendered (expanded) line.
+        if ch == '\t' {
+            for _ in 0..tab_width.max(1) {
+                if col > 0 && col + 1 > width {
+                    rows += 1;
+                    col = 1;
+                } else {
+                    col += 1;
+                }
+            }
+            continue;
+        }
         let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
         if w == 0 {
             continue; // zero-width (combining marks, controls): no advance

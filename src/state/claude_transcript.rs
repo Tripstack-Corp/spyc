@@ -58,7 +58,12 @@ pub fn resolve_active_jsonl(q: crate::agent::TranscriptQuery) -> Option<PathBuf>
 /// chronological order. Returns empty on read failure. Assistant prose
 /// is rendered through the Markdown viewer (`width` hints prose/table
 /// reflow); user prompts and tool calls stay plain, agent-styled.
-pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
+pub fn render_transcript(
+    path: &Path,
+    theme: &Theme,
+    width: Option<usize>,
+    show_tool_calls: bool,
+) -> Vec<Line<'static>> {
     let Ok(text) = crate::state::read_tail_lossy(path, crate::state::MAX_TRANSCRIPT_TAIL_BYTES)
     else {
         return Vec::new();
@@ -104,7 +109,7 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
                 for block in blocks {
                     match block["type"].as_str() {
                         Some("tool_result") => {
-                            if let Some(preview) = tool_result_preview(block) {
+                            if show_tool_calls && let Some(preview) = tool_result_preview(block) {
                                 out.push(Line::from(Span::styled(
                                     format!("  \u{2514} {preview}"),
                                     dim_style,
@@ -140,7 +145,7 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
                                 width,
                             );
                         }
-                        Some("tool_use") => {
+                        Some("tool_use") if show_tool_calls => {
                             let name = block["name"].as_str().unwrap_or("?");
                             let label = match tool_use_detail(&block["input"]) {
                                 Some(detail) => format!("\u{2699} {name}({detail})"),
@@ -223,19 +228,28 @@ mod tests {
 
     #[test]
     fn missing_file_is_empty() {
-        let lines = render_transcript(Path::new("/nonexistent/x.jsonl"), &Theme::default(), None);
+        let lines = render_transcript(
+            Path::new("/nonexistent/x.jsonl"),
+            &Theme::default(),
+            None,
+            true,
+        );
         assert!(lines.is_empty());
     }
 
     fn render_to_flat(content: &str) -> Vec<String> {
+        render_to_flat_opts(content, true)
+    }
+
+    fn render_to_flat_opts(content: &str, show_tool_calls: bool) -> Vec<String> {
         let dir = std::env::temp_dir();
         let path = dir.join(format!(
-            "spyc-claude-test-{}-{:p}.jsonl",
+            "spyc-claude-test-{}-{:p}-{show_tool_calls}.jsonl",
             std::process::id(),
             content
         ));
         std::fs::write(&path, content).unwrap();
-        let lines = render_transcript(&path, &Theme::default(), None);
+        let lines = render_transcript(&path, &Theme::default(), None, show_tool_calls);
         let _ = std::fs::remove_file(&path);
         lines
             .iter()
@@ -261,6 +275,31 @@ mod tests {
         assert!(flat.iter().any(|l| l.contains("\u{2699} Edit(src/lib.rs)")));
         // tool_result renders as a dim one-line preview.
         assert!(flat.iter().any(|l| l.contains("\u{2514} ok")));
+    }
+
+    #[test]
+    fn hiding_tool_calls_keeps_prose_and_drops_tool_lines() {
+        let content = concat!(
+            r#"{"type":"user","message":{"role":"user","content":"fix the bug"}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"On it."},{"type":"tool_use","name":"Edit","input":{"file_path":"src/lib.rs"}}]}}"#,
+            "\n",
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}"#,
+            "\n",
+        );
+        let flat = render_to_flat_opts(content, false);
+        // Prompt + assistant prose stay.
+        assert!(flat.iter().any(|l| l.contains("fix the bug")));
+        assert!(flat.iter().any(|l| l.contains("On it.")));
+        // tool_use and tool_result lines are gone.
+        assert!(
+            !flat.iter().any(|l| l.contains("\u{2699}")),
+            "no tool-use line"
+        );
+        assert!(
+            !flat.iter().any(|l| l.contains("\u{2514}")),
+            "no tool-result line"
+        );
     }
 
     #[test]

@@ -31,7 +31,12 @@ pub fn resolve_active_jsonl(q: crate::agent::TranscriptQuery) -> Option<PathBuf>
 /// chronological order. Returns empty on read failure. Model prose is
 /// rendered through the Markdown viewer (`width` hints prose/table
 /// reflow); user prompts and tool calls stay plain.
-pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
+pub fn render_transcript(
+    path: &Path,
+    theme: &Theme,
+    width: Option<usize>,
+    show_tool_calls: bool,
+) -> Vec<Line<'static>> {
     let Ok(text) = crate::state::read_tail_lossy(path, crate::state::MAX_TRANSCRIPT_TAIL_BYTES)
     else {
         return Vec::new();
@@ -97,7 +102,7 @@ pub fn render_transcript(path: &Path, theme: &Theme, width: Option<usize>) -> Ve
             }
 
             // Format tool_calls
-            if let Some(tool_calls) = val["tool_calls"].as_array() {
+            if show_tool_calls && let Some(tool_calls) = val["tool_calls"].as_array() {
                 for tool in tool_calls {
                     let name = tool["name"].as_str().unwrap_or("?");
                     out.push(Line::from(Span::styled(
@@ -118,7 +123,12 @@ mod tests {
 
     #[test]
     fn missing_file_is_empty() {
-        let lines = render_transcript(Path::new("/nonexistent/x.jsonl"), &Theme::default(), None);
+        let lines = render_transcript(
+            Path::new("/nonexistent/x.jsonl"),
+            &Theme::default(),
+            None,
+            true,
+        );
         assert!(lines.is_empty());
     }
 
@@ -157,7 +167,7 @@ mod tests {
         }
         f.flush().unwrap();
 
-        let lines = render_transcript(f.path(), &Theme::default(), None);
+        let lines = render_transcript(f.path(), &Theme::default(), None, true);
         let text = flatten(&lines);
 
         assert!(text.contains("hello there"), "user content rendered");
@@ -166,5 +176,10 @@ mod tests {
         // The malformed line rendered its raw content without panicking
         // (reaching this assertion at all proves the guard works).
         assert!(text.contains("oops"), "malformed line survived");
+
+        // With tool calls hidden, the prose stays but the tool name is gone.
+        let hidden = flatten(&render_transcript(f.path(), &Theme::default(), None, false));
+        assert!(hidden.contains("sure thing"), "model prose kept");
+        assert!(!hidden.contains("read_file"), "tool call hidden");
     }
 }
