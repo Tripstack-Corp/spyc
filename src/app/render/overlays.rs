@@ -146,7 +146,7 @@ impl App {
         if !self.view.show_activity {
             return;
         }
-        use ratatui::style::{Color, Modifier, Style};
+        use ratatui::style::{Color, Style};
         use ratatui::text::{Line as HudLine, Span};
         use ratatui::widgets::Paragraph as ActivityP;
 
@@ -154,13 +154,13 @@ impl App {
         // (build + diff + tty emission); `r` is just the render closure (CPU).
         // pk-r ≈ diff+emission; pk near the inter-keystroke interval ⇒ render-bound.
         //
-        // Split into a dimmed `N dps` headline + a full-contrast remainder: the
-        // headline is the at-a-glance idle indicator and reads better
-        // de-emphasized, while the `[p e o]` reason breakdown and the timings
-        // stay sharp. Only the head carries `Modifier::DIM` (see the render loop).
-        // Fixed-width count/timing fields so the line — and thus the whole
-        // block, since line 1 is the longest — keeps a constant width instead
-        // of bouncing as throughput and latency rise and fall.
+        // The whole HUD renders in one foreground colour (solid black on each
+        // band) — no per-segment dimming. An earlier `Modifier::DIM` on the
+        // `N dps` headline made that count a washed-out grey against the rest,
+        // which read as an inconsistent font colour (same problem as the dropped
+        // transcript-preview DIM). Fixed-width count/timing fields so the line —
+        // and thus the whole block, since line 1 is the longest — keeps a
+        // constant width instead of bouncing as throughput and latency move.
         let l1_head = format!(" {:>4} dps", self.view.activity.snap.draws);
         let l1_tail = format!(
             " [p:{:>3} e:{:>3} o:{:>3}]  {:>6} cells/s  pk {:>5.1}ms r{:>5.1}ms echo {:>5.1}ms ",
@@ -311,21 +311,11 @@ impl App {
                 width: block_w,
                 height: 1,
             };
+            // Every row renders in one uniform style (solid black on its band)
+            // so the HUD font colour stays consistent — including row 0, whose
+            // `N dps` headline used to be dimmed.
             let normal = Style::default().fg(Color::Black).bg(*bg);
-            // Row 0 alone splits into a dimmed `N dps` headline + a full-contrast
-            // remainder (the `[p e o]` breakdown + timings); every other row is a
-            // single span.
-            let line = if row == 0 {
-                HudLine::from(vec![
-                    Span::styled(
-                        format!("{pad}{l1_head}"),
-                        normal.add_modifier(Modifier::DIM),
-                    ),
-                    Span::styled(l1_tail.clone(), normal),
-                ])
-            } else {
-                HudLine::from(Span::styled(format!("{pad}{text}"), normal))
-            };
+            let line = HudLine::from(Span::styled(format!("{pad}{text}"), normal));
             frame.render_widget(ActivityP::new(line), rect);
         }
     }

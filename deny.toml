@@ -84,6 +84,17 @@ ignore = [
     # alternative without forking portable-pty.
     { id = "RUSTSEC-2017-0008", reason = "unmaintained transitive via portable-pty; no alternative" },
 ]
+# cargo-deny's native "unmaintained" source (separate from the RUSTSEC
+# advisory-db) reports a maintainer EOL declaration with the synthetic id
+# RUSTSEC-0000-0000, so it can't be silenced per-crate in `ignore` above
+# (that array's `{ crate = … }` form targets the *yanked* check). Scope it to
+# our own workspace crates: spyc still fails if IT goes unmaintained, but a
+# transitive font/parsing dep we can't upgrade doesn't break CI. The trigger
+# was ttf-parser 0.25.1 (author declared EOL, recommends skrifa) — transitive
+# via resvg/fontdb for the mermaid SVG→PNG render only, no runtime untrusted
+# font input, and no safe upgrade in the resvg 0.46 tree. RUSTSEC-db
+# unmaintained advisories (real ids) are unaffected and still enforced above.
+unmaintained = "workspace"
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
 # Setting this to true can be helpful if you have special authentication requirements that cargo-deny does not support.
