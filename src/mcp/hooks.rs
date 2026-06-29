@@ -1,4 +1,4 @@
-//! Claude Code status hooks: spyc installs three command hooks into a launched
+//! Claude Code status hooks: spyc installs command hooks into a launched
 //! claude pane's project `.claude/settings.json` so the agent auto-reports its
 //! activity (`spyc --report-status <state>`) on lifecycle events, driving the
 //! per-tab activity dot WITHOUT the agent having to call the `report_status`
@@ -13,6 +13,10 @@
 //! * `Notification`      → `blocked` (Claude's "waiting for your input" idle
 //!   notification — a slower backstop. It does NOT fire on permission prompts,
 //!   so `PermissionRequest` is what carries the immediate blocked signal.)
+//! * `PreToolUse`        → `blocked` (matched to `AskUserQuestion`/`ExitPlanMode`
+//!   — the agent asking a question or requesting plan approval. These are
+//!   mid-turn tools that fire none of the above, so without this the dot keeps
+//!   pulsing `working` while the agent actually waits on the user.)
 //! * `Stop`              → `done`    (the agent finished its turn)
 //!
 //! Merge/cleanup mirrors the `.mcp.json` policy in [`super::config`]: merge our
@@ -27,14 +31,21 @@ use serde_json::{Value, json};
 
 use super::config::ConfigCleanup;
 
-/// The (event, reported-state) hooks spyc installs. Two events map to `blocked`:
-/// `PermissionRequest` (the real-time permission-prompt signal) and
-/// `Notification` (the slower idle "waiting for input" backstop).
-const STATUS_HOOKS: [(&str, &str); 4] = [
-    ("UserPromptSubmit", "working"),
-    ("PermissionRequest", "blocked"),
-    ("Notification", "blocked"),
-    ("Stop", "done"),
+/// The (event, matcher, reported-state) hooks spyc installs. `matcher` is the
+/// tool-name pattern for the per-tool events (`""` = all / not-a-tool-event).
+/// Three things map to `blocked`: `PermissionRequest` (the real-time
+/// permission-prompt signal), `Notification` (the slower idle "waiting for
+/// input" backstop), and a `PreToolUse` matching `AskUserQuestion`/`ExitPlanMode`
+/// — the agent asking a question or requesting plan approval, which fire no
+/// `PermissionRequest`/`Notification`/`Stop` of their own (they're mid-turn
+/// tools), so without this the dot keeps the working pulse while the agent
+/// waits on you.
+const STATUS_HOOKS: [(&str, &str, &str); 5] = [
+    ("UserPromptSubmit", "", "working"),
+    ("PermissionRequest", "", "blocked"),
+    ("Notification", "", "blocked"),
+    ("PreToolUse", "AskUserQuestion|ExitPlanMode", "blocked"),
+    ("Stop", "", "done"),
 ];
 
 /// True if `group` (a matcher-group `{matcher, hooks:[...]}`) holds a command
@@ -100,9 +111,9 @@ fn merged_status_hooks_json(existing: Option<&str>, exe: &str) -> Option<String>
     let obj = root.as_object_mut()?;
     let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
     let hooks_obj = hooks.as_object_mut()?;
-    for (event, state) in STATUS_HOOKS {
+    for (event, matcher, state) in STATUS_HOOKS {
         let group = json!({
-            "matcher": "",
+            "matcher": matcher,
             "hooks": [ { "type": "command", "command": format!("{exe} --report-status {state}") } ],
         });
         let arr = hooks_obj.entry(event).or_insert_with(|| json!([]));
@@ -137,7 +148,7 @@ pub fn cleanup_claude_status_hooks(dir: &Path) -> ConfigCleanup {
         .pointer("/hooks")
         .and_then(Value::as_object)
         .is_some_and(|h| {
-            STATUS_HOOKS.iter().any(|(event, _)| {
+            STATUS_HOOKS.iter().any(|(event, _, _)| {
                 h.get(*event)
                     .and_then(Value::as_array)
                     .is_some_and(|a| a.iter().any(group_is_ours))
@@ -154,7 +165,7 @@ pub fn cleanup_claude_status_hooks(dir: &Path) -> ConfigCleanup {
         return ConfigCleanup::NothingToDo;
     };
     if let Some(hooks_obj) = obj.get_mut("hooks").and_then(Value::as_object_mut) {
-        for (event, _) in STATUS_HOOKS {
+        for (event, _, _) in STATUS_HOOKS {
             if let Some(list) = hooks_obj.get_mut(event).and_then(Value::as_array_mut) {
                 list.retain(|g| !group_is_ours(g));
             }
@@ -200,8 +211,9 @@ mod tests {
         assert!(ensure_claude_status_hooks(dir));
         let path = dir.join(".claude/settings.json");
         let v = read(&path);
-        // All three events present, each running --report-status with its state.
-        for (event, state) in STATUS_HOOKS {
+        // Every event present, each running --report-status with its state and
+        // carrying its tool-name matcher (`""` for the non-tool events).
+        for (event, matcher, state) in STATUS_HOOKS {
             let cmd = v
                 .pointer(&format!("/hooks/{event}/0/hooks/0/command"))
                 .and_then(Value::as_str)
@@ -210,7 +222,18 @@ mod tests {
                 cmd.contains("--report-status") && cmd.contains(state),
                 "{event} → {state}: got {cmd:?}"
             );
+            let m = v
+                .pointer(&format!("/hooks/{event}/0/matcher"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            assert_eq!(m, matcher, "{event} matcher");
         }
+        // The PreToolUse hook targets the user-facing ask/approve tools.
+        assert_eq!(
+            v.pointer("/hooks/PreToolUse/0/matcher")
+                .and_then(Value::as_str),
+            Some("AskUserQuestion|ExitPlanMode")
+        );
         // Cleanup removes everything → file (and .claude/) gone.
         assert!(matches!(
             cleanup_claude_status_hooks(dir),
