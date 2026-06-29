@@ -935,6 +935,29 @@ mod tests {
         assert_eq!(read_lsp_message(&mut c).unwrap(), "hello");
     }
 
+    // Regression: the `--report-status` hook reporter wrote a BARE
+    // newline-delimited JSON line, which the socket server (Content-Length
+    // framed) silently dropped — so hook-driven status never reached spyc.
+    // The reporter must frame via `send_message` so `read_lsp_message` reads it
+    // back; a bare line must NOT parse (that was the bug).
+    #[test]
+    fn report_status_framing_round_trips_but_a_bare_line_does_not() {
+        let body = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"report_status","arguments":{"status":"blocked"}}}"#;
+        let mut framed = Vec::new();
+        send_message(&mut framed, body).unwrap();
+        assert_eq!(
+            read_lsp_message(&mut Cursor::new(framed)).unwrap(),
+            body,
+            "send_message framing must round-trip through the socket reader"
+        );
+        // The old reporter's output: bare JSON + '\n', no Content-Length header.
+        let mut bare = Cursor::new(format!("{body}\n").into_bytes());
+        assert!(
+            read_lsp_message(&mut bare).is_err(),
+            "a bare newline-delimited line must NOT parse — silently dropping it was the bug"
+        );
+    }
+
     #[test]
     fn read_lsp_message_rejects_oversized_content_length() {
         // A hostile/garbage header must not trigger a multi-GB allocation;

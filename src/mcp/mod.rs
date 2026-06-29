@@ -169,7 +169,7 @@ fn resolve_context_path(project_root: &Path) -> PathBuf {
 /// below the proxy's 20 s) bounds the worst case so the hook can't stall the
 /// agent's turn.
 pub fn report_status_to_socket(state: &str, trace: bool) {
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader};
     const REPORT_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
     // Opt-in diagnostic trace (`--status-trace`, baked into the installed hook
@@ -216,12 +216,18 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
             "name": "report_status",
             "arguments": { "status": state, "pane_id": pane_id },
         },
-    });
-    if writeln!(stream, "{req}").is_err() {
+    })
+    .to_string();
+    // The socket server reads Content-Length-framed messages (`read_lsp_message`,
+    // same framing the proxy forwards). A bare newline-delimited line has no
+    // `Content-Length` header, so the server never parses it and the report is
+    // silently dropped — which is why hook-driven reports never moved the dot,
+    // while MCP-tool calls (routed through the framing proxy) did. Frame it the
+    // same way via `send_message` (which also flushes).
+    if protocol::send_message(&mut stream, &req).is_err() {
         trace_log("report-status: write FAILED");
         return;
     }
-    let _ = stream.flush();
     trace_log(&format!("report-status: sent state={state}"));
     // Read the one-line reply so spyc has applied the command before we exit —
     // closing the socket immediately would otherwise race the main-loop apply.
