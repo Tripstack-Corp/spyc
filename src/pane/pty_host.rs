@@ -32,6 +32,19 @@ use super::PaneWake;
 /// to exit on its own.
 const REAP_GRACE: std::time::Duration = std::time::Duration::from_millis(200);
 
+/// Bound on the reader→consumer channel, in 8 KiB read chunks. A full channel
+/// blocks the reader thread's `send`, which lets the pty's kernel buffer fill
+/// and the child's `write` throttle — natural terminal flow control — so a
+/// firehose child (`yes`, `cat /dev/urandom`) can't grow the channel without
+/// limit when the consumer (the vt100 parser for a `Pane`, the per-tick `drain`
+/// for a capture/task) falls behind. 512 ⇒ ≤4 MiB buffered: far above any
+/// legitimate interactive burst (a full-screen redraw is a few chunks), small
+/// enough that the parser catches up quickly once a firehose is interrupted.
+/// Safe because every container drains continuously (parser worker / per-tick
+/// drain) and teardown drops the receiver, so a blocked `send` is transient
+/// backpressure that always resolves — never a wedge.
+const READER_CHANNEL_CAP: usize = 512;
+
 /// MVU Phase 3b/3c: the wake half of a pty consumer — a lost-wakeup-safe
 /// edge flag plus the closure fired on its 0→1 transition. Used by Pane's
 /// parser worker (3b, via `adopt`) AND, in 3c, by the `PtyHost` reader
@@ -222,8 +235,11 @@ impl PtyHost {
         let writer = pair.master.take_writer()?;
 
         // Background thread pumps reader → channel. The render loop
-        // drains the channel without blocking on child output.
-        let (tx, event_rx) = mpsc::channel::<PtyEvent>();
+        // drains the channel without blocking on child output. The channel is
+        // BOUNDED (`READER_CHANNEL_CAP`): a full channel blocks the reader's
+        // `send`, applying backpressure so a firehose child can't grow it
+        // without limit when the consumer falls behind (see the const).
+        let (tx, event_rx) = mpsc::sync_channel::<PtyEvent>(READER_CHANNEL_CAP);
         let closed_atomic = Arc::new(AtomicBool::new(false));
         let closed_flag = Arc::clone(&closed_atomic);
         // MVU Phase 3c: the wake slot the reader re-loads each iteration.
@@ -548,7 +564,7 @@ fn kill_group(pid: u32, sig: rustix::process::Signal) {
 /// `pane::reader_loop`.
 fn reader_loop(
     mut reader: Box<dyn Read + Send>,
-    tx: &mpsc::Sender<PtyEvent>,
+    tx: &mpsc::SyncSender<PtyEvent>,
     closed: &AtomicBool,
     wake: &Arc<Mutex<Option<Wake>>>,
 ) {
@@ -640,7 +656,7 @@ mod tests {
         let payload: Vec<u8> = b"alpha\nbeta\n".to_vec();
         let reader =
             Box::new(std::io::Cursor::new(payload.clone())) as Box<dyn std::io::Read + Send>;
-        let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
+        let (tx, rx) = std::sync::mpsc::sync_channel::<PtyEvent>(super::READER_CHANNEL_CAP);
         let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let closed_cl = std::sync::Arc::clone(&closed);
 
@@ -667,6 +683,50 @@ mod tests {
         assert_eq!(got_bytes, payload, "byte stream must round-trip in order");
     }
 
+    /// Backpressure: with a cap-1 channel the reader MUST block between every
+    /// 8 KB chunk (only one can sit in the channel at a time), yet every byte
+    /// is still delivered in order with no loss, and the reader completes (no
+    /// deadlock). This is the guarantee the bounded channel adds — a firehose
+    /// child is throttled, not silently dropped or grown without limit. (The
+    /// child-`write` throttle itself is the live-load-test concern.)
+    #[test]
+    fn reader_loop_bounded_channel_delivers_all_under_a_tight_cap() {
+        let chunk = 8192usize;
+        let mut payload: Vec<u8> = Vec::new();
+        payload.extend(std::iter::repeat_n(b'A', chunk));
+        payload.extend(std::iter::repeat_n(b'B', chunk));
+        payload.extend(std::iter::repeat_n(b'C', chunk));
+        let reader =
+            Box::new(std::io::Cursor::new(payload.clone())) as Box<dyn std::io::Read + Send>;
+        // cap 1: at most one chunk buffered → the reader blocks on every send
+        // until the consumer recvs, exercising the backpressure path.
+        let (tx, rx) = std::sync::mpsc::sync_channel::<PtyEvent>(1);
+        let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let closed_cl = std::sync::Arc::clone(&closed);
+        let wake = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let thread = std::thread::spawn(move || {
+            super::reader_loop(reader, &tx, &closed_cl, &wake);
+        });
+        let mut got: Vec<u8> = Vec::new();
+        let mut got_close = false;
+        // Blocking recv (no poll): the reader can only finish after each chunk
+        // clears the cap-1 channel, so a deadlock would hang the test.
+        loop {
+            match rx.recv() {
+                Ok(PtyEvent::Bytes(b)) => got.extend_from_slice(&b),
+                Ok(PtyEvent::Closed) => {
+                    got_close = true;
+                    break;
+                }
+                Err(_) => break,
+            }
+        }
+        thread.join().unwrap();
+        assert!(got_close, "Closed must arrive after every chunk drains");
+        assert_eq!(got, payload, "all bytes delivered in order through cap-1");
+        assert!(closed.load(std::sync::atomic::Ordering::Acquire));
+    }
+
     /// MVU Phase 3c: with a `Some` wake slot, the reader fires on the byte
     /// 0→1 edge AND once on EOF — exactly two fires for one chunk (the
     /// output edge coalesces; the close-wake is unconditional). This is the
@@ -677,7 +737,7 @@ mod tests {
         use std::sync::atomic::AtomicUsize;
         let payload = b"hello\n".to_vec();
         let reader = Box::new(std::io::Cursor::new(payload)) as Box<dyn std::io::Read + Send>;
-        let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
+        let (tx, rx) = std::sync::mpsc::sync_channel::<PtyEvent>(super::READER_CHANNEL_CAP);
         let closed = Arc::new(AtomicBool::new(false));
         let closed_cl = Arc::clone(&closed);
         let count = Arc::new(AtomicUsize::new(0));
@@ -708,7 +768,7 @@ mod tests {
     #[test]
     fn reader_loop_none_slot_is_silent() {
         let reader = Box::new(std::io::Cursor::new(b"x".to_vec())) as Box<dyn std::io::Read + Send>;
-        let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
+        let (tx, rx) = std::sync::mpsc::sync_channel::<PtyEvent>(super::READER_CHANNEL_CAP);
         let closed = Arc::new(AtomicBool::new(false));
         let closed_cl = Arc::clone(&closed);
         let wake = Arc::new(Mutex::new(None));

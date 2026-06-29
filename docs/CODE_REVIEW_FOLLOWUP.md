@@ -1,6 +1,6 @@
 # Code review follow-up — finalizing the June 2026 review
 
-**Status:** ACTIVE tracker (opened 2026-06-21). The June 2026 deep review ([`docs/archive/CODE_REVIEW_2026-06.md`](archive/CODE_REVIEW_2026-06.md)) drove a large remediation campaign (PRs #329–#424). This doc tracks what it left: the High/Medium findings deferred or never verified.
+**Status:** ✅ COMPLETE (closed 2026-06-28). Every High/Medium finding the June 2026 deep review ([`docs/archive/CODE_REVIEW_2026-06.md`](archive/CODE_REVIEW_2026-06.md)) left is now at a clean terminal state — fixed, or closed (refuted / by-design / accepted). The last finding (`pty_host.rs:208`) closed in PR #606. Opened 2026-06-21.
 
 **Goal:** drive every remaining finding to a clean terminal state — **fixed** (own cluster PR) or **closed** (refuted / by-design / accepted), keeping an honest ledger.
 
@@ -31,7 +31,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 - **PR11** — MCP scope/robustness + path/env overlay _(3 findings; clusters: mcp)_
 - **PR12** — Misc correctness batch _(11 findings; clusters: resume, other, fs-watch-topology, prompt-allowlist-drift, perf-linear-scan, perf-sort-alloc, pager-truncation-bytes, pane-vt100-recovery-size)_
 
-**Remaining: 1** (after PR #602; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings, #590 fixed the 2 MCP-robustness findings, #592 fixed inventory re-yank, #595 fixed the 2 git-view syntect-on-main-thread findings, #597 closed rename-similarity as by-design, #598 unified `:limit`, #600 stopped the session-restore dedup dropping distinct sessions, #601 fixed the vt100-recovery parser size, #602 moved the watcher listing refresh off-thread). The one open item is `pty_host.rs:208` (unbounded reader→parser channel — needs a backpressure design + live firehose load-test; see the `REAL` row below). See the closed log for the trail.
+**Remaining: 0 — campaign complete** (after PR #606; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings, #590 fixed the 2 MCP-robustness findings, #592 fixed inventory re-yank, #595 fixed the 2 git-view syntect-on-main-thread findings, #597 closed rename-similarity as by-design, #598 unified `:limit`, #600 stopped the session-restore dedup dropping distinct sessions, #601 fixed the vt100-recovery parser size, #602 moved the watcher listing refresh off-thread, #606 bounded the pty reader→parser channel — the last one). All 67 are now at a clean terminal state. See the closed log for the trail.
 
 ## To fix — by cluster
 
@@ -78,7 +78,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/clipboard.rs:111` | Clipboard helper inherits stdout/stderr (garbles the raw-mode TUI) and leaks a zombie when stdin write fails | medium | S | ✅ PR #549 |
 | `src/fs/finder.rs:136` | find_nested_git_repos re-walks the entire subtree raw (no gitignore, no cap, no cancellation) on every F open / :grep in a git root | medium | S | ✅ PR #583 |
 | `src/fs/grep.rs:353` | search_to_vec blocks on the full repo walk even after the result limit is reached | medium | S | ✅ PR #527 |
-| `src/pane/pty_host.rs:208` | Unbounded reader->parser channel with a reader that never stops reading: no backpressure, unbounded memory under a firehose child | medium | S | REAL |
+| `src/pane/pty_host.rs:208` | Unbounded reader->parser channel with a reader that never stops reading: no backpressure, unbounded memory under a firehose child | medium | S | ✅ PR #606 |
 | `src/state/sessions/mod.rs:579` | find_claude_session_name reads the entire conversation JSONL (100+ MB) into memory | medium | S | ✅ PR #583 |
 | `src/agent/resume.rs:298` | gemini_resume_index_for runs `gemini --list-sessions` synchronously with no timeout on the session-restore path | medium | M | ✅ PR #583 |
 | `src/app/key_dispatch/mod.rs:315` | Capture-pty writes bypass the Effect executor while sibling sinks in the same match use Effect::SendToPane | medium | M | ✅ PR #581 |
@@ -131,6 +131,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | ✅ PR #598 |
 
 ## Closed / resolved (running log)
+
+**✅ PR #606 — bound the pty reader→consumer channel; backpressure (2026-06-28) — LAST FINDING, campaign complete:**
+- `pane/pty_host.rs:208` — the reader thread pumped 8 KB pty chunks into an UNBOUNDED `mpsc::channel`, so a firehose child (`yes`, `cat /dev/urandom`) that outran the consumer (vt100 parser for a Pane / per-tick drain for a capture/task) grew it without limit. Switched to a bounded `sync_channel(READER_CHANNEL_CAP=512)` (≤4 MiB): a full channel blocks the reader's `send` → the pty kernel buffer fills → the child's `write` throttles (terminal flow control). Verified deadlock-free across every state: the Pane parser worker drains continuously and checks its stop flag at the TOP of each loop iteration (so a demote/close mid-firehose exits promptly — can't spin on a never-empty channel and hang the join); captures/tasks `drain` every tick; demote/promote block the reader only transiently (≤1 tick) until the new container drains; teardown drops the receiver → blocked `send` returns `Err` → the detached reader exits; `^z` SIGSTOPs the child so nothing fills. The 0→1 wake protocol is unchanged. New cap-1 test proves all bytes arrive in order with no loss + no deadlock under a tight bound. The real firehose feel (smooth throttle, no wedge) is the live load-test.
 
 **✅ PR #602 — watcher listing refresh off the event loop (2026-06-28):**
 - `app/sources.rs:293` — the debounced fs-watcher refresh ran `refresh_listing` (a ≤50k-entry `read_dir` + full sort + rebuild) inline on the event loop, freezing the UI on a big dir under fs churn. The watcher trigger now calls `App::spawn_listing_refresh`, which runs the read on the existing file-op worker (reuses `FileOp`/`FileOutcome`/`Message::FileOpDone` — no new Message variant); the result installs through `AppState::apply_refreshed_listing` (extracted back-half, shared with the still-synchronous post-mutation `refresh_listing`). Single-in-flight + dirty-re-spawn so an event burst can't pile up reads; staleness-gated by the focused column's `list_generation` (chdir / sync refresh / focus switch discards the stale read). 3 tests (worker read, fresh applies, stale discarded). HELD for owner live-test (daily-driver async timing).
