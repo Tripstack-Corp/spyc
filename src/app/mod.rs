@@ -651,6 +651,12 @@ pub struct ViewState {
     /// `pager_history` because the latter silently drops
     /// `no_history=true` views — going through history would lose them.
     pub pager_help_stash: Option<PagerView>,
+    /// Stash for the real scrollback (`scroll_pager`) while its dedicated help
+    /// (`H` in `^a v`) is shown in that same bottom slot. `H` toggles the help
+    /// between scrollback- and pager-keys variants; `Esc`/`q` restores this.
+    /// Kept apart from `pager_help_stash` (the top-overlay help) so the two
+    /// regions' help flows never clobber each other.
+    pub scroll_pager_help_stash: Option<PagerView>,
     /// Per-file scroll memory for the pager (loaded once at startup;
     /// see [`state::pager_positions`]).
     pub pager_positions: crate::state::pager_positions::PagerPositions,
@@ -794,6 +800,7 @@ impl ViewState {
             pager_pending_bracket: None,
             pager_was_open: false,
             pager_help_stash: None,
+            scroll_pager_help_stash: None,
             pager_positions: crate::state::pager_positions::PagerPositions::load(),
             theme,
             needs_full_repaint: false,

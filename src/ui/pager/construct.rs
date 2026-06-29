@@ -11,8 +11,8 @@ use crate::ui::theme::Theme;
 
 use super::{Mount, PagerView, Search};
 
-use super::PAGER_HELP_TITLE;
 use super::layout::line_plain_text;
+use super::{PAGER_HELP_TITLE, SCROLLBACK_HELP_TITLE};
 
 impl PagerView {
     /// Build a pager from pre-styled lines (e.g. the help overlay).
@@ -272,5 +272,115 @@ pub fn build_pager_help(theme: &Theme) -> PagerView {
     // and never word-wrap (its content is curated to fit).
     view.no_history = true;
     view.wrap = false;
+    view
+}
+
+/// The dedicated help for the `^a v` scrollback / transcript view. Shown in the
+/// bottom `scroll_pager` slot (over the stashed scrollback); `H` toggles it with
+/// [`build_pager_help`] — separate-but-linked — and `Esc`/`q` restores the
+/// scrollback. Leads with a short blurb on the transcript engine, then the
+/// scrollback-specific keys.
+pub fn build_scrollback_help(theme: &Theme) -> PagerView {
+    use crate::ui::display_pad_right;
+
+    let key_style = Style::default().fg(theme.pick).add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(theme.status_path);
+    let section_style = Style::default()
+        .fg(theme.status_user)
+        .add_modifier(Modifier::BOLD);
+    let blurb_style = Style::default().fg(theme.status_suffix);
+
+    // Intro blurb — the "extended support" the generic pager help doesn't cover.
+    let blurb: &[&str] = &[
+        "Scrollback shows the pane's history in the in-app pager.",
+        "For an agent tab (Claude / codex / agy) it engages the agent's",
+        "on-disk transcript JSONL instead — real text, searchable, not a",
+        "terminal-grid snapshot. Line numbers are on by default here so it",
+        "reads as scrolled-back, not live. The pty keeps running off-screen;",
+        "Esc snaps back to live.",
+    ];
+
+    let sections: &[(&str, &[(&str, &str)])] = &[
+        (
+            "Transcript",
+            &[
+                ("t", "show / hide agent tool-use & tool-result lines"),
+                ("r", "reload (a full-screen agent keeps appending)"),
+            ],
+        ),
+        (
+            "Jump / search",
+            &[
+                ("gf", "jump to a file path referenced in the output"),
+                ("gF", "jump + open the pager at file:line"),
+                (":N", "jump to line N"),
+                ("/  ?  n  N", "search forward / backward, repeat"),
+            ],
+        ),
+        (
+            "Select / yank",
+            &[
+                (
+                    "V",
+                    "visual line mode — double-tap to arm (place, then anchor)",
+                ),
+                ("^v", "visual block mode"),
+                ("y  Y", "yank source / visible to clipboard"),
+            ],
+        ),
+        (
+            "Display",
+            &[
+                ("l", "toggle line numbers"),
+                ("w", "toggle whitespace markers (·, ↲, $, → tab)"),
+                ("W", "toggle line wrap"),
+            ],
+        ),
+        (
+            "Navigation",
+            &[
+                ("j  k", "scroll a line"),
+                ("^D  ^U", "half page"),
+                ("^F  ^B  Space", "page"),
+                ("g  G", "top / bottom"),
+            ],
+        ),
+        (
+            "Exit",
+            &[
+                ("q  Q  Esc", "back to the live pane"),
+                ("H", "toggle the full pager-keys help"),
+            ],
+        ),
+    ];
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    for b in blurb {
+        lines.push(Line::from(Span::styled((*b).to_string(), blurb_style)));
+    }
+    for (title, rows) in sections {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(*title, section_style)));
+        for (keys, desc) in *rows {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(display_pad_right(keys, 16), key_style),
+                Span::raw("  "),
+                Span::styled((*desc).to_string(), desc_style),
+            ]));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  press H for all pager keys · Esc to return".to_string(),
+        blurb_style,
+    )));
+
+    let mut view = PagerView::new_styled(SCROLLBACK_HELP_TITLE, lines);
+    view.show_line_numbers = false;
+    view.no_history = true;
+    view.wrap = false;
+    // Renders in the bottom pane region where the scrollback was.
+    view.mount = Mount::LowerPane;
     view
 }

@@ -548,4 +548,54 @@ mod tests {
             "backspacing past the first digit exits jump mode"
         );
     }
+
+    /// `H` in the scrollback gives it a dedicated help in the bottom slot;
+    /// pressing `H` again toggles to the full pager-keys help (separate but
+    /// linked); `Esc` restores the stashed scrollback.
+    #[test]
+    fn scrollback_help_toggles_with_pager_help_and_esc_restores() {
+        use crate::app::state::Focus;
+        use crate::ui::pager::{Mount, PAGER_HELP_TITLE, SCROLLBACK_HELP_TITLE};
+
+        let mut app = App::test_app(std::env::temp_dir());
+        app.state.focus = Focus::Pane; // bottom scrollback owns input
+        let mut sb = PagerView::new_plain(
+            "transcript",
+            (0..20).map(|i| format!("line {i}")).collect::<Vec<_>>(),
+        );
+        sb.pane_scroll = true;
+        sb.mount = Mount::LowerPane;
+        app.view.scroll_pager = Some(sb);
+
+        // First H → transcript help, real scrollback stashed.
+        app.handle_pager_key(ch('H'));
+        assert_eq!(
+            app.view.scroll_pager.as_ref().map(|v| v.title.as_str()),
+            Some(SCROLLBACK_HELP_TITLE)
+        );
+        assert!(app.view.scroll_pager_help_stash.is_some());
+
+        // H again → toggle to the full pager-keys help (still stashed).
+        app.handle_pager_key(ch('H'));
+        assert_eq!(
+            app.view.scroll_pager.as_ref().map(|v| v.title.as_str()),
+            Some(PAGER_HELP_TITLE)
+        );
+        assert!(app.view.scroll_pager_help_stash.is_some());
+
+        // H once more → back to transcript help (toggle is symmetric).
+        app.handle_pager_key(ch('H'));
+        assert_eq!(
+            app.view.scroll_pager.as_ref().map(|v| v.title.as_str()),
+            Some(SCROLLBACK_HELP_TITLE)
+        );
+
+        // Esc → restore the real scrollback (not snap-to-live, not close).
+        app.handle_pager_key(code(KeyCode::Esc));
+        assert_eq!(
+            app.view.scroll_pager.as_ref().map(|v| v.title.as_str()),
+            Some("transcript")
+        );
+        assert!(app.view.scroll_pager_help_stash.is_none());
+    }
 }

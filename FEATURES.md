@@ -316,6 +316,12 @@ spyc's workflow: browse files above, talk to Claude below.
     `⚙`/`└` entries) so you can skim just the conversation prose,
     then bring the tool activity back. Shown by default; the choice
     persists across `^a v` re-opens for the session.
+  - **`H` opens the scrollback's own help.** The transcript view has
+    its own help (the keys above + a blurb on the transcript engine),
+    shown in the bottom pane; pressing `H` again toggles to the full
+    pager-keys help (separate but linked), and `Esc`/`q` returns to the
+    scrollback. (`H` is a no-op in the *generic* overlay pager only when
+    it's a bottom scrollback — there it's this transcript help.)
 - **Ctrl+J** newline in pane (multi-line input for Claude CLI)
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of

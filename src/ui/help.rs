@@ -284,7 +284,7 @@ const SECTIONS: &[Section] = &[
             ),
             (
                 "^a v",
-                "scroll pane history in the in-app pager (/ ? n/N, :N, V, ^v, y; t toggles transcript tool calls)",
+                "scroll pane history in the in-app pager (/ ? n/N, :N, V, ^v, y; t toggles transcript tool calls; H transcript help)",
             ),
             ("^a u", "quick select — pick URL/path/SHA/IP from pane"),
             ("^a s", "send selection paths to pane stdin"),

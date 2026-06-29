@@ -13,7 +13,7 @@ mod render;
 mod scroll_search;
 mod selection;
 
-pub use construct::build_pager_help;
+pub use construct::{build_pager_help, build_scrollback_help};
 pub use layout::{centered_body_width, centered_col_width};
 pub use render::render;
 
@@ -331,6 +331,13 @@ pub struct PagerView {
 /// `Esc` handler can dismiss just the help and pop back to the
 /// underlying pager that was active when `?` was pressed.
 pub const PAGER_HELP_TITLE: &str = "Pager help";
+
+/// Sentinel title for the scrollback / transcript help view (`H` in the
+/// `^a v` scrollback). Shown in the bottom `scroll_pager` slot over the
+/// stashed scrollback; `H` toggles it with [`PAGER_HELP_TITLE`] and `Esc`/`q`
+/// restores the scrollback. Both titles are how the motion + close handlers
+/// recognize a help view sitting in the scroll slot.
+pub const SCROLLBACK_HELP_TITLE: &str = "Scrollback / transcript help";
 
 #[cfg(test)]
 mod tests;
