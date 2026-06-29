@@ -31,7 +31,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 - **PR11** — MCP scope/robustness + path/env overlay _(3 findings; clusters: mcp)_
 - **PR12** — Misc correctness batch _(11 findings; clusters: resume, other, fs-watch-topology, prompt-allowlist-drift, perf-linear-scan, perf-sort-alloc, pager-truncation-bytes, pane-vt100-recovery-size)_
 
-**Remaining: 5** (after PR #597; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings, #590 fixed the 2 MCP-robustness findings, #592 fixed inventory re-yank, #595 fixed the 2 git-view syntect-on-main-thread findings). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
+**Remaining: 4** (after PR #598; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings, #590 fixed the 2 MCP-robustness findings, #592 fixed inventory re-yank, #595 fixed the 2 git-view syntect-on-main-thread findings, #597 closed rename-similarity as by-design, #598 unified `:limit`). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
 
 ## To fix — by cluster
 
@@ -128,9 +128,12 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/pane/tabs.rs:20` | Claude-specific session-restore state machine (PendingResumeSend) lives in the generic pane layer | medium | M | ✅ #581 (closed: by-design) |
 | `src/state/inventory.rs:85` | Re-yanking a modified file silently keeps the stale cached content (moved from PR9 — dedup *behavior*, not code dup) | medium | S | ✅ PR #592 |
 | `src/state/sessions/mod.rs:127` | load_sessions dedup collapses distinct resumable sessions that share cwd + commands (moved from PR9) | medium | S | REAL |
-| `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
+| `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | ✅ PR #598 |
 
 ## Closed / resolved (running log)
+
+**✅ PR #598 — unify `:limit` command with the `=` limit prompt (2026-06-28):**
+- `state/dispatch.rs:45` — the `:limit` command and the `=`-prompt (`PromptKind::Limit`) had drifted: the prompt special-cased `git`/`g`/`h`/`harpoon` (with empty-repo / empty-harpoon error checks), but the command path treated them as literal globs and set `temp_filter` unconditionally. (`apply_temp_filter` already interprets the `"git"`/`"h"` tokens, so the *filtering* worked — but `:limit git` in a repo with no changes silently set a doomed empty filter with a misleading flash, instead of erroring.) Extracted one `apply_limit_token` helper (empty→clear, `!`→picks, `git`/`g`→git, `h`/`harpoon`→harpoon, else→glob; returns whether to rebuild) used by BOTH paths, so `:limit git`/`:limit h` now behave exactly like `=git`/`=h` — matching what FEATURES.md already documented. 2 tests (git filter set; error + filter untouched without changes).
 
 **✅ PR #597 — rename-similarity recompute is by-design; documented (2026-06-28):**
 - `git/diff_model/build.rs:559` — accepted, not changed. Investigated reusing gix's rename-detection diff: the staged `gd`/`gD` path (`gix::diff::index::ChangeRef::Rewrite`) does **not** surface the `DiffLineStats` its tracker computed (verified against gix-diff 0.64 `index/mod.rs` — no `diff` field), so there's nothing to reuse there. The `show` path (`tree_with_rewrites::ChangeRef::Rewrite`) *does* expose `diff`, but its `similarity` is **byte-based** while our `blob_similarity` is **line-based** (different metric *and* potentially a different diff algorithm), so reusing only there would make `show`'s `R<n>`/`C<n>` % disagree with `gd`/`gD`'s. Deriving similarity from our own display hunks is unreliable (context-limited hunks don't give whole-file line totals). The recompute runs in the **off-thread** diff worker (`build_payload`), so the extra blob diff per *rare* renamed file costs no UI responsiveness. Kept the one pinned, uniform metric across all three views; added call-site comments at both Rewrite arms so it isn't re-flagged.

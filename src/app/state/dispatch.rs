@@ -9,6 +9,47 @@ use crate::app::{Effect, Mode, Prompt, PromptKind};
 use super::{AppState, CommandResult, PromptResult};
 
 impl AppState {
+    /// Apply a `limit` token to the focused column's temp filter — the single
+    /// source shared by the `=` prompt (`PromptKind::Limit`) and the `:limit`
+    /// command so they can't drift. Tokens: empty clears, `!` = picks only,
+    /// `git`/`g` = git changes, `h`/`harpoon` = harpoon, anything else = a
+    /// literal glob. Flashes the outcome. Returns `true` when the filter changed
+    /// and the rows should rebuild; `false` on an error that left it untouched
+    /// (empty harpoon / not in a git repo).
+    fn apply_limit_token(&mut self, token: &str) -> bool {
+        match token {
+            "" => {
+                self.cur_mut().temp_filter = None;
+                self.flash_info("limit cleared");
+            }
+            "!" => {
+                self.cur_mut().temp_filter = Some("!".to_string());
+                self.flash_info("limit: picks only");
+            }
+            "h" | "harpoon" => {
+                if self.cur().harpoon_filter_set.is_empty() {
+                    self.flash_error("harpoon empty (no repo/PROJECT_HOME) — nothing to filter");
+                    return false;
+                }
+                self.cur_mut().temp_filter = Some("h".to_string());
+                self.flash_info("limit: harpoon");
+            }
+            "git" | "g" => {
+                if self.cur().git.files.is_empty() {
+                    self.flash_error("not in a git repo (or no changes)");
+                    return false;
+                }
+                self.cur_mut().temp_filter = Some("git".to_string());
+                self.flash_info("limit: git changes");
+            }
+            pat => {
+                self.cur_mut().temp_filter = Some(pat.to_string());
+                self.flash_info(format!("limit: {pat}"));
+            }
+        }
+        true
+    }
+
     /// Handle the pure-domain arms of `:` commands.
     ///
     /// (See [`COMMAND_TABLE`] for the canonical registry of base names — the
@@ -35,26 +76,19 @@ impl AppState {
             return CommandResult::Quit;
         }
 
-        // :limit [pattern]
-        if input == "limit" {
-            self.cur_mut().temp_filter = None;
-            self.flash_info("limit cleared");
-            self.rebuild_rows();
+        // :limit [token] — shares `apply_limit_token` with the `=` prompt
+        // (`PromptKind::Limit`) so `:limit git` / `:limit h` behave exactly like
+        // `=git` / `=h` (the git-changes / harpoon filters), not literal globs.
+        if input == "limit" || input == "limit " {
+            if self.apply_limit_token("") {
+                self.rebuild_rows();
+            }
             return CommandResult::Handled;
         }
         if let Some(pat) = input.strip_prefix("limit ") {
-            let pat = pat.trim();
-            if pat.is_empty() {
-                self.cur_mut().temp_filter = None;
-                self.flash_info("limit cleared");
-            } else if pat == "!" {
-                self.cur_mut().temp_filter = Some("!".to_string());
-                self.flash_info("limit: picks only");
-            } else {
-                self.cur_mut().temp_filter = Some(pat.to_string());
-                self.flash_info(format!("limit: {pat}"));
+            if self.apply_limit_token(pat.trim()) {
+                self.rebuild_rows();
             }
-            self.rebuild_rows();
             return CommandResult::Handled;
         }
 
@@ -326,34 +360,9 @@ impl AppState {
                 PromptResult::Handled
             }
             PromptKind::Limit => {
-                let pattern = buffer.trim();
-                if pattern.is_empty() {
-                    self.cur_mut().temp_filter = None;
-                    self.flash_info("limit cleared");
-                } else if pattern == "!" {
-                    self.cur_mut().temp_filter = Some("!".to_string());
-                    self.flash_info("limit: picks only");
-                } else if pattern == "h" || pattern == "harpoon" {
-                    if self.cur().harpoon_filter_set.is_empty() {
-                        self.flash_error(
-                            "harpoon empty (no repo/PROJECT_HOME) — nothing to filter",
-                        );
-                        return PromptResult::Handled;
-                    }
-                    self.cur_mut().temp_filter = Some("h".to_string());
-                    self.flash_info("limit: harpoon");
-                } else if pattern == "git" || pattern == "g" {
-                    if self.cur().git.files.is_empty() {
-                        self.flash_error("not in a git repo (or no changes)");
-                        return PromptResult::Handled;
-                    }
-                    self.cur_mut().temp_filter = Some("git".to_string());
-                    self.flash_info("limit: git changes");
-                } else {
-                    self.cur_mut().temp_filter = Some(pattern.to_string());
-                    self.flash_info(format!("limit: {pattern}"));
+                if self.apply_limit_token(buffer.trim()) {
+                    self.rebuild_rows();
                 }
-                self.rebuild_rows();
                 PromptResult::Handled
             }
             PromptKind::PaneNewTabCmd => {

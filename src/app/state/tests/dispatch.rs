@@ -69,6 +69,33 @@ fn cmd_limit_picks_only() {
 }
 
 #[test]
+fn cmd_limit_git_matches_the_prompt() {
+    use crate::ui::list_view::{GitChange, GitFileStatus};
+    // `:limit git` must behave like `=git` (the git-changes filter), not a
+    // literal "git" glob — shared `apply_limit_token`.
+    let mut s = test_state();
+    s.left.git.files.insert(
+        "foo.rs".to_string(),
+        GitFileStatus::unstaged(GitChange::Modified),
+    );
+    s.dispatch_command("limit git");
+    assert_eq!(s.left.temp_filter.as_deref(), Some("git"));
+    assert!(s.flash.as_ref().unwrap().text.contains("git changes"));
+}
+
+#[test]
+fn cmd_limit_git_errors_and_leaves_filter_untouched_without_changes() {
+    // With no git changes, `:limit git` flashes an error and does NOT set a
+    // doomed empty filter (the bug the unification fixes — the old command path
+    // set temp_filter="git" unconditionally, yielding a silent empty list).
+    let mut s = test_state();
+    assert!(s.left.git.files.is_empty());
+    s.dispatch_command("limit git");
+    assert!(s.left.temp_filter.is_none());
+    assert!(s.flash.as_ref().unwrap().text.contains("not in a git repo"));
+}
+
+#[test]
 fn cmd_sort_query() {
     let mut s = test_state();
     s.dispatch_command("sort");
