@@ -371,6 +371,39 @@ once we've daily-driven our own builds for a few days.
   account (key as a masked repo variable; later OIDC/WIF),
   `RUSTC_WRAPPER=sccache` in the quality and coverage steps. Do it
   when PR friction warrants; current caching is good enough.
+- **Merge autopilot — `:land` (PARKED, needs more thought).** Kill the
+  merge-train traffic-copping: push → CI → main moved → rebase → repeat,
+  done by hand. Diagnosis: the recurring conflict is *always* the
+  per-PR `Cargo.toml` version line + `Cargo.lock` spyc entry — never
+  scope. So the win is mechanical, not a multi-agent "conductor"
+  (scope-negotiation is over-fit; the remote is the real serialization
+  authority and spyc coordination is per-instance/one-socket anyway —
+  explicitly **not** building that).
+  - **Tier 1 — SHIPPED #608 (v1.77.0).** `spyc-semver` git merge driver
+    (`src/merge_driver.rs`): `.gitattributes` routes `Cargo.toml` through
+    `spyc --merge-driver`, a 3-way merge in-process (diffy, no git
+    subprocess) that keeps the higher semver for a version-only conflict;
+    `Cargo.lock` uses `merge=ours` + a `cargo` regen. Installed into the
+    repo's git config on launch. Every PR *after* it auto-resolves the
+    version line on rebase (it couldn't help its own introducing PR —
+    `.gitattributes` wasn't on main yet).
+  - **Tier 2 — `:land` autopilot (the parked piece).** A command that
+    runs the loop off the main thread (rebase onto fresh main → driver
+    auto-resolves → force-push → `bkt pr merge` → conflict-lap → repeat),
+    reported as a background task. **Open design fork:** the loop's core
+    moves — `git rebase` and especially `git push` — can't be done via
+    gix (networking/credentials features are off by design; gix push is
+    nascent; no rebase API), so it *must* invoke the `git` CLI, which the
+    `no_subprocess_git_in_production` guard forbids in spyc's Rust. Two
+    ways through, undecided: (a) ship `scripts/land.sh` and launch it via
+    the existing background-task machinery (spyc's Rust never spawns git;
+    guard intact; logic in bash); (b) a Rust off-thread worker with a
+    documented guard carve-out for the autopilot module. Lean (a), but
+    parked to think it through.
+  - **Tier 3 (only if real scope collisions ever appear).** A single
+    *merge mutex* on the worktree-lease substrate (`claim_worktree`) so
+    concurrent `:land`s queue rather than race — plus an MCP `land_pr`
+    tool. The useful 5% of "the conductor"; not scope declaration.
 
 ## Post-2.0 (2.x) — the structural arc
 
