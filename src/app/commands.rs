@@ -258,9 +258,109 @@ pub(super) fn cmd_graveyard(app: &mut App, _args: &str) -> Vec<Effect> {
 // reachable and re-bindable (`map KEY command <name>`). Each just runs the
 // same `Action` the key fired, returning its effects to the caller.
 
-/// `:activity` — toggle the activity monitor overlay (was `A`).
-pub(super) fn cmd_activity(app: &mut App, _args: &str) -> Vec<Effect> {
+/// `:activity` — toggle the activity monitor overlay (was `A`). `:activity dump`
+/// instead opens a saveable pager with a per-pane breakdown of how every agent
+/// tab's dot is derived (the `:why-status` reasoning for ALL panes at once) —
+/// the `source` line is the crux: a live `report_status` self-report vs the
+/// output-timing fallback. Easy to yank/save and paste when debugging the dots.
+pub(super) fn cmd_activity(app: &mut App, args: &str) -> Vec<Effect> {
+    if args.trim() == "dump" {
+        let mut view = PagerView::new_plain("activity dump", activity_dump_lines(app));
+        view.saveable = true;
+        app.set_pager(view);
+        return Vec::new();
+    }
     app.apply(&Action::ToggleActivity).unwrap_or_default()
+}
+
+/// Build the `:activity dump` report (see [`cmd_activity`]). Pure read of the
+/// live tabs + activity tallies → plain lines; no I/O, no mutation.
+fn activity_dump_lines(app: &App) -> Vec<String> {
+    use crate::pane::AgentActivity;
+    use crate::state::sessions::AgentKind;
+
+    let state_str = |a: AgentActivity| match a {
+        AgentActivity::Working => "working",
+        AgentActivity::Idle => "idle",
+        AgentActivity::Blocked => "blocked",
+        AgentActivity::Done => "done",
+        AgentActivity::Unknown => "unknown",
+    };
+
+    let now = std::time::Instant::now();
+    let mut out = vec![format!(
+        "spyc {} (pid {}) — activity dump @ {}",
+        env!("CARGO_PKG_VERSION"),
+        std::process::id(),
+        crate::sysinfo::format_now(),
+    )];
+    // `report_status:N` here is the key signal: how many status reports
+    // (hook-driven OR agent-driven) actually reached spyc this session.
+    let calls = &app.view.activity.mcp_tool_calls;
+    let tally: Vec<String> = calls
+        .iter()
+        .filter(|(_, c)| **c > 0)
+        .map(|(n, c)| format!("{n}:{c}"))
+        .collect();
+    out.push(format!(
+        "mcp tool calls: {}",
+        if tally.is_empty() {
+            "(none yet)".to_string()
+        } else {
+            tally.join("  ")
+        }
+    ));
+    out.push(String::new());
+
+    let Some(tabs) = app.runtime.pane_tabs.as_ref() else {
+        out.push("(no panes open)".to_string());
+        return out;
+    };
+    let active = tabs.active_index();
+    for (i, e) in tabs.tabs().iter().enumerate() {
+        let info = &e.info;
+        let is_agent = crate::agent::detect(&info.command).kind() != AgentKind::Other;
+        let marker = if i == active { '*' } else { ' ' };
+        out.push(format!(
+            "{marker}[{}] \"{}\"  dot={}  agent={is_agent}  suspended={}",
+            i + 1,
+            info.label,
+            state_str(info.activity),
+            info.suspended,
+        ));
+        out.push(format!("    command: {}", info.command));
+        out.push(format!("    cwd: {}", info.cwd.display()));
+        // The crux: live self-report vs the output-timing fallback.
+        match info.reported {
+            Some(r) => out.push(format!(
+                "    source: SELF-REPORT status={} set {:.1}s ago, expires in {:.0}s",
+                state_str(r.status),
+                r.at.elapsed().as_secs_f32(),
+                r.expiry.saturating_duration_since(now).as_secs_f32(),
+            )),
+            None => out.push("    source: output-timing (no live report)".to_string()),
+        }
+        match info.last_output_at {
+            Some(at) => out.push(format!(
+                "    last_output: {:.1}s ago",
+                at.elapsed().as_secs_f32()
+            )),
+            None => out.push("    last_output: none".to_string()),
+        }
+        out.push(format!(
+            "    spawn: {:.0}s ago",
+            info.spawn_at.elapsed().as_secs_f32()
+        ));
+        out.push(format!("    pane_id: {}", info.id));
+        if let Some(s) = &info.claude_session_id {
+            out.push(format!("    claude_session_id: {s}"));
+        }
+        if let Some(s) = &info.codex_session_id {
+            out.push(format!("    codex_session_id: {s}"));
+        }
+        out.push(String::new());
+    }
+    out
 }
 
 /// `:longlist` — long `ls -lh`-style listing of the selection (was `L`).

@@ -213,7 +213,7 @@ const SECTIONS: &[Section] = &[
             ("C", "toggle colors / mono"),
             (
                 ":activity",
-                "toggle activity monitor (throughput + internals + pid/rss/threads + mcp call counts)",
+                "toggle activity monitor; :activity dump → per-pane dot-status (why-status) report in a pager",
             ),
             (":setenv NAME=VALUE", "set an environment variable"),
         ],
