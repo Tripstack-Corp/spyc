@@ -97,6 +97,7 @@
 # status_path    = "#7dcfff"
 # status_suffix  = "#565f89"
 # prompt_prefix  = "#ff9e64"
+# popup_border   = "#bb9af7"  # outline of centered pop-ups (which-key, harpoon)
 # Diff / show / blame renderer (the in-house syntax-highlighted view).
 # *_fg are foregrounds; *_bg are the row-background tints behind +/- lines
 # (dropped in mono / colortoggle). Syntax-highlighted code keeps its own

@@ -296,7 +296,7 @@ macro_rules! color_overrides {
 color_overrides! {
     dir, exec, symlink, file, other,
     cursor_bg, cursor_fg, pick, take,
-    status_user, status_path, status_suffix, prompt_prefix, delete_warning,
+    status_user, status_path, status_suffix, prompt_prefix, popup_border, delete_warning,
     diff_add_fg, diff_del_fg, diff_add_bg, diff_del_bg,
     diff_add_word_bg, diff_del_word_bg,
     diff_hunk_fg, diff_file_fg, diff_meta_fg,

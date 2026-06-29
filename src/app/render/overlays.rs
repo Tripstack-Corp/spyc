@@ -50,7 +50,7 @@ impl App {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(title)
-            .border_style(Style::default().fg(self.view.theme.prompt_prefix));
+            .border_style(Style::default().fg(self.view.theme.popup_border));
         let inner = block.inner(rect);
         frame.render_widget(block, rect);
 
@@ -428,7 +428,7 @@ impl App {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(format!(" {} ", hint.title))
-            .border_style(Style::default().fg(self.view.theme.prompt_prefix));
+            .border_style(Style::default().fg(self.view.theme.popup_border));
         let inner = block.inner(rect);
         frame.render_widget(block, rect);
 

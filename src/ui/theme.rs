@@ -30,6 +30,12 @@ pub struct Theme {
     pub status_path: Color,
     pub status_suffix: Color,
     pub prompt_prefix: Color,
+    /// Border color for centered pop-up overlays (the which-key chord hint,
+    /// the harpoon menu). Deliberately *not* `prompt_prefix`: the frame chrome
+    /// (active pane divider, tab line) is amber `prompt_prefix`, so a popup
+    /// sharing that color blends into the frame beneath it. A distinct accent
+    /// reads as "this floats above everything else."
+    pub popup_border: Color,
     pub empty_marker: Color,
     /// Background tint for rows that are about to be deleted by an
     /// active `RemoveConfirm` prompt. Stronger than the cursor /
@@ -86,6 +92,7 @@ impl Default for Theme {
             status_path: Color::Rgb(0xc0, 0xca, 0xf5),
             status_suffix: Color::Rgb(0x56, 0x5f, 0x89),
             prompt_prefix: Color::Rgb(0xe0, 0xaf, 0x68),
+            popup_border: Color::Rgb(0xbb, 0x9a, 0xf7), // lavender — distinct from the amber chrome
             empty_marker: Color::Rgb(0x56, 0x5f, 0x89),
             delete_warning: Color::Rgb(0x80, 0x1e, 0x1e), // deep crimson
             diff_add_fg: Color::Rgb(0x9e, 0xce, 0x6a),    // green (matches exec)
@@ -136,6 +143,7 @@ impl Theme {
         apply!(status_path);
         apply!(status_suffix);
         apply!(prompt_prefix);
+        apply!(popup_border);
         apply!(delete_warning);
         apply!(diff_add_fg);
         apply!(diff_del_fg);
