@@ -344,6 +344,17 @@ impl App {
         for ev in std::mem::take(&mut ctx.fs_pending) {
             git_event |= ev.paths.iter().any(|p| self.is_gitdir_status_path(p));
             preview_event |= ev.paths.iter().any(|p| self.is_preview_path(p));
+            // A working-tree edit (any path that is NOT a `.git/index`/`HEAD`
+            // change) must force the next git poll to re-walk the column(s) it
+            // lands in — the poll's mtime short-circuit can't see it and the
+            // listing refresh only covers the focused column, so an UNFOCUSED
+            // column's markers would otherwise go stale (`git restore` /
+            // external edit). Gitignored churn is already dropped above.
+            for p in &ev.paths {
+                if !self.is_gitdir_status_path(p) {
+                    self.state.flag_worktree_rewalk_for_path(p);
+                }
+            }
             self.ingest_fs_event(
                 &ev,
                 now_pre,

@@ -33,6 +33,32 @@ impl AppState {
         any
     }
 
+    /// Force the next git poll to re-walk every active column whose working
+    /// tree contains `path`. Called for a working-tree fs-event (an edit /
+    /// `git restore` / external write — anything that is NOT a `.git/index`
+    /// or `HEAD` change). The poll's mtime short-circuit
+    /// ([`Self::refresh_git_state_for`]) can't see such a change (no
+    /// `.git/index`/`HEAD` mtime moves), and the listing-refresh path only
+    /// invalidates the **focused** column — so without this an UNFOCUSED
+    /// column's `~`/` M` markers stay stale after an external edit until a git
+    /// op or chdir. Sets the existing `pending_worktree_rewalk` escape hatch,
+    /// which the next 1 Hz poll honors (re-walking once, off-thread). Flagging
+    /// the focused column too is harmless — its listing refresh clears the flag
+    /// on success. Returns whether any column was flagged.
+    pub fn flag_worktree_rewalk_for_path(&mut self, path: &Path) -> bool {
+        let mut flagged = false;
+        for side in [Side::Left, Side::Right] {
+            if side == Side::Right && self.right.is_none() {
+                continue;
+            }
+            if path.starts_with(&self.col(side).listing.dir) {
+                self.col_mut(side).git_cache.pending_worktree_rewalk = true;
+                flagged = true;
+            }
+        }
+        flagged
+    }
+
     /// Re-poll one column's git state (`git.info` + `git.files`) and update only
     /// if it changed. Returns `true` iff that column was different. Does NOT
     /// rebuild rows — the [`Self::refresh_git_state`] orchestrator does that once
@@ -247,5 +273,42 @@ impl AppState {
             self.col_mut(side).git_cache.git_status_cache = None;
         }
         self.set_repo_root(side, repo_root);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::App;
+    use crate::app::state::Side;
+    use std::path::Path;
+
+    #[test]
+    fn working_tree_event_flags_rewalk_for_the_owning_column() {
+        let dir = std::env::temp_dir().join("spyc-flag-rewalk-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let mut app = App::test_app(dir.clone());
+        // A path inside the column's tree forces its next poll to re-walk —
+        // this is what converges an UNFOCUSED column after a working-tree edit
+        // the mtime short-circuit can't see.
+        assert!(
+            app.state
+                .flag_worktree_rewalk_for_path(&dir.join("src/lib.rs"))
+        );
+        assert!(
+            app.state.col(Side::Left).git_cache.pending_worktree_rewalk,
+            "an in-tree edit flags the column for a forced re-walk"
+        );
+
+        // A path outside every column's tree flags nothing (and doesn't churn
+        // the flag back on).
+        app.state
+            .col_mut(Side::Left)
+            .git_cache
+            .pending_worktree_rewalk = false;
+        assert!(
+            !app.state
+                .flag_worktree_rewalk_for_path(Path::new("/nowhere/near/here"))
+        );
+        assert!(!app.state.col(Side::Left).git_cache.pending_worktree_rewalk);
     }
 }
