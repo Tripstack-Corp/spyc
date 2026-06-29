@@ -19,6 +19,7 @@ mod key_trace;
 mod keymap;
 mod mcp;
 mod mcp_cmd;
+mod merge_driver;
 mod pane;
 mod paths;
 mod proc_cwd;
@@ -160,6 +161,13 @@ struct Cli {
     ///   spyc --print-config > ~/.spycrc.toml
     #[arg(long)]
     print_config: bool,
+
+    /// Internal git merge driver for spyc's version-line conflicts. git invokes
+    /// it via `.gitattributes` as `spyc --merge-driver %O %A %B`; not for direct
+    /// use. Resolves the `Cargo.toml` / `Cargo.lock` version-bump conflicts that
+    /// every concurrent PR collides on; exits non-zero on any real conflict.
+    #[arg(long, num_args = 3, value_names = ["BASE", "CURRENT", "OTHER"], hide = true)]
+    merge_driver: Option<Vec<String>>,
 }
 
 /// Binary entry point. `src/main.rs` is a thin shim that just calls this;
@@ -207,6 +215,18 @@ pub fn run() -> Result<()> {
         let root = std::env::current_dir()?;
         return mcp::run(root);
     }
+    // Git merge-driver subprocess (invoked by git via `.gitattributes`, see
+    // `merge_driver`). Exit non-zero on a real conflict so git reports it.
+    if let Some(args) = cli.merge_driver.as_deref() {
+        if let [base, current, other] = args {
+            let clean = merge_driver::run_merge_driver(base, current, other)?;
+            if !clean {
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
+        anyhow::bail!("--merge-driver expects 3 paths (%O %A %B)");
+    }
     // Agent status hook reporter: a tiny one-shot that pings the running spyc.
     // Best-effort — never errors out (it runs inside the agent's lifecycle
     // hook, and must not block/break the agent if spyc is gone).
@@ -232,6 +252,12 @@ pub fn run() -> Result<()> {
         return Ok(());
     }
 
+    // Install the version-line merge driver for this repo (idempotent,
+    // best-effort) so concurrent-PR Cargo.toml/Cargo.lock conflicts auto-resolve
+    // on rebase. No-op when not in a git repo or already configured.
+    if let Ok(cwd) = std::env::current_dir() {
+        let _ = merge_driver::ensure_installed(&cwd);
+    }
     if let Some(p) = debug_log::init(cli.debug) {
         eprintln!("spyc: debug log → {p}");
     }

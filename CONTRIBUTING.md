@@ -174,6 +174,18 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 See `AGENTS.md` ("Commits, merges, and CHANGELOG") for the longer
 rationale.
 
+## Merge-train conflicts
+
+Because every PR bumps `version`, concurrent PRs collide on that one
+`Cargo.toml` / `Cargo.lock` line. spyc ships a git merge driver
+(`src/merge_driver.rs`) that resolves it automatically — it keeps the
+higher semver on rebase, so a merge-train rebase only stops on a *real*
+conflict. The driver is installed into the repo's git config the first
+time you launch spyc in the repo (idempotent); to set it up without
+launching, the `.gitattributes` driver name is `spyc-semver`. After a
+driver-assisted rebase, run `cargo build` once so `Cargo.lock` (which
+uses `merge=ours`) picks up the resolved version.
+
 ## CI
 
 Bitbucket Pipelines runs `make check` on every push. The pipeline

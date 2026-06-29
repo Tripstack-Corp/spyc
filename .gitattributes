@@ -1,0 +1,12 @@
+# Auto-resolve the version-line conflict every concurrent PR collides on.
+#
+# spyc bumps `version = "x.y.z"` on every PR, so any two in-flight branches
+# conflict on that one line. The `spyc-semver` merge driver (src/merge_driver.rs;
+# spyc installs it into the repo's git config on launch) runs a three-way merge
+# and keeps the higher semver for a version-only conflict — anything else still
+# surfaces as a real conflict.
+Cargo.toml merge=spyc-semver
+# Cargo.lock keeps "our" side on conflict; the next `cargo build` / `cargo update
+# -p spyc` regenerates the spyc version entry deterministically (no network).
+# This never produces a spurious lock conflict — the proven rebase recipe.
+Cargo.lock merge=ours

@@ -67,7 +67,7 @@ Deep design decisions live in [`ARCHITECTURE.md`](ARCHITECTURE.md) (sync-only, M
 - **`src/git/`** — git facade, **100% in-process via gix, no subprocess in production** (guard: `no_subprocess_git_in_production`). `discovery`/`status`/`branch`/`worktree`/`model`/`diff_model`/`blame`. Hot path: 1 Hz mtime poll reads the cached gitdir; gix opens only on chdir-to-new-repo + HEAD change.
 - **`src/mcp/`** — MCP server (`mod`/`server`/`protocol`/`config`/`readers`). Read tools scope to the focused column's `search_root`, each with an optional `root` to target another worktree. `initialize` carries `SERVER_INSTRUCTIONS` (steers the agent to spyc tools; keep short).
 - **`src/state/`** — cursor, marks, picks, inventory, history, masks, sessions + session_names, harpoon, graveyard, frecency (`J`), pager_positions, health, agent transcript readers (`*_transcript.rs` → `^a v` scrollback).
-- Leaves — **`src/mcp_cmd.rs`** (MCP↔loop channel types), **`src/context.rs`** (context snapshot for MCP), **`src/config/`**, **`src/shell/`**, **`src/paths.rs`** (XDG), **`src/clipboard.rs`**, **`src/envset.rs`** (`:s` env overrides, no `unsafe`), **`src/key_trace.rs`**, **`src/sysinfo.rs`**, **`src/proc_cwd.rs`**, **`src/term_title.rs`** (OSC 2 + tmux passthrough), **`src/debug_log.rs`**, **`src/main.rs`** (thin shim over `spyc::run()`).
+- Leaves — **`src/mcp_cmd.rs`** (MCP↔loop channel types), **`src/context.rs`** (context snapshot for MCP), **`src/merge_driver.rs`** (`spyc --merge-driver` git merge driver — auto-resolves the `Cargo.toml` version-line conflict every concurrent PR collides on; installed into git config on launch), **`src/config/`**, **`src/shell/`**, **`src/paths.rs`** (XDG), **`src/clipboard.rs`**, **`src/envset.rs`** (`:s` env overrides, no `unsafe`), **`src/key_trace.rs`**, **`src/sysinfo.rs`**, **`src/proc_cwd.rs`**, **`src/term_title.rs`** (OSC 2 + tmux passthrough), **`src/debug_log.rs`**, **`src/main.rs`** (thin shim over `spyc::run()`).
 
 ## MVU invariants (don't erode)
 
@@ -106,6 +106,7 @@ spyc is Model-View-Update. Keep these — they're what make it reason-about-able
 
 - **Commit subject = actual scope, not its caption.** A commit touching a feature + a version bump says both (`feat: gemini agent + bump cargo-deny`). The body holds the long form.
 - **Squash on merge** (`bkt pr merge <N> --strategy squash`) — `main`'s log becomes one commit per shipped shape.
+- **Version-line conflicts auto-resolve.** Because every PR bumps `version`, concurrent PRs collide on that one `Cargo.toml`/`Cargo.lock` line. The `spyc-semver` merge driver (`src/merge_driver.rs`, installed into git config on spyc launch via `.gitattributes`) keeps the higher semver on rebase; `Cargo.lock` uses `merge=ours` + a `cargo` regen. So a merge-train rebase only stops on a *real* conflict — don't hand-resolve version lines.
 - **`CHANGELOG.md` is git-cliff-generated from v1.57.0** (config `cliff.toml`): the section comes from the commit *type*, the line from `scope: subject` — so **the commit message _is_ the changelog entry** (a category-spanning PR wants multiple well-typed commits). v1.56.0 and earlier are frozen hand-written history, left verbatim. Preview with `make changelog`; release with `make release-tag VERSION=x.y.z`.
 
 ## Building
