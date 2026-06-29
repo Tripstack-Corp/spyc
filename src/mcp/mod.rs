@@ -172,14 +172,31 @@ pub fn report_status_to_socket(state: &str) {
     use std::io::{BufRead, BufReader, Write};
     const REPORT_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
-    let Ok(sock) = std::env::var("SPYC_MCP_SOCK") else {
-        return;
-    };
+    let sock = std::env::var("SPYC_MCP_SOCK").unwrap_or_default();
+    let pane_id = std::env::var("SPYC_PANE_ID").ok();
+    // Diagnostic (mcp.log): log every reporter invocation + the env it actually
+    // saw. A status hook that FIRES but can't reach spyc (Claude ran the hook
+    // command without SPYC_MCP_SOCK in its env) is otherwise indistinguishable
+    // from a hook that never fires — both leave no trace. To check whether the
+    // auto-status hooks work: `grep report-status <state-dir>/mcp.log`.
+    mcp_log(&format!(
+        "report-status: state={state} SPYC_MCP_SOCK={} SPYC_PANE_ID={}",
+        if sock.is_empty() {
+            "MISSING"
+        } else {
+            sock.as_str()
+        },
+        if pane_id.as_deref().unwrap_or("").is_empty() {
+            "MISSING"
+        } else {
+            "set"
+        },
+    ));
     if sock.is_empty() {
         return;
     }
-    let pane_id = std::env::var("SPYC_PANE_ID").ok();
     let Ok(mut stream) = UnixStream::connect(&sock) else {
+        mcp_log(&format!("report-status: connect FAILED to {sock}"));
         return; // spyc not running / different instance — nothing to update
     };
     let _ = stream.set_read_timeout(Some(REPORT_IO_TIMEOUT));
@@ -194,9 +211,11 @@ pub fn report_status_to_socket(state: &str) {
         },
     });
     if writeln!(stream, "{req}").is_err() {
+        mcp_log("report-status: write FAILED");
         return;
     }
     let _ = stream.flush();
+    mcp_log(&format!("report-status: sent state={state}"));
     // Read the one-line reply so spyc has applied the command before we exit —
     // closing the socket immediately would otherwise race the main-loop apply.
     // Best-effort: a timeout/EOF here doesn't matter, the command is queued.
