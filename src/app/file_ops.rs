@@ -1,8 +1,9 @@
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
-use super::state::PagerRequest;
+use super::state::{PagerRequest, Side};
 use super::{App, Effect, Message, PaneInput, PaneTarget, pager_handler};
+use crate::fs::listing::Listing;
 use crate::state::inventory::Inventory;
 use crate::ui::pager::PagerView;
 
@@ -83,6 +84,16 @@ pub enum FileOp {
         wrap: Option<u16>,
         dest: PagerDest,
     },
+    /// Read a directory listing off the input thread for the WATCHER-driven
+    /// refresh — a 50k-entry walk + sort would otherwise block the event loop
+    /// on every debounced fs-event burst. `side`/`gen` are the staleness tag:
+    /// the result is applied only if column `side` is still focused at the same
+    /// `list_generation` (no chdir / sync refresh / focus switch since the spawn).
+    RefreshListing {
+        side: Side,
+        dir: PathBuf,
+        generation: u64,
+    },
 }
 
 // No `derive(Debug)`: `SpecialFileOpened` carries a `PagerView`, which isn't
@@ -132,6 +143,14 @@ pub enum FileOutcome {
     SpecialFileOpened {
         result: Result<Box<PagerView>, String>,
         dest: PagerDest,
+    },
+    /// A watcher-driven listing read ([`FileOp::RefreshListing`]). `side`/`gen`
+    /// are the staleness tag carried from the spawn; `result` is the read (`Err`
+    /// is logged and dropped). Applied by `apply_one_file_outcome`.
+    ListingRefreshed {
+        side: Side,
+        generation: u64,
+        result: Result<Listing, String>,
     },
 }
 
@@ -236,6 +255,19 @@ pub fn run_file_op(op: FileOp) -> FileOutcome {
             let result = pager_handler::build_pager_view(&path, &theme, open_as_rendered, wrap)
                 .map(Box::new);
             FileOutcome::SpecialFileOpened { result, dest }
+        }
+        FileOp::RefreshListing {
+            side,
+            dir,
+            generation,
+        } => {
+            // The heavy 50k-entry walk + sort, off the input thread.
+            let result = Listing::read(&dir).map_err(|e| e.to_string());
+            FileOutcome::ListingRefreshed {
+                side,
+                generation,
+                result,
+            }
         }
         FileOp::PipeContent {
             use_inventory,
@@ -421,7 +453,56 @@ impl App {
                 Ok(view) => self.install_pager_at_dest(*view, dest),
                 Err(e) => self.state.flash_error(e),
             },
+            FileOutcome::ListingRefreshed {
+                side,
+                generation,
+                result,
+            } => {
+                self.runtime.listing_refresh_inflight = false;
+                if let Ok(listing) = result {
+                    // Apply only if nothing changed this column's view since the
+                    // read was spawned — a chdir / sync `refresh_listing` / focus
+                    // switch all bump `list_generation` (or move focus), and the
+                    // fresh read would otherwise clobber that newer state.
+                    if self.state.focused_side() == side
+                        && self.state.col(side).list_generation == generation
+                    {
+                        self.state.apply_refreshed_listing(listing);
+                        // The fs-driven refresh may have shifted cursor_file /
+                        // git_branch — mirror the old inline `context_dirty`.
+                        self.view.context_dirty = true;
+                    }
+                }
+                // A refresh requested while this read was in flight → re-spawn
+                // so the latest on-disk state is eventually shown.
+                if std::mem::take(&mut self.runtime.listing_refresh_dirty) {
+                    self.spawn_listing_refresh();
+                }
+            }
         }
+    }
+
+    /// Kick the watcher-driven listing refresh off the input thread. Does the
+    /// cheap self-heal inline (≤2 `is_dir` stats), then spawns a worker for the
+    /// heavy `Listing::read`. Single-in-flight: a request arriving while a read
+    /// is running just marks `dirty`, and the result handler re-spawns — so a
+    /// burst of fs events can't pile up overlapping reads. The result is
+    /// staleness-tagged with the focused column's `list_generation`.
+    pub(crate) fn spawn_listing_refresh(&mut self) {
+        self.state.reset_orphaned_columns_to_home();
+        if self.runtime.listing_refresh_inflight {
+            self.runtime.listing_refresh_dirty = true;
+            return;
+        }
+        let side = self.state.focused_side();
+        let dir = self.state.col(side).listing.dir.clone();
+        let generation = self.state.col(side).list_generation;
+        self.runtime.listing_refresh_inflight = true;
+        self.spawn_file_op(FileOp::RefreshListing {
+            side,
+            dir,
+            generation,
+        });
     }
 
     /// Spawn the detached file-op worker: run `op`, push its outcome onto
@@ -445,6 +526,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use super::super::state::Side;
     use super::{App, Effect, FileOp, FileOutcome, PagerDest, run_file_op};
     use crate::ui::pager::PagerView;
     use crate::ui::theme::Theme;
@@ -618,6 +700,80 @@ mod tests {
             lines.iter().any(|l| l.contains("hello.txt")),
             "filename row: {lines:?}"
         );
+    }
+
+    #[test]
+    fn refresh_listing_op_reads_dir_off_thread() {
+        let work = tempdir().unwrap();
+        write_file(work.path(), "alpha.txt", "a");
+        write_file(work.path(), "beta.txt", "b");
+        let out = run_file_op(FileOp::RefreshListing {
+            side: Side::Left,
+            dir: work.path().to_path_buf(),
+            generation: 7,
+        });
+        let FileOutcome::ListingRefreshed {
+            side,
+            generation,
+            result,
+        } = out
+        else {
+            panic!("expected ListingRefreshed");
+        };
+        assert_eq!(side, Side::Left);
+        assert_eq!(generation, 7, "staleness tag rides through the worker");
+        let listing = result.expect("read ok");
+        assert!(listing.entries.iter().any(|e| e.name == "alpha.txt"));
+        assert!(listing.entries.iter().any(|e| e.name == "beta.txt"));
+    }
+
+    #[test]
+    fn fresh_listing_refresh_applies_to_focused_column() {
+        let work = tempdir().unwrap();
+        let mut app = App::test_app(work.path().to_path_buf());
+        let side = app.state.focused_side();
+        let generation = app.state.col(side).list_generation;
+        let listing = crate::fs::listing::Listing::read(work.path()).unwrap();
+        app.runtime.listing_refresh_inflight = true;
+        app.runtime
+            .file_results
+            .lock()
+            .unwrap()
+            .push(FileOutcome::ListingRefreshed {
+                side,
+                generation,
+                result: Ok(listing),
+            });
+        let (drew, _fx) = app.apply_file_outcomes();
+        assert!(drew, "applying a refreshed listing redraws");
+        assert!(!app.runtime.listing_refresh_inflight, "in-flight cleared");
+        // apply ran → rebuild_rows bumped the generation.
+        assert_ne!(app.state.col(side).list_generation, generation);
+    }
+
+    #[test]
+    fn stale_listing_refresh_is_discarded() {
+        let work = tempdir().unwrap();
+        let mut app = App::test_app(work.path().to_path_buf());
+        let side = app.state.focused_side();
+        let generation = app.state.col(side).list_generation;
+        let listing = crate::fs::listing::Listing::read(work.path()).unwrap();
+        app.runtime.listing_refresh_inflight = true;
+        // Tag with a generation that no longer matches (a chdir / sync refresh
+        // happened since the read was spawned) → the read must be dropped.
+        app.runtime
+            .file_results
+            .lock()
+            .unwrap()
+            .push(FileOutcome::ListingRefreshed {
+                side,
+                generation: generation.wrapping_sub(1),
+                result: Ok(listing),
+            });
+        app.apply_file_outcomes();
+        assert!(!app.runtime.listing_refresh_inflight, "in-flight cleared");
+        // Discarded → apply_refreshed_listing never ran, so no generation bump.
+        assert_eq!(app.state.col(side).list_generation, generation);
     }
 
     #[test]

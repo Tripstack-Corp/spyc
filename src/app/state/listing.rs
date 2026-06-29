@@ -207,68 +207,7 @@ impl AppState {
         // this method, so an external deletion is healed on the next refresh.
         self.reset_orphaned_columns_to_home();
         match Listing::read(&self.cur().listing.dir) {
-            Ok(new) => {
-                self.cur_mut().listing = new;
-                // Event-driven refresh touches the FOCUSED column's git. With
-                // dual fs-watch (PR D) both columns' trees + gitdirs fire
-                // events, so the focused column refreshes here on its own edits;
-                // `.git` index/HEAD events refresh BOTH columns via the
-                // git-event path (`refresh_git_state`). A non-focused column's
-                // working-tree edits still wait for the 1 Hz poll.
-                let side = self.focused_side();
-                // Refresh the top-bar branch/dirty string too — without
-                // this the bar stays on `main` after edits and only
-                // updates when the user changes directories. Event-
-                // driven refresh would normally invalidate the raw
-                // cache (file mtimes moved but `.git/index` may not
-                // have — and we need fresh content for ` M`
-                // markers).
-                //
-                // But: an active filesystem (claude writing findings, build
-                // outputs, IDE auto-saves) can trip `refresh_listing`
-                // repeatedly. Throttle the raw-cache invalidation to 1 s so a
-                // burst doesn't re-walk `git status` on every event. The 1 Hz
-                // safety poll in `refresh_git_state` still catches `.git/index`
-                // changes immediately; the only trade-off is up to ~1 s lag in
-                // working-tree ` M` markers for edits within the window.
-                let throttle = std::time::Duration::from_secs(1);
-                let should_invalidate = self
-                    .col(side)
-                    .git_cache
-                    .last_git_invalidation
-                    .is_none_or(|t| t.elapsed() >= throttle);
-                if should_invalidate {
-                    self.col_mut(side).git_cache.git_status_cache = None;
-                    self.col_mut(side).git_cache.last_git_invalidation =
-                        Some(std::time::Instant::now());
-                    // This walk reflects the current worktree, so any earlier
-                    // deferred re-walk is now satisfied.
-                    self.col_mut(side).git_cache.pending_worktree_rewalk = false;
-                } else {
-                    // Throttled this round — defer the re-walk so the working-tree
-                    // change can't stay stale. The 1 Hz git poll's mtime
-                    // short-circuit won't catch it (an unstaged edit moves no
-                    // `.git/index`/`HEAD` mtime), so flag it for a forced re-walk
-                    // on the next poll instead of dropping it.
-                    self.col_mut(side).git_cache.pending_worktree_rewalk = true;
-                }
-                let dir = self.col(side).listing.dir.clone();
-                let new_git_files = self.git_file_statuses_cached(side, &dir);
-                let new_git_info = self.compute_git_info_fast(side);
-                let mut new_keys: Vec<&str> = new_git_files.keys().map(String::as_str).collect();
-                new_keys.sort_unstable();
-                crate::spyc_debug!(
-                    "refresh_listing: dir={} git_info: {:?} → {:?}, git_files: {} → {} (new={:?})",
-                    self.col(side).listing.dir.display(),
-                    self.col(side).git.info,
-                    new_git_info,
-                    self.col(side).git.files.len(),
-                    new_git_files.len(),
-                    new_keys,
-                );
-                self.col_mut(side).git.set(new_git_info, new_git_files);
-                self.rebuild_rows();
-            }
+            Ok(new) => self.apply_refreshed_listing(new),
             Err(e) => {
                 crate::spyc_debug!(
                     "refresh_listing: Listing::read({}) failed: {e}",
@@ -276,6 +215,75 @@ impl AppState {
                 );
             }
         }
+    }
+
+    /// Install an already-read listing into the focused column and bring its
+    /// git markers + rows up to date — the back half of [`refresh_listing`],
+    /// shared with the off-thread watcher refresh (`App::spawn_listing_refresh`,
+    /// which does the heavy `Listing::read` on a worker and then calls this with
+    /// the focused column's freshly-read `Listing`). The caller guarantees `new`
+    /// is for the focused column's current dir (the sync path reads it inline;
+    /// the async path staleness-checks `list_generation` before calling).
+    pub fn apply_refreshed_listing(&mut self, new: Listing) {
+        self.cur_mut().listing = new;
+        // Event-driven refresh touches the FOCUSED column's git. With
+        // dual fs-watch (PR D) both columns' trees + gitdirs fire
+        // events, so the focused column refreshes here on its own edits;
+        // `.git` index/HEAD events refresh BOTH columns via the
+        // git-event path (`refresh_git_state`). A non-focused column's
+        // working-tree edits still wait for the 1 Hz poll.
+        let side = self.focused_side();
+        // Refresh the top-bar branch/dirty string too — without
+        // this the bar stays on `main` after edits and only
+        // updates when the user changes directories. Event-
+        // driven refresh would normally invalidate the raw
+        // cache (file mtimes moved but `.git/index` may not
+        // have — and we need fresh content for ` M`
+        // markers).
+        //
+        // But: an active filesystem (claude writing findings, build
+        // outputs, IDE auto-saves) can trip `refresh_listing`
+        // repeatedly. Throttle the raw-cache invalidation to 1 s so a
+        // burst doesn't re-walk `git status` on every event. The 1 Hz
+        // safety poll in `refresh_git_state` still catches `.git/index`
+        // changes immediately; the only trade-off is up to ~1 s lag in
+        // working-tree ` M` markers for edits within the window.
+        let throttle = std::time::Duration::from_secs(1);
+        let should_invalidate = self
+            .col(side)
+            .git_cache
+            .last_git_invalidation
+            .is_none_or(|t| t.elapsed() >= throttle);
+        if should_invalidate {
+            self.col_mut(side).git_cache.git_status_cache = None;
+            self.col_mut(side).git_cache.last_git_invalidation = Some(std::time::Instant::now());
+            // This walk reflects the current worktree, so any earlier
+            // deferred re-walk is now satisfied.
+            self.col_mut(side).git_cache.pending_worktree_rewalk = false;
+        } else {
+            // Throttled this round — defer the re-walk so the working-tree
+            // change can't stay stale. The 1 Hz git poll's mtime
+            // short-circuit won't catch it (an unstaged edit moves no
+            // `.git/index`/`HEAD` mtime), so flag it for a forced re-walk
+            // on the next poll instead of dropping it.
+            self.col_mut(side).git_cache.pending_worktree_rewalk = true;
+        }
+        let dir = self.col(side).listing.dir.clone();
+        let new_git_files = self.git_file_statuses_cached(side, &dir);
+        let new_git_info = self.compute_git_info_fast(side);
+        let mut new_keys: Vec<&str> = new_git_files.keys().map(String::as_str).collect();
+        new_keys.sort_unstable();
+        crate::spyc_debug!(
+            "refresh_listing: dir={} git_info: {:?} → {:?}, git_files: {} → {} (new={:?})",
+            self.col(side).listing.dir.display(),
+            self.col(side).git.info,
+            new_git_info,
+            self.col(side).git.files.len(),
+            new_git_files.len(),
+            new_keys,
+        );
+        self.col_mut(side).git.set(new_git_info, new_git_files);
+        self.rebuild_rows();
     }
 
     pub fn chdir(&mut self, path: &Path) -> Result<()> {

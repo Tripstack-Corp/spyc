@@ -541,6 +541,12 @@ struct Runtime {
     mermaid_results: std::sync::Arc<std::sync::Mutex<Vec<mermaid_ops::MermaidOutcome>>>,
     /// Landing slot for off-thread file operations.
     file_results: std::sync::Arc<std::sync::Mutex<Vec<file_ops::FileOutcome>>>,
+    /// The watcher-driven listing refresh (`FileOp::RefreshListing`) reads the
+    /// dir off-thread; `inflight` keeps a single read in flight at a time, and
+    /// `dirty` records a refresh requested while one was running so the result
+    /// handler can re-spawn for the latest state. See `App::spawn_listing_refresh`.
+    listing_refresh_inflight: bool,
+    listing_refresh_dirty: bool,
     /// Landing slot for off-thread inventory operations.
     inventory_results: std::sync::Arc<std::sync::Mutex<Vec<inventory_ops::InventoryOutcome>>>,
     /// Landing slot for off-thread MCP worktree create/remove/clean ops. The

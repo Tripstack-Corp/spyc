@@ -31,7 +31,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 - **PR11** — MCP scope/robustness + path/env overlay _(3 findings; clusters: mcp)_
 - **PR12** — Misc correctness batch _(11 findings; clusters: resume, other, fs-watch-topology, prompt-allowlist-drift, perf-linear-scan, perf-sort-alloc, pager-truncation-bytes, pane-vt100-recovery-size)_
 
-**Remaining: 3** (after PR #600; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings, #590 fixed the 2 MCP-robustness findings, #592 fixed inventory re-yank, #595 fixed the 2 git-view syntect-on-main-thread findings, #597 closed rename-similarity as by-design, #598 unified `:limit`, #600 stopped the session-restore dedup dropping distinct sessions). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
+**Remaining: 1** (after PR #602; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings, #590 fixed the 2 MCP-robustness findings, #592 fixed inventory re-yank, #595 fixed the 2 git-view syntect-on-main-thread findings, #597 closed rename-similarity as by-design, #598 unified `:limit`, #600 stopped the session-restore dedup dropping distinct sessions, #601 fixed the vt100-recovery parser size, #602 moved the watcher listing refresh off-thread). The one open item is `pty_host.rs:208` (unbounded reader→parser channel — needs a backpressure design + live firehose load-test; see the `REAL` row below). See the closed log for the trail.
 
 ## To fix — by cluster
 
@@ -90,7 +90,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/ui/blame_render.rs:44` | render_blame joins and syntect-highlights the whole file on the main thread with no size cap | medium | M | ✅ PR #595 |
 | `src/ui/diff_render/mod.rs:149` | Diff render syntect-highlights both full sides on the main thread, and re-highlights from scratch on every layout toggle | medium | M | ✅ PR #595 |
 | `src/ui/pager/construct.rs:182` | Pager yank/save methods do inline OS side effects, bypassing the existing Effect::CopyToClipboard path | medium | M | ✅ PR #588 |
-| `src/app/sources.rs:293` | Watcher-driven `refresh_listing` does a synchronous 50k-entry disk walk + allocation-heavy sort on the event-loop thread | medium | L | PARTIAL |
+| `src/app/sources.rs:293` | Watcher-driven `refresh_listing` does a synchronous 50k-entry disk walk + allocation-heavy sort on the event-loop thread | medium | L | ✅ PR #602 |
 
 ### PR9 · Dedup / shared-helper cleanups — ✅ done (PRs #517, #518; see closed log)
 
@@ -131,6 +131,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | ✅ PR #598 |
 
 ## Closed / resolved (running log)
+
+**✅ PR #602 — watcher listing refresh off the event loop (2026-06-28):**
+- `app/sources.rs:293` — the debounced fs-watcher refresh ran `refresh_listing` (a ≤50k-entry `read_dir` + full sort + rebuild) inline on the event loop, freezing the UI on a big dir under fs churn. The watcher trigger now calls `App::spawn_listing_refresh`, which runs the read on the existing file-op worker (reuses `FileOp`/`FileOutcome`/`Message::FileOpDone` — no new Message variant); the result installs through `AppState::apply_refreshed_listing` (extracted back-half, shared with the still-synchronous post-mutation `refresh_listing`). Single-in-flight + dirty-re-spawn so an event burst can't pile up reads; staleness-gated by the focused column's `list_generation` (chdir / sync refresh / focus switch discards the stale read). 3 tests (worker read, fresh applies, stale discarded). HELD for owner live-test (daily-driver async timing).
 
 **✅ PR #600 — session-restore: stop dedup dropping distinct sessions (2026-06-28):**
 - `state/sessions/mod.rs:127` — `load_sessions` deduped by `cwd + tab commands`, keeping only the most recent. But each session is saved to its own `<id>.json` with its own agent transcripts / vsplit, so that key only ever collapsed *genuinely-distinct* restore points (e.g. two different Claude conversations started in the same dir) — silently making the older one unrestorable from `spyc -r`. Removed the lossy dedup; every saved session now shows. `prune_old` (`MAX_SESSIONS = 20`) still bounds how many accumulate. (Owner decision: "show all distinct sessions.") Flipped the test's dedup sub-case to assert both same-cwd+commands sessions are kept, newest-first.

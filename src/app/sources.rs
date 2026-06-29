@@ -397,12 +397,12 @@ impl App {
         ) {
             ctx.last_event_at = None;
             ctx.first_event_after_refresh = None;
-            self.state.refresh_listing();
+            // Off-thread: the 50k-entry walk + sort would otherwise block the
+            // event loop on every debounced burst. The refreshed listing lands
+            // a tick later via `FileOpDone` → `apply_file_outcomes` (which sets
+            // `needs_draw` + `context_dirty` then), so neither is set here.
+            self.spawn_listing_refresh();
             ctx.last_refresh = now_pre;
-            needs_draw = true;
-            // Listing changed via fs watcher (not a keystroke path) —
-            // `cursor_file` / `git_branch` in the context may have shifted.
-            self.view.context_dirty = true;
             ctx.scheduler.disarm(Deadline::RefreshQuiet);
         }
         needs_draw
