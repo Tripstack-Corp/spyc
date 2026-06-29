@@ -34,7 +34,7 @@ impl App {
                     return Vec::new();
                 }
                 // Pager-help overlay: dismiss just the help, restore
-                // whatever pager was active when `?` was pressed.
+                // whatever pager was active when help was opened.
                 // Restore from the dedicated `pager_help_stash` slot
                 // so the original mount (Overlay / TopPane /
                 // LowerPane) and `pane_scroll` flag come back intact
@@ -127,8 +127,9 @@ impl App {
                 self.view.needs_full_repaint = true;
             }
             KeyCode::Char('/') => view.begin_search(),
-            KeyCode::Char('n') => view.search_next(viewport),
-            KeyCode::Char('N') => view.search_prev(viewport),
+            KeyCode::Char('?') => view.begin_search_backward(),
+            KeyCode::Char('n') => view.search_repeat(viewport),
+            KeyCode::Char('N') => view.search_repeat_opposite(viewport),
             KeyCode::Char(':') => {
                 view.jump_buf = Some(String::new());
             }
@@ -340,11 +341,12 @@ impl App {
                     false,
                 );
             }
-            KeyCode::Char('?') | KeyCode::F(1) => {
+            KeyCode::Char('H') | KeyCode::F(1) => {
                 // Help is a top/overlay-pager concern (stash → restore the
                 // `view.pager` slot). A focused bottom scrollback
-                // (`view.scroll_pager`) has no `?` binding, so don't open help
-                // over the top pager from underneath it.
+                // (`view.scroll_pager`) has no help binding, so don't open help
+                // over the top pager from underneath it. (`?` is search-backward
+                // here, like vim/less; help moved to `H`/F1.)
                 if !(self.state.pane_focused() && self.view.scroll_pager.is_some()) {
                     // Stash the current pager so dismissing the help
                     // (Esc/q) restores it verbatim — same content,

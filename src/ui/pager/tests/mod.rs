@@ -402,6 +402,118 @@ fn title_header_prepended_when_include_true() {
     assert_eq!(out, "# !cargo build\n\nhello\nworld");
 }
 
+// ── backward search (`?`) and direction-aware n/N ─────────────
+
+#[test]
+fn select_match_forward_picks_first_at_or_after_anchor() {
+    let m = [5usize, 15, 25];
+    // Anchor below the first match → the first match.
+    assert_eq!(PagerView::select_match(&m, 0, false), 0);
+    // Anchor exactly on a match → that match (stays put).
+    assert_eq!(PagerView::select_match(&m, 15, false), 1);
+    // Anchor between matches → the next one down.
+    assert_eq!(PagerView::select_match(&m, 16, false), 2);
+    // Anchor past the last match → wraps to the first.
+    assert_eq!(PagerView::select_match(&m, 99, false), 0);
+}
+
+#[test]
+fn select_match_backward_picks_last_at_or_before_anchor() {
+    let m = [5usize, 15, 25];
+    // Anchor past the last match → the last match.
+    assert_eq!(PagerView::select_match(&m, 99, true), 2);
+    // Anchor exactly on a match → that match.
+    assert_eq!(PagerView::select_match(&m, 15, true), 1);
+    // Anchor between matches → the previous one up.
+    assert_eq!(PagerView::select_match(&m, 14, true), 0);
+    // Anchor above the first match → wraps to the last.
+    assert_eq!(PagerView::select_match(&m, 0, true), 2);
+}
+
+#[test]
+fn select_match_single_match_always_lands_on_it() {
+    let m = [7usize];
+    assert_eq!(PagerView::select_match(&m, 0, false), 0);
+    assert_eq!(PagerView::select_match(&m, 100, false), 0);
+    assert_eq!(PagerView::select_match(&m, 0, true), 0);
+    assert_eq!(PagerView::select_match(&m, 100, true), 0);
+}
+
+/// Matches at lines 5/15/25; a view scrolled into the middle.
+fn needle_view() -> PagerView {
+    let lines: Vec<String> = (0..30)
+        .map(|i| {
+            if i % 10 == 5 {
+                format!("line {i} needle")
+            } else {
+                format!("line {i}")
+            }
+        })
+        .collect();
+    PagerView::new_plain("t", lines)
+}
+
+fn run_search(view: &mut PagerView, backward: bool, viewport: u16) {
+    if backward {
+        view.begin_search_backward();
+    } else {
+        view.begin_search();
+    }
+    for c in "needle".chars() {
+        view.search_push_char(c);
+    }
+    assert!(view.commit_search(viewport));
+}
+
+#[test]
+fn forward_search_lands_below_current_scroll_not_top_of_file() {
+    let mut view = needle_view();
+    view.scroll = 20; // below the line-15 match, above line-25
+    run_search(&mut view, false, 10);
+    // Forward from line 20 finds line 25, NOT line 5 (the old top-of-file jump).
+    assert_eq!(view.current_match_line(), Some(25));
+}
+
+#[test]
+fn backward_search_lands_above_current_scroll() {
+    let mut view = needle_view();
+    view.scroll = 20;
+    run_search(&mut view, true, 10);
+    // Backward from line 20 finds line 15.
+    assert_eq!(view.current_match_line(), Some(15));
+}
+
+#[test]
+fn n_repeats_in_direction_shift_n_against_it() {
+    let viewport = 10u16;
+
+    // Forward search: n walks down (wraps), N walks up.
+    let mut fwd = needle_view();
+    fwd.scroll = 0;
+    run_search(&mut fwd, false, viewport); // lands on 5
+    assert_eq!(fwd.current_match_line(), Some(5));
+    fwd.search_repeat(viewport); // n → 15
+    assert_eq!(fwd.current_match_line(), Some(15));
+    fwd.search_repeat_opposite(viewport); // N → 5
+    assert_eq!(fwd.current_match_line(), Some(5));
+    fwd.search_repeat_opposite(viewport); // N → wraps up to 25
+    assert_eq!(fwd.current_match_line(), Some(25));
+
+    // Backward search: n walks up (wraps), N walks down.
+    let mut bwd = needle_view();
+    bwd.scroll = 29;
+    run_search(&mut bwd, true, viewport); // lands on 25
+    assert_eq!(bwd.current_match_line(), Some(25));
+    bwd.search_repeat(viewport); // n → 15
+    assert_eq!(bwd.current_match_line(), Some(15));
+    bwd.search_repeat(viewport); // n → 5
+    assert_eq!(bwd.current_match_line(), Some(5));
+    bwd.search_repeat(viewport); // n → wraps down to 25
+    assert_eq!(bwd.current_match_line(), Some(25));
+    bwd.search_repeat_opposite(viewport); // N → 5
+    assert_eq!(bwd.current_match_line(), Some(5));
+}
+
 #[test]
 fn title_header_skipped_when_include_false() {
     let view = PagerView::new_plain("!cargo build", vec!["hello".into()]);

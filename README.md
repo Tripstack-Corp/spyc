@@ -249,9 +249,9 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 ### Pager
 
 Press `Enter` on a file to view it in the built-in pager with
-syntax highlighting, search, line numbers, hex dump, markdown
-rendering, and ANSI color support. Press `?` inside the pager for
-its own help overlay.
+syntax highlighting, search (`/` forward, `?` backward; `n` / `N`
+repeat), line numbers, hex dump, markdown rendering, and ANSI color
+support. Press `H` (or `F1`) inside the pager for its own help overlay.
 
 The pager is more than a centered overlay — it can also mount
 in-place:

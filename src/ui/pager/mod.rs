@@ -21,14 +21,19 @@ pub use render::render;
 enum Search {
     /// No search in progress; j/k scroll normally.
     Off,
-    /// The user is typing a query (triggered by `/`).
-    Typing(String),
+    /// The user is typing a query. `backward` is the direction the search was
+    /// initiated in — `/` forward, `?` backward — carried through to the
+    /// committed `Active` so the landing match and `n`/`N` honor it.
+    Typing { query: String, backward: bool },
     /// A query has been committed. `matches` holds line indices that
-    /// contain the query; `cursor` is an index into `matches`.
+    /// contain the query; `cursor` is an index into `matches`. `backward`
+    /// is the initiating direction (see `Typing`): `n` repeats along it,
+    /// `N` against it.
     Active {
         query: String,
         matches: Vec<usize>,
         cursor: usize,
+        backward: bool,
     },
 }
 

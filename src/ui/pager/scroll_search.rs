@@ -6,6 +6,11 @@ use super::{PagerView, Search, VisualKind};
 
 use super::layout::{partition_lines_static, visual_rows};
 
+/// The footer prompt sigil for a search's direction: `?` backward, `/` forward.
+const fn search_sigil(backward: bool) -> char {
+    if backward { '?' } else { '/' }
+}
+
 impl PagerView {
     pub const fn toggle_whitespace(&mut self) {
         self.show_whitespace = !self.show_whitespace;
@@ -231,25 +236,41 @@ impl PagerView {
 
     // ---- Search ----------------------------------------------------------
 
-    /// True when the pager is capturing text input for a `/` search.
+    /// True when the pager is capturing text input for a `/` or `?` search.
     pub const fn is_typing_search(&self) -> bool {
-        matches!(self.search, Search::Typing(_))
+        matches!(self.search, Search::Typing { .. })
     }
 
+    /// Begin a forward (`/`) search: subsequent chars build the query and
+    /// Enter commits it, landing on the first match at or *below* the current
+    /// scroll (wrapping). `n` then repeats downward, `N` upward.
     pub fn begin_search(&mut self) {
-        self.search = Search::Typing(String::new());
+        self.search = Search::Typing {
+            query: String::new(),
+            backward: false,
+        };
+    }
+
+    /// Begin a backward (`?`) search: like [`Self::begin_search`] but the
+    /// commit lands on the first match at or *above* the current scroll, and
+    /// `n` repeats upward, `N` downward.
+    pub fn begin_search_backward(&mut self) {
+        self.search = Search::Typing {
+            query: String::new(),
+            backward: true,
+        };
     }
 
     /// Append a char to the search buffer (only meaningful while typing).
     pub fn search_push_char(&mut self, c: char) {
-        if let Search::Typing(buf) = &mut self.search {
-            buf.push(c);
+        if let Search::Typing { query, .. } = &mut self.search {
+            query.push(c);
         }
     }
 
     pub fn search_backspace(&mut self) {
-        if let Search::Typing(buf) = &mut self.search {
-            buf.pop();
+        if let Search::Typing { query, .. } = &mut self.search {
+            query.pop();
         }
     }
 
@@ -258,11 +279,13 @@ impl PagerView {
         self.search = Search::Off;
     }
 
-    /// Commit the typed query: find matching lines, jump to the first.
-    /// No matches → revert to Off and return false so the caller can flash.
+    /// Commit the typed query: find matching lines, then jump to the match
+    /// nearest the current scroll in the search's direction (forward → first
+    /// at/below, backward → first at/above; each wraps). No matches → revert
+    /// to Off and return false so the caller can flash.
     pub fn commit_search(&mut self, viewport_height: u16) -> bool {
-        let query = match std::mem::replace(&mut self.search, Search::Off) {
-            Search::Typing(q) => q,
+        let (query, backward) = match std::mem::replace(&mut self.search, Search::Off) {
+            Search::Typing { query, backward } => (query, backward),
             other => {
                 self.search = other;
                 return true;
@@ -295,33 +318,42 @@ impl PagerView {
         if matches.is_empty() {
             return false;
         }
-        self.scroll_to_match(matches[0], viewport_height);
+        // Land relative to the current scroll, honoring the search direction
+        // (rather than always snapping to the top of the file).
+        let cursor = Self::select_match(&matches, self.scroll, backward);
+        self.scroll_to_match(matches[cursor], viewport_height);
         self.search = Search::Active {
             query,
             matches,
-            cursor: 0,
+            cursor,
+            backward,
         };
         true
     }
 
-    /// Move to the next match (wraps). No-op when no search is active.
-    pub fn search_next(&mut self, viewport_height: u16) {
-        let Search::Active {
-            matches, cursor, ..
-        } = &mut self.search
-        else {
-            return;
-        };
-        if matches.is_empty() {
-            return;
+    /// Pick the match-list cursor for a freshly committed search, relative to
+    /// the scroll `anchor` and direction. Forward → the first match at or
+    /// after `anchor`; backward → the last match at or before it. Each wraps
+    /// to the far end when nothing lies on the requested side.
+    ///
+    /// `matches` must be sorted ascending and non-empty (`commit_search`
+    /// guarantees both — it collects in line order and returns early when
+    /// empty).
+    pub(super) fn select_match(matches: &[usize], anchor: usize, backward: bool) -> usize {
+        if backward {
+            matches
+                .iter()
+                .rposition(|&m| m <= anchor)
+                .unwrap_or(matches.len() - 1)
+        } else {
+            matches.iter().position(|&m| m >= anchor).unwrap_or(0)
         }
-        *cursor = (*cursor + 1) % matches.len();
-        let line_idx = matches[*cursor];
-        self.scroll_to_match(line_idx, viewport_height);
     }
 
-    /// Move to the previous match (wraps).
-    pub fn search_prev(&mut self, viewport_height: u16) {
+    /// Step the active-search cursor by one match in match-index order
+    /// (wraps). `forward` true → next index, false → previous. No-op unless a
+    /// search is active.
+    fn step_match(&mut self, forward: bool, viewport_height: u16) {
         let Search::Active {
             matches, cursor, ..
         } = &mut self.search
@@ -331,13 +363,45 @@ impl PagerView {
         if matches.is_empty() {
             return;
         }
-        *cursor = if *cursor == 0 {
+        *cursor = if forward {
+            (*cursor + 1) % matches.len()
+        } else if *cursor == 0 {
             matches.len() - 1
         } else {
             *cursor - 1
         };
         let line_idx = matches[*cursor];
         self.scroll_to_match(line_idx, viewport_height);
+    }
+
+    /// True when the active search was initiated backward (`?`).
+    const fn search_is_backward(&self) -> bool {
+        matches!(self.search, Search::Active { backward: true, .. })
+    }
+
+    /// Advance to the next match in match-index order (wraps). The picker
+    /// pagers bind `n`/`N` straight to this / [`Self::search_prev`]; their
+    /// search is always forward, so direction-awareness isn't needed.
+    pub fn search_next(&mut self, viewport_height: u16) {
+        self.step_match(true, viewport_height);
+    }
+
+    /// Step to the previous match in match-index order (wraps).
+    pub fn search_prev(&mut self, viewport_height: u16) {
+        self.step_match(false, viewport_height);
+    }
+
+    /// Repeat the active search in its initiating direction (`n`): downward
+    /// for a `/` search, upward for a `?` search.
+    pub fn search_repeat(&mut self, viewport_height: u16) {
+        let forward = !self.search_is_backward();
+        self.step_match(forward, viewport_height);
+    }
+
+    /// Repeat the active search against its initiating direction (`N`).
+    pub fn search_repeat_opposite(&mut self, viewport_height: u16) {
+        let forward = self.search_is_backward();
+        self.step_match(forward, viewport_height);
     }
 
     /// Returns the line index of the current search match, if any.
@@ -424,12 +488,20 @@ impl PagerView {
         }
         match &self.search {
             Search::Off => None,
-            Search::Typing(buf) => Some(format!("/{buf}_")),
+            Search::Typing { query, backward } => {
+                Some(format!("{}{query}_", search_sigil(*backward)))
+            }
             Search::Active {
                 query,
                 matches,
                 cursor,
-            } => Some(format!("/{query}  {}/{}", cursor + 1, matches.len())),
+                backward,
+            } => Some(format!(
+                "{}{query}  {}/{}",
+                search_sigil(*backward),
+                cursor + 1,
+                matches.len()
+            )),
         }
     }
 }

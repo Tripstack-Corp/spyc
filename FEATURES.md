@@ -349,7 +349,9 @@ spyc.
 - ANSI color preservation — captured command output looks exactly right
 - **Streaming output** — `!` commands show output live with an
   hourglass timer, stderr merged so build progress appears in real-time
-- **/ search** within pager content, with **n / N** navigation
+- **/ search** forward / **? search** backward within pager content,
+  each landing on the nearest match from the current scroll; **n / N**
+  repeat in / against the search direction (vim/less semantics)
 - **:N** jump to line N
 - **l** toggle line numbers (on by default)
 - **w** toggle whitespace markers (·, ↲, $)

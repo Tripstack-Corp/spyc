@@ -197,9 +197,10 @@ pub fn build_pager_help(theme: &Theme) -> PagerView {
         (
             "Search",
             &[
-                ("/", "search forward"),
-                ("n", "next match"),
-                ("N", "previous match"),
+                ("/", "search forward (from current position)"),
+                ("?", "search backward (from current position)"),
+                ("n", "repeat search (same direction)"),
+                ("N", "repeat search (opposite direction)"),
                 (":N", "jump to line N"),
             ],
         ),
@@ -242,7 +243,10 @@ pub fn build_pager_help(theme: &Theme) -> PagerView {
             "Buffer history",
             &[("[b", "previous buffer"), ("]b", "next buffer")],
         ),
-        ("Exit", &[("q  Q  Esc", "close pager"), ("?", "this help")]),
+        (
+            "Exit",
+            &[("q  Q  Esc", "close pager"), ("H  F1", "this help")],
+        ),
     ];
 
     let mut lines: Vec<Line<'static>> = Vec::new();
