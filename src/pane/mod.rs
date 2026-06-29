@@ -174,7 +174,6 @@ impl Pane {
         let event_rx = host
             .take_event_rx()
             .expect("PtyHost::take_event_rx returned None — already taken");
-        let last_size = host.last_size;
         let debug_dump = host.debug_dump;
         let parser_clone = Arc::clone(&parser);
         let gen_clone = Arc::clone(&parser_gen);
@@ -200,7 +199,6 @@ impl Pane {
                 stop_clone,
                 parser_clone,
                 gen_clone,
-                last_size,
                 debug_dump,
                 wake,
             );
@@ -617,12 +615,23 @@ fn append_pty_debug(bytes: &[u8]) {
 /// parser at the current dimensions; the screen looks blank
 /// briefly, then the child repaints. Same safety net as the
 /// pre-v1.50.84 main-thread `process_bytes_safe`.
+/// Replace a (poisoned / torn) parser with a fresh one at its CURRENT size —
+/// NOT a captured adopt-time size. `Pane::resize` keeps the screen size in sync
+/// with the pty and its coalescer skips a same-size resize, so rebuilding at a
+/// stale size would never get corrected (the next resize to the real current
+/// size is a no-op). Reading the live size off the parser keeps the recovered
+/// grid the right shape. The size fields survive a `process` panic (it tears
+/// cell/cursor state, not the grid dimensions).
+fn rebuild_parser_preserving_size(p: &mut vt100::Parser) {
+    let (rows, cols) = p.screen().size();
+    *p = vt100::Parser::new(rows, cols, 10_000);
+}
+
 fn parser_worker(
     guard: RxReturn,
     stop: Arc<AtomicBool>,
     parser: Arc<Mutex<vt100::Parser>>,
     parser_gen: Arc<AtomicU64>,
-    initial_size: (u16, u16),
     debug_dump: bool,
     wake: Wake,
 ) {
@@ -671,14 +680,15 @@ fn parser_worker(
                     );
                     // The panic unwound through a held MutexGuard, so the
                     // mutex is now poisoned. Recover the guard via
-                    // into_inner, install a fresh parser, then clear the
-                    // poison so the main thread's render lock is healthy
-                    // again (the child repaints into the blank grid).
+                    // into_inner, install a fresh parser at the parser's
+                    // CURRENT size (NOT the adopt-time `initial_size`), then
+                    // clear the poison so the main thread's render lock is
+                    // healthy again (the child repaints into the blank grid).
                     {
                         let mut p = parser
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        *p = vt100::Parser::new(initial_size.0, initial_size.1, 10_000);
+                        rebuild_parser_preserving_size(&mut p);
                     }
                     parser.clear_poison();
                 }

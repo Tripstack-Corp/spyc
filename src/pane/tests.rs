@@ -140,7 +140,7 @@ mod wake_tests {
             home: rx_home_tx,
         };
         let handle = std::thread::spawn(move || {
-            parser_worker(guard, stop_cl, parser, gen_cl, (24, 80), false, wake);
+            parser_worker(guard, stop_cl, parser, gen_cl, false, wake);
         });
         (tx, gen_ctr, pending, count, handle)
     }
@@ -235,7 +235,7 @@ mod wake_tests {
             home: home_tx,
         };
         let handle = std::thread::spawn(move || {
-            parser_worker(guard, stop, parser, gen_ctr, (24, 80), false, wake);
+            parser_worker(guard, stop, parser, gen_ctr, false, wake);
         });
         // First Bytes chunk parses, then fires the 0→1 wake edge → panic.
         tx.send(PtyEvent::Bytes(b"x".to_vec())).unwrap();
@@ -247,6 +247,33 @@ mod wake_tests {
         assert!(
             home_rx.recv_timeout(Duration::from_secs(2)).is_ok(),
             "byte receiver must survive a worker panic"
+        );
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::super::rebuild_parser_preserving_size;
+
+    #[test]
+    fn rebuild_preserves_current_size_not_initial() {
+        // A pane adopted at 24×80, then resized to 30×100 (via the same
+        // `set_size` `Pane::resize` uses). A panic-recovery rebuild must land at
+        // the CURRENT size, not the adopt-time 24×80 — otherwise the coalescer
+        // (`== last_size` early-return) never corrects it.
+        let mut p = vt100::Parser::new(24, 80, 100);
+        p.screen_mut().set_size(30, 100);
+        let current = p.screen().size();
+        assert_ne!(
+            current,
+            (24, 80),
+            "set_size should change the reported size"
+        );
+        rebuild_parser_preserving_size(&mut p);
+        assert_eq!(
+            p.screen().size(),
+            current,
+            "rebuild must preserve the current size"
         );
     }
 }
