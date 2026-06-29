@@ -491,6 +491,14 @@ pub fn build_index_change_file(
             dest_kind,
             copy,
         } => {
+            // Recompute rather than reuse gix's detection diff: the index diff
+            // API (`gix::diff::index::ChangeRef::Rewrite`) doesn't surface the
+            // `DiffLineStats` its rewrite tracker computed, so there's nothing to
+            // reuse on this path. Keeping the dedicated `blob_similarity` (one
+            // algorithm- and metric-pinned calc) also keeps the `R<n>`/`C<n>` %
+            // identical across `gd`/`gD`/`show`; it runs in the off-thread diff
+            // worker, so the extra blob diff per (rare) renamed file costs no UI
+            // responsiveness.
             let similarity = blob_similarity(repo, *source_id, *dest_id);
             let status = if *copy {
                 FileStatus::Copied { similarity }
@@ -635,6 +643,13 @@ pub fn build_tree_change_file(
             id,
             ..
         } => {
+            // The tree-diff `Change::Rewrite` *does* carry gix's detection
+            // `DiffLineStats`, but we deliberately recompute with the same
+            // `blob_similarity` the index path uses (which can't reuse — see
+            // `build_index_change_file`): gix's stat similarity is byte-based
+            // while ours is line-based, so reusing only here would make `show`'s
+            // `R<n>`/`C<n>` % disagree with `gd`/`gD`'s. One pinned metric across
+            // all views beats saving a blob diff on a rare renamed file.
             let similarity = blob_similarity(repo, *source_id, *id);
             let status = if *copy {
                 FileStatus::Copied { similarity }

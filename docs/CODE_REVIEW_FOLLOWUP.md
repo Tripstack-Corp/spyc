@@ -31,7 +31,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 - **PR11** — MCP scope/robustness + path/env overlay _(3 findings; clusters: mcp)_
 - **PR12** — Misc correctness batch _(11 findings; clusters: resume, other, fs-watch-topology, prompt-allowlist-drift, perf-linear-scan, perf-sort-alloc, pager-truncation-bytes, pane-vt100-recovery-size)_
 
-**Remaining: 6** (after PR #595; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings, #590 fixed the 2 MCP-robustness findings, #592 fixed inventory re-yank, #595 fixed the 2 git-view syntect-on-main-thread findings). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
+**Remaining: 5** (after PR #597; down from the original 67 — the 2026-06-27 re-verification closed 3 as already-fixed/by-design, #581 fixed 1, #582 fixed the lone HIGH, #583 fixed 3 cheap blocking-IO findings, #588 fixed 2 effects-as-data findings, #590 fixed the 2 MCP-robustness findings, #592 fixed inventory re-yank, #595 fixed the 2 git-view syntect-on-main-thread findings). See the closed log for the trail; the open items are the `REAL`/`PARTIAL` rows below.
 
 ## To fix — by cluster
 
@@ -121,7 +121,7 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/render/chrome.rs:320` | build_rows is O(rows × delete-preview paths) — quadratic on 'delete picks' in a big directory | medium | S | ✅ PR #526 |
 | `src/fs/listing.rs:137` | Listing::sort comparator allocates 2-4 Strings per comparison — ~1.5M+ allocations per sort of a 50k-entry directory, on the event loop | medium | S | ✅ PR #525 |
 | `src/fs/ops.rs:52` | read_truncated caps lines but not bytes — a huge single-line file is loaded entirely into RAM on the UI thread | medium | S | ✅ PR #521 |
-| `src/git/diff_model/build.rs:559` | Rename similarity recomputed with a second full-blob diff that gix already performed | medium | S | REAL |
+| `src/git/diff_model/build.rs:559` | Rename similarity recomputed with a second full-blob diff that gix already performed | medium | S | ✅ PR #597 (accepted; rationale in log) |
 | `src/main.rs:87` | Panic hook doesn't pop kitty keyboard-enhancement flags or alternate-scroll mode — terminal left misbehaving after a panic | medium | S | ✅ PR #529 |
 | `src/pane/mod.rs:607` | vt100 panic recovery rebuilds the parser at the adopt-time size, and the resize coalescer guarantees it never gets corrected | medium | S | REAL |
 | `src/app/run.rs:54` | Config-file watch on $HOME is permanently destroyed when the listing watch passes through the same directory | medium | M | ✅ #581 (already-fixed: watches keyed by purpose) |
@@ -131,6 +131,9 @@ One `fix:`/`refactor:` PR per cluster (batched where small), gate-green, each `m
 | `src/app/state/dispatch.rs:45` | :limit command and limit-prompt are drifted near-duplicates — unifying them changes `:limit git`/`:limit h` (fix, moved from PR9) | medium | S | REAL |
 
 ## Closed / resolved (running log)
+
+**✅ PR #597 — rename-similarity recompute is by-design; documented (2026-06-28):**
+- `git/diff_model/build.rs:559` — accepted, not changed. Investigated reusing gix's rename-detection diff: the staged `gd`/`gD` path (`gix::diff::index::ChangeRef::Rewrite`) does **not** surface the `DiffLineStats` its tracker computed (verified against gix-diff 0.64 `index/mod.rs` — no `diff` field), so there's nothing to reuse there. The `show` path (`tree_with_rewrites::ChangeRef::Rewrite`) *does* expose `diff`, but its `similarity` is **byte-based** while our `blob_similarity` is **line-based** (different metric *and* potentially a different diff algorithm), so reusing only there would make `show`'s `R<n>`/`C<n>` % disagree with `gd`/`gD`'s. Deriving similarity from our own display hunks is unreliable (context-limited hunks don't give whole-file line totals). The recompute runs in the **off-thread** diff worker (`build_payload`), so the extra blob diff per *rare* renamed file costs no UI responsiveness. Kept the one pinned, uniform metric across all three views; added call-site comments at both Rewrite arms so it isn't re-flagged.
 
 **✅ PR #595 — git-view syntax highlights computed in the worker, off the main thread (2026-06-28):**
 - `ui/blame_render.rs:44` — `render_blame` re-ran syntect over the whole file on every render (mount, `f`, resize); no cache. Split into `highlight_blame` (the syntect pass) + `render_blame_highlighted` (the cheap layout half).
