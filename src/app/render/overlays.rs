@@ -10,8 +10,15 @@ use crate::app::{App, format_uptime};
 impl App {
     /// Render the harpoon menu overlay. Centered modal box listing
     /// the active project's slots, with the menu cursor on a
-    /// highlighted row. Footer shows the bindings.
-    pub(super) fn render_harpoon_menu(&self, frame: &mut Frame) {
+    /// highlighted row. Footer shows the bindings. `h_divider_row` /
+    /// `v_divider_col` let it nudge its border off a structural divider
+    /// (see [`Self::render_chord_hint`]).
+    pub(super) fn render_harpoon_menu(
+        &self,
+        frame: &mut Frame,
+        h_divider_row: Option<u16>,
+        v_divider_col: Option<u16>,
+    ) {
         use ratatui::{
             layout::Rect,
             style::{Color, Modifier, Style},
@@ -30,8 +37,10 @@ impl App {
         let width = area.width.clamp(40, 72);
         let body_h = (h.slots.len().max(1)) as u16;
         let height = (2 + body_h + 2).min(area.height); // borders + body + footer
-        let x = area.x + (area.width.saturating_sub(width)) / 2;
-        let y = area.y + (area.height.saturating_sub(height)) / 2;
+        let cx = area.x + (area.width.saturating_sub(width)) / 2;
+        let cy = area.y + (area.height.saturating_sub(height)) / 2;
+        let x = place_clear_of_line(cx, width, v_divider_col, area.x, area.right());
+        let y = place_clear_of_line(cy, height, h_divider_row, area.y, area.bottom());
         let rect = Rect {
             x,
             y,
@@ -326,7 +335,18 @@ impl App {
     /// continuation lines (never truncated); entries flow into as many columns as
     /// the terminal height needs. Drawn from `view.chord_hint` (built in
     /// `settle_chord_hint`); a pure `&self` read. No-op when no popup is active.
-    pub(super) fn render_chord_hint(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+    ///
+    /// `h_divider_row` / `v_divider_col` are the horizontal pane divider's row
+    /// and the vertical split separator's column (when present), so the popup
+    /// can nudge its border off them — a box edge sitting exactly on a divider
+    /// merges the two single-cell rules into one line that reads as broken.
+    pub(super) fn render_chord_hint(
+        &self,
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        h_divider_row: Option<u16>,
+        v_divider_col: Option<u16>,
+    ) {
         use ratatui::{
             layout::Rect,
             style::{Modifier, Style},
@@ -415,8 +435,12 @@ impl App {
         let rows_tall = columns.iter().map(Vec::len).max().unwrap_or(0);
         let width = ((n * col_w) as u16 + 2).min(area.width);
         let height = (rows_tall as u16 + 2).min(area.height);
-        let x = area.x + area.width.saturating_sub(width) / 2;
-        let y = area.y + area.height.saturating_sub(height) / 2;
+        // Center, then nudge a border off a structural divider it would land on
+        // (a box edge collinear with the pane / split rule merges into it).
+        let cx = area.x + area.width.saturating_sub(width) / 2;
+        let cy = area.y + area.height.saturating_sub(height) / 2;
+        let x = place_clear_of_line(cx, width, v_divider_col, area.x, area.right());
+        let y = place_clear_of_line(cy, height, h_divider_row, area.y, area.bottom());
         let rect = Rect {
             x,
             y,
@@ -450,6 +474,29 @@ impl App {
     }
 }
 
+/// Place a popup span of `size` cells so neither of its edges (`start` and
+/// `start + size - 1`) sits on `line`, staying within `[min, max_end)`. Starts
+/// from the centered `start` and, only if it collides, tries the nearest
+/// offsets (±1, ±2); if none fit (the popup nearly fills the axis, leaving no
+/// room to dodge), returns the centered value unchanged. `line: None` (no such
+/// divider on screen) is a no-op.
+fn place_clear_of_line(start: u16, size: u16, line: Option<u16>, min: u16, max_end: u16) -> u16 {
+    let Some(line) = line else {
+        return start;
+    };
+    let collides = |s: u16| s == line || s + size.saturating_sub(1) == line;
+    if !collides(start) {
+        return start;
+    }
+    for delta in [1i32, -1, 2, -2] {
+        let s = i32::from(start) + delta;
+        if s >= i32::from(min) && s + i32::from(size) <= i32::from(max_end) && !collides(s as u16) {
+            return s as u16;
+        }
+    }
+    start
+}
+
 /// Greedy word-wrap a popup label to `width` display columns. Returns one
 /// segment per line. A single word longer than `width` lands on its own line
 /// (popup labels never contain such words, so this stays simple).
@@ -480,4 +527,44 @@ fn wrap_label(label: &str, width: usize) -> Vec<String> {
         lines.push(cur);
     }
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::place_clear_of_line;
+
+    #[test]
+    fn no_line_or_no_collision_keeps_centered() {
+        // No divider on screen → unchanged.
+        assert_eq!(place_clear_of_line(10, 5, None, 0, 80), 10);
+        // Divider clear of both edges (10..=14) → unchanged.
+        assert_eq!(place_clear_of_line(10, 5, Some(20), 0, 80), 10);
+    }
+
+    #[test]
+    fn top_edge_on_line_shifts_down() {
+        // start == line: nudged to 11 (edges 11 and 15, both clear of 10).
+        assert_eq!(place_clear_of_line(10, 5, Some(10), 0, 80), 11);
+    }
+
+    #[test]
+    fn bottom_edge_on_line_shifts() {
+        // bottom edge (start+size-1 = 14) == line → +1 makes edges 11 and 15,
+        // neither is 14 → resolved.
+        assert_eq!(place_clear_of_line(10, 5, Some(14), 0, 80), 11);
+    }
+
+    #[test]
+    fn falls_back_to_minus_one_when_down_would_overflow() {
+        // Height 5 at the very bottom: start=5, max_end=10 (edges 5..=9),
+        // line=5 (top edge). +1 would push the bottom edge past max_end, so it
+        // shifts up to 4 instead (edges 4 and 8).
+        assert_eq!(place_clear_of_line(5, 5, Some(5), 0, 10), 4);
+    }
+
+    #[test]
+    fn no_room_to_dodge_returns_centered() {
+        // Popup fills the whole axis (size == span): can't move, stays put.
+        assert_eq!(place_clear_of_line(0, 10, Some(0), 0, 10), 0);
+    }
 }

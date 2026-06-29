@@ -242,7 +242,11 @@ impl App {
         // Harpoon menu overlay — modal, drawn on top of everything
         // except the activity monitor.
         if self.view.harpoon_menu.is_some() {
-            self.render_harpoon_menu(frame);
+            self.render_harpoon_menu(
+                frame,
+                layout.divider.map(|r| r.y),
+                layout.vdivider.map(|r| r.x),
+            );
         }
     }
 

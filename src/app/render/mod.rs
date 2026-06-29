@@ -416,11 +416,16 @@ impl App {
         // rows/grid) BEFORE drawing, so the draw path itself performs no
         // domain/view transitions.
         let layout = self.prepare_frame(frame.area());
+        // The two structural rules a centered popup border could land on (and so
+        // visually merge with): the horizontal pane divider and the vertical
+        // split separator. Captured before `layout` is consumed by render_inner.
+        let h_divider_row = layout.divider.map(|r| r.y);
+        let v_divider_col = layout.vdivider.map(|r| r.x);
         self.render_inner(frame, layout);
         let frame_area = frame.area();
         // which-key chord-hint popup — over the content but under the always-on
         // activity HUD (different corners; the HUD wins any overlap).
-        self.render_chord_hint(frame, frame_area);
+        self.render_chord_hint(frame, frame_area, h_divider_row, v_divider_col);
         self.render_activity_hud(frame, frame_area);
         // Full-screen mermaid image overlay (the `i` key) — drawn last so it
         // sits on top of everything, including the HUD.
