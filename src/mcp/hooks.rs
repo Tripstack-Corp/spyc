@@ -26,10 +26,29 @@
 //! git-tracked `settings.json` (don't dirty something the user committed).
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Value, json};
 
 use super::config::ConfigCleanup;
+
+/// Set once at launch from the `--status-trace` CLI flag. When on, the hook
+/// commands spyc installs get a baked `--status-trace` arg so the one-shot
+/// reporter subprocess logs each invocation — and crucially the arg rides in the
+/// command string, so it survives even if Claude runs hooks with a sanitized
+/// env. Off by default (the reporter fires every agent turn; always-on logging
+/// would spam `mcp.log`). Mirrors the `--key-trace` debug-flag pattern.
+static STATUS_TRACE: AtomicBool = AtomicBool::new(false);
+
+/// Enable baking `--status-trace` into installed hook commands. Called once at
+/// startup from `spyc --status-trace`.
+pub fn set_status_trace(on: bool) {
+    STATUS_TRACE.store(on, Ordering::Relaxed);
+}
+
+fn status_trace_enabled() -> bool {
+    STATUS_TRACE.load(Ordering::Relaxed)
+}
 
 /// The (event, matcher, reported-state) hooks spyc installs. `matcher` is the
 /// tool-name pattern for the per-tool events (`""` = all / not-a-tool-event).
@@ -83,7 +102,11 @@ pub fn ensure_claude_status_hooks(dir: &Path) -> bool {
     }
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
     let existing = std::fs::read_to_string(&path).ok();
-    let Some(out) = merged_status_hooks_json(existing.as_deref(), &exe.to_string_lossy()) else {
+    let Some(out) = merged_status_hooks_json(
+        existing.as_deref(),
+        &exe.to_string_lossy(),
+        status_trace_enabled(),
+    ) else {
         return false;
     };
     // Already current → skip the write (and its mtime bump), but still report
@@ -103,7 +126,7 @@ pub fn ensure_claude_status_hooks(dir: &Path) -> bool {
 /// refuse to clobber, or on a serialization failure. Pure (no I/O) so the merge
 /// — and its byte-level idempotency, which is what makes the write skippable —
 /// is unit-testable.
-fn merged_status_hooks_json(existing: Option<&str>, exe: &str) -> Option<String> {
+fn merged_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) -> Option<String> {
     let mut root = existing
         .and_then(|t| serde_json::from_str::<Value>(t).ok())
         .filter(Value::is_object)
@@ -111,10 +134,13 @@ fn merged_status_hooks_json(existing: Option<&str>, exe: &str) -> Option<String>
     let obj = root.as_object_mut()?;
     let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
     let hooks_obj = hooks.as_object_mut()?;
+    // `--status-trace` rides in the command string (not env) so the reporter
+    // logs even when Claude sanitizes the hook env.
+    let suffix = if trace { " --status-trace" } else { "" };
     for (event, matcher, state) in STATUS_HOOKS {
         let group = json!({
             "matcher": matcher,
-            "hooks": [ { "type": "command", "command": format!("{exe} --report-status {state}") } ],
+            "hooks": [ { "type": "command", "command": format!("{exe} --report-status {state}{suffix}") } ],
         });
         let arr = hooks_obj.entry(event).or_insert_with(|| json!([]));
         let Some(list) = arr.as_array_mut() else {
@@ -300,23 +326,38 @@ mod tests {
         // this is the invariant that lets `ensure_claude_status_hooks` skip the
         // write (and the mtime bump) on a re-launch instead of churning the
         // shared settings.json.
-        let once = merged_status_hooks_json(None, "spyc").expect("fresh merge");
-        let twice = merged_status_hooks_json(Some(&once), "spyc").expect("re-merge");
+        let once = merged_status_hooks_json(None, "spyc", false).expect("fresh merge");
+        let twice = merged_status_hooks_json(Some(&once), "spyc", false).expect("re-merge");
         assert_eq!(once, twice, "re-applying the merge changed a byte");
         // It really installed our hooks (guards against a vacuous equality).
         assert!(once.contains("--report-status blocked"));
+        assert!(
+            !once.contains("--status-trace"),
+            "trace off → no baked flag"
+        );
         // A user's own settings/hooks survive the round-trip unchanged too.
         let with_user = merged_status_hooks_json(
             Some(r#"{"theme":"dark","hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo bye"}]}]}}"#),
             "spyc",
+            false,
         )
         .expect("merge over user config");
         assert_eq!(
             with_user,
-            merged_status_hooks_json(Some(&with_user), "spyc").expect("re-merge over user config"),
+            merged_status_hooks_json(Some(&with_user), "spyc", false)
+                .expect("re-merge over user config"),
             "merge over a user config is not idempotent"
         );
         assert!(with_user.contains("echo bye"), "user hook dropped");
+
+        // `--status-trace` on bakes the flag into every command, still idempotently.
+        let traced = merged_status_hooks_json(None, "spyc", true).expect("traced merge");
+        assert!(traced.contains("--report-status blocked --status-trace"));
+        assert_eq!(
+            traced,
+            merged_status_hooks_json(Some(&traced), "spyc", true).expect("re-merge traced"),
+            "traced merge is not idempotent"
+        );
     }
 
     #[test]

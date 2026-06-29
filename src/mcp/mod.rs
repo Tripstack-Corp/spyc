@@ -142,7 +142,7 @@ pub use config::{
     detect_existing_spyc_codex, ensure_codex_config_toml, ensure_mcp_json, enterprise_defines_spyc,
     sweep_orphan_spyc_configs,
 };
-pub use hooks::{cleanup_claude_status_hooks, ensure_claude_status_hooks};
+pub use hooks::{cleanup_claude_status_hooks, ensure_claude_status_hooks, set_status_trace};
 pub use server::{cleanup_socket, start_socket_server};
 
 use server::{discover_live_socket, run_direct, run_proxy};
@@ -168,18 +168,25 @@ fn resolve_context_path(project_root: &Path) -> PathBuf {
 /// the agent — every failure path just returns. A tight 2 s IO timeout (far
 /// below the proxy's 20 s) bounds the worst case so the hook can't stall the
 /// agent's turn.
-pub fn report_status_to_socket(state: &str) {
+pub fn report_status_to_socket(state: &str, trace: bool) {
     use std::io::{BufRead, BufReader, Write};
     const REPORT_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
+    // Opt-in diagnostic trace (`--status-trace`, baked into the installed hook
+    // command so it survives any env sanitization — it travels as a cmdline arg,
+    // not an env var). OFF by default: this reporter fires on every agent turn,
+    // so always-on would spam mcp.log. When on, it logs each invocation + the
+    // env it actually saw, distinguishing a hook that FIRED-but-couldn't-reach
+    // (no SPYC_MCP_SOCK) from one that never fired. `grep report-status mcp.log`.
+    let trace_log = |msg: &str| {
+        if trace {
+            mcp_log(msg);
+        }
+    };
+
     let sock = std::env::var("SPYC_MCP_SOCK").unwrap_or_default();
     let pane_id = std::env::var("SPYC_PANE_ID").ok();
-    // Diagnostic (mcp.log): log every reporter invocation + the env it actually
-    // saw. A status hook that FIRES but can't reach spyc (Claude ran the hook
-    // command without SPYC_MCP_SOCK in its env) is otherwise indistinguishable
-    // from a hook that never fires — both leave no trace. To check whether the
-    // auto-status hooks work: `grep report-status <state-dir>/mcp.log`.
-    mcp_log(&format!(
+    trace_log(&format!(
         "report-status: state={state} SPYC_MCP_SOCK={} SPYC_PANE_ID={}",
         if sock.is_empty() {
             "MISSING"
@@ -196,7 +203,7 @@ pub fn report_status_to_socket(state: &str) {
         return;
     }
     let Ok(mut stream) = UnixStream::connect(&sock) else {
-        mcp_log(&format!("report-status: connect FAILED to {sock}"));
+        trace_log(&format!("report-status: connect FAILED to {sock}"));
         return; // spyc not running / different instance — nothing to update
     };
     let _ = stream.set_read_timeout(Some(REPORT_IO_TIMEOUT));
@@ -211,11 +218,11 @@ pub fn report_status_to_socket(state: &str) {
         },
     });
     if writeln!(stream, "{req}").is_err() {
-        mcp_log("report-status: write FAILED");
+        trace_log("report-status: write FAILED");
         return;
     }
     let _ = stream.flush();
-    mcp_log(&format!("report-status: sent state={state}"));
+    trace_log(&format!("report-status: sent state={state}"));
     // Read the one-line reply so spyc has applied the command before we exit —
     // closing the socket immediately would otherwise race the main-loop apply.
     // Best-effort: a timeout/EOF here doesn't matter, the command is queued.

@@ -142,6 +142,14 @@ struct Cli {
     #[arg(long)]
     key_trace: bool,
 
+    /// Trace the agent status-reporter to mcp.log: each `--report-status` hook
+    /// invocation + the env it actually saw (SPYC_MCP_SOCK / SPYC_PANE_ID). Bakes
+    /// `--status-trace` into the status hooks spyc installs, so it logs even if
+    /// Claude sanitizes the hook env. Off by default (the reporter fires every
+    /// agent turn). Diagnose with `grep report-status <state-dir>/mcp.log`.
+    #[arg(long)]
+    status_trace: bool,
+
     /// Run as MCP server (stdio JSON-RPC)
     #[arg(long)]
     mcp: bool,
@@ -206,6 +214,10 @@ pub fn run() -> Result<()> {
 
     let cli = Cli::parse();
 
+    // Record `--status-trace` so the hook installer bakes `--status-trace` into
+    // the status-reporter commands it writes (the reporter then logs each fire).
+    mcp::set_status_trace(cli.status_trace);
+
     if cli.print_config {
         print!("{}", config::DEFAULT_TEMPLATE);
         return Ok(());
@@ -231,7 +243,7 @@ pub fn run() -> Result<()> {
     // Best-effort — never errors out (it runs inside the agent's lifecycle
     // hook, and must not block/break the agent if spyc is gone).
     if let Some(state) = cli.report_status.as_deref() {
-        mcp::report_status_to_socket(state);
+        mcp::report_status_to_socket(state, cli.status_trace);
         return Ok(());
     }
     if cli.verbose {
