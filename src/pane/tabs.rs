@@ -177,6 +177,13 @@ pub struct TabInfo {
     /// exact rollout when present (the strongest signal). `None` for non-codex
     /// tabs and codex tabs not yet pinned.
     pub codex_session_id: Option<String>,
+    /// Claude session uuid pinned to this tab. Set at restore from the exact
+    /// `/resume <sid>` we inject (we KNOW which conversation this pane is
+    /// resuming), so the next session save persists it directly instead of
+    /// re-deriving it from the fragile spawn-time-proximity heuristic — which
+    /// crosses panes restored together (they all spawn within the same second).
+    /// `None` for non-claude tabs and for a fresh (never-resumed) claude pane.
+    pub claude_session_id: Option<String>,
 }
 
 impl TabInfo {
@@ -209,6 +216,7 @@ impl TabInfo {
             spawn_at: std::time::Instant::now(),
             spawn_epoch_secs: crate::sysinfo::epoch_secs(),
             codex_session_id: None,
+            claude_session_id: None,
         }
     }
 }

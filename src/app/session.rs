@@ -45,16 +45,30 @@ impl App {
                     .map(|t| {
                         let profile = crate::agent::detect(&t.info.command);
                         let kind = profile.kind();
-                        // Resolve the (session_id, session_name) to
-                        // persist. The profile honors `claimed` internally
-                        // so multi-pane saves don't collapse onto one
+                        // Resolve the (session_id, session_name) to persist.
+                        // Prefer this tab's PINNED claude session id (set at
+                        // restore from the exact `/resume <sid>`) when its JSONL
+                        // still exists — that's the conversation this pane is
+                        // definitively running, so it bypasses the spawn-proximity
+                        // resolver that crosses panes restored together. Otherwise
+                        // fall back to the profile resolver, which honors `claimed`
+                        // internally so multi-pane saves don't collapse onto one
                         // conversation.
-                        let (agent_session_id, agent_session_name) = profile.resolve_resume_target(
-                            &t.pane,
-                            &t.info.cwd,
-                            t.info.spawn_epoch_secs,
-                            &claimed,
-                        );
+                        let (agent_session_id, agent_session_name) =
+                            match t.info.claude_session_id.as_deref().filter(|id| {
+                                crate::state::sessions::claude_jsonl_exists(&t.info.cwd, id)
+                            }) {
+                                Some(id) => (
+                                    Some(id.to_string()),
+                                    crate::state::sessions::find_claude_session_name(id),
+                                ),
+                                None => profile.resolve_resume_target(
+                                    &t.pane,
+                                    &t.info.cwd,
+                                    t.info.spawn_epoch_secs,
+                                    &claimed,
+                                ),
+                            };
                         if let Some(ref id) = agent_session_id {
                             claimed.insert(id.clone());
                         }
@@ -331,6 +345,11 @@ impl App {
                     // session files saved before the save-side strip landed.
                     entry.info.label = crate::pane::tabs::strip_exit_suffix(&tab.label);
                     if let crate::agent::ResumeAction::ClaudeStdin { session_id } = plan.resume {
+                        // Pin the exact session this pane is resuming so the next
+                        // save persists it directly, never re-deriving it from the
+                        // spawn-proximity heuristic that crosses panes restored
+                        // together (they all spawn within the same second).
+                        entry.info.claude_session_id = Some(session_id.clone());
                         entry.info.pending_resume_send =
                             Some(crate::pane::tabs::PendingResumeSend::Text {
                                 sid: session_id,
