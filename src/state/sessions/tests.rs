@@ -410,7 +410,7 @@ fn picker_works_for_gemini_records() {
 // `with_state_root` isolates this test from siblings.
 
 #[test]
-fn save_load_prune_and_dedup() {
+fn save_load_prune_and_keep_distinct_sessions() {
     let tmp = tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         // --- roundtrip ---
@@ -474,10 +474,11 @@ fn save_load_prune_and_dedup() {
         let loaded = load_sessions();
         assert!(loaded.len() <= MAX_SESSIONS);
 
-        // --- clean up for dedup test ---
+        // --- clean up for the distinct-sessions test ---
         std::fs::remove_dir_all(&dir).unwrap();
 
-        // --- dedup ---
+        // --- distinct sessions with the same cwd + commands are BOTH kept ---
+        // (each is its own restore point; load_sessions does no lossy dedup)
         for id in [100_u64, 200] {
             let s = Session {
                 id,
@@ -502,9 +503,10 @@ fn save_load_prune_and_dedup() {
             save_session(&s).unwrap();
         }
         let loaded = load_sessions();
-        assert_eq!(loaded.len(), 1);
-        // Most recent (id=200) wins
+        assert_eq!(loaded.len(), 2, "distinct sessions must not be collapsed");
+        // Sorted by recency: id=200 (newer) before id=100.
         assert_eq!(loaded[0].id, 200);
+        assert_eq!(loaded[1].id, 100);
     });
 }
 

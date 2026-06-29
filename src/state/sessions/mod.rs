@@ -146,20 +146,11 @@ pub fn load_sessions() -> Vec<Session> {
         })
         .collect();
     sessions.sort_by_key(|s| std::cmp::Reverse(s.epoch_secs));
-    // Dedup by cwd + tab commands (keep most recent).
-    let mut seen = std::collections::HashSet::new();
-    sessions.retain(|s| {
-        let key = format!(
-            "{}|{}",
-            s.cwd.display(),
-            s.tabs
-                .iter()
-                .map(|t| t.command.as_str())
-                .collect::<Vec<_>>()
-                .join(",")
-        );
-        seen.insert(key)
-    });
+    // No dedup: every saved session is a distinct restore point (its own
+    // `<id>.json` with its own agent transcripts / vsplit), so collapsing by
+    // cwd + commands would silently drop genuinely-different sessions that
+    // happen to share a directory and tab layout. `prune_old` (MAX_SESSIONS)
+    // already bounds how many accumulate.
     sessions
 }
 
