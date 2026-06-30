@@ -129,18 +129,29 @@ definitions:
               tar -xzf /tmp/cargo-deny.tar.gz -C /tmp
               install -m 0755 "/tmp/${CARGO_DENY_DIR}/cargo-deny" "$CARGO_HOME/bin/cargo-deny"
             fi
-          # `make check` = fmt-check + clippy + tests + deny. Tests
-          # forced single-threaded by the Makefile (XDG_STATE_HOME race).
-          # CI calls the Makefile so local and CI agree on the gate.
+          # `make check` = fmt-check + clippy + tests + deny. CI calls the
+          # Makefile so local and CI agree on the gate. (The suite runs
+          # with default test parallelism — it's chdir-free, so the
+          # parallel runner is safe; there is no --test-threads=1.)
+          #
+          # Two CI-only env overrides (local dev is unaffected):
           #
           # `CARGO_INCREMENTAL=0` disables cargo's per-crate incremental
           # metadata. The metadata files include build paths and
           # timestamps that go stale across runners, which makes warm-
           # cache hits silently rebuild artifacts that should have been
           # reusable. Disabling it shrinks target/ AND makes the cached
-          # dep graph deterministic across runs. Local dev keeps
-          # incremental on (this is a CI-only override).
-          - CARGO_INCREMENTAL=0 make check
+          # dep graph deterministic across runs.
+          #
+          # `CARGO_PROFILE_{DEV,TEST}_DEBUG=line-tables-only` drops full
+          # DWARF from the clippy + test compiles. clippy (check-mode) and
+          # test (codegen-mode) each compile spyc's large crate separately
+          # — cargo can't share those artifacts — so the debug info is
+          # generated twice. CI never runs a debugger on these builds;
+          # line tables keep panic file:line in test failures while cutting
+          # compile time and shrinking target/ (which also speeds the
+          # Bitbucket cache push/pull).
+          - CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_PROFILE_TEST_DEBUG=line-tables-only make check
 
     - step: &deps-status
         name: Dependency drift report
@@ -189,7 +200,24 @@ definitions:
           - rustup
         script:
           - rustup component add llvm-tools-preview
-          - cargo install cargo-llvm-cov --locked
+          # cargo-llvm-cov: pinned prebuilt binary from the upstream
+          # GitHub release, verified by sha256 — mirrors the cargo-deny
+          # install in the Quality step. Replaces `cargo install
+          # cargo-llvm-cov --locked`, which compiled from source (minutes)
+          # on every cold cache. Bump VERSION + SHA256 together when
+          # taiki-e ships a new release (sha = sha256 of the
+          # x86_64-unknown-linux-musl .tar.gz; the binary sits at its root).
+          - |
+            CARGO_LLVM_COV_VERSION=0.8.7
+            CARGO_LLVM_COV_SHA256=967b5cc996c29d8baa52bbb4595ef1f53af35255af8e2036ddbc6468d7b523c7
+            # `--version` may need the `llvm-cov` subcommand depending on the
+            # build, so try both forms before deciding to (re)install.
+            if ! { "$CARGO_HOME/bin/cargo-llvm-cov" --version 2>/dev/null || "$CARGO_HOME/bin/cargo-llvm-cov" llvm-cov --version 2>/dev/null; } | grep -q "${CARGO_LLVM_COV_VERSION}"; then
+              curl -sSLo /tmp/cargo-llvm-cov.tar.gz "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${CARGO_LLVM_COV_VERSION}/cargo-llvm-cov-x86_64-unknown-linux-musl.tar.gz"
+              echo "${CARGO_LLVM_COV_SHA256}  /tmp/cargo-llvm-cov.tar.gz" | sha256sum -c -
+              tar -xzf /tmp/cargo-llvm-cov.tar.gz -C /tmp
+              install -m 0755 /tmp/cargo-llvm-cov "$CARGO_HOME/bin/cargo-llvm-cov"
+            fi
           # `CARGO_TARGET_DIR=target-cov` keeps the instrumented build
           # out of the Quality step's `target/` cache. See the
           # `target-cov` cache definition above for the why.
