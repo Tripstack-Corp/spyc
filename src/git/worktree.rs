@@ -147,12 +147,32 @@ pub fn add(dir: &Path, branch: &str, base: Option<&str>) -> std::io::Result<Path
     // corrected the base BRANCH but not the PATH). The common dir is shared by
     // every worktree of the repo, so opening it yields the main worktree's repo
     // view regardless of where `dir` points.
-    let root = std::fs::canonicalize(
-        gix::open(&common_dir)
-            .ok()
-            .and_then(|main| main.workdir().map(std::path::Path::to_path_buf))
-            .ok_or_else(|| std::io::Error::other("cannot add a worktree to a bare repository"))?,
-    )?;
+    let root = if let Some(workdir) = gix::open(&common_dir)
+        .ok()
+        .and_then(|main| main.workdir().map(std::path::Path::to_path_buf))
+    {
+        // Non-bare: the main worktree root. Canonicalize so the persisted
+        // gitfile/admin paths are absolute (see the `common_dir` note above).
+        std::fs::canonicalize(workdir)?
+    } else {
+        // Bare repo: no workdir, so derive the logical root from the (already
+        // canonical) git dir and place worktrees beside it, matching
+        // `git worktree add` (which a bare repo fully supports):
+        //   `<root>/.git` (a bare-flagged gitdir-style repo — e.g. spyc's own
+        //                  bare main checkout with sibling worktrees) → `<root>`
+        //   `<root>.git`  (classic `git init --bare`)                  → `<root>`
+        //   otherwise (a bare dir with no `.git` suffix)               → itself
+        // Previously this bailed with "cannot add a worktree to a bare
+        // repository", which broke `create_worktree` on a bare main repo.
+        let cd = common_dir.as_path();
+        if cd.file_name() == Some(std::ffi::OsStr::new(".git")) {
+            cd.parent().unwrap_or(cd).to_path_buf()
+        } else if cd.extension() == Some(std::ffi::OsStr::new("git")) {
+            cd.with_extension("")
+        } else {
+            cd.to_path_buf()
+        }
+    };
 
     // Group worktrees under a per-repo sibling dir, so they don't clutter the
     // repo's parent or collide with unrelated dirs:
@@ -586,6 +606,37 @@ mod tests {
         assert!(
             !wt2.starts_with(&wt1),
             "worktree must NOT nest under the asking linked worktree: {wt2:?}"
+        );
+    }
+
+    #[test]
+    fn add_to_bare_repo_anchors_beside_repo_root() {
+        // A bare main repo (no working tree) must still accept `add()`:
+        // `git worktree add` supports it, but the gix path used to bail with
+        // "cannot add a worktree to a bare repository" because a bare repo has
+        // no `workdir()` — which broke `create_worktree` on spyc's own canonical
+        // layout (a bare main checkout with sibling worktrees). The new worktree
+        // must land beside the repo root (`<root>.worktrees/<branch>`), derived
+        // from the `<root>/.git` git dir.
+        let (_tmp, main) = init_repo();
+        // Flip the repo bare so gix reports no workdir, exercising the
+        // bare-fallback path. The `.git` dir and its objects stay in place.
+        run_git(&main, &["config", "core.bare", "true"]);
+        let base_head = gix_head_sha(&main); // a bare repo's HEAD still resolves
+
+        let target = add(&main, "wt-bare", None).expect("add to bare repo must succeed");
+
+        let group = main.parent().unwrap().join("repo.worktrees");
+        assert_eq!(
+            target,
+            group.join("wt-bare"),
+            "worktree must anchor beside the bare repo root, got {target:?}"
+        );
+        assert!(target.is_dir(), "worktree dir must be materialized");
+        assert_eq!(
+            gix_head_sha(&target),
+            base_head,
+            "new worktree HEAD must match the bare repo's base commit"
         );
     }
 
