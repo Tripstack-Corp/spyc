@@ -216,26 +216,29 @@ spyc's workflow: browse files above, talk to Claude below.
     square — no TTL, no output or animation revives it — until you actually
     answer the pane by pressing **Enter** in it (or the agent files a newer
     report). Non-agent tabs (a plain shell) get no dot.
-  - **Auto-reporting (claude + codex)** — so it works without the agent choosing
-    to call the tool, spyc installs lifecycle hooks (prompt-submit → working,
-    needs-permission/approval → blocked, turn-end → done) that run
-    `spyc --report-status`. Both agents share the same event idea, with
-    per-agent config: claude writes `.claude/settings.json` (JSON, reloaded
-    live); codex writes inline `[[hooks.*]]` into the same `.codex/config.toml`
-    that already holds the MCP entry (read once at startup, so for an
-    already-consented repo the hooks are written *before* codex spawns).
-    **It asks first**, once per project: the first `claude`/`codex` launch in a
-    repo pops a `[Y/n]` ("let spyc show this agent's live status? writes hooks to
-    `<config>`, removed on exit"), and the answer is **saved per repo** — never
-    nags again. The write preserves your existing hooks/config; on exit spyc
-    removes only what it added (and never a git-tracked file). The popup requires
-    an explicit decision — `y` or `n`; Esc and any other key keep it up (it can't
-    be dismissed accidentally), and a saved `n` is undoable, so
+  - **Auto-reporting (claude + codex; agy partial)** — so it works without the
+    agent choosing to call the tool, spyc installs lifecycle hooks (prompt-submit
+    → working, needs-permission/approval → blocked, turn-end → done) that run
+    `spyc --report-status`. The agents share the same event idea, with per-agent
+    config: **claude** writes `.claude/settings.json` (JSON, reloaded live);
+    **codex** writes inline `[[hooks.*]]` into the same `.codex/config.toml` that
+    already holds the MCP entry (read once at startup, so for an already-consented
+    repo the hooks are written *before* codex spawns); **agy** (Antigravity)
+    writes a `spyc-status` set into `.agents/hooks.json` but is **partial** —
+    agy exposes no permission/approval event, so it gets `working` + `done` only,
+    never the red `blocked` "needs me" square.
+    **It asks first**, once per project: the first `claude`/`codex`/`agy` launch
+    in a repo pops a `[Y/n]` ("let spyc show this agent's live status? writes
+    hooks to `<config>`, removed on exit"), and the answer is **saved per repo** —
+    never nags again. The write preserves your existing hooks/config; on exit
+    spyc removes only what it added (and never a git-tracked file). The popup
+    requires an explicit decision — `y` or `n`; Esc and any other key keep it up
+    (it can't be dismissed accidentally), and a saved `n` is undoable, so
     **`:hooks on|on!|off`** changes a project's choice later — `on` also installs
     the hooks for an already-running agent (claude live-reloads → kicks in on the
-    next message; codex picks them up on its next launch). That's the undo for an
-    accidental "no". If a claude live reload doesn't take (e.g. the running spyc
-    is a throwaway build-dir binary whose path went stale), **`:hooks on!`**
+    next message; codex/agy pick them up on their next launch). That's the undo
+    for an accidental "no". If a claude live reload doesn't take (e.g. the running
+    spyc is a throwaway build-dir binary whose path went stale), **`:hooks on!`**
     force-restarts the active claude pane and resumes the conversation so the
     hooks load from launch.
 

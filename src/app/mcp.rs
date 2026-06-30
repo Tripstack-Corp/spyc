@@ -135,6 +135,11 @@ impl App {
                     crate::mcp::ConfigCleanup::SkippedTracked
                 )
                 .then(|| dir.join(".claude").join("settings.json")),
+                matches!(
+                    crate::mcp::cleanup_agy_status_hooks(&dir),
+                    crate::mcp::ConfigCleanup::SkippedTracked
+                )
+                .then(|| dir.join(".agents").join("hooks.json")),
             ]
             .into_iter()
             .flatten()

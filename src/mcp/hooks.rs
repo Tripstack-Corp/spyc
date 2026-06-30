@@ -5,12 +5,15 @@
 //! itself. The reporter reads `SPYC_MCP_SOCK` + `SPYC_PANE_ID` from the env
 //! spyc injects into the pane (inherited by the hook).
 //!
-//! Two agents are wired (both share the lifecycle-event → reported-state idea):
+//! Three agents are wired (all share the lifecycle-event → reported-state idea):
 //! * **claude** — `.claude/settings.json` (JSON), reloaded live → hooks take
 //!   effect on the next turn (the functions below).
 //! * **codex** — inline `[[hooks.<Event>]]` arrays in the SAME
 //!   `.codex/config.toml` we write the MCP entry into; read once at startup, so
 //!   they must be written BEFORE the pane spawns (see the codex section).
+//! * **agy** (Antigravity) — a `spyc-status` named set in `.agents/hooks.json`;
+//!   PARTIAL (working/done only — agy has no approval event for `blocked`). See
+//!   the agy section.
 //!
 //! Event → state (verified against the Claude Code hooks docs):
 //! * `UserPromptSubmit`  → `working` (the agent just got a prompt)
@@ -411,6 +414,140 @@ pub fn cleanup_codex_status_hooks(dir: &Path) -> ConfigCleanup {
     ConfigCleanup::Cleaned
 }
 
+// ── Agy (Antigravity CLI) status hooks ────────────────────────────────
+//
+// Agy's JSON hooks live in `<dir>/.agents/hooks.json`. Its root is a map of
+// *named hook-sets*; the matcher-less lifecycle events (`PreInvocation` /
+// `Stop`) take a FLAT list of handlers directly under the event key (unlike
+// claude/codex's `{hooks:[…]}` group + matcher, which agy uses only for
+// PreToolUse). spyc owns one named set, `spyc-status`:
+//
+// ```json
+// { "spyc-status": {
+//     "PreInvocation": [{ "type": "command", "command": "spyc --report-status working" }],
+//     "Stop":          [{ "type": "command", "command": "spyc --report-status done" }] } }
+// ```
+//
+// **Partial** coverage: only `working` (turn start) + `done` (turn end). Agy
+// exposes NO permission/approval event, so there's no `blocked` ("needs me")
+// signal — the dot is accurate except it never shows the red waiting square.
+// (Revisit if agy adds an approval hook.) Read at startup → written pre-spawn
+// like codex (`live_reload: false`). The exact agy schema is derived from
+// Google's hooks docs + community guides rather than a verified live install,
+// so it may need a tweak as agy stabilizes.
+
+/// Agy's (event, reported-state). No `blocked`: agy has no approval/permission
+/// event to hang it on.
+const AGY_STATUS_HOOKS: [(&str, &str); 2] = [("PreInvocation", "working"), ("Stop", "done")];
+
+/// The named hook-set spyc owns in agy's `hooks.json` (our namespace there).
+const AGY_HOOK_SET: &str = "spyc-status";
+
+/// True when `set` (a named hook-set's value) is one of ours — any handler in
+/// any of its event arrays runs `--report-status`. Belt-and-suspenders on top
+/// of owning the `spyc-status` key, mirroring the claude/codex "ours" marker.
+fn agy_set_is_ours(set: &Value) -> bool {
+    set.as_object().is_some_and(|events| {
+        events.values().any(|arr| {
+            arr.as_array().is_some_and(|handlers| {
+                handlers.iter().any(|h| {
+                    h.get("command")
+                        .and_then(Value::as_str)
+                        .is_some_and(|c| c.contains("--report-status"))
+                })
+            })
+        })
+    })
+}
+
+/// Agy counterpart of [`ensure_claude_status_hooks`]: merge spyc's status hooks
+/// into `<dir>/.agents/hooks.json`. Byte-idempotent skip, git-tracked guard,
+/// and return contract mirror the claude version.
+pub fn ensure_agy_status_hooks(dir: &Path) -> bool {
+    let path = dir.join(".agents").join("hooks.json");
+    if crate::git::discovery::is_tracked(&path) {
+        return false;
+    }
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
+    let existing = std::fs::read_to_string(&path).ok();
+    let Some(out) = merged_agy_status_hooks_json(
+        existing.as_deref(),
+        &exe.to_string_lossy(),
+        status_trace_enabled(),
+    ) else {
+        return false;
+    };
+    if existing.as_deref() == Some(out.as_str()) {
+        return true;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    crate::fs::write_atomic(&path, out.as_bytes()).is_ok()
+}
+
+/// Pure merge for agy's `hooks.json`: own the `spyc-status` named set (replace
+/// any prior ours, preserving the user's other sets). `None` on a non-object
+/// existing value or a serialization failure. Pure → its byte-idempotency,
+/// which lets the write be skipped, is testable.
+fn merged_agy_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) -> Option<String> {
+    let mut root = existing
+        .and_then(|t| serde_json::from_str::<Value>(t).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    let obj = root.as_object_mut()?;
+    let suffix = if trace { " --status-trace" } else { "" };
+    let mut set = serde_json::Map::new();
+    for (event, state) in AGY_STATUS_HOOKS {
+        set.insert(
+            event.to_string(),
+            json!([{ "type": "command", "command": format!("{exe} --report-status {state}{suffix}") }]),
+        );
+    }
+    // We own the whole `spyc-status` key, so an insert replaces a prior ours
+    // outright — idempotent — without disturbing the user's other named sets.
+    obj.insert(AGY_HOOK_SET.to_string(), Value::Object(set));
+    serde_json::to_string_pretty(&root)
+        .ok()
+        .map(|out| out + "\n")
+}
+
+/// Teardown counterpart: remove only spyc's `spyc-status` set from
+/// `<dir>/.agents/hooks.json`, preserving the user's other sets; delete the
+/// file (and `.agents/` if now empty) when nothing else remains. Refuses a
+/// git-tracked file.
+pub fn cleanup_agy_status_hooks(dir: &Path) -> ConfigCleanup {
+    let agents_dir = dir.join(".agents");
+    let path = agents_dir.join("hooks.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return ConfigCleanup::NothingToDo;
+    };
+    let Ok(mut root) = serde_json::from_str::<Value>(&text) else {
+        return ConfigCleanup::NothingToDo;
+    };
+    if !root.get(AGY_HOOK_SET).is_some_and(agy_set_is_ours) {
+        return ConfigCleanup::NothingToDo;
+    }
+    if crate::git::discovery::is_tracked(&path) {
+        return ConfigCleanup::SkippedTracked;
+    }
+    let Some(obj) = root.as_object_mut() else {
+        return ConfigCleanup::NothingToDo;
+    };
+    obj.remove(AGY_HOOK_SET);
+    if obj.is_empty() {
+        let _ = std::fs::remove_file(&path);
+        // Remove `.agents/` too, but only if now empty (no-op otherwise — it
+        // may hold skills / mcp_config.json).
+        let _ = std::fs::remove_dir(&agents_dir);
+        return ConfigCleanup::Cleaned;
+    }
+    if let Ok(out) = serde_json::to_string_pretty(&root) {
+        let _ = crate::fs::write_atomic(&path, (out + "\n").as_bytes());
+    }
+    ConfigCleanup::Cleaned
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -710,6 +847,126 @@ mod tests {
             traced,
             merged_codex_status_hooks_toml(Some(&traced), "spyc", true).expect("re-merge traced"),
             "traced merge is not idempotent"
+        );
+    }
+
+    // ── agy (.agents/hooks.json, named hook-set, flat handler lists) ──────
+
+    #[test]
+    fn writes_agy_status_hooks_then_cleans_them_leaving_no_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        assert!(ensure_agy_status_hooks(dir));
+        let path = dir.join(".agents/hooks.json");
+        let v = read(&path);
+        for (event, state) in AGY_STATUS_HOOKS {
+            // Flat handler list directly under the event key (no matcher/group).
+            let cmd = v
+                .pointer(&format!("/{AGY_HOOK_SET}/{event}/0/command"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            assert!(
+                cmd.contains("--report-status") && cmd.contains(state),
+                "{event} → {state}: got {cmd:?}"
+            );
+            assert_eq!(
+                v.pointer(&format!("/{AGY_HOOK_SET}/{event}/0/type"))
+                    .and_then(Value::as_str),
+                Some("command")
+            );
+        }
+        assert!(matches!(
+            cleanup_agy_status_hooks(dir),
+            ConfigCleanup::Cleaned
+        ));
+        assert!(!path.exists(), "hooks.json should be removed when emptied");
+        assert!(
+            !dir.join(".agents").exists(),
+            "empty .agents dir should be removed"
+        );
+    }
+
+    #[test]
+    fn agy_hooks_preserve_user_sets_and_cleanup_leaves_them() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::create_dir_all(dir.join(".agents")).unwrap();
+        let path = dir.join(".agents/hooks.json");
+        // A pre-existing user hook-set.
+        std::fs::write(
+            &path,
+            r#"{"linter":{"PostToolUse":[{"matcher":"write_to_file","hooks":[{"type":"command","command":"./lint.sh"}]}]}}"#,
+        )
+        .unwrap();
+        assert!(ensure_agy_status_hooks(dir));
+        let v = read(&path);
+        assert!(v.get("linter").is_some(), "user set preserved");
+        assert!(v.get(AGY_HOOK_SET).is_some(), "our set added");
+
+        // Idempotent re-write.
+        assert!(ensure_agy_status_hooks(dir));
+
+        // Cleanup removes ONLY our set; the user's linter set survives.
+        assert!(matches!(
+            cleanup_agy_status_hooks(dir),
+            ConfigCleanup::Cleaned
+        ));
+        let after = read(&path);
+        assert!(after.get(AGY_HOOK_SET).is_none(), "our set removed");
+        assert!(after.get("linter").is_some(), "user set preserved");
+        assert_eq!(
+            after.pointer("/linter/PostToolUse/0/hooks/0/command"),
+            Some(&Value::String("./lint.sh".into()))
+        );
+    }
+
+    #[test]
+    fn cleanup_agy_hooks_is_a_noop_when_nothing_of_ours() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::create_dir_all(dir.join(".agents")).unwrap();
+        std::fs::write(dir.join(".agents/hooks.json"), r#"{"linter":{}}"#).unwrap();
+        assert!(matches!(
+            cleanup_agy_status_hooks(dir),
+            ConfigCleanup::NothingToDo
+        ));
+        assert!(dir.join(".agents/hooks.json").exists());
+    }
+
+    #[test]
+    fn agy_merge_is_byte_idempotent() {
+        let once = merged_agy_status_hooks_json(None, "spyc", false).expect("fresh merge");
+        let twice = merged_agy_status_hooks_json(Some(&once), "spyc", false).expect("re-merge");
+        assert_eq!(once, twice, "re-applying the merge changed a byte");
+        assert!(once.contains("--report-status working"));
+        assert!(once.contains("--report-status done"));
+        assert!(
+            !once.contains("blocked"),
+            "agy has no blocked signal (no approval event)"
+        );
+        assert!(
+            !once.contains("--status-trace"),
+            "trace off → no baked flag"
+        );
+
+        let with_user = merged_agy_status_hooks_json(
+            Some(r#"{"linter":{"Stop":[{"type":"command","command":"./x.sh"}]}}"#),
+            "spyc",
+            false,
+        )
+        .expect("merge over user config");
+        assert_eq!(
+            with_user,
+            merged_agy_status_hooks_json(Some(&with_user), "spyc", false).expect("re-merge"),
+            "merge over a user config is not idempotent"
+        );
+        assert!(with_user.contains("./x.sh"), "user set dropped");
+
+        let traced = merged_agy_status_hooks_json(None, "spyc", true).expect("traced merge");
+        assert!(traced.contains("--report-status working --status-trace"));
+        assert_eq!(
+            traced,
+            merged_agy_status_hooks_json(Some(&traced), "spyc", true).expect("re-merge traced"),
         );
     }
 }

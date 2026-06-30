@@ -263,7 +263,7 @@ const SECTIONS: &[Section] = &[
             ),
             (
                 ":hooks on|on!|off",
-                "claude/codex auto-status hooks (asked once on launch); on! restarts+resumes a claude pane",
+                "claude/codex/agy auto-status hooks (asked once on launch); on! restarts+resumes a claude pane",
             ),
             (
                 "^a +  ^a -",

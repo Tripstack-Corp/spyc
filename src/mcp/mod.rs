@@ -143,8 +143,9 @@ pub use config::{
     sweep_orphan_spyc_configs,
 };
 pub use hooks::{
-    cleanup_claude_status_hooks, cleanup_codex_status_hooks, ensure_claude_status_hooks,
-    ensure_codex_status_hooks, set_status_trace,
+    cleanup_agy_status_hooks, cleanup_claude_status_hooks, cleanup_codex_status_hooks,
+    ensure_agy_status_hooks, ensure_claude_status_hooks, ensure_codex_status_hooks,
+    set_status_trace,
 };
 pub use server::{cleanup_socket, start_socket_server};
 

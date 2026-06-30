@@ -432,6 +432,17 @@ impl AgentProfile for AgyProfile {
             miss_message: None,
         })
     }
+    fn status_hooks(&self) -> Option<StatusHookSupport> {
+        // Partial: agy exposes PreInvocation/Stop (→ working/done) but NO
+        // permission/approval event, so there's no `blocked` signal. Hooks live
+        // in `.agents/hooks.json`, read at startup → written pre-spawn.
+        Some(StatusHookSupport {
+            ensure: crate::mcp::ensure_agy_status_hooks,
+            cleanup: crate::mcp::cleanup_agy_status_hooks,
+            config_label: ".agents/hooks.json",
+            live_reload: false,
+        })
+    }
 }
 
 /// Strip zot's resume flags so a saved baseline restores cleanly:
@@ -565,10 +576,10 @@ mod tests {
         assert_eq!(detect("").kind(), AgentKind::Other);
     }
 
-    /// Only claude + codex auto-install status hooks today, each naming its own
-    /// config file; codex isn't live-reloaded (read once at startup).
+    /// claude / codex / agy auto-install status hooks, each naming its own
+    /// config file; only claude live-reloads (codex/agy read config at startup).
     #[test]
-    fn status_hook_support_is_claude_and_codex() {
+    fn status_hook_support_per_agent() {
         let claude = ClaudeProfile
             .status_hooks()
             .expect("claude has status hooks");
@@ -579,8 +590,11 @@ mod tests {
         assert_eq!(codex.config_label, ".codex/config.toml");
         assert!(!codex.live_reload, "codex reads config once at startup");
 
+        let agy = AgyProfile.status_hooks().expect("agy has status hooks");
+        assert_eq!(agy.config_label, ".agents/hooks.json");
+        assert!(!agy.live_reload, "agy reads config at startup");
+
         assert!(GeminiProfile.status_hooks().is_none());
-        assert!(AgyProfile.status_hooks().is_none());
         assert!(ZotProfile.status_hooks().is_none());
         assert!(OtherProfile.status_hooks().is_none());
     }
