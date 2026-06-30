@@ -295,8 +295,12 @@ impl App {
     }
 
     /// The per-tab agent-activity dot span: a spicy heat-pulse `●` while
-    /// Working, a steady hot-red `●` when Blocked, a teal `●` when Done, a quiet
-    /// `·` when Idle, `None` for a non-agent tab. The glyph is TIGHT (no leading
+    /// Working, then a *square* `■` (same visual weight as the dot) for the two
+    /// settled "waiting" states — steady hot-red when Blocked ("needs me"),
+    /// calm teal when Done ("finished, waiting for the next prompt") — and a
+    /// quiet `·` when Idle, `None` for a non-agent tab. Circle = live/animated,
+    /// square = stopped/waiting, so shape (not just colour) tells them apart.
+    /// The glyph is TIGHT (no leading
     /// space) — the caller renders it right against the `[N*]` bracket so it's
     /// unambiguously that tab's, replacing the redundant `+`. PURE — reads the
     /// theme and the already-settled `agent_anim_frame` (advanced off the draw
@@ -323,18 +327,18 @@ impl App {
                         .spicy_pulse_color(self.view.agent_anim_frame.wrapping_add(phase_offset)))
                     .add_modifier(Modifier::BOLD),
             )),
-            // Blocked = "needs me": a STEADY hot red `●` (not the pulse) so it
-            // reads as a distinct, attention-grabbing state, not just "working".
+            // Blocked = "needs me": a STEADY hot-red SQUARE `■` (not the pulse,
+            // not a circle) so it reads as a stopped, attention-grabbing state.
             AgentActivity::Blocked => Some(Span::styled(
-                "\u{25cf}", // ●
+                "\u{25a0}", // ■
                 Style::default()
                     .fg(Color::Rgb(0xF7, 0x76, 0x8E)) // hot red (matches bg-task err)
                     .add_modifier(Modifier::BOLD),
             )),
-            // Done = finished a turn: a calm teal `●` (the "pulls the eye but
-            // settled" color), distinct from the warm working pulse.
+            // Done = finished a turn, waiting for the next prompt: a calm teal
+            // SQUARE `■` — settled (square, not the live circle).
             AgentActivity::Done => Some(Span::styled(
-                "\u{25cf}", // ●
+                "\u{25a0}", // ■
                 Style::default()
                     .fg(self.view.theme.take)
                     .add_modifier(Modifier::BOLD),

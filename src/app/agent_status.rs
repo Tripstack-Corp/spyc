@@ -235,7 +235,11 @@ impl App {
             return AgentActivity::Unknown;
         }
         if let Some(r) = reported {
-            let expired = now >= r.expiry;
+            // `Blocked` is latched: no TTL expiry and output never supersedes it
+            // (`report_superseded_by_output` returns false), so it holds until the
+            // user answers the pane (Enter, in `run_effects`) or a newer report
+            // lands. Every other status expires or yields to later output.
+            let expired = r.status != AgentActivity::Blocked && now >= r.expiry;
             let superseded = report_superseded_by_output(r, last_output_at);
             if !expired && !superseded {
                 return r.status;
@@ -272,9 +276,13 @@ impl App {
         for entry in tabs.tabs_mut() {
             let is_agent = crate::agent::detect(&entry.info.command).kind() != AgentKind::Other;
             // Drop a report that's no longer authoritative (expired, or the tab
-            // resumed output after it) so state + `:why-status` stay honest.
+            // resumed output after it) so state + `:why-status` stay honest. A
+            // `Blocked` report is latched — it never expires here and output
+            // never supersedes it (see `effective_activity`); only the Enter-on-
+            // pane clear in `run_effects` or a newer report drops it.
             if let Some(r) = entry.info.reported
-                && (now >= r.expiry || report_superseded_by_output(r, entry.info.last_output_at))
+                && ((r.status != AgentActivity::Blocked && now >= r.expiry)
+                    || report_superseded_by_output(r, entry.info.last_output_at))
             {
                 entry.info.reported = None;
             }
@@ -285,9 +293,14 @@ impl App {
                 now,
             );
             // Wake-arming: re-evaluate at the earliest of a live report's expiry
-            // or a timing-Working tab's idle-flip, so the dot can't go stale.
+            // or a timing-Working tab's idle-flip, so the dot can't go stale. A
+            // latched `Blocked` report never expires, so don't arm a wake for it
+            // (nothing would flip; an Enter keystroke clears it via its own path).
             if let Some(r) = entry.info.reported {
-                earliest_flip = Some(earliest_flip.map_or(r.expiry, |m: Instant| m.min(r.expiry)));
+                if r.status != AgentActivity::Blocked {
+                    earliest_flip =
+                        Some(earliest_flip.map_or(r.expiry, |m: Instant| m.min(r.expiry)));
+                }
             } else if new == AgentActivity::Working
                 && let Some(at) = entry.info.last_output_at
             {
@@ -440,10 +453,11 @@ mod tests {
             ),
             AgentActivity::Blocked
         );
-        // Expired report → falls back to timing (no recent output → Idle).
+        // A non-blocked report past its TTL → falls back to timing (no recent
+        // output → Idle). Blocked is exempt from TTL — see the latch test.
         assert_eq!(
             App::effective_activity(
-                report(AgentActivity::Blocked, base, base + Duration::from_secs(1)),
+                report(AgentActivity::Working, base, base + Duration::from_secs(1)),
                 true,
                 None,
                 base + Duration::from_secs(2),
@@ -473,12 +487,12 @@ mod tests {
         );
     }
 
-    // A `blocked` report is LATCHED: output never supersedes it — not the
-    // prompt's initial render, not the menu's later redraws while it waits (the
-    // bug where that output bounced the dot off red and back to the working
-    // pulse). It clears only via TTL, a newer report, or the user answering the
-    // pane (handled in `run_effects`). A non-blocked report still hands back to
-    // timing on output.
+    // A `blocked` report is LATCHED: neither output NOR its TTL supersedes it —
+    // not the prompt's initial render, not the menu's later redraws while it
+    // waits, and not the expiry clock (the bug where any of those bounced the
+    // dot off red and back to the working pulse). It clears only via a newer
+    // report or the user answering the pane with Enter (handled in
+    // `run_effects`). A non-blocked report still hands back to timing on output.
     #[test]
     fn blocked_report_is_latched_against_output() {
         use crate::pane::{AgentActivity, ReportedStatus};
@@ -500,16 +514,18 @@ mod tests {
             "blocked is latched — prompt redraws must not bounce it to working"
         );
 
-        // Expiry still ends it → falls back to timing (quiet → Idle).
-        let expired = Some(ReportedStatus {
+        // Its TTL does NOT end it either — a blocked report well past `expiry`
+        // still reads Blocked (latched until the user answers with Enter). This
+        // is the "stuck until <ENTER>" behaviour: no clock revives the dot.
+        let stale = Some(ReportedStatus {
             status: AgentActivity::Blocked,
             at: base,
             expiry: base + Duration::from_secs(1),
         });
         assert_eq!(
-            App::effective_activity(expired, true, None, base + Duration::from_secs(2)),
-            AgentActivity::Idle,
-            "an expired blocked report falls back to timing"
+            App::effective_activity(stale, true, None, base + Duration::from_secs(600)),
+            AgentActivity::Blocked,
+            "blocked has no TTL — it stays until answered"
         );
 
         // Contrast: a non-blocked report (done) is still superseded by later

@@ -265,6 +265,18 @@ impl PaneInput {
             Self::Key(key) => pane.send_key(key),
         }
     }
+
+    /// Whether this input is an Enter / carriage-return — the explicit "I've
+    /// answered the pane" signal that clears a latched `Blocked` dot. Only a
+    /// real Enter keypress (`Key(Enter)`) or a bare CR/LF byte counts; typing
+    /// other keys, navigating a menu, or pasting (bytes that merely *contain* a
+    /// newline) leaves the dot stuck red until the user actually commits.
+    fn is_enter(&self) -> bool {
+        match self {
+            Self::Key(k) => matches!(k.code, crossterm::event::KeyCode::Enter),
+            Self::Bytes(b) => b == b"\r" || b == b"\n" || b == b"\r\n",
+        }
+    }
 }
 
 /// The success action for an [`Effect::SignalGroup`]: which task to toggle
@@ -509,17 +521,23 @@ impl App {
                     if self.view.show_activity && matches!(target, PaneTarget::Active) {
                         self.view.pane_send_at = Some(std::time::Instant::now());
                     }
+                    // Only an explicit Enter answers the pane. A latched `blocked`
+                    // dot stays red through navigation / typing / pastes and clears
+                    // ONLY when the user commits with Enter (or a newer report) —
+                    // owner spec: "leave it stuck until the user sends <ENTER>".
+                    let clears_blocked = input.is_enter();
                     let result = match target {
                         PaneTarget::Active => self.runtime.pane_tabs.as_mut().map(|t| {
-                            // The user is answering the active pane (e.g. a Yes/No
-                            // permission prompt) → it no longer "needs me": drop a
-                            // live `blocked` self-report (otherwise output-latched,
-                            // see `report_superseded_by_output`) so the dot leaves
-                            // red and follows the agent's resumed output again.
+                            // The user pressed Enter on the active pane (answering a
+                            // Yes/No permission prompt, a question, or submitting a
+                            // prompt) → it no longer "needs me": drop the latched
+                            // `blocked` self-report so the dot leaves red and follows
+                            // the agent's resumed output again.
                             let info = t.active_info_mut();
-                            if info
-                                .reported
-                                .is_some_and(|r| r.status == crate::pane::AgentActivity::Blocked)
+                            if clears_blocked
+                                && info.reported.is_some_and(|r| {
+                                    r.status == crate::pane::AgentActivity::Blocked
+                                })
                             {
                                 info.reported = None;
                             }
@@ -912,7 +930,24 @@ pub mod matchers {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClipMsg, Effect, PostAction};
+    use super::{ClipMsg, Effect, PaneInput, PostAction};
+
+    #[test]
+    fn pane_input_is_enter_only_for_a_real_enter() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let key = |c| PaneInput::Key(KeyEvent::new(c, KeyModifiers::NONE));
+        // The clear-the-blocked-dot trigger: a real Enter keypress or a bare CR/LF.
+        assert!(key(KeyCode::Enter).is_enter());
+        assert!(PaneInput::Bytes(b"\r".to_vec()).is_enter());
+        assert!(PaneInput::Bytes(b"\n".to_vec()).is_enter());
+        assert!(PaneInput::Bytes(b"\r\n".to_vec()).is_enter());
+        // Everything else leaves a latched blocked dot stuck (owner spec):
+        // navigation, typing, and pastes that merely *contain* a newline.
+        assert!(!key(KeyCode::Char('y')).is_enter());
+        assert!(!key(KeyCode::Down).is_enter());
+        assert!(!PaneInput::Bytes(b"line1\nline2".to_vec()).is_enter());
+        assert!(!PaneInput::Bytes(b"1".to_vec()).is_enter());
+    }
 
     #[test]
     fn clip_pane_lines_count_recomputed_from_text() {

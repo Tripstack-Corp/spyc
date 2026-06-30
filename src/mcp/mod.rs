@@ -199,6 +199,26 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
             "set"
         },
     ));
+    // Max-info diagnostic: Claude Code pipes the hook event JSON to the hook's
+    // stdin (carrying `hook_event_name`, `notification_type`, `tool_name`, …)
+    // and closes it. When tracing, slurp + log it so we can see EXACTLY which
+    // event fired this report (the hook *command* is identical for
+    // PermissionRequest / Notification / PreToolUse, so the event name only
+    // lives in the payload). Guarded on `!is_terminal()` so a manual
+    // `spyc --report-status … --status-trace` from a shell never blocks on read,
+    // and capped so a pathological payload can't balloon mcp.log.
+    if trace {
+        use std::io::{IsTerminal, Read};
+        let stdin = std::io::stdin();
+        if !stdin.is_terminal() {
+            let mut payload = String::new();
+            let _ = stdin.lock().take(8192).read_to_string(&mut payload);
+            let payload = payload.trim();
+            if !payload.is_empty() {
+                trace_log(&format!("report-status: hook stdin: {payload}"));
+            }
+        }
+    }
     if sock.is_empty() {
         return;
     }

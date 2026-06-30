@@ -207,9 +207,15 @@ spyc's workflow: browse files above, talk to Claude below.
   - **Semantic self-report** via the `report_status` MCP tool: a cooperative
     agent (Claude, codex, …) tells spyc when it's `working` (holds the pulse
     through a silent thinking pause — no false "idle"), `blocked` (a steady
-    **hot-red `●`** — the "which agent needs me" signal), or `done` (a calm
-    teal `●`). A live report overrides the timing guess until it expires or the
-    agent resumes output. Non-agent tabs (a plain shell) get no dot.
+    **hot-red square `■`** — the "which agent needs me" signal), or `done` (a
+    calm teal square `■`). Shape carries meaning: a **circle `●`** is live /
+    animated (working), a **square `■`** is a *settled, waiting* state (blocked
+    or done) — so you can tell "needs me / finished" from "busy" at a glance.
+    A live `working`/`done` report overrides the timing guess until it expires
+    or the agent resumes output. **`blocked` is latched**: it stays a steady red
+    square — no TTL, no output or animation revives it — until you actually
+    answer the pane by pressing **Enter** in it (or the agent files a newer
+    report). Non-agent tabs (a plain shell) get no dot.
   - **Auto-reporting (Claude)** — so it works without the agent choosing to call
     the tool, spyc installs Claude lifecycle hooks (prompt-submit → working,
     needs-input → blocked, turn-end → done) that run `spyc --report-status`.
