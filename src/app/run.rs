@@ -409,6 +409,13 @@ impl App {
         // the watch worker to exit and drop its `RecommendedWatcher` (H8).
         let mut ctx = self.run_setup(&msg_tx);
 
+        // Load `~/.config/spyc/init.lua` now that `pane_wake_tx` is wired (so
+        // `ensure_lua_worker` can spawn). Submits a `Load` job whose
+        // registrations land via the first `handle_lua_done` drain below; a
+        // no-op when there's no init.lua. Done here, not in `bootstrap`, because
+        // the worker needs the wake channel `run_setup` just installed.
+        self.load_init_lua();
+
         // MVU Phase 1: the parkable input reader runs on its own thread
         // and feeds `msg_tx`; the loop `recv_timeout`s on `msg_rx` instead
         // of calling `event::poll`/`event::read` directly. `reader_handle`

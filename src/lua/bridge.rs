@@ -18,6 +18,11 @@ use crate::context::SpycContext;
 /// loop. Hitting the cap aborts the script with an error.
 pub const MAX_REQUESTS: usize = 10_000;
 
+/// Cap on registrations one `init.lua` load may make (the `spyc.map` /
+/// `spyc.command` / `spyc.on` calls). A run hitting it aborts with an error —
+/// like [`MAX_REQUESTS`], it bounds a script that registers in a loop.
+pub const MAX_REGISTRATIONS: usize = 10_000;
+
 /// One request a script makes back to spyc. Plain data — no OS handles, no
 /// `App` types — so it crosses the worker→loop boundary freely.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,13 +47,40 @@ pub enum LuaRequest {
     Warn(String),
 }
 
+/// What a Lua callback was registered as, during an `init.lua` load. The App
+/// layer turns each into a live binding: a `Map` appends a synthetic
+/// `BoundAction::Lua("@map:<idx>")` keymap entry; a `Command` becomes a runtime
+/// `:`-command; an `Event` is recorded but not yet dispatched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RegKind {
+    /// `spyc.map(key, fn)` — `key` is the `.spycrc` DSL key string (e.g. `z`,
+    /// `^x`, `<F2>`).
+    Map(String),
+    /// `spyc.command(name, fn)` — `name` is the `:`-command name.
+    Command(String),
+    /// `spyc.on(event, fn)` — `event` is the hook name. Event hooks are
+    /// recorded but not yet dispatched.
+    Event(String),
+}
+
+/// One callback `init.lua` registered, paired with the worker-side id under
+/// which its `Function` is stored. A later [`super::LuaJob::RunRegistered`]
+/// names that `fn_id` to invoke the stored callback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Registration {
+    pub kind: RegKind,
+    pub fn_id: u64,
+}
+
 /// Worker-thread-local state shared (via `Rc<RefCell<…>>`) between the `spyc.*`
 /// API closures and the per-run driver: the read-only context snapshot the
-/// script sees, and the queue of requests it builds. Reset before every run.
+/// script sees, the queue of requests it builds, and (during an `init.lua`
+/// load) the callback registrations it makes. All three reset before every run.
 #[derive(Default)]
 pub struct Bridge {
     pub snapshot: Option<SpycContext>,
     pub requests: Vec<LuaRequest>,
+    pub registrations: Vec<Registration>,
 }
 
 pub type SharedBridge = Rc<RefCell<Bridge>>;

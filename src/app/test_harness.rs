@@ -31,6 +31,7 @@ impl App {
                 pane_wake_tx: None,
                 next_sink_id: 0,
                 lua: None,
+                lua_registry: super::lua::LuaRegistry::default(),
                 mcp_config_dirs: Vec::new(),
                 pane_tabs: None,
                 top_overlay: None,

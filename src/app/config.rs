@@ -44,6 +44,10 @@ impl App {
                     self.state
                         .flash_error(format!("config: {}", warnings.join("; ")));
                 }
+                // The rebuilt keymap dropped the old synthetic `@map:` entries,
+                // so re-run init.lua to re-register them (silent when there's no
+                // init.lua — a configless `^R` shouldn't flash about Lua).
+                self.reload_init_lua(false);
             }
             Err(e) => self.state.flash_error(format!("config error: {e}")),
         }
@@ -62,6 +66,14 @@ impl App {
         // `reload_config` actually loads — and browsing into a hostile
         // directory never causes us to watch/react to its `.spycrc.toml`.
         out.push(self.state.start_dir.join(".spycrc.toml"));
+        // The Lua entry point: a watch event on it routes through
+        // `reload_config` (which re-runs init.lua), so editing init.lua takes
+        // effect without `^R` / `:lua reload`. Watching its parent
+        // (`~/.config/spyc/`) also covers edits to `lua/<name>.lua` scripts
+        // that a `map KEY lua <name>` binding re-reads on each run anyway.
+        if let Some(init) = crate::state::config_root().map(|r| r.join("init.lua")) {
+            out.push(init);
+        }
         out
     }
 

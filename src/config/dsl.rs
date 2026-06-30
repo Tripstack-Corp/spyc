@@ -79,7 +79,10 @@ fn parse_map(rest: &str) -> Result<Option<UserBinding>, String> {
     Ok(Some(UserBinding { chord, action }))
 }
 
-fn parse_key(tok: &str) -> Result<KeyChord, String> {
+/// Parse a `.spycrc` DSL key token (a plain char, `^X` control notation, or a
+/// `<Named>` key) into a [`KeyChord`]. `pub` so `spyc.map(key, fn)` can reuse
+/// the exact same key grammar the config DSL uses.
+pub fn parse_key(tok: &str) -> Result<KeyChord, String> {
     // Control notation: ^X
     if let Some(rest) = tok.strip_prefix('^') {
         let mut chars = rest.chars();

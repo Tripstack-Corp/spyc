@@ -327,6 +327,10 @@ const SECTIONS: &[Section] = &[
                 ":",
                 "command line (:cd, :sort, :grep, :limit, :lua, :set, :!, :;, :q)",
             ),
+            (
+                ":lua",
+                "status|on|off|reload — engine control (init.lua: spyc.map/spyc.command)",
+            ),
         ],
     },
     Section {

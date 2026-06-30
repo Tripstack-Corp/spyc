@@ -137,6 +137,12 @@ impl App {
             command_table::lookup(name).map(|spec| &spec.handler)
         {
             handler(self, args)
+        } else if let Some(effects) = self.dispatch_lua_command(name) {
+            // A `spyc.command(name, fn)` registration from init.lua — not in the
+            // static COMMAND_TABLE (which stays guard-tested + untouched), so it
+            // falls through to here. Args are ignored (the callback reads
+            // `spyc.context()`); the run lands via `handle_lua_done`.
+            effects
         } else {
             // Pure names were resolved above; anything unregistered is unknown.
             self.state.flash_error(format!("unknown command: {input}"));

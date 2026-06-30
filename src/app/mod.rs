@@ -475,6 +475,10 @@ struct Runtime {
     /// non-`Send` `mlua::Lua` lives entirely inside it and never moves to the
     /// main thread.
     lua: Option<crate::lua::LuaWorker>,
+    /// `init.lua`'s `spyc.map` / `spyc.command` / `spyc.on` registrations,
+    /// keyed by trigger → worker-side `fn_id`. Rebuilt from scratch on every
+    /// `init.lua` (re)load; empty until then.
+    lua_registry: lua::LuaRegistry,
     /// Directories where we wrote an MCP client config we own (`.mcp.json` /
     /// `.codex/config.toml`) when launching an agent pane. Recorded by
     /// `ensure_agent_mcp_config`; `cleanup_written_mcp_configs` removes our

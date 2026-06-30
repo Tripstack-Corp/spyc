@@ -828,10 +828,17 @@ unambiguous:
   (`spyc.context()` / `cwd` / `cursor`), drive the view (`navigate` / `pick`
   / `filter` / `report_status`), invoke any built-in action by name
   (`spyc.action("git_blame")`) or a `:` command (`spyc.cmd(":grep foo")`),
-  and `notify` / `warn`. Scripts run on a dedicated worker thread so a
-  runaway can't freeze the UI — an instruction-budget hook plus a hard
+  and `notify` / `warn`. An optional `~/.config/spyc/init.lua` is a config
+  platform: `spyc.map("z", fn)` binds a key to a Lua callback and
+  `spyc.command("blame", fn)` registers a runtime `:` command — both fire
+  the callback later (Tab-completion lists registered commands). `spyc.on`
+  records event hooks (not yet dispatched). `:lua reload` (or `^R`) re-runs
+  init.lua so edits take without a restart; `:lua status` reports the
+  registered map/command counts. Scripts run on a dedicated worker thread
+  so a runaway can't freeze the UI — an instruction-budget hook plus a hard
   ceiling abort it, and `:lua off` / `--no-lua` disable the engine.
-  `$HOME`-only (a project config can never run Lua).
+  `$HOME`-only (a project config can never run Lua, and init.lua loads only
+  from `~/.config/spyc/`).
 - **Color overrides** — customize the palette for directories, cursors,
   picks, status bar segments, etc.
 - **Ignore mask patterns** — define what each mask group hides.

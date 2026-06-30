@@ -177,6 +177,13 @@ impl UserKeymap {
         Self { entries: bindings }
     }
 
+    /// Append a binding so it wins over earlier conflicts (`find` scans in
+    /// reverse). Used to install `init.lua`'s `spyc.map` registrations as
+    /// synthetic `@map:<idx>` entries on top of the loaded config.
+    pub fn push(&mut self, binding: UserBinding) {
+        self.entries.push(binding);
+    }
+
     /// Iterate over the bindings in the order they were declared. Used by
     /// the help overlay so the user sees their own `.spycrc` entries.
     pub fn iter(&self) -> std::slice::Iter<'_, UserBinding> {

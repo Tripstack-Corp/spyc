@@ -16,7 +16,7 @@ mod api;
 mod bridge;
 mod worker;
 
-pub use bridge::LuaRequest;
+pub use bridge::{LuaRequest, RegKind, Registration};
 pub use worker::{LuaJob, LuaOutcome, LuaWorker};
 
 use std::sync::atomic::{AtomicBool, Ordering};

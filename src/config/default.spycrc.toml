@@ -154,6 +154,10 @@
 # instruction-budget + ceiling kill switch, and `:lua off` / `--no-lua` disable
 # it entirely.
 #
+# For a richer setup, write ~/.config/spyc/init.lua: it can `spyc.map("z", fn)`
+# to bind a key to a Lua callback and `spyc.command("blame", fn)` to register a
+# runtime `:` command (both fire the callback later). `:lua reload` re-runs it.
+#
 # Some less-frequent features ship as `:` commands without a default key, so
 # the keymap stays uncluttered — bind the ones you use here. Examples:
 #
