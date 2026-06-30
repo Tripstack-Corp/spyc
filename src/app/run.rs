@@ -648,6 +648,14 @@ impl App {
                 ctx.draw.mark(3);
             }
 
+            // Lua runaway watchdog: while a Lua job is in-flight + un-prompted,
+            // arm `LuaRunaway` at its soft threshold and raise the interactive
+            // "keep waiting? [y/N]" modal once it elapses. Idle stays 0 dps
+            // (armed only while a job runs).
+            if self.settle_lua_runaway(now_pre, &mut ctx) {
+                ctx.draw.mark(3);
+            }
+
             // Execute writable MCP commands buffered into `ctx.mcp_pending` (see
             // `drain_mcp_pending` — kept at this early loop position for the
             // 5s read-after-write timeout contract).

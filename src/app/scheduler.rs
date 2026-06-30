@@ -59,6 +59,11 @@ pub enum Deadline {
     /// Armed from `view.chord_hint_due`, disarmed when the chord resolves.
     /// POST-recv (`settle_chord_hint`).
     ChordHint,
+    /// Lua runaway soft-threshold: wake `LUA_RUNAWAY_SOFT` after an in-flight
+    /// Lua job started to raise the "keep waiting? [y/N]" modal. Armed only
+    /// while a job is in-flight and un-prompted, so idle stays 0 dps. PRE-recv
+    /// (`settle_lua_runaway`).
+    LuaRunaway,
 }
 
 /// Run()-local deadline scheduler (MVU Phase 2). **Advisory** — it only

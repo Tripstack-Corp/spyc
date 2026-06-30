@@ -43,6 +43,12 @@ impl App {
         ) {
             return self.handle_close_pane_confirm_key(key);
         }
+        if matches!(
+            &self.state.mode,
+            Mode::Prompting(p) if matches!(p.kind, PromptKind::LuaRunaway)
+        ) {
+            return self.handle_lua_runaway_confirm_key(key);
+        }
         // Shell prompts (`!` / `;`) use the vi line editor + history.
         let has_editor = matches!(
             &self.state.mode,

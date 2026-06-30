@@ -111,6 +111,11 @@ pub enum PromptKind {
     /// anything else keeps it. Always targets the active tab (the modal prompt
     /// blocks tab switching), so it needs no index. An exited tab skips this.
     ClosePane,
+    /// A Lua script has run past the soft threshold — "keep waiting? [y/N]".
+    /// `y`/`Y` re-arms the watchdog and keeps waiting; `n`/`N`/Esc (or any
+    /// other key) requests the abort. Raised from the runaway watchdog
+    /// (`settle_lua_runaway`); the worker's hard ceiling is the backstop.
+    LuaRunaway,
 }
 
 impl PromptKind {
@@ -804,6 +809,7 @@ mod tests {
                 },
             ),
             ("ClosePane", K::ClosePane),
+            ("LuaRunaway", K::LuaRunaway),
         ] {
             assert!(
                 !k.wants_path_completion(),

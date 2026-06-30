@@ -479,6 +479,11 @@ struct Runtime {
     /// keyed by trigger → worker-side `fn_id`. Rebuilt from scratch on every
     /// `init.lua` (re)load; empty until then.
     lua_registry: lua::LuaRegistry,
+    /// The in-flight Lua job (name + watchdog window start), for the runaway
+    /// "keep waiting? [y/N]" prompt. `Some` only while a job runs; cleared when
+    /// its outcome drains. The `Instant` it carries is an OS-ish clock value,
+    /// correctly in `Runtime` (never the pure Model).
+    lua_inflight: Option<lua::LuaInflight>,
     /// Directories where we wrote an MCP client config we own (`.mcp.json` /
     /// `.codex/config.toml`) when launching an agent pane. Recorded by
     /// `ensure_agent_mcp_config`; `cleanup_written_mcp_configs` removes our

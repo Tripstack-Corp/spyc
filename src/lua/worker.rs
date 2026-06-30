@@ -129,6 +129,14 @@ impl LuaWorker {
         self.busy.load(Ordering::SeqCst)
     }
 
+    /// Request the in-flight script abort: the instruction hook unwinds the
+    /// running `call()` at its next check (the App's interactive kill switch
+    /// for a runaway). The worker resets `abort=false` at each job start, so
+    /// this only affects the currently-executing job — a no-op when idle.
+    pub fn request_abort(&self) {
+        self.abort.store(true, Ordering::SeqCst);
+    }
+
     /// Take all completed outcomes (the main loop drains these on wake).
     pub fn drain_outcomes(&self) -> Vec<LuaOutcome> {
         self.outcomes

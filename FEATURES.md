@@ -835,10 +835,12 @@ unambiguous:
   records event hooks (not yet dispatched). `:lua reload` (or `^R`) re-runs
   init.lua so edits take without a restart; `:lua status` reports the
   registered map/command counts. Scripts run on a dedicated worker thread
-  so a runaway can't freeze the UI — an instruction-budget hook plus a hard
-  ceiling abort it, and `:lua off` / `--no-lua` disable the engine.
-  `$HOME`-only (a project config can never run Lua, and init.lua loads only
-  from `~/.config/spyc/`).
+  so a runaway can't freeze the UI: if a script runs past ~1s an interactive
+  **"lua '\<name\>' running Ns — keep waiting? [y/N]"** prompt pops — `N`/`Esc`
+  aborts it, `y` keeps waiting (re-prompting after another second) — backed by
+  an instruction-budget hook and a hard 30s ceiling, and `:lua off` /
+  `--no-lua` disable the engine. `$HOME`-only (a project config can never run
+  Lua, and init.lua loads only from `~/.config/spyc/`).
 - **Color overrides** — customize the palette for directories, cursors,
   picks, status bar segments, etc.
 - **Ignore mask patterns** — define what each mask group hides.

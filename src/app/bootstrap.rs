@@ -258,6 +258,7 @@ impl App {
                 next_sink_id: 0,
                 lua: None,
                 lua_registry: super::lua::LuaRegistry::default(),
+                lua_inflight: None,
                 mcp_config_dirs: Vec::new(),
                 pane_tabs: None,
                 top_overlay: None,
