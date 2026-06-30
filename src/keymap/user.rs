@@ -122,6 +122,11 @@ pub enum BoundAction {
     /// bind it). Lets a user re-bind any feature that ships only as a `:`
     /// command (graveyard, activity, …).
     Command(String),
+    /// `map KEY lua <name>` — run the Lua script `<config_root>/lua/<name>.lua`
+    /// on keypress. Runs arbitrary code, so it's
+    /// [`is_executing`](Self::is_executing) (only `$HOME` config may bind it; a
+    /// project `.spycrc.toml` cannot).
+    Lua(String),
 }
 
 impl BoundAction {
@@ -134,6 +139,7 @@ impl BoundAction {
             Self::Jump(path) => format!("jump to {path}"),
             Self::ToggleMaskFixed(n) => format!("toggle mask {n}"),
             Self::Command(cmd) => format!(":{cmd}"),
+            Self::Lua(name) => format!("lua: {name}"),
         }
     }
 
@@ -146,7 +152,10 @@ impl BoundAction {
     /// are not executing. `Command` is — it dispatches arbitrary `:` input,
     /// including the `:!`/`:;` shell symbols.
     pub const fn is_executing(&self) -> bool {
-        matches!(self, Self::UnixCmd(_) | Self::Jump(_) | Self::Command(_))
+        matches!(
+            self,
+            Self::UnixCmd(_) | Self::Jump(_) | Self::Command(_) | Self::Lua(_)
+        )
     }
 }
 

@@ -814,12 +814,24 @@ unambiguous:
   any action. Chord bindings (e.g., `^W n`) are supported. Beyond the
   built-in actions, a key can run a `unix` shell template
   (`map ^P unix ps aux`), a `jump`/`patternpick`, or a **`:` command**
-  (`map g y command graveyard`). The less-frequent features ship as
+  (`map A command graveyard`), or a **Lua script**
+  (`map z lua mymacro` → runs `~/.config/spyc/lua/mymacro.lua`). The
+  less-frequent features ship as
   `:` commands with no default key (graveyard, activity monitor,
   long-list, file-type, chmod) — `--print-config` lists them as
   commented `command` examples to copy-and-enable. `unix` / `command` /
-  `jump` only take effect in `~/.spycrc.toml` (a project file can't bind
-  a single-keypress command runner in an untrusted clone).
+  `lua` / `jump` only take effect in `~/.spycrc.toml` (a project file can't
+  bind a single-keypress code runner in an untrusted clone).
+- **Lua scripting** — embed real logic in your config (`mlua`, vendored
+  Lua 5.4). A `map KEY lua <name>` binding runs
+  `~/.config/spyc/lua/<name>.lua`, which calls a `spyc.*` API: read context
+  (`spyc.context()` / `cwd` / `cursor`), drive the view (`navigate` / `pick`
+  / `filter` / `report_status`), invoke any built-in action by name
+  (`spyc.action("git_blame")`) or a `:` command (`spyc.cmd(":grep foo")`),
+  and `notify` / `warn`. Scripts run on a dedicated worker thread so a
+  runaway can't freeze the UI — an instruction-budget hook plus a hard
+  ceiling abort it, and `:lua off` / `--no-lua` disable the engine.
+  `$HOME`-only (a project config can never run Lua).
 - **Color overrides** — customize the palette for directories, cursors,
   picks, status bar segments, etc.
 - **Ignore mask patterns** — define what each mask group hides.

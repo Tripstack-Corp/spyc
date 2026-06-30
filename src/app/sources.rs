@@ -75,6 +75,9 @@ pub fn coalesce_pending(
             // MCP worktree op done — same payloadless wake; the outcome rides
             // `runtime.worktree_results`, drained by `apply_worktree_outcomes`.
             | Message::WorktreeJobDone
+            // Lua-script-done — same payloadless-wake shape; the outcomes ride
+            // the worker's buffer, drained by `handle_lua_done` in the pre-recv scan.
+            | Message::LuaDone
             // Option B: codex-session-scan-done — same payloadless-wake shape;
             // the snapshot rides `runtime.codex_pin_pending`, drained by
             // `apply_codex_session_pins` in the pre-recv scan.

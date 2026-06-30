@@ -140,15 +140,19 @@
 # One DSL line per entry. Forms:
 #   map <KEY> unix <command...>     — run shell command (% = selection)
 #   map <KEY> command <:cmd...>     — run a : command (e.g. graveyard)
+#   map <KEY> lua <name>            — run ~/.config/spyc/lua/<name>.lua
 #   map <KEY> patternpick <glob>    — pick files matching a glob
 #   map <KEY> jump <path>           — jump to a directory
 #
 # <KEY> can be a single char (`f`), a chord (`g x`), or a Ctrl-prefixed
 # binding (`^P`). Lines starting with `#` inside the array are comments.
 #
-# NOTE: `unix`, `command`, and `jump` only take effect in THIS file
-# (~/.spycrc.toml) — a project-local .spycrc.toml can't bind them (it could
-# run arbitrary commands on a single keypress in an untrusted clone).
+# NOTE: `unix`, `command`, `lua`, and `jump` only take effect in THIS file
+# (~/.spycrc.toml) — a project-local .spycrc.toml can't bind them (they could
+# run arbitrary code on a single keypress in an untrusted clone). Lua scripts
+# load only from ~/.config/spyc/lua/; the engine runs them off-thread with an
+# instruction-budget + ceiling kill switch, and `:lua off` / `--no-lua` disable
+# it entirely.
 #
 # Some less-frequent features ship as `:` commands without a default key, so
 # the keymap stays uncluttered — bind the ones you use here. Examples:
@@ -164,4 +168,5 @@
 #   "map A command activity",      # toggle the activity monitor
 #   "map L command longlist",      # long ls -lh listing
 #   "map ^Y command graveyard",    # recover soft-deleted files
+#   "map z lua mymacro",           # run ~/.config/spyc/lua/mymacro.lua
 # ]

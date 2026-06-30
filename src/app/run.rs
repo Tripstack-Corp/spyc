@@ -258,7 +258,8 @@ impl App {
                 | Message::InventoryDone
                 | Message::PreviewReloadDone
                 | Message::WorktreeJobDone
-                | Message::CodexSessionReady,
+                | Message::CodexSessionReady
+                | Message::LuaDone,
             ) => {
                 unreachable!(
                     "buffered/collapsed message surfaced as `effective` from the coalesce pre-step"
@@ -530,6 +531,16 @@ impl App {
             }
             if !file_fx.is_empty() {
                 self.run_effects(file_fx, terminal, &foreground_exec);
+            }
+
+            // Drain finished Lua runs (woke via `Message::LuaDone`): apply the
+            // requests the script produced, running any effects they translate to.
+            let (lua_draw, lua_fx) = self.handle_lua_done();
+            if lua_draw {
+                ctx.draw.mark(3);
+            }
+            if !lua_fx.is_empty() {
+                self.run_effects(lua_fx, terminal, &foreground_exec);
             }
 
             // Drain any off-thread inventory ops (yank/remove/clear/put) that landed.

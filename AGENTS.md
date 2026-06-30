@@ -33,7 +33,8 @@ One line per feature; see [`FEATURES.md`](FEATURES.md) for the full reference.
 - **Session save/restore** — auto-saved on quit with a spice name (e.g. `SAFFRON_CUMIN`); `spyc -r` resumes tabs, agent conversations, and the vsplit.
 - **`PROJECT_HOME`** — sticky per-session project root (auto-set from `.git`). `Space p` jumps, `gP`/`Space P` sets, `:project` manages. New panes default here. Exposed via MCP.
 - **Status bar** — `🌶️ | PROJECT_HOME | SESSION | path | git | suffix`; `[layout] status_position` flips top/bottom. Host terminal title set to `🌶️: <project> · <session>`.
-- **`.spycrc.toml`** — keymap DSL, themes, ignore masks, layout, live reload. The DSL binds a key to a built-in action, a `unix` shell template, a `patternpick`/`jump`, or a `:` command (`map KEY command <name>`); `unix`/`command`/`jump` are `is_executing`, so only `$HOME` config may bind them. `spyc --print-config` emits a commented template.
+- **`.spycrc.toml`** — keymap DSL, themes, ignore masks, layout, live reload. The DSL binds a key to a built-in action, a `unix` shell template, a `patternpick`/`jump`, a `:` command (`map KEY command <name>`), or a `lua` script (`map KEY lua <name>`); `unix`/`command`/`lua`/`jump` are `is_executing`, so only `$HOME` config may bind them. `spyc --print-config` emits a commented template.
+- **Lua scripting** — embed logic via `mlua` (vendored Lua 5.4). `map KEY lua <name>` runs `~/.config/spyc/lua/<name>.lua` on a dedicated worker thread (instruction-budget kill switch + hard ceiling; `:lua off`/`--no-lua` disable it). The `spyc.*` API reads context (`context`/`cwd`/`cursor`), drives the view (`navigate`/`pick`/`filter`/`report_status`), invokes any built-in `action`/`:`-command by name, and `notify`/`warn`. `$HOME`-only. Charter `docs/LUA_SCRIPTING_PLAN.md`; engine `src/lua/`, glue `src/app/lua.rs`.
 
 ## Architecture
 
@@ -54,13 +55,14 @@ Deep design decisions live in [`ARCHITECTURE.md`](ARCHITECTURE.md) (sync-only, M
 - Panes — **`pane_tabs.rs`** (tab lifecycle/focus), **`pane_scroll.rs`** (scroll mode + scrollback; `^a v` auto-engages an alt-screen agent's on-disk transcript), **`codex_pin.rs`** (spawn-ordered rollout claim), **`navigate.rs`**, **`quick_select.rs`** (`^a u`).
 - Vsplit — **`vsplit.rs`** (`^a |` preview cycle; `^s n`/`^s x` second Commander; `cur()`/`col(side)`; `carve_vsplit` geometry), **`preview_ops.rs`** (off-thread live-reload of the split preview).
 - Off-thread workers (Effect → detached worker → Runtime slot → payloadless Message → pre-recv drain) — **`file_ops.rs`** (copy/move/pipe + `OpenSpecialFile`), **`inventory_ops.rs`**, **`graveyard_ops.rs`**, **`mermaid_ops.rs`**, **`worktree_ops.rs`** (MCP worktree create/remove/clean), **`worktree_clean.rs`** (`safe_remove_worktree`, the shared safe teardown).
-- App-layer result handlers — **`git_state.rs`**, **`harpoon.rs`**, **`graveyard.rs`** (`:graveyard` viewer), **`clipboard.rs`**, **`mcp.rs`**, **`agent_status.rs`** (status short-id + P0 activity derive), **`config.rs`** (live reload).
+- App-layer result handlers — **`git_state.rs`**, **`harpoon.rs`**, **`graveyard.rs`** (`:graveyard` viewer), **`clipboard.rs`**, **`mcp.rs`**, **`agent_status.rs`** (status short-id + P0 activity derive), **`config.rs`** (live reload), **`lua.rs`** (embedded-Lua glue: lazy-spawn the worker, submit a `map KEY lua <name>` run, drain finished runs → translate `LuaRequest`s to effects/actions, `:lua` controls).
 - Session / misc state — **`session.rs`** (save/restore, `-r` picker), **`tasks.rs`** + **`capture.rs`** (`!` shell-capture state), **`find_picker.rs`** + **`prompt.rs`** (small data structs), **`activity.rs`** (`A`-overlay monitor).
 
 **Other crates:**
 
 - **`src/agent/`** — agent profile registry; one `AgentProfile` impl per hosted agent (claude/codex/gemini/agy/zot). Adding an agent = one impl + one `REGISTRY` entry.
 - **`src/keymap/`** — `Action` enum (`action.rs` — the full vocabulary of behaviors, each tagged with its `tier()`), resolver, DSL parser, default bindings.
+- **`src/lua/`** — embedded Lua scripting engine (mlua, vendored Lua 5.4; docs/LUA_SCRIPTING_PLAN.md). `worker` (interpreter on a dedicated thread + instruction-hook kill switch + hard ceiling), `api` (the `spyc.*` table: context reads + request-enqueue), `bridge` (`LuaRequest` data + per-run cap). Off the main thread; scripts enqueue requests the App layer applies (`src/app/lua.rs`). `$HOME`-only (`BoundAction::Lua` is `is_executing`).
 - **`src/pane/`** — pty-hosted subprocess: `mod.rs` (`Pane`), `input.rs` (key→ANSI), `widget.rs` (vt100→ratatui), `quick_select.rs`, `pathref.rs` (`gf`/`gF`).
 - **`src/ui/`** — pure renderers (`model + &Theme → Vec<Line>`): list, status bar, pager, prompt, help, theme; `syntax.rs` (syntect), `markdown/`, `diff_render/` + `blame_render.rs` (in-house git diff/show/blame, `|` toggles split/unified).
 - **`src/fs/`** — listing, entry types, file ops; `finder.rs` (`F`), `grep.rs` (`:grep`).

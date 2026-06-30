@@ -33,6 +33,7 @@ pub use picks::Picks;
 
 thread_local! {
     static STATE_ROOT_OVERRIDE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    static CONFIG_ROOT_OVERRIDE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
 /// Resolve the spyc state-root directory (the equivalent of
@@ -58,6 +59,30 @@ pub fn state_root() -> Option<PathBuf> {
         return Some(PathBuf::from(xdg).join("spyc"));
     }
     std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state/spyc"))
+}
+
+/// Resolve the spyc config-root directory (the equivalent of
+/// `$XDG_CONFIG_HOME/spyc`). This is where **user-authored** configuration
+/// lives — the Lua entry point (`init.lua`) and the `lua/` script dir hang
+/// off it. Distinct from [`state_root`]: config is hand-edited and lives
+/// under `~/.config`; state is app-managed and lives under `~/.local/state`.
+///
+/// Resolution order:
+/// 1. Per-thread test override (see `with_config_root`).
+/// 2. `$XDG_CONFIG_HOME/spyc`.
+/// 3. `$HOME/.config/spyc`.
+/// 4. `None` on exotic systems with neither.
+///
+/// Mirrors [`state_root`]'s thread-local override so parallel tests can
+/// isolate without mutating process-global env vars.
+pub fn config_root() -> Option<PathBuf> {
+    if let Some(p) = CONFIG_ROOT_OVERRIDE.with(|c| c.borrow().clone()) {
+        return Some(p);
+    }
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+        return Some(PathBuf::from(xdg).join("spyc"));
+    }
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/spyc"))
 }
 
 /// Path of a file named `name` directly under the state root, if one
@@ -260,10 +285,50 @@ pub fn with_state_root<R>(root: &std::path::Path, body: impl FnOnce() -> R) -> R
     body()
 }
 
+/// Test-only: run `body` with `config_root()` pinned to `root`. The
+/// override is unwound when `body` returns *or panics* (RAII guard).
+/// Mirrors [`with_state_root`].
+#[cfg(test)]
+pub fn with_config_root<R>(root: &std::path::Path, body: impl FnOnce() -> R) -> R {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            CONFIG_ROOT_OVERRIDE.with(|c| *c.borrow_mut() = None);
+        }
+    }
+    CONFIG_ROOT_OVERRIDE.with(|c| *c.borrow_mut() = Some(root.to_path_buf()));
+    let _g = Guard;
+    body()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{push_transcript_prompt, read_tail_lossy};
     use std::io::Write;
+
+    /// The thread-local override pins `config_root()` for the duration of the
+    /// body and is gone afterward (RAII unwind), so parallel tests don't leak
+    /// into one another. Touches no process-global env.
+    #[test]
+    fn config_root_override_pins_and_unwinds() {
+        let tmp = tempfile::tempdir().unwrap();
+        super::with_config_root(tmp.path(), || {
+            assert_eq!(super::config_root().as_deref(), Some(tmp.path()));
+        });
+        // Override unwound: resolution falls back to env, never our tempdir.
+        assert_ne!(super::config_root().as_deref(), Some(tmp.path()));
+    }
+
+    /// `config_root` and `state_root` are independent axes — overriding one
+    /// must never pin the other (they resolve to different XDG bases).
+    #[test]
+    fn config_root_independent_of_state_root() {
+        let cfg = tempfile::tempdir().unwrap();
+        super::with_config_root(cfg.path(), || {
+            assert_eq!(super::config_root().as_deref(), Some(cfg.path()));
+            assert_ne!(super::state_root().as_deref(), Some(cfg.path()));
+        });
+    }
 
     #[test]
     fn transcript_prompt_prefixes_and_collapses_blank() {

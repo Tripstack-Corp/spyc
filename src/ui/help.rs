@@ -325,7 +325,7 @@ const SECTIONS: &[Section] = &[
             ("$", "drop into $SHELL in current dir"),
             (
                 ":",
-                "command line (:cd, :sort, :grep, :limit, :set, :!, :;, :q)",
+                "command line (:cd, :sort, :grep, :limit, :lua, :set, :!, :;, :q)",
             ),
         ],
     },

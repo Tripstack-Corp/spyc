@@ -363,7 +363,7 @@ spyc reads `.spycrc.toml` from `~/.spycrc.toml` (user) and `./.spycrc.toml`
 
 > **Project configs are sandboxed.** A `./.spycrc.toml` can set colors,
 > layout, ignore masks, and rebind keys to built-in actions, but its
-> *executing* bindings (`unix` shell commands and `jump`) are ignored --
+> *executing* bindings (`unix` shell commands, `lua` scripts, and `jump`) are ignored --
 > only your `~/.spycrc.toml` may bind those, so opening spyc in a cloned
 > repo can't run commands a malicious `.spycrc.toml` planted there. `^R`
 > reloads the project file from the directory you launched in, not the one
@@ -390,6 +390,7 @@ keymap = [
     "map f unix file %",
     "map A command activity",
     "map ^Y command graveyard",
+    "map z lua mymacro",  # run ~/.config/spyc/lua/mymacro.lua ($HOME config only)
 ]
 
 # Color overrides: customize the palette.

@@ -17,6 +17,7 @@ mod fs;
 mod git;
 mod key_trace;
 mod keymap;
+mod lua;
 mod mcp;
 mod mcp_cmd;
 mod merge_driver;
@@ -170,6 +171,11 @@ struct Cli {
     #[arg(long)]
     print_config: bool,
 
+    /// Disable the embedded Lua engine for this session — no worker thread, and
+    /// `map KEY lua` / init.lua won't run. The startup equivalent of `:lua off`.
+    #[arg(long)]
+    no_lua: bool,
+
     /// Internal git merge driver for spyc's version-line conflicts. git invokes
     /// it via `.gitattributes` as `spyc --merge-driver %O %A %B`; not for direct
     /// use. Resolves the `Cargo.toml` / `Cargo.lock` version-bump conflicts that
@@ -217,6 +223,9 @@ pub fn run() -> Result<()> {
     // Record `--status-trace` so the hook installer bakes `--status-trace` into
     // the status-reporter commands it writes (the reporter then logs each fire).
     mcp::set_status_trace(cli.status_trace);
+
+    // Disable the embedded Lua engine if requested (no worker thread spawned).
+    lua::set_enabled(!cli.no_lua);
 
     if cli.print_config {
         print!("{}", config::DEFAULT_TEMPLATE);

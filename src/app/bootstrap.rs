@@ -255,6 +255,7 @@ impl App {
                 mcp_cmd_rx: Some(mcp_cmd_rx),
                 pane_wake_tx: None,
                 next_sink_id: 0,
+                lua: None,
                 mcp_config_dirs: Vec::new(),
                 pane_tabs: None,
                 top_overlay: None,

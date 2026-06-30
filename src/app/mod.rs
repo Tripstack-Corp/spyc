@@ -142,6 +142,12 @@ enum Message {
     /// listing/context update, then answers the MCP client. Same shape as
     /// `MermaidDone`.
     WorktreeJobDone,
+    /// A Lua script finished on the worker thread (`runtime.lua`). Payloadless
+    /// wake — `handle_lua_done` drains the worker's outcome buffer in the
+    /// pre-recv scan and translates the requests into effects/actions. Same
+    /// shape as `WorktreeJobDone`, except the outcomes ride the worker's own
+    /// buffer (`LuaWorker::drain_outcomes`), not a `runtime.*_results` slot.
+    LuaDone,
     /// An off-thread vertical-split preview reload (`kick_preview_reload`)
     /// finished and pushed its outcome onto `runtime.preview_results`.
     /// Payloadless wake — `apply_preview_reloads` drains the slot in the
@@ -253,6 +259,7 @@ mod harpoon;
 mod inventory_ops;
 mod key_dispatch;
 mod loop_steps;
+mod lua;
 mod mcp;
 mod mermaid_ops;
 #[cfg(test)]
@@ -462,6 +469,12 @@ struct Runtime {
     pane_wake_tx: Option<std::sync::mpsc::Sender<Message>>,
     /// Monotonic `SinkId` allocator (never reused).
     next_sink_id: u64,
+    /// The embedded Lua engine worker — lazy-spawned on first use
+    /// (`ensure_lua_worker`), `None` until then / when disabled (`--no-lua`,
+    /// `:lua off`) / in the test harness. Owns the interpreter thread; the
+    /// non-`Send` `mlua::Lua` lives entirely inside it and never moves to the
+    /// main thread.
+    lua: Option<crate::lua::LuaWorker>,
     /// Directories where we wrote an MCP client config we own (`.mcp.json` /
     /// `.codex/config.toml`) when launching an agent pane. Recorded by
     /// `ensure_agent_mcp_config`; `cleanup_written_mcp_configs` removes our

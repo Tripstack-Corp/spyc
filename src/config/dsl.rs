@@ -130,7 +130,7 @@ fn parse_named(name: &str) -> Result<NamedKey, String> {
     })
 }
 
-fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
+pub fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
     // Helpers for the "=value" argument convention.
     fn arg_value(tail: &str) -> Option<&str> {
         tail.strip_prefix('=').map(str::trim)
@@ -188,6 +188,16 @@ fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
                 Err("`command` needs a : command (e.g. `command graveyard`)".to_string())
             } else {
                 Ok(BoundAction::Command(tail.to_string()))
+            }
+        }
+        // `lua <name>` — bind a key to a $HOME Lua script
+        // (`~/.config/spyc/lua/<name>.lua`). `is_executing` (runs arbitrary
+        // code), so only `$HOME` config may bind it.
+        "lua" => {
+            if tail.is_empty() {
+                Err("`lua` needs a script name (e.g. `lua mymacro`)".to_string())
+            } else {
+                Ok(BoundAction::Lua(tail.to_string()))
             }
         }
 
@@ -282,6 +292,23 @@ mod tests {
         // So the project-config security gate ($HOME-only) covers it.
         let b = parse("map A command activity").unwrap().unwrap();
         assert!(b.action.is_executing());
+    }
+
+    #[test]
+    fn lua_verb_parses_and_is_executing() {
+        let b = parse("map z lua mymacro").unwrap().unwrap();
+        match &b.action {
+            BoundAction::Lua(s) => assert_eq!(s, "mymacro"),
+            other => panic!("expected Lua, got {other:?}"),
+        }
+        // The $HOME-only gate keys off this — a project `.spycrc.toml` can't
+        // bind Lua (it runs arbitrary code).
+        assert!(b.action.is_executing());
+    }
+
+    #[test]
+    fn empty_lua_is_an_error() {
+        assert!(parse("map z lua").is_err());
     }
 
     #[test]

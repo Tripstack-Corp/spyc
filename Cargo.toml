@@ -1,6 +1,6 @@
 [package]
 name = "spyc"
-version = "1.83.0"
+version = "1.84.0"
 edition = "2024"
 description = "A Rust TUI file commander where the AI agent in the side pane can query the file commander itself"
 license = "BSD-3-Clause"
@@ -104,6 +104,14 @@ rustix = { version = "1.1.4", features = ["process", "termios", "fs", "system"] 
 # internal `crate::sysinfo` module.
 sysinfo_crate = { package = "sysinfo", version = "0.33", default-features = false, features = ["system"] }
 infer = { version = "0.19.0", default-features = false }
+# Lua scripting engine (docs/LUA_SCRIPTING_PLAN.md): embeds Lua 5.4 so a
+# `~/.config/spyc/init.lua` / keybinding can run user logic. `vendored` compiles
+# the Lua 5.4 C source via the `cc` crate — another compiled-C dependency
+# alongside `zstd-sys` (libzstd), so it rides the same toolchain: native builds
+# use the host/image C compiler, and the musl/darwin cross-builds route it
+# through `cargo zigbuild`'s `zig cc` like every other `*-sys` crate. No `send`
+# feature — the interpreter is pinned to a single worker thread.
+mlua = { version = "0.10", features = ["lua54", "vendored"] }
 
 # macOS thread count: sysinfo's `tasks()` is Linux-only, so on macOS we read
 # it from `proc_pidinfo(PROC_PIDTASKINFO).pti_threadnum` via the small,

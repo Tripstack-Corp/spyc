@@ -17,8 +17,14 @@
 # branch-build failure does.
 
 # Non-slim image — bakes in `make`, `git`, `curl`, `ca-certificates`,
-# `tar`, etc., so we don't apt-install on every run (~13s saved). The
-# pull is bigger but Bitbucket caches the image per-runner.
+# `tar`, AND a C toolchain (gcc/`cc` via build-essential), so we don't
+# apt-install on every run (~13s saved). The pull is bigger but Bitbucket
+# caches the image per-runner.
+#
+# The C compiler is load-bearing: spyc links compiled-C deps — `zstd-sys`
+# (libzstd) and `mlua-sys` (vendored Lua 5.4) — so a `rust:*-slim` image
+# (no build-essential) would break the build. The `cc --version` guard at
+# the top of the quality step fails loudly if a future image swap drops it.
 image: rust:1.85
 
 definitions:
@@ -95,6 +101,11 @@ definitions:
           - target
           - rustup
         script:
+          # Guard: spyc links compiled-C deps (zstd-sys/libzstd,
+          # mlua-sys/vendored Lua), so the image MUST carry a C compiler.
+          # Fail loudly here rather than deep in a `*-sys` build script if a
+          # future image swap (e.g. to `rust:*-slim`) drops build-essential.
+          - cc --version
           # `make`, `git`, `curl`, `ca-certificates` all come from the
           # non-slim image. We add rustfmt + clippy components and
           # cargo-deny. cargo-deny covers what cargo-audit used to
