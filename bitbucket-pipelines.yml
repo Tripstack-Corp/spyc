@@ -24,7 +24,8 @@
 # The C compiler is load-bearing: spyc links compiled-C deps — `zstd-sys`
 # (libzstd) and `mlua-sys` (vendored Lua 5.4) — so a `rust:*-slim` image
 # (no build-essential) would break the build. The `cc --version` guard at
-# the top of the quality step fails loudly if a future image swap drops it.
+# the top of the lint and test steps fails loudly if a future image swap
+# drops it.
 image: rust:1.85
 
 definitions:
@@ -67,12 +68,31 @@ definitions:
           - rust-toolchain.toml
           - .ci-cache-version
       path: target
-    # Coverage-instrumented target dir. Quality and Coverage emit
+    # Split-step target caches. The Lint step (clippy, check-mode) and the
+    # Test step (cargo test, codegen-mode) run in PARALLEL on separate
+    # runners; their artifacts are binary-incompatible (clippy emits
+    # `.rmeta`-only, test emits full `.rlib` + test binaries). Sharing one
+    # cache would freeze the key on whichever uploaded first (caches are
+    # immutable), so the other step would restore the wrong half and
+    # recompile from scratch every run. Separate caches keep each warm.
+    target-lint:
+      key:
+        files:
+          - rust-toolchain.toml
+          - .ci-cache-version
+      path: target
+    target-test:
+      key:
+        files:
+          - rust-toolchain.toml
+          - .ci-cache-version
+      path: target
+    # Coverage-instrumented target dir. The Test step and Coverage emit
     # binary-incompatible artifacts (`cargo llvm-cov` injects
     # `-C instrument-coverage` RUSTFLAGS), so they cannot share
     # `target/`: whichever step's upload landed last clobbered the
     # other and forced a from-scratch rebuild on the next run.
-    # Coverage now writes to `target-cov/` (via `--target-dir`) and
+    # Coverage writes to `target-cov/` (via `--target-dir`) and
     # caches it under its own key.
     target-cov:
       key:
@@ -94,31 +114,33 @@ definitions:
       path: $RUSTUP_HOME
 
   steps:
-    - step: &quality
-        name: Quality gate (make check)
+    # Lint ∥ Test run in PARALLEL (see `pipelines` below). `make check` ran
+    # clippy (check-mode) then test (codegen-mode) sequentially in one step;
+    # cargo can't share those two compiles of spyc's one ~83k-LoC crate, so
+    # the crate was compiled twice back-to-back (~347s). Splitting them onto
+    # two runners makes the wall-clock max(lint, test) instead of the sum.
+    # (Test *execution* is ~13s — the cost is compilation, not running.)
+    - step: &lint
+        name: Lint + supply-chain (fmt, clippy, deny)
         caches:
           - cargo
-          - target
+          - target-lint
           - rustup
         script:
           # Guard: spyc links compiled-C deps (zstd-sys/libzstd,
-          # mlua-sys/vendored Lua), so the image MUST carry a C compiler.
-          # Fail loudly here rather than deep in a `*-sys` build script if a
-          # future image swap (e.g. to `rust:*-slim`) drops build-essential.
+          # mlua-sys/vendored Lua), and build scripts run under `cargo
+          # clippy` too, so the image MUST carry a C compiler. Fail loudly
+          # here rather than deep in a `*-sys` build script if a future
+          # image swap (e.g. to `rust:*-slim`) drops build-essential.
           - cc --version
-          # `make`, `git`, `curl`, `ca-certificates` all come from the
-          # non-slim image. We add rustfmt + clippy components and
-          # cargo-deny. cargo-deny covers what cargo-audit used to
-          # (advisories) plus licenses, sources, and bans — ignores
-          # live in deny.toml with documented reasons.
+          # rustfmt + clippy components come from the rustup cache (warm:
+          # no-op). cargo-deny covers advisories + licenses + sources +
+          # bans; ignores live in deny.toml with documented reasons.
           - rustup component add rustfmt clippy
-          # cargo-deny: prebuilt binary from the upstream GitHub
-          # release, verified against the project's own published
-          # `.sha256`. Replaces `cargo install cargo-deny --locked`
-          # which spent ~3 min compiling from source on every cold
-          # cache. Bump the VERSION + SHA256 pair together when
-          # EmbarkStudios ships a new release; the sha file lives at
-          # the same release URL with `.sha256` appended.
+          # cargo-deny: prebuilt binary from the upstream GitHub release,
+          # verified by sha256. Bump the VERSION + SHA256 pair together when
+          # EmbarkStudios ships a new release; the sha file lives at the
+          # same release URL with `.sha256` appended.
           - |
             CARGO_DENY_VERSION=0.19.4
             CARGO_DENY_SHA256=3bd58b784e83715b86ddbc9deac591890372ec77fda5741bb0826970b958506f
@@ -129,29 +151,27 @@ definitions:
               tar -xzf /tmp/cargo-deny.tar.gz -C /tmp
               install -m 0755 "/tmp/${CARGO_DENY_DIR}/cargo-deny" "$CARGO_HOME/bin/cargo-deny"
             fi
-          # `make check` = fmt-check + clippy + tests + deny. CI calls the
-          # Makefile so local and CI agree on the gate. (The suite runs
-          # with default test parallelism — it's chdir-free, so the
-          # parallel runner is safe; there is no --test-threads=1.)
-          #
-          # Two CI-only env overrides (local dev is unaffected):
-          #
-          # `CARGO_INCREMENTAL=0` disables cargo's per-crate incremental
-          # metadata. The metadata files include build paths and
-          # timestamps that go stale across runners, which makes warm-
-          # cache hits silently rebuild artifacts that should have been
-          # reusable. Disabling it shrinks target/ AND makes the cached
-          # dep graph deterministic across runs.
-          #
-          # `CARGO_PROFILE_{DEV,TEST}_DEBUG=line-tables-only` drops full
-          # DWARF from the clippy + test compiles. clippy (check-mode) and
-          # test (codegen-mode) each compile spyc's large crate separately
-          # — cargo can't share those artifacts — so the debug info is
-          # generated twice. CI never runs a debugger on these builds;
-          # line tables keep panic file:line in test failures while cutting
-          # compile time and shrinking target/ (which also speeds the
-          # Bitbucket cache push/pull).
-          - CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_PROFILE_TEST_DEBUG=line-tables-only make check
+          # fmt-check + clippy + deny (no tests — those run in the parallel
+          # Test step). Calls the Makefile targets so local and CI agree.
+          # `CARGO_INCREMENTAL=0`: the per-crate incremental metadata embeds
+          # build paths/timestamps that go stale across runners and defeat
+          # warm-cache reuse; disabling it also shrinks the cache.
+          - CARGO_INCREMENTAL=0 make fmt-check lint deny
+
+    - step: &test
+        name: Tests (cargo test --all-targets)
+        caches:
+          - cargo
+          - target-test
+          - rustup
+        script:
+          # Build scripts (zstd-sys / mlua-sys vendored Lua) compile C here.
+          - cc --version
+          # `CARGO_INCREMENTAL=0`: see the Lint step. `CARGO_PROFILE_{DEV,
+          # TEST}_DEBUG=line-tables-only` trims DWARF from the test compile
+          # (keeps panic file:line for failures) and shrinks target/. Both
+          # are CI-only overrides; local dev is unaffected.
+          - CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_PROFILE_TEST_DEBUG=line-tables-only make test
 
     - step: &deps-status
         name: Dependency drift report
@@ -219,12 +239,12 @@ definitions:
               install -m 0755 /tmp/cargo-llvm-cov "$CARGO_HOME/bin/cargo-llvm-cov"
             fi
           # `CARGO_TARGET_DIR=target-cov` keeps the instrumented build
-          # out of the Quality step's `target/` cache. See the
+          # out of the Test step's `target/` cache. See the
           # `target-cov` cache definition above for the why.
           # (`cargo llvm-cov` itself doesn't accept `--target-dir`;
           # the env var is the documented escape hatch.)
           #
-          # `CARGO_INCREMENTAL=0` mirrors the Quality step — disables
+          # `CARGO_INCREMENTAL=0` mirrors the other steps — disables
           # the stale-across-runners incremental metadata so warm
           # cache hits actually reuse compiled artifacts.
           - CARGO_TARGET_DIR=target-cov CARGO_INCREMENTAL=0 cargo llvm-cov --locked --all-targets --fail-under-lines 35
@@ -237,19 +257,26 @@ pipelines:
   # leaves a clean three-state model:
   #   - branch push, no PR    → no CI (open the PR for feedback)
   #   - branch push, PR open  → `pull-requests` runs once
-  #   - merge to main         → `branches.main` runs (parallel
-  #                              quality + coverage gate)
+  #   - merge to main         → `branches.main` runs
+  #
+  # Lint ∥ Test run on every PR and on main. Coverage is MAIN-ONLY: it's a
+  # third full (instrumented) compile, so keeping it off the PR path lets a
+  # PR finish in max(lint, test) instead of also waiting on coverage. The
+  # `--fail-under-lines` ratchet then gates the merged result — a PR that
+  # drops coverage fails the main build, not the PR build. (Re-add `*coverage`
+  # to `pull-requests` to gate per-PR again.)
   branches:
     main:
       - parallel:
-          - step: *quality
+          - step: *lint
+          - step: *test
           - step: *coverage
 
   pull-requests:
     '**':
       - parallel:
-          - step: *quality
-          - step: *coverage
+          - step: *lint
+          - step: *test
 
   custom:
     # Triggered by the Bitbucket UI schedule "Weekly deps drift" on
