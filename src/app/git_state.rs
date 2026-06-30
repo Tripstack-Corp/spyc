@@ -129,10 +129,20 @@ impl App {
         let changed = new_files != self.state.col(side).git.files
             || new_info != self.state.col(side).git.info;
         self.state.col_mut(side).git.set(new_info, new_files);
-        if changed {
+        // This walk reflects the post-unlink working tree, so the optimistic
+        // `R` ghosts have done their job: a tracked deletion is now a real
+        // `is_deleted()` ghost in `git.files`, and an untracked/ignored removal
+        // is simply gone. Clear them — forcing a rebuild even when git markers
+        // were otherwise unchanged, so an optimistic ghost for an untracked file
+        // (which git won't report) doesn't linger.
+        let had_pending = !self.state.col(side).pending_ghosts.is_empty();
+        if had_pending {
+            self.state.col_mut(side).pending_ghosts.clear();
+        }
+        if changed || had_pending {
             self.state.rebuild_rows();
         }
-        changed
+        changed || had_pending
     }
 
     /// `git show <sha>` into the pager. Uppercase action for a

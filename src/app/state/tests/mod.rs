@@ -98,6 +98,100 @@ fn rebuild_rows_does_not_ghost_a_deleted_file_still_on_disk() {
 }
 
 #[test]
+fn pending_ghost_holds_a_just_removed_row_struck_through() {
+    use crate::fs::Entry;
+    use std::time::SystemTime;
+
+    let mk = |name: &str| Entry {
+        path: PathBuf::from("/tmp/test").join(name),
+        name: name.to_string(),
+        kind: EntryKind::File,
+        size: 0,
+        mtime: SystemTime::UNIX_EPOCH,
+    };
+    let mut s = test_state();
+    s.left.view = crate::app::View::Dir;
+    s.left.sort_order = SortMode::Name;
+    s.left.sort_reversed = false;
+    // `mid.txt` was just removed (gone from disk) and is held optimistically —
+    // the off-thread `git status` hasn't recomputed yet, so it is NOT in
+    // git.files. The pending ghost keeps the row visible (struck) so it doesn't
+    // momentarily vanish before the async status re-adds it (the `R` "bounce").
+    s.left.listing.entries = vec![mk("aaa.txt"), mk("zzz.txt")];
+    s.left.pending_ghosts.insert("mid.txt".to_string());
+    s.rebuild_rows();
+
+    let names: Vec<&str> = s.left.rows.iter().map(|r| r.display.as_str()).collect();
+    assert_eq!(
+        names,
+        ["aaa.txt", "mid.txt", "zzz.txt"],
+        "optimistic ghost interleaves into the name sort like a git ghost"
+    );
+    let ghost = s.left.rows.iter().find(|r| r.display == "mid.txt").unwrap();
+    assert!(
+        ghost.deleted,
+        "the just-removed file is held as a struck-through ghost (no vanish)"
+    );
+}
+
+#[test]
+fn pending_ghost_for_a_file_still_on_disk_keeps_its_real_row() {
+    use crate::fs::Entry;
+    use std::time::SystemTime;
+
+    let mut s = test_state();
+    s.left.view = crate::app::View::Dir;
+    // Removal is confirmed but the off-thread unlink hasn't landed yet — the
+    // file is still on disk, so it stays a NORMAL row (no premature/duplicate
+    // ghost). It only flips to a ghost once the refresh sees it gone.
+    s.left.listing.entries = vec![Entry {
+        path: PathBuf::from("/tmp/test/doomed.txt"),
+        name: "doomed.txt".to_string(),
+        kind: EntryKind::File,
+        size: 1,
+        mtime: SystemTime::UNIX_EPOCH,
+    }];
+    s.left.pending_ghosts.insert("doomed.txt".to_string());
+    s.rebuild_rows();
+
+    assert_eq!(
+        s.left.rows.len(),
+        1,
+        "no duplicate ghost while the file is still on disk"
+    );
+    assert!(
+        !s.left.rows[0].deleted,
+        "an on-disk row is never struck through, even when pending removal"
+    );
+}
+
+#[test]
+fn chdir_clears_dir_scoped_pending_ghosts() {
+    let tmp = tempfile::tempdir().unwrap();
+    let a = std::fs::canonicalize(tmp.path()).unwrap();
+    let b = a.join("sub");
+    std::fs::create_dir(&b).unwrap();
+
+    let mut s = test_state();
+    // Drive the RIGHT (non-focused) column: `chdir_side` skips the process-cwd
+    // `set_current_dir` for a non-focused column, so this test stays chdir-free
+    // (a global cwd change races the parallel test runner).
+    s.right = Some(Commander::for_dir(&a, &s.config).unwrap());
+    s.right
+        .as_mut()
+        .unwrap()
+        .pending_ghosts
+        .insert("ghost.txt".to_string());
+    // The basename was scoped to dir `a`; after a chdir it must NOT carry over
+    // and ghost a same-named file in `b` — the new dir's git status governs.
+    s.chdir_side(Side::Right, &b).unwrap();
+    assert!(
+        s.right.as_ref().unwrap().pending_ghosts.is_empty(),
+        "pending ghosts are dir-scoped and clear on chdir"
+    );
+}
+
+#[test]
 fn reset_orphaned_columns_snaps_a_removed_worktree_column_home() {
     let tmp = tempfile::tempdir().unwrap();
     let home = std::fs::canonicalize(tmp.path()).unwrap();

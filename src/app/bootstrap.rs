@@ -139,6 +139,7 @@ impl App {
                     .map(|h| h.ancestor_set().clone())
                     .unwrap_or_default(),
                 harpoon,
+                pending_ghosts: std::collections::HashSet::new(),
             },
             right: None,
             inventory: Inventory::load(),

@@ -78,11 +78,12 @@ impl AppState {
     }
 
     /// Build the `View::Dir` rows: the on-disk entries (mask-filtered, in the
-    /// listing's sort order) plus synthesized "ghost" rows for git-deleted
-    /// files that are gone from disk, so a deletion stays visible (the view
-    /// then renders ghosts struck-through). Ghosts are interleaved via the
-    /// listing's own sort so a deleted file sorts into place — e.g. the source
-    /// of an unstaged rename sits right next to its new name under name order.
+    /// listing's sort order) plus synthesized "ghost" rows for files gone from
+    /// disk that are either git-deleted or freshly removed (`pending_ghosts`),
+    /// so a deletion stays visible (the view then renders ghosts struck-through).
+    /// Ghosts are interleaved via the listing's own sort so a deleted file sorts
+    /// into place — e.g. the source of an unstaged rename sits right next to its
+    /// new name under name order.
     fn build_dir_rows(&self) -> Vec<RowData> {
         use std::collections::HashSet;
 
@@ -96,22 +97,28 @@ impl AppState {
             .collect();
         let live_names: HashSet<&str> = live.iter().map(|e| e.name.as_str()).collect();
 
-        // `git.files` keys in-dir files by bare basename and dir aggregates by
-        // `name/`. A git-deleted file that's no longer on disk (and isn't
-        // mask-hidden) becomes a ghost; one still on disk (e.g. `git rm
-        // --cached`) keeps its real row.
-        let ghost_names: Vec<&String> = self
+        // Ghost candidates come from two sources, deduped: git-deleted files
+        // (`git.files` keys in-dir files by bare basename, dirs by `name/`), and
+        // `pending_ghosts` — files the user just removed (`R`) whose off-thread
+        // `git status` hasn't landed yet. The latter holds the row struck-through
+        // so it doesn't momentarily vanish before the async status re-adds a
+        // tracked deletion as a real ghost (the post-`R` list "bounce"). Either
+        // way a candidate becomes a ghost only once it's gone from disk and isn't
+        // mask-hidden — one still on disk (e.g. `git rm --cached`, or a removal
+        // not yet unlinked) keeps its real row.
+        let git_deleted = self
             .cur()
             .git
             .files
             .iter()
-            .filter(|(name, st)| {
-                !name.ends_with('/')
-                    && st.is_deleted()
-                    && !live_names.contains(name.as_str())
-                    && !masks.hides(name)
-            })
-            .map(|(name, _)| name)
+            .filter(|(name, st)| !name.ends_with('/') && st.is_deleted())
+            .map(|(name, _)| name.as_str());
+        let optimistic = self.cur().pending_ghosts.iter().map(String::as_str);
+        let ghost_names: Vec<&str> = git_deleted
+            .chain(optimistic)
+            .filter(|name| !name.ends_with('/') && !live_names.contains(name) && !masks.hides(name))
+            .collect::<HashSet<&str>>()
+            .into_iter()
             .collect();
 
         if ghost_names.is_empty() {
@@ -128,7 +135,7 @@ impl AppState {
         for name in &ghost_names {
             combined.push(Entry::deleted_placeholder(&dir, name));
         }
-        let ghost_set: HashSet<&str> = ghost_names.iter().map(|n| n.as_str()).collect();
+        let ghost_set: HashSet<&str> = ghost_names.iter().copied().collect();
         let mut tmp = Listing {
             dir,
             entries: combined,
@@ -337,6 +344,10 @@ impl AppState {
         self.col_mut(side).git_cache.git_poll_cache = key;
         self.col_mut(side).picks.clear();
         self.col_mut(side).temp_filter = None;
+        // Optimistic-delete ghosts are keyed by bare basename within the OLD
+        // dir; carrying them across a chdir would ghost a same-named file in the
+        // new dir. The new dir's own git status governs ghosts here.
+        self.col_mut(side).pending_ghosts.clear();
         self.col_mut(side).cursor = Cursor::new();
         self.col_mut(side).view = View::Dir;
         self.rebuild_rows();

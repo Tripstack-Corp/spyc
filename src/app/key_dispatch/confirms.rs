@@ -43,6 +43,39 @@ impl App {
         // gone from the user's intent); the listing still shows the files
         // until the worker unlinks them and the refresh lands.
         self.state.left.picks.clear();
+        // Optimistically ghost the removed rows so they don't momentarily
+        // vanish before the off-thread `git status` re-adds a tracked file as a
+        // struck-through ghost (the post-`R` list "bounce"). Only with a git
+        // worker active (the sync no-worker path already has fresh status, no
+        // gap) and inside a repo; skip files git already reports untracked —
+        // those should drop cleanly with no ghost. The ghosts are dir-scoped
+        // basenames and `apply_git_worker_result` clears them once the
+        // authoritative status lands. (Files in subdirs of a removed dir aren't
+        // ghosted — only the dir's own row is, and a dir never ghosts.)
+        let (worker, in_repo, dir) = {
+            let col = self.state.cur();
+            (
+                col.git_cache.git_worker_available,
+                col.git_cache.current_repo_root.is_some(),
+                col.listing.dir.clone(),
+            )
+        };
+        if worker && in_repo {
+            let names: Vec<String> = paths
+                .iter()
+                .filter(|p| p.parent() == Some(dir.as_path()))
+                .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .filter(|name| {
+                    self.state
+                        .cur()
+                        .git
+                        .files
+                        .get(name)
+                        .is_none_or(|st| !st.untracked)
+                })
+                .collect();
+            self.state.cur_mut().pending_ghosts.extend(names);
+        }
         self.state
             .flash_info(format!("removing {} item(s)…", paths.len()));
         vec![Effect::Graveyard(GraveyardOp::Archive { paths })]

@@ -538,6 +538,16 @@ pub struct Commander {
     /// `apply_temp_filter` (`=h`) stays pure-domain. Empty when `harpoon` is
     /// `None`.
     pub harpoon_filter_set: std::collections::HashSet<PathBuf>,
+    /// Bare basenames the user just removed (`R`) that aren't git-untracked,
+    /// held as optimistic struck-through ghosts until the authoritative
+    /// off-thread `git status` lands. Without this the row vanishes on the sync
+    /// post-unlink `refresh_listing` (git markers are async, so no `is_deleted()`
+    /// ghost yet) and only reappears as a ghost when the worker result arrives —
+    /// a visible list "bounce". `build_dir_rows` unions these into its ghost set;
+    /// `apply_git_worker_result` clears them once git is authoritative (a tracked
+    /// deletion is then a real ghost, an untracked/ignored one simply gone).
+    /// Dir-scoped — cleared on chdir.
+    pub pending_ghosts: std::collections::HashSet<String>,
 }
 
 impl Commander {
@@ -573,6 +583,7 @@ impl Commander {
             // root / PROJECT_HOME is known (a fresh commander has no root yet).
             harpoon: None,
             harpoon_filter_set: std::collections::HashSet::new(),
+            pending_ghosts: std::collections::HashSet::new(),
         })
     }
 }
@@ -945,6 +956,7 @@ impl AppState {
                 git_cache: GitCache::default(),
                 harpoon: None,
                 harpoon_filter_set: std::collections::HashSet::new(),
+                pending_ghosts: std::collections::HashSet::new(),
             },
             right: None,
             inventory: Inventory::new(),
