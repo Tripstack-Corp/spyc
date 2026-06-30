@@ -1061,3 +1061,28 @@ fn socket_bind_error_other_is_plain_context() {
         "must not mislabel a non-permission error as a sandbox: {msg}"
     );
 }
+
+#[test]
+fn idle_prompt_notification_downgrades_blocked_to_done() {
+    use super::effective_report_state as eff;
+
+    // The bug: Claude's ~60s "waiting for your input" idle nudge fires the
+    // Notification hook (configured `blocked`) → both idle panes flipped to the
+    // red "needs me" square. An idle_prompt is finished+waiting → `done`.
+    let idle = r#"{"hook_event_name":"Notification","notification_type":"idle_prompt","message":"Claude is waiting for your input"}"#;
+    assert_eq!(eff("blocked", idle), "done");
+
+    // A real permission prompt stays blocked (both the Notification variant and
+    // the PermissionRequest event — which fires for tool-permission prompts).
+    let perm = r#"{"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission"}"#;
+    assert_eq!(eff("blocked", perm), "blocked");
+    let perm_req = r#"{"hook_event_name":"PermissionRequest","tool_name":"Bash"}"#;
+    assert_eq!(eff("blocked", perm_req), "blocked");
+
+    // Non-blocked states pass through untouched, and an empty / unparseable
+    // payload leaves the configured state alone (never accidentally downgrade).
+    assert_eq!(eff("working", idle), "working");
+    assert_eq!(eff("done", idle), "done");
+    assert_eq!(eff("blocked", ""), "blocked");
+    assert_eq!(eff("blocked", "not json"), "blocked");
+}

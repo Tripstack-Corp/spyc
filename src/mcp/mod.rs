@@ -157,6 +157,32 @@ fn resolve_context_path(project_root: &Path) -> PathBuf {
     context::context_path(project_root)
 }
 
+/// The *effective* report state, given the hook's configured state and the
+/// Claude Code event JSON piped to the hook's stdin. The one remap: a
+/// `Notification` whose `notification_type` is `idle_prompt` ("Claude is
+/// waiting for your input") is the agent **finished and waiting** — that's
+/// `done` (the calm teal square), NOT `blocked` (the alarming red "needs me"
+/// square). Without it an idle agent flips to a false-red square after Claude's
+/// ~60s idle nudge — both panes "switched to stop squares" when the user looked
+/// away. A `permission_prompt` Notification (and the `PermissionRequest` event,
+/// which fires for real tool-permission prompts) keeps `blocked`. An empty or
+/// unparseable payload leaves the configured state unchanged. Pure + tested.
+fn effective_report_state<'a>(configured: &'a str, hook_payload: &str) -> &'a str {
+    if configured != "blocked" {
+        return configured;
+    }
+    let idle_notification = serde_json::from_str::<serde_json::Value>(hook_payload)
+        .ok()
+        .is_some_and(|v| {
+            v["hook_event_name"] == "Notification" && v["notification_type"] == "idle_prompt"
+        });
+    if idle_notification {
+        "done"
+    } else {
+        configured
+    }
+}
+
 /// Agent status-hook reporter (`spyc --report-status <state>`): a one-shot that
 /// pings the running spyc so it can set this pane's activity dot. Reads
 /// `SPYC_MCP_SOCK` (the socket) + `SPYC_PANE_ID` (which tab) from the
@@ -199,25 +225,35 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
             "set"
         },
     ));
-    // Max-info diagnostic: Claude Code pipes the hook event JSON to the hook's
-    // stdin (carrying `hook_event_name`, `notification_type`, `tool_name`, …)
-    // and closes it. When tracing, slurp + log it so we can see EXACTLY which
-    // event fired this report (the hook *command* is identical for
-    // PermissionRequest / Notification / PreToolUse, so the event name only
-    // lives in the payload). Guarded on `!is_terminal()` so a manual
-    // `spyc --report-status … --status-trace` from a shell never blocks on read,
-    // and capped so a pathological payload can't balloon mcp.log.
-    if trace {
+    // Claude Code pipes the hook event JSON to the hook's stdin (carrying
+    // `hook_event_name`, `notification_type`, `tool_name`, …) then closes it.
+    // Read it ALWAYS (not just when tracing): the *effective* state depends on
+    // it — `effective_report_state` downgrades an `idle_prompt` Notification
+    // from `blocked` to `done`. Guarded on `!is_terminal()` so a manual
+    // `spyc --report-status …` from a shell never blocks on read, and capped so
+    // a pathological payload can't balloon mcp.log.
+    let payload = {
         use std::io::{IsTerminal, Read};
         let stdin = std::io::stdin();
-        if !stdin.is_terminal() {
-            let mut payload = String::new();
-            let _ = stdin.lock().take(8192).read_to_string(&mut payload);
-            let payload = payload.trim();
-            if !payload.is_empty() {
-                trace_log(&format!("report-status: hook stdin: {payload}"));
-            }
+        if stdin.is_terminal() {
+            String::new()
+        } else {
+            let mut s = String::new();
+            let _ = stdin.lock().take(8192).read_to_string(&mut s);
+            s.trim().to_string()
         }
+    };
+    if trace && !payload.is_empty() {
+        // Max-info diagnostic: see EXACTLY which event fired this report (the
+        // hook *command* is identical across PermissionRequest / Notification /
+        // PreToolUse, so the event name only lives in the payload).
+        trace_log(&format!("report-status: hook stdin: {payload}"));
+    }
+    // An idle Notification means "finished, waiting" → `done`, not the alarming
+    // `blocked` square (the false-red-on-idle bug); permission stays `blocked`.
+    let state = effective_report_state(state, &payload);
+    if trace {
+        trace_log(&format!("report-status: effective state={state}"));
     }
     if sock.is_empty() {
         return;

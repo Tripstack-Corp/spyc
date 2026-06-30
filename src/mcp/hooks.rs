@@ -10,9 +10,16 @@
 //! * `PermissionRequest` → `blocked` (Claude is asking to use a tool — the
 //!   real-time "which agent needs me" signal; fires the instant the permission
 //!   prompt appears)
-//! * `Notification`      → `blocked` (Claude's "waiting for your input" idle
-//!   notification — a slower backstop. It does NOT fire on permission prompts,
-//!   so `PermissionRequest` is what carries the immediate blocked signal.)
+//! * `Notification`      → `blocked` (configured), but **payload-dependent**:
+//!   Claude fires Notification with a `notification_type` of either
+//!   `permission_prompt` ("Claude needs your permission" — keep `blocked`) or
+//!   `idle_prompt` ("Claude is waiting for your input" after ~60s idle). The
+//!   reporter (`mcp::effective_report_state`) reads the hook's stdin and
+//!   **downgrades an `idle_prompt` Notification to `done`** — an idle agent is
+//!   finished-and-waiting, not "needs me", so it must not flip to the red
+//!   blocked square. (Verified empirically via `--status-trace`: Notification
+//!   DOES fire on permission prompts, contra an earlier belief — but
+//!   `PermissionRequest` is the primary, instant permission signal.)
 //! * `PreToolUse`        → `blocked` (matched to `AskUserQuestion`/`ExitPlanMode`
 //!   — the agent asking a question or requesting plan approval. These are
 //!   mid-turn tools that fire none of the above, so without this the dot keeps
