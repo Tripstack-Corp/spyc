@@ -88,6 +88,28 @@ pub struct TranscriptSpec {
     pub miss_message: Option<&'static str>,
 }
 
+/// How spyc installs an agent's activity-status lifecycle hooks (the ones that
+/// call `spyc --report-status <state>` so the tab dot tracks the agent's turn).
+/// Returned by [`AgentProfile::status_hooks`] for agents spyc can auto-wire
+/// (claude/codex); `None` for the rest. The two `fn` pointers are the
+/// format-specific writer/cleaner in [`crate::mcp`] — JSON `settings.json` for
+/// claude, TOML `config.toml` for codex.
+pub struct StatusHookSupport {
+    /// Write/refresh our hooks into the project dir; returns whether our hooks
+    /// are present in a file we own (so teardown tracks the dir for cleanup).
+    pub ensure: fn(&Path) -> bool,
+    /// Remove only our hooks from the project dir.
+    pub cleanup: fn(&Path) -> crate::mcp::ConfigCleanup,
+    /// The config file the consent popup names, relative to the project root
+    /// (e.g. `.claude/settings.json`).
+    pub config_label: &'static str,
+    /// True if the agent re-reads its hook config live (claude reloads
+    /// `.claude/settings.json` each turn). False = config is read once at
+    /// startup (codex), so the hooks must be written BEFORE the pane spawns and
+    /// a post-launch enable only takes effect on the agent's next launch.
+    pub live_reload: bool,
+}
+
 /// Per-agent behavior. Default methods express "this agent doesn't do
 /// X" — an agent without a capability simply doesn't override.
 pub trait AgentProfile: Sync {
@@ -147,6 +169,13 @@ pub trait AgentProfile: Sync {
 
     /// Transcript scrollback spec, if any. Default: none (gemini).
     fn transcript(&self) -> Option<TranscriptSpec> {
+        None
+    }
+
+    /// Activity-status lifecycle hooks, if spyc can auto-install them for this
+    /// agent (claude/codex). Default: none — the dot then rides P0 output
+    /// timing only (no semantic working/blocked/done self-report via hooks).
+    fn status_hooks(&self) -> Option<StatusHookSupport> {
         None
     }
 }
@@ -226,6 +255,14 @@ impl AgentProfile for ClaudeProfile {
             miss_message: None,
         })
     }
+    fn status_hooks(&self) -> Option<StatusHookSupport> {
+        Some(StatusHookSupport {
+            ensure: crate::mcp::ensure_claude_status_hooks,
+            cleanup: crate::mcp::cleanup_claude_status_hooks,
+            config_label: ".claude/settings.json",
+            live_reload: true,
+        })
+    }
 }
 
 pub struct CodexProfile;
@@ -275,6 +312,17 @@ impl AgentProfile for CodexProfile {
             config_key: None,
             default_enabled: true,
             miss_message: Some("codex: no transcript on disk yet for this session"),
+        })
+    }
+    fn status_hooks(&self) -> Option<StatusHookSupport> {
+        // Codex's event hooks live in `.codex/config.toml` (the same file as the
+        // MCP entry) and are read once at startup → `live_reload: false`, so the
+        // app-layer install runs pre-spawn for an already-consented repo.
+        Some(StatusHookSupport {
+            ensure: crate::mcp::ensure_codex_status_hooks,
+            cleanup: crate::mcp::cleanup_codex_status_hooks,
+            config_label: ".codex/config.toml",
+            live_reload: false,
         })
     }
 }
@@ -515,6 +563,26 @@ mod tests {
         assert_eq!(detect("/opt/bin/zot -c").kind(), AgentKind::Zot);
         assert_eq!(detect("bash -lc 'make'").kind(), AgentKind::Other);
         assert_eq!(detect("").kind(), AgentKind::Other);
+    }
+
+    /// Only claude + codex auto-install status hooks today, each naming its own
+    /// config file; codex isn't live-reloaded (read once at startup).
+    #[test]
+    fn status_hook_support_is_claude_and_codex() {
+        let claude = ClaudeProfile
+            .status_hooks()
+            .expect("claude has status hooks");
+        assert_eq!(claude.config_label, ".claude/settings.json");
+        assert!(claude.live_reload, "claude reloads settings.json live");
+
+        let codex = CodexProfile.status_hooks().expect("codex has status hooks");
+        assert_eq!(codex.config_label, ".codex/config.toml");
+        assert!(!codex.live_reload, "codex reads config once at startup");
+
+        assert!(GeminiProfile.status_hooks().is_none());
+        assert!(AgyProfile.status_hooks().is_none());
+        assert!(ZotProfile.status_hooks().is_none());
+        assert!(OtherProfile.status_hooks().is_none());
     }
 
     #[test]

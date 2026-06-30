@@ -1,9 +1,16 @@
-//! Claude Code status hooks: spyc installs command hooks into a launched
-//! claude pane's project `.claude/settings.json` so the agent auto-reports its
-//! activity (`spyc --report-status <state>`) on lifecycle events, driving the
-//! per-tab activity dot WITHOUT the agent having to call the `report_status`
-//! tool itself. The reporter reads `SPYC_MCP_SOCK` + `SPYC_PANE_ID` from the
-//! env spyc injects into the pane (inherited by the hook).
+//! Agent status hooks: spyc installs command hooks into a launched agent
+//! pane's project config so the agent auto-reports its activity
+//! (`spyc --report-status <state>`) on lifecycle events, driving the per-tab
+//! activity dot WITHOUT the agent having to call the `report_status` tool
+//! itself. The reporter reads `SPYC_MCP_SOCK` + `SPYC_PANE_ID` from the env
+//! spyc injects into the pane (inherited by the hook).
+//!
+//! Two agents are wired (both share the lifecycle-event → reported-state idea):
+//! * **claude** — `.claude/settings.json` (JSON), reloaded live → hooks take
+//!   effect on the next turn (the functions below).
+//! * **codex** — inline `[[hooks.<Event>]]` arrays in the SAME
+//!   `.codex/config.toml` we write the MCP entry into; read once at startup, so
+//!   they must be written BEFORE the pane spawns (see the codex section).
 //!
 //! Event → state (verified against the Claude Code hooks docs):
 //! * `UserPromptSubmit`  → `working` (the agent just got a prompt)
@@ -229,6 +236,181 @@ pub fn cleanup_claude_status_hooks(dir: &Path) -> ConfigCleanup {
     ConfigCleanup::Cleaned
 }
 
+// ── Codex status hooks ────────────────────────────────────────────────
+//
+// Codex ships an event-hooks system parallel to claude's, but its config lives
+// as inline `[[hooks.<Event>]]` arrays-of-tables in the SAME
+// `.codex/config.toml` we write the MCP server into (see [`super::config`]),
+// not a separate file. The event names overlap with claude's:
+// `UserPromptSubmit` → working, `PermissionRequest` → blocked (the instant
+// "needs me" approval signal), `Stop` → done. Codex has no `Notification`/idle
+// event, so there's no idle-downgrade to apply — `effective_report_state` is
+// inert for codex payloads. Timing differs: codex reads its config ONCE at
+// startup (no live reload), so for an already-consented repo the hooks are
+// written before the pane spawns; a first-launch `yes` only takes effect on
+// codex's next launch.
+
+/// Codex's (event, reported-state). No matcher: these events aren't
+/// tool-scoped, and the `--report-status` command string is the "ours" marker
+/// for cleanup (a user isn't expected to author their own).
+const CODEX_STATUS_HOOKS: [(&str, &str); 3] = [
+    ("UserPromptSubmit", "working"),
+    ("PermissionRequest", "blocked"),
+    ("Stop", "done"),
+];
+
+/// TOML counterpart of [`group_is_ours`]: a `{ hooks = [{ command = … }] }`
+/// group is ours when a handler's `command` runs `--report-status`.
+fn codex_group_is_ours(group: &toml::Value) -> bool {
+    group
+        .get("hooks")
+        .and_then(toml::Value::as_array)
+        .is_some_and(|handlers| {
+            handlers.iter().any(|h| {
+                h.get("command")
+                    .and_then(toml::Value::as_str)
+                    .is_some_and(|c| c.contains("--report-status"))
+            })
+        })
+}
+
+/// Codex counterpart of [`ensure_claude_status_hooks`]: merge spyc's status
+/// hooks into `<dir>/.codex/config.toml` (the same file as the MCP entry),
+/// preserving everything else. The byte-idempotent skip, the git-tracked guard,
+/// and the return contract all mirror the claude version.
+pub fn ensure_codex_status_hooks(dir: &Path) -> bool {
+    let path = dir.join(".codex").join("config.toml");
+    if crate::git::discovery::is_tracked(&path) {
+        return false;
+    }
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
+    let existing = std::fs::read_to_string(&path).ok();
+    let Some(out) = merged_codex_status_hooks_toml(
+        existing.as_deref(),
+        &exe.to_string_lossy(),
+        status_trace_enabled(),
+    ) else {
+        return false;
+    };
+    if existing.as_deref() == Some(out.as_str()) {
+        return true;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    crate::fs::write_atomic(&path, out.as_bytes()).is_ok()
+}
+
+/// Pure merge for codex's `config.toml`: add a `[[hooks.<Event>]]` group for
+/// each [`CODEX_STATUS_HOOKS`] entry into `existing` (or a fresh table),
+/// dropping a stale spyc group from a prior launch and preserving the user's
+/// own config (including our `[mcp_servers.spyc]`). `None` on a non-table
+/// existing value or a serialization failure. Pure (no I/O) so the merge — and
+/// its byte-level idempotency, which lets the write be skipped — is testable.
+fn merged_codex_status_hooks_toml(
+    existing: Option<&str>,
+    exe: &str,
+    trace: bool,
+) -> Option<String> {
+    let mut root = existing
+        .and_then(|t| toml::from_str::<toml::Value>(t).ok())
+        .filter(toml::Value::is_table)
+        .unwrap_or_else(|| toml::Value::Table(toml::Table::new()));
+    let obj = root.as_table_mut()?;
+    let hooks = obj
+        .entry("hooks")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let hooks_obj = hooks.as_table_mut()?;
+    // `--status-trace` rides in the command string (not env) so the reporter
+    // logs even when codex sanitizes the hook env.
+    let suffix = if trace { " --status-trace" } else { "" };
+    for (event, state) in CODEX_STATUS_HOOKS {
+        let mut handler = toml::Table::new();
+        handler.insert("type".into(), toml::Value::String("command".into()));
+        handler.insert(
+            "command".into(),
+            toml::Value::String(format!("{exe} --report-status {state}{suffix}")),
+        );
+        let mut group = toml::Table::new();
+        group.insert(
+            "hooks".into(),
+            toml::Value::Array(vec![toml::Value::Table(handler)]),
+        );
+        let arr = hooks_obj
+            .entry(event)
+            .or_insert_with(|| toml::Value::Array(Vec::new()));
+        let Some(list) = arr.as_array_mut() else {
+            continue;
+        };
+        // Drop a stale spyc group from a prior launch, keep the user's, append ours.
+        list.retain(|g| !codex_group_is_ours(g));
+        list.push(toml::Value::Table(group));
+    }
+    toml::to_string_pretty(&root).ok()
+}
+
+/// Teardown counterpart: remove only spyc's hook groups from
+/// `<dir>/.codex/config.toml`, preserving the user's config and our MCP entry
+/// (cleaned separately by [`super::config::cleanup_codex_config`]). Empties
+/// cascade as in the claude version; the file (and `.codex/`) is deleted only
+/// when nothing else remains. Refuses a git-tracked file.
+pub fn cleanup_codex_status_hooks(dir: &Path) -> ConfigCleanup {
+    let codex_dir = dir.join(".codex");
+    let path = codex_dir.join("config.toml");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return ConfigCleanup::NothingToDo;
+    };
+    let Ok(mut root) = toml::from_str::<toml::Value>(&text) else {
+        return ConfigCleanup::NothingToDo;
+    };
+    let has_ours = root
+        .get("hooks")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|h| {
+            CODEX_STATUS_HOOKS.iter().any(|(event, _)| {
+                h.get(*event)
+                    .and_then(toml::Value::as_array)
+                    .is_some_and(|a| a.iter().any(codex_group_is_ours))
+            })
+        });
+    if !has_ours {
+        return ConfigCleanup::NothingToDo;
+    }
+    if crate::git::discovery::is_tracked(&path) {
+        return ConfigCleanup::SkippedTracked;
+    }
+    let Some(obj) = root.as_table_mut() else {
+        return ConfigCleanup::NothingToDo;
+    };
+    if let Some(hooks_obj) = obj.get_mut("hooks").and_then(toml::Value::as_table_mut) {
+        for (event, _) in CODEX_STATUS_HOOKS {
+            if let Some(list) = hooks_obj.get_mut(event).and_then(toml::Value::as_array_mut) {
+                list.retain(|g| !codex_group_is_ours(g));
+            }
+        }
+        // Drop emptied event arrays.
+        hooks_obj.retain(|_, v| !v.as_array().is_some_and(Vec::is_empty));
+    }
+    // Drop the `hooks` key if it's now empty.
+    if obj
+        .get("hooks")
+        .and_then(toml::Value::as_table)
+        .is_some_and(toml::Table::is_empty)
+    {
+        obj.remove("hooks");
+    }
+    if obj.is_empty() {
+        let _ = std::fs::remove_file(&path);
+        // Remove `.codex/` too, but only if now empty (no-op otherwise).
+        let _ = std::fs::remove_dir(&codex_dir);
+        return ConfigCleanup::Cleaned;
+    }
+    if let Ok(out) = toml::to_string_pretty(&root) {
+        let _ = crate::fs::write_atomic(&path, out.as_bytes());
+    }
+    ConfigCleanup::Cleaned
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,6 +577,139 @@ mod tests {
         assert_eq!(
             before, after,
             "an already-current settings.json was rewritten (mtime bumped → would trip Claude's live-reload)"
+        );
+    }
+
+    // ── codex (TOML, shares config.toml with the MCP entry) ───────────────
+
+    fn read_toml(path: &Path) -> toml::Value {
+        toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    /// The first handler `command` for a codex hook `event`, or "".
+    fn codex_cmd(v: &toml::Value, event: &str) -> String {
+        v.get("hooks")
+            .and_then(|h| h.get(event))
+            .and_then(toml::Value::as_array)
+            .and_then(|a| a.first())
+            .and_then(|g| g.get("hooks"))
+            .and_then(toml::Value::as_array)
+            .and_then(|a| a.first())
+            .and_then(|h| h.get("command"))
+            .and_then(toml::Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    #[test]
+    fn writes_codex_status_hooks_then_cleans_them_leaving_no_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        assert!(ensure_codex_status_hooks(dir));
+        let path = dir.join(".codex/config.toml");
+        let v = read_toml(&path);
+        for (event, state) in CODEX_STATUS_HOOKS {
+            let cmd = codex_cmd(&v, event);
+            assert!(
+                cmd.contains("--report-status") && cmd.contains(state),
+                "{event} → {state}: got {cmd:?}"
+            );
+        }
+        assert!(matches!(
+            cleanup_codex_status_hooks(dir),
+            ConfigCleanup::Cleaned
+        ));
+        assert!(!path.exists(), "config.toml should be removed when emptied");
+        assert!(
+            !dir.join(".codex").exists(),
+            "empty .codex dir should be removed"
+        );
+    }
+
+    #[test]
+    fn codex_hooks_coexist_with_the_mcp_entry_and_cleanup_leaves_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::create_dir_all(dir.join(".codex")).unwrap();
+        let path = dir.join(".codex/config.toml");
+        // A pre-existing MCP entry (as the codex MCP writer leaves it) + a user key.
+        std::fs::write(
+            &path,
+            "model = \"gpt-5\"\n\n[mcp_servers.spyc]\ncommand = \"spyc\"\nargs = [\"--mcp\"]\n",
+        )
+        .unwrap();
+        assert!(ensure_codex_status_hooks(dir));
+        let v = read_toml(&path);
+        assert!(v.get("hooks").is_some(), "hooks added");
+        assert!(v.get("mcp_servers").is_some(), "MCP entry preserved");
+        assert_eq!(v.get("model").and_then(toml::Value::as_str), Some("gpt-5"));
+
+        // Idempotent re-write doesn't disturb the file.
+        assert!(ensure_codex_status_hooks(dir));
+
+        // Cleanup removes ONLY our hooks; the MCP entry + user key survive.
+        assert!(matches!(
+            cleanup_codex_status_hooks(dir),
+            ConfigCleanup::Cleaned
+        ));
+        let after = read_toml(&path);
+        assert!(after.get("hooks").is_none(), "our hooks removed");
+        assert!(after.get("mcp_servers").is_some(), "MCP entry preserved");
+        assert_eq!(
+            after.get("model").and_then(toml::Value::as_str),
+            Some("gpt-5")
+        );
+    }
+
+    #[test]
+    fn cleanup_codex_hooks_is_a_noop_when_nothing_of_ours() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::create_dir_all(dir.join(".codex")).unwrap();
+        std::fs::write(dir.join(".codex/config.toml"), "model = \"gpt-5\"\n").unwrap();
+        assert!(matches!(
+            cleanup_codex_status_hooks(dir),
+            ConfigCleanup::NothingToDo
+        ));
+        assert!(dir.join(".codex/config.toml").exists());
+    }
+
+    #[test]
+    fn codex_merge_is_byte_idempotent() {
+        // The invariant that lets `ensure_codex_status_hooks` skip a re-write:
+        // re-applying the merge to its own output reproduces it byte-for-byte.
+        let once = merged_codex_status_hooks_toml(None, "spyc", false).expect("fresh merge");
+        let twice = merged_codex_status_hooks_toml(Some(&once), "spyc", false).expect("re-merge");
+        assert_eq!(once, twice, "re-applying the merge changed a byte");
+        assert!(once.contains("--report-status blocked"));
+        assert!(
+            !once.contains("--status-trace"),
+            "trace off → no baked flag"
+        );
+
+        // A user's own codex config (incl. our MCP entry) survives the round-trip.
+        let with_user = merged_codex_status_hooks_toml(
+            Some("model = \"gpt-5\"\n[mcp_servers.spyc]\ncommand = \"spyc\"\n"),
+            "spyc",
+            false,
+        )
+        .expect("merge over user config");
+        assert_eq!(
+            with_user,
+            merged_codex_status_hooks_toml(Some(&with_user), "spyc", false)
+                .expect("re-merge over user config"),
+            "merge over a user config is not idempotent"
+        );
+        assert!(with_user.contains("gpt-5"), "user config dropped");
+        assert!(with_user.contains("mcp_servers"), "MCP entry dropped");
+
+        // `--status-trace` on bakes the flag into every command, still idempotently.
+        let traced = merged_codex_status_hooks_toml(None, "spyc", true).expect("traced merge");
+        assert!(traced.contains("--report-status blocked --status-trace"));
+        assert_eq!(
+            traced,
+            merged_codex_status_hooks_toml(Some(&traced), "spyc", true).expect("re-merge traced"),
+            "traced merge is not idempotent"
         );
     }
 }

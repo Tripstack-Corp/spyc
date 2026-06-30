@@ -94,15 +94,17 @@ pub enum PromptKind {
     ClaudeCrashRecover {
         tab_idx: usize,
     },
-    /// First-launch consent (per project, saved) before spyc writes Claude
-    /// status hooks into `root`'s `.claude/settings.json`. `y`/`Y` →
-    /// remember-allow + install hooks for `cwd`; `n`/`N` → remember-deny.
-    /// Any other key (including Esc) keeps the prompt open — y/n is required.
-    /// `root` keys the persisted consent (`state::hook_consent`); `cwd` is the
-    /// launching pane's dir (where the hooks are written).
+    /// First-launch consent (per project, saved) before spyc writes an agent's
+    /// status hooks into `root`'s config (claude `.claude/settings.json` /
+    /// codex `.codex/config.toml`). `y`/`Y` → remember-allow + install hooks for
+    /// `cwd`; `n`/`N` → remember-deny. Any other key (including Esc) keeps the
+    /// prompt open — y/n is required. `root` keys the persisted consent
+    /// (`state::hook_consent`); `cwd` is the launching pane's dir (where the
+    /// hooks are written); `agent` picks the installer (which config + format).
     HookConsent {
         root: std::path::PathBuf,
         cwd: std::path::PathBuf,
+        agent: crate::state::sessions::AgentKind,
     },
     /// `^a x` on a tab whose child is still running — confirm before killing it
     /// (closing a live claude loses the session). Single-key: `y`/`Y` closes,
@@ -788,6 +790,7 @@ mod tests {
                 K::HookConsent {
                     root: std::path::PathBuf::new(),
                     cwd: std::path::PathBuf::new(),
+                    agent: crate::state::sessions::AgentKind::Claude,
                 },
             ),
             ("ClosePane", K::ClosePane),

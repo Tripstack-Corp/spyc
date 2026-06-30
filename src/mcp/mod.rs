@@ -142,7 +142,10 @@ pub use config::{
     detect_existing_spyc_codex, ensure_codex_config_toml, ensure_mcp_json, enterprise_defines_spyc,
     sweep_orphan_spyc_configs,
 };
-pub use hooks::{cleanup_claude_status_hooks, ensure_claude_status_hooks, set_status_trace};
+pub use hooks::{
+    cleanup_claude_status_hooks, cleanup_codex_status_hooks, ensure_claude_status_hooks,
+    ensure_codex_status_hooks, set_status_trace,
+};
 pub use server::{cleanup_socket, start_socket_server};
 
 use server::{discover_live_socket, run_direct, run_proxy};
@@ -158,8 +161,10 @@ fn resolve_context_path(project_root: &Path) -> PathBuf {
 }
 
 /// The *effective* report state, given the hook's configured state and the
-/// Claude Code event JSON piped to the hook's stdin. The one remap: a
-/// `Notification` whose `notification_type` is `idle_prompt` ("Claude is
+/// agent event JSON piped to the hook's stdin. The one remap is Claude-specific
+/// (codex has no `Notification`/idle event, so this is inert for codex
+/// payloads): a `Notification` whose `notification_type` is `idle_prompt`
+/// ("Claude is
 /// waiting for your input") is the agent **finished and waiting** — that's
 /// `done` (the calm teal square), NOT `blocked` (the alarming red "needs me"
 /// square). Without it an idle agent flips to a false-red square after Claude's

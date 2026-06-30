@@ -104,6 +104,11 @@ impl App {
         // spyc's socket on startup. Gated on the agent here, so directories where
         // no agent is ever launched don't get a stray config dir. No-op otherwise.
         self.ensure_agent_mcp_config(cmd, cwd);
+        // Codex reads `.codex/config.toml` once at startup, so an already-consented
+        // repo's status hooks must be written now, before the pty spawns — else
+        // they'd be missed until codex's next launch. Live-reload agents (claude)
+        // are handled post-spawn. No-op for non-hook agents / un-consented repos.
+        self.maybe_preinstall_startup_hooks(cmd, cwd);
         // Build the tab metadata up front so its stable id is available to
         // inject as `SPYC_PANE_ID` (below). Option B: a `codex resume <uuid>`
         // pane knows its session id immediately — pin it now so `^a v` is exact
@@ -161,42 +166,82 @@ impl App {
         }
     }
 
-    /// After launching a Claude pane: install the status hooks if this project
-    /// has already consented, do nothing if it declined, else raise the
-    /// first-launch consent popup (`HookConsent`). Consent is keyed by the
-    /// **project root** (`find_repo_root`, else the cwd) and saved, so a given
-    /// repo is asked exactly once. Gated on MCP running (the hooks report over
-    /// the socket) and the agent being Claude.
+    /// After launching an agent pane that supports status hooks (claude/codex):
+    /// install them if this project has already consented, do nothing if it
+    /// declined, else raise the first-launch consent popup (`HookConsent`).
+    /// Consent is keyed by the **project root** (`find_repo_root`, else the cwd)
+    /// and saved, so a given repo is asked exactly once. Gated on MCP running
+    /// (the hooks report over the socket) and the agent having a status-hook
+    /// installer. For codex the already-consented case is also written
+    /// pre-spawn ([`maybe_preinstall_startup_hooks`](Self::maybe_preinstall_startup_hooks))
+    /// so the hooks are live this session; here it's a harmless idempotent re-run.
     fn maybe_offer_status_hooks(&mut self, cmd: &str, cwd: &std::path::Path) {
-        if !self.view.mcp_running
-            || crate::agent::detect(cmd).kind() != crate::state::sessions::AgentKind::Claude
-        {
+        if !self.view.mcp_running {
             return;
         }
+        let profile = crate::agent::detect(cmd);
+        let Some(support) = profile.status_hooks() else {
+            return;
+        };
+        let kind = profile.kind();
         let root = state::find_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
         match crate::state::hook_consent::consent_for(&root) {
-            Some(true) => self.install_status_hooks(cwd),
+            Some(true) => self.install_status_hooks(cwd, kind),
             Some(false) => {}
             None => {
                 self.state.mode = Mode::Prompting(Prompt::simple(
                     PromptKind::HookConsent {
                         root,
                         cwd: cwd.to_path_buf(),
+                        agent: kind,
                     },
-                    "Let spyc show this agent's live status? Writes hooks to .claude/settings.json (removed on exit). [y]es / [n]o ",
+                    format!(
+                        "Let spyc show this agent's live status? Writes hooks to {} (removed on exit). [y]es / [n]o ",
+                        support.config_label
+                    ),
                 ));
             }
         }
     }
 
-    /// Write the Claude status hooks into `cwd` and record the dir so teardown
+    /// Pre-spawn install for agents that read their hook config only at startup
+    /// (codex): when this project has already consented, write the status hooks
+    /// BEFORE the pty spawns so they're live for THIS session — a post-spawn
+    /// install would be missed until the agent's next launch. Live-reload agents
+    /// (claude) skip this; their post-spawn `maybe_offer_status_hooks` install
+    /// is picked up on the next turn. First-launch consent is still handled
+    /// post-spawn (it can't pre-empt the interactive popup).
+    pub(super) fn maybe_preinstall_startup_hooks(&mut self, cmd: &str, cwd: &std::path::Path) {
+        if !self.view.mcp_running {
+            return;
+        }
+        let profile = crate::agent::detect(cmd);
+        let Some(support) = profile.status_hooks() else {
+            return;
+        };
+        if support.live_reload {
+            return;
+        }
+        let root = state::find_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+        if crate::state::hook_consent::consent_for(&root) == Some(true) {
+            self.install_status_hooks(cwd, profile.kind());
+        }
+    }
+
+    /// Write `kind`'s status hooks into `cwd` and record the dir so teardown
     /// cleans them (shares `mcp_config_dirs` with the `.mcp.json` cleanup).
-    /// Assumes consent is already granted. A no-op-returning write (git-tracked
-    /// settings.json) simply isn't tracked.
-    pub(super) fn install_status_hooks(&mut self, cwd: &std::path::Path) {
-        if crate::mcp::ensure_claude_status_hooks(cwd)
-            && !self.runtime.mcp_config_dirs.iter().any(|d| d == cwd)
-        {
+    /// Assumes consent is already granted. A no-op for an agent without a
+    /// status-hook installer; a no-op-returning write (git-tracked config)
+    /// simply isn't tracked.
+    pub(super) fn install_status_hooks(
+        &mut self,
+        cwd: &std::path::Path,
+        kind: crate::state::sessions::AgentKind,
+    ) {
+        let Some(support) = crate::agent::profile_for(kind).status_hooks() else {
+            return;
+        };
+        if (support.ensure)(cwd) && !self.runtime.mcp_config_dirs.iter().any(|d| d == cwd) {
             self.runtime.mcp_config_dirs.push(cwd.to_path_buf());
         }
     }
@@ -212,38 +257,41 @@ impl App {
         state::find_repo_root(&dir).unwrap_or(dir)
     }
 
-    /// `:hooks on|off` — grant/revoke per-project consent for Claude status
-    /// hooks and (un)install them for every open **claude** pane in that project
-    /// (so a *running* agent gains/loses the hooks, not just future launches).
-    /// Claude reloads `.claude/settings.json` live, so the change takes effect on
-    /// the agent's next message — no restart, no lost conversation. This is the
-    /// escape hatch from an accidental `no` at launch.
+    /// `:hooks on|off` — grant/revoke per-project consent for agent status hooks
+    /// and (un)install them for every open hook-supporting pane (claude/codex)
+    /// in that project, so a *running* agent gains/loses the hooks, not just
+    /// future launches. Claude reloads `.claude/settings.json` live (effect on
+    /// its next message); codex reads its config at startup, so an `on` for a
+    /// running codex pane writes the hooks but they only apply on codex's next
+    /// launch. This is the escape hatch from an accidental `no` at launch.
     pub(super) fn set_status_hooks(&mut self, enable: bool) {
         let root = self.status_hooks_target_root();
         crate::state::hook_consent::set_consent(&root, enable);
-        // Claude panes whose project root matches — collect first (immutable
-        // borrow) so the install/cleanup mutations below don't alias.
-        let cwds: Vec<std::path::PathBuf> = self
+        // Hook-supporting panes whose project root matches — collect (cwd, kind)
+        // first (immutable borrow) so the install/cleanup mutations don't alias.
+        let panes: Vec<(std::path::PathBuf, crate::state::sessions::AgentKind)> = self
             .runtime
             .pane_tabs
             .as_ref()
             .map(|tabs| {
                 tabs.tabs()
                     .iter()
-                    .filter(|t| {
-                        crate::agent::detect(&t.info.command).kind()
-                            == crate::state::sessions::AgentKind::Claude
+                    .filter_map(|t| {
+                        let profile = crate::agent::detect(&t.info.command);
+                        profile
+                            .status_hooks()
+                            .is_some()
+                            .then(|| (t.info.cwd.clone(), profile.kind()))
                     })
-                    .map(|t| t.info.cwd.clone())
-                    .filter(|cwd| state::find_repo_root(cwd).as_deref().unwrap_or(cwd) == root)
+                    .filter(|(cwd, _)| state::find_repo_root(cwd).as_deref().unwrap_or(cwd) == root)
                     .collect()
             })
             .unwrap_or_default();
-        for cwd in &cwds {
+        for (cwd, kind) in &panes {
             if enable {
-                self.install_status_hooks(cwd);
-            } else {
-                crate::mcp::cleanup_claude_status_hooks(cwd);
+                self.install_status_hooks(cwd, *kind);
+            } else if let Some(support) = crate::agent::profile_for(*kind).status_hooks() {
+                (support.cleanup)(cwd);
                 self.runtime.mcp_config_dirs.retain(|d| d != cwd);
             }
         }
@@ -251,8 +299,8 @@ impl App {
         if enable {
             let note = Self::ephemeral_hook_binary_note();
             self.state.flash_info(format!(
-                "status hooks ON for {proj} ({} pane(s)) — live on Claude's next message (`:hooks on!` to force-restart+resume){note}",
-                cwds.len()
+                "status hooks ON for {proj} ({} pane(s)) — claude live next message, codex on next launch (`:hooks on!` force-restarts claude){note}",
+                panes.len()
             ));
         } else {
             self.state
@@ -364,7 +412,7 @@ impl App {
                 .flash_error(":hooks on! — active pane is not claude");
             return;
         }
-        self.install_status_hooks(&cwd);
+        self.install_status_hooks(&cwd, crate::state::sessions::AgentKind::Claude);
 
         // Resolve the live session id (newest claude jsonl for this cwd) so we
         // can auto-`/resume`. Strip any `--resume` from the command so we

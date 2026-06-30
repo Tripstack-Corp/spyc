@@ -206,13 +206,14 @@ pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
-/// `:hooks [on|on!|off]` — manage Claude status-hook consent for the current
+/// `:hooks [on|on!|off]` — manage agent status-hook consent for the current
 /// project: the escape hatch from the first-launch popup (e.g. an accidental
-/// `no`). `on` grants consent + installs the hooks for any running claude panes
-/// in this project (Claude live-reloads them, so it takes on the next message);
-/// `on!` additionally **restarts the active claude pane and resumes** it, for
-/// when the live reload doesn't take; `off` revokes + uninstalls; no arg reports
-/// the current state. Consent is keyed by the project root and saved.
+/// `no`). `on` grants consent + installs the hooks for any running claude/codex
+/// panes in this project (Claude live-reloads them → next message; codex reads
+/// config at startup → next launch); `on!` additionally **restarts the active
+/// claude pane and resumes** it, for when the live reload doesn't take (claude
+/// only); `off` revokes + uninstalls; no arg reports the current state. Consent
+/// is keyed by the project root and saved.
 pub(super) fn cmd_hooks(app: &mut App, args: &str) -> Vec<Effect> {
     match args.trim() {
         "on!" | "enable!" => app.force_restart_status_hooks(),
@@ -223,7 +224,7 @@ pub(super) fn cmd_hooks(app: &mut App, args: &str) -> Vec<Effect> {
             let state = match crate::state::hook_consent::consent_for(&root) {
                 Some(true) => "on",
                 Some(false) => "off",
-                None => "unset (asks on next claude launch)",
+                None => "unset (asks on next claude/codex launch)",
             };
             app.state.flash_info(format!(
                 "status hooks: {state} for {} — `:hooks on|on!|off` to change",

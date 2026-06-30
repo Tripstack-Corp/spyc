@@ -109,8 +109,11 @@ impl App {
     pub fn cleanup_written_mcp_configs(&mut self) {
         for dir in std::mem::take(&mut self.runtime.mcp_config_dirs) {
             // Try each shape per dir; each is a no-op unless it finds an entry
-            // that's *ours*, so attempting the wrong one is harmless. The Claude
-            // status hooks (`.claude/settings.json`) ride the same dir set.
+            // that's *ours*, so attempting the wrong one is harmless. The agent
+            // status hooks (claude `.claude/settings.json`, codex's hooks in the
+            // shared `.codex/config.toml`) ride the same dir set. Codex's MCP
+            // entry and its status hooks live in one file; cleaning either leaves
+            // the other, and whichever empties it last deletes the file/dir.
             for tracked_path in [
                 matches!(
                     crate::mcp::cleanup_mcp_json(&dir),
@@ -119,6 +122,11 @@ impl App {
                 .then(|| dir.join(".mcp.json")),
                 matches!(
                     crate::mcp::cleanup_codex_config(&dir),
+                    crate::mcp::ConfigCleanup::SkippedTracked
+                )
+                .then(|| dir.join(".codex").join("config.toml")),
+                matches!(
+                    crate::mcp::cleanup_codex_status_hooks(&dir),
                     crate::mcp::ConfigCleanup::SkippedTracked
                 )
                 .then(|| dir.join(".codex").join("config.toml")),

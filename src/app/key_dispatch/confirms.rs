@@ -172,7 +172,7 @@ impl App {
     pub(super) fn handle_hook_consent_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         let prev_mode = std::mem::replace(&mut self.state.mode, Mode::Normal);
         let Mode::Prompting(Prompt {
-            kind: PromptKind::HookConsent { root, cwd },
+            kind: PromptKind::HookConsent { root, cwd, agent },
             prefix,
             buffer,
             editor,
@@ -183,10 +183,18 @@ impl App {
         match key.code {
             KeyCode::Char('y' | 'Y') => {
                 crate::state::hook_consent::set_consent(&root, true);
-                self.install_status_hooks(&cwd);
-                self.state.flash_info(
-                    "status hooks on — Claude reports its activity (saved; `:hooks off` to undo)",
-                );
+                self.install_status_hooks(&cwd, agent);
+                // Claude reloads its config live (effect on the next message);
+                // codex reads config at startup, so the hooks it just got apply
+                // on its next launch.
+                let profile = crate::agent::profile_for(agent);
+                let live = profile.status_hooks().is_some_and(|s| s.live_reload);
+                let name = profile.name();
+                self.state.flash_info(if live {
+                    format!("status hooks on — {name} reports its live activity (saved; `:hooks off` to undo)")
+                } else {
+                    format!("status hooks on — active on {name}'s next launch (saved; `:hooks off` to undo)")
+                });
             }
             KeyCode::Char('n' | 'N') => {
                 crate::state::hook_consent::set_consent(&root, false);
@@ -196,7 +204,7 @@ impl App {
             _ => {
                 // Restore the prompt — y/n is required; Esc does not defer.
                 self.state.mode = Mode::Prompting(Prompt {
-                    kind: PromptKind::HookConsent { root, cwd },
+                    kind: PromptKind::HookConsent { root, cwd, agent },
                     prefix,
                     buffer,
                     editor,
@@ -224,6 +232,7 @@ mod tests {
             PromptKind::HookConsent {
                 root: PathBuf::from("/repo"),
                 cwd: PathBuf::from("/repo"),
+                agent: crate::state::sessions::AgentKind::Claude,
             },
             "consent? [y]es / [n]o ",
         ));
