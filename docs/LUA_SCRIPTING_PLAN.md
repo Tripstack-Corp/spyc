@@ -40,7 +40,7 @@ It also reuses spyc's two existing async idioms:
 1. A trigger (a `BoundAction::Lua`, a `spyc.map` key, a Lua `:`-command, or — phase 2 — an event) hands the main loop a job: `{ fn_id, context_snapshot }`.
 2. Main records `lua_job: { id, name, started_at }`, sends the job to the worker over `lua_job_tx`, and returns immediately (`Vec<Effect>` empty for now). Main keeps looping.
 3. Worker looks up the stored `Function` by `fn_id` (a `RegistryKey` held worker-side), builds the `spyc` context table from the snapshot, installs the instruction hook, and `call()`s it.
-4. Inside the call, the script's `spyc.*` functions either (a) read the snapshot locally (cheap context: cwd/cursor/picks/filter/git_branch/project_home/session) or (b) **round-trip** a request to main (mutations, and heavy reads like worktree-list/git/file-content) via a reply channel, reusing `execute_mcp_command`. Each round-trip is a quick `Message` the main loop handles between renders — so the loop never blocks and stays interruptible.
+4. Inside the call, the script's `spyc.*` functions either (a) read the snapshot locally (cheap context: cwd/cursor/picks/filter/git_branch/project_home/session), (b) run a **live read** directly on the worker (worktree-list/git/file-content/search — see "Live reads" below; these reuse the already-off-loop, thread-safe `src/mcp/readers.rs` layer, so NO round-trip is needed — the PR4 divergence from this section's original guess), or (c) **round-trip** a request to main (mutations only) via a reply channel, reusing `execute_mcp_command`. Each round-trip is a quick `Message` the main loop handles between renders — so the loop never blocks and stays interruptible.
 5. On return/error, the worker sends `Message::LuaDone { id, result }`; main clears `lua_job`, flashes any error, and applies any registration deltas.
 
 **`mlua::Lua` never crosses threads** — created on the worker, all
@@ -97,8 +97,8 @@ A single `spyc` global table.
 **Reads (from the cheap snapshot — no round-trip):**
 `spyc.context()` → table {cwd, cursor_file, picks, inventory, filter, git_branch, project_home, session_name, version}; plus sugar `spyc.cwd()`, `spyc.cursor()`, `spyc.picks()`, `spyc.git_branch()`. Backed by `SpycContext` (`src/context.rs`, already `Clone`/`Serialize`).
 
-**Reads (round-trip, reuse MCP read logic — phase 4):**
-`spyc.worktrees()`, `spyc.git_status()`, `spyc.git_log{...}`, `spyc.read(path)`, `spyc.search_paths(q)`, `spyc.search_content(re)`.
+**Live reads (SHIPPED, PR4 — computed on the worker, NO round-trip):**
+`spyc.worktrees()`, `spyc.git_status()`, `spyc.git_log{limit=N}`, `spyc.read(path)`, `spyc.search_paths(q)`, `spyc.search_content(re)`. The charter guessed these would need a synchronous worker→main-loop round-trip; **they don't.** spyc's MCP read tools already run OFF the main loop — `src/mcp/readers.rs` is root-scoped + thread-safe (reads fs/gix directly from a `root`), and the finder/grep run on worker threads. So the Lua worker calls those readers DIRECTLY on the worker thread, using the snapshot's read root (`search_root` else `cwd`; `spyc.read` resolves a relative path against `cwd`), converts the reader's JSON to a Lua value via one `json_to_lua`, and returns it inline — no reply channel, no un-abortable-window design. A read blocks the *worker* briefly (never the UI, since the interpreter is off-thread); the hard ceiling still bounds the whole run once control returns to Lua. Error convention: a genuine failure (bad path, invalid regex) RAISES an `mlua::Error`; "nothing here" (clean tree, empty repo, no matches) is an empty table. `git_log` mirrors the MCP tool (`limit` only; no `paths` filter — the underlying reader has none).
 
 **Mutations / actions (round-trip; reuse `McpCommand`/`execute_mcp_command` where overlapping):**
 - `spyc.navigate(path)`, `spyc.pick(globs)`, `spyc.clear_picks()`, `spyc.filter(glob)`, `spyc.report_status(s)` → existing `McpCommand` variants.
@@ -149,7 +149,7 @@ A single `spyc` global table.
 1. **PR1 — Lua worker + Tier A keybindings + core safety.** mlua dep + Cargo comment rewrite; `src/lua/` worker/bridge/api; `Runtime.lua`; `BoundAction::Lua` + DSL `lua` verb + trust gate + tests; snapshot-in / batch-out (`action`/`cmd`/`navigate`/`pick`/`filter`/`report_status`/`notify`); **instruction hook + abort flag + hard ceiling + error containment** (auto-kill, flash-only — no modal yet); `:lua off`/`--no-lua`. Smallest end-to-end slice, safe from day one.
 2. **PR2 — Tier B: init.lua platform.** Loader in bootstrap + reload + watcher tracking; `spyc.map` / `spyc.command` + the COMMAND_TABLE fallthrough + completion merge; the inert `spyc.on` stub; `:lua reload`/`:lua status`.
 3. **PR3 — Interactive runaway control.** The soft-threshold scheduler deadline + the "keep waiting? [y/N]" modal (new confirm variant in `modal.rs`/confirm handlers) wired to the abort flag; pure watchdog-decision tests.
-4. **PR4 — Round-trip live reads.** `spyc.worktrees`/`git_status`/`git_log`/`read`/`search_*` reusing the MCP read logic; richer `context`.
+4. **PR4 — Live reads. ✅ SHIPPED (v1.88.0).** `spyc.worktrees`/`git_status`/`git_log`/`read`/`search_paths`/`search_content` reusing the root-scoped MCP readers (`src/mcp/readers.rs` + `crate::fs::{finder,grep}`) DIRECTLY on the worker — the "round-trip" the charter assumed turned out unnecessary (the readers are already off-loop + thread-safe). One `json_to_lua` marshals every reader's JSON; reads raise on failure, empty-table on absence.
 5. **PR5 (phase 2, deferred) — Tier C events.** `Event` enum + `fire_event` + the low-frequency dispatch sites; activate `spyc.on`.
 
 ## Top risks & mitigations

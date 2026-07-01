@@ -825,7 +825,13 @@ unambiguous:
 - **Lua scripting** — embed real logic in your config (`mlua`, vendored
   Lua 5.4). A `map KEY lua <name>` binding runs
   `~/.config/spyc/lua/<name>.lua`, which calls a `spyc.*` API: read context
-  (`spyc.context()` / `cwd` / `cursor`), drive the view (`navigate` / `pick`
+  (`spyc.context()` / `cwd` / `cursor`); query **live** worktree/git/file/search
+  state and use the result inline (`spyc.worktrees()`, `spyc.git_status()`,
+  `spyc.git_log{limit=N}`, `spyc.read(path)`, `spyc.search_paths(query)`,
+  `spyc.search_content(regex)` — computed synchronously on the worker, no
+  main-loop round-trip, since they reuse spyc's root-scoped, thread-safe MCP
+  readers; a failure — bad path, not-a-repo, invalid regex — raises a Lua
+  error, "nothing here" is an empty table); drive the view (`navigate` / `pick`
   / `filter` / `report_status`), invoke any built-in action by its
   canonical snake_case name — the full keymap vocabulary, not just the
   curated DSL verbs (`spyc.action("git_blame")`, `spyc.action("down", 3)`;

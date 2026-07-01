@@ -134,7 +134,14 @@ pub fn socket_path() -> PathBuf {
 mod config;
 mod hooks;
 mod protocol;
-mod readers;
+/// Root-based readers (git/fs/file) shared with the Lua engine's live-read API
+/// (`src/lua/api.rs`). Every reader here is root-scoped and thread-safe (reads
+/// fs/gix directly, no `App`), so the off-main-thread Lua worker calls them the
+/// same way the off-loop MCP tool handlers do. `pub` (not `pub(crate)`) is the
+/// house convention for a free item in the private `mcp` module — clippy's
+/// `redundant_pub_crate` flags the narrower form; crate-external reach is still
+/// gated by `mcp` being private.
+pub mod readers;
 mod server;
 
 pub use config::{

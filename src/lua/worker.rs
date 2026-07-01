@@ -419,6 +419,7 @@ fn report_setup_failure<W: Fn()>(
 mod tests {
     use super::super::bridge::RegKind;
     use super::*;
+    use crate::git::test_support::run_git;
 
     fn dummy_snapshot() -> SpycContext {
         SpycContext {
@@ -433,6 +434,27 @@ mod tests {
             session_name: String::new(),
             pid: 0,
             version: String::new(),
+        }
+    }
+
+    /// A snapshot rooted at `dir` (both `cwd` and `search_root`), so the live
+    /// reads scope to a real temp dir / git repo the test just built.
+    fn snapshot_at(dir: &Path) -> SpycContext {
+        SpycContext {
+            cwd: dir.to_path_buf(),
+            search_root: Some(dir.to_path_buf()),
+            ..dummy_snapshot()
+        }
+    }
+
+    /// The single request a live-read test produces: the script computed a read
+    /// and encoded the result into `spyc.notify(...)`, so asserting on the
+    /// notify text proves the read ran end to end through a real worker.
+    fn notify_text(outcome: &LuaOutcome) -> &str {
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        match outcome.requests.as_slice() {
+            [LuaRequest::Notify(msg)] => msg,
+            other => panic!("expected one Notify request, got {other:?}"),
         }
     }
 
@@ -695,5 +717,187 @@ mod tests {
         });
         assert!(outcome.error.is_some());
         assert!(outcome.requests.is_empty());
+    }
+
+    /// The must-have live-read proof: `spyc.read` returns a written file's
+    /// contents through a real worker run, resolving the relative path against
+    /// the snapshot's cwd.
+    #[test]
+    fn spyc_read_returns_file_contents() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("hello.txt"), "world\n").unwrap();
+        std::fs::write(
+            dir.path().join("t.lua"),
+            "spyc.notify(spyc.read('hello.txt'))",
+        )
+        .unwrap();
+
+        let outcome = run_one(LuaJob::RunFile {
+            name: "t".to_string(),
+            lua_dir: dir.path().to_path_buf(),
+            snapshot: snapshot_at(dir.path()),
+        });
+        assert_eq!(notify_text(&outcome), "world\n");
+    }
+
+    /// `spyc.read` of a missing file raises, so the run reports an error and
+    /// applies nothing (the raise-on-failure convention).
+    #[test]
+    fn spyc_read_missing_file_raises() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("t.lua"), "spyc.read('nope.txt')").unwrap();
+
+        let outcome = run_one(LuaJob::RunFile {
+            name: "t".to_string(),
+            lua_dir: dir.path().to_path_buf(),
+            snapshot: snapshot_at(dir.path()),
+        });
+        assert!(outcome.error.is_some(), "missing file must raise");
+        assert!(outcome.requests.is_empty(), "a raised read applies nothing");
+    }
+
+    /// `spyc.search_paths` finds a file by fuzzy query (gitignore-aware walk),
+    /// returning a sequence table the script can index.
+    #[test]
+    fn spyc_search_paths_finds_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::write(dir.path().join("needle.rs"), "x\n").unwrap();
+        std::fs::write(
+            dir.path().join("t.lua"),
+            "local hits = spyc.search_paths('needle')\n\
+             spyc.notify(hits[1] or 'none')",
+        )
+        .unwrap();
+
+        let outcome = run_one(LuaJob::RunFile {
+            name: "t".to_string(),
+            lua_dir: dir.path().to_path_buf(),
+            snapshot: snapshot_at(dir.path()),
+        });
+        assert_eq!(notify_text(&outcome), "needle.rs");
+    }
+
+    /// `spyc.search_content` returns `{file, line, text}` rows the script reads.
+    #[test]
+    fn spyc_search_content_returns_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::write(dir.path().join("a.txt"), "one\nNEEDLE here\nthree\n").unwrap();
+        std::fs::write(
+            dir.path().join("t.lua"),
+            "local hits = spyc.search_content('NEEDLE')\n\
+             local m = hits[1]\n\
+             spyc.notify(m.file .. ':' .. m.line .. ':' .. m.text)",
+        )
+        .unwrap();
+
+        let outcome = run_one(LuaJob::RunFile {
+            name: "t".to_string(),
+            lua_dir: dir.path().to_path_buf(),
+            snapshot: snapshot_at(dir.path()),
+        });
+        assert_eq!(notify_text(&outcome), "a.txt:2:NEEDLE here");
+    }
+
+    /// `spyc.search_content` with an invalid regex raises (aborting the run).
+    #[test]
+    fn spyc_search_content_bad_regex_raises() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join("t.lua"),
+            "spyc.search_content('[unterminated')",
+        )
+        .unwrap();
+
+        let outcome = run_one(LuaJob::RunFile {
+            name: "t".to_string(),
+            lua_dir: dir.path().to_path_buf(),
+            snapshot: snapshot_at(dir.path()),
+        });
+        assert!(outcome.error.is_some(), "a bad regex must raise");
+    }
+
+    /// `spyc.git_status` returns a table of `{path, staged, unstaged,
+    /// untracked}` rows reflecting the worktree.
+    #[test]
+    fn spyc_git_status_reflects_the_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = std::fs::canonicalize(dir.path()).unwrap();
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-q", "-m", "first"]);
+        // One untracked file → git_status has a single untracked entry. The
+        // script lives OUTSIDE the repo so it doesn't itself show as untracked.
+        std::fs::write(repo.join("new.txt"), "x\n").unwrap();
+        let scripts = tempfile::tempdir().unwrap();
+        std::fs::write(
+            scripts.path().join("t.lua"),
+            "local st = spyc.git_status()\n\
+             spyc.notify(#st .. ':' .. st[1].path .. ':' .. tostring(st[1].untracked))",
+        )
+        .unwrap();
+
+        let outcome = run_one(LuaJob::RunFile {
+            name: "t".to_string(),
+            lua_dir: scripts.path().to_path_buf(),
+            snapshot: snapshot_at(&repo),
+        });
+        assert_eq!(notify_text(&outcome), "1:new.txt:true");
+    }
+
+    /// `spyc.git_log` returns commit tables with a `limit` opt; the newest
+    /// commit's subject comes back.
+    #[test]
+    fn spyc_git_log_returns_commits() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = std::fs::canonicalize(dir.path()).unwrap();
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-q", "-m", "first"]);
+        std::fs::write(repo.join("b.txt"), "b\n").unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-q", "-m", "second"]);
+        std::fs::write(
+            repo.join("t.lua"),
+            "local log = spyc.git_log({ limit = 1 })\n\
+             spyc.notify(#log .. ':' .. log[1].subject)",
+        )
+        .unwrap();
+
+        let outcome = run_one(LuaJob::RunFile {
+            name: "t".to_string(),
+            lua_dir: repo.clone(),
+            snapshot: snapshot_at(&repo),
+        });
+        assert_eq!(notify_text(&outcome), "1:second");
+    }
+
+    /// `spyc.worktrees` returns a table of worktree entries (the main worktree
+    /// at least), each with a `branch` field.
+    #[test]
+    fn spyc_worktrees_lists_the_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = std::fs::canonicalize(dir.path()).unwrap();
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-q", "-m", "first"]);
+        std::fs::write(
+            repo.join("t.lua"),
+            "local wts = spyc.worktrees()\n\
+             spyc.notify(#wts .. ':' .. wts[1].branch)",
+        )
+        .unwrap();
+
+        let outcome = run_one(LuaJob::RunFile {
+            name: "t".to_string(),
+            lua_dir: repo.clone(),
+            snapshot: snapshot_at(&repo),
+        });
+        assert_eq!(notify_text(&outcome), "1:main");
     }
 }

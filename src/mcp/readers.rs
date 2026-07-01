@@ -141,7 +141,7 @@ pub(super) fn read_cwd_from_context(ctx_path: &Path) -> PathBuf {
 }
 
 /// Read file content (up to 100KB, text only).
-pub(super) fn read_file_content(path: &Path) -> Result<String, String> {
+pub fn read_file_content(path: &Path) -> Result<String, String> {
     let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
     if !meta.is_file() {
         return Err(format!("{}: not a regular file", path.display()));
@@ -190,9 +190,17 @@ pub(super) fn read_context_or_empty(ctx_path: &Path) -> String {
 /// Returns `[]` outside a repo. (Column-`b` flags still need context the
 /// snapshot doesn't yet expose.)
 pub(super) fn list_worktrees_json(ctx_path: &Path) -> String {
-    let cwd = read_cwd_from_context(ctx_path);
-    let cwd_canon = std::fs::canonicalize(&cwd).ok();
-    let Some(worktrees) = crate::git::worktree::list(&cwd) else {
+    list_worktrees_json_at(&read_cwd_from_context(ctx_path))
+}
+
+/// Root-based core of [`list_worktrees_json`]: the same worktree inventory, but
+/// keyed off an explicit `cwd` (the focused column's worktree root) instead of
+/// re-reading it from a context file. The Lua worker holds the snapshot struct,
+/// not a ctx file, so it calls this directly; the MCP handler resolves `cwd`
+/// from the context file and delegates here.
+pub fn list_worktrees_json_at(cwd: &Path) -> String {
+    let cwd_canon = std::fs::canonicalize(cwd).ok();
+    let Some(worktrees) = crate::git::worktree::list(cwd) else {
         return "[]".to_string();
     };
     // Resolve the integration base once, from the MAIN worktree — always first
@@ -295,7 +303,7 @@ const fn change_label(c: crate::ui::list_view::GitChange) -> &'static str {
 /// one object per changed path — `{path, staged, unstaged, untracked}` (staged
 /// / unstaged are the change kind or null). Socket-thread, pure git on the
 /// search root; `[]` when clean or outside a repo.
-pub(super) fn git_status_json(root: &Path) -> String {
+pub fn git_status_json(root: &Path) -> String {
     let Some(entries) = crate::git::status::repo_status(root) else {
         return "[]".to_string();
     };
@@ -317,7 +325,7 @@ pub(super) fn git_status_json(root: &Path) -> String {
 /// newest first — `{short_id, author, time, subject}` per entry. Socket-thread,
 /// pure git; `[]` outside a repo / unborn HEAD. `root` is the effective root
 /// (focused column, or the agent's explicit `root` override).
-pub(super) fn git_log_json(root: &Path, limit: usize) -> String {
+pub fn git_log_json(root: &Path, limit: usize) -> String {
     let arr: Vec<Value> = crate::git::log::recent(root, limit)
         .iter()
         .map(|c| {

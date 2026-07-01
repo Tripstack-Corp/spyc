@@ -7,13 +7,23 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use mlua::{Function, Lua, RegistryKey, Table, Variadic};
+use mlua::{Function, Lua, RegistryKey, Table, Value, Variadic};
+use serde_json::Value as JsonValue;
 
 use super::bridge::{
     LuaRequest, MAX_REGISTRATIONS, MAX_REQUESTS, RegKind, Registration, SharedBridge,
 };
+
+/// Cap on results a single live read returns to Lua, mirroring the MCP read
+/// tools' defaults (`search_paths` 100, `search_content` 200, `git_log` 20).
+/// A script that wants more can loop; these keep a pathological `spyc.read` of
+/// a monorepo from flooding the interpreter.
+const SEARCH_PATHS_LIMIT: usize = 100;
+const SEARCH_CONTENT_LIMIT: usize = 200;
+const GIT_LOG_LIMIT: usize = 20;
 
 /// Worker-thread-local store of the Lua callbacks `init.lua` registers via
 /// `spyc.map` / `spyc.command` / `spyc.on`. Unlike the per-run
@@ -123,6 +133,89 @@ pub fn install(lua: &Lua, bridge: &SharedBridge, fnreg: &SharedFnRegistry) -> ml
         })?,
     )?;
 
+    // ---- live reads (computed on the worker, returned synchronously) ----
+    // These call the same root-scoped, thread-safe readers the off-loop MCP
+    // tools use (`src/mcp/readers.rs`, `crate::fs::{finder,grep}`), reading
+    // fs/gix directly from the snapshot's read root — no round-trip to the main
+    // loop. A read runs as a native call, so the instruction-count hook can't
+    // interrupt it mid-read; a pathological search blocks the WORKER (never the
+    // UI) until it returns, and the hard ceiling still bounds the whole run once
+    // control returns to Lua. All reads RAISE an `mlua::Error` on genuine
+    // failure (bad path, not-a-repo file read, invalid regex); "nothing here"
+    // (clean tree, empty repo, no matches) is an empty table.
+    let b = Rc::clone(bridge);
+    spyc.set(
+        "worktrees",
+        lua.create_function(move |lua, ()| {
+            let root = read_root(&b)?;
+            json_str_to_lua(lua, &crate::mcp::readers::list_worktrees_json_at(&root))
+        })?,
+    )?;
+
+    let b = Rc::clone(bridge);
+    spyc.set(
+        "git_status",
+        lua.create_function(move |lua, ()| {
+            let root = read_root(&b)?;
+            json_str_to_lua(lua, &crate::mcp::readers::git_status_json(&root))
+        })?,
+    )?;
+
+    let b = Rc::clone(bridge);
+    spyc.set(
+        "git_log",
+        lua.create_function(move |lua, opts: Option<Table>| {
+            let limit = opts
+                .as_ref()
+                .and_then(|t| t.get::<Option<usize>>("limit").ok().flatten())
+                .unwrap_or(GIT_LOG_LIMIT);
+            let root = read_root(&b)?;
+            json_str_to_lua(lua, &crate::mcp::readers::git_log_json(&root, limit))
+        })?,
+    )?;
+
+    let b = Rc::clone(bridge);
+    spyc.set(
+        "read",
+        lua.create_function(move |_, path: String| {
+            let resolved = resolve_read_path(&b, &path)?;
+            crate::mcp::readers::read_file_content(&resolved).map_err(mlua::Error::runtime)
+        })?,
+    )?;
+
+    let b = Rc::clone(bridge);
+    spyc.set(
+        "search_paths",
+        lua.create_function(move |lua, query: String| {
+            let root = read_root(&b)?;
+            let paths = crate::fs::finder::find_paths(&root, &query, SEARCH_PATHS_LIMIT);
+            let t = lua.create_table()?;
+            for (i, p) in paths.iter().enumerate() {
+                t.set(i + 1, p.to_string_lossy().into_owned())?;
+            }
+            Ok(t)
+        })?,
+    )?;
+
+    let b = Rc::clone(bridge);
+    spyc.set(
+        "search_content",
+        lua.create_function(move |lua, regex: String| {
+            let root = read_root(&b)?;
+            let hits = crate::fs::grep::search_to_vec(&root, &regex, SEARCH_CONTENT_LIMIT)
+                .map_err(mlua::Error::runtime)?;
+            let t = lua.create_table()?;
+            for (i, m) in hits.iter().enumerate() {
+                let row = lua.create_table()?;
+                row.set("file", m.path.to_string_lossy().into_owned())?;
+                row.set("line", m.line)?;
+                row.set("text", m.text.clone())?;
+                t.set(i + 1, row)?;
+            }
+            Ok(t)
+        })?,
+    )?;
+
     // ---- mutations / actions (enqueue a request) ----
     let b = Rc::clone(bridge);
     spyc.set(
@@ -216,6 +309,79 @@ pub fn install(lua: &Lua, bridge: &SharedBridge, fnreg: &SharedFnRegistry) -> ml
 
     lua.globals().set("spyc", spyc)?;
     Ok(())
+}
+
+/// The root a live read scopes to: the snapshot's `search_root` (the focused
+/// column's worktree root) when set, else its `cwd`. Errors (aborting the read)
+/// if no snapshot is installed — which never happens for a real run.
+fn read_root(bridge: &SharedBridge) -> mlua::Result<PathBuf> {
+    let b = bridge.borrow();
+    let s = b
+        .snapshot
+        .as_ref()
+        .ok_or_else(|| mlua::Error::runtime("spyc: no context available"))?;
+    Ok(s.search_root.clone().unwrap_or_else(|| s.cwd.clone()))
+}
+
+/// Resolve a `spyc.read` path argument: an absolute path as-is, else relative
+/// to the snapshot's `cwd` (matching the MCP `get_file_content` contract that
+/// relative paths resolve against spyc's cwd).
+fn resolve_read_path(bridge: &SharedBridge, path: &str) -> mlua::Result<PathBuf> {
+    let raw = Path::new(path);
+    if raw.is_absolute() {
+        return Ok(raw.to_path_buf());
+    }
+    let b = bridge.borrow();
+    let s = b
+        .snapshot
+        .as_ref()
+        .ok_or_else(|| mlua::Error::runtime("spyc: no context available"))?;
+    Ok(s.cwd.join(raw))
+}
+
+/// Parse a reader's JSON string and convert it to a Lua value. The readers
+/// (`git_status_json`, `git_log_json`, `list_worktrees_json_at`) already emit
+/// JSON, so each read fn is just `reader(root) -> String -> here`. A parse
+/// failure raises (it means a reader returned malformed JSON — a bug, not a
+/// user error).
+fn json_str_to_lua(lua: &Lua, json: &str) -> mlua::Result<Value> {
+    let v: JsonValue = serde_json::from_str(json)
+        .map_err(|e| mlua::Error::runtime(format!("spyc: reader returned bad JSON: {e}")))?;
+    json_to_lua(lua, &v)
+}
+
+/// Convert a `serde_json::Value` to an `mlua::Value`: object → table keyed by
+/// string, array → 1-based sequence table, string/number/bool → the Lua scalar,
+/// null → `nil`. The single marshaling point for every JSON-producing reader.
+fn json_to_lua(lua: &Lua, v: &JsonValue) -> mlua::Result<Value> {
+    Ok(match v {
+        JsonValue::Null => Value::Nil,
+        JsonValue::Bool(b) => Value::Boolean(*b),
+        JsonValue::Number(n) => {
+            // Prefer an exact integer; fall back to float for fractional /
+            // out-of-range values. `as_f64` never fails for a JSON number.
+            if let Some(i) = n.as_i64() {
+                Value::Integer(i)
+            } else {
+                Value::Number(n.as_f64().unwrap_or(0.0))
+            }
+        }
+        JsonValue::String(s) => Value::String(lua.create_string(s)?),
+        JsonValue::Array(arr) => {
+            let t = lua.create_table()?;
+            for (i, item) in arr.iter().enumerate() {
+                t.set(i + 1, json_to_lua(lua, item)?)?;
+            }
+            Value::Table(t)
+        }
+        JsonValue::Object(map) => {
+            let t = lua.create_table()?;
+            for (k, item) in map {
+                t.set(k.as_str(), json_to_lua(lua, item)?)?;
+            }
+            Value::Table(t)
+        }
+    })
 }
 
 /// Build the `spyc.context()` table from the current snapshot (empty table when
