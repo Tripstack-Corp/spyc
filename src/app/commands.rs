@@ -65,6 +65,20 @@ impl App {
     pub fn dispatch_command(&mut self, input: &str) -> Vec<Effect> {
         use super::state::Update;
 
+        // A `spyc.command`-registered `:`-command (from init.lua) isn't in the
+        // static COMMAND_TABLE, and the pure `AppState::dispatch_command` can't
+        // see the runtime Lua registry — for an unregistered name it flashes
+        // "unknown command" and returns `Handled`, short-circuiting this method
+        // before any App-layer arm runs. So resolve a Lua command FIRST, but
+        // only when the name isn't a built-in table command (built-ins keep
+        // precedence — a Lua command can't shadow one).
+        let (lua_name, _) = command_table::split_name_args(input.trim());
+        if command_table::lookup(lua_name).is_none()
+            && let Some(effects) = self.dispatch_lua_command(lua_name)
+        {
+            return effects;
+        }
+
         // Try the pure-domain handler first, normalized to the unified
         // `Update` (MVU Stage 3C). `Handled`/`Post` collapse into
         // `Handled(effects)` (the run loop executes whatever's there).
@@ -137,14 +151,10 @@ impl App {
             command_table::lookup(name).map(|spec| &spec.handler)
         {
             handler(self, args)
-        } else if let Some(effects) = self.dispatch_lua_command(name) {
-            // A `spyc.command(name, fn)` registration from init.lua — not in the
-            // static COMMAND_TABLE (which stays guard-tested + untouched), so it
-            // falls through to here. Args are ignored (the callback reads
-            // `spyc.context()`); the run lands via `handle_lua_done`.
-            effects
         } else {
-            // Pure names were resolved above; anything unregistered is unknown.
+            // Pure names were resolved above; Lua `:`-commands were resolved at
+            // the top of this method (before the pure short-circuit); anything
+            // unregistered is genuinely unknown.
             self.state.flash_error(format!("unknown command: {input}"));
             Vec::new()
         }

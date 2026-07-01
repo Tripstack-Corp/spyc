@@ -602,6 +602,40 @@ mod tests {
         assert!(!lua_runaway_due(false, Duration::ZERO, soft));
     }
 
+    /// Regression: a `spyc.command`-registered `:`-command (from init.lua) must
+    /// route through the App-layer Lua dispatch, NOT be swallowed by the pure
+    /// `AppState::dispatch_command`'s "unknown command" arm. The pure half can't
+    /// see the runtime Lua registry, so it flashed "unknown command" + returned
+    /// `Handled`, short-circuiting the App layer — so init.lua `:`-commands
+    /// reported "unknown command". `App::dispatch_command` now resolves a Lua
+    /// command name (that isn't a built-in) before the pure short-circuit.
+    #[test]
+    fn lua_registered_command_is_not_reported_unknown() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            // Register a `:blame` command as init.lua's `spyc.command` would.
+            app.runtime
+                .lua_registry
+                .commands
+                .insert("blame".to_string(), 0);
+            app.state.flash = None;
+            let _ = app.dispatch_command("blame");
+            // The test harness has no worker (no `pane_wake_tx`), so the Lua
+            // path flashes "lua is disabled" — the point is it ROUTED to Lua,
+            // not "unknown command".
+            let unknown = app
+                .state
+                .flash
+                .as_ref()
+                .is_some_and(|f| f.text.contains("unknown command"));
+            assert!(
+                !unknown,
+                "a registered Lua `:`-command must route to Lua, not flash 'unknown command'"
+            );
+        });
+    }
+
     /// An un-prompted in-flight job whose window has elapsed raises the modal,
     /// marks the window prompted, and disarms the deadline.
     #[test]
