@@ -335,39 +335,42 @@ impl App {
         }
     }
 
-    /// Run a built-in action named by its `.spycrc` DSL verb (the single source
-    /// of truth, reused from `config::dsl`), `count` times (clamped). Only
-    /// `Plain` actions are reachable; verbs needing inline args
-    /// (`unix`/`jump`/`command`) are rejected — `spyc.cmd(":…")` is the escape
-    /// hatch for those.
+    /// Run a built-in action named by its canonical snake_case name, `count`
+    /// times (clamped). Resolution order:
+    ///
+    /// 1. [`crate::keymap::action::action_from_name`] — the **full** `Action`
+    ///    vocabulary (`git_blame`, `worktree_list`, `goto_first`, …), so the
+    ///    entire keymap is scriptable, not just the curated DSL verbs.
+    /// 2. Fallback to [`crate::config::dsl::parse_action`] for the DSL-only
+    ///    aliases whose spelling differs from the canonical name (`enter`/`edit`
+    ///    → `enter_or_edit`, `nextfile` → `down`, `keys` → `help`, …). Only
+    ///    `Plain` actions are honored here; DSL verbs needing inline args
+    ///    (`unix`/`jump`/`command`/`lua`) are rejected — `spyc.cmd(":…")` is the
+    ///    escape hatch for those.
     fn run_lua_action(&mut self, name: &str, count: Option<u32>) -> Vec<Effect> {
-        match crate::config::dsl::parse_action(name, "") {
-            Ok(BoundAction::Plain(action)) => {
-                let repeats = count.unwrap_or(1).clamp(1, MAX_ACTION_REPEAT);
-                let mut fx = Vec::new();
-                for _ in 0..repeats {
-                    match self.apply(&action) {
-                        Ok(e) => fx.extend(e),
-                        Err(e) => {
-                            self.state.flash_error(format!("lua: action '{name}': {e}"));
-                            break;
-                        }
-                    }
+        let action = crate::keymap::action::action_from_name(name).or_else(|| {
+            match crate::config::dsl::parse_action(name, "") {
+                Ok(BoundAction::Plain(action)) => Some(action),
+                _ => None,
+            }
+        });
+        let Some(action) = action else {
+            self.state
+                .flash_error(format!("lua: unknown action '{name}'"));
+            return Vec::new();
+        };
+        let repeats = count.unwrap_or(1).clamp(1, MAX_ACTION_REPEAT);
+        let mut fx = Vec::new();
+        for _ in 0..repeats {
+            match self.apply(&action) {
+                Ok(e) => fx.extend(e),
+                Err(e) => {
+                    self.state.flash_error(format!("lua: action '{name}': {e}"));
+                    break;
                 }
-                fx
-            }
-            Ok(_) => {
-                self.state.flash_error(format!(
-                    "lua: action '{name}' needs arguments not available via spyc.action — use spyc.cmd"
-                ));
-                Vec::new()
-            }
-            Err(e) => {
-                self.state
-                    .flash_error(format!("lua: unknown action '{name}': {e}"));
-                Vec::new()
             }
         }
+        fx
     }
 
     /// Run an MCP-vocabulary mutation, surfacing an error response as a flash.

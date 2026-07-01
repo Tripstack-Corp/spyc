@@ -102,7 +102,7 @@ A single `spyc` global table.
 
 **Mutations / actions (round-trip; reuse `McpCommand`/`execute_mcp_command` where overlapping):**
 - `spyc.navigate(path)`, `spyc.pick(globs)`, `spyc.clear_picks()`, `spyc.filter(glob)`, `spyc.report_status(s)` → existing `McpCommand` variants.
-- `spyc.action(name, count?)` → run **any existing `Action` by name** (huge reuse — reflect the DSL's action-name table from `src/config/dsl.rs::parse_action`). New `LuaRequest::RunAction`.
+- `spyc.action(name, count?)` → run **any existing `Action` by its canonical snake_case name** (the full vocabulary, via `keymap::action::{canonical_name,action_from_name}` — an exhaustive name↔`Action` layer whose completeness a `strum::EnumIter` round-trip guard test enforces; `run_lua_action` falls back to the `.spycrc` DSL verb table in `src/config/dsl.rs::parse_action` only for aliases like `enter`/`nextfile`). `set_mark`/`jump_mark` are excluded (no default mark letter). New `LuaRequest::RunAction`.
 - `spyc.cmd(line)` → run a `:` command line (e.g. `:grep foo`) — reuses the `:`-dispatch. New `LuaRequest::RunColon`.
 - `spyc.notify(msg)` / `spyc.warn(msg)` → flash line.
 

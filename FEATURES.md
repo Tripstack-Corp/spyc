@@ -826,8 +826,12 @@ unambiguous:
   Lua 5.4). A `map KEY lua <name>` binding runs
   `~/.config/spyc/lua/<name>.lua`, which calls a `spyc.*` API: read context
   (`spyc.context()` / `cwd` / `cursor`), drive the view (`navigate` / `pick`
-  / `filter` / `report_status`), invoke any built-in action by name
-  (`spyc.action("git_blame")`) or a `:` command (`spyc.cmd(":grep foo")`),
+  / `filter` / `report_status`), invoke any built-in action by its
+  canonical snake_case name — the full keymap vocabulary, not just the
+  curated DSL verbs (`spyc.action("git_blame")`, `spyc.action("down", 3)`;
+  `set_mark` / `jump_mark` are excluded, since they need a mark letter with
+  no sensible default — use `spyc.cmd(":…")` there) — or a `:` command
+  (`spyc.cmd(":grep foo")`),
   and `notify` / `warn`. An optional `~/.config/spyc/init.lua` is a config
   platform: `spyc.map("z", fn)` binds a key to a Lua callback and
   `spyc.command("blame", fn)` registers a runtime `:` command — both fire
