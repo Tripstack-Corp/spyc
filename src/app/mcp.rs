@@ -72,6 +72,17 @@ impl App {
             // just registers a stdio entry that re-execs `spyc --mcp` to proxy.
             // Enterprise-flavored statuses are claude-specific; codex shouldn't
             // return them, but if it ever does we treat them as a no-op.
+            // `[pane] codex_mcp = false`: skip registering our MCP server for
+            // codex and strip any entry we wrote before, so codex has no spyc
+            // tool to call — the escape hatch for codex's /review elicitation
+            // hang (openai/codex#25856). Status hooks are written separately
+            // (maybe_preinstall_startup_hooks), so activity dots keep working.
+            crate::state::sessions::AgentKind::Codex if !self.state.config.pane.codex_mcp => {
+                let _ = crate::mcp::cleanup_codex_config(cwd);
+                self.state
+                    .flash_info("codex MCP off ([pane] codex_mcp=false) — /review workaround");
+                false
+            }
             crate::state::sessions::AgentKind::Codex => {
                 match crate::mcp::ensure_codex_config_toml(cwd, takeover) {
                     Ok(crate::mcp::McpConfigStatus::TookOver { old_pid }) => {

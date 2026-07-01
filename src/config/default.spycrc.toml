@@ -50,6 +50,13 @@
 # new_tab_cwd = "project_home"
 # claude_transcript_scrollback = false
 # agy_transcript_scrollback = true
+# codex_mcp = true
+#   Set false to stop registering spyc's MCP server for codex panes (the
+#   [mcp_servers.spyc] entry in .codex/config.toml). Workaround for codex's
+#   /review hang (openai/codex#25856): codex mis-resolves the MCP tool-call
+#   approval elicitation and spins forever. Status hooks still install, so
+#   activity dots keep working — codex just loses spyc's MCP tools. Claude
+#   is unaffected.
 
 # ── yank ──────────────────────────────────────────────────────────────
 # Pager yank (`y` / `Y` / visual-mode `y`) behavior.

@@ -905,6 +905,13 @@ Both registrations re-exec `spyc --mcp` as a stdio proxy that
 forwards to the same socket, so a single server backs both agents.
 Both files carry `SPYC_MCP_SOCK` in the env block.
 
+**`[pane] codex_mcp = false`** (`.spycrc.toml`) stops spyc from registering
+its MCP server for codex — an escape hatch for a codex `/review` bug
+([openai/codex#25856](https://github.com/openai/codex/issues/25856)) where
+codex mis-resolves the MCP tool-call approval elicitation and hangs on the
+first spyc tool call. Status hooks still install (activity dots keep working);
+codex just loses spyc's MCP tools. Claude is unaffected. Default on.
+
 Multiple spyc instances coexist safely; when a new instance opens
 in a directory already owned by a live spyc, it prompts on stderr
 before taking over (`PID N already owns MCP here. Take over?

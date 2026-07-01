@@ -148,6 +148,13 @@ pub struct PaneConfig {
     pub claude_transcript_scrollback: bool,
     /// See `default.spycrc.toml` `[pane]` block for doc.
     pub agy_transcript_scrollback: bool,
+    /// When false, spyc does NOT register its MCP server for codex panes (the
+    /// `[mcp_servers.spyc]` entry in `.codex/config.toml`). Escape hatch for
+    /// codex's `/review` hang (openai/codex#25856): codex mis-resolves the MCP
+    /// tool-call approval elicitation and spins forever on the first spyc tool
+    /// call. Status hooks still install (activity dots keep working); codex just
+    /// loses spyc's MCP tools. Default true (integration on). Claude unaffected.
+    pub codex_mcp: bool,
 }
 
 impl Default for PaneConfig {
@@ -157,6 +164,7 @@ impl Default for PaneConfig {
             new_tab_cwd: NewTabCwd::default(),
             claude_transcript_scrollback: false,
             agy_transcript_scrollback: true,
+            codex_mcp: true,
         }
     }
 }
@@ -189,6 +197,8 @@ struct FilePane {
     claude_transcript_scrollback: Option<bool>,
     #[serde(default)]
     agy_transcript_scrollback: Option<bool>,
+    #[serde(default)]
+    codex_mcp: Option<bool>,
 }
 
 /// Yank / clipboard knobs.
@@ -477,6 +487,9 @@ impl Config {
         if let Some(b) = file.pane.agy_transcript_scrollback {
             self.pane.agy_transcript_scrollback = b;
         }
+        if let Some(b) = file.pane.codex_mcp {
+            self.pane.codex_mcp = b;
+        }
 
         // Yank: per-field merge.
         if let Some(b) = file.yank.include_pager_title {
@@ -702,6 +715,21 @@ mod tests {
         std::fs::write(&path, "[pane]\nclaude_transcript_scrollback = true\n").unwrap();
         let cfg = Config::load_from(&[Some(&path)]).unwrap();
         assert!(cfg.pane.claude_transcript_scrollback);
+    }
+
+    #[test]
+    fn codex_mcp_defaults_true() {
+        // Integration on by default — the /review workaround is opt-in.
+        assert!(Config::default().pane.codex_mcp);
+    }
+
+    #[test]
+    fn parses_codex_mcp_false() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[pane]\ncodex_mcp = false\n").unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert!(!cfg.pane.codex_mcp);
     }
 
     #[test]
