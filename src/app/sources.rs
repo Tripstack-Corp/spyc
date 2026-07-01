@@ -198,7 +198,14 @@ pub fn coalesce_recv(
             // `effective`, panicking on the unreachable. Collapse them like
             // every other payloadless done-wake.
             | Message::FileOpDone
-            | Message::InventoryDone,
+            | Message::InventoryDone
+            // Lua-worker done-wake (engine / init.lua / registered-fn run
+            // finished) — payloadless, drained by `handle_lua_done` in the
+            // pre-recv scan. Same trap as FileOpDone/InventoryDone above: wired
+            // into `coalesce_pending` + the `dispatch_effective` unreachable arm
+            // but MISSED here, so the first `LuaDone` of a wakeup fell through
+            // to `other` and panicked on the unreachable. Collapse it too.
+            | Message::LuaDone,
         ) => coalesce_tail(rx, ctx),
         other => other,
     }
@@ -577,24 +584,38 @@ mod tests {
         assert_eq!(mcp_pending.len(), 1, "MCP request buffered, not dropped");
     }
 
-    /// Regression: the off-thread file-op / inventory done-wakes (cluster 1,
-    /// #514) were wired into `coalesce_pending` and the `dispatch_effective`
-    /// unreachable arm but MISSED in `coalesce_recv`'s collapse list — so one
-    /// arriving as the FIRST message of a wakeup (a copy/move worker finishing,
-    /// its wake next off the channel) fell through to `other`, surfaced as
-    /// `effective`, and panicked on the unreachable. Each must collapse to a
-    /// synthesized Timeout (the outcome rides `runtime.file_results` /
-    /// `inventory_results`, drained by the pre-recv scan), leaving nothing
-    /// queued.
+    /// Regression + guard: EVERY payloadless done-wake must collapse to a
+    /// synthesized Timeout in `coalesce_recv` (its outcome rides a `runtime.*`
+    /// slot / the worker buffer, drained by the pre-recv scan). A variant wired
+    /// into `coalesce_pending` + the `dispatch_effective` unreachable arm but
+    /// MISSED in `coalesce_recv`'s collapse list falls through `other => other`,
+    /// surfaces as `effective`, and panics on the unreachable — this bit
+    /// FileOpDone/InventoryDone (#514) and again LuaDone (the Lua-worker wake).
+    /// **Add every new payloadless done-wake to this list** so the trap can't
+    /// recur silently.
     #[test]
-    fn coalesce_recv_collapses_file_op_and_inventory_done() {
-        for done in [Message::FileOpDone, Message::InventoryDone] {
+    fn coalesce_recv_collapses_all_payloadless_done_wakes() {
+        let wakes = [
+            Message::PagerStreamOutput,
+            Message::FindOutput,
+            Message::ReaderExited,
+            Message::AgentStatusReady,
+            Message::GraveyardDone,
+            Message::MermaidDone,
+            Message::PreviewReloadDone,
+            Message::WorktreeJobDone,
+            Message::CodexSessionReady,
+            Message::FileOpDone,
+            Message::InventoryDone,
+            Message::LuaDone,
+        ];
+        for done in wakes {
             let (_tx, rx) = mpsc::channel::<Message>();
             let mut ctx = RunCtx::for_test();
             let out = coalesce_recv(Ok(done), &rx, &mut ctx);
             assert!(
                 matches!(out, Err(mpsc::RecvTimeoutError::Timeout)),
-                "FileOpDone/InventoryDone must collapse to Timeout, not surface as `effective`"
+                "a payloadless done-wake must collapse to Timeout, not surface as `effective`"
             );
         }
     }
