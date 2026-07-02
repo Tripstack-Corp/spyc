@@ -131,7 +131,7 @@ project status, update **all** of:
 - `ROADMAP.md` — move items to Done, add new plans
 - `AGENTS.md` — architecture and conventions
 - `src/ui/help.rs` — the `?` help overlay
-- `docs/presentation.html` — stats and feature lists (if significant)
+- `docs/assets/presentation.html` — stats and feature lists (if significant)
 
 This is a hard requirement, not a nice-to-have. Stale docs are bugs.
 

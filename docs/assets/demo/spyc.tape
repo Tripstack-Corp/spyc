@@ -7,8 +7,8 @@
 #
 #   Generate (from the repo root):
 #       brew install vhs
-#       chmod +x docs/demo/fake-claude.sh
-#       vhs docs/demo/spyc.tape          # writes docs/demo.gif
+#       chmod +x docs/assets/demo/fake-claude.sh
+#       vhs docs/assets/demo/spyc.tape          # writes docs/assets/demo.gif
 #
 #   Hard-won keybinding / behavior notes (verified live, NOT from the README):
 #     • `d` is a chord-arming key (dd = delete). Descend is Enter-only.
@@ -25,7 +25,7 @@
 #   Tuning: Sleep values are reading-beats — bump them if a step feels rushed.
 # ─────────────────────────────────────────────────────────────────────────────
 
-Output docs/demo.gif
+Output docs/assets/demo.gif
 
 # ── Look & feel ──────────────────────────────────────────────────────────────
 Set Shell        "bash"
@@ -45,7 +45,7 @@ Set TypingSpeed  55ms
 
 # ── Setup (hidden): launch spyc with the scripted agent, wait for first paint ──
 Hide
-Type `export SPYC_PANE_CMD="$(pwd)/docs/demo/fake-claude.sh"`
+Type `export SPYC_PANE_CMD="$(pwd)/docs/assets/demo/fake-claude.sh"`
 Enter
 Type "spyc"
 Enter

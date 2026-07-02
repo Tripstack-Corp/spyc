@@ -18,7 +18,7 @@ fn plain_text(line: &Line<'_>) -> String {
 /// Regression test for the wrap-vs-bottom bug: a file with
 /// long lines that wrap to multiple visual rows would lose the
 /// trailing logical lines when scrolled to "Bot". Reported on
-/// `docs/spyc-logo.svg` (154 logical lines, several wrap to 2
+/// `docs/assets/spyc-logo.svg` (154 logical lines, several wrap to 2
 /// rows each, viewport ~40 rows). The user saw "Bot" but lines
 /// 151-154 never appeared.
 ///

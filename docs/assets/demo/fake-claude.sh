@@ -2,12 +2,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Scripted stand-in for `claude` used ONLY to record the VHS demo GIF.
 #
-#   SPYC_PANE_CMD="$(pwd)/docs/demo/fake-claude.sh" spyc
+#   SPYC_PANE_CMD="$(pwd)/docs/assets/demo/fake-claude.sh" spyc
 #
 # Why a stand-in: a real agent's timing and wording vary run-to-run, which makes
 # the .tape non-reproducible. This depicts a real, supported interaction — the
 # agent reads the user's picks over the spyc MCP socket and answers with a path
-# — but with fixed timing so `vhs docs/demo/spyc.tape` is deterministic.
+# — but with fixed timing so `vhs docs/assets/demo/spyc.tape` is deterministic.
 #
 # Kept deliberately SHORT so the whole exchange fits the split pane and the
 # closing path (the `gf` target) stays on screen. Every path is real.

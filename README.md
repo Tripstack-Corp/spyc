@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/spyc-logo.png" alt="spyc logo" width="128">
+  <img src="docs/assets/spyc-logo.png" alt="spyc logo" width="128">
 </p>
 
 <h1 align="center">spyc</h1>
@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/demo.gif" alt="spyc demo: navigate, ask the agent, gf jump" width="720">
+  <img src="docs/assets/demo.gif" alt="spyc demo: navigate, ask the agent, gf jump" width="720">
 </p>
 
 ---
