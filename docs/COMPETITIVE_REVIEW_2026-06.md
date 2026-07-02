@@ -191,7 +191,7 @@ server and already lazily writes per-agent config (`ensure_agent_mcp_config`).
 Building agent-status on the **MCP/hook channel** — a cooperative agent
 *self-reporting* working/blocked, plus a tunable scrape *fallback* — dodges the
 entire #671/#803 fragility class. That is how spyc wins a feature herdr struggles
-to keep working. The implementation plan is **`docs/AGENT_AWARENESS_PLAN.md`**.
+to keep working. The implementation plan is **`docs/archive/AGENT_AWARENESS_PLAN.md`**.
 
 ---
 
@@ -375,7 +375,7 @@ nix/Happy wrappers; was a no-op on Linux until v0.7.0). The differentiator is no
 longer "spyc has agent-status" — it's **"spyc does it reliably."** spyc's win:
 build it on the **MCP/hook channel** (cooperative agents *self-report* via the
 MCP config spyc already writes) with a tunable scrape *fallback* — dodging
-herdr's entire fragility class. This is the spine of `docs/AGENT_AWARENESS_PLAN.md`.
+herdr's entire fragility class. This is the spine of `docs/archive/AGENT_AWARENESS_PLAN.md`.
 
 ### 3. The review loop — diff & merge across worktrees *(demand: high · effort: low, already built · asset: in-house gix diff/show/blame)*
 
@@ -628,7 +628,7 @@ the reliable (MCP/hook) way**, not herdr's fragile scrape.
    **MCP/hook self-report channel** (cooperative agents report via the config
    spyc already writes) with a tunable scrape *fallback* — dodging herdr's 46+
    detection bugs. Stable pane indices for vi muscle memory. Plan:
-   **`docs/AGENT_AWARENESS_PLAN.md`**.
+   **`docs/archive/AGENT_AWARENESS_PLAN.md`**.
 3. **Ship the worktree-bootstrap story** *(highest unmet demand; design spike
    first).* Make "new worktree carries your untracked files / runs your setup
    hook" first-class. Nobody owns it; spyc's graveyard machinery is the start.

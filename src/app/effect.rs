@@ -132,7 +132,7 @@ pub enum Effect {
 
     /// A-class. Fire a desktop notification and/or ring the terminal bell that an
     /// agent pane changed to `Blocked` ("needs me") or `Done` — the P3-1 ping
-    /// (`docs/AGENT_AWARENESS_PLAN.md`). Emitted by `settle_agent_activity` on the
+    /// (`docs/archive/AGENT_AWARENESS_PLAN.md`). Emitted by `settle_agent_activity` on the
     /// status transition, gated by `[notify]` + focused-tab suppression (the pure
     /// decision, incl. the SSH-aware `system`-vs-`osc9` routing, lives in
     /// `agent_status.rs`, so this carries only the resolved channels).

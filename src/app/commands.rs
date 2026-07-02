@@ -183,7 +183,7 @@ pub(super) fn cmd_date(app: &mut App, _args: &str) -> Vec<Effect> {
 }
 
 /// `:why-status` — explain the active tab's agent-activity classification
-/// (debug aid, `docs/AGENT_AWARENESS_PLAN.md`): the current state, its **source**
+/// (debug aid, `docs/archive/AGENT_AWARENESS_PLAN.md`): the current state, its **source**
 /// (a semantic `report_status` self-report vs the output-timing fallback), and
 /// how long since its last pane output. App-layer (reads the live pane tabs +
 /// clock).
@@ -231,7 +231,7 @@ pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
 /// `:notify test` — fire every notification channel on demand (bell, the
 /// spice-heat visual border pulse, and BOTH desktop mechanisms: the OS notifier
 /// plus an OSC-9 escape), bypassing `[notify]` gating so you can verify each
-/// without waiting for a real agent transition (`docs/AGENT_AWARENESS_PLAN.md`).
+/// without waiting for a real agent transition (`docs/archive/AGENT_AWARENESS_PLAN.md`).
 /// Any other argument prints usage. App-layer (reads the clock to start the pulse).
 pub(super) fn cmd_notify(app: &mut App, args: &str) -> Vec<Effect> {
     if args.trim() != "test" {

@@ -643,7 +643,7 @@ pub struct AppState {
     /// view; the rebuild_rows path keys off `view` so we don't pay
     /// the disk read except when the user is looking at it.
     pub graveyard: Vec<crate::state::graveyard::Entry>,
-    /// P2 merge/scope coordination registry (`docs/AGENT_AWARENESS_PLAN.md`):
+    /// P2 merge/scope coordination registry (`docs/archive/AGENT_AWARENESS_PLAN.md`):
     /// what each agent tab has declared it's touching, via the `register_scope`
     /// MCP tool. In-memory + session-persisted (rides P3-2's autosave and
     /// `spyc -r`), never file-backed — every agent pane in one spyc shares this

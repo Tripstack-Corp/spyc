@@ -318,7 +318,7 @@ pub enum DesktopVia {
 }
 
 /// `[notify]` — desktop notification + bell behavior when an agent pane's
-/// status changes (P3-1, `docs/AGENT_AWARENESS_PLAN.md`). Channels are
+/// status changes (P3-1, `docs/archive/AGENT_AWARENESS_PLAN.md`). Channels are
 /// independent; the desktop ping and the visual flash are on by default.
 ///
 /// Each channel decides *which* transitions it fires on. `Blocked` ("needs me")

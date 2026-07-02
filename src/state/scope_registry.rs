@@ -1,4 +1,4 @@
-//! P2 merge/scope coordination (`docs/AGENT_AWARENESS_PLAN.md`): the in-memory,
+//! P2 merge/scope coordination (`docs/archive/AGENT_AWARENESS_PLAN.md`): the in-memory,
 //! session-persisted registry an agent uses to declare what it's touching before
 //! a merge, so a concurrent agent can see the overlap and `wait_for_scope_clear`
 //! instead of colliding. Lives flat on `AppState` (`Vec<ScopeClaim>`, the same

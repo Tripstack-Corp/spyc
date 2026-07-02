@@ -24,7 +24,7 @@ use crate::pane::{AgentActivity, ReportedStatus};
 /// enough to bridge the sub-second gaps between streamed token chunks; short
 /// enough that "the agent stopped" reads as `Idle` promptly. A silent thinking
 /// pause longer than this reads as `Idle` — true working-through-silence needs
-/// the P1 semantic hook (`docs/AGENT_AWARENESS_PLAN.md`), not output timing.
+/// the P1 semantic hook (`docs/archive/AGENT_AWARENESS_PLAN.md`), not output timing.
 const AGENT_ACTIVE_WINDOW: Duration = Duration::from_secs(2);
 
 /// P1-2 scrape-fallback hysteresis: a scrape-detected state must match this

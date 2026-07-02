@@ -64,7 +64,7 @@ pub fn resume_still_unsubmitted(tail_lines: &[String], sid: &str) -> bool {
 /// Activity state of a tab's process, shown as a colored dot per **agent** tab
 /// in the divider (`App::settle_agent_activity`).
 ///
-/// Two sources feed it (`docs/AGENT_AWARENESS_PLAN.md`): the coarse P0
+/// Two sources feed it (`docs/archive/AGENT_AWARENESS_PLAN.md`): the coarse P0
 /// *output-timing* signal (`Working` while output flows, else `Idle`), and the
 /// P1 *semantic self-report* over the `report_status` MCP tool, which a
 /// cooperative agent uses to assert `Working` (even through a silent thinking

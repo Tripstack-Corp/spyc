@@ -66,7 +66,7 @@ pub enum McpCommand {
         /// conversation over the spawn-proximity resolver (P1-3).
         session_id: Option<String>,
     },
-    /// P2 merge/scope coordination (`docs/AGENT_AWARENESS_PLAN.md`): declare
+    /// P2 merge/scope coordination (`docs/archive/AGENT_AWARENESS_PLAN.md`): declare
     /// the scope this agent is about to touch. Same targeting priority as
     /// `ReportStatus` (`pane_id` → `pane` → focused) — that tab's stable
     /// `claim_owner` key becomes the claim's `owner`. `intent` is

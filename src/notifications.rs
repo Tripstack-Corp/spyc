@@ -1,6 +1,6 @@
 //! Desktop notifications + terminal bell for agent status changes.
 //!
-//! The P3-1 "which agent needs me" ping (`docs/AGENT_AWARENESS_PLAN.md`): when an
+//! The P3-1 "which agent needs me" ping (`docs/archive/AGENT_AWARENESS_PLAN.md`): when an
 //! agent pane transitions to `Blocked` / `Done`, `App::settle_agent_activity`
 //! emits a `Notify` effect and `run_effects` routes it here.
 //!

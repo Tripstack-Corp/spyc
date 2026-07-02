@@ -1,4 +1,4 @@
-//! P1-2 scrape fallback (`docs/AGENT_AWARENESS_PLAN.md`): a declarative,
+//! P1-2 scrape fallback (`docs/archive/AGENT_AWARENESS_PLAN.md`): a declarative,
 //! data-driven detection ruleset for agents that don't self-report over the
 //! MCP/hook channel — the tunable fallback spyc's P1-1 self-report path was
 //! always meant to have, never the primary path (that's herdr's fragility

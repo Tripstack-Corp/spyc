@@ -170,7 +170,7 @@ positioned for the audience we care about:
    dot (working / blocked / done) sourced from an MCP/hook self-report
    channel, with desktop notifications on the blocked/done transition.
    Yazi has no agent concept at all. Shipped 2026; charter
-   `docs/AGENT_AWARENESS_PLAN.md`.
+   `docs/archive/AGENT_AWARENESS_PLAN.md`.
 
 ## Where we deliberately differ
 
