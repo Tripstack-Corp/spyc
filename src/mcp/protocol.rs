@@ -32,6 +32,13 @@ const READ_TOOL_TIMEOUT: std::time::Duration = {
     })
 };
 
+/// P2 `wait_for_scope_clear` bounds: the default wait when the caller gives no
+/// `timeout_ms`, and a hard ceiling so a wedged waiter can't pin a socket thread
+/// forever. The socket-side reply timeout is derived from these + a buffer so it
+/// always outlasts the loop's own timed-out reply.
+const DEFAULT_SCOPE_WAIT_MS: u64 = 300_000;
+const MAX_SCOPE_WAIT_MS: u64 = 600_000;
+
 /// Run `f` on a detached thread and wait at most `timeout` for its result,
 /// returning `Err` on timeout. There is no cancellation: a timed-out thread
 /// runs to completion in the background — acceptable because the work is pure
@@ -229,6 +236,20 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                         "type": "object",
                         "properties": {"id": {"type": "integer", "description": "The claim id to release."}},
                         "required": ["id"]
+                    }
+                },
+                {
+                    "name": "wait_for_scope_clear",
+                    "description": "Block until no OTHER agent's `merging` scope claim overlaps `paths` (or `timeout_ms` elapses) — the coordination verb for the merge train. Register your merge (register_scope intent='merging'), then wait_for_scope_clear on the same paths: you resume once whoever's mid-merge on overlapping files releases, so concurrent agents serialize instead of colliding + rebasing. Returns {outcome: 'cleared'|'timed_out', conflicts:[...]}. Your OWN claims never block you. Always bounded by a timeout (default 5m, hard cap 10m).",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "array", "items": {"type": "string"}, "description": "File paths/globs to wait on (usually the same set you register_scope'd)."},
+                            "timeout_ms": {"type": "integer", "description": "Max wait in ms (default 300000, capped 600000). Returns outcome='timed_out' if it elapses."},
+                            "pane_id": {"type": "string", "description": "Optional stable pane id (SPYC_PANE_ID); defaults to your focused tab."},
+                            "pane": {"type": "integer", "description": "Optional 1-based tab number; defaults to the focused tab."}
+                        },
+                        "required": ["paths"]
                     }
                 },
                 {
@@ -750,9 +771,19 @@ fn handle_tools_call(
                 Err(e) => send_tool_error(w, id, &e),
             }
         }
-        "navigate_to" | "set_filter" | "pick_files" | "clear_picks" | "create_worktree"
-        | "remove_worktree" | "clean_worktree" | "open_worktree" | "report_status"
-        | "register_scope" | "list_scopes" | "release_scope" => {
+        "navigate_to"
+        | "set_filter"
+        | "pick_files"
+        | "clear_picks"
+        | "create_worktree"
+        | "remove_worktree"
+        | "clean_worktree"
+        | "open_worktree"
+        | "report_status"
+        | "register_scope"
+        | "list_scopes"
+        | "release_scope"
+        | "wait_for_scope_clear" => {
             let Some(tx) = cmd_tx else {
                 return send_tool_error(w, id, "writable actions not available in stdio mode");
             };
@@ -875,6 +906,31 @@ fn handle_tools_call(
                     };
                     McpCommand::ReleaseScope { id: claim_id }
                 }
+                "wait_for_scope_clear" => {
+                    let paths: Vec<String> = args["paths"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if paths.is_empty() {
+                        return send_tool_error(w, id, "missing required parameter: paths");
+                    }
+                    let pane_id = args["pane_id"].as_str().map(String::from);
+                    let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
+                    let timeout_ms = args["timeout_ms"]
+                        .as_u64()
+                        .unwrap_or(DEFAULT_SCOPE_WAIT_MS)
+                        .min(MAX_SCOPE_WAIT_MS);
+                    McpCommand::WaitForScopeClear {
+                        pane_id,
+                        pane,
+                        paths,
+                        timeout_ms,
+                    }
+                }
                 _ => unreachable!(),
             };
 
@@ -898,6 +954,16 @@ fn handle_tools_call(
             let reply_timeout = match name {
                 "create_worktree" | "remove_worktree" | "clean_worktree" => {
                     std::time::Duration::from_secs(60)
+                }
+                // The loop parks this and replies (cleared/timed_out) by
+                // `timeout_ms`; wait a hair longer so the socket read always
+                // receives that reply instead of giving up first.
+                "wait_for_scope_clear" => {
+                    let ms = args["timeout_ms"]
+                        .as_u64()
+                        .unwrap_or(DEFAULT_SCOPE_WAIT_MS)
+                        .min(MAX_SCOPE_WAIT_MS);
+                    std::time::Duration::from_millis(ms) + std::time::Duration::from_secs(2)
                 }
                 _ => std::time::Duration::from_secs(5),
             };

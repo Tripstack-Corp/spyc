@@ -558,6 +558,12 @@ impl App {
                     message: format!("released {dropped} claim(s) with id {id}"),
                 }
             }
+            // `wait_for_scope_clear` is intercepted + parked in
+            // `drain_mcp_pending` (it can't reply inline), so it never reaches
+            // here — answer defensively rather than panic if that ever changes.
+            McpCommand::WaitForScopeClear { .. } => McpResponse::Error {
+                message: "wait_for_scope_clear is handled by the loop's park path".into(),
+            },
             McpCommand::Disconnected { new_pid } => {
                 self.view.mcp_running = false;
                 self.state.flash_error(format!(
@@ -598,6 +604,118 @@ impl App {
                     message: "noted".into(),
                 }
             }
+        }
+    }
+
+    /// P2 `wait_for_scope_clear`: answer immediately if the caller's queried
+    /// scope is already clear, else **park** the reply sender until
+    /// `settle_scope_waiters` fires it on a clear / timeout. Owns its reply
+    /// (park-or-answer) rather than returning an `McpResponse` inline. Resolves
+    /// the caller's owner key from the same pane targeting as `report_status`, so
+    /// the caller's *own* claims never block it.
+    pub(crate) fn handle_scope_wait(
+        &mut self,
+        pane_id: Option<String>,
+        pane: Option<usize>,
+        paths: Vec<String>,
+        timeout_ms: u64,
+        reply: std::sync::mpsc::Sender<crate::mcp_cmd::McpResponse>,
+    ) {
+        use crate::mcp_cmd::McpResponse;
+        if paths.is_empty() {
+            let _ = reply.send(McpResponse::Error {
+                message: "wait_for_scope_clear needs at least one path".into(),
+            });
+            return;
+        }
+        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+            let _ = reply.send(McpResponse::Error {
+                message: "no pane open".into(),
+            });
+            return;
+        };
+        let ids: Vec<&str> = tabs.tabs().iter().map(|t| t.info.id.as_str()).collect();
+        let owner = match resolve_report_target(pane_id.as_deref(), pane, &ids, tabs.active_index())
+        {
+            Ok(idx) => tabs.tabs()[idx].info.claim_owner.clone(),
+            Err(message) => {
+                let _ = reply.send(McpResponse::Error { message });
+                return;
+            }
+        };
+        // Fast path: already clear ⇒ answer now, don't park.
+        if crate::state::scope_registry::conflicts(&self.state.scope_registry, &owner, &paths)
+            .is_empty()
+        {
+            let _ = reply.send(McpResponse::Ok {
+                message: serde_json::json!({ "outcome": "cleared", "conflicts": [] }).to_string(),
+            });
+            return;
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        self.runtime.scope_waiters.push(super::PendingScopeWait {
+            owner,
+            paths,
+            deadline,
+            reply,
+        });
+    }
+
+    /// P2 `wait_for_scope_clear` settle (PRE-recv): resolve each parked waiter —
+    /// `cleared` once its scope has no blocking `Merging` conflict, `timed_out`
+    /// once its deadline passes — and re-arm `Deadline::ScopeWait` at the
+    /// earliest remaining deadline (disarmed when none remain, so idle stays 0
+    /// dps). Runs after `drain_mcp_pending` so a `release_scope` in the same tick
+    /// unblocks its waiters at once.
+    pub(crate) fn settle_scope_waiters(
+        &mut self,
+        now: std::time::Instant,
+        ctx: &mut super::RunCtx,
+    ) {
+        use crate::state::scope_registry::{WaitOutcome, conflicts, wait_outcome};
+        if self.runtime.scope_waiters.is_empty() {
+            ctx.scheduler.disarm(super::Deadline::ScopeWait);
+            return;
+        }
+        // Take the waiters out so we can read `scope_registry` immutably while
+        // deciding each — `retain`'s closure would otherwise alias `self`.
+        let waiters = std::mem::take(&mut self.runtime.scope_waiters);
+        let mut still_waiting = Vec::new();
+        let mut earliest: Option<std::time::Instant> = None;
+        for w in waiters {
+            let blocking = conflicts(&self.state.scope_registry, &w.owner, &w.paths);
+            match wait_outcome(!blocking.is_empty(), now >= w.deadline) {
+                Some(WaitOutcome::Cleared) => {
+                    let _ = w.reply.send(crate::mcp_cmd::McpResponse::Ok {
+                        message: serde_json::json!({ "outcome": "cleared", "conflicts": [] })
+                            .to_string(),
+                    });
+                }
+                Some(WaitOutcome::TimedOut) => {
+                    let conflicts_json: Vec<_> = blocking
+                        .iter()
+                        .map(|c| {
+                            serde_json::json!({ "owner": c.owner_label, "pr": c.pr, "paths": c.paths })
+                        })
+                        .collect();
+                    let _ = w.reply.send(crate::mcp_cmd::McpResponse::Ok {
+                        message: serde_json::json!({
+                            "outcome": "timed_out",
+                            "conflicts": conflicts_json,
+                        })
+                        .to_string(),
+                    });
+                }
+                None => {
+                    earliest = Some(earliest.map_or(w.deadline, |m| m.min(w.deadline)));
+                    still_waiting.push(w);
+                }
+            }
+        }
+        self.runtime.scope_waiters = still_waiting;
+        match earliest {
+            Some(when) => ctx.scheduler.arm(super::Deadline::ScopeWait, when),
+            None => ctx.scheduler.disarm(super::Deadline::ScopeWait),
         }
     }
 }

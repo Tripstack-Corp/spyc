@@ -1007,11 +1007,14 @@ Claude can query and control the workspace through these tools:
   `idle`. Overrides spyc's output-timing guess; targets the focused tab by
   default.
 - **`register_scope(paths, intent, [pr], [note])`** / **`list_scopes`** /
-  **`release_scope(id)`** -- merge-coordination registry (P2). Declare the
-  files/globs you're touching and whether you're `editing` or `merging`; other
-  agents `list_scopes` to see overlaps before merging so concurrent agents queue
-  instead of colliding. In-memory, session-persisted (survives `-r`), auto-
-  released when your tab closes. Advisory — spyc never blocks a merge.
+  **`release_scope(id)`** / **`wait_for_scope_clear(paths, [timeout_ms])`** --
+  merge-coordination registry (P2). Declare the files/globs you're touching and
+  whether you're `editing` or `merging`; other agents `list_scopes` to see
+  overlaps, or **`wait_for_scope_clear`** to *block* until no other `merging`
+  claim overlaps theirs (bounded by a timeout — default 5m, cap 10m), so
+  concurrent agents serialize instead of colliding. In-memory, session-persisted
+  (survives `-r`), auto-released when your tab closes. Advisory — spyc never
+  blocks a merge itself. Inspect in-TUI with `:agent list` / `:agent registry`.
 - **`navigate_to`** -- change directory or focus cursor on a file
 - **`set_filter`** -- set or clear the file listing filter (glob)
 - **`pick_files`** -- pick files matching glob patterns (additive)

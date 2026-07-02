@@ -75,6 +75,11 @@ pub enum Deadline {
     /// disarms. Never armed while the session is clean, so idle stays 0 dps.
     /// PRE-recv (`settle_autosave`).
     Autosave,
+    /// P2 `wait_for_scope_clear`: wake at the earliest parked scope-waiter's
+    /// deadline so a timeout fires with no other activity. Armed only while a
+    /// waiter is parked, disarmed when none remain — idle stays 0 dps. PRE-recv
+    /// (`settle_scope_waiters`).
+    ScopeWait,
 }
 
 /// Run()-local deadline scheduler (MVU Phase 2). **Advisory** — it only

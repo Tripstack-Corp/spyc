@@ -448,6 +448,17 @@ struct AgentStatusCache {
 const AGENT_STATUS_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// MVU Phase 5: the **Runtime** cluster — IO handles (channels, worker
+/// A parked `wait_for_scope_clear` MCP call (P2): the caller's resolved owner
+/// key + queried paths, the deadline it times out at, and the one-shot reply
+/// sender the loop fires once its scope clears / the deadline passes. Held in
+/// `Runtime` (an OS handle + a clock instant, not domain state).
+struct PendingScopeWait {
+    owner: String,
+    paths: Vec<String>,
+    deadline: std::time::Instant,
+    reply: std::sync::mpsc::Sender<crate::mcp_cmd::McpResponse>,
+}
+
 /// endpoints, pty hosts, threads) held disjointly from the domain Model
 /// (`App.state`) and the render/derived `ViewState`. Fields migrate in
 /// over Phase-5 PRs; PR 1 seeds it with the git worker-result receiver
@@ -478,6 +489,11 @@ struct Runtime {
     /// only while a change awaits its save; cleared on save / when clean. An
     /// OS-ish clock value, correctly in `Runtime` (never the pure Model).
     autosave_due: Option<std::time::Instant>,
+    /// P2 `wait_for_scope_clear`: parked MCP waiters, each holding the one-shot
+    /// reply sender the loop fires (from `settle_scope_waiters`) once its scope
+    /// clears or its deadline passes. In `Runtime` — it owns OS handles (the
+    /// reply channel) + a clock instant, never the pure Model.
+    scope_waiters: Vec<PendingScopeWait>,
     /// The embedded Lua engine worker — lazy-spawned on first use
     /// (`ensure_lua_worker`), `None` until then / when disabled (`--no-lua`,
     /// `:lua off`) / in the test harness. Owns the interpreter thread; the

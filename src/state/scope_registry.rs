@@ -27,6 +27,13 @@ impl ScopeIntent {
             _ => None,
         }
     }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Editing => "editing",
+            Self::Merging => "merging",
+        }
+    }
 }
 
 /// One agent's declared scope. `owner` is the claiming tab's stable
@@ -78,6 +85,30 @@ pub fn conflicts<'a>(
         .filter(|c| c.owner != owner && c.intent == ScopeIntent::Merging)
         .filter(|c| paths_conflict(&c.paths, paths))
         .collect()
+}
+
+/// The outcome of a `wait_for_scope_clear` check at one instant — the pure core
+/// of `settle_scope_waiters`, kept over `bool`s so it's trivially testable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WaitOutcome {
+    /// No blocking conflict remains — resume the caller.
+    Cleared,
+    /// The deadline passed while a conflict still stood.
+    TimedOut,
+}
+
+/// Resolve a parked waiter: `Cleared` once its scope has no blocking conflict,
+/// `TimedOut` if the deadline passed first, else `None` (keep waiting). A scope
+/// that clears exactly as the deadline hits reports `Cleared` — the good outcome
+/// wins the tie (conflict is checked first).
+pub const fn wait_outcome(has_conflict: bool, past_deadline: bool) -> Option<WaitOutcome> {
+    if !has_conflict {
+        Some(WaitOutcome::Cleared)
+    } else if past_deadline {
+        Some(WaitOutcome::TimedOut)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -165,5 +196,16 @@ mod tests {
     #[test]
     fn conflicts_empty_registry_is_empty() {
         assert!(conflicts(&[], "agent-a", &strs(&["x"])).is_empty());
+    }
+
+    #[test]
+    fn wait_outcome_cleared_beats_timeout_and_keeps_waiting_otherwise() {
+        // No conflict → cleared, regardless of the deadline.
+        assert_eq!(wait_outcome(false, false), Some(WaitOutcome::Cleared));
+        assert_eq!(wait_outcome(false, true), Some(WaitOutcome::Cleared));
+        // Conflict persists past the deadline → timed out.
+        assert_eq!(wait_outcome(true, true), Some(WaitOutcome::TimedOut));
+        // Conflict, still within the window → keep waiting.
+        assert_eq!(wait_outcome(true, false), None);
     }
 }

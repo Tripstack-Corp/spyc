@@ -526,3 +526,102 @@ fn closing_a_tab_auto_releases_its_scope_claims() {
         );
     });
 }
+
+// A conflicting `Merging` claim owned by someone else, for the wait tests.
+#[cfg(test)]
+fn other_merge_claim(paths: &[&str]) -> crate::state::scope_registry::ScopeClaim {
+    crate::state::scope_registry::ScopeClaim {
+        id: 1,
+        owner: "other-agent".to_string(),
+        owner_label: "codex".to_string(),
+        paths: paths.iter().map(|s| (*s).to_string()).collect(),
+        intent: crate::state::scope_registry::ScopeIntent::Merging,
+        pr: None,
+        note: None,
+        claimed_at_secs: 0,
+    }
+}
+
+/// P2 wait_for_scope_clear: with no conflicting merge, the caller is answered
+/// `cleared` immediately — nothing parks.
+#[test]
+fn wait_for_scope_clear_immediate_when_no_conflict() {
+    use crate::mcp_cmd::McpResponse;
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        app.open_pane_tab("cat");
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.handle_scope_wait(None, None, vec!["src/x.rs".to_string()], 5_000, tx);
+        assert!(
+            app.runtime.scope_waiters.is_empty(),
+            "no conflict ⇒ not parked"
+        );
+        match rx.try_recv().expect("immediate reply") {
+            McpResponse::Ok { message } => assert!(message.contains("cleared")),
+            McpResponse::Error { message } => panic!("unexpected error: {message}"),
+        }
+    });
+}
+
+/// P2 wait_for_scope_clear: a conflicting merge parks the caller; releasing it
+/// and settling resumes them with `cleared`.
+#[test]
+fn wait_for_scope_clear_parks_then_clears_on_release() {
+    use crate::mcp_cmd::McpResponse;
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        app.open_pane_tab("cat");
+        app.state
+            .scope_registry
+            .push(other_merge_claim(&["src/x.rs"]));
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.handle_scope_wait(None, None, vec!["src/x.rs".to_string()], 60_000, tx);
+        assert_eq!(app.runtime.scope_waiters.len(), 1, "conflict ⇒ parked");
+        assert!(rx.try_recv().is_err(), "no reply while parked");
+
+        // Release the conflict, settle → the waiter resumes cleared + is dropped.
+        app.state.scope_registry.clear();
+        let mut ctx = RunCtx::for_test();
+        app.settle_scope_waiters(std::time::Instant::now(), &mut ctx);
+        assert!(
+            app.runtime.scope_waiters.is_empty(),
+            "resolved waiter removed"
+        );
+        match rx.try_recv().expect("cleared reply") {
+            McpResponse::Ok { message } => assert!(message.contains("cleared")),
+            McpResponse::Error { message } => panic!("unexpected error: {message}"),
+        }
+    });
+}
+
+/// P2 wait_for_scope_clear: a conflict that persists past the deadline resolves
+/// as `timed_out` (bounded — no unbounded block).
+#[test]
+fn wait_for_scope_clear_times_out_when_conflict_persists() {
+    use crate::mcp_cmd::McpResponse;
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        app.open_pane_tab("cat");
+        app.state
+            .scope_registry
+            .push(other_merge_claim(&["src/x.rs"]));
+        let (tx, rx) = std::sync::mpsc::channel();
+        // timeout_ms = 0 ⇒ deadline is "now"; the conflict is present so it parks.
+        app.handle_scope_wait(None, None, vec!["src/x.rs".to_string()], 0, tx);
+        assert_eq!(app.runtime.scope_waiters.len(), 1);
+        // Settle a hair later — deadline passed, conflict still stands ⇒ timed out.
+        let mut ctx = RunCtx::for_test();
+        app.settle_scope_waiters(
+            std::time::Instant::now() + std::time::Duration::from_millis(10),
+            &mut ctx,
+        );
+        assert!(app.runtime.scope_waiters.is_empty());
+        match rx.try_recv().expect("timed_out reply") {
+            McpResponse::Ok { message } => assert!(message.contains("timed_out")),
+            McpResponse::Error { message } => panic!("unexpected error: {message}"),
+        }
+    });
+}

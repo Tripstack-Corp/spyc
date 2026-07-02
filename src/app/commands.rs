@@ -424,6 +424,114 @@ fn activity_dump_lines(app: &App) -> Vec<String> {
     out
 }
 
+/// `:agent list` / `:agent registry` — dump the P2 agent-coordination state to
+/// a saveable pager (the orchestration view, sans a full screen). `list` = each
+/// agent tab with its dot + owned scope claims; `registry` = the raw scope
+/// registry (all claims + parked-waiter count). Any other arg prints usage.
+pub(super) fn cmd_agent(app: &mut App, args: &str) -> Vec<Effect> {
+    let (title, lines) = match args.trim() {
+        "list" => ("agent list", agent_list_lines(app)),
+        "registry" => ("agent registry", agent_registry_lines(app)),
+        _ => {
+            app.state.flash_info("usage: :agent list | :agent registry");
+            return Vec::new();
+        }
+    };
+    let mut view = PagerView::new_plain(title, lines);
+    view.saveable = true;
+    app.set_pager(view);
+    Vec::new()
+}
+
+/// Build the `:agent registry` dump — every P2 scope claim + the parked-waiter
+/// count. Pure read of the Model registry + Runtime waiters.
+fn agent_registry_lines(app: &App) -> Vec<String> {
+    let now = crate::sysinfo::epoch_secs();
+    let mut out = vec![format!(
+        "spyc {} (pid {}) — scope registry @ {}",
+        env!("CARGO_PKG_VERSION"),
+        std::process::id(),
+        crate::sysinfo::format_now(),
+    )];
+    if app.state.scope_registry.is_empty() {
+        out.push("(no scope claims)".to_string());
+    }
+    for c in &app.state.scope_registry {
+        let age = now.saturating_sub(c.claimed_at_secs);
+        out.push(String::new());
+        out.push(format!(
+            "[{}] {} — {}  (claimed {age}s ago)",
+            c.id,
+            c.owner_label,
+            c.intent.as_str(),
+        ));
+        out.push(format!("    paths: {}", c.paths.join(", ")));
+        if let Some(pr) = &c.pr {
+            out.push(format!("    pr: {pr}"));
+        }
+        if let Some(note) = &c.note {
+            out.push(format!("    note: {note}"));
+        }
+    }
+    let waiting = app.runtime.scope_waiters.len();
+    if waiting > 0 {
+        out.push(String::new());
+        out.push(format!("{waiting} agent(s) parked in wait_for_scope_clear"));
+    }
+    out
+}
+
+/// Build the `:agent list` dump — each agent tab with its activity dot + the
+/// scope claims it owns. Pure read of the pane tabs + registry.
+fn agent_list_lines(app: &App) -> Vec<String> {
+    use crate::pane::AgentActivity;
+    use crate::state::sessions::AgentKind;
+    let state_str = |a: AgentActivity| match a {
+        AgentActivity::Working => "working",
+        AgentActivity::Idle => "idle",
+        AgentActivity::Blocked => "blocked",
+        AgentActivity::Done => "done",
+        AgentActivity::Unknown => "unknown",
+    };
+    let mut out = vec![format!(
+        "spyc {} — agents @ {}",
+        env!("CARGO_PKG_VERSION"),
+        crate::sysinfo::format_now(),
+    )];
+    let Some(tabs) = app.runtime.pane_tabs.as_ref() else {
+        out.push("(no panes open)".to_string());
+        return out;
+    };
+    let active = tabs.active_index();
+    for (i, e) in tabs.tabs().iter().enumerate() {
+        let info = &e.info;
+        if crate::agent::detect(&info.command).kind() == AgentKind::Other {
+            continue; // non-agent tab: no dot, no coordination role
+        }
+        let marker = if i == active { '*' } else { ' ' };
+        out.push(String::new());
+        out.push(format!(
+            "{marker}[{}] {}  dot={}",
+            i + 1,
+            info.label,
+            state_str(info.activity),
+        ));
+        let claims: Vec<&str> = app
+            .state
+            .scope_registry
+            .iter()
+            .filter(|c| c.owner == info.claim_owner)
+            .flat_map(|c| c.paths.iter().map(String::as_str))
+            .collect();
+        if claims.is_empty() {
+            out.push("    scope: (none)".to_string());
+        } else {
+            out.push(format!("    scope: {}", claims.join(", ")));
+        }
+    }
+    out
+}
+
 /// `:longlist` — long `ls -lh`-style listing of the selection (was `L`).
 pub(super) fn cmd_longlist(app: &mut App, _args: &str) -> Vec<Effect> {
     app.apply(&Action::LongList).unwrap_or_default()

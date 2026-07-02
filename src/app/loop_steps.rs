@@ -100,12 +100,23 @@ impl App {
             // double-count writable commands, which arrive as their own command
             // *in addition to* a `ToolCalled`.
             let crate::mcp_cmd::McpRequest { command, reply } = req;
-            // Heavy worktree ops (create/remove/clean) run off the loop: validate
-            // synchronously (cheap, reads App state incl. the occupied guard),
-            // then hand the gix/copy IO to a worker that replies once the main
-            // loop has re-applied refresh+context (`apply_worktree_outcomes`).
-            // Everything else is served synchronously, replying inline.
-            if let Some(planned) = self.plan_worktree_job(&command) {
+            // `wait_for_scope_clear` blocks: it doesn't reply inline — the loop
+            // parks its reply sender (or answers at once if already clear) and
+            // `settle_scope_waiters` fires it later. Heavy worktree ops
+            // (create/remove/clean) run off the loop: validate synchronously
+            // (cheap, reads App state incl. the occupied guard), then hand the
+            // gix/copy IO to a worker that replies once the main loop has
+            // re-applied refresh+context. Everything else is served
+            // synchronously, replying inline.
+            if let crate::mcp_cmd::McpCommand::WaitForScopeClear {
+                pane_id,
+                pane,
+                paths,
+                timeout_ms,
+            } = command
+            {
+                self.handle_scope_wait(pane_id, pane, paths, timeout_ms, reply);
+            } else if let Some(planned) = self.plan_worktree_job(&command) {
                 match planned {
                     Ok(job) => self.spawn_worktree_job(
                         job,

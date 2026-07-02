@@ -87,6 +87,18 @@ pub enum McpCommand {
     /// agent or the user may clean up a stale claim on someone else's behalf).
     /// No-op (not an error) if `id` doesn't match any live claim.
     ReleaseScope { id: u64 },
+    /// P2: block until no *other* owner's `Merging` claim overlaps `paths`, or
+    /// `timeout_ms` elapses. Same targeting as `RegisterScope` (`pane_id` →
+    /// `pane` → focused) resolves the caller's owner key so its own claims never
+    /// block it. This request does NOT reply inline — the loop parks its reply
+    /// sender (`Runtime::scope_waiters`) and fires it from `settle_scope_waiters`
+    /// once the conflict clears or the deadline passes.
+    WaitForScopeClear {
+        pane_id: Option<String>,
+        pane: Option<usize>,
+        paths: Vec<String>,
+        timeout_ms: u64,
+    },
     /// Another spyc instance has taken over the MCP socket for this
     /// directory. The TUI should warn the user.
     Disconnected { new_pid: u32 },

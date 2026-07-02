@@ -62,10 +62,12 @@ stays focused on what's left.
 
 **Remaining** — the live scope this charter still tracks:
 
-- **P2** — merge/scope coordination. **Registry + verbs shipped** (v1.95.0):
-  `register_scope` / `list_scopes` / `release_scope`, in-memory + session-
-  persisted + auto-released on tab close. **Remaining:** `wait_for_scope_clear`
-  (the blocking verb) + the orchestration screen. Full design in Phase 2 below.
+- **P2** — merge/scope coordination. ✅ **SHIPPED** (v1.95.0 registry +
+  v1.96.0 wait): `register_scope` / `list_scopes` / `release_scope` +
+  `wait_for_scope_clear` (blocking, loop-parked, bounded), in-memory +
+  session-persisted + auto-released on tab close; inspected via `:agent list` /
+  `:agent registry` pager dumps (the screen became commands, per the owner). Full
+  design in Phase 2 below. **P2 complete → charter fully shipped.**
 
 ---
 
@@ -274,7 +276,7 @@ serializes into the session snapshot next to tabs + vsplit, so:
 `src/state/sessions/` (serialize + restore), `src/mcp/{protocol,readers}.rs` +
 `src/mcp_cmd.rs` + `src/app/mcp.rs` (the verbs). *Effort: med.*
 
-### P2-2 · `wait_for_scope_clear` — the coordination verb
+### P2-2 · `wait_for_scope_clear` — the coordination verb — SHIPPED (v1.96.0)
 
 **`wait_for_scope_clear(paths, timeout_ms)`** blocks the caller until no
 `Merging` claim overlaps `paths` (or the timeout fires), returning which happened.
@@ -305,7 +307,15 @@ Mechanics (the loop-held-waiter shape above):
   lead `list_scopes()` to see who overlaps and waits out the risky pairs before
   landing them.
 
-### P2-3 · The orchestration screen
+### P2-3 · `:agent list` / `:agent registry` (pager dumps) — SHIPPED (v1.96.0)
+
+Per the owner, the "full screen" was descoped to two `:` commands that dump the
+coordination state to a saveable pager (the `:activity dump` pattern): `:agent
+registry` = every scope claim + parked-waiter count; `:agent list` = each agent
+tab with its dot + owned claims. Observability without a new interactive mode.
+*Code:* `src/app/commands.rs` (`cmd_agent`), `src/app/command_table.rs`.
+
+Original full-screen sketch (not built):
 
 A TUI panel (`:orchestrate`, or a chord) rendering the live registry: per agent
 tab — its claimed paths, `intent`, PR, and the **wait graph** (who's blocked on
@@ -343,14 +353,17 @@ owner test):
    own: `list_scopes` already lets agents see overlaps. *Code:*
    `src/state/scope_registry.rs`, `src/app/state/`, `src/state/sessions/`,
    `src/mcp/protocol.rs`, `src/mcp_cmd.rs`, `src/app/mcp.rs`, `src/app/pane_tabs.rs`.
-2. **`wait_for_scope_clear`** — the loop-held `PendingWait` + `Deadline::ScopeWait`
-   + `settle_scope_waiters` + the pure conflict check. *(next)*
-3. **The orchestration screen** — observability render first, then the
-   interactive ops.
+2. **`wait_for_scope_clear`** — ✅ **SHIPPED (v1.96.0).** The loop-held
+   `PendingScopeWait` + `Deadline::ScopeWait` + `settle_scope_waiters` + the pure
+   `wait_outcome` / `conflicts` checks; parked in `drain_mcp_pending`, bounded by
+   a mandatory timeout.
+3. **`:agent list` / `:agent registry`** — ✅ **SHIPPED (v1.96.0)**, the pager
+   dumps that replaced the full screen (owner's call).
 
 `read_pane` / `send_pane_keys` and streaming `subscribe_events` stay **out of
-scope** (documented above). So "P2 complete" = **registry + wait + screen** — the
-merge-coordination layer, not a generic agent-drives-agent surface.
+scope** (documented above). So **P2 is complete** = registry + wait +
+`:agent` inspection — the merge-coordination layer, not a generic
+agent-drives-agent surface.
 
 *Keep spyc's edge throughout:* one PID-scoped socket + the takeover prompt; the
 registry is advisory (spyc never blocks a merge or auto-spawns); every wait
@@ -386,7 +399,7 @@ has it. *Code:* `src/app/session.rs`, `src/app/scheduler.rs`, `src/state/session
 ## Sequencing & rationale
 
 ```
-P0 ✅  ──►  P1-1 ✅  P1-3 ✅  P1-2 ✅  ──►  P2 (scope registry + wait_for_scope_clear + screen)
+P0 ✅  ──►  P1-1 ✅  P1-3 ✅  P1-2 ✅  ──►  P2 ✅ (scope registry + wait_for_scope_clear + :agent dumps)
                               │
                               ▼
                          P3-1 ✅        P3-2 ✅ crash-sufficient autosave

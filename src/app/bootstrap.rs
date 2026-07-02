@@ -264,6 +264,7 @@ impl App {
                 next_sink_id: 0,
                 autosave_last_saved_fp: None,
                 autosave_due: None,
+                scope_waiters: Vec::new(),
                 lua: None,
                 lua_registry: super::lua::LuaRegistry::default(),
                 lua_inflight: None,

@@ -691,6 +691,11 @@ impl App {
                 ctx.draw.mark(3);
             }
 
+            // P2 `wait_for_scope_clear`: resolve parked scope-waiters (a
+            // `release_scope` may have landed in the drain just above) + honor
+            // their deadlines. Armed only while a waiter is parked ⇒ 0 dps idle.
+            self.settle_scope_waiters(now_pre, &mut ctx);
+
             // Drain the git-worker results buffered into `ctx.git_pending` — the
             // SOLE apply/count/take site (see `drain_git_pending`).
             if self.drain_git_pending(&mut ctx) {

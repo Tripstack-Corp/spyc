@@ -96,6 +96,7 @@ const fn app(name: &'static str, handler: fn(&mut App, &str) -> Vec<Effect>) -> 
 /// output (enforced by `command_table_is_sorted_and_unique`).
 pub const COMMAND_TABLE: &[CommandSpec] = &[
     app("activity", commands::cmd_activity),
+    app("agent", commands::cmd_agent),
     app("bnext", commands::cmd_bnext),
     app("bprev", commands::cmd_bprev),
     pure("cd"),
