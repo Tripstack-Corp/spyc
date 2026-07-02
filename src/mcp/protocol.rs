@@ -738,11 +738,15 @@ fn handle_tools_call(
                     let pane_id = args["pane_id"].as_str().map(String::from);
                     let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
                     let ttl_ms = args["ttl_ms"].as_u64();
+                    // Piggybacked by the status-hook reporter (Claude's hook
+                    // stdin carries `session_id`); absent on a direct agent call.
+                    let session_id = args["session_id"].as_str().map(String::from);
                     McpCommand::ReportStatus {
                         pane_id,
                         pane,
                         status,
                         ttl_ms,
+                        session_id,
                     }
                 }
                 "navigate_to" => {

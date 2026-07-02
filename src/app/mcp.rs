@@ -410,6 +410,7 @@ impl App {
                 pane,
                 status,
                 ttl_ms,
+                session_id,
             } => {
                 use crate::pane::{AgentActivity, ReportedStatus};
                 let activity = match status.as_str() {
@@ -449,6 +450,20 @@ impl App {
                 // Apply immediately so this frame reflects it; `settle_agent_activity`
                 // maintains it (and falls back to timing once it expires).
                 entry.info.activity = activity;
+                // P1-3: a live session id piggybacked on the hook report supersedes
+                // the spawn-proximity resolver at save time — route it to the id
+                // field for this tab's agent (only Claude's hooks carry one today).
+                if let Some(sid) = session_id {
+                    match crate::agent::detect(&entry.info.command).kind() {
+                        crate::state::sessions::AgentKind::Claude => {
+                            entry.info.claude_session_id = Some(sid);
+                        }
+                        crate::state::sessions::AgentKind::Codex => {
+                            entry.info.codex_session_id = Some(sid);
+                        }
+                        _ => {}
+                    }
+                }
                 let label = entry.info.label.clone();
                 McpResponse::Ok {
                     message: format!("status '{status}' set for pane {} ({label})", idx + 1),

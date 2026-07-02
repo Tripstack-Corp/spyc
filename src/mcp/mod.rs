@@ -196,6 +196,18 @@ fn effective_report_state<'a>(configured: &'a str, hook_payload: &str) -> &'a st
     }
 }
 
+/// Extract the agent's live session UUID from a status-hook stdin payload
+/// (Claude includes `session_id` in every hook event's JSON). `None` when the
+/// payload is empty / unparseable / lacks the field — the reporter then simply
+/// omits it. The P1-3 piggyback: a live-reported id lets `save_session` resume
+/// the exact conversation instead of guessing by spawn proximity.
+fn session_id_from_hook_payload(payload: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|v| v["session_id"].as_str().map(String::from))
+        .filter(|s| !s.is_empty())
+}
+
 /// Agent status-hook reporter (`spyc --report-status <state>`): a one-shot that
 /// pings the running spyc so it can set this pane's activity dot. Reads
 /// `SPYC_MCP_SOCK` (the socket) + `SPYC_PANE_ID` (which tab) from the
@@ -265,8 +277,14 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
     // An idle Notification means "finished, waiting" → `done`, not the alarming
     // `blocked` square (the false-red-on-idle bug); permission stays `blocked`.
     let state = effective_report_state(state, &payload);
+    // P1-3: piggyback the agent's live session id (from the same hook stdin) so
+    // spyc can pin this pane's exact conversation for `-r` restore.
+    let session_id = session_id_from_hook_payload(&payload);
     if trace {
         trace_log(&format!("report-status: effective state={state}"));
+        if let Some(sid) = session_id.as_deref() {
+            trace_log(&format!("report-status: session_id={sid}"));
+        }
     }
     if sock.is_empty() {
         return;
@@ -283,7 +301,7 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
         "method": "tools/call",
         "params": {
             "name": "report_status",
-            "arguments": { "status": state, "pane_id": pane_id },
+            "arguments": { "status": state, "pane_id": pane_id, "session_id": session_id },
         },
     })
     .to_string();

@@ -40,12 +40,18 @@ stays focused on what's left.
   a `SIGKILL` loses at most the ~2s debounce window instead of everything since
   launch. 0-dps-at-idle preserved (armed only while dirty; skips empty sessions).
   *Code:* `src/app/session.rs`, `src/app/scheduler.rs`, `src/state/sessions/`.
+- **P1-3 — live session-identity capture** (v1.93.0). The status-hook reporter
+  piggybacks the agent's live `session_id` (from Claude's hook stdin) onto its
+  `report_status` call; spyc pins it to the pane's `claude_session_id`, so
+  `save_session` / `-r` resume the **exact** conversation instead of guessing by
+  spawn-proximity (fixes the #607 crossed-conversations class). Claude-only today
+  (only its hooks carry the id in stdin). *Code:* `src/mcp/mod.rs`,
+  `src/mcp/protocol.rs`, `src/app/mcp.rs`, `src/mcp_cmd.rs`.
 
 **Remaining** — the live scope this charter still tracks:
 
 - **P1-2** — data-driven detection manifest (the scrape *fallback* for agents
   spyc can't auto-hook).
-- **P1-3** — live session-identity capture (`report_agent_session`).
 - **P2** — orchestration: event hub + wait/subscribe + read/send (the capability
   gap; the highest-ceiling item).
 
@@ -116,11 +122,11 @@ P3-1)*.
 
 ---
 
-## Phase 1 (remaining) — Reliable detection: the fallback + live identity
+## Phase 1 (remaining) — Reliable detection: the fallback
 
-The self-report core (P1-1) shipped; what's left is the graceful-degradation
-fallback for agents spyc can't hook, and a live (rather than exit-banner-sniffed)
-session-identity signal.
+The self-report core (P1-1) and live session-identity capture (P1-3) shipped;
+what's left is the graceful-degradation scrape fallback for agents spyc can't
+hook.
 
 **P1-2 · Data-driven detection manifest (the fallback).**
 For agents that don't self-report, replace the imperative per-profile scrape with
@@ -145,23 +151,20 @@ declarative ruleset is spyc's safety net: a missed hook degrades to a scrape gue
 never to nothing. Keep it clearly second-class (a report always wins) so we never
 re-enter herdr's fragility class as the *primary* path.
 
-**P1-3 · Live session-identity capture (`report_agent_session`).**
-Have the same hook report the agent's session UUID + transcript path *as it runs*
-(herdr's Tier-1 model), instead of spyc's current **exit-banner sniffing**. More
-reliable `-r` restore; fewer missed resumes. spyc already pins codex session ids
-(`app::codex_pin`) — this generalizes that to a live, agent-driven signal.
-*Touches:* `src/agent/` profiles, `src/state/sessions/`, `src/mcp/`, hook assets.
-*Effort: low–med.*
-*Use cases:* reliable `spyc -r` — the agent reports its own session UUID + transcript
-path *live*, so restore replays the **right** native `--resume <id>` instead of
-guessing by spawn-proximity (spyc's own #607: two same-cwd Claude panes crossed
-conversations on restore — exactly this failure). The field keeps arriving here:
-*"preserving the agent session ID and calling the native resume command is the key
-part"* ([Zed #58001](https://github.com/zed-industries/zed/discussions/58001)), and
-Claude Code's own `--resume` throws *"No conversation found"* when its index desyncs
-from the on-disk `.jsonl` ([CC #18311](https://github.com/anthropics/claude-code/issues/18311)).
-A live, agent-driven signal sidesteps that whole class — and generalizes the codex
-spawn-order pin (`app::codex_pin`) into one agent-agnostic mechanism.
+**P1-3 · Live session-identity capture. — SHIPPED (v1.93.0).**
+The status-hook reporter (`spyc --report-status`) already reads Claude's hook
+stdin; it now also lifts the `session_id` Claude includes there and piggybacks it
+onto the same `report_status` socket call (no new tool — `session_id` rides the
+existing args; pure `session_id_from_hook_payload`). spyc routes it to the pane's
+`claude_session_id` (in the `McpCommand::ReportStatus` apply), and `save_session`
+already prefers that id when its JSONL exists — so `-r` replays the **right**
+native `--resume <id>` live, instead of guessing by spawn-proximity (fixes the
+#607 crossed-conversations class; the failure Zed #58001 / CC #18311 also hit).
+**Claude-only** in practice: codex keeps `app::codex_pin` (its id lives in the
+rollout file, not hook stdin) and agy has no id channel — so this generalizes
+self-report where the agent *can*, not literally all three. transcript_path is
+unneeded (derived from cwd + id via `claude_jsonl_path`). *Code:* `src/mcp/mod.rs`,
+`src/mcp/protocol.rs`, `src/app/mcp.rs`, `src/mcp_cmd.rs`.
 
 ---
 
@@ -257,7 +260,7 @@ has it. *Code:* `src/app/session.rs`, `src/app/scheduler.rs`, `src/state/session
 ## Sequencing & rationale
 
 ```
-P0 ✅  ──►  P1-1 ✅  ──►  P1-2 fallback / P1-3 session-id (remaining)
+P0 ✅  ──►  P1-1 ✅  ──►  P1-3 session-id ✅ · P1-2 fallback (remaining)
                               │
                               ▼
                          P2 (event hub + wait/subscribe + read/send)
@@ -268,9 +271,9 @@ P0 ✅  ──►  P1-1 ✅  ──►  P1-2 fallback / P1-3 session-id (remaini
 
 - **P0 (shipped)** — you can't ship or debug status without a vocabulary, a
   render surface, and `:why-status`.
-- **P1 is the moat** — semantic-first detection (P1-1, shipped) is the
-  reliability win over herdr; the fallback (P1-2) and live session id (P1-3)
-  round it out before the orchestration layer leans on it.
+- **P1 is the moat** — semantic-first detection (P1-1) + live session id (P1-3)
+  shipped, the reliability win over herdr; the scrape fallback (P1-2) rounds it
+  out before the orchestration layer leans on it.
 - **P2 is the capability gap** — highest ceiling, but it depends on P1's status
   signal being trustworthy.
 - **P3 is independent polish (both shipped)** — P3-1 landed after P0; P3-2 (the

@@ -1086,3 +1086,20 @@ fn idle_prompt_notification_downgrades_blocked_to_done() {
     assert_eq!(eff("blocked", ""), "blocked");
     assert_eq!(eff("blocked", "not json"), "blocked");
 }
+
+#[test]
+fn session_id_piggybacks_from_hook_payload() {
+    use super::session_id_from_hook_payload as sid;
+
+    // Claude includes `session_id` (+ transcript_path/cwd/hook_event_name) in
+    // every hook payload; we lift just the id to pin the pane's conversation.
+    let payload = r#"{"hook_event_name":"UserPromptSubmit","session_id":"abc-123","transcript_path":"/x/y.jsonl","cwd":"/proj"}"#;
+    assert_eq!(sid(payload), Some("abc-123".to_string()));
+
+    // Absent / empty / unparseable ⇒ None (the reporter then omits it; a direct
+    // agent report_status call has no payload at all).
+    assert_eq!(sid(r#"{"hook_event_name":"Stop"}"#), None);
+    assert_eq!(sid(r#"{"session_id":""}"#), None);
+    assert_eq!(sid(""), None);
+    assert_eq!(sid("not json"), None);
+}

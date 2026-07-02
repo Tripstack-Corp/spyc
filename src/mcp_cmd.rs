@@ -59,6 +59,12 @@ pub enum McpCommand {
         pane: Option<usize>,
         status: String,
         ttl_ms: Option<u64>,
+        /// The agent's live session UUID, piggybacked from the status hook's
+        /// stdin (Claude includes `session_id` in every hook payload). `Some`
+        /// only on hook-driven reports; a direct agent `report_status` call (or
+        /// the Lua binding) omits it. Lets `save_session` prefer the *live*
+        /// conversation over the spawn-proximity resolver (P1-3).
+        session_id: Option<String>,
     },
     /// Another spyc instance has taken over the MCP socket for this
     /// directory. The TUI should warn the user.

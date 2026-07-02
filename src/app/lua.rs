@@ -363,6 +363,7 @@ impl App {
                     pane: None,
                     status,
                     ttl_ms: None,
+                    session_id: None,
                 });
                 Vec::new()
             }
