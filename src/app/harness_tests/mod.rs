@@ -280,6 +280,77 @@ fn esc_closes_overlay_pager() {
     });
 }
 
+/// `:notify test` fires every channel (bell + both desktop mechanisms) and
+/// starts the visual border pulse regardless of `[notify]` config — the
+/// on-demand diagnostic. A bare `:notify` is a usage no-op that fires nothing.
+#[test]
+fn notify_test_command_fires_all_channels() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+        // Bare `:notify` → usage flash, no effect, no pulse.
+        assert!(super::commands::cmd_notify(&mut app, "").is_empty());
+        assert!(app.view.visual_bell.is_none());
+        // `:notify test` → one Notify carrying every channel, and the pulse starts.
+        let fx = super::commands::cmd_notify(&mut app, "test");
+        assert!(app.view.visual_bell.is_some(), "the visual pulse starts");
+        match fx.as_slice() {
+            [Effect::Notify { system, osc9, bell }] => {
+                assert!(system.is_some(), "OS notifier fires");
+                assert!(osc9.is_some(), "OSC-9 fires");
+                assert!(*bell, "bell rings");
+            }
+            other => panic!("expected one Effect::Notify, got {other:?}"),
+        }
+    });
+}
+
+/// Regression: a hook-driven `report_status` pre-sets `activity` for an instant
+/// dot (`mcp.rs`), which used to erase the Idle→Blocked edge before
+/// `settle_agent_activity` observed it — so the dot went red but the ping never
+/// fired. The edge now keys off the settle-owned `notified` field, so the
+/// transition still emits `Effect::Notify` even with `activity` pre-set.
+#[test]
+fn agent_transition_notifies_even_when_activity_preset_by_report() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        // `cat` stands in for the agent process; the "claude" command makes the
+        // tab detect as an agent. Same spawn idiom as the pane harness tests.
+        let wake = app.make_pane_wake();
+        let pane = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
+            .expect("spawn cat");
+        let entry =
+            crate::pane::tabs::TabEntry::new(pane, crate::pane::tabs::TabInfo::new("claude", &dir));
+        app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
+
+        // The state right after the MCP report handler applied a `blocked`
+        // report: `reported` + `activity` are Blocked (the instant-dot pre-set),
+        // but the settle-owned `notified` still lags at Idle. The tab isn't
+        // pane-focused (default focus is the file list) → not suppressed.
+        let now = std::time::Instant::now();
+        {
+            let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+            info.reported = Some(crate::pane::ReportedStatus {
+                status: crate::pane::AgentActivity::Blocked,
+                at: now,
+                expiry: now + std::time::Duration::from_secs(300),
+            });
+            info.activity = crate::pane::AgentActivity::Blocked;
+            info.notified = crate::pane::AgentActivity::Idle;
+        }
+
+        let mut ctx = RunCtx::for_test();
+        let (_drew, effects) = app.settle_agent_activity(now, &mut ctx);
+        assert!(
+            effects.iter().any(|e| matches!(e, Effect::Notify { .. })),
+            "a Blocked transition must ping even when `activity` was pre-set by the report",
+        );
+    });
+}
+
 mod mcp;
 mod pane;
 mod per_column;

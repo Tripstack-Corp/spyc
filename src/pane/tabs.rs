@@ -127,6 +127,13 @@ pub struct TabInfo {
     /// Cached activity state, recomputed OFF the draw path in
     /// `App::settle_agent_activity` (render is pure and can't read `now`).
     pub activity: AgentActivity,
+    /// The activity value the last P3-1 notification decision was made against —
+    /// the edge tracker for `Effect::Notify`. **Distinct from `activity`**: the
+    /// MCP `report_status` handler pre-sets `activity` for an instant dot, which
+    /// would otherwise erase the Idle→Blocked edge before `settle_agent_activity`
+    /// sees it (→ no notification). `settle_agent_activity` owns this field, so
+    /// the pre-set can't hide the transition. Starts `Unknown`.
+    pub notified: AgentActivity,
     /// True while this pane is `^z`-suspended: spyc sent `SIGSTOP` to its
     /// process group (the child is stopped, not exited) and the divider shows
     /// 💤 instead of the activity dot. Set/cleared by the `^z` toggle
@@ -208,6 +215,7 @@ impl TabInfo {
             has_activity: false,
             last_output_at: None,
             activity: AgentActivity::Unknown,
+            notified: AgentActivity::Unknown,
             suspended: false,
             reported: None,
             restore_fallback: None,

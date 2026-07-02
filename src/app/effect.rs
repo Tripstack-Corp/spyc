@@ -130,6 +130,23 @@ pub enum Effect {
     /// (`term_title_effect`); only the `term_title::set` IO is the effect.
     SetTerminalTitle { title: String },
 
+    /// A-class. Fire a desktop notification and/or ring the terminal bell that an
+    /// agent pane changed to `Blocked` ("needs me") or `Done` — the P3-1 ping
+    /// (`docs/AGENT_AWARENESS_PLAN.md`). Emitted by `settle_agent_activity` on the
+    /// status transition, gated by `[notify]` + focused-tab suppression (the pure
+    /// decision, incl. the SSH-aware `system`-vs-`osc9` routing, lives in
+    /// `agent_status.rs`, so this carries only the resolved channels).
+    /// `system` = `Some((summary, body))` → the OS notifier (`notifications::send`,
+    /// off-thread so the loop never blocks on the system / D-Bus round trip);
+    /// `osc9` = `Some(message)` → an OSC-9 terminal escape (client-side over SSH);
+    /// `bell` rings the terminal bell (a cheap inline stdout write). Each is
+    /// independent, so a bell-only or osc9-only config works without an empty popup.
+    Notify {
+        system: Option<(String, String)>,
+        osc9: Option<String>,
+        bell: bool,
+    },
+
     /// A-class. MVU Phase 5: read the active pane's text from the live host
     /// (a bounded, yank-gated `&self` read — never per-frame) and route it
     /// to `then`. The producer is pure-Model (it just emits this); the
@@ -587,6 +604,21 @@ impl App {
                 // compose + dedup already happened loop-side.
                 Effect::SetTerminalTitle { title } => {
                     let _ = crate::term_title::set(&title);
+                }
+                // A-class: the P3-1 agent-status ping. The gating + suppression +
+                // text all happened in the producer (`settle_agent_activity`);
+                // here we just fire the OS notification (off-thread, best-effort)
+                // and ring the bell if requested (inline stdout write).
+                Effect::Notify { system, osc9, bell } => {
+                    if let Some((summary, body)) = system {
+                        crate::notifications::send(summary, body);
+                    }
+                    if let Some(msg) = osc9 {
+                        crate::notifications::notify_osc9(&msg);
+                    }
+                    if bell {
+                        crate::notifications::ring_bell();
+                    }
                 }
                 // C-class: the chdir de-IO fork (MVU Phase 5). The blocking
                 // listing read runs here in the executor — never in the pure

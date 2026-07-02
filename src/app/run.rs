@@ -644,7 +644,18 @@ impl App {
             // pulse frame, and arm AgentIdle (flip Working→Idle) + AgentAnim
             // (pulse while working). Idle when all tabs quiet ⇒ both disarmed ⇒
             // 0 dps preserved (see `settle_agent_activity`).
-            if self.settle_agent_activity(now_pre, &mut ctx) {
+            let (agent_draw, agent_fx) = self.settle_agent_activity(now_pre, &mut ctx);
+            if agent_draw {
+                ctx.draw.mark(3);
+            }
+            if !agent_fx.is_empty() {
+                self.run_effects(agent_fx, terminal, &foreground_exec);
+            }
+
+            // P3-1 visual bell: advance/decay the Charm border-pulse flash
+            // (armed only after a Blocked/Done transition when `[notify].visual`
+            // is set; a no-op otherwise, so idle stays 0 dps).
+            if self.settle_visual_bell(now_pre, &mut ctx) {
                 ctx.draw.mark(3);
             }
 

@@ -21,6 +21,7 @@ mod lua;
 mod mcp;
 mod mcp_cmd;
 mod merge_driver;
+mod notifications;
 mod pane;
 mod paths;
 mod proc_cwd;

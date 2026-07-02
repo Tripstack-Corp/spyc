@@ -8,6 +8,47 @@ use ratatui::Frame;
 use crate::app::{App, format_uptime};
 
 impl App {
+    /// P3-1 visual bell: paint the Charm gradient border pulse over the outermost
+    /// ring of cells — a non-destructive bg tint, no reflow / layout change.
+    /// Reads `view.visual_bell.frame` (advanced off the draw in
+    /// `settle_visual_bell`, so this pure pass never reads the clock) to sweep the
+    /// pink→violet→cyan gradient. A no-op when no flash is active — the channel is
+    /// off by default (`[notify]`), so steady-state panes never touch this.
+    pub(super) fn render_visual_bell(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+        let Some(bell) = self.view.visual_bell else {
+            return;
+        };
+        if area.width < 2 || area.height < 2 {
+            return;
+        }
+        let phase = bell.frame;
+        let buf = frame.buffer_mut();
+        let last_col = f32::from(area.width - 1);
+        // Top + bottom rows: sweep the gradient horizontally across the frame.
+        for x in area.x..area.right() {
+            let frac = f32::from(x - area.x) / last_col;
+            let color = self.charm_pulse_color(frac, phase);
+            if let Some(cell) = buf.cell_mut((x, area.y)) {
+                cell.set_bg(color);
+            }
+            if let Some(cell) = buf.cell_mut((x, area.bottom() - 1)) {
+                cell.set_bg(color);
+            }
+        }
+        // Left + right columns (corners already painted above): the gradient's
+        // two ends.
+        let left = self.charm_pulse_color(0.0, phase);
+        let right = self.charm_pulse_color(1.0, phase);
+        for y in (area.y + 1)..(area.bottom() - 1) {
+            if let Some(cell) = buf.cell_mut((area.x, y)) {
+                cell.set_bg(left);
+            }
+            if let Some(cell) = buf.cell_mut((area.right() - 1, y)) {
+                cell.set_bg(right);
+            }
+        }
+    }
+
     /// Render the harpoon menu overlay. Centered modal box listing
     /// the active project's slots, with the menu cursor on a
     /// highlighted row. Footer shows the bindings. `h_divider_row` /

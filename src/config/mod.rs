@@ -48,6 +48,9 @@ pub struct Config {
     /// Delete-action behavior knobs.
     pub delete: DeleteConfig,
 
+    /// Agent-status notification knobs (`[notify]`).
+    pub notify: NotifyConfig,
+
     /// Ignore-mask definitions. When non-empty, they replace the
     /// built-in defaults wholesale.
     pub ignore_masks: Vec<IgnoreMask>,
@@ -298,6 +301,81 @@ struct FileDelete {
     confirm: Option<bool>,
 }
 
+/// How a desktop notification is delivered (`[notify].desktop_via`). `Auto`
+/// routes to an OSC-9 terminal escape over SSH (so the ping reaches your *client*
+/// terminal, not the remote box spyc runs on) and the OS notifier locally.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DesktopVia {
+    #[default]
+    Auto,
+    /// OS notifier only (notify-rust — the machine spyc runs on).
+    System,
+    /// OSC-9 terminal escape only (your client terminal; needs iTerm2/kitty/…).
+    Osc9,
+    /// Both mechanisms.
+    Both,
+}
+
+/// `[notify]` — desktop notification + bell behavior when an agent pane's
+/// status changes (P3-1, `docs/AGENT_AWARENESS_PLAN.md`). Channels are
+/// independent; only the desktop ping is on by default.
+#[derive(Debug, Clone)]
+pub struct NotifyConfig {
+    /// Fire a desktop notification when an agent pane transitions to `Blocked`
+    /// (or `Done`) — the "which agent needs me" signal. On by default. How it's
+    /// delivered is [`Self::desktop_via`].
+    pub desktop: bool,
+    /// Which mechanism delivers the desktop notification. Default `Auto`:
+    /// OSC-9 over SSH (reaches your client), the OS notifier locally.
+    pub desktop_via: DesktopVia,
+    /// Also notify on the `Done` transition (a finished turn). On by default;
+    /// set false to be pinged only when an agent is *blocked* (`Done` fires
+    /// every turn, which some find noisy).
+    pub desktop_done: bool,
+    /// Ring the terminal bell (BEL) alongside the notification. Off by default.
+    pub bell: bool,
+    /// Flash a Charm-style gradient border pulse on the transition. Off by
+    /// default (a purely decorative attention cue).
+    pub visual: bool,
+    /// Suppress every channel when the transitioning tab is the one the user is
+    /// actively watching (its pane owns the keyboard) — no point pinging about
+    /// an agent already on screen. On by default.
+    pub suppress_focused_tab: bool,
+}
+
+impl Default for NotifyConfig {
+    fn default() -> Self {
+        Self {
+            desktop: true,
+            desktop_via: DesktopVia::default(),
+            desktop_done: true,
+            bell: false,
+            visual: false,
+            suppress_focused_tab: true,
+        }
+    }
+}
+
+/// On-disk shape of `[notify]`. `Option` per field for "didn't set" disambig,
+/// so a project file with a bare `[notify]` doesn't clobber user defaults.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileNotify {
+    #[serde(default)]
+    desktop: Option<bool>,
+    #[serde(default)]
+    desktop_via: Option<DesktopVia>,
+    #[serde(default)]
+    desktop_done: Option<bool>,
+    #[serde(default)]
+    bell: Option<bool>,
+    #[serde(default)]
+    visual: Option<bool>,
+    #[serde(default)]
+    suppress_focused_tab: Option<bool>,
+}
+
 /// On-disk shape of `[markdown]`. `Option` for "didn't set" disambig.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -371,6 +449,8 @@ struct FileConfig {
     markdown: FileMarkdown,
     #[serde(default)]
     delete: FileDelete,
+    #[serde(default)]
+    notify: FileNotify,
     #[serde(default)]
     ignore_masks: Vec<IgnoreMask>,
     #[serde(default)]
@@ -510,6 +590,26 @@ impl Config {
         // Delete: per-field merge.
         if let Some(b) = file.delete.confirm {
             self.delete.confirm = b;
+        }
+
+        // Notify: per-field merge.
+        if let Some(b) = file.notify.desktop {
+            self.notify.desktop = b;
+        }
+        if let Some(v) = file.notify.desktop_via {
+            self.notify.desktop_via = v;
+        }
+        if let Some(b) = file.notify.desktop_done {
+            self.notify.desktop_done = b;
+        }
+        if let Some(b) = file.notify.bell {
+            self.notify.bell = b;
+        }
+        if let Some(b) = file.notify.visual {
+            self.notify.visual = b;
+        }
+        if let Some(b) = file.notify.suppress_focused_tab {
+            self.notify.suppress_focused_tab = b;
         }
 
         // Ignore masks: append.
@@ -669,6 +769,53 @@ mod tests {
         std::fs::write(&project, "[colors]\ndir = \"#abcdef\"\n").unwrap();
         let cfg = Config::load_from(&[Some(&user), Some(&project)]).unwrap();
         assert!(!cfg.yank.include_pager_title);
+    }
+
+    #[test]
+    fn notify_defaults_desktop_on_bells_off() {
+        // The founding default: the "needs me" desktop ping (Blocked + Done) is
+        // on; the bell + visual flash are opt-in; focused-tab suppression on.
+        let n = Config::default().notify;
+        assert!(n.desktop);
+        assert_eq!(n.desktop_via, super::DesktopVia::Auto);
+        assert!(n.desktop_done);
+        assert!(!n.bell);
+        assert!(!n.visual);
+        assert!(n.suppress_focused_tab);
+    }
+
+    #[test]
+    fn parses_notify_overrides() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(
+            &path,
+            "[notify]\ndesktop = false\ndesktop_via = \"osc9\"\ndesktop_done = false\nbell = true\nvisual = true\nsuppress_focused_tab = false\n",
+        )
+        .unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert!(!cfg.notify.desktop);
+        assert_eq!(cfg.notify.desktop_via, super::DesktopVia::Osc9);
+        assert!(!cfg.notify.desktop_done);
+        assert!(cfg.notify.bell);
+        assert!(cfg.notify.visual);
+        assert!(!cfg.notify.suppress_focused_tab);
+    }
+
+    #[test]
+    fn project_without_notify_does_not_clobber_user_notify() {
+        // A bare / absent project `[notify]` must not reset a value the user
+        // file set (the per-field Option merge, same as [delete]/[yank]).
+        let tmp = tempdir().unwrap();
+        let user = tmp.path().join("user.toml");
+        let project = tmp.path().join("project.toml");
+        std::fs::write(&user, "[notify]\ndesktop = false\nbell = true\n").unwrap();
+        std::fs::write(&project, "[colors]\ndir = \"#abcdef\"\n").unwrap();
+        let cfg = Config::load_from(&[Some(&user), Some(&project)]).unwrap();
+        assert!(!cfg.notify.desktop);
+        assert!(cfg.notify.bell);
+        // Untouched fields keep their defaults.
+        assert!(cfg.notify.desktop_done);
     }
 
     #[test]

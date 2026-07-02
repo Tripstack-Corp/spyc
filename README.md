@@ -397,7 +397,21 @@ keymap = [
 [colors]
 cursor_bg = "#ff6600"
 pick      = "#ffcb6b"
+
+# Notifications when an agent pane changes status ("which agent needs me").
+# The desktop ping is on by default; the bell + visual flash are opt-in.
+[notify]
+# desktop = true              # notify on Blocked / Done (on by default)
+# desktop_via = "auto"        # "auto" (OSC-9 over SSH → your client, OS notifier
+                              #  locally), "system", "osc9", or "both"
+# desktop_done = false        # ...only when *blocked*, not on every finished turn
+# bell = true                 # also ring the terminal bell
+# visual = true               # flash a Charm-style gradient border pulse
+# suppress_focused_tab = false # notify even about the tab you're watching
 ```
+
+Run **`:notify test`** to fire every channel on demand (bell + visual + both
+desktop mechanisms), to verify your setup without waiting for an agent transition.
 
 ## Recommended setup
 

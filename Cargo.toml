@@ -1,6 +1,6 @@
 [package]
 name = "spyc"
-version = "1.89.0"
+version = "1.90.0"
 edition = "2024"
 description = "A Rust TUI file commander where the AI agent in the side pane can query the file commander itself"
 license = "BSD-3-Clause"
@@ -34,6 +34,13 @@ base64 = "0.22"
 # cleanly; Linux is best-effort (X11/Wayland clipboards don't persist after exit
 # without a manager).
 arboard = "3"
+# Desktop notifications for agent status changes (src/notifications.rs, the
+# P3-1 "which agent needs me" ping). `default-features = false` + `z` keeps the
+# Linux backend pure-Rust (zbus + async-io, no C libdbus → static musl stays
+# clean) and drops the unused async/serde defaults; macOS uses
+# mac-notification-sys, Windows winrt. NOTE: notifies the machine spyc RUNS on —
+# over SSH that's the remote, not the client (documented in the [notify] config).
+notify-rust = { version = "4", default-features = false, features = ["z"] }
 crossterm = "0.29"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"

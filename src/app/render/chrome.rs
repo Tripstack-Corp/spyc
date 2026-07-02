@@ -373,6 +373,23 @@ impl App {
         }
     }
 
+    /// P3-1 visual-bell color: a point on the Charm pink→violet→cyan gradient at
+    /// `frac` (0..1 around the border), swept by the animation `frame`. Truecolor
+    /// walks the smooth gradient (`charm_gradient`); a 256-color terminal still
+    /// animates via a 3-color cycle; mono falls back to the popup-border accent.
+    pub(super) fn charm_pulse_color(&self, frac: f32, frame: u64) -> ratatui::style::Color {
+        use ratatui::style::Color;
+        if self.view.theme.mono {
+            return self.view.theme.popup_border;
+        }
+        if !self.view.hud_truecolor {
+            const CYCLE: [Color; 3] = [Color::Magenta, Color::LightMagenta, Color::Cyan];
+            return CYCLE[(frame % 3) as usize];
+        }
+        let (r, g, b) = charm_gradient(frac, frame);
+        Color::Rgb(r, g, b)
+    }
+
     /// Status-bar header: the left (path / view name) and right
     /// (status tags) halves of the top line, per current view.
     pub(super) fn header_parts(&self) -> (String, String) {
@@ -518,6 +535,35 @@ const fn on_off(b: bool) -> &'static str {
     if b { "on" } else { "off" }
 }
 
+/// A point on the Charm pink→violet→cyan gradient at `frac` (0..1 around the
+/// border ring), swept by the animation `frame` so the band travels. Pure +
+/// truecolor; the visual-bell pulse (`charm_pulse_color`) maps it to a cell bg.
+/// Looped, so the gradient wraps seamlessly around the ring.
+fn charm_gradient(frac: f32, frame: u64) -> (u8, u8, u8) {
+    const STOPS: [(u8, u8, u8); 3] = [
+        (0xFF, 0x6A, 0xC1), // charm pink
+        (0xA4, 0x5F, 0xE8), // violet
+        (0x43, 0xE0, 0xE8), // cyan
+    ];
+    let count = STOPS.len();
+    // Sweep the sampled position by the frame (~0.08 stop-widths/tick).
+    let pos = (frame as f32).mul_add(0.08, frac).rem_euclid(1.0);
+    let scaled = pos * count as f32;
+    let lo = (scaled as usize) % count;
+    let hi = (lo + 1) % count;
+    let blend = scaled - scaled.floor();
+    let mix = |from: u8, to: u8| {
+        (f32::from(to) - f32::from(from))
+            .mul_add(blend, f32::from(from))
+            .round() as u8
+    };
+    (
+        mix(STOPS[lo].0, STOPS[hi].0),
+        mix(STOPS[lo].1, STOPS[hi].1),
+        mix(STOPS[lo].2, STOPS[hi].2),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use crate::app::App;
@@ -578,5 +624,20 @@ mod tests {
         // A near-max seed added to a non-zero frame must not overflow — the
         // call site wraps. (A raw `+` would panic here in a checked build.)
         let _ = app.agent_activity_span(AgentActivity::Working, u64::MAX);
+    }
+
+    // P3-1 visual bell: the pure Charm-gradient color fn.
+    #[test]
+    fn charm_gradient_is_pure_and_starts_at_charm_pink() {
+        // frame 0, frac 0 → the first stop (charm pink) exactly.
+        assert_eq!(super::charm_gradient(0.0, 0), (0xFF, 0x6A, 0xC1));
+        // Deterministic: identical inputs → identical output (a pure fn).
+        assert_eq!(
+            super::charm_gradient(0.42, 5),
+            super::charm_gradient(0.42, 5)
+        );
+        // The ring wraps seamlessly: frac 1.0 == frac 0.0 at any frame
+        // (`rem_euclid`), so there's no seam where the two ends meet.
+        assert_eq!(super::charm_gradient(1.0, 3), super::charm_gradient(0.0, 3));
     }
 }

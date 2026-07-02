@@ -222,6 +222,34 @@ pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
+/// `:notify test` — fire every notification channel on demand (bell, the Charm
+/// visual border pulse, and BOTH desktop mechanisms: the OS notifier + an OSC-9
+/// escape), bypassing `[notify]` gating so you can verify each works without
+/// waiting for a real agent transition (`docs/AGENT_AWARENESS_PLAN.md`). Any
+/// other argument prints usage. App-layer (reads the clock to start the pulse).
+pub(super) fn cmd_notify(app: &mut App, args: &str) -> Vec<Effect> {
+    if args.trim() != "test" {
+        app.state.flash_info("usage: :notify test");
+        return Vec::new();
+    }
+    // Start the border pulse now; `settle_visual_bell` animates + clears it (it
+    // re-arms its own deadline, so the command doesn't need `ctx`).
+    app.view.visual_bell = Some(crate::app::VisualBell {
+        start: std::time::Instant::now(),
+        frame: 0,
+    });
+    app.state
+        .flash_info("notify test: fired bell + visual + desktop (system + osc9)");
+    vec![Effect::Notify {
+        system: Some((
+            "spyc".to_string(),
+            "notification test — all channels".to_string(),
+        )),
+        osc9: Some("spyc — notification test (all channels)".to_string()),
+        bell: true,
+    }]
+}
+
 /// `:hooks [on|on!|off]` — manage agent status-hook consent for the current
 /// project: the escape hatch from the first-launch popup (e.g. an accidental
 /// `no`). `on` grants consent + installs the hooks for any running claude/codex

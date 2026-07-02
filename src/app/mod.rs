@@ -626,6 +626,17 @@ pub struct ChordHint {
     pub rows: Vec<(&'static str, &'static str)>,
 }
 
+/// A brief Charm-style border-pulse flash — the P3-1 visual bell. `start` times
+/// the ~half-second decay; `frame` is the animation step advanced in
+/// `settle_visual_bell` (a `&mut` settle — the pure draw can't read the clock)
+/// so the perimeter pulse can sweep its pink→purple→cyan gradient. `None` on
+/// `view.visual_bell` means no flash is active.
+#[derive(Clone, Copy, Debug)]
+pub struct VisualBell {
+    pub start: std::time::Instant,
+    pub frame: u64,
+}
+
 /// MVU end-state: the **ViewState** cluster — render ephemerals + derived
 /// caches + UI-layer state. Pure of OS handles (those live in [`Runtime`]) and
 /// of domain state (that lives in `AppState`). Owned by `App` as a disjoint
@@ -786,6 +797,12 @@ pub struct ViewState {
     /// can't read the clock) while ≥1 agent tab is Working. The pure draw maps
     /// it to a warm heat color for the per-tab dot.
     pub agent_anim_frame: u64,
+    /// Active Charm-gradient border-pulse flash (P3-1 visual bell), or `None`.
+    /// Started by `settle_agent_activity` on a Blocked/Done transition when
+    /// `[notify].visual` is set; advanced + cleared by `settle_visual_bell`. The
+    /// pure draw reads it to paint the perimeter ring — off by default, so idle
+    /// panes never arm it.
+    pub visual_bell: Option<VisualBell>,
     /// Process-lifetime constants for the activity HUD, snapshotted ONCE at
     /// construction so the pure `&self` render pass never reads the OS / env
     /// per frame (the render-purity contract): the pid (for `sample`/lldb),
@@ -794,6 +811,11 @@ pub struct ViewState {
     pub hud_pid: u32,
     pub hud_term: String,
     pub hud_truecolor: bool,
+    /// Whether spyc is running over SSH (`$SSH_CONNECTION`/`$SSH_TTY`/`$SSH_CLIENT`),
+    /// snapshotted once at construction (doesn't change mid-session). Drives the
+    /// P3-1 `desktop_via = "auto"` routing — OSC-9 (client-side) over SSH, the OS
+    /// notifier locally — so the pure `notification_for_transition` never reads env.
+    pub is_ssh: bool,
     /// Tab-completion / cycle state.
     // Module-private (type `TabState` is module-private).
     tab_state: Option<TabState>,
@@ -868,10 +890,14 @@ impl ViewState {
             pane_send_at: None,
             started_at: std::time::Instant::now(),
             agent_anim_frame: 0,
+            visual_bell: None,
             hud_pid: std::process::id(),
             hud_term: std::env::var("TERM").unwrap_or_else(|_| "?".to_string()),
             hud_truecolor: std::env::var("COLORTERM")
                 .is_ok_and(|c| c.contains("truecolor") || c.contains("24bit")),
+            is_ssh: std::env::var_os("SSH_CONNECTION").is_some()
+                || std::env::var_os("SSH_TTY").is_some()
+                || std::env::var_os("SSH_CLIENT").is_some(),
             tab_state: None,
             scroll_last: None,
             transcript_show_tool_calls: true,

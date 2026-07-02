@@ -13,7 +13,11 @@
 
 use std::time::{Duration, Instant};
 
-use super::{AGENT_STATUS_TTL, AgentKind, AgentStatusCache, App, Deadline, Message, RunCtx};
+use super::{
+    AGENT_STATUS_TTL, AgentKind, AgentStatusCache, App, Deadline, Effect, Message, RunCtx,
+    VisualBell,
+};
+use crate::config::{DesktopVia, NotifyConfig};
 use crate::pane::{AgentActivity, ReportedStatus};
 
 /// How long after a tab's last pane output it still counts as `Working`. Long
@@ -44,6 +48,118 @@ fn report_superseded_by_output(r: ReportedStatus, last_output_at: Option<Instant
         return false;
     }
     last_output_at.is_some_and(|o| o > r.at)
+}
+
+/// Total lifetime of a P3-1 visual-bell border pulse before it clears.
+const VISUAL_BELL_DURATION: Duration = Duration::from_millis(480);
+/// Cadence of the pulse's gradient sweep (~16 Hz). Armed only while a flash is
+/// live, so an idle pane never wakes for it.
+const VISUAL_BELL_FRAME: Duration = Duration::from_millis(60);
+
+/// What a status transition should trigger, after `[notify]` gating +
+/// focused-tab suppression. The pure output of [`notification_for_transition`]:
+/// `system` is `Some((summary, body))` when the OS notifier fires; `osc9` is
+/// `Some(message)` when the terminal-escape channel fires; `bell`/`visual` when
+/// those fire. All-off = nothing to do.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct NotifyPlan {
+    system: Option<(String, String)>,
+    osc9: Option<String>,
+    bell: bool,
+    visual: bool,
+}
+
+impl NotifyPlan {
+    /// No channel fired — the caller emits nothing.
+    const fn is_silent(&self) -> bool {
+        self.system.is_none() && self.osc9.is_none() && !self.bell && !self.visual
+    }
+}
+
+/// Which desktop-notification mechanisms fire for `via`, given whether spyc is
+/// running over SSH. Returns `(system, osc9)`. `Auto` routes to OSC-9 over SSH
+/// (so the ping reaches the *client* terminal, not the remote box) and the OS
+/// notifier locally — the "just works over SSH" default. Pure.
+const fn desktop_delivery(via: DesktopVia, is_ssh: bool) -> (bool, bool) {
+    match via {
+        DesktopVia::Auto => {
+            if is_ssh {
+                (false, true)
+            } else {
+                (true, false)
+            }
+        }
+        DesktopVia::System => (true, false),
+        DesktopVia::Osc9 => (false, true),
+        DesktopVia::Both => (true, true),
+    }
+}
+
+/// Decide what a tab's `old → new` activity transition should trigger, given the
+/// `[notify]` config, whether this tab is the one the user is actively watching
+/// (its pane owns the keyboard), and whether spyc is over SSH. Pure + testable.
+///
+/// Only a *fresh* transition INTO `Blocked` ("needs me") or `Done` (a finished
+/// turn) is notify-worthy; `Done` additionally requires `desktop_done` (so a
+/// user who finds per-turn pings noisy can be alerted on `Blocked` only). A
+/// focused tab is suppressed when `suppress_focused_tab` — no point pinging about
+/// an agent already on screen. The desktop mechanism(s) come from
+/// [`desktop_delivery`]. Returns a silent plan when nothing should fire.
+fn notification_for_transition(
+    old: AgentActivity,
+    new: AgentActivity,
+    cfg: &NotifyConfig,
+    tab_focused: bool,
+    is_ssh: bool,
+    label: &str,
+    tab_number: usize,
+) -> NotifyPlan {
+    let worthy = match new {
+        AgentActivity::Blocked => old != AgentActivity::Blocked,
+        AgentActivity::Done => old != AgentActivity::Done && cfg.desktop_done,
+        _ => false,
+    };
+    if !worthy || (cfg.suppress_focused_tab && tab_focused) {
+        return NotifyPlan::default();
+    }
+    let (want_system, want_osc9) = if cfg.desktop {
+        desktop_delivery(cfg.desktop_via, is_ssh)
+    } else {
+        (false, false)
+    };
+    let (system, osc9) = if want_system || want_osc9 {
+        let (summary, body) = notification_text(label, tab_number, new);
+        // OSC-9 takes one line; fold the two parts into it.
+        let osc9 = want_osc9.then(|| format!("{summary} — {body}"));
+        let system = want_system.then_some((summary, body));
+        (system, osc9)
+    } else {
+        (None, None)
+    };
+    NotifyPlan {
+        system,
+        osc9,
+        bell: cfg.bell,
+        visual: cfg.visual,
+    }
+}
+
+/// Compose the `(summary, body)` for a transition notification: a glanceable
+/// "which agent + what" summary plus the tab locator in the body. Only
+/// `Blocked` / `Done` reach here (see [`notification_for_transition`]); the
+/// fallback arm is a sane non-panicking default.
+fn notification_text(label: &str, tab_number: usize, new: AgentActivity) -> (String, String) {
+    match new {
+        AgentActivity::Blocked => (
+            format!("{label} needs you"),
+            format!("tab {tab_number} is blocked"),
+        ),
+        AgentActivity::Done => (
+            format!("{label} finished"),
+            format!("tab {tab_number} — done"),
+        ),
+        _ => (label.to_string(), format!("tab {tab_number}")),
+    }
 }
 
 impl App {
@@ -260,14 +376,22 @@ impl App {
     /// `AgentAnim` ticks the pulse while any tab is Working. When no tab is
     /// Working both are disarmed, so an all-idle pane set draws 0 fps (the idle
     /// invariant). Non-agent tabs are left `Unknown` (no dot).
-    pub(crate) fn settle_agent_activity(&mut self, now: Instant, ctx: &mut RunCtx) -> bool {
-        // Snapshot the anim epoch up front so the `pane_tabs` mutable borrow
-        // below doesn't overlap the `self.view` read.
+    pub(crate) fn settle_agent_activity(
+        &mut self,
+        now: Instant,
+        ctx: &mut RunCtx,
+    ) -> (bool, Vec<Effect>) {
+        // Snapshot the anim epoch + the notify inputs up front so the `pane_tabs`
+        // mutable borrow below doesn't overlap the `self.view` / `self.state`
+        // reads. `pane_focused` + the active tab index drive the P3-1
+        // focused-tab suppression; the config is cloned (5 bools, cheap).
         let anim_epoch = self.view.started_at;
-        // Only bother tracking `agent_status` transitions when a Lua handler is
-        // registered for the event (the common case has none → no per-tab
-        // bookkeeping). Collect (id, effective-status) during the borrow and
-        // fire after it drops (fire needs `&mut self`).
+        let pane_focused = self.state.pane_focused();
+        let is_ssh = self.view.is_ssh;
+        let notify_cfg = self.state.config.notify.clone();
+        // Only track `agent_status` transitions when a Lua handler wants the
+        // event (the common case has none → no per-tab bookkeeping). Collect
+        // during the borrow, fire after it drops (fire needs `&mut self`).
         let track_status = self.lua_wants_agent_status_event();
         let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
             ctx.scheduler.disarm(Deadline::AgentIdle);
@@ -276,15 +400,18 @@ impl App {
                 // No tabs → prune every stale baseline.
                 self.prune_agent_status_baselines(&std::collections::HashSet::new());
             }
-            return false;
+            return (false, Vec::new());
         };
+        let active_idx = tabs.active_index();
 
         let mut changed = false;
+        let mut effects: Vec<Effect> = Vec::new();
+        let mut start_visual = false;
         let mut earliest_flip: Option<Instant> = None;
         let mut any_working = false;
         let mut status_transitions: Vec<(String, AgentActivity)> = Vec::new();
         let mut live_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for entry in tabs.tabs_mut() {
+        for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
             let is_agent = crate::agent::detect(&entry.info.command).kind() != AgentKind::Other;
             // Drop a report that's no longer authoritative (expired, or the tab
             // resumed output after it) so state + `:why-status` stay honest. A
@@ -321,6 +448,36 @@ impl App {
             if new == AgentActivity::Working {
                 any_working = true;
             }
+            // P3-1 notification edge: compare `new` against `notified` (this
+            // settle owns it), NOT `activity` — the MCP `report_status` handler
+            // pre-sets `activity` for an instant dot, which would otherwise erase
+            // the Idle→Blocked edge before we see it (→ no ping). Decide against
+            // the old `notified`, then advance it.
+            if new != entry.info.notified {
+                let tab_focused = i == active_idx && pane_focused;
+                let plan = notification_for_transition(
+                    entry.info.notified,
+                    new,
+                    &notify_cfg,
+                    tab_focused,
+                    is_ssh,
+                    &entry.info.label,
+                    i + 1,
+                );
+                if !plan.is_silent() {
+                    if plan.system.is_some() || plan.osc9.is_some() || plan.bell {
+                        effects.push(Effect::Notify {
+                            system: plan.system,
+                            osc9: plan.osc9,
+                            bell: plan.bell,
+                        });
+                    }
+                    start_visual |= plan.visual;
+                }
+                entry.info.notified = new;
+            }
+            // Render field (the dot): the MCP handler may have already advanced it
+            // for an instant update; keep it in sync here either way.
             if entry.info.activity != new {
                 entry.info.activity = new;
                 changed = true;
@@ -366,6 +523,48 @@ impl App {
         } else {
             ctx.scheduler.disarm(Deadline::AgentAnim);
         }
+        // P3-1 visual bell: a Blocked/Done transition asked for a flash (and
+        // `[notify].visual` is on) → start (or restart) the Charm border pulse
+        // and arm its sweep tick. `settle_visual_bell` advances + clears it.
+        if start_visual {
+            self.view.visual_bell = Some(VisualBell {
+                start: now,
+                frame: 0,
+            });
+            ctx.scheduler
+                .arm(Deadline::VisualBell, now + VISUAL_BELL_FRAME);
+            changed = true;
+        }
+        (changed, effects)
+    }
+
+    /// Advance / decay the P3-1 visual-bell border pulse (a `&mut` settle point,
+    /// PRE-recv — the pure draw can't read the clock). Clears the flash once
+    /// [`VISUAL_BELL_DURATION`] elapses (disarming the tick, so an idle pane
+    /// returns to 0 dps), else advances the sweep `frame` and re-arms. Returns
+    /// whether the frame changed (the caller marks a redraw). A no-op — and a
+    /// defensive disarm — when no flash is active.
+    pub(crate) fn settle_visual_bell(&mut self, now: Instant, ctx: &mut RunCtx) -> bool {
+        let Some(bell) = self.view.visual_bell else {
+            ctx.scheduler.disarm(Deadline::VisualBell);
+            return false;
+        };
+        if now.saturating_duration_since(bell.start) >= VISUAL_BELL_DURATION {
+            self.view.visual_bell = None;
+            ctx.scheduler.disarm(Deadline::VisualBell);
+            return true;
+        }
+        let elapsed_ms = now.saturating_duration_since(bell.start).as_millis();
+        let frame = u64::try_from(elapsed_ms / VISUAL_BELL_FRAME.as_millis()).unwrap_or(0);
+        let changed = frame != bell.frame;
+        if changed {
+            self.view.visual_bell = Some(VisualBell {
+                start: bell.start,
+                frame,
+            });
+        }
+        ctx.scheduler
+            .arm(Deadline::VisualBell, now + VISUAL_BELL_FRAME);
         changed
     }
 }
@@ -574,5 +773,146 @@ mod tests {
             AgentActivity::Working,
             "done has no latch — output supersedes it"
         );
+    }
+
+    // P3-1: the pure transition → notification decision (the core of the ping).
+    // `false` = not the focused tab; `false` = not over SSH (so `auto` → system).
+    #[test]
+    fn notify_fires_on_blocked_and_done_transitions() {
+        use crate::config::NotifyConfig;
+        use crate::pane::AgentActivity::{Blocked, Done, Idle, Working};
+        let cfg = NotifyConfig::default(); // desktop(auto) + desktop_done on; bell/visual off.
+
+        // Idle → Blocked on a background tab, local → system "needs me" ping only.
+        let p = super::notification_for_transition(Idle, Blocked, &cfg, false, false, "codex", 2);
+        let (summary, body) = p.system.clone().expect("blocked pings the OS notifier");
+        assert!(summary.contains("codex"), "summary names the agent");
+        assert!(body.contains('2'), "body carries the tab locator");
+        assert!(p.osc9.is_none(), "auto+local doesn't use OSC-9");
+        assert!(!p.bell && !p.visual, "bell + visual are off by default");
+
+        // Working → Done also pings (desktop_done on by default).
+        let p = super::notification_for_transition(Working, Done, &cfg, false, false, "claude", 1);
+        assert!(p.system.is_some());
+    }
+
+    // The OSC-9 fallback: `auto` routes to OSC-9 (not the OS notifier) over SSH,
+    // so the ping reaches the client terminal — and the explicit modes obey.
+    #[test]
+    fn notify_desktop_delivery_routes_osc9_over_ssh() {
+        use super::desktop_delivery;
+        use crate::config::DesktopVia::{Auto, Both, Osc9, System};
+        // (system, osc9)
+        assert_eq!(
+            desktop_delivery(Auto, false),
+            (true, false),
+            "auto local → system"
+        );
+        assert_eq!(
+            desktop_delivery(Auto, true),
+            (false, true),
+            "auto SSH → OSC-9"
+        );
+        assert_eq!(
+            desktop_delivery(System, true),
+            (true, false),
+            "system forced even on SSH"
+        );
+        assert_eq!(
+            desktop_delivery(Osc9, false),
+            (false, true),
+            "osc9 forced even local"
+        );
+        assert_eq!(desktop_delivery(Both, false), (true, true));
+    }
+
+    #[test]
+    fn notify_auto_over_ssh_emits_osc9_not_system() {
+        use crate::config::NotifyConfig;
+        use crate::pane::AgentActivity::{Blocked, Idle};
+        let cfg = NotifyConfig::default(); // desktop_via = auto
+        // is_ssh = true → the desktop ping goes out as OSC-9, not the OS notifier.
+        let p = super::notification_for_transition(Idle, Blocked, &cfg, false, true, "codex", 2);
+        assert!(p.system.is_none(), "no OS notifier over SSH under auto");
+        let msg = p.osc9.expect("OSC-9 fires over SSH");
+        assert!(
+            msg.contains("codex") && msg.contains('2'),
+            "OSC-9 carries agent + tab"
+        );
+    }
+
+    #[test]
+    fn notify_suppressed_for_the_focused_tab() {
+        use crate::config::NotifyConfig;
+        use crate::pane::AgentActivity::{Blocked, Idle};
+        // Same transition, but the user is watching this tab → stay silent.
+        let cfg = NotifyConfig::default();
+        assert!(
+            super::notification_for_transition(Idle, Blocked, &cfg, true, false, "codex", 2)
+                .is_silent()
+        );
+    }
+
+    #[test]
+    fn notify_done_gated_by_desktop_done() {
+        use crate::config::NotifyConfig;
+        use crate::pane::AgentActivity::{Blocked, Done, Idle, Working};
+        let cfg = NotifyConfig {
+            desktop_done: false,
+            ..NotifyConfig::default()
+        };
+        // Done with desktop_done off → silent…
+        assert!(
+            super::notification_for_transition(Working, Done, &cfg, false, false, "codex", 3)
+                .is_silent()
+        );
+        // …but Blocked still fires.
+        assert!(
+            super::notification_for_transition(Idle, Blocked, &cfg, false, false, "codex", 3)
+                .system
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn notify_only_on_a_fresh_edge_not_a_repeat() {
+        use crate::config::NotifyConfig;
+        use crate::pane::AgentActivity::{Blocked, Done, Idle, Working};
+        let cfg = NotifyConfig::default();
+        // No edge (Blocked → Blocked, Done → Done) → silent: one ping per turn.
+        assert!(
+            super::notification_for_transition(Blocked, Blocked, &cfg, false, false, "x", 1)
+                .is_silent()
+        );
+        assert!(
+            super::notification_for_transition(Done, Done, &cfg, false, false, "x", 1).is_silent()
+        );
+        // Non-worthy transitions (resume / go quiet) never ping.
+        assert!(
+            super::notification_for_transition(Idle, Working, &cfg, false, false, "x", 1)
+                .is_silent()
+        );
+        assert!(
+            super::notification_for_transition(Working, Idle, &cfg, false, false, "x", 1)
+                .is_silent()
+        );
+    }
+
+    #[test]
+    fn notify_bell_only_config_rings_without_a_desktop_popup() {
+        use crate::config::NotifyConfig;
+        use crate::pane::AgentActivity::{Blocked, Idle};
+        let cfg = NotifyConfig {
+            desktop: false,
+            bell: true,
+            ..NotifyConfig::default()
+        };
+        let p = super::notification_for_transition(Idle, Blocked, &cfg, false, false, "codex", 1);
+        assert!(
+            p.system.is_none() && p.osc9.is_none(),
+            "no desktop notif when desktop is off"
+        );
+        assert!(p.bell, "the bell still rings");
+        assert!(!p.is_silent());
     }
 }

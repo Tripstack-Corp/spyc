@@ -244,6 +244,27 @@ spyc's workflow: browse files above, talk to Claude below.
 
   **`:why-status`** flashes the active tab's state, its source (self-reported
   vs output-timing), and seconds since last output, for debugging.
+- **Agent notifications** (`[notify]` config) — the "which agent needs me" ping,
+  fired the instant a pane transitions (0 delay, not a timer):
+  - **Desktop notification** naming the tab (e.g. *"codex needs you — tab 2 is
+    blocked"*) on `Blocked` and `Done`. **On by default.** `desktop_via` picks
+    how it's delivered — default **`"auto"`**: an **OSC-9 terminal escape over
+    SSH** (so it pops on your *client* terminal, where your eyes are) and the OS
+    notifier (`notify-rust`) locally. Force it with `"system"` (OS notifier — the
+    machine spyc runs on), `"osc9"` (terminal escape — needs iTerm2/kitty/WezTerm/
+    …), or `"both"`. Set `desktop = false` to silence, or `desktop_done = false`
+    to be pinged only when an agent is *blocked* (not on every finished turn).
+  - **Terminal bell** (`bell = true`, off by default) — rings alongside the
+    notification.
+  - **Visual bell** (`visual = true`, off by default) — a brief Charm-style
+    pink→purple→cyan gradient **border pulse** around the whole frame; a
+    tasteful, non-reflowing attention flash.
+  - **`suppress_focused_tab`** (on by default) stays quiet when the transitioning
+    tab is the one you're already watching — no point pinging about an agent
+    that's already on screen.
+  - **`:notify test`** fires every channel on demand (bell + visual + both desktop
+    mechanisms), bypassing the config gating — to verify your setup without waiting
+    for a real agent transition.
 - **^a |** vertical (left/right) split of the file area. Opens (50/50) with a
   **preview of the file under the cursor** (markdown rendered) in the right
   column. Press it again **on a different file** to swap the preview to that
