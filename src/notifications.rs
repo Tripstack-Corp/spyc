@@ -54,15 +54,54 @@ pub fn ring_bell() {
 /// DCS passthrough when inside tmux, mirroring `term_title`. Terminals without
 /// OSC 9 support silently ignore it; a failed stdout write is ignored.
 pub fn notify_osc9(message: &str) {
-    let clean: String = message.chars().filter(|c| !c.is_control()).collect();
-    let seq = format!("\x1b]9;{clean}\x07");
-    let wrapped = if std::env::var_os("TMUX").is_some() {
-        // Inner ESCs doubled, per tmux DCS passthrough (see `term_title::wrap`).
-        format!("\x1bPtmux;{}\x1b\\", seq.replace('\x1b', "\x1b\x1b"))
-    } else {
-        seq
-    };
+    let wrapped = osc9_sequence(message, std::env::var_os("TMUX").is_some());
     let mut out = io::stdout();
     let _ = out.write_all(wrapped.as_bytes());
     let _ = out.flush();
+}
+
+/// Build the OSC 9 notification byte sequence for `message`. Pure — the caller
+/// passes `in_tmux` so tests exercise both modes without touching the global
+/// `TMUX` env var (the `term_title::wrap` template). `message` is
+/// control-char-sanitized first: an embedded `\x1b`/`\x07` (the OSC terminator)
+/// could otherwise close the sequence early and inject arbitrary escapes. Inside
+/// tmux the whole thing is DCS-wrapped with its inner ESCs doubled.
+fn osc9_sequence(message: &str, in_tmux: bool) -> String {
+    let clean: String = message.chars().filter(|c| !c.is_control()).collect();
+    let seq = format!("\x1b]9;{clean}\x07");
+    if in_tmux {
+        format!("\x1bPtmux;{}\x1b\\", seq.replace('\x1b', "\x1b\x1b"))
+    } else {
+        seq
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn osc9_wraps_message_outside_tmux() {
+        assert_eq!(osc9_sequence("build done", false), "\x1b]9;build done\x07");
+    }
+
+    #[test]
+    fn osc9_strips_control_chars_so_an_escape_cant_break_out() {
+        // A tab name crafted to close the OSC early and inject a second escape
+        // (an OSC 52 clipboard write). The sanitizer must drop every control
+        // byte, leaving exactly one leading ESC and one terminating BEL.
+        let hostile = "tab\x07\x1b]52;c;ZXZpbA==\x07";
+        let seq = osc9_sequence(hostile, false);
+        assert_eq!(seq, "\x1b]9;tab]52;c;ZXZpbA==\x07");
+        assert_eq!(seq.matches('\x1b').count(), 1, "only the opening ESC");
+        assert_eq!(seq.matches('\x07').count(), 1, "only the terminating BEL");
+    }
+
+    #[test]
+    fn osc9_doubles_esc_and_wraps_in_dcs_inside_tmux() {
+        assert_eq!(
+            osc9_sequence("hi", true),
+            "\x1bPtmux;\x1b\x1b]9;hi\x07\x1b\\"
+        );
+    }
 }
