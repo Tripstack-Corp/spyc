@@ -83,6 +83,19 @@ ignore = [
     # portable-pty (which spyc uses for the embedded pane). No
     # alternative without forking portable-pty.
     { id = "RUSTSEC-2017-0008", reason = "unmaintained transitive via portable-pty; no alternative" },
+    # quick-xml < 0.41.0 — XML-parse DoS advisories (RUSTSEC-2026-0194 quadratic
+    # duplicate-attribute check; RUSTSEC-2026-0195 unbounded namespace-declaration
+    # allocation). Two copies in the tree, neither reachable under the advisory's
+    # remote-untrusted-XML threat model:
+    #   * 0.37.x via notify-rust -> tauri-winrt-notification — a Windows-only
+    #     (cfg(windows)) backend, not compiled on our macOS/Linux targets.
+    #   * 0.38.x via syntect -> plist — parses TRUSTED bundled theme/syntax assets,
+    #     not untrusted remote XML.
+    # spyc is a local single-user TUI with no remote unauthenticated XML input.
+    # No upgrade path until syntect/plist and tauri-winrt bump to quick-xml
+    # >= 0.41.0 — revisit then (tracked in docs/RELEASE_ENGINEERING.md supply-chain).
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml XML-DoS; unreachable (win-only notify + trusted-theme syntect); no upgrade path < 0.41" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml XML-DoS; unreachable (win-only notify + trusted-theme syntect); no upgrade path < 0.41" },
 ]
 # cargo-deny's native "unmaintained" source (separate from the RUSTSEC
 # advisory-db) reports a maintainer EOL declaration with the synthetic id
