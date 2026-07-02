@@ -47,7 +47,11 @@ do from here?", modeled on Neovim's which-key.
 - **dd / Ndd** remove the cursor entry (+ N-1 below) to the graveyard,
   confirming with `y` (bare `d` arms the chord, vim-style; any other key
   cancels)
-- **V** open `$EDITOR` in the top pane — bottom pane stays visible
+- **V** open `$EDITOR` in the top pane — bottom pane stays visible.
+  Focus nav still works while it's open: `^a-j`/`^a-k` to/from the bottom
+  pane, `^a-h`/`^a-l` between split columns (same workflow as `D` below);
+  other pane commands (new/close/rename tab, send, …) stay paused while
+  editing — quit the editor to use them
 - **D** open the cursor file in spyc's in-app pager mounted in the
   top-pane slot — bottom pane stays visible. Same loader as `Enter`
   (syntax highlighting, markdown render, hex dump for

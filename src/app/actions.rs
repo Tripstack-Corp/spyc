@@ -114,7 +114,25 @@ impl App {
         // see the status line those commands rely on. The chord is already
         // fully consumed by the resolver, so nothing leaks to the editor;
         // swallow the Pane-tier action with a hint. Quit the editor to resume.
-        if matches!(self.state.focus, state::Focus::Overlay) && action.tier() == Tier::Pane {
+        // EXCEPTION: pure focus-nav — `^a j`/`^a k` (to/from the bottom pane)
+        // and `^a h`/`^a l` (between split columns). These move the keyboard,
+        // not pane state, and every region they target stays visible while `V`
+        // runs: the editor only replaces its own column's top area, so the
+        // bottom pane and the other split column keep rendering (and the
+        // overlay stays pinned to its column). This is the same workflow `D`'s
+        // pager already allows (it never hits this gate — `Focus::Pager`, not
+        // `Focus::Overlay`). Without the exemption the `^a` chord armed (the
+        // which-key popup even appeared) but the completing key did nothing.
+        if matches!(self.state.focus, state::Focus::Overlay)
+            && action.tier() == Tier::Pane
+            && !matches!(
+                action,
+                Action::PaneFocusDown
+                    | Action::PaneFocusUp
+                    | Action::VsplitFocusLeft
+                    | Action::VsplitFocusRight
+            )
+        {
             self.state
                 .flash_info("pane commands paused while editing — quit the editor first");
             return Ok(Vec::new());

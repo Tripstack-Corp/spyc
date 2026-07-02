@@ -637,3 +637,94 @@ fn closing_a_running_tab_confirms_first() {
         assert_eq!(count(&app), 1, "y closes the running tab");
     });
 }
+
+/// Regression: `V`'s top-overlay editor pauses Pane-tier actions (new tab,
+/// rename, etc. would mutate the pane hidden behind the editor) — but the
+/// bottom pane STAYS VISIBLE while `V` is open (only the top file-list area is
+/// replaced), so pure focus-switch (`^a j` / `^a k`) must still work: it moves
+/// the keyboard, not the pane state. Before the fix a user could arm the `^a`
+/// chord (the which-key popup even appeared) but the completing `j`/`k` did
+/// nothing — swallowed by the same gate that blocks `^a c`/`^a x`/etc.
+#[test]
+fn pane_focus_switch_still_works_while_v_editor_is_open() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        app.open_pane_tab("cat"); // the bottom pane, visible beside V
+
+        // Simulate `V`: a live top-overlay pty + Focus::Overlay. `apply_inner`'s
+        // gate only reads `state.focus`, so this is a faithful stand-in.
+        let wake = app.make_pane_wake();
+        let overlay = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
+            .expect("spawn overlay");
+        app.runtime.top_overlay = Some(overlay);
+        app.state.focus = state::Focus::Overlay;
+
+        // A genuinely mutating Pane-tier action stays paused.
+        let count = |app: &App| app.runtime.pane_tabs.as_ref().map_or(0, |t| t.tabs().len());
+        let tabs_before = count(&app);
+        app.apply(&Action::PaneNewTab).unwrap();
+        assert_eq!(
+            count(&app),
+            tabs_before,
+            "mutating pane actions stay paused while editing"
+        );
+        assert!(matches!(app.state.focus, state::Focus::Overlay));
+
+        // Pure focus-switch is exempt: `^a j` moves the keyboard to the
+        // already-visible bottom pane...
+        app.apply(&Action::PaneFocusDown).unwrap();
+        assert!(
+            matches!(app.state.focus, state::Focus::Pane),
+            "^a j must switch to the bottom pane even while the editor is open"
+        );
+
+        // ...and `^a k` climbs back to the editor.
+        app.apply(&Action::PaneFocusUp).unwrap();
+        assert!(
+            matches!(app.state.focus, state::Focus::Overlay),
+            "^a k returns to the editor"
+        );
+    });
+}
+
+/// Companion of the above for the vertical split: `^a h` / `^a l` (column
+/// focus) are pure focus nav too, so they're also exempt from the V-editor
+/// pause — you can switch columns while an editor is open in one of them (the
+/// overlay stays pinned to its own column and keeps rendering). Asserted on
+/// `focused_side()` (the active split column), which the switch moves; before
+/// the fix the action was swallowed and the column never changed.
+#[test]
+fn vsplit_column_focus_switch_still_works_while_v_editor_is_open() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        // A vsplit with a right commander; focus the LEFT column.
+        app.open_second_commander_at(&dir);
+        app.apply(&Action::VsplitFocusLeft).unwrap();
+        assert_eq!(app.focused_side(), state::Side::Left);
+
+        // Open a `V` editor in the left column (its own top-overlay slot).
+        let wake = app.make_pane_wake();
+        let overlay = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
+            .expect("spawn overlay");
+        app.runtime.top_overlay = Some(overlay);
+        app.state.focus = state::Focus::Overlay;
+
+        // `^a l` switches to the right column even with the editor open...
+        app.apply(&Action::VsplitFocusRight).unwrap();
+        assert_eq!(
+            app.focused_side(),
+            state::Side::Right,
+            "^a l must switch columns even while a V editor is open in the left"
+        );
+
+        // ...and `^a h` switches back to the left (editor) column.
+        app.apply(&Action::VsplitFocusLeft).unwrap();
+        assert_eq!(app.focused_side(), state::Side::Left, "^a h switches back");
+    });
+}
