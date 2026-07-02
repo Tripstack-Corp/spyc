@@ -113,6 +113,11 @@
   protect the lower status — or if a user creates a new pane with ^a-c while
   in V, focus should go to the status line, since other commands/statuses rely
   on it. Verify this nuance is actually covered before treating it as closed.
+- claude cli should always be pinned to bottom of the terminal - it seems to get
+  scrolled halfway up sometimes and Claude PTY can get messed up — scrollback
+  accumulates rendering artifacts from Claude CLI's progress bars, spinners, and
+  cursor repositioning. ^L redraws the visible screen but can't fix corrupted
+  scrollback. Solution t.b.d.
 
 ### BIGGER ###
 - task runner should be equivalent to a lower pane and be able to push down
@@ -123,6 +128,11 @@
   disable masks and have an editable list of them
 - yanking from the pane should support # so that you can yank the last 150
   lines, etc.
+- so we could have a concept of one spyc per agent and the agents could be tied
+    - would require that we get rid of all the hardcoded "left / right" references
+    - would mean that the spyc loaded in left or right could change - so this
+      is more abstract but better
+    - maybe a list of spyc sessions?
 - Spencer says neovim's help is less overwhelming than ours and that we can
   probably move a bunch of commands to `:` commands when they're used less
   frequently (e.g. graveyard — a user could always map these if they wanted,
