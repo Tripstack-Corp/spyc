@@ -27,6 +27,19 @@ use crate::pane::{AgentActivity, ReportedStatus};
 /// the P1 semantic hook (`docs/AGENT_AWARENESS_PLAN.md`), not output timing.
 const AGENT_ACTIVE_WINDOW: Duration = Duration::from_secs(2);
 
+/// P1-2 scrape-fallback hysteresis: a scrape-detected state must match this
+/// many consecutive *output events* (never a poll tick — spyc re-scans only
+/// when the pane actually produces new bytes) before it's trusted enough to
+/// flip the dot. Adapts herdr's timer-based debounce to spyc's event-driven
+/// drain: fewer, real events beat a fixed-interval poll for the same
+/// flicker-killing purpose.
+const SCRAPE_CONFIRM_COUNT: u8 = 2;
+
+/// P1-2 running scrape-hysteresis candidate: `(state, consecutive-match count)`.
+type ScrapeCandidate = Option<(AgentActivity, u8)>;
+/// P1-2 scanned / confirmed scrape result: `(state, optional `:why-status` hint)`.
+type ScrapeResult = Option<(AgentActivity, Option<&'static str>)>;
+
 /// Cadence of the "spicy pulse" working animation (~4 Hz). Armed only while
 /// ≥1 agent tab is `Working`, so an all-idle pane set still draws 0 fps.
 const AGENT_ANIM_INTERVAL: Duration = Duration::from_millis(250);
@@ -348,13 +361,18 @@ impl App {
     }
 
     /// The authority resolution (P1, testable core): a live semantic
-    /// [`ReportedStatus`] wins over the output-timing fallback. A report is
-    /// *live* until it expires or the tab produces output **after** it (the
-    /// agent resumed → timing takes back over). When no report is live, fall
-    /// back to [`Self::activity_for`]. Non-agent tabs are always `Unknown`
-    /// (a report targeting one is ignored — dots are agent-only).
+    /// [`ReportedStatus`] wins over the P1-2 scrape fallback, which wins over
+    /// the output-timing fallback. A report is *live* until it expires or the
+    /// tab produces output **after** it (the agent resumed → timing takes back
+    /// over). `scrape` is the tab's CONFIRMED scrape-inferred state (already
+    /// hysteresis-gated by `scrape_candidate_after`); it's a fallback for
+    /// agents with no live report, never consulted while one is authoritative
+    /// (the caller clears it the instant a report exists — see
+    /// `settle_agent_activity`). Non-agent tabs are always `Unknown` (a report
+    /// targeting one is ignored — dots are agent-only).
     fn effective_activity(
         reported: Option<ReportedStatus>,
+        scrape: Option<AgentActivity>,
         is_agent: bool,
         last_output_at: Option<Instant>,
         now: Instant,
@@ -373,7 +391,59 @@ impl App {
                 return r.status;
             }
         }
+        if let Some(s) = scrape {
+            return s;
+        }
         Self::activity_for(is_agent, last_output_at, now)
+    }
+
+    /// P1-2 pure hysteresis step: given the prior `(state, consecutive-match
+    /// count)` candidate and a fresh `detect_rules::scan` result, return the
+    /// updated candidate to store plus the CONFIRMED status (once the same
+    /// state has matched `SCRAPE_CONFIRM_COUNT` times in a row). A scan miss
+    /// (`None`) immediately drops both — a rule ceasing to match (the prompt
+    /// scrolled away / was answered) should clear the guess right away, not
+    /// linger through its own hysteresis.
+    fn scrape_candidate_after(
+        prior: ScrapeCandidate,
+        scanned: ScrapeResult,
+    ) -> (ScrapeCandidate, ScrapeResult) {
+        let Some((state, hint)) = scanned else {
+            return (None, None);
+        };
+        let count = match prior {
+            Some((s, c)) if s == state => c.saturating_add(1),
+            _ => 1,
+        };
+        let confirmed = (count >= SCRAPE_CONFIRM_COUNT).then_some((state, hint));
+        (Some((state, count)), confirmed)
+    }
+
+    /// P1-2 producer: refresh a tab's scrape-fallback status from its current
+    /// screen. Called on each output event (`drain_pane_output`) — the only
+    /// moment the screen can have changed. A no-op unless the tab is an agent
+    /// with a non-empty [`detection_rules`](crate::agent::AgentProfile::detection_rules)
+    /// ruleset AND has no live self-report (an empty ruleset short-circuits
+    /// *before* any screen read, so hooked agents like claude/codex pay
+    /// nothing). Scans the LIVE visible screen — never scrollback, so a prompt
+    /// that was answered and scrolled off can't linger as a false `Blocked` —
+    /// and folds the result through the hysteresis in [`Self::scrape_candidate_after`].
+    pub(crate) fn update_tab_scrape(entry: &mut crate::pane::tabs::TabEntry) {
+        // A live report is authoritative (`settle_agent_activity` also clears
+        // any scrape state while one exists); don't do the scan work behind it.
+        if entry.info.reported.is_some() {
+            return;
+        }
+        let rules = crate::agent::detect(&entry.info.command).detection_rules();
+        if rules.is_empty() {
+            return;
+        }
+        let lines = entry.pane.visible_lines();
+        let scanned = crate::agent::detect_rules::scan(&lines, rules);
+        let (candidate, confirmed) =
+            Self::scrape_candidate_after(entry.info.scrape_candidate, scanned);
+        entry.info.scrape_candidate = candidate;
+        entry.info.scrape_status = confirmed;
     }
 
     /// Agent-activity (P0): derive each agent tab's [`AgentActivity`] from the
@@ -436,8 +506,17 @@ impl App {
             {
                 entry.info.reported = None;
             }
+            // P1-2: a live report is now (or still) authoritative — drop any
+            // scrape guess so it can't resurface stale if the report later
+            // expires (the tab would then correctly fall through to a FRESH
+            // scan on its next output event, not a carried-over one).
+            if entry.info.reported.is_some() {
+                entry.info.scrape_candidate = None;
+                entry.info.scrape_status = None;
+            }
             let new = Self::effective_activity(
                 entry.info.reported,
+                entry.info.scrape_status.map(|(s, _)| s),
                 is_agent,
                 entry.info.last_output_at,
                 now,
@@ -677,6 +756,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 report(AgentActivity::Working, base, base + Duration::from_secs(60)),
+                None,
                 true,
                 None,
                 base,
@@ -687,6 +767,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 report(AgentActivity::Blocked, base, base + Duration::from_secs(60)),
+                None,
                 true,
                 Some(base),
                 base + Duration::from_secs(1),
@@ -698,6 +779,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 report(AgentActivity::Working, base, base + Duration::from_secs(1)),
+                None,
                 true,
                 None,
                 base + Duration::from_secs(2),
@@ -709,6 +791,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 report(AgentActivity::Idle, base, base + Duration::from_secs(60)),
+                None,
                 true,
                 Some(later),
                 later,
@@ -719,12 +802,82 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 report(AgentActivity::Working, base, base + Duration::from_secs(60)),
+                None,
                 false,
                 None,
                 base,
             ),
             AgentActivity::Unknown
         );
+    }
+
+    // P1-2: the scrape fallback sits BETWEEN a live report and output timing —
+    // consulted only when there's no report, and itself beaten by one.
+    #[test]
+    fn effective_activity_scrape_fallback_sits_between_report_and_timing() {
+        use crate::pane::AgentActivity;
+        use std::time::{Duration, Instant};
+        let base = Instant::now();
+
+        // No report, no output → timing alone would say Idle; scrape overrides.
+        assert_eq!(
+            App::effective_activity(None, Some(AgentActivity::Blocked), true, None, base),
+            AgentActivity::Blocked
+        );
+        // A live report still wins over a scrape guess.
+        let report = Some(crate::pane::ReportedStatus {
+            status: AgentActivity::Working,
+            at: base,
+            expiry: base + Duration::from_secs(60),
+        });
+        assert_eq!(
+            App::effective_activity(report, Some(AgentActivity::Blocked), true, None, base),
+            AgentActivity::Working
+        );
+        // No scrape guess either → falls all the way through to timing.
+        assert_eq!(
+            App::effective_activity(None, None, true, None, base),
+            AgentActivity::Idle
+        );
+        // Non-agent tab ignores scrape too (dots are agent-only).
+        assert_eq!(
+            App::effective_activity(None, Some(AgentActivity::Blocked), false, None, base),
+            AgentActivity::Unknown
+        );
+    }
+
+    // P1-2 hysteresis: N consecutive agreeing scans confirm; a disagreement
+    // resets the count; a miss clears everything immediately (no lingering
+    // stale guess once the matched text scrolls away / gets answered).
+    #[test]
+    fn scrape_candidate_after_requires_consecutive_agreement() {
+        use crate::pane::AgentActivity;
+
+        // First match ever → becomes the candidate, not yet confirmed
+        // (SCRAPE_CONFIRM_COUNT is 2).
+        let (candidate, confirmed) =
+            App::scrape_candidate_after(None, Some((AgentActivity::Blocked, Some("hint"))));
+        assert_eq!(candidate, Some((AgentActivity::Blocked, 1)));
+        assert_eq!(confirmed, None);
+
+        // Same state again → count hits the threshold → confirmed.
+        let (candidate, confirmed) =
+            App::scrape_candidate_after(candidate, Some((AgentActivity::Blocked, Some("hint"))));
+        assert_eq!(candidate, Some((AgentActivity::Blocked, 2)));
+        assert_eq!(confirmed, Some((AgentActivity::Blocked, Some("hint"))));
+
+        // A different state resets the count to 1, not accumulating onto the
+        // old one.
+        let (candidate, confirmed) =
+            App::scrape_candidate_after(candidate, Some((AgentActivity::Working, None)));
+        assert_eq!(candidate, Some((AgentActivity::Working, 1)));
+        assert_eq!(confirmed, None);
+
+        // A miss (rule no longer matches) clears both immediately — no
+        // hysteresis on the way down.
+        let (candidate, confirmed) = App::scrape_candidate_after(candidate, None);
+        assert_eq!(candidate, None);
+        assert_eq!(confirmed, None);
     }
 
     // A `blocked` report is LATCHED: neither output NOR its TTL supersedes it —
@@ -749,7 +902,7 @@ mod tests {
         // waits) does NOT supersede — the dot stays Blocked.
         let later = base + Duration::from_secs(30);
         assert_eq!(
-            App::effective_activity(blocked, true, Some(later), later),
+            App::effective_activity(blocked, None, true, Some(later), later),
             AgentActivity::Blocked,
             "blocked is latched — prompt redraws must not bounce it to working"
         );
@@ -763,7 +916,7 @@ mod tests {
             expiry: base + Duration::from_secs(1),
         });
         assert_eq!(
-            App::effective_activity(stale, true, None, base + Duration::from_secs(600)),
+            App::effective_activity(stale, None, true, None, base + Duration::from_secs(600)),
             AgentActivity::Blocked,
             "blocked has no TTL — it stays until answered"
         );
@@ -778,6 +931,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 done,
+                None,
                 true,
                 Some(base + Duration::from_millis(200)),
                 base + Duration::from_millis(300),

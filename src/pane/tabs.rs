@@ -191,6 +191,21 @@ pub struct TabInfo {
     /// crosses panes restored together (they all spawn within the same second).
     /// `None` for non-claude tabs and for a fresh (never-resumed) claude pane.
     pub claude_session_id: Option<String>,
+    /// P1-2 scrape-fallback hysteresis: the last `(state, consecutive-match
+    /// count)` a `detect_rules::scan` produced for this tab, across real
+    /// output events (never a poll). Lets `scrape_candidate_after` require
+    /// `SCRAPE_CONFIRM_COUNT` consecutive agreeing scans before promoting a
+    /// guess into [`Self::scrape_status`] — kills flicker from a transient
+    /// line of scrolling text. `None` when the last scan found no match, or
+    /// the tab has no live report to fall back from.
+    pub scrape_candidate: Option<(AgentActivity, u8)>,
+    /// P1-2 CONFIRMED scrape-inferred status (state + `:why-status` hint),
+    /// once `scrape_candidate` reaches the confirm threshold. Third-tier input
+    /// to `effective_activity` (self-report > this > output timing). Cleared
+    /// the instant a live `report_status` self-report exists for this tab —
+    /// a report always wins, and scrape must not accumulate a stale guess
+    /// behind one that could resurface if the report later expires.
+    pub scrape_status: Option<(AgentActivity, Option<&'static str>)>,
 }
 
 impl TabInfo {
@@ -225,6 +240,8 @@ impl TabInfo {
             spawn_epoch_secs: crate::sysinfo::epoch_secs(),
             codex_session_id: None,
             claude_session_id: None,
+            scrape_candidate: None,
+            scrape_status: None,
         }
     }
 }

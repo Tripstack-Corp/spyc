@@ -208,11 +208,17 @@ pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
             AgentActivity::Done => "done",
             AgentActivity::Unknown => "unknown",
         };
-        // A live report is authoritative; otherwise it's the timing fallback.
+        // Priority: a live self-report wins, then the P1-2 scrape fallback,
+        // then output timing (`effective_activity`'s exact order).
         let source = if info.reported.is_some() {
-            "self-reported"
+            "self-reported".to_string()
+        } else if let Some((_, hint)) = info.scrape_status {
+            match hint {
+                Some(h) => format!("scrape-fallback: {h}"),
+                None => "scrape-fallback".to_string(),
+            }
         } else {
-            "output-timing"
+            "output-timing".to_string()
         };
         format!("why-status [{}]: {state} ({source}) — {age}", info.label)
     } else {
@@ -375,15 +381,25 @@ fn activity_dump_lines(app: &App) -> Vec<String> {
         ));
         out.push(format!("    command: {}", info.command));
         out.push(format!("    cwd: {}", info.cwd.display()));
-        // The crux: live self-report vs the output-timing fallback.
-        match info.reported {
-            Some(r) => out.push(format!(
+        // The crux: live self-report > P1-2 scrape fallback > output timing.
+        match (info.reported, info.scrape_status) {
+            (Some(r), _) => out.push(format!(
                 "    source: SELF-REPORT status={} set {:.1}s ago, expires in {:.0}s",
                 state_str(r.status),
                 r.at.elapsed().as_secs_f32(),
                 r.expiry.saturating_duration_since(now).as_secs_f32(),
             )),
-            None => out.push("    source: output-timing (no live report)".to_string()),
+            (None, Some((s, hint))) => out.push(format!(
+                "    source: SCRAPE-FALLBACK status={}{}",
+                state_str(s),
+                match hint {
+                    Some(h) => format!(" ({h})"),
+                    None => String::new(),
+                },
+            )),
+            (None, None) => {
+                out.push("    source: output-timing (no live report)".to_string());
+            }
         }
         match info.last_output_at {
             Some(at) => out.push(format!(

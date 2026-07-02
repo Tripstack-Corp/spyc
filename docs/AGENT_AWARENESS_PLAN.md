@@ -47,11 +47,21 @@ stays focused on what's left.
   spawn-proximity (fixes the #607 crossed-conversations class). Claude-only today
   (only its hooks carry the id in stdin). *Code:* `src/mcp/mod.rs`,
   `src/mcp/protocol.rs`, `src/app/mcp.rs`, `src/mcp_cmd.rs`.
+- **P1-2 — data-driven detection manifest (the scrape fallback)** (v1.94.0). A
+  declarative per-`AgentProfile` ruleset (`agent::detect_rules`: `Region` +
+  `Matcher` + priority-ordered `DetectionRule`) scanned on each output event for
+  an agent with rules **and no live report** — the third detection tier, strictly
+  below self-report and above output timing (`effective_activity`). Event-driven
+  hysteresis (`scrape_candidate_after`, `SCRAPE_CONFIRM_COUNT` consecutive
+  agreeing scans) kills flicker; scans the live visible screen only (no stale
+  scrollback); `:why-status` / `:activity dump` label the `scrape-fallback`
+  source. Ships one verified rule — gemini's `Allow execution of:` approval
+  prompt → `Blocked` (gemini has no `status_hooks`). *Code:*
+  `src/agent/detect_rules.rs`, `src/agent/mod.rs`, `src/app/agent_status.rs`,
+  `src/app/streaming.rs`, `src/pane/tabs.rs`.
 
 **Remaining** — the live scope this charter still tracks:
 
-- **P1-2** — data-driven detection manifest (the scrape *fallback* for agents
-  spyc can't auto-hook).
 - **P2** — orchestration: event hub + wait/subscribe + read/send (the capability
   gap; the highest-ceiling item).
 
@@ -122,34 +132,33 @@ P3-1)*.
 
 ---
 
-## Phase 1 (remaining) — Reliable detection: the fallback
+## Phase 1 — Reliable detection *(shipped)*
 
-The self-report core (P1-1) and live session-identity capture (P1-3) shipped;
-what's left is the graceful-degradation scrape fallback for agents spyc can't
-hook.
+All three detection tiers shipped: P1-1 self-report (the primary), P1-3 live
+session-id, and P1-2 the scrape fallback below.
 
-**P1-2 · Data-driven detection manifest (the fallback).**
-For agents that don't self-report, replace the imperative per-profile scrape with
-a declarative ruleset on `AgentProfile`: priority-ordered rules, each with a
-`region` (`bottom_non_empty_lines(N)` / `after_last_horizontal_rule` /
-`osc_title` / `osc_progress`), a matcher (`contains` / `regex`, composed
-`any`/`all`/`not`), a target state, and a `visible_blocker` hint. Add the
-debounce/hysteresis herdr tuned (≈3 idle confirmations @ 100ms, cap ~700ms) to
-kill flicker. Region-/OSC-scoped scanning beats spyc's current fixed-slice scan.
-*Touches:* `src/agent/` (profile gains an optional ruleset), `agent_status.rs`
-(one engine drives all agents). *Effort: med.*
-*Better-than-herdr:* a fallback, not the primary — so an agent UI change degrades
-gracefully instead of breaking the headline feature.
+**P1-2 · Data-driven detection manifest (the fallback). — SHIPPED (v1.94.0).**
+A declarative per-`AgentProfile` ruleset (`agent::detect_rules`: a `Region`, a
+`Matcher`, and priority-ordered `DetectionRule`s each with a `visible_blocker`
+hint), scanned on each output event for an agent that has rules **and** no live
+report — the third tier of `effective_activity`, strictly below self-report and
+above output timing. Event-driven hysteresis (`scrape_candidate_after`:
+`SCRAPE_CONFIRM_COUNT` consecutive agreeing scans — herdr's timer debounce
+adapted to spyc's output-event drain) kills flicker; it scans the **live visible
+screen only** (never scrollback, so an answered prompt that scrolled off can't
+linger as a false `Blocked`), and `:why-status` / `:activity dump` label the
+`scrape-fallback` source. Ships one **verified** rule: gemini's `Allow execution
+of:` approval prompt → `Blocked` (gemini has no `status_hooks`); every other
+agent defaults to an empty ruleset — no guessing at UI text spyc hasn't observed
+(worse than no fallback). Deliberately **second-class**: a live report always
+wins (`settle_agent_activity` clears any scrape guess the instant one exists), so
+spyc never re-enters herdr's fragility class as the *primary* path.
 *Use cases:* an agent spyc **can't** auto-hook still gets a live dot instead of
-going dark — a `gemini` / `zot` / `aider` pane (no `status_hooks()`), or a
-**wrapper-hidden** Claude/codex (`nix`, Bubblewrap, Happy) whose hook env didn't
-propagate. This is exactly the gap cmux shipped blind into — *"sidebar agent status
-is hook-only with no fallback … codex agents go silent when hooks miss"*
-([cmux #3749](https://github.com/manaflow-ai/cmux/issues/3749)) — and the same
-wrapper problem herdr band-aids with a manual `HERDR_AGENT=claude` env hint. The
-declarative ruleset is spyc's safety net: a missed hook degrades to a scrape guess,
-never to nothing. Keep it clearly second-class (a report always wins) so we never
-re-enter herdr's fragility class as the *primary* path.
+going dark — a `gemini` pane (no `status_hooks()`), or a **wrapper-hidden**
+Claude/codex (`nix`, Bubblewrap, Happy) whose hook env didn't propagate — exactly
+the gap cmux shipped blind into (*"sidebar agent status is hook-only with no
+fallback … codex agents go silent when hooks miss"*,
+[cmux #3749](https://github.com/manaflow-ai/cmux/issues/3749)).
 
 **P1-3 · Live session-identity capture. — SHIPPED (v1.93.0).**
 The status-hook reporter (`spyc --report-status`) already reads Claude's hook
@@ -260,10 +269,7 @@ has it. *Code:* `src/app/session.rs`, `src/app/scheduler.rs`, `src/state/session
 ## Sequencing & rationale
 
 ```
-P0 ✅  ──►  P1-1 ✅  ──►  P1-3 session-id ✅ · P1-2 fallback (remaining)
-                              │
-                              ▼
-                         P2 (event hub + wait/subscribe + read/send)
+P0 ✅  ──►  P1-1 ✅  P1-3 ✅  P1-2 ✅  ──►  P2 (event hub + wait/subscribe + read/send)
                               │
                               ▼
                          P3-1 ✅        P3-2 ✅ crash-sufficient autosave
@@ -271,9 +277,9 @@ P0 ✅  ──►  P1-1 ✅  ──►  P1-3 session-id ✅ · P1-2 fallback (re
 
 - **P0 (shipped)** — you can't ship or debug status without a vocabulary, a
   render surface, and `:why-status`.
-- **P1 is the moat** — semantic-first detection (P1-1) + live session id (P1-3)
-  shipped, the reliability win over herdr; the scrape fallback (P1-2) rounds it
-  out before the orchestration layer leans on it.
+- **P1 is the moat (shipped)** — semantic-first detection (P1-1) + live session
+  id (P1-3) + the scrape fallback (P1-2) are the reliability win over herdr;
+  P1-2 rounds it out below the orchestration layer.
 - **P2 is the capability gap** — highest ceiling, but it depends on P1's status
   signal being trustworthy.
 - **P3 is independent polish (both shipped)** — P3-1 landed after P0; P3-2 (the

@@ -372,6 +372,11 @@ impl App {
                     // Output stamp for EVERY tab (active + background) — the
                     // activity dot tracks live output, not just unseen output.
                     entry.info.last_output_at = Some(now);
+                    // P1-2 scrape fallback: the screen just changed, so re-scan
+                    // it for a status cue (e.g. gemini's approval prompt) for any
+                    // agent with detection rules + no live report. No-op (no
+                    // screen read) for hooked agents / empty rulesets.
+                    Self::update_tab_scrape(entry);
                     if i == active_idx {
                         pane_had_output = true;
                     } else {

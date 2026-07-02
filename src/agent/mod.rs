@@ -12,6 +12,7 @@
 //! meet at [`profile_for`] (kind → profile, for restored tabs) and
 //! [`detect`] (command → profile, for live panes).
 
+pub mod detect_rules;
 pub mod resume;
 
 use std::collections::HashSet;
@@ -22,6 +23,7 @@ use ratatui::text::Line;
 use crate::pane::Pane;
 use crate::state::sessions::{AgentKind, SessionCandidate};
 use crate::ui::theme::Theme;
+use detect_rules::DetectionRule;
 
 /// How a restored pane re-establishes its conversation.
 pub enum ResumeAction {
@@ -177,6 +179,17 @@ pub trait AgentProfile: Sync {
     /// timing only (no semantic working/blocked/done self-report via hooks).
     fn status_hooks(&self) -> Option<StatusHookSupport> {
         None
+    }
+
+    /// P1-2 scrape fallback: priority-ordered pane-text detection rules for an
+    /// agent that can't (or doesn't yet) self-report — consulted only while no
+    /// live semantic report is authoritative for the tab (`report_status`
+    /// always wins; see `app::agent_status::effective_activity`). Default:
+    /// empty — no fallback beyond P0 output timing, which is correct for any
+    /// agent whose prompt text isn't verified here (guessing at UI text spyc
+    /// hasn't observed would be worse than no fallback).
+    fn detection_rules(&self) -> &'static [DetectionRule] {
+        &[]
     }
 }
 
@@ -375,7 +388,24 @@ impl AgentProfile for GeminiProfile {
     }
     // exit_summary_mode: None (gemini is omitted from the summary).
     // transcript: None (gemini has no transcript renderer).
+    fn detection_rules(&self) -> &'static [DetectionRule] {
+        GEMINI_DETECTION_RULES
+    }
 }
+
+/// P1-2: Gemini CLI has no `status_hooks()` (no lifecycle-hook config format
+/// spyc writes to today), so it relies entirely on this scrape fallback.
+/// Verified against Gemini CLI's own docs: a shell-command tool call raises a
+/// `y/n/always` confirmation prompt reading `Allow execution of: '<cmd>'?`
+/// (google-gemini/gemini-cli docs + issue #4340). Only the one verified
+/// pattern is here — inventing more would risk a false `Blocked` worse than no
+/// fallback.
+static GEMINI_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {
+    region: detect_rules::Region::BottomNonEmptyLines(15),
+    matcher: detect_rules::Matcher::Contains("Allow execution of:"),
+    state: crate::pane::AgentActivity::Blocked,
+    visible_blocker: Some("awaiting tool-execution approval"),
+}];
 
 pub struct AgyProfile;
 impl AgentProfile for AgyProfile {
@@ -503,6 +533,8 @@ impl AgentProfile for ZotProfile {
     // on disk to implement faithfully. Follow-up: add `zot_transcript`
     // + flip `transcript()` to `Some`, and capture the active session
     // path for `--session`-based specific resume.
+    // detection_rules: default `&[]` (P1-2 scrape fallback) — no verified
+    // prompt/UI text for zot to build a rule from; add one once observed.
 }
 
 /// The no-op profile for `bash`/`vim`/anything unrecognized. Not in

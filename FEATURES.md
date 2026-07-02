@@ -201,7 +201,7 @@ spyc's workflow: browse files above, talk to Claude below.
   inert while zoomed (only `^a z` exits), and the prior split is restored on
   un-zoom.
 - **Agent-activity dots** — each **agent** pane tab shows a live activity dot
-  in the divider, from two sources:
+  in the divider, from these layered sources (a later one always wins):
   - **Output timing** (no hooks, no screen-scraping): a **spicy heat-pulse `●`**
     — a pepper-red → ember → orange → spark color *breath* (~4 Hz) — while
     output is flowing, fading to a quiet `·` once the agent goes silent. The
@@ -244,9 +244,17 @@ spyc's workflow: browse files above, talk to Claude below.
     spyc is a throwaway build-dir binary whose path went stale), **`:hooks on!`**
     force-restarts the active claude pane and resumes the conversation so the
     hooks load from launch.
+  - **Scrape fallback** (for agents spyc can't hook, e.g. `gemini`) — when an
+    agent has no self-report, spyc reads its **visible screen** for a known
+    prompt and infers status. Today that's gemini's `Allow execution of:`
+    approval prompt lighting the red `blocked` square. Deliberately last-resort:
+    any live self-report always wins, it needs a couple of consecutive matches
+    before trusting a guess (no flicker), and it only matches prompt text spyc
+    has actually verified — so it never invents a false alarm. This is the one
+    place spyc reads the screen, and only as a graceful degradation.
 
-  **`:why-status`** flashes the active tab's state, its source (self-reported
-  vs output-timing), and seconds since last output, for debugging.
+  **`:why-status`** flashes the active tab's state, its source (self-reported /
+  scrape-fallback / output-timing), and seconds since last output, for debugging.
 - **Agent notifications** (`[notify]` config) — the "which agent needs me" ping,
   fired the instant a pane transitions (0 delay, not a timer):
   - **Desktop notification** naming the tab (e.g. *"codex needs you — tab 2 is
