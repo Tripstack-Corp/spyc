@@ -6,7 +6,7 @@ use super::*;
 
 impl App {
     /// Test-only `App` constructor for workflow-harness tests
-    /// (`docs/TEST_IMPROVEMENT_PLAN.md` Phase 1). Builds a deterministic
+    /// (`docs/archive/TESTING_STRATEGY.md` Phase 1). Builds a deterministic
     /// `App` with **no** terminal, **no** MCP socket server, **no**
     /// git-status worker thread, and **no** real-env cwd — unlike
     /// `App::new`. Drive it with `apply(&Action)` / `handle_key(KeyEvent)`

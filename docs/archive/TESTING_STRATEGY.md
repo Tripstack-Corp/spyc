@@ -1,16 +1,20 @@
-# spyc testing campaign — coverage + anti-"test theater"
+# spyc testing strategy — coverage + anti-"test theater"
 
-**Status:** all 8 clusters shipped (#426–#435); ~50 new tests, the
-anti-"test theater" effect-intent seam in place, and **2 real bugs found +
-fixed** (#430, #431 — both in the live pane/pty workflow, cluster 4). Two
-small follow-ons remain (the deferred routing edges from cluster 6; a real
-coverage-guided cargo-fuzz pass if a lib split ever lands) — see the Order of
-attack table. The harness (`App::test_app`, `src/app/test_harness.rs`) +
-effect-intent matchers (`app/effect.rs`) are the durable foundation for
-future workflow tests.
+**Status:** the campaign that produced this is **COMPLETE** — all 8 clusters
+shipped (#426–#438): ~50 new tests, the anti-"test theater" effect-intent
+seam in place, both a `proptest` in-crate pass and a real coverage-guided
+**cargo-fuzz** pass (6 targets, all clean), and **2 real bugs found + fixed**
+(#430, #431 — both in the live pane/pty workflow, cluster 4). This doc now
+stands as spyc's **testing strategy + guidelines** — the durable reference
+for *how* tests are written here (workstreams A/B/E and the appendix), with
+the Order-of-attack table and Bugs-found log kept as the campaign's
+historical record. The harness (`App::test_app`, `src/app/test_harness.rs`)
++ effect-intent matchers (`app/effect.rs`) are the foundation for future
+workflow tests.
 
-This charter folds the original May workflow-coverage plan together with
-the "Beyond Test Theater" quality RFC into one running plan.
+Originally a running campaign plan folding the May workflow-coverage plan
+together with the "Beyond Test Theater" quality RFC; retained as the
+project's testing strategy now that the campaign has closed.
 
 **Goal:** raise the *value* of the suite, not just the count. Two distinct
 risks, addressed in parallel:

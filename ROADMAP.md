@@ -61,7 +61,10 @@ flight, and foundations work continues throughout.
 deliberately lean: fix the daily-driver papercuts, finish the gating
 thesis features, finish distribution, launch. (The structural items
 that used to lead this list — decomposition and the MVU rewrite —
-shipped; the deep structural arc that *remains* is post-2.0.)
+shipped, as has the test-de-risking campaign (workflow harness,
+proptest/cargo-fuzz, workflow coverage — see
+[`docs/archive/TESTING_STRATEGY.md`](docs/archive/TESTING_STRATEGY.md));
+the deep structural arc that *remains* is post-2.0.)
 
 1. **Daily-driver fixes.** Small, high-value, mostly standalone:
    - `^a s` path handoff Option A — anchor sent paths on the pane's
@@ -75,16 +78,10 @@ shipped; the deep structural arc that *remains* is post-2.0.)
    - Cwd-export-on-quit (`--cwd-file`), keymap-DSL completeness +
      `unmap`, PgUp/PgDn pane discoverability — all under
      "Foundations backlog" below.
-2. **Test de-risking (remainder).** The `App` workflow harness and
-   render snapshots shipped
-   ([`docs/TEST_IMPROVEMENT_PLAN.md`](docs/TEST_IMPROVEMENT_PLAN.md)
-   Phase 1); remaining: workflow tests for pane/pty lifecycle
-   (zoom, `^a v`, tab lifecycle), Quick Select end-to-end,
-   background-task flows (`^Z`/`:fg`), and session restore.
-3. **Thesis features that gate 2.0.** Session forking (`^a f`) and
+2. **Thesis features that gate 2.0.** Session forking (`^a f`) and
    prompt templates in `.spycrc.toml` — both described under "Thesis
    backlog," both implementable on current plumbing.
-4. **Distribution / launch.** The launch plan below, end to end.
+3. **Distribution / launch.** The launch plan below, end to end.
 
 **v2.0 — public distribution launch.** Cut once the daily-driver
 fixes, session forking, prompt templates, and the launch plan are
@@ -618,7 +615,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/drafts/PANE_RECOVERY_PLAN.md` | Pending design (Phase 0 is road-to-2.0). |
 | `docs/drafts/PANE_STARTUP_TABS_PLAN.md` | Pending design (road-to-2.0). |
 | `docs/drafts/PATH_HANDOFF_PLAN.md` | Pending design (Option A is road-to-2.0). |
-| `docs/TEST_IMPROVEMENT_PLAN.md` | Testing campaign charter (coverage + anti-"test theater"). Phase 1 (App harness) shipped; remainder is road-to-2.0. |
+| `docs/archive/TESTING_STRATEGY.md` | Testing strategy & guidelines (coverage, anti-"test theater", proptest/cargo-fuzz, AI-testing rules). Campaign complete (#426–#438); kept as the how-we-test reference. |
 | `docs/drafts/V1_60_PLAN.md` | Pending design (post-2.0, after V1_70). |
 | `docs/drafts/V1_70_PLAN.md` | Pending design (post-2.0, first in the arc). |
 | `docs/YAZI_COMPETITIVE_REVIEW.md` | Competitive snapshot (2026-05-28); refresh on Yazi's next major. |

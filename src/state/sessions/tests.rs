@@ -513,7 +513,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
 /// Full save→disk→load round-trip: multiple tabs survive in order
 /// with distinct session ids/kinds, and cwd / labels / commands /
 /// project_home / session name / active tab / pane geometry all
-/// persist. (TEST_IMPROVEMENT_PLAN: session restore.)
+/// persist. (TESTING_STRATEGY: session restore.)
 #[test]
 fn session_round_trips_through_disk_preserving_tabs_in_order() {
     let tmp = tempfile::tempdir().unwrap();

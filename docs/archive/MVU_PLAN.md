@@ -16,7 +16,7 @@
 > **Phase 0 (Focus-as-one-value) lands first** as a standalone daily-driver
 > bug fix (highest bug-leverage, zero loop change). **Phases 1–6 land
 > incrementally before launch, sequenced after the test-harness de-risking**
-> (`docs/TEST_IMPROVEMENT_PLAN.md`) so regressions in the loop/effect surgery
+> (`docs/archive/TESTING_STRATEGY.md`) so regressions in the loop/effect surgery
 > are caught.
 >
 > **Trade-off (honest):** doing deep loop/concurrency surgery before a public
@@ -485,7 +485,7 @@ incrementalism, scope-honesty); all returned viable after these were folded in.
   (timing, focus, stdin) that behavior-equivalence tests don't fully catch, at
   the worst possible moment. → Accepted to avoid a post-launch refactor
   overhang. Mitigated by: every phase behavior-equivalent behind green CI +
-  manual daily-driver smoke; the test harness (`docs/TEST_IMPROVEMENT_PLAN.md`)
+  manual daily-driver smoke; the test harness (`docs/archive/TESTING_STRATEGY.md`)
   lands *before* Phases 1–6; Phase 0 (lowest-risk, highest-value) lands first
   and the single-channel loop rewrite lands last; each phase is independently
   revertable. If a phase destabilizes the daily drivers, it reverts in
