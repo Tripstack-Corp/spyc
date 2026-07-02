@@ -186,9 +186,15 @@ impl App {
             self.view.pager_right = None;
         } else {
             self.view.pager = None;
-            // The left/single slot just closed — unpin its column before the
-            // focus recompute so it resolves to the file list, not a stale pager.
-            self.view.overlay_column = None;
+            // Unpin the column only when nothing else is still anchored to it.
+            // A `V`/`;` top-overlay pty can still be open in that column (a
+            // modal `Overlay` pager like `?` help opened *over* the editor after
+            // `^a l` moved focus to `b`), and it needs the pin to keep rendering
+            // in place — clearing it would move the editor into the other column
+            // (blanking this one, artifacting that one).
+            if self.runtime.top_overlay.is_none() {
+                self.view.overlay_column = None;
+            }
         }
         // The top pager just closed — drop any stale `Pager(_)` focus this
         // frame (the loop top would catch it next tick regardless).

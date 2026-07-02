@@ -728,3 +728,45 @@ fn vsplit_column_focus_switch_still_works_while_v_editor_is_open() {
         assert_eq!(app.focused_side(), state::Side::Left, "^a h switches back");
     });
 }
+
+/// Regression (follow-up to the above): with a `V` editor open in the left
+/// column, `^a l` to the right, then `?` help — closing that modal `Overlay`
+/// pager must NOT unpin the still-open editor's column. `clear_pager` used to
+/// null `overlay_column` unconditionally, so the editor lost its left pin and
+/// `carve_vsplit` moved it into the right column (blanking the left,
+/// artifacting the right). The pin must survive because a `top_overlay` is
+/// still live.
+#[test]
+fn closing_help_over_a_v_editor_keeps_the_editor_column_pinned() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        app.open_second_commander_at(&dir); // vsplit + right commander
+        app.apply(&Action::VsplitFocusLeft).unwrap();
+
+        // `V` editor live in the left column, pinned there (as install_overlay_pty
+        // would set it).
+        let wake = app.make_pane_wake();
+        let overlay = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
+            .expect("spawn overlay");
+        app.runtime.top_overlay = Some(overlay);
+        app.view.overlay_column = Some(state::Side::Left);
+
+        // Switch to the right column, then open `?` help as a modal Overlay pager.
+        app.apply(&Action::VsplitFocusRight).unwrap();
+        let mut help = crate::ui::pager::PagerView::new_plain("Help", vec!["help".to_string()]);
+        help.mount = crate::ui::pager::Mount::Overlay;
+        app.view.pager = Some(help);
+
+        // Closing help drops the pager but must leave the editor's pin intact.
+        app.clear_pager();
+        assert!(app.view.pager.is_none(), "help pager closed");
+        assert_eq!(
+            app.view.overlay_column,
+            Some(state::Side::Left),
+            "the still-open V editor must stay pinned to its column after help closes",
+        );
+    });
+}

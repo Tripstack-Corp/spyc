@@ -975,6 +975,47 @@ mod render_tests {
         });
     }
 
+    /// A centered `Overlay` pager (`?` help / `:grep` / git-view / version)
+    /// opened while a `V`/`;` `top_overlay` editor is live must still render.
+    /// The overlay branch returns early before the default Overlay-pager draw,
+    /// so it has to paint the pager on top itself — otherwise the pager owns
+    /// input but is invisible (the reported "hit `?`, the overlay doesn't
+    /// work"). Repro: vsplit + editor in the left column, focus on the right,
+    /// then `?`.
+    #[test]
+    fn overlay_pager_renders_over_a_live_top_overlay() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = demo_app(&files());
+            // A live top-overlay pty (stands in for the `V` editor), pinned to
+            // the left column of a vsplit; keyboard on the right column.
+            let wake = app.make_pane_wake();
+            let overlay =
+                crate::pane::Pane::spawn("cat", 24, 80, tmp.path(), &app.view.context_path, wake)
+                    .expect("spawn overlay");
+            app.runtime.top_overlay = Some(overlay);
+            app.view.overlay_column = Some(state::Side::Left);
+            app.state.vsplit = Some(state::VSplit {
+                width_pct: 50,
+                mode: state::VsplitMode::TopOnly,
+                focus: state::Side::Right,
+            });
+            // Help opened as a modal Overlay pager, owning focus (as recompute
+            // would set it), with a recognizable marker line.
+            let mut help =
+                crate::ui::pager::PagerView::new_plain("Help", vec!["ZZHELPMARKERZZ".to_string()]);
+            help.mount = crate::ui::pager::Mount::Overlay;
+            app.view.pager = Some(help);
+            app.state.focus = state::Focus::Pager(crate::ui::pager::Mount::Overlay);
+
+            let out = render_to_string(&mut app, 80, 24);
+            assert!(
+                out.contains("ZZHELPMARKERZZ"),
+                "the Overlay pager must draw on top of the editor overlay:\n{out}"
+            );
+        });
+    }
+
     /// `build_rows` must flag exactly the rows whose path is in
     /// `pending_delete_preview` — and only those. Locks the set-membership
     /// refactor (the old per-row linear `any(p == path)` scan was quadratic

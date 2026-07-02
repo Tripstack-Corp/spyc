@@ -105,6 +105,18 @@ impl App {
             if self.state.vsplit.is_some() {
                 self.render_prompt_line(frame, layout.prompt);
             }
+            // A centered `Overlay` pager (help / grep / git-view / version, …)
+            // opened while the editor is up must still draw. The user switched
+            // focus off the editor (e.g. `^a l` to `b`), so `?` landed an
+            // Overlay pager in `view.pager` that owns focus but has no draw
+            // site in this branch — paint it on top before returning (mirrors
+            // the TopPane branch's help tail below). Without this it's invisible
+            // yet still eats input.
+            if let Some(view) = self.view.pager.as_ref()
+                && matches!(view.mount, crate::ui::pager::Mount::Overlay)
+            {
+                crate::ui::pager::render(frame, frame.area(), view, &self.view.theme);
+            }
             return;
         }
 
