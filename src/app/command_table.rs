@@ -129,6 +129,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     app("undo", commands::cmd_undo),
     pure("version"),
     pure("whoami"),
+    app("why-git", commands::cmd_why_git),
     app("why-status", commands::cmd_why_status),
 ];
 

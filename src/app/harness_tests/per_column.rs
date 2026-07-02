@@ -262,6 +262,164 @@ fn dual_git_each_column_shows_its_own_repo() {
     });
 }
 
+/// Reproduction attempt for the reported "right-column markers go stale in a
+/// worktree": open `b` at a real LINKED worktree that's dirty, then commit in
+/// it and re-poll — `b`'s markers must converge to clean. Exercises the poll's
+/// per-worktree-gitdir mtime key across a commit (the per-worktree `index`
+/// moves, so the short-circuit must break and re-walk). Sync walk (no worker in
+/// the harness).
+#[test]
+fn worktree_column_markers_clear_after_a_commit() {
+    use std::path::Path;
+    let tmp = tempfile::tempdir().unwrap();
+    let run_git = |dir: &Path, args: &[&str]| {
+        let ok = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .current_dir(std::env::temp_dir())
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@x")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@x")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("spawn git")
+            .success();
+        assert!(ok, "git {args:?} failed in {dir:?}");
+    };
+    crate::state::with_state_root(tmp.path(), || {
+        let base = std::fs::canonicalize(tmp.path()).unwrap();
+        let main_repo = base.join("main");
+        std::fs::create_dir(&main_repo).unwrap();
+        run_git(&main_repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(main_repo.join("seed.txt"), "s\n").unwrap();
+        run_git(&main_repo, &["add", "seed.txt"]);
+        run_git(&main_repo, &["commit", "-q", "-m", "seed"]);
+        // A linked worktree on a new branch (sibling dir).
+        let wt = base.join("wt");
+        run_git(
+            &main_repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "feature",
+                wt.to_str().unwrap(),
+            ],
+        );
+        // Dirty a tracked file in the worktree.
+        std::fs::write(wt.join("seed.txt"), "changed\n").unwrap();
+
+        let mut app = App::test_app(main_repo.clone());
+        app.state.update_repo_root(state::Side::Left, &main_repo);
+        app.open_second_commander_at(&wt); // b at the worktree — dirty
+        assert!(
+            app.state
+                .right
+                .as_ref()
+                .expect("b open")
+                .git
+                .files
+                .contains_key("seed.txt"),
+            "precondition: b shows the dirty marker before the commit"
+        );
+
+        // Commit the change IN the worktree — working tree goes clean, and the
+        // per-worktree `index` mtime moves.
+        run_git(&wt, &["add", "seed.txt"]);
+        run_git(&wt, &["commit", "-q", "-m", "in-wt"]);
+
+        // The 1 Hz safety-net poll (or an fs-event) re-runs this.
+        app.state.refresh_git_state();
+
+        let b = app.state.right.as_ref().expect("b still open");
+        assert!(
+            b.git.files.is_empty(),
+            "b's markers must clear after the worktree commit — got stale {:?}",
+            b.git.files
+        );
+        assert_eq!(
+            b.git.info.as_deref(),
+            Some("feature"),
+            "b's branch shows clean (no `*`) after commit: {:?}",
+            b.git.info
+        );
+    });
+}
+
+/// `:why-git` opens a saveable pager whose per-column dump surfaces the
+/// diagnostic fields — repo root/gitdir, the poll-cache-vs-on-disk key (the
+/// short-circuit verdict), and the marker count — for the focused column's
+/// repo. This is the "why are the markers stale" capture tool.
+#[test]
+fn why_git_dumps_per_column_refresh_state() {
+    use std::path::Path;
+    let tmp = tempfile::tempdir().unwrap();
+    let run_git = |dir: &Path, args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .current_dir(std::env::temp_dir())
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@x")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@x")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("spawn git");
+    };
+    crate::state::with_state_root(tmp.path(), || {
+        let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("f.txt"), "v1\n").unwrap();
+        run_git(&repo, &["add", "f.txt"]);
+        run_git(&repo, &["commit", "-q", "-m", "v1"]);
+        std::fs::write(repo.join("f.txt"), "dirty\n").unwrap(); // unstaged edit
+
+        let mut app = App::test_app(repo.clone());
+        app.state.update_repo_root(state::Side::Left, &repo);
+        app.state.refresh_git_state();
+
+        app.dispatch_command("why-git");
+        let view = app.view.pager.as_ref().expect(":why-git opens a pager");
+        assert_eq!(view.title, "why-git");
+        assert!(view.saveable, "the dump is yankable/saveable");
+        let text: String = view
+            .lines
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        for needle in [
+            "[a (left)]",
+            "repo_root:",
+            "gitdir:",
+            "git.files:",
+            "→ next poll:",
+        ] {
+            assert!(
+                text.contains(needle),
+                "why-git dump missing {needle:?}:\n{text}"
+            );
+        }
+        assert!(
+            text.contains("f.txt"),
+            "the dirty file should show in the marker list:\n{text}"
+        );
+    });
+}
+
 /// `O` (new file) creates the file in the FOCUSED column's dir — so a worktree
 /// in `b` gets the file, not `a`'s dir. Regression: the create path joined
 /// `state.left.listing.dir`.

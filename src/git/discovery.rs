@@ -98,6 +98,40 @@ mod tests {
         assert!(gitdir(tmp.path()).is_none());
     }
 
+    /// LOAD-BEARING: for a linked worktree, `gitdir` must return the
+    /// *per-worktree* gitdir (`<main>/.git/worktrees/<name>`), NOT the shared
+    /// common `.git`. The 1 Hz git poll + the fs-watch both stat this path's
+    /// `index`/`HEAD`; a worktree commit moves the per-worktree `index` but not
+    /// the common one, so if this collapsed to the common dir, column b's
+    /// markers would freeze at open-time state and never refresh.
+    #[test]
+    fn gitdir_linked_worktree_is_per_worktree_not_common() {
+        let (_tmp, root) = init_repo();
+        let wt_parent = tempfile::tempdir().unwrap();
+        let wt = std::fs::canonicalize(wt_parent.path())
+            .unwrap_or_else(|_| wt_parent.path().to_path_buf())
+            .join("wt");
+        run_git(
+            &root,
+            &["worktree", "add", "-b", "feature", wt.to_str().unwrap()],
+        );
+
+        let common = gitdir(&root).expect("main gitdir"); // <root>/.git
+        let per_wt = gitdir(&wt).expect("worktree gitdir");
+        assert_ne!(
+            per_wt, common,
+            "a linked worktree's gitdir must differ from the common .git"
+        );
+        assert!(
+            per_wt.components().any(|c| c.as_os_str() == "worktrees"),
+            "expected a per-worktree gitdir under .git/worktrees, got {per_wt:?}"
+        );
+        assert!(
+            per_wt.join("index").exists(),
+            "the per-worktree gitdir should hold the worktree's own index at {per_wt:?}"
+        );
+    }
+
     #[test]
     fn head_branch_attached_is_branch_name() {
         let (_tmp, root) = init_repo();

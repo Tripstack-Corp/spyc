@@ -228,6 +228,132 @@ pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
+/// `:why-git` — dump per-column git-marker refresh state to a saveable pager:
+/// each column's repo root + resolved gitdir, the cached poll key vs the LIVE
+/// on-disk `index`/`HEAD` mtimes (so you can see whether the 1 Hz poll will
+/// SHORT-CIRCUIT or re-walk), the displayed `git.files` marker count, and the
+/// worker generation. The diagnostic for "why is this column showing stale
+/// markers": if the poll short-circuits (cache == on-disk) yet the markers
+/// disagree with a fresh `git status`, the cache was stamped stale — capture
+/// this dump the moment it recurs so the exact broken invariant is pinned.
+pub(super) fn cmd_why_git(app: &mut App, _args: &str) -> Vec<Effect> {
+    let mut view = PagerView::new_plain("why-git", why_git_lines(app));
+    view.saveable = true;
+    app.set_pager(view);
+    Vec::new()
+}
+
+/// Build the `:why-git` report (see [`cmd_why_git`]). Reads per-column git
+/// state plus a couple of `stat`s on each column's live gitdir to compare
+/// against its poll cache — the `→ next poll` verdict mirrors
+/// `refresh_git_state_for`'s short-circuit condition.
+fn why_git_lines(app: &App) -> Vec<String> {
+    use super::state::Side;
+    // A `SystemTime` as `secs.mmm` since the epoch — stable + directly
+    // comparable across the poll-cache vs on-disk lines; `—` for `None`.
+    let fmt = |t: Option<std::time::SystemTime>| -> String {
+        match t.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()) {
+            Some(d) => format!("{}.{:03}", d.as_secs(), d.subsec_millis()),
+            None => "—".to_string(),
+        }
+    };
+    let stat_mtime = |dir: Option<&std::path::Path>, file: &str| {
+        dir.and_then(|d| {
+            std::fs::metadata(d.join(file))
+                .and_then(|m| m.modified())
+                .ok()
+        })
+    };
+    let path_or = |p: Option<&std::path::Path>| {
+        p.map_or_else(|| "(none)".to_string(), |p| p.display().to_string())
+    };
+
+    let mut out = vec![
+        format!(
+            "spyc {} (pid {}) — git dump @ {}",
+            env!("CARGO_PKG_VERSION"),
+            std::process::id(),
+            crate::sysinfo::format_now(),
+        ),
+        String::new(),
+    ];
+    for side in app.state.active_sides() {
+        let c = app.state.col(side);
+        let gc = &c.git_cache;
+        let label = match side {
+            Side::Left => "a (left)",
+            Side::Right => "b (right)",
+        };
+        out.push(format!("[{label}]  cwd: {}", c.listing.dir.display()));
+        out.push(format!(
+            "    repo_root: {}",
+            path_or(gc.current_repo_root.as_deref())
+        ));
+        out.push(format!(
+            "    gitdir:    {}",
+            path_or(gc.current_gitdir.as_deref())
+        ));
+        out.push(format!(
+            "    branch:    {}",
+            c.git.info.as_deref().unwrap_or("(no repo)")
+        ));
+        let mut names: Vec<&str> = c.git.files.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        let sample = names.iter().take(6).copied().collect::<Vec<_>>().join(", ");
+        out.push(format!(
+            "    git.files: {} marker(s){}",
+            names.len(),
+            if names.is_empty() {
+                String::new()
+            } else {
+                format!(" [{sample}{}]", if names.len() > 6 { ", …" } else { "" })
+            }
+        ));
+        // The crux: the poll's freshness key (cached) vs the LIVE on-disk key.
+        let cache_key = gc.git_poll_cache;
+        let live_idx = stat_mtime(gc.current_gitdir.as_deref(), "index");
+        let live_head = stat_mtime(gc.current_gitdir.as_deref(), "HEAD");
+        out.push(format!(
+            "    poll_cache: index={} head={}",
+            fmt(cache_key.map(|(i, _)| i)),
+            fmt(cache_key.map(|(_, h)| h)),
+        ));
+        out.push(format!(
+            "    on-disk:    index={} head={}",
+            fmt(live_idx),
+            fmt(live_head)
+        ));
+        // Mirrors `refresh_git_state_for`: skip the walk iff a full cached key
+        // equals the (both-present) on-disk key and no rewalk is forced.
+        let short_circuits = matches!(cache_key, Some((ci, ch)) if live_idx == Some(ci) && live_head == Some(ch))
+            && !gc.pending_worktree_rewalk;
+        out.push(format!(
+            "    → next poll: {}",
+            if short_circuits {
+                "SHORT-CIRCUITS (cache == on-disk → walk skipped; the markers above are what stick)"
+            } else {
+                "RE-WALKS (cache != on-disk, or rewalk forced → markers will refresh next poll)"
+            }
+        ));
+        match &gc.git_status_cache {
+            Some(sc) => out.push(format!(
+                "    status_cache: {} entr(y/ies) for {} (index={} head={})",
+                sc.entries.len(),
+                sc.repo_root.display(),
+                fmt(Some(sc.index_mtime)),
+                fmt(Some(sc.head_mtime)),
+            )),
+            None => out.push("    status_cache: (none)".to_string()),
+        }
+        out.push(format!(
+            "    generation: {}   pending_rewalk: {}   worker: {}",
+            gc.git_generation, gc.pending_worktree_rewalk, gc.git_worker_available,
+        ));
+        out.push(String::new());
+    }
+    out
+}
+
 /// `:notify test` — fire every notification channel on demand (bell, the
 /// spice-heat visual border pulse, and BOTH desktop mechanisms: the OS notifier
 /// plus an OSC-9 escape), bypassing `[notify]` gating so you can verify each

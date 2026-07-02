@@ -255,6 +255,11 @@ spyc's workflow: browse files above, talk to Claude below.
 
   **`:why-status`** flashes the active tab's state, its source (self-reported /
   scrape-fallback / output-timing), and seconds since last output, for debugging.
+  **`:why-git`** opens a saveable pager dumping each column's git-marker refresh
+  state — repo root / resolved gitdir, the cached poll key vs the live on-disk
+  `index`/`HEAD` mtimes (so you can see whether the next 1 Hz poll SHORT-CIRCUITS
+  or re-walks), and the displayed marker count. The tool for "why is this column
+  showing stale git markers" — capture it the moment markers look wrong.
 - **Agent notifications** (`[notify]` config) — the "which agent needs me" ping,
   fired the instant a pane transitions (0 delay, not a timer):
   - **Desktop notification** naming the tab (e.g. *"codex needs you — tab 2 is
