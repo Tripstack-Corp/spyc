@@ -39,7 +39,7 @@ fixed later). Treat this doc as a point-in-time record, not a live ledger.
 
 **Follow-up.** The deferred verification + resolution work — 29 confirmed-but-open and
 45 unverified findings — is tracked in
-[`docs/CODE_REVIEW_FOLLOWUP.md`](../CODE_REVIEW_FOLLOWUP.md).
+[`docs/archive/CODE_REVIEW_FOLLOWUP.md`](CODE_REVIEW_FOLLOWUP.md).
 
 ## High severity
 

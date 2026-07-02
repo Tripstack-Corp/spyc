@@ -200,7 +200,7 @@ pub enum Effect {
     /// the loop. The worker pushes a `MermaidOutcome` onto
     /// `runtime.mermaid_results` and wakes with `Message::MermaidDone`;
     /// `apply_mermaid_outcomes` (pre-recv scan) surfaces it in the pager status
-    /// line. See `docs/MERMAID_PAGER_PLAN.md`.
+    /// line. See `docs/archive/MERMAID_PAGER_PLAN.md`.
     RenderMermaid(mermaid_ops::MermaidRenderOp),
 
     /// Tier 5. Run a file operation (copy / move / pipe) on a detached worker

@@ -1,4 +1,4 @@
-//! Embedded Lua scripting engine (docs/LUA_SCRIPTING_PLAN.md).
+//! Embedded Lua scripting engine (docs/archive/LUA_SCRIPTING_PLAN.md).
 //!
 //! `mlua::Lua` runs on ONE dedicated worker thread ([`LuaWorker`]); the main
 //! loop talks to it over channels. A script never mutates spyc directly — its

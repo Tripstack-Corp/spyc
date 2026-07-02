@@ -1,5 +1,5 @@
 //! Tier-C `spyc.on` event dispatch: firing registered Lua callbacks on
-//! low-frequency events (the capstone of the Lua platform, `docs/LUA_SCRIPTING_PLAN.md`).
+//! low-frequency events (the capstone of the Lua platform, `docs/archive/LUA_SCRIPTING_PLAN.md`).
 //!
 //! Four events fire — `startup` (once, after init.lua loads), `dir_changed`,
 //! `project_changed`, and `agent_status` — each passing the callback an event

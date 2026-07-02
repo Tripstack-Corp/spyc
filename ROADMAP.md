@@ -66,12 +66,12 @@ shipped; the deep structural arc that *remains* is post-2.0.)
 1. **Daily-driver fixes.** Small, high-value, mostly standalone:
    - `^a s` path handoff Option A — anchor sent paths on the pane's
      *live* cwd, not `PROJECT_HOME` (live bug;
-     [`docs/PATH_HANDOFF_PLAN.md`](docs/PATH_HANDOFF_PLAN.md)).
+     [`docs/drafts/PATH_HANDOFF_PLAN.md`](docs/drafts/PATH_HANDOFF_PLAN.md)).
    - Configurable startup pane tabs — `[pane] tabs = [...]`
-     ([`docs/PANE_STARTUP_TABS_PLAN.md`](docs/PANE_STARTUP_TABS_PLAN.md)).
+     ([`docs/drafts/PANE_STARTUP_TABS_PLAN.md`](docs/drafts/PANE_STARTUP_TABS_PLAN.md)).
    - Pane recovery **Phase 0** — cosmetic vt100-snapshot backdrop on a
      just-respawned pane
-     ([`docs/PANE_RECOVERY_PLAN.md`](docs/PANE_RECOVERY_PLAN.md)).
+     ([`docs/drafts/PANE_RECOVERY_PLAN.md`](docs/drafts/PANE_RECOVERY_PLAN.md)).
    - Cwd-export-on-quit (`--cwd-file`), keymap-DSL completeness +
      `unmap`, PgUp/PgDn pane discoverability — all under
      "Foundations backlog" below.
@@ -411,7 +411,7 @@ Held until 2.0 has shipped and stabilized. These build on each other
 in order; the MVU prerequisite they used to wait on is done.
 
 - **Mise en Place — typed addressability + crate split**
-  ([`docs/V1_70_PLAN.md`](docs/V1_70_PLAN.md)). Stations (stable pane
+  ([`docs/drafts/V1_70_PLAN.md`](docs/drafts/V1_70_PLAN.md)). Stations (stable pane
   handles), Plates (structured snapshots), the typed Order-rail
   protocol, and Bell primitives (observed waits) that retire timer
   hacks like `RESTORE_BANNER_SETTLE` and the resume verify-retry
@@ -420,11 +420,11 @@ in order; the MVU prerequisite they used to wait on is done.
   split (`spyc-proto`/`spyc-pty`/`spyc-os` for unsafe isolation/…).
   Lands *before* CounterTop so the hub rides a real protocol.
 - **CounterTop — multi-instance hub**
-  ([`docs/V1_60_PLAN.md`](docs/V1_60_PLAN.md)). Peer-spyc discovery,
+  ([`docs/drafts/V1_60_PLAN.md`](docs/drafts/V1_60_PLAN.md)). Peer-spyc discovery,
   a HUD aggregating per-workspace agent state, frame mirroring +
   take-control, `--hub` mode. Rides on the Order rail.
 - **Auto-approval & action log**
-  ([`docs/AUTO_APPROVAL_PLAN.md`](docs/AUTO_APPROVAL_PLAN.md)).
+  ([`docs/drafts/AUTO_APPROVAL_PLAN.md`](docs/drafts/AUTO_APPROVAL_PLAN.md)).
   Curate each agent's *native* permission system + a `:approvals`
   view. Large; partly blocked on codex/gemini permission-schema
   verification (the plan's open questions 1–2).
@@ -614,13 +614,13 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `ARCHITECTURE.md` | Deep stable design decisions. |
 | `DESIGN.md` | UI design language (theme, components, glyphs). |
 | `FEATURES.md` | User-facing feature reference. |
-| `docs/AUTO_APPROVAL_PLAN.md` | Pending design (post-2.0). |
-| `docs/PANE_RECOVERY_PLAN.md` | Pending design (Phase 0 is road-to-2.0). |
-| `docs/PANE_STARTUP_TABS_PLAN.md` | Pending design (road-to-2.0). |
-| `docs/PATH_HANDOFF_PLAN.md` | Pending design (Option A is road-to-2.0). |
+| `docs/drafts/AUTO_APPROVAL_PLAN.md` | Pending design (post-2.0). |
+| `docs/drafts/PANE_RECOVERY_PLAN.md` | Pending design (Phase 0 is road-to-2.0). |
+| `docs/drafts/PANE_STARTUP_TABS_PLAN.md` | Pending design (road-to-2.0). |
+| `docs/drafts/PATH_HANDOFF_PLAN.md` | Pending design (Option A is road-to-2.0). |
 | `docs/TEST_IMPROVEMENT_PLAN.md` | Testing campaign charter (coverage + anti-"test theater"). Phase 1 (App harness) shipped; remainder is road-to-2.0. |
-| `docs/V1_60_PLAN.md` | Pending design (post-2.0, after V1_70). |
-| `docs/V1_70_PLAN.md` | Pending design (post-2.0, first in the arc). |
+| `docs/drafts/V1_60_PLAN.md` | Pending design (post-2.0, after V1_70). |
+| `docs/drafts/V1_70_PLAN.md` | Pending design (post-2.0, first in the arc). |
 | `docs/YAZI_COMPETITIVE_REVIEW.md` | Competitive snapshot (2026-05-28); refresh on Yazi's next major. |
 | `docs/archive/` | Shipped plans, kept as historical record. |
 

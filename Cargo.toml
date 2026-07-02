@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 ratatui = "0.30"
-# Mermaid-in-pager (docs/MERMAID_PAGER_PLAN.md): render ```mermaid blocks as
+# Mermaid-in-pager (docs/archive/MERMAID_PAGER_PLAN.md): render ```mermaid blocks as
 # terminal-graphics images. All pure-Rust, zero C deps — `default-features =
 # false` on ratatui-image drops the `chafa-dyn` default (a C lib via
 # pkg-config); Sixel still works via pure-Rust `icy_sixel`, and Kitty/iTerm2/
@@ -111,7 +111,7 @@ rustix = { version = "1.1.4", features = ["process", "termios", "fs", "system"] 
 # internal `crate::sysinfo` module.
 sysinfo_crate = { package = "sysinfo", version = "0.33", default-features = false, features = ["system"] }
 infer = { version = "0.19.0", default-features = false }
-# Lua scripting engine (docs/LUA_SCRIPTING_PLAN.md): embeds Lua 5.4 so a
+# Lua scripting engine (docs/archive/LUA_SCRIPTING_PLAN.md): embeds Lua 5.4 so a
 # `~/.config/spyc/init.lua` / keybinding can run user logic. `vendored` compiles
 # the Lua 5.4 C source via the `cc` crate — another compiled-C dependency
 # alongside `zstd-sys` (libzstd), so it rides the same toolchain: native builds

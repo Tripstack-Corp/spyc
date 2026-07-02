@@ -323,7 +323,7 @@ pub struct PagerView {
     /// ` ```mermaid ` blocks in this view (rendered-line range + source),
     /// collected by `markdown::render_doc`. Empty for non-markdown views.
     /// Drives the `o`-to-open hook (and later the inline image). See
-    /// `docs/MERMAID_PAGER_PLAN.md`.
+    /// `docs/archive/MERMAID_PAGER_PLAN.md`.
     pub mermaid_blocks: Vec<crate::ui::markdown::MermaidBlock>,
 }
 

@@ -427,7 +427,7 @@ impl App {
             // overlay inside spyc (graphics terminals). Both render off-thread
             // via `Effect::RenderMermaid`; `apply_mermaid_outcomes` installs the
             // result + flashes status. `.map(...)` ends the immutable borrow
-            // before we mutate `flash`. See docs/MERMAID_PAGER_PLAN.md.
+            // before we mutate `flash`. See docs/archive/MERMAID_PAGER_PLAN.md.
             KeyCode::Char('o' | 'i') => {
                 use crate::app::mermaid_ops::{MermaidMode, MermaidRenderOp};
                 match view.visible_mermaid_block().map(|b| b.source.clone()) {

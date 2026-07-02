@@ -276,7 +276,7 @@ fn nested_bold_in_heading_keeps_rest_bold() {
     );
 }
 
-// --- mermaid block detection (docs/MERMAID_PAGER_PLAN.md, Phase 1) ---
+// --- mermaid block detection (docs/archive/MERMAID_PAGER_PLAN.md, Phase 1) ---
 
 fn doc(src: &str) -> MarkdownDoc {
     render_doc(src, &Theme::default(), None)

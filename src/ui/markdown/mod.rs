@@ -27,7 +27,7 @@ use crate::ui::theme::Theme;
 /// `line_range` is the half-open range of *rendered* `lines` the block's
 /// placeholder occupies — so the pager can tell when the cursor is on it (the
 /// `o`-to-open hook, and later the inline image). `source` is the raw diagram
-/// text handed to the off-thread renderer. See `docs/MERMAID_PAGER_PLAN.md`.
+/// text handed to the off-thread renderer. See `docs/archive/MERMAID_PAGER_PLAN.md`.
 #[derive(Debug, Clone)]
 pub struct MermaidBlock {
     pub line_range: std::ops::Range<usize>,

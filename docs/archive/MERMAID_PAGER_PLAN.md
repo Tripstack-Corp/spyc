@@ -1,6 +1,6 @@
 # Mermaid diagram rendering in the markdown pager — implementation plan
 
-**Status:** proposed (not started)
+**Status:** COMPLETE — shipped v1.58.11 (#446–#448). Archived as historical record.
 **Goal:** when viewing a markdown file (e.g. `share/DEPLOY.md`) in spyc's pager,
 render fenced ` ```mermaid ` blocks as actual diagrams (terminal graphics)
 instead of dumping the raw source, with a graceful fallback to source on

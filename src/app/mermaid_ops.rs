@@ -13,7 +13,7 @@
 //! the loop with `Message::MermaidDone`; `App::apply_mermaid_outcomes` (pre-recv
 //! scan) opens/installs the result and flashes status. All pure-Rust
 //! (mermaid-rs-renderer → resvg), no Node/Chromium.
-//! See `docs/MERMAID_PAGER_PLAN.md`.
+//! See `docs/archive/MERMAID_PAGER_PLAN.md`.
 
 use std::path::PathBuf;
 

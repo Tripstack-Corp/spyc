@@ -603,7 +603,7 @@ struct Runtime {
 /// ready-to-blit protocol plus the PNG bytes and — for a mermaid diagram — its
 /// source, so the image-pager verbs (`s` save, `Y` yank source, later
 /// `y`/`b`/`c`) work without re-rendering. Generalizes to image-file preview
-/// (where `source` is `None`). See `docs/MERMAID_PAGER_PLAN.md`.
+/// (where `source` is `None`). See `docs/archive/MERMAID_PAGER_PLAN.md`.
 pub struct ImageView {
     pub protocol: ratatui_image::protocol::Protocol,
     pub png: Vec<u8>,
@@ -680,7 +680,7 @@ pub struct ViewState {
     /// blitted over everything until dismissed (q/Esc), with its own verbs
     /// (`s`/`Y`/`o`/…). `None` when nothing is being viewed. Set by
     /// `apply_mermaid_outcomes`. Graphics terminals only. See
-    /// `docs/MERMAID_PAGER_PLAN.md`.
+    /// `docs/archive/MERMAID_PAGER_PLAN.md`.
     pub image_view: Option<ImageView>,
     pub pager_history: PagerHistory,
     pub pager_pending_bracket: Option<char>,
