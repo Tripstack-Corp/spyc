@@ -367,6 +367,10 @@ listing dir instead).
 spyc reads `.spycrc.toml` from `~/.spycrc.toml` (user) and `./.spycrc.toml`
 (project). Changes are picked up live -- no restart needed (`^R` to force).
 
+> **Full reference:** [`CONFIGURATION.md`](CONFIGURATION.md) — every option with
+> examples, including notifications (`[notify]`), the keymap DSL, and Lua
+> scripting.
+
 > **Project configs are sandboxed.** A `./.spycrc.toml` can set colors,
 > layout, ignore masks, and rebind keys to built-in actions, but its
 > *executing* bindings (`unix` shell commands, `lua` scripts, and `jump`) are ignored --

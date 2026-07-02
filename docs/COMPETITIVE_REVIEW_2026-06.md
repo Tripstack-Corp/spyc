@@ -60,6 +60,7 @@ lane** is where spyc lives — and it already has occupants.
 | **Conductor** | GUI · macOS | Cloud/GitHub-OAuth model triggered a trust backlash ("keys for the kingdom"); "silicon only." |
 | **Superset** | GUI · macOS | "Run 10 parallel agents"; surfaced the review-bottleneck and DB-isolation debates. |
 | **agent-deck** | TUI · cross-plat | 338★ · Go · MIT. Feature-maximalist: MCP socket pooling (claims 85–90% memory reduction), status-transition notifications, cost dashboard, "conductor" agents. |
+| **psmux** | TUI · **Windows** | Rust · "the native Windows tmux" (ConPTY, reads `.tmux.conf`, 83 tmux commands). A **multiplexer**, not a manager — its one agent feature renders Claude Code teammate agents into panes. No file manager, MCP, git, or context-sharing. Different lane (Windows) + different layer. See §1b. |
 | **long tail** | mixed | Chorus · Vibetunnel · VibeKanban · Mux · Happy · AutoClaude · Codirigent · Centurion · AgentWire · Baton … |
 | **spyc** | TUI · cross-plat | Rust/ratatui · in-process gix worktrees · MCP bridge · vi-keyboard **file+process+agent manager** (not just a multiplexer). |
 
@@ -190,6 +191,54 @@ Building agent-status on the **MCP/hook channel** — a cooperative agent
 *self-reporting* working/blocked, plus a tunable scrape *fallback* — dodges the
 entire #671/#803 fragility class. That is how spyc wins a feature herdr struggles
 to keep working. The implementation plan is **`docs/AGENT_AWARENESS_PLAN.md`**.
+
+---
+
+## 1b. psmux — a multiplexer, not a manager (does not move the thesis)
+
+[psmux](https://github.com/psmux/psmux) markets itself as **"the native Windows
+tmux. Born in PowerShell, made in Rust."** It is a faithful tmux clone for
+Windows (ConPTY, reads `.tmux.conf`, 83 tmux commands, themes, session
+persistence) — for people who want tmux without WSL. Its one agent-adjacent
+feature: when **Claude Code** spawns teammate agents inside a psmux session,
+they render in **separate panes** instead of in-process. No file manager, no
+MCP, no git awareness, no context-sharing, no agent status/notifications.
+
+**It does not alter spyc's thesis** — it's a different *layer* on a different
+*platform*, missing exactly what spyc *is*:
+
+| | psmux | spyc |
+|---|---|---|
+| Core | terminal multiplexer (host many shells) | keyboard-driven **file commander** |
+| Agent value | *hosts* agent panes (paning) | agent **sees your context** via MCP (cursor / picks / git / worktrees) |
+| Platform | Windows-native (anti-WSL) | macOS / Linux (WSL-only on Windows) |
+| Moat | tmux fidelity | *the file commander is the noun the agent operates on* |
+
+The only overlap — **hosting an agent in a pane** — is the one thing spyc
+explicitly does *not* try to win. spyc's embedded pane is a dogfooding vehicle,
+not the product; multiplexing is commoditized (tmux, wezterm, psmux, and Claude
+Code's own `teammateMode`). spyc's bet is orthogonal: not "run more agent
+panes," but "the one agent you're pairing with operates on your live working
+tree without you describing it." A psmux user could still want that bridge; you
+could even run spyc's agent pane *inside* psmux. Complementary layers.
+
+**What it signals (reinforcement, not a pivot):**
+- **"Agents in panes" is now a trend** (psmux + Claude Code teammate-mode). That
+  *validates* spyc's direction and confirms the multiplexer layer is being
+  commoditized — so the guardrail holds: **don't over-invest in pane/multiplexer
+  features; the differentiator is the MCP context bridge + agent-awareness.**
+  (Same conclusion the charter reached parking P2 orchestration to "primitives
+  only, no auto-spawn.")
+- **Windows is a real gap** psmux fills natively while spyc stays WSL-only —
+  reinforces, doesn't threaten, spyc's platform positioning.
+
+**Minor compatibility note:** Claude Code's teammate feature spawns teammates
+into the *host multiplexer* (tmux/iterm2). Running multi-agent Claude Code
+*inside spyc's pane* (which isn't tmux) falls back to in-process — teammates
+won't get their own panes. Not a thesis issue, but a "known interaction" if spyc
+is ever marketed for multi-agent work: spyc is single-pair-agent-focused by
+design; the teammate grid is the multiplexer's job (grid multiplexer is
+explicitly out of scope per the charter).
 
 ---
 

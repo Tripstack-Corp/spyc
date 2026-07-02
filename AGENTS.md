@@ -7,7 +7,9 @@ A vi-keyboard-driven terminal file manager in Rust, on ratatui/crossterm. In the
 > (Claude Code loads it via `CLAUDE.md` → `@AGENTS.md`; codex / agy / others read
 > it directly). Deeper design detail lives in [`ARCHITECTURE.md`](ARCHITECTURE.md);
 > UI language in [`DESIGN.md`](DESIGN.md); the full feature reference in
-> [`FEATURES.md`](FEATURES.md). **Keep this file slim** — it's always in context.
+> [`FEATURES.md`](FEATURES.md); the config reference (`.spycrc.toml`, notifications,
+> keymap DSL, Lua) in [`CONFIGURATION.md`](CONFIGURATION.md). **Keep this file
+> slim** — it's always in context.
 
 ## What it does
 
