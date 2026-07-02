@@ -296,8 +296,8 @@ pub fn install(lua: &Lua, bridge: &SharedBridge, fnreg: &SharedFnRegistry) -> ml
         })?,
     )?;
 
-    // Event hooks are recorded but not yet dispatched: the App stores the
-    // registration so the Tier-C event seam can later fire it.
+    // Event hooks: the App stores the registration and fires it (with an event
+    // payload table) on the wired low-frequency events (`App::fire_lua_event`).
     let b = Rc::clone(bridge);
     let r = Rc::clone(fnreg);
     spyc.set(
@@ -352,8 +352,9 @@ fn json_str_to_lua(lua: &Lua, json: &str) -> mlua::Result<Value> {
 
 /// Convert a `serde_json::Value` to an `mlua::Value`: object → table keyed by
 /// string, array → 1-based sequence table, string/number/bool → the Lua scalar,
-/// null → `nil`. The single marshaling point for every JSON-producing reader.
-fn json_to_lua(lua: &Lua, v: &JsonValue) -> mlua::Result<Value> {
+/// null → `nil`. The single marshaling point for every JSON-producing reader
+/// and for the `spyc.on` event payload the worker passes to a hook callback.
+pub(super) fn json_to_lua(lua: &Lua, v: &JsonValue) -> mlua::Result<Value> {
     Ok(match v {
         JsonValue::Null => Value::Nil,
         JsonValue::Bool(b) => Value::Boolean(*b),

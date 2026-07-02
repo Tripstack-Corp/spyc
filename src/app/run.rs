@@ -656,6 +656,16 @@ impl App {
                 ctx.draw.mark(3);
             }
 
+            // Fire the low-frequency `spyc.on` state-change events (dir_changed
+            // / project_changed) by diffing against the last-fired baselines —
+            // AFTER `handle_lua_done` + its `run_effects(lua_fx)` above, so a
+            // Lua-caused change is re-baselined (not re-fired) via the
+            // re-entrancy guard, and `settle_agent_activity` (agent_status) has
+            // already run this iteration. Only enqueues on a real change → no
+            // redraw here (a handler's effects land on a later drain), 0 dps
+            // idle.
+            self.settle_lua_events();
+
             // Execute writable MCP commands buffered into `ctx.mcp_pending` (see
             // `drain_mcp_pending` — kept at this early loop position for the
             // 5s read-after-write timeout contract).

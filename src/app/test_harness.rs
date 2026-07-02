@@ -33,6 +33,7 @@ impl App {
                 lua: None,
                 lua_registry: super::lua::LuaRegistry::default(),
                 lua_inflight: None,
+                lua_events: super::lua_events::LuaEventState::default(),
                 mcp_config_dirs: Vec::new(),
                 pane_tabs: None,
                 top_overlay: None,

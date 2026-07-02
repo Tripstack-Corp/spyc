@@ -260,6 +260,7 @@ mod inventory_ops;
 mod key_dispatch;
 mod loop_steps;
 mod lua;
+mod lua_events;
 mod mcp;
 mod mermaid_ops;
 #[cfg(test)]
@@ -484,6 +485,12 @@ struct Runtime {
     /// its outcome drains. The `Instant` it carries is an OS-ish clock value,
     /// correctly in `Runtime` (never the pure Model).
     lua_inflight: Option<lua::LuaInflight>,
+    /// Bookkeeping for `spyc.on` event dispatch (the Tier-C seam). Tracks the
+    /// last-fired baselines so `settle_lua_events` fires only on a genuine
+    /// change, plus the re-entrancy guard that stops a Lua event handler whose
+    /// own request re-triggers the same event from looping. Rebuilt from
+    /// scratch on `:lua off` (the registries go too).
+    lua_events: lua_events::LuaEventState,
     /// Directories where we wrote an MCP client config we own (`.mcp.json` /
     /// `.codex/config.toml`) when launching an agent pane. Recorded by
     /// `ensure_agent_mcp_config`; `cleanup_written_mcp_configs` removes our

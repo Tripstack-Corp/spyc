@@ -264,15 +264,26 @@ impl App {
         // Snapshot the anim epoch up front so the `pane_tabs` mutable borrow
         // below doesn't overlap the `self.view` read.
         let anim_epoch = self.view.started_at;
+        // Only bother tracking `agent_status` transitions when a Lua handler is
+        // registered for the event (the common case has none → no per-tab
+        // bookkeeping). Collect (id, effective-status) during the borrow and
+        // fire after it drops (fire needs `&mut self`).
+        let track_status = self.lua_wants_agent_status_event();
         let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
             ctx.scheduler.disarm(Deadline::AgentIdle);
             ctx.scheduler.disarm(Deadline::AgentAnim);
+            if track_status {
+                // No tabs → prune every stale baseline.
+                self.prune_agent_status_baselines(&std::collections::HashSet::new());
+            }
             return false;
         };
 
         let mut changed = false;
         let mut earliest_flip: Option<Instant> = None;
         let mut any_working = false;
+        let mut status_transitions: Vec<(String, AgentActivity)> = Vec::new();
+        let mut live_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         for entry in tabs.tabs_mut() {
             let is_agent = crate::agent::detect(&entry.info.command).kind() != AgentKind::Other;
             // Drop a report that's no longer authoritative (expired, or the tab
@@ -314,6 +325,24 @@ impl App {
                 entry.info.activity = new;
                 changed = true;
             }
+            // Record this tab's effective status for the `agent_status` event
+            // (dedup + firing happen after the borrow). Keyed by the stable
+            // `SPYC_PANE_ID` so the event survives tab reorder.
+            if track_status {
+                live_ids.insert(entry.info.id.clone());
+                status_transitions.push((entry.info.id.clone(), new));
+            }
+        }
+
+        // Fire `agent_status` for tabs whose SEMANTIC status transitioned (the
+        // per-tab baseline in `fire_agent_status_event` dedups a repeat, so an
+        // output tick / anim frame that leaves the status the same fires
+        // nothing), then drop baselines for closed tabs.
+        if track_status {
+            for (id, status) in status_transitions {
+                self.fire_agent_status_event(&id, status);
+            }
+            self.prune_agent_status_baselines(&live_ids);
         }
 
         // Wake to flip Working→Idle at the earliest pending boundary.

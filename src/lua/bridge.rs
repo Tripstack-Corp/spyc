@@ -50,7 +50,8 @@ pub enum LuaRequest {
 /// What a Lua callback was registered as, during an `init.lua` load. The App
 /// layer turns each into a live binding: a `Map` appends a synthetic
 /// `BoundAction::Lua("@map:<idx>")` keymap entry; a `Command` becomes a runtime
-/// `:`-command; an `Event` is recorded but not yet dispatched.
+/// `:`-command; an `Event` is recorded under its name for `App::fire_lua_event`
+/// to dispatch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RegKind {
     /// `spyc.map(key, fn)` — `key` is the `.spycrc` DSL key string (e.g. `z`,
@@ -58,8 +59,9 @@ pub enum RegKind {
     Map(String),
     /// `spyc.command(name, fn)` — `name` is the `:`-command name.
     Command(String),
-    /// `spyc.on(event, fn)` — `event` is the hook name. Event hooks are
-    /// recorded but not yet dispatched.
+    /// `spyc.on(event, fn)` — `event` is the hook name. Fired by
+    /// `App::fire_lua_event` for the wired low-frequency events (`startup` /
+    /// `dir_changed` / `project_changed` / `agent_status`).
     Event(String),
 }
 

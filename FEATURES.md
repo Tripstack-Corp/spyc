@@ -841,8 +841,17 @@ unambiguous:
   and `notify` / `warn`. An optional `~/.config/spyc/init.lua` is a config
   platform: `spyc.map("z", fn)` binds a key to a Lua callback and
   `spyc.command("blame", fn)` registers a runtime `:` command — both fire
-  the callback later (Tab-completion lists registered commands). `spyc.on`
-  records event hooks (not yet dispatched). `:lua reload` (or `^R`) re-runs
+  the callback later (Tab-completion lists registered commands).
+  `spyc.on(event, fn)` registers an **event hook** — spyc runs the callback
+  (passing an `ev` table) when a low-frequency event fires: `startup` (once,
+  after init.lua loads), `dir_changed` (`ev.cwd`), `project_changed`
+  (`ev.project_home`), and `agent_status` (`ev.pane`, `ev.state` ∈
+  working|blocked|done|idle — fired on a semantic transition, so an agent going
+  `blocked`/`done` is a natural trigger, e.g.
+  `spyc.on("agent_status", function(ev) if ev.state == "blocked" then spyc.notify("agent "..ev.pane.." blocked") end end)`).
+  A change a Lua handler itself causes (e.g. an `on("dir_changed")` handler that
+  navigates) does not re-fire the event, so hooks can't loop. High-frequency
+  events (cursor/output) are intentionally not exposed. `:lua reload` (or `^R`) re-runs
   init.lua so edits take without a restart; `:lua status` reports the
   registered map/command counts. Scripts run on a dedicated worker thread
   so a runaway can't freeze the UI: if a script runs past ~1s an interactive

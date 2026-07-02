@@ -55,8 +55,16 @@ pub enum LuaJob {
         snapshot: SpycContext,
     },
     /// Invoke a previously-registered callback by its `fn_id` (a `spyc.map`
-    /// key or a `spyc.command`), collecting its requests like `RunFile`.
-    RunRegistered { fn_id: u64, snapshot: SpycContext },
+    /// key, a `spyc.command`, or a `spyc.on` event hook), collecting its
+    /// requests like `RunFile`. `event` is the callback argument: `None` for a
+    /// map/command trigger (called 0-arg), or `Some(payload)` for an event
+    /// hook — the payload is marshaled to a Lua table via `json_to_lua` and
+    /// passed as the single `ev` argument.
+    RunRegistered {
+        fn_id: u64,
+        snapshot: SpycContext,
+        event: Option<serde_json::Value>,
+    },
     /// Stop the worker thread.
     Shutdown,
 }
@@ -214,8 +222,21 @@ fn run<W: Fn()>(
                 init_path,
                 snapshot,
             } => run_job(&mut || run_load(&lua, &bridge, &init_path, snapshot.clone())),
-            LuaJob::RunRegistered { fn_id, snapshot } => {
-                run_job(&mut || run_registered(&lua, &bridge, &fnreg, fn_id, snapshot.clone()));
+            LuaJob::RunRegistered {
+                fn_id,
+                snapshot,
+                event,
+            } => {
+                run_job(&mut || {
+                    run_registered(
+                        &lua,
+                        &bridge,
+                        &fnreg,
+                        fn_id,
+                        snapshot.clone(),
+                        event.clone(),
+                    )
+                });
             }
             LuaJob::Reload {
                 init_path,
@@ -354,13 +375,17 @@ fn run_load(
 }
 
 /// Invoke a previously-registered callback by its `fn_id`, collecting the
-/// requests it enqueues (a `spyc.map` key or a `spyc.command` firing).
+/// requests it enqueues (a `spyc.map` key, a `spyc.command`, or a `spyc.on`
+/// event hook firing). `event` is the callback argument: `None` calls it 0-arg
+/// (map/command); `Some(payload)` marshals the payload to a Lua table and
+/// passes it as the single `ev` argument (an event hook).
 fn run_registered(
     lua: &Lua,
     bridge: &SharedBridge,
     fnreg: &SharedFnRegistry,
     fn_id: u64,
     snapshot: SpycContext,
+    event: Option<serde_json::Value>,
 ) -> LuaOutcome {
     reset_bridge(bridge, snapshot);
     // Resolve the stored callback to an owned `Function` before calling — the
@@ -375,7 +400,12 @@ fn run_registered(
             ))),
         }
     };
-    let result = func.and_then(|f| f.call::<()>(()));
+    let result = func.and_then(|f| match &event {
+        // An event hook: pass the marshaled payload table as `ev`.
+        Some(payload) => api::json_to_lua(lua, payload).and_then(|arg| f.call::<()>(arg)),
+        // A map/command trigger: 0-arg.
+        None => f.call::<()>(()),
+    });
     let requests = std::mem::take(&mut bridge.borrow_mut().requests);
     match result {
         Ok(()) => LuaOutcome {
@@ -667,6 +697,7 @@ mod tests {
             .submit(LuaJob::RunRegistered {
                 fn_id,
                 snapshot: dummy_snapshot(),
+                event: None,
             })
             .unwrap();
         rx.recv_timeout(Duration::from_secs(5)).expect("fired");
@@ -679,9 +710,8 @@ mod tests {
         );
     }
 
-    /// `spyc.command` / `spyc.on` register with their own kinds; the inert
-    /// `spyc.on` still records a registration (the App stores but never
-    /// dispatches it).
+    /// `spyc.command` / `spyc.on` register with their own kinds — the App
+    /// stores each and (for `spyc.on`) fires it on the wired events.
     #[test]
     fn load_records_command_and_event_registrations() {
         let dir = tempfile::tempdir().unwrap();
@@ -714,9 +744,61 @@ mod tests {
         let outcome = run_one(LuaJob::RunRegistered {
             fn_id: 999,
             snapshot: dummy_snapshot(),
+            event: None,
         });
         assert!(outcome.error.is_some());
         assert!(outcome.requests.is_empty());
+    }
+
+    /// A `spyc.on` event hook receives the event payload as its argument: load
+    /// registers an `agent_status` handler that reads `ev.state`, fire it via
+    /// `RunRegistered` with an event payload, and assert the callback saw the
+    /// table (it echoes `ev.state` back through `spyc.notify`). Proves the
+    /// `event: Some(..)` arm marshals the payload and calls the callback 1-arg.
+    #[test]
+    fn run_registered_passes_the_event_payload() {
+        let dir = tempfile::tempdir().unwrap();
+        let init = dir.path().join("init.lua");
+        std::fs::write(
+            &init,
+            "spyc.on('agent_status', function(ev) spyc.notify('state=' .. ev.state) end)",
+        )
+        .unwrap();
+
+        let (tx, rx) = mpsc::channel::<()>();
+        let worker = LuaWorker::spawn(move || {
+            let _ = tx.send(());
+        });
+        worker
+            .submit(LuaJob::Load {
+                init_path: init,
+                snapshot: dummy_snapshot(),
+            })
+            .unwrap();
+        rx.recv_timeout(Duration::from_secs(5)).expect("load done");
+        let loaded = worker.drain_outcomes();
+        let fn_id = loaded[0].registrations[0].fn_id;
+        assert_eq!(
+            loaded[0].registrations[0].kind,
+            RegKind::Event("agent_status".to_string())
+        );
+
+        worker
+            .submit(LuaJob::RunRegistered {
+                fn_id,
+                snapshot: dummy_snapshot(),
+                event: Some(serde_json::json!({ "pane": 2, "state": "blocked" })),
+            })
+            .unwrap();
+        rx.recv_timeout(Duration::from_secs(5)).expect("fired");
+        let fired = worker.drain_outcomes();
+        assert_eq!(fired.len(), 1);
+        assert!(fired[0].error.is_none(), "{:?}", fired[0].error);
+        assert_eq!(
+            fired[0].requests,
+            vec![LuaRequest::Notify("state=blocked".to_string())],
+            "the callback must receive the event payload as `ev`"
+        );
     }
 
     /// The must-have live-read proof: `spyc.read` returns a written file's

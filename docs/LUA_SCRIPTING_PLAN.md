@@ -1,9 +1,12 @@
 # Lua Scripting Plan (mlua)
 
-> **Status: PROPOSED — awaiting review (2026-06-30). Not started.**
-> Charter for embedding Lua scripting in spyc. Scope, build-dep, and security
-> decisions are locked (see *Context*); the execution model and PR sequence
-> below are the proposal under review.
+> **Status: COMPLETE (2026-07-01). Tier A + B + C all shipped.**
+> Charter for embedding Lua scripting in spyc. Tiers A (programmable
+> keybindings), B (the `init.lua` platform), and C (event hooks) are all
+> shipped; the PR sequence below records the final shape. High-frequency events
+> (`cursor_moved`/`pane_output`) remain deliberately deferred (they'd blow the
+> repaint budget — see the Tier-C seam section). Scope, build-dep, and security
+> decisions are locked (see *Context*).
 
 ## Context
 
@@ -16,10 +19,10 @@ agent pane going `blocked`, a dir change) — the natural capstone of the
 agent-awareness work.
 
 **Locked decisions:**
-- **Scope: Tier A + B now; Tier C (event hooks) designed-for but deferred to a phase-2.**
+- **Scope: Tier A + B + C all shipped.**
   - A: programmable keybindings — `map KEY lua <name>`.
   - B: a `~/.config/spyc/init.lua` config platform — `spyc.map` / `spyc.command` + a `spyc.*` API.
-  - C (design seam only, NOT wired): `spyc.on('startup'|'dir_changed'|'project_changed'|'agent_status', fn)`.
+  - C (SHIPPED): `spyc.on('startup'|'dir_changed'|'project_changed'|'agent_status', fn)` — live, low-frequency events only (high-frequency cursor/output stay deferred).
 - **Build dep accepted unconditionally:** `mlua` with `lua54` + `vendored`, **no cargo feature gate**. A C compiler becomes a hard build requirement everywhere (incl. musl static). The "zero C deps / clean static musl" comments in `Cargo.toml` get honestly rewritten.
 - **Security: `$HOME`/XDG only.** Lua loads only from `~/.config/spyc/init.lua` and `~/.config/spyc/lua/`. Project-local config can NEVER run Lua — enforced for free by marking `BoundAction::Lua` as `is_executing()` (the existing `Trust::Project` gate drops executing bindings).
 
@@ -109,7 +112,7 @@ A single `spyc` global table.
 **Registration (Tier B, evaluated at `init.lua` load):**
 - `spyc.map(key, fn)` → registers `key → fn_id` (key string parsed by the existing `dsl::parse_key`).
 - `spyc.command(name, fn)` → registers a runtime `:`-command.
-- `spyc.on(event, fn)` → **stub that records the registration but is inert in phase 1** (the Tier-C seam; documented as "coming in phase 2" — but per the comment-rot guard, the code comment states only what IS: "event hooks are recorded but not yet dispatched").
+- `spyc.on(event, fn)` → registers an event hook (Tier C, SHIPPED). Any event name registers, but only the four wired events fire: `startup`, `dir_changed`, `project_changed`, `agent_status` (see the Tier-C section).
 
 ## Dispatch paths (all stay MVU-pure: trigger → job → requests-as-data → effects)
 
@@ -122,9 +125,16 @@ A single `spyc` global table.
 - **XDG config dir (lands first, as PR0):** there is no config-dir helper today (`src/paths.rs` is only `~`/`$VAR` expansion; the only XDG resolver is `state_root()` at `src/state/mod.rs:53` = `$XDG_STATE_HOME/spyc` else `~/.local/state/spyc`, with a thread-local override for parallel-safe tests). Add a `config_root()` resolver = `$XDG_CONFIG_HOME/spyc` else `~/.config/spyc`, mirroring `state_root()`'s shape **including its thread-local test override** so VM/config tests stay chdir-free. Lowest-risk home is alongside `state_root()` in `src/state/mod.rs` (reuses the override machinery); a `paths::` home is the cleaner long-term choice if the override is factored out — decide at implementation. `init.lua` and `<config_root>/lua/` are the ONLY load locations. This helper is dependency-free and useful on its own, so it ships **before** any mlua work.
 - **Reload:** extend `src/app/config.rs::reload_config` (already triggered by `^R` + the file watcher) to submit a worker "reload" job: drop the old `Lua` (frees all `RegistryKey`s), recreate, re-run `init.lua`, replace the registries atomically. Add `init.lua` + `~/.config/spyc/lua/` to the config watcher's tracked set (`src/app/watch.rs`).
 
-## Tier-C event seam (DESIGN ONLY — do not wire dispatch in phase 1)
-- `registry.rs` already carries `event → Vec<fn_id>` (populated by the inert `spyc.on`).
-- Phase 2 adds: an `Event` enum (`Startup`, `DirChanged{cwd}`, `ProjectChanged{root}`, `AgentStatus{pane_id,state}`), a main-side `fire_event(ev)` that snapshots context + submits a job per registered `fn_id`, and **a handful of named dispatch sites**: startup (end of `bootstrap`), dir-change (`src/app/navigate.rs` / where cwd changes), project-change (PROJECT_HOME resolve), agent-status (`src/app/agent_status.rs` where `reported`/activity changes). **Low-frequency events only first**; explicitly exclude `cursor_moved`/`pane_output` until debounced — they fire at key-repeat/firehose speed and would blow the repaint budget. The serialization + watchdog already protect against a slow event handler.
+## Tier-C event seam (SHIPPED — PR5)
+- `LuaRegistry.events: HashMap<String, Vec<fn_id>>` carries the `spyc.on` registrations; any event name registers, but only the four low-frequency events below are wired to a dispatch site. High-frequency `cursor_moved`/`pane_output` stay deferred: they fire at key-repeat/firehose speed and would blow the repaint budget (the serialization + watchdog protect against a slow handler, but not against firing thousands of times).
+- **Payload as a callback arg.** `LuaJob::RunRegistered` gained `event: Option<serde_json::Value>`; `run_registered` calls the stored `Function` as `f.call(json_to_lua(payload))` when `Some`, else 0-arg `f.call(())` (so map/command triggers stay argument-free). One `json_to_lua` (added in PR4) marshals the payload table.
+- **`App::fire_lua_event(event, payload)`** (`src/app/lua.rs`) looks up the registered `fn_id`s and submits one `RunRegistered { event: Some(payload) }` per handler; the finished runs drain through the SAME `handle_lua_done` path as map/command triggers (no new `Message`/coalesce variant). No user-facing flash (events are automatic). **Busy-skip:** an event while the worker is running is dropped (not queued) — the next occurrence re-fires; this bounds runaway event queueing.
+- **Re-entrancy guard.** `Runtime.lua_events.applying_requests` is set while `handle_lua_done` applies a run's requests (and spans the deferred `run_effects(lua_fx)`). `settle_lua_events` treats a cwd/PROJECT_HOME change seen under the flag as Lua-caused and re-baselines instead of firing — so an `on("dir_changed")` handler that navigates can't infinite-loop. `agent_status`/`startup` can't be self-triggered by a request, so they're exempt.
+- **The four dispatch sites:**
+  - **startup** — a one-shot `startup_pending` flag is armed when `load_init_lua`/`reload_init_lua` submits the `Load`/`Reload`; when that outcome drains in `handle_lua_done` (AFTER the `on` registrations install), `startup` fires exactly once. Payload `{}`.
+  - **dir_changed** / **project_changed** — `App::settle_lua_events` (loop-bottom, the impure post-transition settle) diffs the focused column's cwd + PROJECT_HOME against last-fired baselines. This catches a change from ANY source (key, MCP, session restore, a Lua request) without instrumenting each mutation site. Payloads `{cwd}` / `{project_home}`.
+  - **agent_status** — `settle_agent_activity` fires on a SEMANTIC transition of a tab's effective status (working↔blocked↔done↔idle), keyed by the stable `SPYC_PANE_ID`, so an output tick / animation frame that leaves the status unchanged fires nothing. Payload `{pane, state}`.
+- **Idle stays 0 dps:** every fire is event-driven (an actual state change); no polling/timer added. The per-tab tracking + baseline diffing are gated on a matching handler being registered, so a configless / no-handler run pays nothing.
 
 ## Cargo.toml / build / deny
 - Add: `mlua = { version = "0.10", features = ["lua54", "vendored"] }` (pin the current release at implementation).
@@ -150,7 +160,7 @@ A single `spyc` global table.
 2. **PR2 — Tier B: init.lua platform.** Loader in bootstrap + reload + watcher tracking; `spyc.map` / `spyc.command` + the COMMAND_TABLE fallthrough + completion merge; the inert `spyc.on` stub; `:lua reload`/`:lua status`.
 3. **PR3 — Interactive runaway control.** The soft-threshold scheduler deadline + the "keep waiting? [y/N]" modal (new confirm variant in `modal.rs`/confirm handlers) wired to the abort flag; pure watchdog-decision tests.
 4. **PR4 — Live reads. ✅ SHIPPED (v1.88.0).** `spyc.worktrees`/`git_status`/`git_log`/`read`/`search_paths`/`search_content` reusing the root-scoped MCP readers (`src/mcp/readers.rs` + `crate::fs::{finder,grep}`) DIRECTLY on the worker — the "round-trip" the charter assumed turned out unnecessary (the readers are already off-loop + thread-safe). One `json_to_lua` marshals every reader's JSON; reads raise on failure, empty-table on absence.
-5. **PR5 (phase 2, deferred) — Tier C events.** `Event` enum + `fire_event` + the low-frequency dispatch sites; activate `spyc.on`.
+5. **PR5 — Tier C events. ✅ SHIPPED (v1.89.0).** Activated `spyc.on`: extended `LuaJob::RunRegistered` with an `event: Option<serde_json::Value>` arg; added `App::fire_lua_event` + `settle_lua_events` (dir/project diff) + `fire_agent_status_event` (semantic-transition detection in `settle_agent_activity`) + the one-shot `startup` fire after the `Load` drain; the `applying_requests` re-entrancy guard breaks the navigate-in-a-dir_changed-handler loop; busy-skip bounds load. Low-frequency events only (startup/dir_changed/project_changed/agent_status); high-frequency cursor/output remain deferred. The campaign (Tier A+B+C) is complete.
 
 ## Top risks & mitigations
 1. **A runaway script wedging the UI.** Mitigated structurally by off-thread execution + the layered kill switches (hook abort flag, hard ceiling, interactive prompt, single-worker serialization, global off switch). Residual: a script blocked inside a C call — mitigated by not exposing blocking primitives and routing all blocking work through cancelable spyc round-trips.

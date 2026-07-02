@@ -16,6 +16,7 @@ use crate::keymap::user::{BoundAction, UserBinding};
 use crate::lua::{LuaJob, LuaOutcome, LuaRequest, LuaWorker, RegKind, Registration};
 use crate::mcp_cmd::{McpCommand, McpResponse};
 
+use super::lua_events::{EV_STARTUP, LuaEventState};
 use super::{App, Deadline, Effect, Message, Mode, Prompt, PromptKind, RunCtx};
 
 /// Cap on how many times `spyc.action(name, count)` re-applies an action — the
@@ -70,8 +71,10 @@ pub struct LuaRegistry {
     pub maps: Vec<u64>,
     /// `spyc.command` callbacks, keyed by `:`-command name.
     pub commands: HashMap<String, u64>,
-    /// `spyc.on` callbacks, keyed by event name. Recorded but not yet
-    /// dispatched (the Tier-C event seam).
+    /// `spyc.on` callbacks, keyed by event name — `App::fire_lua_event` looks
+    /// them up to dispatch. Any name registers, but only `startup` /
+    /// `dir_changed` / `project_changed` / `agent_status` are wired to a
+    /// dispatch site.
     pub events: HashMap<String, Vec<u64>>,
 }
 
@@ -90,7 +93,7 @@ impl App {
     /// Ensure the Lua worker is running (lazy spawn). Returns whether one is
     /// available — false when Lua is disabled (`--no-lua` / `:lua off`) or no
     /// wake channel exists yet (pre-`run()` / the test harness).
-    fn ensure_lua_worker(&mut self) -> bool {
+    pub(super) fn ensure_lua_worker(&mut self) -> bool {
         if !crate::lua::enabled() {
             return false;
         }
@@ -155,7 +158,11 @@ impl App {
         let snapshot = self.snapshot_context();
         self.submit_lua_job(
             "mapped key".to_string(),
-            LuaJob::RunRegistered { fn_id, snapshot },
+            LuaJob::RunRegistered {
+                fn_id,
+                snapshot,
+                event: None,
+            },
         );
         Vec::new()
     }
@@ -176,7 +183,11 @@ impl App {
         let snapshot = self.snapshot_context();
         self.submit_lua_job(
             format!(":{name}"),
-            LuaJob::RunRegistered { fn_id, snapshot },
+            LuaJob::RunRegistered {
+                fn_id,
+                snapshot,
+                event: None,
+            },
         );
         Some(Vec::new())
     }
@@ -196,7 +207,7 @@ impl App {
     /// successful submit, record `lua_inflight` (the `name` is the runaway
     /// modal's display label) so the watchdog can raise the "keep waiting?"
     /// prompt if the job runs past `LUA_RUNAWAY_SOFT`.
-    fn submit_lua_job(&mut self, name: String, job: LuaJob) {
+    pub(super) fn submit_lua_job(&mut self, name: String, job: LuaJob) {
         if let Some(worker) = self.runtime.lua.as_ref() {
             match worker.submit(job) {
                 Ok(()) => {
@@ -238,7 +249,12 @@ impl App {
             self.state.mode = Mode::Normal;
             self.view.needs_full_repaint = true;
         }
+        // Was this the drain of the `init.lua` `Load`/`Reload`? If so, its
+        // `spyc.on` registrations are now installed, so `startup` may fire.
+        let fire_startup = self.runtime.lua_events.startup_pending;
+        self.runtime.lua_events.startup_pending = false;
         let mut effects = Vec::new();
+        let mut applied_a_request = false;
         for outcome in outcomes {
             if let Some(err) = outcome.error {
                 if !user_aborted {
@@ -250,8 +266,32 @@ impl App {
                 self.apply_lua_registration(kind, fn_id);
             }
             for req in outcome.requests {
+                applied_a_request = true;
                 effects.extend(self.apply_lua_request(req));
             }
+        }
+        // Re-entrancy guard: a request applied this iteration may have changed
+        // the focused cwd / PROJECT_HOME (a handler that navigated). Mark it so
+        // `settle_lua_events` (loop-bottom, same iteration) re-baselines that
+        // change instead of firing `dir_changed`/`project_changed` — otherwise
+        // an `on("dir_changed")` handler that navigates would loop. The flag
+        // spans the deferred `run_effects(lua_fx)` in `run()` too (a `ChangeDir`
+        // effect applies there, after this returns) since `settle_lua_events`
+        // runs after that. Only set when a request actually ran — a
+        // registration-only `Load` drain changes no state, so it must not
+        // suppress a real user cwd change that lands the same iteration.
+        if applied_a_request {
+            self.runtime.lua_events.applying_requests = true;
+        }
+        // Fire `startup` once, AFTER the load's `on` handlers are installed. Not
+        // suppressed by the re-entrancy guard — it's the intended first fire,
+        // not a request-application side effect (it also doesn't submit through
+        // the busy worker, since we're mid-drain — see `fire_lua_event`).
+        if fire_startup {
+            self.fire_lua_event(
+                EV_STARTUP,
+                serde_json::Value::Object(serde_json::Map::new()),
+            );
         }
         (true, effects)
     }
@@ -259,7 +299,9 @@ impl App {
     /// Install one `init.lua` registration as a live binding: a `Map` appends a
     /// synthetic `@map:<idx>` keymap entry (which the existing resolver routes
     /// straight back to `apply_lua_binding`); a `Command` records a runtime
-    /// `:`-command; an `Event` is recorded but not yet dispatched.
+    /// `:`-command; an `Event` is recorded under its name for `fire_lua_event`
+    /// to dispatch. Any event name registers, but only `startup` / `dir_changed`
+    /// / `project_changed` / `agent_status` are wired to a dispatch site.
     fn apply_lua_registration(&mut self, kind: RegKind, fn_id: u64) {
         match kind {
             RegKind::Map(key) => {
@@ -400,6 +442,9 @@ impl App {
         if !self.ensure_lua_worker() {
             return;
         }
+        // Arm the one-shot `startup` fire for when this Load's `spyc.on`
+        // registrations drain + install (see `handle_lua_done`).
+        self.runtime.lua_events.startup_pending = true;
         let snapshot = self.snapshot_context();
         self.submit_lua_job(
             "init.lua".to_string(),
@@ -421,6 +466,11 @@ impl App {
     /// (a configless user shouldn't get a Lua flash every `^R`).
     pub(super) fn reload_init_lua(&mut self, verbose: bool) {
         self.runtime.lua_registry.clear();
+        // Reset event bookkeeping too: reload re-registers the `spyc.on`
+        // handlers, so the last-fired agent-status baselines start fresh (a
+        // re-registered handler should see the current statuses as its first
+        // fires) and `startup` re-fires once the reload's registrations install.
+        self.runtime.lua_events.last_agent_status.clear();
         let Some(init_path) = self.init_lua_path() else {
             if verbose {
                 if crate::lua::enabled() {
@@ -435,6 +485,8 @@ impl App {
         if !self.ensure_lua_worker() {
             return;
         }
+        // Re-fire `startup` when the reload's registrations install.
+        self.runtime.lua_events.startup_pending = true;
         let snapshot = self.snapshot_context();
         self.submit_lua_job(
             "init.lua".to_string(),
@@ -557,6 +609,7 @@ pub(super) fn cmd_lua(app: &mut App, args: &str) -> Vec<Effect> {
             app.runtime.lua = None;
             app.runtime.lua_registry.clear();
             app.runtime.lua_inflight = None;
+            app.runtime.lua_events = LuaEventState::default();
             app.state.flash_info("lua: disabled");
         }
         "on" => {
