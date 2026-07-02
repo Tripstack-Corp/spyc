@@ -89,8 +89,12 @@ ignore = [
     # remote-untrusted-XML threat model:
     #   * 0.37.x via notify-rust -> tauri-winrt-notification — a Windows-only
     #     (cfg(windows)) backend, not compiled on our macOS/Linux targets.
-    #   * 0.38.x via syntect -> plist — parses TRUSTED bundled theme/syntax assets,
-    #     not untrusted remote XML.
+    #   * 0.38.x via syntect -> plist — quick-xml runs only when BUILDING the
+    #     SyntaxSet (parsing .sublime-syntax / .tmTheme *definition* files), never
+    #     on the file content being highlighted (that path is HighlightLines, no
+    #     XML). Definitions come from compiled-in two-face defaults + the user's
+    #     own ~/.config/spyc/syntaxes/ ($HOME-owned, same trust tier as
+    #     .spycrc.toml) — never untrusted remote input.
     # spyc is a local single-user TUI with no remote unauthenticated XML input.
     # No upgrade path until syntect/plist and tauri-winrt bump to quick-xml
     # >= 0.41.0 — revisit then (tracked in docs/RELEASE_ENGINEERING.md supply-chain).

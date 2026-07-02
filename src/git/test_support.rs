@@ -8,18 +8,32 @@
 
 use std::path::Path;
 
+/// Retry budget for [`run_git`]. Observed failure (2026-07-02, `make check`'s
+/// pre-commit hook): `git add` on a just-materialized worktree hit `Unable to
+/// create '.../.git/index.lock': Not a directory` after exhausting the old
+/// 3-attempt/300ms budget — did not reproduce over 5 clean re-runs at normal
+/// parallelism, so it's genuine transient contention (this codebase's other
+/// `set_current_dir` call sites — `app/bootstrap.rs`, `app/state/listing.rs`
+/// — mutate the process-wide cwd from sibling test threads; under heavy
+/// parallel `cargo test`, plus any concurrent `cargo build`/`test` from a
+/// sibling worktree on the same machine, macOS's temp-volume metadata cache
+/// can transiently misreport on an unrelated, otherwise-valid path), not a
+/// logic bug — widen the budget rather than chase an unreproducible one-off.
+const RUN_GIT_MAX_ATTEMPTS: u32 = 6;
+
 /// Run `git` against `dir` with a hermetic config (no user/system
 /// `.gitconfig`), returning stdout.
 ///
 /// Hardening for the parallel test suite: pass the operation dir via
 /// `-C <dir>` and pin the *process* cwd to a stable, never-deleted
 /// `temp_dir()`. Sibling tests `set_current_dir` and drop their tempdirs,
-/// which can transiently invalidate an inherited cwd mid-spawn; retry a few
-/// times with backoff to ride out that thrash.
+/// which can transiently invalidate an inherited cwd mid-spawn, or (rarer)
+/// heavy concurrent filesystem churn on the temp volume can transiently
+/// misreport on an unrelated path; retry with backoff to ride out either.
 pub fn run_git(dir: &Path, args: &[&str]) -> String {
     let dir_str = dir.to_str().expect("utf8 dir");
     let mut last_err = String::new();
-    for attempt in 0..3u32 {
+    for attempt in 0..RUN_GIT_MAX_ATTEMPTS {
         let out = std::process::Command::new("git")
             .arg("-C")
             .arg(dir_str)
@@ -43,5 +57,5 @@ pub fn run_git(dir: &Path, args: &[&str]) -> String {
             50 * u64::from(attempt + 1),
         ));
     }
-    panic!("git {args:?} failed after 3 attempts: {last_err}");
+    panic!("git {args:?} failed after {RUN_GIT_MAX_ATTEMPTS} attempts: {last_err}");
 }
