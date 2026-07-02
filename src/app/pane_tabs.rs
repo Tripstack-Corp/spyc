@@ -633,6 +633,15 @@ impl App {
     /// Close the active pane tab unconditionally — the shared body reached
     /// directly for an exited tab, or after the running-tab confirm.
     pub(crate) fn close_active_tab_now(&mut self) {
+        // Capture the closing tab's scope-claim owner key *before* it's removed,
+        // so we can auto-release its claims — a closed tab never holds a stale
+        // one (P2). `claim_owner` is unique per tab, so this drops exactly its
+        // claims, not a sibling's.
+        let closing_owner = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .map(|t| t.active_info().claim_owner.clone());
         if let Some(tabs) = self.runtime.pane_tabs.as_mut()
             && !tabs.close_active()
         {
@@ -641,6 +650,9 @@ impl App {
             self.state.focus = state::Focus::FileList;
             self.view.needs_full_repaint = true;
             self.state.flash_info("pane: last tab closed");
+        }
+        if let Some(owner) = closing_owner {
+            self.state.scope_registry.retain(|c| c.owner != owner);
         }
         // The closed tab may have had a stashed scrollback pager whose stream is
         // parked by id; reclaim it now that the tab is gone.

@@ -66,6 +66,27 @@ pub enum McpCommand {
         /// conversation over the spawn-proximity resolver (P1-3).
         session_id: Option<String>,
     },
+    /// P2 merge/scope coordination (`docs/AGENT_AWARENESS_PLAN.md`): declare
+    /// the scope this agent is about to touch. Same targeting priority as
+    /// `ReportStatus` (`pane_id` → `pane` → focused) — that tab's stable
+    /// `claim_owner` key becomes the claim's `owner`. `intent` is
+    /// `editing`/`merging`; only `merging` claims block a
+    /// `wait_for_scope_clear`. Returns the new claim's id.
+    RegisterScope {
+        pane_id: Option<String>,
+        pane: Option<usize>,
+        paths: Vec<String>,
+        intent: String,
+        pr: Option<String>,
+        note: Option<String>,
+    },
+    /// P2: the full scope registry as JSON — what an agent checks before
+    /// merging, and what the orchestration screen renders.
+    ListScopes,
+    /// P2: drop a claim by id (no ownership check — advisory tooling; a lead
+    /// agent or the user may clean up a stale claim on someone else's behalf).
+    /// No-op (not an error) if `id` doesn't match any live claim.
+    ReleaseScope { id: u64 },
     /// Another spyc instance has taken over the MCP socket for this
     /// directory. The TUI should warn the user.
     Disconnected { new_pid: u32 },

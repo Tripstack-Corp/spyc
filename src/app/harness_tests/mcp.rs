@@ -446,3 +446,83 @@ fn mcp_open_worktree_rejects_non_dir() {
         assert!(app.state.right.is_none(), "b not opened on error");
     });
 }
+
+/// P2 registry: register → list → release round-trips through the MCP apply
+/// path. register_scope resolves the claiming tab's stable owner key, returns
+/// the new claim id + any conflicting merges; list_scopes serializes the
+/// registry; release_scope drops the claim by id.
+#[test]
+fn register_list_release_scope_round_trip() {
+    use crate::mcp_cmd::{McpCommand, McpResponse};
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        app.open_pane_tab("cat"); // a tab to own the claim
+
+        let ok = |r: McpResponse| match r {
+            McpResponse::Ok { message } => message,
+            McpResponse::Error { message } => panic!("unexpected error: {message}"),
+        };
+
+        // register a `merging` claim on the focused tab (pane_id/pane = None).
+        let msg = ok(app.execute_mcp_command(McpCommand::RegisterScope {
+            pane_id: None,
+            pane: None,
+            paths: vec!["src/app/session.rs".to_string()],
+            intent: "merging".to_string(),
+            pr: Some("#661".to_string()),
+            note: None,
+        }));
+        let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        let claim_id = v["claim_id"].as_u64().expect("claim_id in reply");
+        assert_eq!(
+            v["conflicting_merges"].as_array().unwrap().len(),
+            0,
+            "no other claim ⇒ no conflicts"
+        );
+        assert_eq!(app.state.scope_registry.len(), 1);
+
+        // list_scopes serializes the registry as JSON.
+        let listed = ok(app.execute_mcp_command(McpCommand::ListScopes));
+        let arr: serde_json::Value = serde_json::from_str(&listed).unwrap();
+        assert_eq!(arr.as_array().unwrap().len(), 1);
+        assert_eq!(arr[0]["pr"], "#661");
+        assert_eq!(arr[0]["intent"], "merging");
+
+        // release_scope drops it by id.
+        ok(app.execute_mcp_command(McpCommand::ReleaseScope { id: claim_id }));
+        assert!(
+            app.state.scope_registry.is_empty(),
+            "release_scope drops the claim"
+        );
+    });
+}
+
+/// P2 registry: closing the owning tab auto-releases its claims — a closed tab
+/// never leaves a stale claim behind (the owner key is unique per tab, so a
+/// sibling's claims survive).
+#[test]
+fn closing_a_tab_auto_releases_its_scope_claims() {
+    use crate::mcp_cmd::{McpCommand, McpResponse};
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        app.open_pane_tab("cat");
+        let resp = app.execute_mcp_command(McpCommand::RegisterScope {
+            pane_id: None,
+            pane: None,
+            paths: vec!["x".to_string()],
+            intent: "editing".to_string(),
+            pr: None,
+            note: None,
+        });
+        assert!(matches!(resp, McpResponse::Ok { .. }));
+        assert_eq!(app.state.scope_registry.len(), 1);
+
+        app.close_active_tab_now();
+        assert!(
+            app.state.scope_registry.is_empty(),
+            "closing the owning tab releases its claims"
+        );
+    });
+}

@@ -19,6 +19,7 @@ pub mod inventory;
 pub mod marks;
 pub mod pager_positions;
 pub mod picks;
+pub mod scope_registry;
 pub mod session_names;
 pub mod sessions;
 

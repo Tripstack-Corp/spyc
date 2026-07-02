@@ -62,10 +62,10 @@ stays focused on what's left.
 
 **Remaining** — the live scope this charter still tracks:
 
-- **P2** — merge/scope coordination: a `register_scope` / `list_scopes` /
-  `wait_for_scope_clear` registry (in-memory, session-persisted) + an
-  orchestration screen (the capability gap; the highest-ceiling item). Full
-  design + use-cases in Phase 2 below.
+- **P2** — merge/scope coordination. **Registry + verbs shipped** (v1.95.0):
+  `register_scope` / `list_scopes` / `release_scope`, in-memory + session-
+  persisted + auto-released on tab close. **Remaining:** `wait_for_scope_clear`
+  (the blocking verb) + the orchestration screen. Full design in Phase 2 below.
 
 ---
 
@@ -240,7 +240,7 @@ land without a daemon, a second runtime, or `tokio`:
 So every invariant this plan opened with holds: single process, one message
 channel, effects-as-data, render stays pure, 0 dps at idle.
 
-### P2-1 · The scope registry + its MCP verbs
+### P2-1 · The scope registry + its MCP verbs — SHIPPED (v1.95.0)
 
 An **in-memory, Model-owned** registry: a `Vec<ScopeClaim>` on `AppState`, each
 `ScopeClaim { owner, paths, intent, pr, note, claimed_at }` — `intent` is
@@ -336,12 +336,15 @@ mutates through the existing action path.
 Three PRs, smallest blast radius first (each its own worktree + version bump +
 owner test):
 
-1. **Registry + verbs + persistence** — `register_scope` / `list_scopes` /
-   `release_scope`, the Model-owned `Vec<ScopeClaim>`, serialize/restore through
-   the session snapshot + `session_fingerprint` (rides P3-2). Useful on its own:
-   `list_scopes` already lets agents see overlaps.
+1. **Registry + verbs + persistence** — ✅ **SHIPPED (v1.95.0).**
+   `register_scope` / `list_scopes` / `release_scope`, the Model-owned
+   `Vec<ScopeClaim>`, serialize/restore through the session snapshot +
+   `session_fingerprint` (rides P3-2), auto-release on tab close. Useful on its
+   own: `list_scopes` already lets agents see overlaps. *Code:*
+   `src/state/scope_registry.rs`, `src/app/state/`, `src/state/sessions/`,
+   `src/mcp/protocol.rs`, `src/mcp_cmd.rs`, `src/app/mcp.rs`, `src/app/pane_tabs.rs`.
 2. **`wait_for_scope_clear`** — the loop-held `PendingWait` + `Deadline::ScopeWait`
-   + `settle_scope_waiters` + the pure conflict check.
+   + `settle_scope_waiters` + the pure conflict check. *(next)*
 3. **The orchestration screen** — observability render first, then the
    interactive ops.
 

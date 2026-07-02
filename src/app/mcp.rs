@@ -469,6 +469,95 @@ impl App {
                     message: format!("status '{status}' set for pane {} ({label})", idx + 1),
                 }
             }
+            McpCommand::RegisterScope {
+                pane_id,
+                pane,
+                paths,
+                intent,
+                pr,
+                note,
+            } => {
+                use crate::state::scope_registry::{ScopeClaim, ScopeIntent, conflicts};
+                let Some(parsed_intent) = ScopeIntent::parse(&intent) else {
+                    return McpResponse::Error {
+                        message: format!("intent must be 'editing' or 'merging', got '{intent}'"),
+                    };
+                };
+                if paths.is_empty() {
+                    return McpResponse::Error {
+                        message: "register_scope needs at least one path".into(),
+                    };
+                }
+                // Resolve the claiming tab → its stable owner key + label (same
+                // targeting as `report_status`: pane_id → pane → focused).
+                let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+                    return McpResponse::Error {
+                        message: "no pane open".into(),
+                    };
+                };
+                let ids: Vec<&str> = tabs.tabs().iter().map(|t| t.info.id.as_str()).collect();
+                let idx = match resolve_report_target(
+                    pane_id.as_deref(),
+                    pane,
+                    &ids,
+                    tabs.active_index(),
+                ) {
+                    Ok(i) => i,
+                    Err(message) => return McpResponse::Error { message },
+                };
+                let info = &tabs.tabs()[idx].info;
+                let owner = info.claim_owner.clone();
+                let owner_label = info.label.clone();
+                // Opaque monotonic-ish id (one past the current max). Reuse after a
+                // full release is harmless — waiters key on paths, not id.
+                let claim_id = self
+                    .state
+                    .scope_registry
+                    .iter()
+                    .map(|c| c.id)
+                    .max()
+                    .unwrap_or(0)
+                    + 1;
+                let claim = ScopeClaim {
+                    id: claim_id,
+                    owner: owner.clone(),
+                    owner_label,
+                    paths,
+                    intent: parsed_intent,
+                    pr,
+                    note,
+                    claimed_at_secs: crate::sysinfo::epoch_secs(),
+                };
+                // Surface any blocking overlap now, so the agent can decide to
+                // `wait_for_scope_clear` without a separate `list_scopes` round-trip.
+                let blocking: Vec<_> = conflicts(&self.state.scope_registry, &owner, &claim.paths)
+                    .iter()
+                    .map(|c| {
+                        serde_json::json!({ "owner": c.owner_label, "pr": c.pr, "paths": c.paths })
+                    })
+                    .collect();
+                self.state.scope_registry.push(claim);
+                McpResponse::Ok {
+                    message: serde_json::json!({
+                        "claim_id": claim_id,
+                        "conflicting_merges": blocking,
+                    })
+                    .to_string(),
+                }
+            }
+            McpCommand::ListScopes => {
+                let json = serde_json::to_string(&self.state.scope_registry)
+                    .unwrap_or_else(|_| "[]".to_string());
+                McpResponse::Ok { message: json }
+            }
+            McpCommand::ReleaseScope { id } => {
+                let before = self.state.scope_registry.len();
+                self.state.scope_registry.retain(|c| c.id != id);
+                let dropped = before - self.state.scope_registry.len();
+                McpResponse::Ok {
+                    message: format!("released {dropped} claim(s) with id {id}"),
+                }
+            }
             McpCommand::Disconnected { new_pid } => {
                 self.view.mcp_running = false;
                 self.state.flash_error(format!(

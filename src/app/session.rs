@@ -154,6 +154,7 @@ impl App {
                             agent_kind: kind,
                             agent_session_id,
                             agent_session_name,
+                            claim_owner: t.info.claim_owner.clone(),
                         }
                     })
                     .collect()
@@ -211,6 +212,7 @@ impl App {
                         .and_then(|p| p.source_path.clone()),
                     right_cwd: self.state.right.as_ref().map(|c| c.listing.dir.clone()),
                 }),
+            scope_claims: self.state.scope_registry.clone(),
         }
     }
 
@@ -305,6 +307,9 @@ impl App {
         if let Some(c) = self.state.right.as_ref() {
             c.listing.dir.hash(&mut h);
         }
+        // P2: a scope-registry mutation (register/release) is session-relevant
+        // — it's exactly what must survive a crash mid-merge-train.
+        self.state.scope_registry.hash(&mut h);
         h.finish()
     }
 
@@ -314,14 +319,15 @@ impl App {
     /// persist. Only armed while dirty ⇒ a clean/idle session wakes nothing
     /// (0 dps). Never needs a redraw.
     pub(crate) fn settle_autosave(&mut self, now: Instant, ctx: &mut RunCtx) {
-        // Nothing worth restoring (bare launch: no tabs, no split) ⇒ never write
-        // an empty session; stay disarmed.
+        // Nothing worth restoring (bare launch: no tabs, no split, no scope
+        // claims) ⇒ never write an empty session; stay disarmed.
         let has_restorable = self
             .runtime
             .pane_tabs
             .as_ref()
             .is_some_and(|pt| !pt.tabs().is_empty())
-            || self.state.vsplit.is_some();
+            || self.state.vsplit.is_some()
+            || !self.state.scope_registry.is_empty();
         let dirty = has_restorable
             && Some(self.session_fingerprint()) != self.runtime.autosave_last_saved_fp;
         match autosave_action(dirty, self.runtime.autosave_due, now) {
@@ -480,6 +486,13 @@ impl App {
                     // diverge. Defensive `strip_exit_suffix` heals older
                     // session files saved before the save-side strip landed.
                     entry.info.label = crate::pane::tabs::strip_exit_suffix(&tab.label);
+                    // P2: re-bind this respawned tab to its pre-restore scope-
+                    // claim owner key (empty on an older save, or a tab that
+                    // never had one) — leave the fresh one `TabInfo::new` just
+                    // assigned rather than overwrite with an empty string.
+                    if !tab.claim_owner.is_empty() {
+                        entry.info.claim_owner.clone_from(&tab.claim_owner);
+                    }
                     if let crate::agent::ResumeAction::ClaudeStdin { session_id } = plan.resume {
                         // Pin the exact session this pane is resuming so the next
                         // save persists it directly, never re-deriving it from the
@@ -510,6 +523,12 @@ impl App {
         if let Some(sv) = &session.vsplit {
             self.restore_vsplit(sv, session.pane_focused);
         }
+        // P2: restore the scope-coordination registry verbatim — independent
+        // of tab-restore success, like the vsplit above. A claim whose owning
+        // tab failed to respawn (or whose save predates `claim_owner`) just
+        // shows up "orphaned" on the registry / orchestration screen, still
+        // informative and releasable rather than silently lost.
+        self.state.scope_registry.clone_from(&session.scope_claims);
         self.state.flash_info("session restored");
     }
 

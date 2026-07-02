@@ -1006,6 +1006,12 @@ Claude can query and control the workspace through these tools:
   your pane's dot: `working` / `blocked` (the "needs me" hot-red dot) / `done` /
   `idle`. Overrides spyc's output-timing guess; targets the focused tab by
   default.
+- **`register_scope(paths, intent, [pr], [note])`** / **`list_scopes`** /
+  **`release_scope(id)`** -- merge-coordination registry (P2). Declare the
+  files/globs you're touching and whether you're `editing` or `merging`; other
+  agents `list_scopes` to see overlaps before merging so concurrent agents queue
+  instead of colliding. In-memory, session-persisted (survives `-r`), auto-
+  released when your tab closes. Advisory — spyc never blocks a merge.
 - **`navigate_to`** -- change directory or focus cursor on a file
 - **`set_filter`** -- set or clear the file listing filter (glob)
 - **`pick_files`** -- pick files matching glob patterns (additive)

@@ -185,6 +185,7 @@ fn effective_kind_passes_through_explicit_value() {
         agent_kind: AgentKind::Codex,
         agent_session_id: Some("uuid".into()),
         agent_session_name: None,
+        claim_owner: String::new(),
     };
     assert_eq!(tab.effective_kind(), AgentKind::Codex);
     tab.agent_kind = AgentKind::Other;
@@ -426,6 +427,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                 agent_kind: crate::state::sessions::AgentKind::Other,
                 agent_session_id: None,
                 agent_session_name: None,
+                claim_owner: String::new(),
             }],
             active_tab: 0,
             pane_height_pct: 30,
@@ -433,6 +435,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
             name: "SAFFRON_CUMIN".to_string(),
             project_home: None,
             vsplit: None,
+            scope_claims: Vec::new(),
         };
         save_session(&session).unwrap();
         let loaded = load_sessions();
@@ -461,6 +464,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                     agent_kind: crate::state::sessions::AgentKind::Other,
                     agent_session_id: None,
                     agent_session_name: None,
+                    claim_owner: String::new(),
                 }],
                 active_tab: 0,
                 pane_height_pct: 30,
@@ -468,6 +472,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                 name: String::new(),
                 project_home: None,
                 vsplit: None,
+                scope_claims: Vec::new(),
             };
             save_session(&s).unwrap();
         }
@@ -492,6 +497,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                     agent_kind: crate::state::sessions::AgentKind::Other,
                     agent_session_id: None,
                     agent_session_name: None,
+                    claim_owner: String::new(),
                 }],
                 active_tab: 0,
                 pane_height_pct: 30,
@@ -499,6 +505,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                 name: String::new(),
                 project_home: None,
                 vsplit: None,
+                scope_claims: Vec::new(),
             };
             save_session(&s).unwrap();
         }
@@ -531,6 +538,7 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
                     agent_kind: AgentKind::Claude,
                     agent_session_id: Some("sid-A".into()),
                     agent_session_name: Some("AROMA".into()),
+                    claim_owner: "owner-A".into(),
                 },
                 SavedTab {
                     command: "codex".into(),
@@ -539,6 +547,7 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
                     agent_kind: AgentKind::Codex,
                     agent_session_id: Some("sid-B".into()),
                     agent_session_name: None,
+                    claim_owner: String::new(),
                 },
             ],
             active_tab: 1,
@@ -547,6 +556,16 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
             name: "SAFFRON_PAPRIKA".into(),
             project_home: Some(PathBuf::from("/tmp/proj")),
             vsplit: None,
+            scope_claims: vec![crate::state::scope_registry::ScopeClaim {
+                id: 1,
+                owner: "owner-A".into(),
+                owner_label: "claude".into(),
+                paths: vec!["src/app/session.rs".into()],
+                intent: crate::state::scope_registry::ScopeIntent::Merging,
+                pr: Some("#661".into()),
+                note: None,
+                claimed_at_secs: 1_700_000_000,
+            }],
         };
         save_session(&session).unwrap();
 
@@ -568,10 +587,20 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
         assert_eq!(s.tabs[0].agent_kind, AgentKind::Claude);
         assert_eq!(s.tabs[0].agent_session_id.as_deref(), Some("sid-A"));
         assert_eq!(s.tabs[0].agent_session_name.as_deref(), Some("AROMA"));
+        assert_eq!(s.tabs[0].claim_owner, "owner-A");
         assert_eq!(s.tabs[1].command, "codex");
         assert_eq!(s.tabs[1].agent_kind, AgentKind::Codex);
         assert_eq!(s.tabs[1].agent_session_id.as_deref(), Some("sid-B"));
         assert_eq!(s.tabs[1].cwd, PathBuf::from("/tmp/proj/sub"));
+        assert_eq!(s.tabs[1].claim_owner, "", "a tab with no claim omits it");
+        // P2: the scope registry round-trips through disk too.
+        assert_eq!(s.scope_claims.len(), 1);
+        assert_eq!(s.scope_claims[0].owner, "owner-A");
+        assert_eq!(
+            s.scope_claims[0].intent,
+            crate::state::scope_registry::ScopeIntent::Merging
+        );
+        assert_eq!(s.scope_claims[0].pr.as_deref(), Some("#661"));
     });
 }
 
@@ -611,6 +640,9 @@ fn legacy_session_json_without_name_or_project_home_loads() {
         s.tabs[0].agent_session_id.as_deref(),
         Some("22222222-2222-2222-2222-222222222222")
     );
+    // P2 fields predate this save too: both must default, not fail to parse.
+    assert_eq!(s.tabs[0].claim_owner, "");
+    assert!(s.scope_claims.is_empty());
 }
 
 /// Wire-format guarantee: a tab with no session id omits the
@@ -626,6 +658,7 @@ fn tab_omits_absent_session_id_in_json() {
         agent_kind: AgentKind::Other,
         agent_session_id: None,
         agent_session_name: None,
+        claim_owner: String::new(),
     };
     let json = serde_json::to_value(&bare).unwrap();
     assert!(
@@ -633,6 +666,10 @@ fn tab_omits_absent_session_id_in_json() {
         "an absent session id must be skipped, not serialized as null"
     );
     assert!(json.get("agent_session_name").is_none());
+    assert!(
+        json.get("claim_owner").is_none(),
+        "an empty claim_owner must be skipped, not serialized as \"\""
+    );
 
     let with_id = SavedTab {
         agent_session_id: Some("sid".into()),

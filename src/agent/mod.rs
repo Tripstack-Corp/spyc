@@ -792,6 +792,7 @@ mod tests {
             agent_kind: AgentKind::Other, // legacy save: field absent → Other
             agent_session_id: Some("sid-legacy".into()),
             agent_session_name: Some("OLD".into()),
+            claim_owner: String::new(),
         };
         // `effective_kind` upgrades the legacy Other → Claude.
         assert_eq!(tab.effective_kind(), AgentKind::Claude);
@@ -818,6 +819,7 @@ mod tests {
             agent_kind: AgentKind::Other,
             agent_session_id: None,
             agent_session_name: None,
+            claim_owner: String::new(),
         };
         assert_eq!(tab.effective_kind(), AgentKind::Other);
         let plan = profile_for(tab.effective_kind()).reconstruct_restore(

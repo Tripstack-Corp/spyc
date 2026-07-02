@@ -202,6 +202,36 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                     }
                 },
                 {
+                    "name": "register_scope",
+                    "description": "Declare the files/globs YOU are about to touch and whether you're `editing` or about to be `merging` — the merge-coordination registry. Another agent can `list_scopes` to see your claim and `wait_for_scope_clear` before merging overlapping files, so concurrent agents queue instead of colliding. Call it before a merge with intent='merging' and your PR's file set; `release_scope` when done. Returns {claim_id, conflicting_merges:[...]} — a non-empty conflicting_merges means someone else is mid-merge on your files. Advisory: spyc never blocks a merge.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "paths": {"type": "array", "items": {"type": "string"}, "description": "File paths or globs (glob::Pattern syntax, e.g. 'src/app/*.rs') you're touching."},
+                            "intent": {"type": "string", "enum": ["editing", "merging"], "description": "editing = informational; merging = blocks another agent's wait_for_scope_clear on overlapping paths."},
+                            "pr": {"type": "string", "description": "Optional PR identifier this claim is for (e.g. '#661')."},
+                            "note": {"type": "string", "description": "Optional free-text note shown in list_scopes / the orchestration screen."},
+                            "pane_id": {"type": "string", "description": "Optional stable pane id (SPYC_PANE_ID); defaults to your focused tab."},
+                            "pane": {"type": "integer", "description": "Optional 1-based tab number; defaults to the focused tab."}
+                        },
+                        "required": ["paths", "intent"]
+                    }
+                },
+                {
+                    "name": "list_scopes",
+                    "description": "List all active scope claims in this spyc — each {id, owner_label, paths, intent, pr, note, claimed_at_secs}. Check it before you merge to see who else is touching your files and whether anyone is mid-merge (intent='merging'). Also what the orchestration screen renders.",
+                    "inputSchema": {"type": "object", "properties": {}, "required": []}
+                },
+                {
+                    "name": "release_scope",
+                    "description": "Release a scope claim by its `id` (from register_scope / list_scopes) once you're done with those files. No-op if the id doesn't match a live claim. No ownership check — a lead agent or the user may clear a stale claim on someone's behalf.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"id": {"type": "integer", "description": "The claim id to release."}},
+                        "required": ["id"]
+                    }
+                },
+                {
                     "name": "navigate_to",
                     "description": "Navigate spyc to a directory or file. If the path is a directory, changes to it. If a file, navigates to its parent directory and places the cursor on it.",
                     "inputSchema": {
@@ -721,7 +751,8 @@ fn handle_tools_call(
             }
         }
         "navigate_to" | "set_filter" | "pick_files" | "clear_picks" | "create_worktree"
-        | "remove_worktree" | "clean_worktree" | "open_worktree" | "report_status" => {
+        | "remove_worktree" | "clean_worktree" | "open_worktree" | "report_status"
+        | "register_scope" | "list_scopes" | "release_scope" => {
             let Some(tx) = cmd_tx else {
                 return send_tool_error(w, id, "writable actions not available in stdio mode");
             };
@@ -807,6 +838,42 @@ fn handle_tools_call(
                         return send_tool_error(w, id, "missing required parameter: path");
                     }
                     McpCommand::OpenWorktree { path }
+                }
+                "register_scope" => {
+                    let paths: Vec<String> = args["paths"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if paths.is_empty() {
+                        return send_tool_error(w, id, "missing required parameter: paths");
+                    }
+                    let intent = args["intent"].as_str().unwrap_or("").to_string();
+                    if !matches!(intent.as_str(), "editing" | "merging") {
+                        return send_tool_error(w, id, "intent must be 'editing' or 'merging'");
+                    }
+                    let pane_id = args["pane_id"].as_str().map(String::from);
+                    let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
+                    let pr = args["pr"].as_str().map(String::from);
+                    let note = args["note"].as_str().map(String::from);
+                    McpCommand::RegisterScope {
+                        pane_id,
+                        pane,
+                        paths,
+                        intent,
+                        pr,
+                        note,
+                    }
+                }
+                "list_scopes" => McpCommand::ListScopes,
+                "release_scope" => {
+                    let Some(claim_id) = args["id"].as_u64() else {
+                        return send_tool_error(w, id, "missing required parameter: id (integer)");
+                    };
+                    McpCommand::ReleaseScope { id: claim_id }
                 }
                 _ => unreachable!(),
             };

@@ -643,6 +643,12 @@ pub struct AppState {
     /// view; the rebuild_rows path keys off `view` so we don't pay
     /// the disk read except when the user is looking at it.
     pub graveyard: Vec<crate::state::graveyard::Entry>,
+    /// P2 merge/scope coordination registry (`docs/AGENT_AWARENESS_PLAN.md`):
+    /// what each agent tab has declared it's touching, via the `register_scope`
+    /// MCP tool. In-memory + session-persisted (rides P3-2's autosave and
+    /// `spyc -r`), never file-backed — every agent pane in one spyc shares this
+    /// one registry. Advisory only: nothing here blocks a merge.
+    pub scope_registry: Vec<crate::state::scope_registry::ScopeClaim>,
     pub user_host: String,
     pub pending_new_tab_cmd: Option<String>,
     pub pending_worktrees: Option<Vec<PathBuf>>,
@@ -986,6 +992,7 @@ impl AppState {
             quit_pending: None,
             pending_delete_preview: None,
             graveyard: Vec::new(),
+            scope_registry: Vec::new(),
             user_host: "test@host".to_string(),
             pending_new_tab_cmd: None,
             pending_worktrees: None,

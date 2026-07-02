@@ -56,6 +56,13 @@ pub struct SavedTab {
         skip_serializing_if = "Option::is_none"
     )]
     pub agent_session_name: Option<String>,
+    /// P2 scope-coordination owner key (`TabInfo::claim_owner`) — persisted so
+    /// a restored tab can reclaim its pre-crash `ScopeClaim`s. Absent on older
+    /// saves (`#[serde(default)]`); an empty string means "no claim owner was
+    /// ever assigned to restore onto" — `restore_session` leaves the freshly
+    /// spawned tab's own fresh key in that case.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub claim_owner: String,
 }
 
 impl SavedTab {
@@ -92,6 +99,12 @@ pub struct Session {
     /// previewed file — restored on `-r`. `None` when no split was open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vsplit: Option<SavedVsplit>,
+    /// P2 merge/scope coordination registry (`AppState::scope_registry`) at
+    /// save time — so a crash mid-merge-train doesn't lose in-flight claims.
+    /// Restored verbatim; each claim re-binds to its owning tab via
+    /// `SavedTab::claim_owner`. Absent on older saves.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scope_claims: Vec<crate::state::scope_registry::ScopeClaim>,
 }
 
 /// Persisted vertical-split state for `-r` restore. Primitives only, so the
