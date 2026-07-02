@@ -20,39 +20,22 @@
   `-c mcp_servers.spyc.enabled=false` — but loses spyc tools in review). (3) 👍/comment
   #25856 with the spyc repro (2nd non-IDEA MCP). NO spyc code fix — it's codex's
   internal review-thread/elicitation bug; wait for upstream.
-- we need a way to send ^a through to the pane; Claude needs ^a for some actions
-- regular autosave for session state - I've also noticed recently that we're
-  not picking up sessions with spyc -r fully; is something happening during
-  shutdown?
-- we need to add "are you sure?" to ^a-x
 - have gf also scan recent scrollback (not just the visible region) and/or fall
   back to the project root unconditionally, so it's robust to long agent
   replies
 - make sure that multiple instances of spyc in the same directory are living
-  together ok - not getting any take over messages?
-- we need to detect that claude sessions need input and change their colour in
-  the pane to a bright blue or something else that will standout to let the
-  user know claude needs attention
+  together ok - not getting any take over messages? (relatedly: is MCP takeover
+  working end-to-end? worth an integration test specifically for the takeover
+  handshake, not just the single-instance path)
 - we need a changelog for humans - in the style of a marketing team like Dropbox
-- embed roto? https://codeberg.org/NLnetLabs/roto
-- Spencer asks if we could have a git diff vs. staged files
-- so we could have a concept of one spyc per agent and the agents could be tied
-    - would require that we get rid of all the hardcoded "left / right" references
-    - would mean that the spyc loaded in left or right could change - so this
-      is more abstract but better
-    - maybe a list of spyc sessions?
-- Column B should be settable to use a separate worktree from Column A
-- our mcp should support worktree creation and management; we should have an
-  installable skill for it - e.g. a "repo bootstrap"
-    - setup a ~/spyc_tutor git
-    - use a lorem ipsum crate to create dummy files to work with
-    - have some sort of way to set some goals for a training session
+  (also flagged as "release notes should read like 1Password/Slack's — fun but
+  informative"; `docs/RELEASE_ENGINEERING.md` §8 now plans a hand-written
+  highlights block on top of the git-cliff generated section for this — build it)
 - need to develop an extensive tutor feature that is workflow goals oriented
   and repeatable lessons
-- the w feature in the markdown viewer should also show tabs
-- the pager V should first arm and let the user move to the first line to start
-  selecting and then V again to start
-- the help pager doesn't need the EOF marker
+    - setup a ~/spyc_tutor git
+    - use a lorem ipsum crate to create dummy files to work withk
+    - have some sort of way to set some goals for a training session
 - Jay wants a realtime markdown viewer ... e.g. he would like to edit a file
   while seeing the updated markdown - this might fit for the plan to support a
   vertical screen split; the vertical split could be full or top pane only and
@@ -65,16 +48,16 @@
   size of the split (left or right - the same way we support resizing the
   horizonal split); file watching would have to watch both spyc cwd's and we
   would have to carefully audit the entire app for any other areas that would
-  have assumptions about the spyc frame
-- hotkey to hide tool calls in scrollback
-- native-to-codex scrollback isnt working (scroll wheel)
+  have assumptions about the spyc frame — the vsplit shipped; still open:
+  the split should default to 1 column left of what it currently calculates,
+  and opening the second column shouldn't shift focus
 - support png/jpeg preview in terminal
 - pasting into the pager for a search / the pasted content goes to the lower
   pane instead; do we need a better model in general for what activity is in
   "focus" - this has come up before as an issue; let's consider a refactor?
-- when in V editor in the top pane, ^a-c will start to launch a new pane; this
-  is confusing when you quit out of EDITOR and see that a command input for a
-  new pane is started
+  — NOTE: the input-authority campaign (unified route_input/InputSink, Focus
+  as routing authority) landed since this was written; verify this specific
+  paste-into-pager-search symptom is actually gone before closing.
 - I would like to include an alias of spyc that would just launch the markdown
   pager standalone; what would that look like? spymd? it could be a useful side
   product
@@ -84,30 +67,25 @@
 - being able to run a follow-up command in the same pager buffer would be nice
   as an option; maybe we could support a pass the previous history into stdin
   of the next command in some nice way?
-- 
 - `!` percent-expansion eats `printf`-style format strings. Repro:
   `! awk '... printf "%d: %s|EOL\n", NR, $0' file` renders as
   `<selection-path>d: <selection-path>s|EOL` — `expand_percent`
   greedily substitutes `%d` / `%s` with cursor/selection paths
   before exec, corrupting awk/printf scripts. Likely fix: only
   expand a documented set of tokens (`%f`, `%p`, `%P`, `%d`?),
-  require a non-alnum boundary, or add an escape (`%%`).
+  require a non-alnum boundary, or add an escape (`%%`). * TO TEST *
 - mouse scroll in pager, 'ENTER' into a file, doesn't seem to be working
-- should be able to reorder tabs?
 - "MCP taken over by spyc PID 62345 — Claude is connected to that instance" -
   the competing one did not give me the option to take over or not
 - hitting ^c with the task pager up also sent ^c to the lower pane - causing
   the task in the lower pane to erroneously cancel
-- it's very confusing still to remember you're in scroll mode in the bottom
-  half - we need a stronger top line/bottom line marker for this
 - the interactive picker tool - gum - handles our ! view very poorly - we
   should investigate why and see if we can patch
-- screen should flash if I'm doing something that hits a wall - e.g. j at the
-  top of a directory (the ~ in the status is not enough)
 - we should be able to send control signals to running processes e.g. ^t
 - cw didn't seem to be worked as expected in ! (? need to confirm - may have
   been using an old version); maybe we should put a build commit hash in the
-  top right?
+  top right? (the activity HUD / `:version` / `gV` already surface the git
+  SHA — confirm this is what's wanted, then close)
 - `brew upgrade` parallel-download progress doesn't redraw in place inside
   the lower pane — each tick stacks 4 fresh lines (gradle / claude-code /
   python@3.14 / python@3.13) into scrollback instead of overwriting. Looks
@@ -118,23 +96,47 @@
   hide this; the short lower pane doesn't). Capture with
   `SPYC_PTY_DEBUG=1` set at launch and inspect `/tmp/spyc_pty_debug.bin`
   for `\e[NA` sequences to confirm vs. brew choosing line-mode.
+- backgrounding a process in a pane should not mark as exited ... it should be
+  foregroundable and have a state marker for sleep (funny emoji)
+- can we detect if someone is running with an incompatible font and warn them
+  before loading our start screen?
+- why does rust-analyzer get so confused all of the time when we're in
+  worktree's?
+- spencer hates that our in-line comments are so verbose ... what's the best
+  practice? is there a better way to annotate our docs?
+- do new worktrees get spawned correctly from project home or from the current
+  worktree?
+- while in V in the top pane, if you ^a-c that command actually starts and is
+  hidden, which is confusing until you quit your editor. The base "^a-c during
+  V is confusing" symptom is fixed (see COMPLETED), but the specific proposal
+  here wasn't fully evaluated: we should not allow these commands unless we
+  protect the lower status — or if a user creates a new pane with ^a-c while
+  in V, focus should go to the status line, since other commands/statuses rely
+  on it. Verify this nuance is actually covered before treating it as closed.
 
 ### BIGGER ###
 - task runner should be equivalent to a lower pane and be able to push down
   into lower pane ^w-_ or into the background ^w-z
-- codex doesn't support vi bindings ... maybe we could control it and inject vi
-  bindings into it's rataui pane
 - yank last response possible? [only if claude code terminal? is there an "api"
   in CC for it to better maintain over time?
-- include a SMALL model that can conversationally answer how to do stuff with
-  spyc; maybe there's a good crate to sidecar with this functionality?
-- while I am drafting a command for a new pane it would be nice to still be
-  able to switch to another pane to check on something
-- would like to be able to reorder tabs
 - directories should persist masking setting / we should be able to enable
   disable masks and have an editable list of them
 - yanking from the pane should support # so that you can yank the last 150
   lines, etc.
+- Spencer says neovim's help is less overwhelming than ours and that we can
+  probably move a bunch of commands to `:` commands when they're used less
+  frequently (e.g. graveyard — a user could always map these if they wanted,
+  and we could include them as commented-out examples in the config
+  generator). So: a full cleanup + simplification pass, and a better way to
+  navigate available features. (The chord/command taxonomy overhaul + the
+  "ship rare features as `:` commands" convention have since shipped — revisit
+  whether this specific ask is now satisfied or still wants the deeper
+  simplification pass.)
+- is there a notes system we could adopt where the longer context is
+  maintained in separate files with a terse one-or-two-liner + a keyed
+  reference in the code? Keeps readability higher, and if the agent reading
+  needs more info it can pull from the detailed reference instead of us being
+  constrained about how much to write inline.
 
 ### MAYBE ###
 - alt-screen drain → coherent log. For panes running alt-screen
@@ -172,11 +174,6 @@
 - count prefix doesn't work with vi line editor operators (e.g. 3cw,
   2dw) — the count is consumed by the resolver but the line editor
   doesn't read it. Low priority for a single-line editor.
-- claude cli should always be pinned to bottom of the terminal - it seems to get
-  scrolled halfway up sometimes and Claude PTY can get messed up — scrollback
-  accumulates rendering artifacts from Claude CLI's progress bars, spinners, and
-  cursor repositioning. ^L redraws the visible screen but can't fix corrupted
-  scrollback. Solution t.b.d.
 - terminal-background auto-detect (the one piece worth borrowing from
   `glow`). Send OSC 11 (`\e]11;?\e\\`) at startup, parse the reply's
   RGB to decide light vs. dark, pick the matching theme preset
@@ -198,6 +195,67 @@
   intentional for `J` (you *want* most-visited dirs to dominate
   jumps), so this only matters if the file surface above wants
   gentler ranking. (Spotted comparing against `nikolic` / `nevi`.)
+- support png/jpeg preview in terminal
+- I would like to include an alias of spyc that would just launch the markdown
+  pager standalone (spymd?) — a useful side product
+- should be able to reorder tabs?
+- screen should flash if I'm doing something that hits a wall - e.g. j at the
+  top of a directory (the ~ in the status is not enough)
+- codex/agy don't support vi bindings ... maybe we could control it and inject
+  vi bindings into their ratatui pane
+- include a SMALL model that can conversationally answer how to do stuff with
+  spyc; maybe there's a good crate to sidecar with this functionality?
+- we should make dotfile/whitespace-guide styling an option — see e.g.
+  indent-rainbow (VS Code): https://github.com/oderwat/vscode-indent-rainbow /
+  https://marketplace.visualstudio.com/items?itemName=oderwat.indent-rainbow
+
+### WON'T DO ###
+- embed roto? https://codeberg.org/NLnetLabs/roto (Spencer suggested Lua as
+  the alternative — spyc shipped its own embedded Lua scripting engine
+  instead; see docs/archive/LUA_SCRIPTING_PLAN.md)
+
+### COMPLETED ###
+
+_(recently marked done, undated — relocated here during the 2026-07-02 backlog
+cleanup; the detailed, versioned changelog below this block is the older,
+long-running FIXED log.)_
+- we need a way to send ^a through to the pane; Claude needs ^a for some actions
+- regular autosave for session state - noticed we weren't picking up sessions
+  with `spyc -r` fully; something happening during shutdown?
+- we need to add "are you sure?" to ^a-x
+- we need to detect that claude sessions need input and change their colour in
+  the pane to a bright blue or something else that will standout to let the
+  user know claude needs attention
+- Spencer asks if we could have a git diff vs. staged files
+- Column B should be settable to use a separate worktree from Column A
+- our mcp should support worktree creation and management; we should have an
+  installable skill for it - e.g. a "repo bootstrap"
+- the w feature in the markdown viewer should also show tabs
+- the pager V should first arm and let the user move to the first line to
+  start selecting and then V again to start
+- the help pager doesn't need the EOF marker
+- hotkey to hide tool calls in scrollback
+- native-to-codex scrollback isnt working (scroll wheel)
+- when in V editor in the top pane, ^a-c will start to launch a new pane; this
+  is confusing when you quit out of EDITOR and see that a command input for a
+  new pane is started (base symptom fixed — see the still-open nuance about
+  status-line protection carried forward in SMALL)
+- it's very confusing still to remember you're in scroll mode in the bottom
+  half - we needed a stronger top/bottom line marker for this
+- while I am drafting a command for a new pane it would be nice to still be
+  able to switch to another pane to check on something
+- we need to delineate global command chords vs. spyc specific (e.g. worktree
+  commands are global, git commands are frame-contextualized) — shipped as the
+  binding-taxonomy overhaul (global/frame/pane tiers, guard-enforced; see
+  AGENTS.md → "Binding taxonomy")
+- Spencer hates that g-h and g-w conflict — resolved by the leader/global-menu
+  rework: `gh` retired in favor of `Space p` (PROJECT_HOME jump); `gw`
+  (worktree-root jump) kept as frame nav, no longer colliding
+- investigate what it would take to create a brew tap from our github — now
+  planned in full in `docs/RELEASE_ENGINEERING.md` (§9 distribution channels,
+  §12 launch checklist); tracking there instead of here
+
+---
 
 ### FIXED ###
 - (fixed, v1.55.2) git markers stale in worktrees (and, relatedly,
@@ -386,7 +444,7 @@
   multi-column help overlay, searching for "show" and pressing `n` a
   few times left every column scrolled to the end of its chunk with
   no match visible. Cause: `scroll_to_match` fed the global line
-  index straight into `self.scroll`, but in multi-col rendering
+  index straight into `self.scroll`, but in multi-column rendering
   `scroll` is interpreted per-column (each column applies the same
   offset within its own chunk). A match in column 2 produced a
   scroll value larger than `scroll_max` and got clamped to the
@@ -479,7 +537,6 @@
   at 24 chars and trimmed proportionally so the whole table
   stays inside the 80-col content budget. Overlong cells
   truncate with `…`.
-
 - (fixed, v1.28.0) `J` (jump-to-path) now has its own persistent
   history bucket. Up / Down in the prompt walk previously-jumped
   destinations independently of shell-command and pane-prompt
@@ -848,96 +905,3 @@
 - (fixed) pane tab auto-closes too fast when child exits — error messages
   flash and vanish before you can read them. Now tabs stay open with
   [exited] label; any keypress dismisses.
-
-
----
-
-# Recovered backlog notes — in worktree copies but NOT in main (2026-07-02)
-
-> Zero-loss recovery. Each note below exists in a worktree backlog but not
-> in main's current copy. Review + fold the keepers into BACKLOG_DRAFT_NOTES.md;
-> some may be done/obsolete. Deduped across both worktrees.
-
-## From `backlog-notes` (12 notes)
-
-- we have to change the name to spicy; check to see if we'll conflict in the
-  world with this
-- backgrounding a process in a pane should not mark as exited ... it should be
-  foregroundable and have a state marker for sleep (funny emoji)
-- can we detect if someone is running with an incompatible font and warn them
-  before loading our start screen?
-- get ready with planning for releases and release notes; release notes should
-  be in the style that 1Password and Slack do theirs - kind of fun but
-  informative
-- we should make this an option:
-    - https://marketplace.visualstudio.com/items?itemName=oderwat.indent-rainbow
-    - https://github.com/oderwat/vscode-indent-rainbow
-- why does rust-analyzer get so confused all of the time when we're in
-  worktree's?
-- we need to delineate global command chords vs. spyc specific; e.g. worktree
-  commands should be global whereas git commands are very contextualized to the
-  spyc frame; we should document this strategy clearly and stick to it
-- Spencer says neovim's help is less overwhelming than ours and that we can
-  probably move a bunch of commands to : commands when they are less frequently
-  used e.g. graveyard (a user could always map these if they wanted(and we
-  could include them as commented out examples in the config generator.
-  So we should do a full cleanup and simplification and provide a better way to
-  navigate through the available features.
-- is there a notes system we could adopt where the longer context is maintained
-  in separate files with a terse one or two liner + a key'd reference in the
-  code? keeps readability higher and if the Agent reading needs more info it
-  can get it from the more detailed reference and then be less constrained
-  about making such notes?
-- spencer hates that g-h and g-w conflict - maybe we need g-p for project and
-  keep g-h 
-- spencer hates that our in-line comments are so verbose ... what's the best
-  practice? is there a better way to annotate our docs?
-- investigate what it would take to create a brew tap from our github
-
-## From `rebrand-plan` (15 notes)
-
-- turn "a" filter on and then open file with "V" in the page. Leaving "V" in
-  the pane loses the "a" filter.
-- opening the second column should not shift focus
-- the w feature in the pager should also show tabs
-- while in V in the top pane if you ^a-c that command will be actually started
-  and hidden which is very confusing until you quit your editor - we should not
-  allow these commands unless we protect the lower status but if we do protect
-  the lower status and a user wants to create a new pane with ^a-c then the
-  focus should go to the status line - I think actually we should protect the
-  status line in V because we rely on other commands and statuses using it
-- hotkey to hide tool calls in agent scrollback
-
-
-Other:
-- the vertical split should default to 1 column left of what it currently
-  calculates
-- do new worktrees get spawned correctly from project home or from the current
-  worktree?
-- investigate what it will take to create a brew or brew tap from our github
-- regular autosave for session state - Claude is treating recovery per
-  workspace so we need to make sure we're handling discovery/saving and
-  recovery correctly
-- support png/jpeg preview in terminal?
-- include an alias that just launches the markdown pager standalone; what would
-  that be named?
-- should be able to reorder panes?
-- is MCP takeover working? can we write an integration test for this?
-- agy/codex doesn't support vi bindings ... maybe we could control it and
-  inject vi bindings into it's rataui pane
-- frecency improvements. Today `state/frecency.rs` (zoxide-style, `count ×
-  tiered-recency`, persisted to `frecency.json`) only tracks
-  *directories* and only feeds the `J` jump prompt's Tab fallback.
-  Two extensions worth considering:
-  (1) reuse the same `Frecency` to rank *files* — record file
-  opens/visits alongside dir visits and order the `F` finder /
-  file-pick results by score, so your hot files float up. Needs a
-  file-visit record site + a finder-side sort; the scoring/persist/
-  prune/health-check machinery already exists.
-  (2) optional curve refinement — nevi uses `log2(count+2) ×
-  (1/(1+elapsed_hrs))^0.2` (diminishing-returns frequency + smooth
-  decay) vs. our linear-count × stepped tiers. Our linear+tiered is
-  intentional for `J` (you *want* most-visited dirs to dominate
-  jumps), so this only matters if the file surface above wants
-  gentler ranking. (Spotted comparing against `nikolic` / `nevi`.)
-
