@@ -13,6 +13,40 @@ biggest *weakness* — fragile, screen-scraped agent status — into a spyc stre
 
 ---
 
+## Status at a glance
+
+**Shipped** — folded into the codebase and documented in full in AGENTS.md
+("Agent-activity dots"); kept here only as one-line pointers so this charter
+stays focused on what's left.
+
+- **P0 — status vocabulary + per-tab dot + `:why-status`.** `AgentActivity`
+  vocabulary + a per-agent-tab activity dot in the divider (output-timing
+  heat-pulse `●` / quiet `·`) + the `:why-status` / `:activity dump` debug
+  surface. *Code:* `src/app/agent_status.rs`, `src/app/render/chrome.rs`,
+  `src/app/commands.rs`.
+- **P1-1 — `report_status` MCP tool + auto-hooks (claude / codex / agy).**
+  Semantic self-report over the PID-scoped socket with a report-beats-timing
+  authority model (`ttl_ms` backstop, fresh output supersedes a stale report),
+  plus consent-gated per-repo lifecycle-hook install driven by
+  `AgentProfile::status_hooks()` (`:hooks on|on!|off`). *Code:* `src/mcp/hooks.rs`,
+  `src/app/mcp.rs`, `src/agent/`.
+- **P3-1 — notification / bell / visual bell on Blocked / Done** (#638, v1.90.0).
+  `Effect::Notify` fires on the real state transition (pure decision
+  `notification_for_transition`); `[notify]` config, desktop ping on by default.
+  *Code:* `src/notifications.rs`, `src/app/effect.rs`, `src/config/`.
+
+**Remaining** — the live scope this charter still tracks:
+
+- **P1-2** — data-driven detection manifest (the scrape *fallback* for agents
+  spyc can't auto-hook).
+- **P1-3** — live session-identity capture (`report_agent_session`).
+- **P2** — orchestration: event hub + wait/subscribe + read/send (the capability
+  gap; the highest-ceiling item).
+- **P3-2** — crash-sufficient / periodic autosave (the daemon-free persistence
+  answer).
+
+---
+
 ## The thesis
 
 The category's founding pain is **"which agent needs me?"** herdr proved the
@@ -29,11 +63,24 @@ to drop a tiny **status hook** so a cooperative agent *self-reports* its state
 over a semantic channel — with a tunable **scrape fallback** for agents that
 won't. Scrape-as-fallback, not scrape-as-primary. That dodges herdr's entire
 fragility class and is how spyc wins a feature herdr struggles to keep working.
+*(The self-report path is shipped — P1-1 above; the scrape fallback is P1-2,
+still to build.)*
 
 Three more ideas ride alongside: an **orchestration capability** (let one agent
 *wait on / subscribe to* another's status — the genuine gap vs MCP today), live
 **session-identity capture** (more reliable than spyc's exit-banner sniffing),
-and a **notification/bell** when a backgrounded agent needs you.
+and a **notification/bell** when a backgrounded agent needs you *(shipped —
+P3-1)*.
+
+> **Field-validated (2026-07).** Each remaining (un-shipped) item below carries
+> a **Use cases** line — the concrete workflow it unlocks, with a real-world source.
+> These are grounded in a web scan of how herdr, cmux, Claude Squad, and Claude
+> Code's own *agent-teams* are actually used (herdr deep dive:
+> `docs/COMPETITIVE_REVIEW_2026-06.md` §1a). Recurring theme: the field keeps
+> arriving at the same design spyc already chose — self-report over scrape, state-
+> driven over timers, native-resume over tab-only restore — and keeps hitting the
+> same Claude-hook gaps spyc hit. Where a feature carries real risk (P2), the
+> skeptic's counterpoints are folded in as guardrails, not hand-waved.
 
 ### Invariants this plan must preserve (spyc MVU)
 
@@ -56,7 +103,7 @@ and a **notification/bell** when a backgrounded agent needs you.
   single-process MVU/sync core — and herdr pays for it (macOS responsible-process
   / TCC loss on handoff, their #808). spyc's answer is **resilient autosave**
   (recovery-sufficient against `SIGKILL`) + richer `-r` content — the 80% win
-  without the daemon. (Tracked as item P3-2, not here.)
+  without the daemon. (Tracked as item P3-2 below.)
 - **A many-agent grid multiplexer.** herdr *is* a multiplexer; spyc is a file
   manager with pane tabs + a file-commander vsplit. We nail the **2–4 agent**
   case, not a 50-pane wall (see review §4 objections).
@@ -65,83 +112,11 @@ and a **notification/bell** when a backgrounded agent needs you.
 
 ---
 
-## Phase 0 — Status vocabulary + a place to show it *(low effort, no new deps)*
+## Phase 1 (remaining) — Reliable detection: the fallback + live identity
 
-> **Status: SHIPPED.** P0 landed as the `AgentActivity { Working, Idle, Unknown }`
-> vocabulary + a per-agent-tab dot in the divider — a **spicy heat-pulse `●`**
-> (the pepper-red→ember→orange→spark "working animation") while output flows,
-> `·` when idle — plus `:why-status`. Note the build revealed P0's premise was
-> wrong: spyc computed agent *identity* (the `claude:<sha>` short-id), **not**
-> activity. So P0 also introduced the first real (agent-agnostic, scrape-free)
-> activity signal: per-tab `last_output_at` timing (`settle_agent_activity`,
-> debounced via the `AgentIdle`/`AgentAnim` scheduler deadlines). `Blocked`,
-> `Done`, and staying-Working-through-a-silent-thinking-pause remain P1 (they
-> need the semantic hook — output timing reads a silent agent as `Idle`).
-
-Foundation the rest builds on.
-
-**P0-1 · Explicit status vocabulary.**
-A small enum — `{ Idle, Working, Blocked, Unknown }` — plus a derived `Done`
-(a finished turn the user hasn't looked at yet; derived, never reported). Lives
-on the agent/pane state, computed in `src/app/agent_status.rs`.
-*Touches:* `src/agent/`, `src/app/agent_status.rs`. *Effort: low.*
-*Better-than-herdr:* same vocabulary herdr settled on (validates it), but sourced
-from a semantic channel in P1, not glyphs.
-
-**P0-2 · Per-pane-tab status dot.**
-Render a colored dot per pane tab in the divider (spyc already renders the pane
-tab bar + task markers in `src/app/render/chrome.rs`). **Worst-state-wins**
-rollup when summarizing (Blocked > Done-unseen > Working > Idle-seen > Unknown),
-matching herdr's aggregation. Honor the review's warning: **stable pane indices**
-— never reorder tabs by attention (herdr users complain about exactly that).
-*Touches:* `src/app/render/chrome.rs`, pane-tab state. *Effort: low.*
-
-**P0-3 · `:why-status` debug surface.**
-A command (and/or an `A`-overlay line) that explains *why* a pane has its current
-status — which rule/region/signal fired. herdr's `agent.explain` is invaluable
-for a fuzzy system; spyc's status work is on the backlog precisely because it's
-hard to debug. Build this early.
-*Touches:* `src/app/command_table.rs` + a small report in `agent_status.rs`.
-*Effort: low.*
-
----
-
-## Phase 1 — Reliable detection (the differentiated core) *(med effort)*
-
-The heart of the plan: semantic self-report first, tunable scrape fallback.
-
-> **Status: P1-1 SHIPPED (tool + authority + auto-hook).** The `report_status`
-> MCP tool + authority model (`App::effective_activity`: a live report with a
-> `ttl_ms` backstop overrides output timing; fresh output supersedes a stale
-> report) + `Blocked`/`Done` states + render + `SERVER_INSTRUCTIONS` nudge landed
-> first. Then the *mechanism* (pane uuid `SPYC_PANE_ID` + `SPYC_MCP_SOCK` env +
-> `spyc --report-status` reporter + `pane_id` targeting). Then the **auto-hook**:
-> spyc writes Claude lifecycle hooks (`UserPromptSubmit`→working,
-> `Notification`→blocked, `Stop`→done) into the project's `.claude/settings.json`
-> (`mcp::hooks`), **consent-gated per project, saved** — a first-launch `[Y/n]`
-> popup (`PromptKind::HookConsent`) whose answer persists in `state::hook_consent`
-> keyed by `find_repo_root`. Merge preserves the user's hooks/settings; teardown
-> removes only ours, skips git-tracked files. So Claude now reports
-> working/blocked/done *automatically*, once the user consents.
-> **Deferred:** `seq` ordering (reports are serial enough; `at`-based supersede
-> covers it); codex auto-hooks (codex's lifecycle-hook surface differs);
-> re-installing hooks for *sibling* claude panes in a repo whose consent is
-> granted mid-session (self-heals on their next launch — consent is saved).
-
-**P1-1 · `report_status` MCP tool + a self-report agent hook.**
-Add an MCP tool the agent can call to set its own pane status
-(`working`/`blocked`/`idle`, optional message). Then — using the **existing**
-`ensure_agent_mcp_config` lazy-write path — also drop a tiny status hook into the
-agent's own config dir (Claude `Stop`/`Notification`/`SessionStart` hooks; codex
-equivalent) that fires on the agent's native lifecycle and reports over the
-socket. Carry an **authority model**: a monotonic `seq` (ordering/skew guard) and
-a `ttl_ms` (a crashed agent's stale "working" auto-expires) — herdr's design,
-reimplemented clean.
-*Touches:* `src/mcp/` (new tool + protocol), `src/app/mcp.rs`,
-`ensure_agent_mcp_config`, hook assets. *Effort: med.*
-*Better-than-herdr:* herdr's Tier-1 agents (claude, codex — spyc's primaries)
-*still* scrape for live status; the hook only buys session identity. spyc makes
-the **primary** path semantic for those exact agents.
+The self-report core (P1-1) shipped; what's left is the graceful-degradation
+fallback for agents spyc can't hook, and a live (rather than exit-banner-sniffed)
+session-identity signal.
 
 **P1-2 · Data-driven detection manifest (the fallback).**
 For agents that don't self-report, replace the imperative per-profile scrape with
@@ -155,6 +130,16 @@ kill flicker. Region-/OSC-scoped scanning beats spyc's current fixed-slice scan.
 (one engine drives all agents). *Effort: med.*
 *Better-than-herdr:* a fallback, not the primary — so an agent UI change degrades
 gracefully instead of breaking the headline feature.
+*Use cases:* an agent spyc **can't** auto-hook still gets a live dot instead of
+going dark — a `gemini` / `zot` / `aider` pane (no `status_hooks()`), or a
+**wrapper-hidden** Claude/codex (`nix`, Bubblewrap, Happy) whose hook env didn't
+propagate. This is exactly the gap cmux shipped blind into — *"sidebar agent status
+is hook-only with no fallback … codex agents go silent when hooks miss"*
+([cmux #3749](https://github.com/manaflow-ai/cmux/issues/3749)) — and the same
+wrapper problem herdr band-aids with a manual `HERDR_AGENT=claude` env hint. The
+declarative ruleset is spyc's safety net: a missed hook degrades to a scrape guess,
+never to nothing. Keep it clearly second-class (a report always wins) so we never
+re-enter herdr's fragility class as the *primary* path.
 
 **P1-3 · Live session-identity capture (`report_agent_session`).**
 Have the same hook report the agent's session UUID + transcript path *as it runs*
@@ -163,6 +148,16 @@ reliable `-r` restore; fewer missed resumes. spyc already pins codex session ids
 (`app::codex_pin`) — this generalizes that to a live, agent-driven signal.
 *Touches:* `src/agent/` profiles, `src/state/sessions/`, `src/mcp/`, hook assets.
 *Effort: low–med.*
+*Use cases:* reliable `spyc -r` — the agent reports its own session UUID + transcript
+path *live*, so restore replays the **right** native `--resume <id>` instead of
+guessing by spawn-proximity (spyc's own #607: two same-cwd Claude panes crossed
+conversations on restore — exactly this failure). The field keeps arriving here:
+*"preserving the agent session ID and calling the native resume command is the key
+part"* ([Zed #58001](https://github.com/zed-industries/zed/discussions/58001)), and
+Claude Code's own `--resume` throws *"No conversation found"* when its index desyncs
+from the on-disk `.jsonl` ([CC #18311](https://github.com/anthropics/claude-code/issues/18311)).
+A live, agent-driven signal sidesteps that whole class — and generalizes the codex
+spawn-order pin (`app::codex_pin`) into one agent-agnostic mechanism.
 
 ---
 
@@ -171,6 +166,37 @@ reliable `-r` restore; fewer missed resumes. spyc already pins codex session ids
 The single most valuable steal: today spyc's MCP is query+mutate; herdr's socket
 lets an agent **block until another agent changes state**. That's "agents
 orchestrate agents," and it's beyond what MCP does for spyc now.
+
+> **Field-validated workflows (what wait/subscribe actually unlocks).** herdr's
+> socket already ships this exact verb set — `wait agent-status … --status done`,
+> `events.subscribe`, `pane.read`, `pane.send_keys` — and AWS Labs'
+> [`cli-agent-orchestrator`](https://github.com/awslabs/cli-agent-orchestrator/blob/main/docs/herdr.md)
+> scripts against it, so the *shape* is proven, not hypothetical. The concrete jobs
+> spyc's tools would serve (each composing with spyc's worktree MCP tools):
+> - **Fan-out → gather.** Spin up N agents across N worktrees (`create_worktree`),
+>   `wait_for_pane_status` until each is `blocked`/`done`, then review the batch. The
+>   dominant multi-agent pattern — Claude's own agent-teams steer the lead with
+>   *"wait for your teammates to complete their tasks before proceeding"*
+>   ([agent-teams docs](https://code.claude.com/docs/en/agent-teams)).
+> - **Parallel review by lens.** Three teammates review a PR for security / perf /
+>   tests concurrently; the lead synthesizes once all report `done` (Anthropic's own
+>   headline example, ibid). Pairs naturally with spyc's in-process diff/review loop.
+> - **Watch-for-blocked → escalate.** `subscribe_events` for the first `blocked`
+>   transition and surface "who needs you" — the supervisor case (feeds P3-1's ping).
+> - **Sequential handoff.** A finishes → `read_pane` its output → `send_pane_keys` to
+>   brief B. The case in-process subagents *can't* cover: they *"only report results
+>   back to the parent and never talk to each other,"* and can't span heterogeneous
+>   agents (claude + codex + aider) the way a terminal socket can.
+>
+> **Guardrails (the skeptic's counterpoints are real — bake them in).** Auto-
+> coordination can collapse into agents *"generating huge status reports for each
+> other"* instead of doing work ([HN 47245373](https://news.ycombinator.com/item?id=47245373));
+> runaway loops burn tokens with no circuit-breaker; and Anthropic itself notes that
+> for sequential / same-file / heavy-dependency work a single session beats a team.
+> So spyc ships the **primitives** (wait/subscribe/read/send) and stays a *primitive*
+> — the human or a deliberately-authored orchestrator composes them; **spyc never
+> auto-spawns**. `timeout` is mandatory on every wait (no unbounded blocks), and the
+> PID-scoped socket + takeover prompt keep a stale waiter from wedging the loop.
 
 **P2-1 · MCP event hub.**
 A sequenced ring buffer of `(seq, Event)` + a subscriber list, fanned out from
@@ -199,15 +225,10 @@ check spyc already does.
 
 ---
 
-## Phase 3 — Polish *(low effort)*
+## Phase 3 (remaining) — Polish *(low effort)*
 
-**P3-1 · Notification + bell on blocked/done.**
-A new `Effect` that fires a desktop notification (and optional terminal bell) when
-a backgrounded agent pane goes `Blocked` or `Done`. Cheap, high-value for the
-dog-fooding loop: you alt-tab away, the agent needs you, you get pinged. herdr
-does this (`AgentStatus::Done → sound`).
-*Touches:* `src/app/agent_status.rs`, a new `Effect` in `src/app/effect.rs`.
-*Effort: low.*
+The blocked/done notification (P3-1) shipped; what's left is the persistence
+stance.
 
 **P3-2 · Richer session-restore content (the persistence answer).**
 Capture the split/pane **layout tree** + per-pane **cwd** in the session snapshot
@@ -216,32 +237,48 @@ so `-r` rebuilds geometry faithfully, and make periodic autosaves
 flush). This is spyc's deliberate, daemon-free answer to the persistence pain
 herdr solves with a server (review §3 #4).
 *Touches:* `src/app/session.rs`, `src/state/sessions/`. *Effort: low–med.*
+*Use cases:* the SSH-drop / laptop-sleep / crash return — reconnect and `-r` rebuilds
+the split geometry + per-pane cwd (already captured today via `SavedVsplit` +
+`SavedTab.cwd`) **and** resumes each agent's *conversation* via its native `--resume`.
+herdr's taxonomy is the reference: restore *"session shape"* + a separate agent-
+restore tier that re-runs native resume for the conversation, explicitly **not** the
+live process ([herdr session-state](https://herdr.dev/docs/session-state/)). The
+missing half today is durability — `save_session()` is **quit-only** (`session.rs`,
+called only from `request_quit`), so a `SIGKILL` loses everything since the last quit;
+add a debounced/periodic autosave so recovery is crash-sufficient. This is precisely
+the *"Recovery Snapshot"* Claude Code declined upstream (consolidating 100+ issues,
+[CC #26729](https://github.com/anthropics/claude-code/issues/26729)) — spyc can just
+have it. Set expectations honestly: restored panes come back as **fresh shells +
+resumed conversations, not PID-preserved live processes** — the detach/reattach
+daemon stays out of scope (see above), and codex #11852's "reconnect shows *working*
+but nothing is actually running" ghost is the trap we avoid by not pretending.
 
 ---
 
 ## Sequencing & rationale
 
 ```
-P0 (vocabulary + dot + :why)  ──►  P1 (semantic report + fallback + session id)
-                                        │
-                                        ▼
-                                   P2 (event hub + wait/subscribe + read/send)
-                                        │
-                                        ▼
-                                   P3 (notify/bell, richer -r)
+P0 ✅  ──►  P1-1 ✅  ──►  P1-2 fallback / P1-3 session-id (remaining)
+                              │
+                              ▼
+                         P2 (event hub + wait/subscribe + read/send)
+                              │
+                              ▼
+                         P3-1 ✅        P3-2 crash-sufficient -r (remaining)
 ```
 
-- **P0 first** — you can't ship or debug status without a vocabulary, a render
-  surface, and `:why-status`.
-- **P1 is the moat** — semantic-first detection is the reliability win over herdr;
-  do it before the orchestration layer leans on it.
+- **P0 (shipped)** — you can't ship or debug status without a vocabulary, a
+  render surface, and `:why-status`.
+- **P1 is the moat** — semantic-first detection (P1-1, shipped) is the
+  reliability win over herdr; the fallback (P1-2) and live session id (P1-3)
+  round it out before the orchestration layer leans on it.
 - **P2 is the capability gap** — highest ceiling, but it depends on P1's status
   signal being trustworthy.
-- **P3 is independent polish** — P3-1 can land any time after P0; P3-2 is the
+- **P3 is independent polish** — P3-1 (shipped) landed after P0; P3-2 is the
   persistence stance and stands alone.
 
-Each item is a candidate for its own worktree + PR (per the project's one-shape-
-per-PR norm), version-bumped, gated, and owner-tested before merge.
+Each remaining item is a candidate for its own worktree + PR (per the project's
+one-shape-per-PR norm), version-bumped, gated, and owner-tested before merge.
 
 ## What this does NOT change about spyc's identity
 
