@@ -61,6 +61,7 @@ lane** is where spyc lives — and it already has occupants.
 | **Superset** | GUI · macOS | "Run 10 parallel agents"; surfaced the review-bottleneck and DB-isolation debates. |
 | **agent-deck** | TUI · cross-plat | 338★ · Go · MIT. Feature-maximalist: MCP socket pooling (claims 85–90% memory reduction), status-transition notifications, cost dashboard, "conductor" agents. |
 | **psmux** | TUI · **Windows** | Rust · "the native Windows tmux" (ConPTY, reads `.tmux.conf`, 83 tmux commands). A **multiplexer**, not a manager — its one agent feature renders Claude Code teammate agents into panes. No file manager, MCP, git, or context-sharing. Different lane (Windows) + different layer. See §1b. |
+| **claude-code-ide.el** | editor plugin | 1.6k★ · 109 forks · Emacs. The closest **architectural** twin outside the TUI-manager space: Claude Code runs in a hosted terminal pane (vterm/eat/ghostty) behind a **bidirectional MCP bridge** that pushes live editor context (file, selection, diagnostics, project) to Claude automatically. Different host (a 40-year-old editor, not a file commander) and different center of gravity — the buffer/editor is the noun, dired is a visited mode, not the driving UI. See §1c. |
 | **long tail** | mixed | Chorus · Vibetunnel · VibeKanban · Mux · Happy · AutoClaude · Codirigent · Centurion · AgentWire · Baton … |
 | **spyc** | TUI · cross-plat | Rust/ratatui · in-process gix worktrees · MCP bridge · vi-keyboard **file+process+agent manager** (not just a multiplexer). |
 
@@ -239,6 +240,59 @@ won't get their own panes. Not a thesis issue, but a "known interaction" if spyc
 is ever marketed for multi-agent work: spyc is single-pair-agent-focused by
 design; the teammate grid is the multiplexer's job (grid multiplexer is
 explicitly out of scope per the charter).
+
+---
+
+## 1c. claude-code-ide.el — the Emacs convergence (validates the shape, not a threat)
+
+The recurring joke when showing spyc around: *"aren't you just recreating
+Emacs?"* Worth taking seriously for a minute, because the Emacs ecosystem has in
+fact converged on something architecturally close —
+**[claude-code-ide.el](https://github.com/manzaltu/claude-code-ide.el)** (1.6k★,
+109 forks, active). It:
+
+- Runs Claude Code in a **hosted terminal pane** inside Emacs (vterm / eat /
+  ghostty backend) — the same "agent lives in a pane" shape as spyc.
+- Bridges via **MCP, bidirectionally** — and critically, **pushes live context
+  to Claude automatically**, without the user re-describing state: current
+  file, selection, buffer diagnostics (Flycheck/Flymake), project info. That is
+  spyc's entire thesis, restated with Emacs as the host instead of a file
+  commander.
+- Exposes Emacs-native tools back to Claude (`xref-find-references`,
+  tree-sitter info, `imenu` symbols, project metadata) and lets Claude execute
+  Elisp directly via an `executeCode` tool.
+
+A second, differently-shaped project — **emacs-claude-agent** — skips the
+terminal pane entirely: a chat-buffer agent with a tool registry that includes
+an `emacs-dired` tool (file ops, pattern search) alongside git/shell/project
+tools. Structurally that's "an agent that can drive dired," closer to a
+tool-calling assistant than a file-commander-with-a-guest-agent. The more
+common Emacs pattern (`aider.el`, `gptel`, `ai-code-interface.el`) is simpler
+still: mark files in dired, manually add them to the agent's context — a
+push-button action, not a live bridge.
+
+**Read on this: validation, not a scoop.** Two independent lineages — a
+40-year-old Lisp editor and a from-scratch Rust TUI — arrived at the same three
+primitives for agent integration: **(1)** host the agent in a pane, **(2)** a
+context bridge that pushes state to the agent automatically, **(3)** let the
+agent act back on the host. That convergence is evidence the shape is right,
+not evidence spyc is redundant.
+
+**Where it actually diverges — the substance of the rebuttal:** in every Emacs
+variant, **the editor/buffer is the noun and the agent bolts onto it**; dired is
+a mode you visit, not the persistent driving interface, and vi-style modal
+navigation is a separate package (`evil-mode`) layered on top of decades of
+editor-first defaults. spyc inverts the center of gravity —
+*"the file commander is the noun the agent operates on"* — the file commander
+is primary, an editor is optional-to-absent, and vi-modal navigation is the
+whole interaction model from the start, not a retrofit. Recreating spyc in
+Emacs means layering `evil-mode` + `claude-code-ide.el` + a from-scratch
+dired-as-primary-UI + a custom activity/notification system on top of an
+editor whose entire ideology is "everything is a buffer" — which is to say,
+you'd end up writing spyc, in Emacs Lisp, fighting the host's bones the whole
+way. It's the 30-year-old joke — *"Emacs: a great operating system, lacking
+only a decent editor"* — taken seriously and built on purpose, in Rust,
+without the Lisp tax.
 
 ---
 
