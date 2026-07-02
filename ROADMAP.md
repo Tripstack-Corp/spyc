@@ -618,7 +618,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/archive/TESTING_STRATEGY.md` | Testing strategy & guidelines (coverage, anti-"test theater", proptest/cargo-fuzz, AI-testing rules). Campaign complete (#426–#438); kept as the how-we-test reference. |
 | `docs/drafts/V1_60_PLAN.md` | Pending design (post-2.0, after V1_70). |
 | `docs/drafts/V1_70_PLAN.md` | Pending design (post-2.0, first in the arc). |
-| `docs/YAZI_COMPETITIVE_REVIEW.md` | Competitive snapshot (2026-05-28); refresh on Yazi's next major. |
+| `docs/YAZI_COMPETITIVE_REVIEW.md` | Competitive snapshot (refreshed 2026-07-01, spyc-side; Yazi still v26.5.6). Refresh on Yazi's next major. |
 | `docs/archive/` | Shipped plans, kept as historical record. |
 
 > **Note on pending plans:** the four feature plans predate the MVU

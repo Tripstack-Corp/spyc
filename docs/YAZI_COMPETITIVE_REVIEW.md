@@ -1,8 +1,11 @@
 # Yazi competitive review
 
-Last reviewed: 2026-05-28
-Yazi reference point: github.com/sxyazi/yazi @ ~37k stars; PR #4005
-(drag-and-drop) merged the same day as this review.
+Last reviewed: 2026-07-01 (spyc-side refresh)
+Yazi reference point: github.com/sxyazi/yazi @ ~39.9k stars; latest stable
+still v26.5.6 (2026-05-05) — no new significant Yazi release since the
+2026-05-28 pass, so this refresh tracks **spyc-side** changes (Lua scripting,
+mermaid rendering, agent-awareness all shipped since). PR #4005
+(drag-and-drop) landed just before that original review.
 
 ## Why this doc exists
 
@@ -69,10 +72,10 @@ daily and line numbers go stale fast.
 
 | Capability                             | Yazi    | spyc                                   |
 |----------------------------------------|---------|----------------------------------------|
-| Async I/O, multithreaded scheduler     | Yes     | Background loading roadmapped (`ROADMAP.md`) |
-| Image preview (kitty/iTerm2/sixel)     | Yes     | Out of scope today; not roadmapped     |
+| Async I/O, multithreaded scheduler     | Yes     | Heavy work is off-thread (git-status walk, file ops, previews/git-view, fs-watch, pager streams, watcher-triggered listing refresh); the core on-navigation `Listing::read` stays synchronous — background directory loading for 100K+ dirs is roadmapped, 50k-entry cap today (`ROADMAP.md`) |
+| Image preview (kitty/iTerm2/sixel)     | Yes     | No *general* image preview, but **mermaid diagrams render as terminal-graphics images** in the pager (v1.58.11) |
 | Code preview / syntax highlighting     | Yes     | Yes (tree-sitter, shipped v1.50.61) |
-| Markdown rendered preview              | No (?)  | Yes (shipped v1.26.0)              |
+| Markdown rendered preview              | No (?)  | Yes (v1.26.0); fenced `mermaid` blocks render as diagrams (v1.58.11) |
 | Multi-tab                              | Yes     | Yes                                    |
 | Trash bin                              | Yes (single tier) | Yes — two-tier: in-app **graveyard** (compressed, undo-able from spyc) cascading to system trash (`src/state/graveyard.rs`) |
 | Archive extraction                     | Yes     | Not implemented                        |
@@ -87,18 +90,18 @@ daily and line numbers go stale fast.
 
 | Capability                             | Yazi    | spyc                                   |
 |----------------------------------------|---------|----------------------------------------|
-| Lua plugin system                      | Yes (concurrent, BETA) | **Non-goal** (`ROADMAP.md`) |
-| Theme system / "Flavors"               | Yes (BETA) | Nerd-font / mono toggle; no theme DSL |
-| Custom previewers / fetchers           | Yes (Lua) | Not exposed                           |
+| Lua scripting / plugins                | Yes — plugins + package manager (BETA) | **Lua scripting shipped** (`map KEY lua`, `init.lua` platform, `spyc.on` events, full-`Action` `spyc.action`; off-thread worker, `src/lua/`, v1.84–1.89). No plugin *package manager* (deliberate). |
+| Theme system / "Flavors"               | Yes (BETA) | Themes in `.spycrc.toml` + nerd-font/mono toggle; no installable-theme package system |
+| Custom previewers / fetchers           | Yes (Lua) | Not exposed (spyc's Lua drives nav/actions/reads, not previewers) |
 | Keymap customization                   | Yes (`keymap.toml`) | Yes (`.spycrc.toml`)         |
-| Package manager for plugins/themes     | Yes     | N/A (no plugin system)                 |
+| Package manager for plugins/themes     | Yes     | No — Lua *scripting*, not a plugin/theme package ecosystem |
 
 ### Automation / external integration
 
 | Capability                             | Yazi    | spyc                                   |
 |----------------------------------------|---------|----------------------------------------|
 | Event publish (`ya pub`)               | Yes     | **Explicit non-goal** (`ROADMAP.md`) — wider attack surface, not on thesis |
-| Event subscribe (`--local-events`, `--remote-events`) | Yes | Roadmap as subscriber socket on existing MCP UDS (`ROADMAP.md`) |
+| Event subscribe (`--local-events`, `--remote-events`) | Yes | **Partial** — `spyc.on(startup\|dir_changed\|project_changed\|agent_status)` Lua event hooks (in-process, v1.89); a subscriber socket on the MCP UDS stays roadmap (`ROADMAP.md`) |
 | Cross-instance state distribution      | Yes ("Data Distribution Service") | Per-PID MCP socket; instances coexist but don't share state |
 | MCP server (agent-callable)            | **No**  | **Yes — core thesis** (`README.md`) |
 | Virtual filesystem for remote files    | Yes     | Out of scope                           |
@@ -163,15 +166,22 @@ positioned for the audience we care about:
    the wrong thing" is one keystroke away from recovery without a
    context switch to Finder / `gio trash list`. See
    `src/state/graveyard.rs` for the design rationale.
+7. **Live agent-status awareness.** Each agent pane carries a status
+   dot (working / blocked / done) sourced from an MCP/hook self-report
+   channel, with desktop notifications on the blocked/done transition.
+   Yazi has no agent concept at all. Shipped 2026; charter
+   `docs/AGENT_AWARENESS_PLAN.md`.
 
 ## Where we deliberately differ
 
 Worth being explicit so the next "Yazi has this, should we?"
 conversation has a fast answer.
 
-- **Plugin system.** Non-goal. `ROADMAP.md` is the canonical
-  statement: "A decade of maintenance debt for a feature 3% of users
-  will touch."
+- **Plugin *package ecosystem*.** spyc shipped Lua *scripting*
+  (`map KEY lua` / `init.lua` / `spyc.on` events / `spyc.action`) — but
+  deliberately not a plugin *package manager / marketplace* like Yazi's.
+  The extensibility surface is in-process scripting + the MCP bridge, not
+  a third-party plugin API to maintain and version.
 - **Mouse beyond current.** Non-goal (`ROADMAP.md`). Keyboard-first
   by thesis.
 - **Event publishing (`ya pub` equivalent).** Non-goal per
@@ -200,9 +210,10 @@ Concrete actions falling out of this review:
    with MCP/Claude pairing**, then picks-as-data-structure, then
    session save/restore. These are the three things Yazi cannot match
    without changing what it is.
-4. **No change to the plugin-system non-goal.** Yazi's plugin system
-   is its main extensibility vector; ours is the MCP surface. Don't
-   re-litigate.
+4. **Extensibility stays scripting + MCP, not a plugin marketplace.**
+   Yazi's plugin *package system* is its main extensibility vector; spyc
+   now has Lua *scripting* (shipped since this review) plus the MCP
+   surface, but deliberately not a third-party plugin package ecosystem.
 5. **Re-run this review** when Yazi cuts its next significant release
    or when a second terminal adopts OSC 72 (whichever comes first).
 
