@@ -4,14 +4,15 @@
 use super::*;
 
 #[test]
-fn ctrl_d_quits_or_closes_commander() {
-    // `^d` maps to the contextual action — the handler closes the second
-    // commander if one is open, else quits (and `request_quit` keeps its own
-    // two-tap confirm, so quitting stays `^d^d` with a warning).
+fn ctrl_d_quits() {
+    // `^d` maps to quit; `request_quit` keeps its own two-tap confirm, so
+    // quitting stays `^d^d` with a warning. It never closes the second
+    // commander (that's `^s x`) — so quitting with `b` open preserves it for
+    // session restore.
     let mut r = Resolver::new();
     assert_eq!(
         feed(&mut r, ctrl('d')),
-        ResolverOutcome::Action(Action::QuitOrCloseCommander)
+        ResolverOutcome::Action(Action::Quit)
     );
 }
 
@@ -90,7 +91,7 @@ fn ctrl_resets_pending_state() {
     assert!(r.is_pending());
     assert_eq!(
         feed(&mut r, ctrl('d')),
-        ResolverOutcome::Action(Action::QuitOrCloseCommander)
+        ResolverOutcome::Action(Action::Quit)
     );
     assert!(!r.is_pending());
 }

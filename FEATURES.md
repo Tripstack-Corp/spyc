@@ -288,8 +288,9 @@ spyc's workflow: browse files above, talk to Claude below.
   scroll position, and re-wraps when you resize the column.
 - **^s n** open a **second full file-commander** in the right column
   (`b`) — a complete browser, not just a preview: its own cwd, listing,
-  picks, filter, sort, git markers, and harpoon. **^s x** (or **^d**,
-  which closes the commander when one is open, else quits) closes it.
+  picks, filter, sort, git markers, and harpoon. **^s x** closes it.
+  (`^d` does *not* close it — it quits, so `^d^d` with `b` open lets the
+  session save + `-r` restore the split.)
   `^a a`/`^a h` focus the left commander (a), `^a b`/`^a l` the right
   (b). Everything follows the focused column: navigation, `V`/`D`
   overlays, file ops (`O`/`+`/`W`), `!`/`;`/`$` shell cwd, the MCP

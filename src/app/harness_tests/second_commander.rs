@@ -574,11 +574,11 @@ fn column_focused_tracks_any_surface_in_b() {
     });
 }
 
-/// `^d` (Action::QuitOrCloseCommander) is contextual: it closes the second
-/// commander when one is open, otherwise quits — and the no-split quit keeps
-/// its existing two-tap "press again to quit" confirm.
+/// `^d` (Action::Quit) quits with the two-tap "press again to quit" confirm and
+/// NEVER closes the second commander — so `^d^d` with `b` open leaves `b` open
+/// when the session saves, and `-r` restores the split. Closing `b` is `^s x`.
 #[test]
-fn ctrl_d_closes_second_commander_then_quits() {
+fn ctrl_d_quits_and_keeps_the_second_commander_open() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let dir = tmp.path().join("work");
@@ -587,25 +587,28 @@ fn ctrl_d_closes_second_commander_then_quits() {
         let mut app = App::test_app(dir);
         let d = app.state.left.listing.dir.clone();
         app.open_second_commander_at(&d);
+        // Focus the LEFT column — the case the user hit: `^d` from `a` used to
+        // close `b`.
+        app.apply(&Action::VsplitFocusLeft).unwrap();
         assert!(app.state.right.is_some());
 
-        // With a commander open, `^d` closes it (does NOT quit).
-        app.apply(&Action::QuitOrCloseCommander).unwrap();
-        assert!(app.state.right.is_none(), "^d closes the second commander");
+        // First `^d` arms the quit confirm; `b` stays open, no quit yet.
+        app.apply(&Action::Quit).unwrap();
         assert!(
-            !app.state.should_quit,
-            "^d must not quit while a commander is open"
+            app.state.right.is_some(),
+            "^d must not close the second commander"
         );
-
-        // No commander now → `^d` is the first quit tap (arms the confirm only).
-        app.apply(&Action::QuitOrCloseCommander).unwrap();
         assert!(
             !app.state.should_quit,
             "first quit tap only arms the confirm"
         );
 
-        // Second tap quits.
-        app.apply(&Action::QuitOrCloseCommander).unwrap();
+        // Second `^d` quits — with `b` still open, so the session save captures it.
+        app.apply(&Action::Quit).unwrap();
         assert!(app.state.should_quit, "second quit tap quits");
+        assert!(
+            app.state.right.is_some(),
+            "b is still open at quit → session save persists right_cwd for -r"
+        );
     });
 }

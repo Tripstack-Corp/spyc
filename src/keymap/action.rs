@@ -148,9 +148,6 @@ pub enum Action {
     // Second file-commander in the right column (^s chord family).
     OpenSecondCommander,  // ^s n — open a second commander (at PROJECT_HOME)
     CloseSecondCommander, // ^s x — close the second commander
-    // `^d` — close the second commander if one is open, else quit (the
-    // no-split quit keeps its own "press again to quit" confirm).
-    QuitOrCloseCommander,
 
     // Graveyard. No default key since the keymap slim — reached via the
     // `:graveyard` command (which dispatches this action for its entry hint).
@@ -279,7 +276,6 @@ impl Action {
             | Self::ToggleDim
             | Self::OpenSecondCommander
             | Self::CloseSecondCommander
-            | Self::QuitOrCloseCommander
             | Self::QuickSelectOpen => Tier::Pane,
             // Meta — cross-cutting / informational.
             Self::Help
@@ -409,7 +405,6 @@ impl Action {
             Self::ToggleActivity => "toggle activity monitor",
             Self::Redraw => "redraw",
             Self::Quit => "quit",
-            Self::QuitOrCloseCommander => "close the second commander, else quit",
             Self::MacroRecordReserved => "(reserved: macro recording)",
             Self::OpenTaskViewer => "open task viewer (most-recent bg task)",
             Self::ReopenLastBuffer => "reopen the most-recent closed pager buffer",
@@ -542,7 +537,6 @@ impl Action {
             Self::ToggleDim => "toggle_dim",
             Self::OpenSecondCommander => "open_second_commander",
             Self::CloseSecondCommander => "close_second_commander",
-            Self::QuitOrCloseCommander => "quit_or_close_commander",
             // Graveyard.
             Self::OpenGraveyardView => "open_graveyard_view",
             // Quick Select.
@@ -702,7 +696,6 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         "toggle_dim" => Action::ToggleDim,
         "open_second_commander" => Action::OpenSecondCommander,
         "close_second_commander" => Action::CloseSecondCommander,
-        "quit_or_close_commander" => Action::QuitOrCloseCommander,
         // Graveyard.
         "open_graveyard_view" => Action::OpenGraveyardView,
         // Quick Select.

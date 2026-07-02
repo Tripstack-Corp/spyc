@@ -282,10 +282,7 @@ const SECTIONS: &[Section] = &[
             ("^a b  ^a l", "focus the right file pane (b)"),
             ("^a d", "toggle dimming of the inactive pane / list"),
             ("^s n", "open a second file-commander (at PROJECT_HOME)"),
-            (
-                "^s x  ^d",
-                "close the second file-commander (^d, else quits)",
-            ),
+            ("^s x", "close the second file-commander"),
             (
                 "^a v",
                 "scroll pane history in the in-app pager (/ ? n/N, :N, V, ^v, y; t toggles transcript tool calls; H transcript help)",
