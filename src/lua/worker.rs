@@ -866,11 +866,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         std::fs::write(dir.path().join("a.txt"), "one\nNEEDLE here\nthree\n").unwrap();
+        // The script itself contains the needle (as its search argument), so the
+        // search matches BOTH a.txt and t.lua and the result order is unspecified.
+        // Pick the a.txt row by file rather than trusting hits[1], so the assertion
+        // is deterministic regardless of directory-walk order.
         std::fs::write(
             dir.path().join("t.lua"),
             "local hits = spyc.search_content('NEEDLE')\n\
-             local m = hits[1]\n\
-             spyc.notify(m.file .. ':' .. m.line .. ':' .. m.text)",
+             local m\n\
+             for _, h in ipairs(hits) do if h.file == 'a.txt' then m = h end end\n\
+             spyc.notify(m and (m.file .. ':' .. m.line .. ':' .. m.text) or 'a.txt not found')",
         )
         .unwrap();
 
