@@ -69,8 +69,12 @@ integration — is what you'd expect from a keyboard-driven file
 manager. The MCP bridge is the part that distinguishes spyc from
 Yazi, Broot, Ranger, or the rest of the space.
 
-The name: **spy** (inspired by SideFX's in-house file manager) +
-**c**laude = **spyc**.
+**The name.** Say it *"spy-see"* — near enough to *spicy*, which is where the
+chili comes from. It carries a lineage too: `spy` and the keyboard-driven file
+commanders that came before it, rebuilt from scratch in Rust for the age of
+coding agents. Precise, fast, no bulk.
+
+<sub>spyc is an independent project, not affiliated with or endorsed by Side Effects Software Inc. or Anthropic.</sub>
 
 ## Quick start
 

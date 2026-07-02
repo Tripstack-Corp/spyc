@@ -1,6 +1,6 @@
 # spyc
 
-A vi-keyboard-driven terminal file manager in Rust, on ratatui/crossterm. Inspired by SideFX's `spy`. Single-developer project.
+A vi-keyboard-driven terminal file manager in Rust, on ratatui/crossterm. In the lineage of keyboard-driven terminal file commanders like `spy`. Single-developer project.
 
 > **Canonical agent guide** — the MVU contract, the per-module map, and the
 > day-to-day conventions, in one place so every tool reads the same source

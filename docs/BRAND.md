@@ -55,8 +55,8 @@ neovim, with a socket the agent reads so it sees what I see.
 + **c**.
 
 **spy** is the lineage: the keyboard-driven file commander that shipped inside
-SideFX's VFX-pipeline software on that SGI IRIX workstation, the one that set
-the bar. **c** is the coding agent spyc is built to run beside (Claude Code by
+the VFX-pipeline software on that SGI IRIX workstation, the one that set the
+bar. **c** is the coding agent spyc is built to run beside (Claude Code by
 default) — the reason the MCP socket exists at all. Lineage and agent, in four
 keystrokes.
 

@@ -5,9 +5,8 @@ built for developers who live in the terminal and want a fast, modal
 interface for navigating files, running commands, and — critically —
 working alongside AI coding assistants like Claude Code.
 
-Inspired by SideFX's `spy` (a file manager from the Houdini VFX
-ecosystem), spyc brings that same "always-open workspace" philosophy to
-modern terminal workflows. The split-pane design lets you browse your
+In the lineage of keyboard-driven terminal file commanders like `spy`, spyc
+brings an "always-open workspace" philosophy to modern terminal workflows. The split-pane design lets you browse your
 project in the top half while Claude runs in the bottom half, so file
 context and AI conversation stay in the same window.
 

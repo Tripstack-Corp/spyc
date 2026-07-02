@@ -1,4 +1,4 @@
-//! spyc — a vi-keyboard-driven file commander inspired by SideFX's spy.
+//! spyc — a vi-keyboard-driven terminal file commander, in the lineage of keyboard-driven file managers like spy.
 //!
 //! This is the crate's **library** root: it owns all the modules and the
 //! [`run`] entry point. `src/main.rs` is a thin binary shim that calls
