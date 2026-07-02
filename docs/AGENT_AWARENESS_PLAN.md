@@ -62,8 +62,10 @@ stays focused on what's left.
 
 **Remaining** — the live scope this charter still tracks:
 
-- **P2** — orchestration: event hub + wait/subscribe + read/send (the capability
-  gap; the highest-ceiling item).
+- **P2** — merge/scope coordination: a `register_scope` / `list_scopes` /
+  `wait_for_scope_clear` registry (in-memory, session-persisted) + an
+  orchestration screen (the capability gap; the highest-ceiling item). Full
+  design + use-cases in Phase 2 below.
 
 ---
 
@@ -86,11 +88,11 @@ fragility class and is how spyc wins a feature herdr struggles to keep working.
 *(The self-report path is shipped — P1-1 above; the scrape fallback is P1-2,
 still to build.)*
 
-Three more ideas ride alongside: an **orchestration capability** (let one agent
-*wait on / subscribe to* another's status — the genuine gap vs MCP today), live
-**session-identity capture** (more reliable than spyc's exit-banner sniffing),
-and a **notification/bell** when a backgrounded agent needs you *(shipped —
-P3-1)*.
+Three more ideas ride alongside: an **orchestration capability** (let agents
+*coordinate merges* — claim a file scope, wait on a conflicting one — the genuine
+gap vs MCP today; P2), live **session-identity capture** (more reliable than
+spyc's exit-banner sniffing; shipped — P1-3), and a **notification/bell** when a
+backgrounded agent needs you *(shipped — P3-1)*.
 
 > **Field-validated (2026-07).** Each remaining (un-shipped) item below carries
 > a **Use cases** line — the concrete workflow it unlocks, with a real-world source.
@@ -177,67 +179,179 @@ unneeded (derived from cwd + id via `claude_jsonl_path`). *Code:* `src/mcp/mod.r
 
 ---
 
-## Phase 2 — Orchestration: wait / subscribe *(med–high effort — the capability gap)*
+## Phase 2 — Merge / scope coordination *(the capability gap, reframed)*
 
-The single most valuable steal: today spyc's MCP is query+mutate; herdr's socket
-lets an agent **block until another agent changes state**. That's "agents
-orchestrate agents," and it's beyond what MCP does for spyc now.
+The last unshipped item — reframed from generic herdr-style "read/send/wait
+primitives" to the coordination layer that solves spyc's **real** pain: the
+**merge train**. Multiple agents work concurrently and collide on merges —
+overlapping files, the `Cargo.toml` version line, racing PRs (this charter's own
+build hit it repeatedly). The `spyc-semver` merge driver already auto-resolves the
+*mechanical* version-line clash; what's missing is coordination for the *semantic*
+overlap. So P2 is: each agent **registers the scope it's touching + its intent**
+(editing vs merging), any agent can read the registry and **wait** on a
+conflicting claim, and a **TUI orchestration screen** shows the whole picture and
+lets you intervene. **Advisory, not enforced** — spyc informs and offers a wait
+primitive; it never blocks a merge and **never auto-spawns**. Realizes the
+merge-autopilot campaign's parked "scope-conductor" (ROADMAP → Tooling) with a
+concrete driver.
 
-> **Field-validated workflows (what wait/subscribe actually unlocks).** herdr's
-> socket already ships this exact verb set — `wait agent-status … --status done`,
-> `events.subscribe`, `pane.read`, `pane.send_keys` — and AWS Labs'
+> **Field-validated (the coordination angle).** The multi-agent field keeps
+> hitting the wall spyc hit: concurrent agents need to *coordinate*, not just run.
+> Claude's own agent-teams steer the lead to *"wait for your teammates to complete
+> their tasks before proceeding"*
+> ([agent-teams docs](https://code.claude.com/docs/en/agent-teams)); herdr ships a
+> socket with `wait agent-status` + `pane.read`/`send_keys` and AWS Labs'
 > [`cli-agent-orchestrator`](https://github.com/awslabs/cli-agent-orchestrator/blob/main/docs/herdr.md)
-> scripts against it, so the *shape* is proven, not hypothetical. The concrete jobs
-> spyc's tools would serve (each composing with spyc's worktree MCP tools):
-> - **Fan-out → gather.** Spin up N agents across N worktrees (`create_worktree`),
->   `wait_for_pane_status` until each is `blocked`/`done`, then review the batch. The
->   dominant multi-agent pattern — Claude's own agent-teams steer the lead with
->   *"wait for your teammates to complete their tasks before proceeding"*
->   ([agent-teams docs](https://code.claude.com/docs/en/agent-teams)).
-> - **Parallel review by lens.** Three teammates review a PR for security / perf /
->   tests concurrently; the lead synthesizes once all report `done` (Anthropic's own
->   headline example, ibid). Pairs naturally with spyc's in-process diff/review loop.
-> - **Watch-for-blocked → escalate.** `subscribe_events` for the first `blocked`
->   transition and surface "who needs you" — the supervisor case (feeds P3-1's ping).
-> - **Sequential handoff.** A finishes → `read_pane` its output → `send_pane_keys` to
->   brief B. The case in-process subagents *can't* cover: they *"only report results
->   back to the parent and never talk to each other,"* and can't span heterogeneous
->   agents (claude + codex + aider) the way a terminal socket can.
+> scripts against it, so the coordination *shape* is proven. spyc's twist: make the
+> unit of coordination the **scope claim** (what files, what intent), not a raw
+> pane run-state — a far better fit for the merge-train problem than a status wait,
+> and it composes with spyc's worktree MCP tools (claim per `create_worktree`).
 >
 > **Guardrails (the skeptic's counterpoints are real — bake them in).** Auto-
 > coordination can collapse into agents *"generating huge status reports for each
 > other"* instead of doing work ([HN 47245373](https://news.ycombinator.com/item?id=47245373));
 > runaway loops burn tokens with no circuit-breaker; and Anthropic itself notes that
 > for sequential / same-file / heavy-dependency work a single session beats a team.
-> So spyc ships the **primitives** (wait/subscribe/read/send) and stays a *primitive*
-> — the human or a deliberately-authored orchestrator composes them; **spyc never
-> auto-spawns**. `timeout` is mandatory on every wait (no unbounded blocks), and the
-> PID-scoped socket + takeover prompt keep a stale waiter from wedging the loop.
+> So spyc ships the **primitives** (register / list / wait + the screen) and stays
+> a *primitive* — the human or a deliberately-authored orchestrator composes them;
+> **spyc never auto-spawns** and never blocks a merge. `timeout` is mandatory on
+> every wait (no unbounded blocks), and the PID-scoped socket + takeover prompt
+> keep a stale waiter from wedging the loop.
 
-**P2-1 · MCP event hub.**
-A sequenced ring buffer of `(seq, Event)` + a subscriber list, fanned out from
-spyc's single `mpsc` `Message` loop (drained in the pre-recv scan, like every
-other source). **Edge-triggered** (emit only on transition) with `events_after(seq)`
-catch-up. Event kinds: `pane.agent_status_changed`, `pane.output_matched`,
-`pane.exited`, `pane.agent_detected`.
-*Touches:* `src/mcp/`, the event loop (`src/app/sources.rs` / `loop_steps.rs`),
-`agent_status.rs`. *Effort: med.*
+### How it maps onto spyc's architecture (no daemon, no second runtime)
 
-**P2-2 · `wait_for_pane_status` + `subscribe_events` MCP tools.**
-`wait_for_pane_status(pane, status, timeout)` (long-poll or event-backed) and a
-streaming `subscribe_events`. Now a top-level Claude in spyc can "spin up codex in
-worktree `b`, wait until it's blocked or done, then read its output" — composing
-with spyc's worktree MCP tools.
-*Touches:* `src/mcp/protocol.rs`, the hub. *Effort: med.*
+Every MCP tool already runs on a **per-connection socket thread**
+(`handle_socket_connection`) that forwards an `McpCommand` to the main loop over
+`mpsc` and **blocks on a one-shot reply channel** (`McpRequest { command, reply }`)
+until the loop answers. Two consequences shape the whole P2 design — and let it
+land without a daemon, a second runtime, or `tokio`:
 
-**P2-3 · `read_pane` + `send_pane_keys` MCP tools.**
-Let an agent read what a *sibling* pane shows (spyc already does pane text reads
-internally for `gf` / quick-select) and send it input. Pairs with P2-1/2 for real
-cross-pane orchestration.
-*Touches:* `src/mcp/`, `src/pane/`. *Effort: med.*
-*Keep spyc's edge:* one PID-scoped socket + the takeover prompt (better-scoped
-than herdr's no-auth, first-to-bind sockets); reuse the `crate::VERSION` staleness
-check spyc already does.
+- **Registry reads + mutations fit the one-shot model unchanged.**
+  `register_scope` / `list_scopes` / `release_scope` are new `McpCommand` variants
+  the loop answers *immediately* — mutate or read the in-memory registry — exactly
+  like `report_status` / `navigate_to` do today.
+- **`wait_for_scope_clear` just answers *later*.** Instead of replying at once,
+  the loop **parks the reply sender** and fires it when the blocking claim
+  releases or a deadline passes. The socket thread stays blocked on its `recv()`
+  the whole time — no polling, no extra thread: a `Runtime`-owned
+  `Vec<PendingWait>`, resolved in a `settle_scope_waiters` step alongside the
+  `settle_*` chain that already runs each pre-recv tick.
+
+So every invariant this plan opened with holds: single process, one message
+channel, effects-as-data, render stays pure, 0 dps at idle.
+
+### P2-1 · The scope registry + its MCP verbs
+
+An **in-memory, Model-owned** registry: a `Vec<ScopeClaim>` on `AppState`, each
+`ScopeClaim { owner, paths, intent, pr, note, claimed_at }` — `intent` is
+`Editing` | `Merging`, `paths` a set of path globs. `owner` is keyed by the tab's
+**stable** id (its `claude_session_id` / a per-tab key that survives `-r`), not
+the ephemeral pane uuid, so a claim re-binds to the right agent after a restore.
+Every agent pane in one spyc shares that spyc's socket, so one registry
+coordinates them all — no files, no locking, no staleness reaping (textbook MVU).
+
+The verbs (one-shot MCP tools; generalize the existing `claim_worktree` lease
+from a whole worktree to a file set + intent):
+- **`register_scope(paths, intent, pr?, note?)`** → a claim id. *"I'm touching
+  these files; I'm about to merge PR #N."*
+- **`list_scopes()`** → the whole registry (owners, paths, intents, PRs, plus the
+  wait graph) — what an agent checks *before* it merges, and what the screen
+  renders.
+- **`release_scope(id)`** — plus an automatic release when a tab closes / its
+  agent exits (a dead agent never holds a stale claim).
+
+**Persistence — the registry is session state, not ephemeral (rides P3-2).** It
+serializes into the session snapshot next to tabs + vsplit, so:
+- P3-2's debounced autosave persists it — `session_fingerprint` gains the
+  registry, so registering/releasing a claim arms a save; a `SIGKILL` mid-train
+  loses at most the ~2s window.
+- **`spyc -r` restores it**, re-binding each claim to its restored tab by the
+  stable `owner` key — coordination survives a crash/restart *exactly* when you'd
+  most want it (mid-train). This is why the registry is **Model** state, not a
+  Runtime scratch field.
+
+*Touches:* `src/app/state/` (registry + `session_fingerprint`),
+`src/state/sessions/` (serialize + restore), `src/mcp/{protocol,readers}.rs` +
+`src/mcp_cmd.rs` + `src/app/mcp.rs` (the verbs). *Effort: med.*
+
+### P2-2 · `wait_for_scope_clear` — the coordination verb
+
+**`wait_for_scope_clear(paths, timeout_ms)`** blocks the caller until no
+`Merging` claim overlaps `paths` (or the timeout fires), returning which happened.
+"Another agent chooses to wait" becomes one call: before merging, an agent waits
+until whoever's mid-merge on the overlapping files releases.
+
+Mechanics (the loop-held-waiter shape above):
+- The socket thread sends `McpCommand::WaitForScopeClear { paths, deadline,
+  reply }` and blocks on `reply.recv()`.
+- The loop parks a `PendingWait { paths, deadline, reply }`; if nothing conflicts
+  *now*, it answers immediately (fast path).
+- `settle_scope_waiters` (runs whenever the registry can change — any
+  `release_scope` / tab close / claim edit) walks the parked waiters: none
+  overlapping a `Merging` claim → send `cleared` + drop; past `deadline` → send
+  `timed_out` + drop. A `Deadline::ScopeWait` at the earliest pending deadline
+  honors timeouts with no other activity — armed only while a waiter is parked, so
+  **0-dps-idle holds**.
+- **Mandatory** `timeout_ms` (no unbounded blocks — a hard guardrail); the
+  overlap check is pure + unit-tested (given claims + query paths → conflict?),
+  per the `route.rs` / `focus.rs` template.
+
+*Use cases (the merge train, solved):*
+- **Serialize the merge train** — before merging, `register_scope(intent:
+  Merging)` your PR's files, `wait_for_scope_clear` on them, merge, `release_scope`.
+  Concurrent agents queue on overlap instead of colliding + rebasing (the exact
+  grind this charter's build kept hitting).
+- **Fan-out → gather** — N agents in N worktrees each claim `Editing` scope; the
+  lead `list_scopes()` to see who overlaps and waits out the risky pairs before
+  landing them.
+
+### P2-3 · The orchestration screen
+
+A TUI panel (`:orchestrate`, or a chord) rendering the live registry: per agent
+tab — its claimed paths, `intent`, PR, and the **wait graph** (who's blocked on
+whom). The "open a screen and see/poke the coordination" you want. Built in two
+steps: **observability first** (a pure `&self` render over the Model registry —
+the `ui/` renderer pattern), then **interactive** (release a stuck claim, wave a
+merge through) via the same registry ops the MCP verbs use, routed through `apply`
+like every other action. New render surface + a light modal; reads the Model,
+mutates through the existing action path.
+
+*Touches:* `src/ui/` (renderer), `src/app/render/` + a `Modal` arm, `src/keymap/`
+(a binding / `:orchestrate` command). *Effort: med.*
+
+### Deliberately not building (considered, set aside)
+
+- **`read_pane` / `send_pane_keys` (one agent driving another's terminal).** The
+  coordination use-case doesn't need it — agents coordinate through the *registry*,
+  not by reading/typing into each other's panes — and it's the sharpest safety
+  edge (agent-drives-agent). Left out unless a real handoff need appears; the
+  pane-read/​send plumbing already exists (`gf` / `SendToPane`) if so.
+- **Streaming `subscribe_events`.** `wait_for_scope_clear` + the screen cover the
+  need; a continuous agent-consumed event feed is the speculative surface the
+  guardrails warn about (agents narrating at each other). P3-1 already gives the
+  *human* the live signal.
+
+### Sequencing
+
+Three PRs, smallest blast radius first (each its own worktree + version bump +
+owner test):
+
+1. **Registry + verbs + persistence** — `register_scope` / `list_scopes` /
+   `release_scope`, the Model-owned `Vec<ScopeClaim>`, serialize/restore through
+   the session snapshot + `session_fingerprint` (rides P3-2). Useful on its own:
+   `list_scopes` already lets agents see overlaps.
+2. **`wait_for_scope_clear`** — the loop-held `PendingWait` + `Deadline::ScopeWait`
+   + `settle_scope_waiters` + the pure conflict check.
+3. **The orchestration screen** — observability render first, then the
+   interactive ops.
+
+`read_pane` / `send_pane_keys` and streaming `subscribe_events` stay **out of
+scope** (documented above). So "P2 complete" = **registry + wait + screen** — the
+merge-coordination layer, not a generic agent-drives-agent surface.
+
+*Keep spyc's edge throughout:* one PID-scoped socket + the takeover prompt; the
+registry is advisory (spyc never blocks a merge or auto-spawns); every wait
+bounded by a mandatory timeout.
 
 ---
 
@@ -269,7 +383,7 @@ has it. *Code:* `src/app/session.rs`, `src/app/scheduler.rs`, `src/state/session
 ## Sequencing & rationale
 
 ```
-P0 ✅  ──►  P1-1 ✅  P1-3 ✅  P1-2 ✅  ──►  P2 (event hub + wait/subscribe + read/send)
+P0 ✅  ──►  P1-1 ✅  P1-3 ✅  P1-2 ✅  ──►  P2 (scope registry + wait_for_scope_clear + screen)
                               │
                               ▼
                          P3-1 ✅        P3-2 ✅ crash-sufficient autosave
@@ -280,11 +394,12 @@ P0 ✅  ──►  P1-1 ✅  P1-3 ✅  P1-2 ✅  ──►  P2 (event hub + wait
 - **P1 is the moat (shipped)** — semantic-first detection (P1-1) + live session
   id (P1-3) + the scrape fallback (P1-2) are the reliability win over herdr;
   P1-2 rounds it out below the orchestration layer.
-- **P2 is the capability gap** — highest ceiling, but it depends on P1's status
-  signal being trustworthy.
+- **P2 is the capability gap (the only remainder)** — highest ceiling; the
+  merge/scope registry builds *on* the shipped work — P1-3's stable per-tab id
+  (restore-safe claim owners) and P3-2's autosave (persistence) — rather than on
+  the live status signal.
 - **P3 is independent polish (both shipped)** — P3-1 landed after P0; P3-2 (the
-  persistence stance) stood alone and is now done, leaving P1-2/P1-3/P2 as the
-  live remainder.
+  persistence stance) stood alone; both done.
 
 Each remaining item is a candidate for its own worktree + PR (per the project's
 one-shape-per-PR norm), version-bumped, gated, and owner-tested before merge.
