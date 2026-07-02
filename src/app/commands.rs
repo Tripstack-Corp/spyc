@@ -222,11 +222,11 @@ pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
-/// `:notify test` — fire every notification channel on demand (bell, the Charm
-/// visual border pulse, and BOTH desktop mechanisms: the OS notifier + an OSC-9
-/// escape), bypassing `[notify]` gating so you can verify each works without
-/// waiting for a real agent transition (`docs/AGENT_AWARENESS_PLAN.md`). Any
-/// other argument prints usage. App-layer (reads the clock to start the pulse).
+/// `:notify test` — fire every notification channel on demand (bell, the
+/// spice-heat visual border pulse, and BOTH desktop mechanisms: the OS notifier
+/// plus an OSC-9 escape), bypassing `[notify]` gating so you can verify each
+/// without waiting for a real agent transition (`docs/AGENT_AWARENESS_PLAN.md`).
+/// Any other argument prints usage. App-layer (reads the clock to start the pulse).
 pub(super) fn cmd_notify(app: &mut App, args: &str) -> Vec<Effect> {
     if args.trim() != "test" {
         app.state.flash_info("usage: :notify test");

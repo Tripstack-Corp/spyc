@@ -427,9 +427,9 @@ impl App {
         // activity HUD (different corners; the HUD wins any overlap).
         self.render_chord_hint(frame, frame_area, h_divider_row, v_divider_col);
         self.render_activity_hud(frame, frame_area);
-        // P3-1 visual bell: the Charm gradient border pulse over the outer ring,
-        // above the chrome + HUD (an attention flash), below the mermaid image.
-        // A no-op unless a flash is live (off by default via `[notify]`).
+        // P3-1 visual bell: the spice-heat gradient border pulse over the outer
+        // ring, above the chrome + HUD (an attention flash), below the mermaid
+        // image. A no-op unless a flash is live (only armed on a transition).
         self.render_visual_bell(frame, frame_area);
         // Full-screen mermaid image overlay (the `i` key) — drawn last so it
         // sits on top of everything, including the HUD.

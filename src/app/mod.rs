@@ -626,11 +626,11 @@ pub struct ChordHint {
     pub rows: Vec<(&'static str, &'static str)>,
 }
 
-/// A brief Charm-style border-pulse flash — the P3-1 visual bell. `start` times
+/// A brief spice-heat border-pulse flash — the P3-1 visual bell. `start` times
 /// the ~half-second decay; `frame` is the animation step advanced in
 /// `settle_visual_bell` (a `&mut` settle — the pure draw can't read the clock)
-/// so the perimeter pulse can sweep its pink→purple→cyan gradient. `None` on
-/// `view.visual_bell` means no flash is active.
+/// so the perimeter pulse can sweep its pepper→ember→orange→spark gradient.
+/// `None` on `view.visual_bell` means no flash is active.
 #[derive(Clone, Copy, Debug)]
 pub struct VisualBell {
     pub start: std::time::Instant,
@@ -797,11 +797,11 @@ pub struct ViewState {
     /// can't read the clock) while ≥1 agent tab is Working. The pure draw maps
     /// it to a warm heat color for the per-tab dot.
     pub agent_anim_frame: u64,
-    /// Active Charm-gradient border-pulse flash (P3-1 visual bell), or `None`.
+    /// Active spice-heat border-pulse flash (P3-1 visual bell), or `None`.
     /// Started by `settle_agent_activity` on a Blocked/Done transition when
-    /// `[notify].visual` is set; advanced + cleared by `settle_visual_bell`. The
-    /// pure draw reads it to paint the perimeter ring — off by default, so idle
-    /// panes never arm it.
+    /// `[notify].visual` is set (on by default); advanced + cleared by
+    /// `settle_visual_bell`. The pure draw reads it to paint the perimeter ring —
+    /// armed only on a transition, so idle panes never touch it.
     pub visual_bell: Option<VisualBell>,
     /// Process-lifetime constants for the activity HUD, snapshotted ONCE at
     /// construction so the pure `&self` render pass never reads the OS / env

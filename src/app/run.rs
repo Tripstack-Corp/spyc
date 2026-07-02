@@ -652,7 +652,7 @@ impl App {
                 self.run_effects(agent_fx, terminal, &foreground_exec);
             }
 
-            // P3-1 visual bell: advance/decay the Charm border-pulse flash
+            // P3-1 visual bell: advance/decay the spice-heat border-pulse flash
             // (armed only after a Blocked/Done transition when `[notify].visual`
             // is set; a no-op otherwise, so idle stays 0 dps).
             if self.settle_visual_bell(now_pre, &mut ctx) {

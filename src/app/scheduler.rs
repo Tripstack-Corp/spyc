@@ -64,7 +64,7 @@ pub enum Deadline {
     /// while a job is in-flight and un-prompted, so idle stays 0 dps. PRE-recv
     /// (`settle_lua_runaway`).
     LuaRunaway,
-    /// P3-1 visual bell: ~short tick that advances the Charm-gradient border
+    /// P3-1 visual bell: ~short tick that advances the spice-heat border
     /// pulse while a flash is active, then clears it. Armed only while
     /// `view.visual_bell.is_some()`, disarmed the instant it decays — so idle
     /// stays 0 dps. PRE-recv (`settle_visual_bell`).

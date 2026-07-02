@@ -357,14 +357,8 @@ impl App {
             return self.view.theme.prompt_prefix;
         }
         if self.view.hud_truecolor {
-            const HEAT: [(u8, u8, u8); 4] = [
-                (0xE0, 0x32, 0x22), // pepper red
-                (0xF4, 0x62, 0x12), // ember
-                (0xFF, 0x95, 0x12), // orange
-                (0xFF, 0xC4, 0x36), // spark
-            ];
             const PHASE: [usize; 6] = [0, 1, 2, 3, 2, 1];
-            let (r, g, b) = HEAT[PHASE[(frame % PHASE.len() as u64) as usize]];
+            let (r, g, b) = SPICE_HEAT[PHASE[(frame % PHASE.len() as u64) as usize]];
             Color::Rgb(r, g, b)
         } else if frame.is_multiple_of(2) {
             Color::Red
@@ -373,20 +367,21 @@ impl App {
         }
     }
 
-    /// P3-1 visual-bell color: a point on the Charm pink→violet→cyan gradient at
-    /// `frac` (0..1 around the border), swept by the animation `frame`. Truecolor
-    /// walks the smooth gradient (`charm_gradient`); a 256-color terminal still
-    /// animates via a 3-color cycle; mono falls back to the popup-border accent.
-    pub(super) fn charm_pulse_color(&self, frac: f32, frame: u64) -> ratatui::style::Color {
+    /// P3-1 visual-bell color: a point on spyc's spice-heat gradient
+    /// (pepper→ember→orange→spark) at `frac` (0..1 around the border), swept by
+    /// the animation `frame`. Truecolor walks the smooth gradient
+    /// (`spice_gradient`); a 256-color terminal still animates via a 3-color warm
+    /// cycle; mono falls back to the popup-border accent.
+    pub(super) fn spice_pulse_color(&self, frac: f32, frame: u64) -> ratatui::style::Color {
         use ratatui::style::Color;
         if self.view.theme.mono {
             return self.view.theme.popup_border;
         }
         if !self.view.hud_truecolor {
-            const CYCLE: [Color; 3] = [Color::Magenta, Color::LightMagenta, Color::Cyan];
+            const CYCLE: [Color; 3] = [Color::Red, Color::LightRed, Color::Yellow];
             return CYCLE[(frame % 3) as usize];
         }
-        let (r, g, b) = charm_gradient(frac, frame);
+        let (r, g, b) = spice_gradient(frac, frame);
         Color::Rgb(r, g, b)
     }
 
@@ -535,17 +530,25 @@ const fn on_off(b: bool) -> &'static str {
     if b { "on" } else { "off" }
 }
 
-/// A point on the Charm pink→violet→cyan gradient at `frac` (0..1 around the
-/// border ring), swept by the animation `frame` so the band travels. Pure +
-/// truecolor; the visual-bell pulse (`charm_pulse_color`) maps it to a cell bg.
-/// Looped, so the gradient wraps seamlessly around the ring.
-fn charm_gradient(frac: f32, frame: u64) -> (u8, u8, u8) {
-    const STOPS: [(u8, u8, u8); 3] = [
-        (0xFF, 0x6A, 0xC1), // charm pink
-        (0xA4, 0x5F, 0xE8), // violet
-        (0x43, 0xE0, 0xE8), // cyan
-    ];
-    let count = STOPS.len();
+/// spyc's "spice heat" palette — the warm pepper→ember→orange→spark ramp shared
+/// by the Working activity dot's breathing pulse (`spicy_pulse_color`) and the
+/// visual-bell border sweep (`spice_gradient`), so both read as the same heat
+/// rather than two unrelated color stories.
+const SPICE_HEAT: [(u8, u8, u8); 4] = [
+    (0xE0, 0x32, 0x22), // pepper red
+    (0xF4, 0x62, 0x12), // ember
+    (0xFF, 0x95, 0x12), // orange
+    (0xFF, 0xC4, 0x36), // spark
+];
+
+/// A point on spyc's spice-heat gradient ([`SPICE_HEAT`]:
+/// pepper→ember→orange→spark) at `frac` (0..1 around the border ring), swept by
+/// the animation `frame` so the band of heat travels. Pure + truecolor; the
+/// visual-bell pulse (`spice_pulse_color`) maps it to a cell bg. Looped, so the
+/// gradient wraps seamlessly around the ring (spark folds back into pepper red,
+/// an all-warm loop — no cool seam).
+fn spice_gradient(frac: f32, frame: u64) -> (u8, u8, u8) {
+    let count = SPICE_HEAT.len();
     // Sweep the sampled position by the frame (~0.08 stop-widths/tick).
     let pos = (frame as f32).mul_add(0.08, frac).rem_euclid(1.0);
     let scaled = pos * count as f32;
@@ -558,9 +561,9 @@ fn charm_gradient(frac: f32, frame: u64) -> (u8, u8, u8) {
             .round() as u8
     };
     (
-        mix(STOPS[lo].0, STOPS[hi].0),
-        mix(STOPS[lo].1, STOPS[hi].1),
-        mix(STOPS[lo].2, STOPS[hi].2),
+        mix(SPICE_HEAT[lo].0, SPICE_HEAT[hi].0),
+        mix(SPICE_HEAT[lo].1, SPICE_HEAT[hi].1),
+        mix(SPICE_HEAT[lo].2, SPICE_HEAT[hi].2),
     )
 }
 
@@ -626,18 +629,18 @@ mod tests {
         let _ = app.agent_activity_span(AgentActivity::Working, u64::MAX);
     }
 
-    // P3-1 visual bell: the pure Charm-gradient color fn.
+    // P3-1 visual bell: the pure spice-heat gradient color fn.
     #[test]
-    fn charm_gradient_is_pure_and_starts_at_charm_pink() {
-        // frame 0, frac 0 → the first stop (charm pink) exactly.
-        assert_eq!(super::charm_gradient(0.0, 0), (0xFF, 0x6A, 0xC1));
+    fn spice_gradient_is_pure_and_starts_at_pepper_red() {
+        // frame 0, frac 0 → the first stop (pepper red) exactly.
+        assert_eq!(super::spice_gradient(0.0, 0), (0xE0, 0x32, 0x22));
         // Deterministic: identical inputs → identical output (a pure fn).
         assert_eq!(
-            super::charm_gradient(0.42, 5),
-            super::charm_gradient(0.42, 5)
+            super::spice_gradient(0.42, 5),
+            super::spice_gradient(0.42, 5)
         );
         // The ring wraps seamlessly: frac 1.0 == frac 0.0 at any frame
         // (`rem_euclid`), so there's no seam where the two ends meet.
-        assert_eq!(super::charm_gradient(1.0, 3), super::charm_gradient(0.0, 3));
+        assert_eq!(super::spice_gradient(1.0, 3), super::spice_gradient(0.0, 3));
     }
 }

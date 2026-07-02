@@ -8,12 +8,13 @@ use ratatui::Frame;
 use crate::app::{App, format_uptime};
 
 impl App {
-    /// P3-1 visual bell: paint the Charm gradient border pulse over the outermost
-    /// ring of cells — a non-destructive bg tint, no reflow / layout change.
-    /// Reads `view.visual_bell.frame` (advanced off the draw in
+    /// P3-1 visual bell: paint spyc's spice-heat gradient border pulse over the
+    /// outermost ring of cells — a non-destructive bg tint, no reflow / layout
+    /// change. Reads `view.visual_bell.frame` (advanced off the draw in
     /// `settle_visual_bell`, so this pure pass never reads the clock) to sweep the
-    /// pink→violet→cyan gradient. A no-op when no flash is active — the channel is
-    /// off by default (`[notify]`), so steady-state panes never touch this.
+    /// pepper→ember→orange→spark gradient. A no-op when no flash is active — the
+    /// pulse only arms on a Blocked/Done transition (`[notify].visual`, on by
+    /// default), so steady-state panes never touch this.
     pub(super) fn render_visual_bell(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
         let Some(bell) = self.view.visual_bell else {
             return;
@@ -27,7 +28,7 @@ impl App {
         // Top + bottom rows: sweep the gradient horizontally across the frame.
         for x in area.x..area.right() {
             let frac = f32::from(x - area.x) / last_col;
-            let color = self.charm_pulse_color(frac, phase);
+            let color = self.spice_pulse_color(frac, phase);
             if let Some(cell) = buf.cell_mut((x, area.y)) {
                 cell.set_bg(color);
             }
@@ -37,8 +38,8 @@ impl App {
         }
         // Left + right columns (corners already painted above): the gradient's
         // two ends.
-        let left = self.charm_pulse_color(0.0, phase);
-        let right = self.charm_pulse_color(1.0, phase);
+        let left = self.spice_pulse_color(0.0, phase);
+        let right = self.spice_pulse_color(1.0, phase);
         for y in (area.y + 1)..(area.bottom() - 1) {
             if let Some(cell) = buf.cell_mut((area.x, y)) {
                 cell.set_bg(left);

@@ -319,7 +319,14 @@ pub enum DesktopVia {
 
 /// `[notify]` — desktop notification + bell behavior when an agent pane's
 /// status changes (P3-1, `docs/AGENT_AWARENESS_PLAN.md`). Channels are
-/// independent; only the desktop ping is on by default.
+/// independent; the desktop ping and the visual flash are on by default.
+///
+/// Each channel decides *which* transitions it fires on. `Blocked` ("needs me")
+/// always fires every enabled channel; the routine `Done` (a finished turn, once
+/// per turn) fires only the channels that opt in via their `*_done` flag. The
+/// default splits by intrusiveness: the quiet desktop ping notifies on `Done`
+/// too (`desktop_done`), but the interrupting bell and on-screen flash stay
+/// `Blocked`-only (`bell_done` / `visual_done` off) so they don't fire per turn.
 #[derive(Debug, Clone)]
 pub struct NotifyConfig {
     /// Fire a desktop notification when an agent pane transitions to `Blocked`
@@ -329,15 +336,25 @@ pub struct NotifyConfig {
     /// Which mechanism delivers the desktop notification. Default `Auto`:
     /// OSC-9 over SSH (reaches your client), the OS notifier locally.
     pub desktop_via: DesktopVia,
-    /// Also notify on the `Done` transition (a finished turn). On by default;
-    /// set false to be pinged only when an agent is *blocked* (`Done` fires
-    /// every turn, which some find noisy).
+    /// Also fire the desktop ping on the `Done` transition (a finished turn). On
+    /// by default; set false to be pinged only when an agent is *blocked*
+    /// (`Done` fires every turn, which some find noisy).
     pub desktop_done: bool,
     /// Ring the terminal bell (BEL) alongside the notification. Off by default.
+    /// When on, it rings on `Blocked` only unless [`Self::bell_done`].
     pub bell: bool,
-    /// Flash a Charm-style gradient border pulse on the transition. Off by
-    /// default (a purely decorative attention cue).
+    /// Also ring the terminal bell on `Done`, not just `Blocked`. Off by default
+    /// — the bell is an "interrupt me" cue, and a per-turn `Done` ring is noise.
+    pub bell_done: bool,
+    /// Flash spyc's spice-heat gradient border pulse on the transition. On by
+    /// default — the branded attention cue; set false to opt out (the desktop
+    /// ping and bell are the separate, independent channels). Fires on `Blocked`
+    /// only unless [`Self::visual_done`].
     pub visual: bool,
+    /// Also flash on `Done`, not just `Blocked`. Off by default — like the bell,
+    /// the on-screen flash is a "needs me" cue, so a per-turn `Done` strobe is
+    /// distracting while you work.
+    pub visual_done: bool,
     /// Suppress every channel when the transitioning tab is the one the user is
     /// actively watching (its pane owns the keyboard) — no point pinging about
     /// an agent already on screen. On by default.
@@ -351,7 +368,9 @@ impl Default for NotifyConfig {
             desktop_via: DesktopVia::default(),
             desktop_done: true,
             bell: false,
-            visual: false,
+            bell_done: false,
+            visual: true,
+            visual_done: false,
             suppress_focused_tab: true,
         }
     }
@@ -371,7 +390,11 @@ struct FileNotify {
     #[serde(default)]
     bell: Option<bool>,
     #[serde(default)]
+    bell_done: Option<bool>,
+    #[serde(default)]
     visual: Option<bool>,
+    #[serde(default)]
+    visual_done: Option<bool>,
     #[serde(default)]
     suppress_focused_tab: Option<bool>,
 }
@@ -605,8 +628,14 @@ impl Config {
         if let Some(b) = file.notify.bell {
             self.notify.bell = b;
         }
+        if let Some(b) = file.notify.bell_done {
+            self.notify.bell_done = b;
+        }
         if let Some(b) = file.notify.visual {
             self.notify.visual = b;
+        }
+        if let Some(b) = file.notify.visual_done {
+            self.notify.visual_done = b;
         }
         if let Some(b) = file.notify.suppress_focused_tab {
             self.notify.suppress_focused_tab = b;
@@ -773,14 +802,19 @@ mod tests {
 
     #[test]
     fn notify_defaults_desktop_on_bells_off() {
-        // The founding default: the "needs me" desktop ping (Blocked + Done) is
-        // on; the bell + visual flash are opt-in; focused-tab suppression on.
+        // The default: the "needs me" desktop ping (Blocked + Done) AND the
+        // branded spice-heat visual flash are on; the terminal bell is opt-in;
+        // focused-tab suppression on. The intrusive channels (bell + flash) stay
+        // Blocked-only — their `*_done` opt-ins default off, so no per-turn
+        // ring/strobe on Done.
         let n = Config::default().notify;
         assert!(n.desktop);
         assert_eq!(n.desktop_via, super::DesktopVia::Auto);
         assert!(n.desktop_done);
         assert!(!n.bell);
-        assert!(!n.visual);
+        assert!(!n.bell_done);
+        assert!(n.visual);
+        assert!(!n.visual_done);
         assert!(n.suppress_focused_tab);
     }
 
@@ -790,7 +824,7 @@ mod tests {
         let path = tmp.path().join("rc.toml");
         std::fs::write(
             &path,
-            "[notify]\ndesktop = false\ndesktop_via = \"osc9\"\ndesktop_done = false\nbell = true\nvisual = true\nsuppress_focused_tab = false\n",
+            "[notify]\ndesktop = false\ndesktop_via = \"osc9\"\ndesktop_done = false\nbell = true\nbell_done = true\nvisual = false\nvisual_done = true\nsuppress_focused_tab = false\n",
         )
         .unwrap();
         let cfg = Config::load_from(&[Some(&path)]).unwrap();
@@ -798,7 +832,11 @@ mod tests {
         assert_eq!(cfg.notify.desktop_via, super::DesktopVia::Osc9);
         assert!(!cfg.notify.desktop_done);
         assert!(cfg.notify.bell);
-        assert!(cfg.notify.visual);
+        // `bell_done`/`visual_done` default OFF, so the override to true proves
+        // they parsed; `visual` defaults ON, so its override to false does.
+        assert!(cfg.notify.bell_done);
+        assert!(!cfg.notify.visual);
+        assert!(cfg.notify.visual_done);
         assert!(!cfg.notify.suppress_focused_tab);
     }
 

@@ -108,18 +108,28 @@
 #                  "osc9"   — terminal escape only (your client; needs a
 #                             terminal that supports OSC 9 — iTerm2/kitty/WezTerm).
 #                  "both"   — fire both.
-#   desktop_done (default true)  also notify on Done (a finished turn); set
-#                                false to be pinged only when *blocked*.
+#   desktop_done (default true)  also fire the desktop ping on Done (a finished
+#                                turn); set false to be pinged only when *blocked*.
 #   bell         (default false) also ring the terminal bell (BEL).
-#   visual       (default false) flash a Charm-style gradient border pulse.
+#   bell_done    (default false) ring the bell on Done too, not just Blocked
+#                                (a per-turn ring is noisy — the bell is a
+#                                "needs me" cue, so it stays Blocked-only).
+#   visual       (default true)  flash spyc's spice-heat gradient border pulse
+#                                (the branded attention cue); set false to opt out.
+#   visual_done  (default false) flash on Done too, not just Blocked (like the
+#                                bell, the flash stays a Blocked-only cue).
 #   suppress_focused_tab (default true)  stay quiet when the transitioning
 #                                tab is the one you're already watching.
+# The intrusive channels (bell + flash) fire on Blocked only by default; the
+# quiet desktop ping fires on Done too. Flip *_done to change that per channel.
 [notify]
 # desktop = true
 # desktop_via = "auto"
 # desktop_done = true
 # bell = false
-# visual = false
+# bell_done = false
+# visual = true
+# visual_done = false
 # suppress_focused_tab = true
 
 # ── colors ────────────────────────────────────────────────────────────

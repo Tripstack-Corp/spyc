@@ -100,11 +100,15 @@ const fn desktop_delivery(via: DesktopVia, is_ssh: bool) -> (bool, bool) {
 /// (its pane owns the keyboard), and whether spyc is over SSH. Pure + testable.
 ///
 /// Only a *fresh* transition INTO `Blocked` ("needs me") or `Done` (a finished
-/// turn) is notify-worthy; `Done` additionally requires `desktop_done` (so a
-/// user who finds per-turn pings noisy can be alerted on `Blocked` only). A
-/// focused tab is suppressed when `suppress_focused_tab` — no point pinging about
-/// an agent already on screen. The desktop mechanism(s) come from
-/// [`desktop_delivery`]. Returns a silent plan when nothing should fire.
+/// turn) fires anything; a repeat or any other target is silent, as is a focused
+/// tab when `suppress_focused_tab`. Beyond that, each channel decides *which*
+/// edge it fires on: `Blocked` fires every enabled channel, but the routine
+/// `Done` edge (once per turn) fires a channel only if it opts in via its
+/// `*_done` flag — `desktop_done` for the ping, `bell_done` for the bell,
+/// `visual_done` for the flash. The default splits by intrusiveness: the quiet
+/// desktop ping notifies on `Done`, the interrupting bell + on-screen flash stay
+/// `Blocked`-only so they don't fire per turn. The desktop mechanism(s) come from
+/// [`desktop_delivery`]. Returns a silent plan when no channel fires.
 fn notification_for_transition(
     old: AgentActivity,
     new: AgentActivity,
@@ -114,15 +118,23 @@ fn notification_for_transition(
     label: &str,
     tab_number: usize,
 ) -> NotifyPlan {
-    let worthy = match new {
-        AgentActivity::Blocked => old != AgentActivity::Blocked,
-        AgentActivity::Done => old != AgentActivity::Done && cfg.desktop_done,
-        _ => false,
+    // A fresh edge into a notify-worthy state; `is_done` distinguishes the
+    // routine finished-turn edge (per-channel opt-in) from `Blocked` (fires all).
+    let is_done = match new {
+        AgentActivity::Blocked if old != AgentActivity::Blocked => false,
+        AgentActivity::Done if old != AgentActivity::Done => true,
+        _ => return NotifyPlan::default(),
     };
-    if !worthy || (cfg.suppress_focused_tab && tab_focused) {
+    if cfg.suppress_focused_tab && tab_focused {
         return NotifyPlan::default();
     }
-    let (want_system, want_osc9) = if cfg.desktop {
+    // On a `Done` edge each channel needs its own `*_done` opt-in; `Blocked`
+    // (`!is_done`) fires every enabled channel.
+    let want_desktop = cfg.desktop && (!is_done || cfg.desktop_done);
+    let want_bell = cfg.bell && (!is_done || cfg.bell_done);
+    let want_visual = cfg.visual && (!is_done || cfg.visual_done);
+
+    let (want_system, want_osc9) = if want_desktop {
         desktop_delivery(cfg.desktop_via, is_ssh)
     } else {
         (false, false)
@@ -139,8 +151,8 @@ fn notification_for_transition(
     NotifyPlan {
         system,
         osc9,
-        bell: cfg.bell,
-        visual: cfg.visual,
+        bell: want_bell,
+        visual: want_visual,
     }
 }
 
@@ -524,8 +536,8 @@ impl App {
             ctx.scheduler.disarm(Deadline::AgentAnim);
         }
         // P3-1 visual bell: a Blocked/Done transition asked for a flash (and
-        // `[notify].visual` is on) → start (or restart) the Charm border pulse
-        // and arm its sweep tick. `settle_visual_bell` advances + clears it.
+        // `[notify].visual` is on) → start (or restart) the spice-heat border
+        // pulse and arm its sweep tick. `settle_visual_bell` advances + clears it.
         if start_visual {
             self.view.visual_bell = Some(VisualBell {
                 start: now,
@@ -781,15 +793,19 @@ mod tests {
     fn notify_fires_on_blocked_and_done_transitions() {
         use crate::config::NotifyConfig;
         use crate::pane::AgentActivity::{Blocked, Done, Idle, Working};
-        let cfg = NotifyConfig::default(); // desktop(auto) + desktop_done on; bell/visual off.
+        let cfg = NotifyConfig::default(); // desktop(auto) + desktop_done + visual on; bell off.
 
-        // Idle → Blocked on a background tab, local → system "needs me" ping only.
+        // Idle → Blocked on a background tab, local → system "needs me" ping.
         let p = super::notification_for_transition(Idle, Blocked, &cfg, false, false, "codex", 2);
         let (summary, body) = p.system.clone().expect("blocked pings the OS notifier");
         assert!(summary.contains("codex"), "summary names the agent");
         assert!(body.contains('2'), "body carries the tab locator");
         assert!(p.osc9.is_none(), "auto+local doesn't use OSC-9");
-        assert!(!p.bell && !p.visual, "bell + visual are off by default");
+        assert!(!p.bell, "the terminal bell is off by default");
+        assert!(
+            p.visual,
+            "the spice-heat visual flash fires (on by default)"
+        );
 
         // Working → Done also pings (desktop_done on by default).
         let p = super::notification_for_transition(Working, Done, &cfg, false, false, "claude", 1);
@@ -914,5 +930,50 @@ mod tests {
         );
         assert!(p.bell, "the bell still rings");
         assert!(!p.is_silent());
+    }
+
+    // The intrusive channels default to Blocked-only: with bell + flash both on
+    // (the noisy config a user hits), a per-turn `Done` must NOT ring or strobe —
+    // only the quiet desktop ping fires on Done. `Blocked` still fires them all.
+    #[test]
+    fn notify_bell_and_flash_are_blocked_only_by_default() {
+        use crate::config::NotifyConfig;
+        use crate::pane::AgentActivity::{Blocked, Done, Idle, Working};
+        let cfg = NotifyConfig {
+            bell: true,
+            visual: true,
+            ..NotifyConfig::default()
+        };
+
+        // Blocked ("needs me") fires the interrupting channels.
+        let p = super::notification_for_transition(Idle, Blocked, &cfg, false, false, "codex", 1);
+        assert!(p.bell, "bell rings on Blocked");
+        assert!(p.visual, "flash fires on Blocked");
+
+        // Done (every finished turn) stays quiet on bell + flash; desktop still pings.
+        let p = super::notification_for_transition(Working, Done, &cfg, false, false, "codex", 1);
+        assert!(!p.bell, "no per-turn bell on Done");
+        assert!(!p.visual, "no per-turn flash on Done");
+        assert!(
+            p.system.is_some(),
+            "the quiet desktop ping still fires on Done"
+        );
+    }
+
+    // `bell_done` / `visual_done` opt the intrusive channels back into `Done`.
+    #[test]
+    fn notify_bell_done_and_visual_done_opt_into_done() {
+        use crate::config::NotifyConfig;
+        use crate::pane::AgentActivity::{Done, Working};
+        let cfg = NotifyConfig {
+            bell: true,
+            bell_done: true,
+            visual: true,
+            visual_done: true,
+            ..NotifyConfig::default()
+        };
+        let p = super::notification_for_transition(Working, Done, &cfg, false, false, "codex", 1);
+        assert!(p.bell, "bell_done rings the bell on Done");
+        assert!(p.visual, "visual_done flashes on Done");
     }
 }

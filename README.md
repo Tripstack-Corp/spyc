@@ -399,14 +399,18 @@ cursor_bg = "#ff6600"
 pick      = "#ffcb6b"
 
 # Notifications when an agent pane changes status ("which agent needs me").
-# The desktop ping is on by default; the bell + visual flash are opt-in.
+# The desktop ping and the visual flash are on by default; the bell is opt-in.
+# The intrusive channels (bell + flash) fire on Blocked only; the quiet desktop
+# ping fires on Done too. Flip a channel's *_done to change that.
 [notify]
 # desktop = true              # notify on Blocked / Done (on by default)
 # desktop_via = "auto"        # "auto" (OSC-9 over SSH → your client, OS notifier
                               #  locally), "system", "osc9", or "both"
-# desktop_done = false        # ...only when *blocked*, not on every finished turn
-# bell = true                 # also ring the terminal bell
-# visual = true               # flash a Charm-style gradient border pulse
+# desktop_done = false        # desktop ping only when *blocked*, not every turn
+# bell = true                 # ring the terminal bell (Blocked only)
+# bell_done = true            # ...ring on Done too (default: Blocked only)
+# visual = false              # opt out of the spice-heat gradient border pulse
+# visual_done = true          # flash on Done too (default: Blocked only)
 # suppress_focused_tab = false # notify even about the tab you're watching
 ```
 

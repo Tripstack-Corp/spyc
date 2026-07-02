@@ -256,9 +256,15 @@ spyc's workflow: browse files above, talk to Claude below.
     to be pinged only when an agent is *blocked* (not on every finished turn).
   - **Terminal bell** (`bell = true`, off by default) — rings alongside the
     notification.
-  - **Visual bell** (`visual = true`, off by default) — a brief Charm-style
-    pink→purple→cyan gradient **border pulse** around the whole frame; a
-    tasteful, non-reflowing attention flash.
+  - **Visual bell** (`visual = false` to opt out; **on by default**) — a brief
+    spice-heat **border pulse** (spyc's pepper→ember→orange→spark gradient)
+    sweeping around the whole frame; the branded, non-reflowing attention flash.
+  - **Blocked-only by default for the intrusive channels.** `Blocked` ("needs
+    me") fires every enabled channel; the routine `Done` (once per *finished
+    turn*) fires only channels that opt in. The quiet desktop ping does
+    (`desktop_done`, on) but the interrupting bell and on-screen flash stay
+    `Blocked`-only so they don't ring/strobe every turn — flip `bell_done` /
+    `visual_done` to fire those on `Done` too.
   - **`suppress_focused_tab`** (on by default) stays quiet when the transitioning
     tab is the one you're already watching — no point pinging about an agent
     that's already on screen.
