@@ -1,0 +1,369 @@
+# spyc — Release Engineering & Public Launch
+
+> Planning + living-process doc. The **process** half (streams, versioning,
+> cadence, security) is public and carries to the repo; the **one-time
+> deployment checklist** (§12) is setup scaffolding for the public 2.0 launch.
+> Modeled on FreeBSD's release-engineering process, right-sized for a small team
+> and phased in.
+
+## 1. Philosophy
+
+FreeBSD's release model is the gold standard for *predictable* software: a
+rolling development head, conservative stabilization branches, frozen release
+branches that only take vetted fixes, signed artifacts, and published support
+windows. spyc adopts the **shape** of that model — the value is the
+predictability, not the bureaucracy — and phases it in:
+
+- **Stage 1 (launch):** `main` (CURRENT) + tagged RELEASEs cut through a short
+  BETA/RC freeze, a single supported line, GitHub Security Advisories for
+  vulns. Enough structure to be trustworthy; not so much it stalls a small team.
+- **Stage 2 (maturity):** introduce `stable/N` + `releng/N.M` branches and
+  backports once two major lines need parallel support. Don't pay for it before.
+
+Principles: every released artifact is **reproducible** (pinned toolchain,
+`--locked`) and **signed**; every release has **notes** (git-cliff +
+human-written highlights); support windows are **published**; security has a
+**single front door**.
+
+## 2. Release streams (the FreeBSD model, mapped)
+
+| FreeBSD | spyc | Git ref | Audience | Stability |
+|---|---|---|---|---|
+| `-CURRENT` | **CURRENT** | `main` | contributors, early adopters | rolling, may break |
+| `-STABLE` | **STABLE** | `stable/N` (per major) | users wanting fixes without churn | ABI/behavior-stable within major N |
+| `-RELEASE` | **RELEASE** | tag `vN.M.P` on `releng/N.M` | end users | frozen snapshot |
+| `releng/*` | **release branch** | `releng/N.M` | release engineering | frozen; security/errata only |
+| snapshots | **SNAPSHOT** | CI artifacts off `main`/`stable/N` | testers | nightly/weekly, unsigned-prerelease |
+
+- **CURRENT (`main`)** — all development lands here, gated by CI. Nightly
+  snapshot builds are published as a rolling `nightly` prerelease.
+- **STABLE (`stable/N`)** — cut from `main` when major `N` begins its life.
+  Receives only **backports** of vetted fixes (FreeBSD's *MFC — Merge From
+  Current*); our equivalent is a cherry-pick PR labeled `backport stable/N`. No
+  new features that break behavior within the major.
+- **RELEASE (`releng/N.M`)** — a release branch forked from `stable/N` (or from
+  `main` for the very first release), then **frozen**. It only ever receives
+  errata + security patches, each producing a new patch tag `vN.M.P`.
+- **SNAPSHOT** — automated builds for people who want to test ahead of a release.
+
+**MFC / backport rule:** a fix flows *toward* stability — land on `main`, then a
+labeled cherry-pick PR backports it to `stable/N`, then (if a release branch is
+open) to `releng/N.M`. Never the reverse. During a freeze, backports to
+`releng/*` require Release-Manager approval.
+
+## 3. Versioning
+
+SemVer, with FreeBSD's patch-level mapping made explicit:
+
+- `MAJOR.MINOR.PATCH` — `MAJOR.MINOR` names the release branch (`releng/2.0`),
+  `PATCH` is FreeBSD's `-pK` errata/security level (`v2.0.0` → `v2.0.1` → …).
+- **Prereleases:** `vN.M.0-beta.1`, `vN.M.0-rc.1` — published as GitHub
+  *pre-releases* (the "Latest" badge stays on the last stable).
+- **Breaking changes** bump MAJOR and (Stage 2) start a new `stable/N`.
+- **Reproducibility:** the pinned `rust-toolchain.toml` + `--locked` mean a tag
+  rebuilds bit-stable across runners.
+
+> **Launch number: `2.0.0`.** spyc keeps its name and its version line — the
+> public launch is a deliberate major bump from the current `1.9x` development
+> line, not a reset to `1.0.0`. (The `1.0.0`-reset option only existed under the
+> abandoned clean-slate rebrand; staying spyc, we continue the line.)
+
+## 4. Branch & tag topology
+
+```mermaid
+gitGraph
+   commit id: "dev"
+   commit id: "dev2"
+   branch stable/2
+   checkout stable/2
+   commit id: "stabilize"
+   branch releng/2.0
+   checkout releng/2.0
+   commit id: "freeze" tag: "v2.0.0-rc.1"
+   commit id: "ship" tag: "v2.0.0"
+   commit id: "errata" tag: "v2.0.1"
+   checkout main
+   commit id: "dev3"
+   checkout stable/2
+   commit id: "backport"
+   branch releng/2.1
+   checkout releng/2.1
+   commit id: "freeze2" tag: "v2.1.0"
+```
+
+(`spyc`'s own pager renders this; so does GitHub.) Stage 1 collapses the middle:
+tag RELEASEs directly off `main` until a second major needs `stable/`.
+
+## 5. The release cycle
+
+**Stage 1 (single line, what we launch with):**
+
+1. Development accrues on `main`; CI green on every PR.
+2. **Cut RC:** tag `vN.M.0-rc.1` on `main`. `release.yml` builds + publishes a
+   GitHub *pre-release* with full artifacts. Soak (e.g., 3–7 days / dogfood).
+3. Fix blockers on `main`; re-tag `-rc.2` as needed.
+4. **Release:** `make release-tag VERSION=N.M.0` (bumps `Cargo.toml`, prepends
+   the git-cliff changelog section, commits, tags `vN.M.0`). Push the tag →
+   `release.yml` publishes the RELEASE.
+5. **Patch:** for a post-release fix, `make release-tag VERSION=N.M.(P+1)` →
+   tag → release. (Stage 2: cherry-pick onto `releng/N.M` first.)
+
+**Stage 2 (parallel majors):** add a freeze on a `releng/N.M` branch forked
+from `stable/N`, run `-beta.X` → `-rc.X` → `vN.M.0` on that branch, and keep
+`main` open for the next major. The Release Manager owns the freeze window.
+
+Each tag matching `v*` triggers `release.yml` (§8); `-beta`/`-rc` tags are
+auto-marked pre-release by pattern.
+
+## 6. Maintenance: Errata & Security (EN / SA)
+
+FreeBSD splits post-release fixes into **Errata Notices** (critical non-security)
+and **Security Advisories**. spyc's equivalents:
+
+- **Security front door:** `SECURITY.md` (already in repo — add a *Supported
+  Versions* table) pointing at **GitHub private vulnerability reporting**
+  (Security tab → advisories). Triage → fix on `main` → backport to every
+  supported `releng/*` → coordinated patch release `vN.M.(P+1)` → publish a
+  **GHSA** with a CVE if warranted. Credit reporters.
+- **Errata:** critical non-security regressions get the same backport-and-patch
+  path, announced in the release notes under a dedicated "Errata" heading.
+- **Signing:** release notes + `SHA256SUMS` are signed (§9) so an advisory's
+  artifacts are verifiable.
+- **Supply chain:** `audit.yml` runs `cargo deny check advisories` weekly (ports
+  the current Bitbucket `weekly-deps` pipeline) so RUSTSEC advisories surface
+  between releases; optionally Dependabot for the Actions themselves.
+
+## 7. Support & EOL policy
+
+Publish this table in the README/SECURITY.md and keep it current:
+
+| Stream | Supported? | Window |
+|---|---|---|
+| Latest RELEASE (`vN.M.x`) | ✅ full (features land in next minor; fixes as patches) | until 2 minors newer ships |
+| Previous minor (`vN.(M-1).x`) | ✅ security + errata only | 3 months after the newer minor |
+| `stable/N` (current major) | ✅ (Stage 2) | life of major N |
+| Older majors | ❌ EOL | — |
+| `nightly` / RC | ⚠️ testing only | never "supported" |
+
+Right-sized for launch: **support the latest RELEASE; security-patch the
+previous minor for a short tail.** Expand windows as the user base grows.
+
+## 8. CI/CD pipelines (GitHub Actions)
+
+Five workflows under `.github/workflows/`. All pin the toolchain via
+`rust-toolchain.toml` and run cargo with `--locked`. The local `make` targets
+are the source of truth — Actions *call them* so local and CI never drift (the
+same discipline the current Bitbucket pipeline uses).
+
+> **Dev-platform decision (open — §13.3):** these Actions assume development
+> moves to GitHub for the public launch. If dev stays on Bitbucket and GitHub is
+> a distribution mirror, keep `bitbucket-pipelines.yml` as the quality gate and
+> port only `release.yml`/`snapshot.yml`/`homebrew.yml` to Actions on the public
+> repo. The workflows below are a direct port of the existing Bitbucket pipeline
+> either way.
+
+### `ci.yml` — quality gate (PR + push to `main` / `stable/*` / `releng/*`)
+- Matrix: `ubuntu-latest` + `macos-latest` (catch OS-gated lints both ways —
+  replaces `make lint-linux` needing zig locally).
+- Steps: checkout → toolchain (cached) → `cargo-deny` (prebuilt binary, sha-
+  pinned, as today) → `CARGO_INCREMENTAL=0 make check` (fmt + clippy + test +
+  deny) → coverage job `cargo llvm-cov --locked --all-targets --fail-under-lines
+  35`.
+- This is a direct port of `bitbucket-pipelines.yml` (quality + coverage,
+  parallel). Required status check for branch protection.
+
+### `release.yml` — build, sign, publish (on tag `v*`)
+- **Trigger:** `push: tags: ['v*']`. Detect `-beta`/`-rc` → mark GitHub Release
+  as *pre-release*.
+- **Build matrix** (calls the existing Makefile targets):
+  - `macos-latest` → `make release-macos-universal` (arm64 + x86_64 lipo).
+  - `ubuntu-latest` → `make release-linux-x86` + `release-linux-arm` (musl
+    static via `cargo-zigbuild`, already wired).
+- **Package:** `make dist` collects them into `dist/`; `make dist-checksums`
+  emits `SHA256SUMS`.
+- **Sign (§9):** GitHub artifact attestations (SLSA provenance, keyless OIDC) +
+  sign `SHA256SUMS` (cosign keyless, and/or `make dist-sign` GPG with `GPG_KEY`
+  secret).
+- **Notes:** `make changelog` (git-cliff) for the generated section + a hand-
+  written highlights block (the 1Password/Slack "changelog for humans" style the
+  backlog calls for).
+- **Publish:** create the GitHub Release, attach `spyc-vN.M.P-<target>.tar.gz` ×4,
+  `SHA256SUMS`, signatures. Trigger `homebrew.yml`.
+- **Permissions:** `contents: write`, `id-token: write` (attestations),
+  `attestations: write`.
+
+### `snapshot.yml` — nightly CURRENT builds (schedule + manual)
+- `schedule` (nightly) + `workflow_dispatch`. Build `main` with the release
+  matrix, publish/refresh a single rolling `nightly` pre-release (delete-and-
+  recreate, or a dated tag pruned to last N). Unsigned-acceptable; clearly
+  labeled "testing only."
+
+### `audit.yml` — supply-chain drift (schedule)
+- Weekly `cargo deny check advisories` (fresh RUSTSEC DB) + `cargo outdated` +
+  `cargo tree --duplicates`. Ports the Bitbucket `weekly-deps` custom pipeline.
+  Failures open/notify (GitHub issue or Slack).
+
+### `homebrew.yml` — tap bump (on release published)
+- On a non-prerelease publish, compute the new artifacts' SHAs and open a PR (or
+  push) to `Tripstack-Corp/homebrew-tap` updating the `spyc` formula/cask.
+  Needs a `HOMEBREW_TAP_TOKEN` secret.
+
+**Cross-cutting:** `concurrency` groups to cancel superseded runs; secrets =
+`GPG_KEY`/`GPG_PASSPHRASE` (if GPG signing) and `HOMEBREW_TAP_TOKEN`; cosign uses
+OIDC (no stored key). If development stays on Bitbucket (§13.3), the public repo
+still ships the Actions above; `bitbucket-pipelines.yml` remains the internal
+gate.
+
+## 9. Artifacts, signing & distribution
+
+**Target matrix** (already supported by `rust-toolchain.toml` + Makefile):
+
+| Platform | Target triple | Build | Artifact |
+|---|---|---|---|
+| macOS (Apple Silicon + Intel) | `aarch64`/`x86_64-apple-darwin` | universal lipo | `spyc-vN.M.P-macos-universal.tar.gz` |
+| Linux x86_64 | `x86_64-unknown-linux-musl` | static | `spyc-vN.M.P-linux-x86_64.tar.gz` |
+| Linux aarch64 | `aarch64-unknown-linux-musl` | static | `spyc-vN.M.P-linux-aarch64.tar.gz` |
+| Windows | — | via WSL (use the Linux build) | documented, not a native target |
+
+**Checksums:** `SHA256SUMS` (`make dist-checksums`).
+
+**Signing — recommend layering:**
+1. **GitHub artifact attestations** (SLSA build provenance, keyless via OIDC) —
+   the modern default; verifiable with `gh attestation verify`. Zero key
+   management.
+2. **Signed `SHA256SUMS`** — cosign keyless (Rekor transparency log) and/or the
+   existing `make dist-sign` GPG path (`GPG_KEY`) for users who want a Web-of-
+   Trust signature. Document `cosign verify-blob` / `gpg --verify` in INSTALL.
+
+**Distribution channels:**
+- **GitHub Releases** — primary; the binaries + checksums + signatures live here.
+- **Homebrew tap** — `brew install Tripstack-Corp/tap/spyc` (the backlog already
+  flags "investigate a brew tap"). `homebrew.yml` keeps it current.
+- **`cargo-binstall`** — add the `[package.metadata.binstall]` hints to
+  `Cargo.toml` so `cargo binstall spyc` pulls the GitHub artifact (no compile).
+- **crates.io** — optional `cargo install spyc` (§13.5); reserve the name
+  regardless.
+- **Install script** — an optional `curl --proto '=https' -sSf <url> | sh`
+  bootstrap (detect OS/arch → fetch the matching release asset → verify checksum
+  → drop in `~/.local/bin`), hosted in-repo. FreeBSD-ish "one command" install.
+
+## 10. GitHub org & repo presentation (Tripstack-Corp)
+
+Two brands coexist and must stay distinct: **spyc is the product** (its mark is
+the chili 🌶️, per `BRAND.md`); **Tripstack is the maintainer/publisher** (its
+logo lives at the org level and in a "maintained by" line — not as the product
+mark).
+
+**Org — `github.com/Tripstack-Corp`:**
+- **Profile README** via a `Tripstack-Corp/.github` repo (`profile/README.md`) —
+  who Tripstack is, what it ships, links. Carries the **Tripstack logo** + brand
+  description.
+- **Org avatar** = Tripstack logo; org description + verified domain if available.
+- Pin `spyc` once public.
+
+**Repo — `Tripstack-Corp/spyc`:**
+- **About:** description = BRAND.md's crate line ("A keyboard-driven, MCP-native
+  terminal file commander that gives your coding agent live eyes on your working
+  tree."); homepage; **topics:** `rust` `tui` `cli` `terminal` `file-manager`
+  `mcp` `ai-agents` `claude` `developer-tools`.
+- **Social preview** (1280×640) — the spyc chili on Charcoal with the wordmark,
+  palette from BRAND.md.
+- **README** — spyc logo at top, badges (CI, latest release, license, platform),
+  the positioning line, the install one-liners, a "Maintained by Tripstack"
+  footer with the Tripstack logo.
+- **Community health files:**
+  - `LICENSE` — BSD-3 (final form pending legal, §13.2).
+  - `SECURITY.md` — **exists**; add the Supported Versions table + GitHub
+    private-reporting link.
+  - `CONTRIBUTING.md` — exists; update + add the release/backport workflow.
+  - `CODE_OF_CONDUCT.md` — **add** (none today; Contributor Covenant).
+  - `.github/ISSUE_TEMPLATE/` (bug + feature) + `PULL_REQUEST_TEMPLATE.md`.
+  - `CODEOWNERS` — route reviews to the maintainers.
+  - `FUNDING.yml` — optional.
+- **Branch protection:** `main` (require `ci.yml`, ≥1 review, linear history);
+  `stable/*` + `releng/*` (same + **no force-push**, restrict who can push).
+- **Repo settings:** enable Discussions (optional), private vulnerability
+  reporting, secret scanning + push protection, Actions with the minimal
+  permissions above; default to **squash-merge** (matches the existing
+  one-commit-per-shape convention) with a clean title.
+
+## 11. Roles
+
+- **Release Manager (FreeBSD `re@`):** owns the cadence, declares freezes, cuts
+  RCs/RELEASEs, approves backports to a frozen `releng/*`. Holds the release
+  signing key (or the OIDC config).
+- **Security Contact (FreeBSD `so@`):** monitors private vuln reports, drives
+  fix + coordinated disclosure + GHSA. Can be the same person at launch; name a
+  backup.
+- Document both in `SECURITY.md` / `CONTRIBUTING.md` (a handle/alias, not a
+  personal name per our conventions).
+
+## 12. One-time launch checklist (public 2.0)
+
+spyc keeps its name and git history — the public launch is publishing the
+existing repo, not seeding a clean slate. Ordered to stand the whole thing up:
+
+1. **Decide the public-repo topology (§13.4):** publish the existing spyc
+   history to `Tripstack-Corp/spyc`, or seed a fresh public repo and keep
+   Bitbucket as the internal history-of-record. Then create the supporting repos
+   — `Tripstack-Corp/.github` (org profile), `Tripstack-Corp/homebrew-tap`.
+2. Set org avatar (Tripstack logo) + profile README + descriptions.
+3. **Resolve the launch gates (§13):** license final form + maintainer/IP
+   sign-off (§13.1–2); dev/CI platform (§13.3); the public homage-line framing
+   (§13.6).
+4. Add `.github/workflows/{ci,release,snapshot,audit,homebrew}.yml`.
+5. Add/refresh community-health files (LICENSE, SECURITY.md Supported-Versions
+   table, CONTRIBUTING, add CODE_OF_CONDUCT, issue/PR templates, CODEOWNERS).
+6. Repo About: description, homepage, topics; upload the social-preview card.
+7. Configure secrets (`GPG_KEY`/`GPG_PASSPHRASE` if GPG; `HOMEBREW_TAP_TOKEN`) +
+   Actions permissions (`id-token: write` for attestations).
+8. Branch protection on `main` (+ `stable/*`, `releng/*` for Stage 2); required
+   checks; squash-merge default.
+9. Enable Security: private vuln reporting, secret scanning, (optional)
+   Dependabot for Actions.
+10. **Dry run:** push a throwaway `v0.0.0-rc.1` tag → confirm `release.yml`
+    builds all four artifacts, signs, and publishes a pre-release; verify with
+    `gh attestation verify` + checksum.
+11. Add `[package.metadata.binstall]` to `Cargo.toml`; publish the first Homebrew
+    formula; (optional) reserve/publish crates.io.
+12. Flip the repo public → cut `v2.0.0` (via the RC → RELEASE cycle, §5) →
+    announce.
+
+## 13. Open decisions
+
+1. **License — public-release form:** confirm with legal what Tripstack can
+   publish and under which license (currently **BSD-3-Clause** in `Cargo.toml` /
+   `deny.toml`). Reconcile a *single* answer across `Cargo.toml` `license`, a
+   root `LICENSE` file, `deny.toml`, and BRAND.md. **Launch blocker.**
+2. **Maintainer / IP:** confirm Tripstack owns the work and signs off on a public
+   OSS release under the company name. **Launch blocker.**
+3. **CI / dev platform:** move development to GitHub (Actions + `gh`, keep-branch
+   rule becomes GitHub-native), or keep dev on Bitbucket (`bkt` + Pipelines) and
+   publish to GitHub as a distribution mirror? Canonical-public argues for
+   GitHub; the team's current flow is Bitbucket. *(Largest non-code workstream.)*
+4. **Public-repo topology:** carry the existing git history to the public repo
+   (transparent "built from scratch" trail) vs. seed a fresh public repo (drop
+   internal planning/review docs + the owner's backlog from the public record,
+   keep Bitbucket as provenance). *(Recommend: carry history if nothing sensitive
+   is in it; otherwise curate a seed.)*
+5. **crates.io:** publish `spyc` (reserve the name now) or stay source/binary
+   install only? *(Recommend: reserve now; publish fast-follow.)*
+6. **Public homage-line framing:** the README's "spy + claude = spyc" origin
+   reads, to a strict trademark eye, as an admission of derivation from SideFX's
+   `spy` (risk assessed **Medium → Negligible**; no registered SideFX mark).
+   Decide whether to keep it verbatim, soften to a plain nominative-fair-use
+   lineage line (no hybrid-mark construction, add a "not affiliated with Side
+   Effects Software or Anthropic" disclaimer), or omit the explicit derivation.
+   *(Recommend: keep the spice/`spy-see` story, frame the lineage descriptively,
+   add the disclaimer.)*
+7. **Cadence:** feature-ready minors vs. time-based? *(Recommend: feature-ready
+   at launch, revisit time-based once stable.)*
+8. **Signing:** attestations only, + cosign, + GPG? *(Recommend: attestations +
+   cosign-signed checksums; GPG optional.)*
+9. **Install channels at launch:** Releases + Homebrew + binstall; add `curl|sh`?
+   *(Recommend: Releases + Homebrew + binstall for v2.0; script + crates.io
+   fast-follow.)*
+10. **Native Windows** ever, or WSL-only? *(Recommend: WSL-only; revisit on
+    demand.)*
+11. **Nightly snapshots** from day one or after launch? *(Recommend: after
+    launch.)*

@@ -1,4 +1,25 @@
 ### SMALL ###
+- BUG (Spencer): codex `/review` hangs on the first MCP call (get_spyc_context).
+  ROOT-CAUSED 2026-06-30 — KNOWN OPEN CODEX BUG, not spyc. Match:
+  github.com/openai/codex/issues/25856 (open; "native review hangs/fails when an
+  MCP is enabled"; affects codex 0.135.0+, user is on 0.142.4; no fix yet) +
+  #21894 (closed, "resolve_elicitation routed to wrong thread_id") + #11816.
+  Cause (per #25856 + our evidence): codex's /review runs an internal review
+  session/thread, raises a tool-call APPROVAL ELICITATION for the MCP server, then
+  resolves it against the WRONG thread → `failed to resolve elicitation request in
+  session error=elicitation request not found` → tool call never approved → spins.
+  spyc is spec-compliant: verified by live-socket replay it forwards get_spyc_context
+  and returns a valid single-line JSON-RPC reply; codex's own logs
+  (~/.codex/logs_2.sqlite table `logs`) show the elicitation failure + repeated
+  SIGTERM/restart of the proxy (startup_complete=false; 285 starts, broken pipes).
+  Project is already trust_level="trusted" yet tool calls still elicit.
+  WORKAROUNDS: (1) `approval_policy = "never"` — TESTED 2026-07-01, DOES NOT WORK:
+  codex still raises + mis-resolves the mcp_tool_call_approval elicitation regardless
+  (it doesn't gate MCP tool approvals in 0.142.4's /review). (2) disable spyc MCP for
+  codex's app-server during review (#25856's ONLY known workaround:
+  `-c mcp_servers.spyc.enabled=false` — but loses spyc tools in review). (3) 👍/comment
+  #25856 with the spyc repro (2nd non-IDEA MCP). NO spyc code fix — it's codex's
+  internal review-thread/elicitation bug; wait for upstream.
 - we need a way to send ^a through to the pane; Claude needs ^a for some actions
 - regular autosave for session state - I've also noticed recently that we're
   not picking up sessions with spyc -r fully; is something happening during
@@ -827,3 +848,96 @@
 - (fixed) pane tab auto-closes too fast when child exits — error messages
   flash and vanish before you can read them. Now tabs stay open with
   [exited] label; any keypress dismisses.
+
+
+---
+
+# Recovered backlog notes — in worktree copies but NOT in main (2026-07-02)
+
+> Zero-loss recovery. Each note below exists in a worktree backlog but not
+> in main's current copy. Review + fold the keepers into BACKLOG_DRAFT_NOTES.md;
+> some may be done/obsolete. Deduped across both worktrees.
+
+## From `backlog-notes` (12 notes)
+
+- we have to change the name to spicy; check to see if we'll conflict in the
+  world with this
+- backgrounding a process in a pane should not mark as exited ... it should be
+  foregroundable and have a state marker for sleep (funny emoji)
+- can we detect if someone is running with an incompatible font and warn them
+  before loading our start screen?
+- get ready with planning for releases and release notes; release notes should
+  be in the style that 1Password and Slack do theirs - kind of fun but
+  informative
+- we should make this an option:
+    - https://marketplace.visualstudio.com/items?itemName=oderwat.indent-rainbow
+    - https://github.com/oderwat/vscode-indent-rainbow
+- why does rust-analyzer get so confused all of the time when we're in
+  worktree's?
+- we need to delineate global command chords vs. spyc specific; e.g. worktree
+  commands should be global whereas git commands are very contextualized to the
+  spyc frame; we should document this strategy clearly and stick to it
+- Spencer says neovim's help is less overwhelming than ours and that we can
+  probably move a bunch of commands to : commands when they are less frequently
+  used e.g. graveyard (a user could always map these if they wanted(and we
+  could include them as commented out examples in the config generator.
+  So we should do a full cleanup and simplification and provide a better way to
+  navigate through the available features.
+- is there a notes system we could adopt where the longer context is maintained
+  in separate files with a terse one or two liner + a key'd reference in the
+  code? keeps readability higher and if the Agent reading needs more info it
+  can get it from the more detailed reference and then be less constrained
+  about making such notes?
+- spencer hates that g-h and g-w conflict - maybe we need g-p for project and
+  keep g-h 
+- spencer hates that our in-line comments are so verbose ... what's the best
+  practice? is there a better way to annotate our docs?
+- investigate what it would take to create a brew tap from our github
+
+## From `rebrand-plan` (15 notes)
+
+- turn "a" filter on and then open file with "V" in the page. Leaving "V" in
+  the pane loses the "a" filter.
+- opening the second column should not shift focus
+- the w feature in the pager should also show tabs
+- while in V in the top pane if you ^a-c that command will be actually started
+  and hidden which is very confusing until you quit your editor - we should not
+  allow these commands unless we protect the lower status but if we do protect
+  the lower status and a user wants to create a new pane with ^a-c then the
+  focus should go to the status line - I think actually we should protect the
+  status line in V because we rely on other commands and statuses using it
+- hotkey to hide tool calls in agent scrollback
+
+
+Other:
+- the vertical split should default to 1 column left of what it currently
+  calculates
+- do new worktrees get spawned correctly from project home or from the current
+  worktree?
+- investigate what it will take to create a brew or brew tap from our github
+- regular autosave for session state - Claude is treating recovery per
+  workspace so we need to make sure we're handling discovery/saving and
+  recovery correctly
+- support png/jpeg preview in terminal?
+- include an alias that just launches the markdown pager standalone; what would
+  that be named?
+- should be able to reorder panes?
+- is MCP takeover working? can we write an integration test for this?
+- agy/codex doesn't support vi bindings ... maybe we could control it and
+  inject vi bindings into it's rataui pane
+- frecency improvements. Today `state/frecency.rs` (zoxide-style, `count ×
+  tiered-recency`, persisted to `frecency.json`) only tracks
+  *directories* and only feeds the `J` jump prompt's Tab fallback.
+  Two extensions worth considering:
+  (1) reuse the same `Frecency` to rank *files* — record file
+  opens/visits alongside dir visits and order the `F` finder /
+  file-pick results by score, so your hot files float up. Needs a
+  file-visit record site + a finder-side sort; the scoring/persist/
+  prune/health-check machinery already exists.
+  (2) optional curve refinement — nevi uses `log2(count+2) ×
+  (1/(1+elapsed_hrs))^0.2` (diminishing-returns frequency + smooth
+  decay) vs. our linear-count × stepped tiers. Our linear+tiered is
+  intentional for `J` (you *want* most-visited dirs to dominate
+  jumps), so this only matters if the file surface above wants
+  gentler ranking. (Spotted comparing against `nikolic` / `nevi`.)
+
