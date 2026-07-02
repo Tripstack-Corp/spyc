@@ -264,9 +264,12 @@ spyc's workflow: browse files above, talk to Claude below.
     (`desktop_done`, on) but the interrupting bell and on-screen flash stay
     `Blocked`-only so they don't ring/strobe every turn — flip `bell_done` /
     `visual_done` to fire those on `Done` too.
-  - **`suppress_focused_tab`** (on by default) stays quiet when the transitioning
-    tab is the one you're already watching — no point pinging about an agent
-    that's already on screen.
+  - **`suppress_focused_tab`** (**off by default**) stays quiet when the
+    transitioning tab is the one you're already watching. Off by default because
+    spyc's keyboard focus doesn't mean your eyes are on the terminal — with the
+    agent pane focused you're usually working in another app while it runs, so
+    the "needs me" / "done" ping is exactly when you want it. Set it true to mute
+    the on-screen tab.
   - **`:notify test`** fires every channel on demand (bell + visual + both desktop
     mechanisms), bypassing the config gating — to verify your setup without waiting
     for a real agent transition.

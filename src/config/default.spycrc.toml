@@ -118,8 +118,10 @@
 #                                (the branded attention cue); set false to opt out.
 #   visual_done  (default false) flash on Done too, not just Blocked (like the
 #                                bell, the flash stays a Blocked-only cue).
-#   suppress_focused_tab (default true)  stay quiet when the transitioning
-#                                tab is the one you're already watching.
+#   suppress_focused_tab (default false) stay quiet when the transitioning tab
+#                                is the one you're already watching. Off by
+#                                default: spyc focus ≠ eyes on the terminal —
+#                                you're usually in another app while it works.
 # The intrusive channels (bell + flash) fire on Blocked only by default; the
 # quiet desktop ping fires on Done too. Flip *_done to change that per channel.
 [notify]
@@ -130,7 +132,7 @@
 # bell_done = false
 # visual = true
 # visual_done = false
-# suppress_focused_tab = true
+# suppress_focused_tab = false
 
 # ── colors ────────────────────────────────────────────────────────────
 # Hex strings ("#aabbcc") or named colors ("red", "blue"). Anything you

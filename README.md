@@ -417,7 +417,7 @@ pick      = "#ffcb6b"
 # bell_done = true            # ...ring on Done too (default: Blocked only)
 # visual = false              # opt out of the spice-heat gradient border pulse
 # visual_done = true          # flash on Done too (default: Blocked only)
-# suppress_focused_tab = false # notify even about the tab you're watching
+# suppress_focused_tab = true # mute the focused tab (off by default → notifies)
 ```
 
 Run **`:notify test`** to fire every channel on demand (bell + visual + both

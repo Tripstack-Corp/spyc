@@ -858,14 +858,27 @@ mod tests {
     }
 
     #[test]
-    fn notify_suppressed_for_the_focused_tab() {
+    fn focused_tab_notifies_by_default_but_knob_suppresses() {
         use crate::config::NotifyConfig;
         use crate::pane::AgentActivity::{Blocked, Idle};
-        // Same transition, but the user is watching this tab → stay silent.
+        // By default a focused tab still fires — spyc's keyboard focus doesn't
+        // mean the user is looking at the terminal (they're usually off in
+        // another app while the agent works), so "needs me" must reach them.
         let cfg = NotifyConfig::default();
         assert!(
+            !super::notification_for_transition(Idle, Blocked, &cfg, true, false, "codex", 2)
+                .is_silent(),
+            "focused tab notifies by default"
+        );
+        // The opt-in knob still silences the on-screen tab when set.
+        let cfg = NotifyConfig {
+            suppress_focused_tab: true,
+            ..NotifyConfig::default()
+        };
+        assert!(
             super::notification_for_transition(Idle, Blocked, &cfg, true, false, "codex", 2)
-                .is_silent()
+                .is_silent(),
+            "suppress_focused_tab = true stays silent for the watched tab"
         );
     }
 

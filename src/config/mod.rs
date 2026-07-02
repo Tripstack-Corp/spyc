@@ -356,8 +356,11 @@ pub struct NotifyConfig {
     /// distracting while you work.
     pub visual_done: bool,
     /// Suppress every channel when the transitioning tab is the one the user is
-    /// actively watching (its pane owns the keyboard) — no point pinging about
-    /// an agent already on screen. On by default.
+    /// actively watching (its pane owns the keyboard). **Off by default**: spyc's
+    /// keyboard focus doesn't mean the user is looking at the terminal — with the
+    /// agent pane focused they're usually off in another app while it works, so
+    /// the "needs me" / "done" ping is exactly when it's wanted. Set true to stay
+    /// quiet for the on-screen tab.
     pub suppress_focused_tab: bool,
 }
 
@@ -371,7 +374,7 @@ impl Default for NotifyConfig {
             bell_done: false,
             visual: true,
             visual_done: false,
-            suppress_focused_tab: true,
+            suppress_focused_tab: false,
         }
     }
 }
@@ -815,7 +818,7 @@ mod tests {
         assert!(!n.bell_done);
         assert!(n.visual);
         assert!(!n.visual_done);
-        assert!(n.suppress_focused_tab);
+        assert!(!n.suppress_focused_tab);
     }
 
     #[test]
@@ -824,7 +827,7 @@ mod tests {
         let path = tmp.path().join("rc.toml");
         std::fs::write(
             &path,
-            "[notify]\ndesktop = false\ndesktop_via = \"osc9\"\ndesktop_done = false\nbell = true\nbell_done = true\nvisual = false\nvisual_done = true\nsuppress_focused_tab = false\n",
+            "[notify]\ndesktop = false\ndesktop_via = \"osc9\"\ndesktop_done = false\nbell = true\nbell_done = true\nvisual = false\nvisual_done = true\nsuppress_focused_tab = true\n",
         )
         .unwrap();
         let cfg = Config::load_from(&[Some(&path)]).unwrap();
@@ -837,7 +840,8 @@ mod tests {
         assert!(cfg.notify.bell_done);
         assert!(!cfg.notify.visual);
         assert!(cfg.notify.visual_done);
-        assert!(!cfg.notify.suppress_focused_tab);
+        // `suppress_focused_tab` defaults OFF, so the override to true proves it parsed.
+        assert!(cfg.notify.suppress_focused_tab);
     }
 
     #[test]
