@@ -118,12 +118,14 @@ pub fn ensure_claude_status_hooks(dir: &Path) -> bool {
         return false;
     }
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
+    // A non-UTF-8 exe path can't be embedded faithfully in the shell command
+    // string; skip rather than write one a shell would mis-exec (cf. `expand_percent`).
+    let Some(exe) = exe.to_str() else {
+        return false;
+    };
     let existing = std::fs::read_to_string(&path).ok();
-    let Some(out) = merged_status_hooks_json(
-        existing.as_deref(),
-        &exe.to_string_lossy(),
-        status_trace_enabled(),
-    ) else {
+    let Some(out) = merged_status_hooks_json(existing.as_deref(), exe, status_trace_enabled())
+    else {
         return false;
     };
     // Already current → skip the write (and its mtime bump), but still report
@@ -154,6 +156,9 @@ fn merged_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) -> O
     // `--status-trace` rides in the command string (not env) so the reporter
     // logs even when Claude sanitizes the hook env.
     let suffix = if trace { " --status-trace" } else { "" };
+    // Shell-quote the exe: agents hand this command to `sh -c`, so a spaced
+    // install path must stay one token or the hook silently never fires.
+    let exe = crate::shell::shell_quote(exe);
     for (event, matcher, state) in STATUS_HOOKS {
         let group = json!({
             "matcher": matcher,
@@ -287,12 +292,13 @@ pub fn ensure_codex_status_hooks(dir: &Path) -> bool {
         return false;
     }
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
+    let Some(exe) = exe.to_str() else {
+        return false;
+    };
     let existing = std::fs::read_to_string(&path).ok();
-    let Some(out) = merged_codex_status_hooks_toml(
-        existing.as_deref(),
-        &exe.to_string_lossy(),
-        status_trace_enabled(),
-    ) else {
+    let Some(out) =
+        merged_codex_status_hooks_toml(existing.as_deref(), exe, status_trace_enabled())
+    else {
         return false;
     };
     if existing.as_deref() == Some(out.as_str()) {
@@ -327,6 +333,9 @@ fn merged_codex_status_hooks_toml(
     // `--status-trace` rides in the command string (not env) so the reporter
     // logs even when codex sanitizes the hook env.
     let suffix = if trace { " --status-trace" } else { "" };
+    // Shell-quote the exe (agents run this via a shell): a spaced install path
+    // must stay one token or the hook silently never fires.
+    let exe = crate::shell::shell_quote(exe);
     for (event, state) in CODEX_STATUS_HOOKS {
         let mut handler = toml::Table::new();
         handler.insert("type".into(), toml::Value::String("command".into()));
@@ -431,10 +440,9 @@ pub fn cleanup_codex_status_hooks(dir: &Path) -> ConfigCleanup {
 // **Partial** coverage: only `working` (turn start) + `done` (turn end). Agy
 // exposes NO permission/approval event, so there's no `blocked` ("needs me")
 // signal — the dot is accurate except it never shows the red waiting square.
-// (Revisit if agy adds an approval hook.) Read at startup → written pre-spawn
-// like codex (`live_reload: false`). The exact agy schema is derived from
-// Google's hooks docs + community guides rather than a verified live install,
-// so it may need a tweak as agy stabilizes.
+// Read at startup → written pre-spawn like codex (`live_reload: false`). The
+// exact agy schema is derived from Google's hooks docs + community guides
+// rather than a verified live install.
 
 /// Agy's (event, reported-state). No `blocked`: agy has no approval/permission
 /// event to hang it on.
@@ -469,12 +477,12 @@ pub fn ensure_agy_status_hooks(dir: &Path) -> bool {
         return false;
     }
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
+    let Some(exe) = exe.to_str() else {
+        return false;
+    };
     let existing = std::fs::read_to_string(&path).ok();
-    let Some(out) = merged_agy_status_hooks_json(
-        existing.as_deref(),
-        &exe.to_string_lossy(),
-        status_trace_enabled(),
-    ) else {
+    let Some(out) = merged_agy_status_hooks_json(existing.as_deref(), exe, status_trace_enabled())
+    else {
         return false;
     };
     if existing.as_deref() == Some(out.as_str()) {
@@ -497,6 +505,7 @@ fn merged_agy_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) 
         .unwrap_or_else(|| json!({}));
     let obj = root.as_object_mut()?;
     let suffix = if trace { " --status-trace" } else { "" };
+    let exe = crate::shell::shell_quote(exe);
     let mut set = serde_json::Map::new();
     for (event, state) in AGY_STATUS_HOOKS {
         set.insert(
@@ -684,6 +693,21 @@ mod tests {
             merged_status_hooks_json(Some(&traced), "spyc", true).expect("re-merge traced"),
             "traced merge is not idempotent"
         );
+    }
+
+    #[test]
+    fn hook_command_shell_quotes_spaced_exe_path() {
+        // An install path with a space must be single-quoted so the shell execs
+        // the whole path — an unquoted `/Users/My User/spyc` would exec `/Users/My`
+        // and the hook would silently never fire. All three writers share the guard.
+        let exe = "/Users/My User/bin/spyc";
+        let quoted = "'/Users/My User/bin/spyc' --report-status";
+        let claude = merged_status_hooks_json(None, exe, false).expect("claude merge");
+        assert!(claude.contains(quoted), "claude not quoted: {claude}");
+        let codex = merged_codex_status_hooks_toml(None, exe, false).expect("codex merge");
+        assert!(codex.contains(quoted), "codex not quoted: {codex}");
+        let agy = merged_agy_status_hooks_json(None, exe, false).expect("agy merge");
+        assert!(agy.contains(quoted), "agy not quoted: {agy}");
     }
 
     #[test]
