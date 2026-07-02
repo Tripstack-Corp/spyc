@@ -258,12 +258,16 @@ const SECTIONS: &[Section] = &[
             ("^a r", "rename active tab"),
             ("^a R", "restart active tab command"),
             (
-                "● / ·",
-                "agent tab dot: spicy pulse=working, red=blocked, teal=done, dim=idle (:why-status)",
+                "●  ■  ·",
+                "agent tab dot: pulse ● working, red square ■ blocked, teal square ■ done, dim · idle (:why-status)",
             ),
             (
                 ":hooks on|on!|off",
                 "claude/codex/agy auto-status hooks (asked once on launch); on! restarts+resumes a claude pane",
+            ),
+            (
+                ":notify test",
+                "fire every notification channel (bell + visual + desktop) to verify setup",
             ),
             (
                 "^a +  ^a -",
@@ -329,7 +333,7 @@ const SECTIONS: &[Section] = &[
             ),
             (
                 ":lua",
-                "status|on|off|reload — engine control (init.lua: spyc.map/spyc.command)",
+                "status|on|off|reload — engine control (init.lua: spyc.map/spyc.command/spyc.on events)",
             ),
         ],
     },

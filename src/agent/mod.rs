@@ -91,9 +91,9 @@ pub struct TranscriptSpec {
 /// How spyc installs an agent's activity-status lifecycle hooks (the ones that
 /// call `spyc --report-status <state>` so the tab dot tracks the agent's turn).
 /// Returned by [`AgentProfile::status_hooks`] for agents spyc can auto-wire
-/// (claude/codex); `None` for the rest. The two `fn` pointers are the
+/// (claude/codex/agy); `None` for the rest. The two `fn` pointers are the
 /// format-specific writer/cleaner in [`crate::mcp`] — JSON `settings.json` for
-/// claude, TOML `config.toml` for codex.
+/// claude, TOML `config.toml` for codex, JSON `.agents/hooks.json` for agy.
 pub struct StatusHookSupport {
     /// Write/refresh our hooks into the project dir; returns whether our hooks
     /// are present in a file we own (so teardown tracks the dir for cleanup).
@@ -173,7 +173,7 @@ pub trait AgentProfile: Sync {
     }
 
     /// Activity-status lifecycle hooks, if spyc can auto-install them for this
-    /// agent (claude/codex). Default: none — the dot then rides P0 output
+    /// agent (claude/codex/agy). Default: none — the dot then rides P0 output
     /// timing only (no semantic working/blocked/done self-report via hooks).
     fn status_hooks(&self) -> Option<StatusHookSupport> {
         None
