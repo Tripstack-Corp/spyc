@@ -1005,7 +1005,10 @@ Claude can query and control the workspace through these tools:
 - **`open_worktree(path)`** -- open the second spyc column (column `b`)
   at the worktree (re-targets `b` if already open), so the agent can
   work in it while the main column stays put. After this,
-  `navigate_to` / search / `pick_files` act on `b`.
+  `navigate_to` / search / `pick_files` act on `b`. An agent-opened
+  column `b` does **not** steal keyboard focus: the user keeps typing to
+  the pane where the conversation is (only `^s n`, the user's own open,
+  moves the keyboard into `b`).
 
 A column is never left stranded in a **deleted worktree**: if its
 directory is removed out from under it by *any* means -- spyc's own

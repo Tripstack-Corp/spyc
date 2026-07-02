@@ -396,8 +396,9 @@ impl App {
                 }
                 // Open (or re-target) column `b` at the worktree. `cur()` now
                 // resolves to `b`, so a follow-up navigate_to/search/pick lands
-                // there while `a` stays put.
-                self.open_second_commander_at(&target);
+                // there while `a` stays put. Background open: the user keeps
+                // typing to the pane below — we don't steal keyboard focus.
+                self.open_second_commander_at_background(&target);
                 let opened = self.state.cur().listing.dir.clone();
                 self.write_context();
                 McpResponse::Ok {

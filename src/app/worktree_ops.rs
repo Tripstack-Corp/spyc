@@ -337,9 +337,12 @@ impl App {
         flash: Option<String>,
         open_path: Option<std::path::PathBuf>,
     ) {
-        // Open `b` FIRST so the refresh + context capture the now-focused column.
+        // Open `b` FIRST so the refresh + context capture the now-active column.
+        // Background open: `b` becomes `cur()` (so the refresh/context see it and
+        // the agent's follow-ups target it) without stealing the pane the user is
+        // typing into.
         if let Some(path) = open_path {
-            self.open_second_commander_at(&path);
+            self.open_second_commander_at_background(&path);
         }
         if let Some(message) = flash {
             self.state.flash_info(message);

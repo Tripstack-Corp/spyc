@@ -64,6 +64,52 @@ fn second_commander_open_focus_and_close() {
     });
 }
 
+/// User-initiated (`^s n`) vs agent-initiated (MCP worktree open) focus: from
+/// the pane, `^s n` pulls the keyboard into `b` (the user asked for it), while a
+/// background open leaves the keyboard in the pane (the user is still typing to
+/// the agent). Both make `b` the active/`cur()` column so a follow-up MCP call
+/// lands there — the difference is purely the keyboard axis.
+#[test]
+fn background_open_keeps_pane_focus_while_user_open_grabs_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "x").unwrap();
+        let b = tmp.path().join("wt");
+        std::fs::create_dir(&b).unwrap();
+
+        // Agent-initiated: user is mid-conversation in the pane.
+        let mut app = App::test_app(dir.clone());
+        app.state.focus = state::Focus::Pane;
+        app.open_second_commander_at_background(&b);
+        assert!(
+            app.state.pane_focused(),
+            "background open leaves the keyboard on the pane (still typing to the agent)"
+        );
+        assert_eq!(
+            app.focused_side(),
+            state::Side::Right,
+            "b is still made the active column so the agent's follow-ups target it"
+        );
+        assert_eq!(
+            std::fs::canonicalize(&app.state.cur().listing.dir).ok(),
+            std::fs::canonicalize(&b).ok(),
+            "cur() resolves to b even though the pane keeps the keyboard"
+        );
+
+        // User-initiated: `^s n` from the same pane-focused start grabs it.
+        let mut app = App::test_app(dir);
+        app.state.focus = state::Focus::Pane;
+        app.open_second_commander_at(&b);
+        assert!(
+            !app.state.pane_focused(),
+            "^s n moves the keyboard out of the pane into the new column"
+        );
+        assert_eq!(app.focused_side(), state::Side::Right, "b is focused");
+    });
+}
+
 /// `^a |` is disabled while a second commander occupies the right column —
 /// the two are mutually exclusive, so the cycle no-ops (no preview opens) and
 /// the commander stays put.

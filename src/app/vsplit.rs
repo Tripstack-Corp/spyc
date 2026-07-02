@@ -158,14 +158,37 @@ impl App {
         self.open_second_commander_at(&dir);
     }
 
-    /// Open (or re-target) the second file-commander rooted at `dir` and focus
-    /// it. The right region hosts a real commander (`state.right`) — mutually
+    /// Open (or re-target) the second file-commander rooted at `dir` and move
+    /// keyboard focus into it — the `^s n` (and session-restore) path: the user
+    /// asked for `b`, so put them in it. For the agent-initiated open (MCP
+    /// worktree create/open) use [`Self::open_second_commander_at_background`],
+    /// which makes `b` active without pulling the user out of the pane.
+    pub(super) fn open_second_commander_at(&mut self, dir: &std::path::Path) {
+        self.open_second_commander_at_inner(dir, true);
+    }
+
+    /// Agent-initiated open (MCP `create_worktree open=true` / `open_worktree`):
+    /// make `b` the active/`cur()` column so the agent's follow-up
+    /// navigate_to / search / pick_files land there, but leave keyboard focus
+    /// where it is — the user is mid-conversation with the agent in the pane and
+    /// shouldn't be yanked out of it. Differs from the `^s n` open only when the
+    /// pane is focused (then focus stays on the pane); from a file column the two
+    /// coincide, since a `cur() == b` file column necessarily owns the keyboard.
+    pub(super) fn open_second_commander_at_background(&mut self, dir: &std::path::Path) {
+        self.open_second_commander_at_inner(dir, false);
+    }
+
+    /// Shared core of the two open paths. `grab_keyboard` moves keyboard focus
+    /// into `b` (leaving the pane); when false, `state.focus` is preserved so an
+    /// agent opening `b` in the background doesn't steal the pane from the user.
+    /// Either way `b` becomes the active/`cur()` column (`vsplit.focus = Right`).
+    /// The right region hosts a real commander (`state.right`) — mutually
     /// exclusive with the `^a |` preview, so any open preview is dropped.
     /// Always **top-only**: full-height would clamp the bottom pane to the left
     /// column (pane under `a` only), which makes no sense for two peer browsers
     /// sharing one pane — the pane stays full-width below both columns and `b`
-    /// occupies the top-right region. Reached from `^s n`.
-    pub(super) fn open_second_commander_at(&mut self, dir: &std::path::Path) {
+    /// occupies the top-right region.
+    fn open_second_commander_at_inner(&mut self, dir: &std::path::Path, grab_keyboard: bool) {
         // Canonicalize so a relative / `..`-laden path resolves cleanly (and so
         // `cur().listing.dir` matches what later path comparisons expect).
         let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
@@ -187,7 +210,11 @@ impl App {
             mode: state::VsplitMode::TopOnly,
             focus: state::Side::Right,
         });
-        self.state.focus = state::Focus::FileList;
+        // `^s n` pulls the keyboard into `b`; a background (agent) open leaves
+        // `state.focus` as-is so the user keeps typing to the pane below.
+        if grab_keyboard {
+            self.state.focus = state::Focus::FileList;
+        }
         // Resolve `b`'s own repo root + populate its git markers now (per-column
         // git — `b` may be a different repo/worktree than `a`). The 1 Hz poll
         // keeps it fresh thereafter; without this its `current_repo_root` stays
