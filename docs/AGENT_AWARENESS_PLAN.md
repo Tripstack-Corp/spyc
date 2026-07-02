@@ -34,6 +34,12 @@ stays focused on what's left.
   `Effect::Notify` fires on the real state transition (pure decision
   `notification_for_transition`); `[notify]` config, desktop ping on by default.
   *Code:* `src/notifications.rs`, `src/app/effect.rs`, `src/config/`.
+- **P3-2 — crash-sufficient autosave** (v1.92.0). Debounced periodic session
+  save (`Deadline::Autosave` + `settle_autosave` over the pure `autosave_action`)
+  on a stable per-process session id, written atomically (`fs::write_atomic`), so
+  a `SIGKILL` loses at most the ~2s debounce window instead of everything since
+  launch. 0-dps-at-idle preserved (armed only while dirty; skips empty sessions).
+  *Code:* `src/app/session.rs`, `src/app/scheduler.rs`, `src/state/sessions/`.
 
 **Remaining** — the live scope this charter still tracks:
 
@@ -42,8 +48,6 @@ stays focused on what's left.
 - **P1-3** — live session-identity capture (`report_agent_session`).
 - **P2** — orchestration: event hub + wait/subscribe + read/send (the capability
   gap; the highest-ceiling item).
-- **P3-2** — crash-sufficient / periodic autosave (the daemon-free persistence
-  answer).
 
 ---
 
@@ -225,33 +229,28 @@ check spyc already does.
 
 ---
 
-## Phase 3 (remaining) — Polish *(low effort)*
+## Phase 3 — Polish *(shipped)*
 
-The blocked/done notification (P3-1) shipped; what's left is the persistence
-stance.
+Both polish items shipped. P3-1 = the blocked/done notification (#638, v1.90.0).
 
-**P3-2 · Richer session-restore content (the persistence answer).**
-Capture the split/pane **layout tree** + per-pane **cwd** in the session snapshot
-so `-r` rebuilds geometry faithfully, and make periodic autosaves
-**recovery-sufficient against `SIGKILL`** (never a thin fallback to a quit-time
-flush). This is spyc's deliberate, daemon-free answer to the persistence pain
-herdr solves with a server (review §3 #4).
-*Touches:* `src/app/session.rs`, `src/state/sessions/`. *Effort: low–med.*
-*Use cases:* the SSH-drop / laptop-sleep / crash return — reconnect and `-r` rebuilds
-the split geometry + per-pane cwd (already captured today via `SavedVsplit` +
-`SavedTab.cwd`) **and** resumes each agent's *conversation* via its native `--resume`.
-herdr's taxonomy is the reference: restore *"session shape"* + a separate agent-
-restore tier that re-runs native resume for the conversation, explicitly **not** the
-live process ([herdr session-state](https://herdr.dev/docs/session-state/)). The
-missing half today is durability — `save_session()` is **quit-only** (`session.rs`,
-called only from `request_quit`), so a `SIGKILL` loses everything since the last quit;
-add a debounced/periodic autosave so recovery is crash-sufficient. This is precisely
-the *"Recovery Snapshot"* Claude Code declined upstream (consolidating 100+ issues,
-[CC #26729](https://github.com/anthropics/claude-code/issues/26729)) — spyc can just
-have it. Set expectations honestly: restored panes come back as **fresh shells +
-resumed conversations, not PID-preserved live processes** — the detach/reattach
-daemon stays out of scope (see above), and codex #11852's "reconnect shows *working*
-but nothing is actually running" ghost is the trap we avoid by not pretending.
+**P3-2 · Crash-sufficient autosave (the persistence answer). — SHIPPED (v1.92.0).**
+`save_session` was **quit-only** (`request_quit`), so a `SIGKILL` lost everything
+since launch. Now a debounced periodic autosave — `Deadline::Autosave`, armed by
+`settle_autosave` over the pure `autosave_action`, on any session-relevant change
+(tab / cwd / vsplit / project-home / geometry, detected via a cheap structural
+fingerprint) — fires ~2s after the last change, so a hard kill loses at most that
+window. Every save reuses a **stable per-process session id** (overwrite-in-place,
+no file churn that would evict other projects' sessions) and goes through
+`fs::write_atomic` (temp + rename, no torn file on kill). Armed only while dirty
+and skips empty sessions, so 0-dps-at-idle holds. The split/pane **layout tree** +
+per-pane **cwd** were already captured (`SavedVsplit` + `SavedTab.cwd`); this closes
+the durability half. Restored panes come back as **fresh shells + resumed
+conversations, not PID-preserved live processes** — the detach/reattach daemon
+stays out of scope (above); codex #11852's "reconnect shows *working* but nothing
+is running" ghost is the trap we avoid by not pretending. This is the *"Recovery
+Snapshot"* Claude Code declined upstream (consolidating 100+ issues,
+[CC #26729](https://github.com/anthropics/claude-code/issues/26729)) — spyc just
+has it. *Code:* `src/app/session.rs`, `src/app/scheduler.rs`, `src/state/sessions/`.
 
 ---
 
@@ -264,7 +263,7 @@ P0 ✅  ──►  P1-1 ✅  ──►  P1-2 fallback / P1-3 session-id (remaini
                          P2 (event hub + wait/subscribe + read/send)
                               │
                               ▼
-                         P3-1 ✅        P3-2 crash-sufficient -r (remaining)
+                         P3-1 ✅        P3-2 ✅ crash-sufficient autosave
 ```
 
 - **P0 (shipped)** — you can't ship or debug status without a vocabulary, a
@@ -274,8 +273,9 @@ P0 ✅  ──►  P1-1 ✅  ──►  P1-2 fallback / P1-3 session-id (remaini
   round it out before the orchestration layer leans on it.
 - **P2 is the capability gap** — highest ceiling, but it depends on P1's status
   signal being trustworthy.
-- **P3 is independent polish** — P3-1 (shipped) landed after P0; P3-2 is the
-  persistence stance and stands alone.
+- **P3 is independent polish (both shipped)** — P3-1 landed after P0; P3-2 (the
+  persistence stance) stood alone and is now done, leaving P1-2/P1-3/P2 as the
+  live remainder.
 
 Each remaining item is a candidate for its own worktree + PR (per the project's
 one-shape-per-PR norm), version-bumped, gated, and owner-tested before merge.

@@ -470,6 +470,14 @@ struct Runtime {
     pane_wake_tx: Option<std::sync::mpsc::Sender<Message>>,
     /// Monotonic `SinkId` allocator (never reused).
     next_sink_id: u64,
+    /// P3-2 crash-sufficient autosave: fingerprint of the session-relevant state
+    /// at the last successful save, so `settle_autosave` re-saves only on a
+    /// genuine change (a clean session arms nothing → idle stays 0 dps).
+    autosave_last_saved_fp: Option<u64>,
+    /// The armed `Deadline::Autosave` fire instant (debounce-window end). `Some`
+    /// only while a change awaits its save; cleared on save / when clean. An
+    /// OS-ish clock value, correctly in `Runtime` (never the pure Model).
+    autosave_due: Option<std::time::Instant>,
     /// The embedded Lua engine worker — lazy-spawned on first use
     /// (`ensure_lua_worker`), `None` until then / when disabled (`--no-lua`,
     /// `:lua off`) / in the test harness. Owns the interpreter thread; the

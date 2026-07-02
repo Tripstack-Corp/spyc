@@ -910,6 +910,12 @@ self-documenting starting point.
 
 spyc auto-saves your workspace on quit and can restore it on startup.
 
+- **Crash-sufficient autosave** — beyond the quit-time save, spyc
+  re-saves the session ~2s after any change (new tab, `cd`, split
+  resize, …) to a stable per-session file written atomically, so a hard
+  kill (`SIGKILL`, crash, laptop sleep) loses at most that couple of
+  seconds rather than everything since launch. It only writes when
+  something actually changed, so an idle spyc does no disk work.
 - **Auto-save** — on quit, spyc saves the current directory, all pane
   tabs (command, label, cwd), active tab, pane height, focus state,
   the spice-themed session name, `PROJECT_HOME`, and the vertical split

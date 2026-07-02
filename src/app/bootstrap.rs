@@ -82,6 +82,10 @@ impl App {
         // `:project <path>` or `gP`. Cleared with `:project clear`.
         let project_home = Some(cwd.clone());
         let session_name = Some(crate::state::session_names::generate());
+        // Stable per-process session file id: assigned once here so the P3-2
+        // debounced autosave and the quit-time save overwrite one `<id>.json`
+        // (no per-save file churn that would evict other projects' sessions).
+        let session_id = Some((crate::sysinfo::epoch_nanos() / 1_000_000) as u64);
 
         // Seed the left column's harpoon from `PROJECT_HOME` (if any). When
         // `PROJECT_HOME` is unset and we're not in a repo, harpoon stays `None`
@@ -150,6 +154,7 @@ impl App {
             mode: Mode::Normal,
             project_home,
             session_name,
+            session_id,
             frecency: crate::state::Frecency::load(),
             focus: state::Focus::FileList,
             // spyc (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
@@ -256,6 +261,8 @@ impl App {
                 mcp_cmd_rx: Some(mcp_cmd_rx),
                 pane_wake_tx: None,
                 next_sink_id: 0,
+                autosave_last_saved_fp: None,
+                autosave_due: None,
                 lua: None,
                 lua_registry: super::lua::LuaRegistry::default(),
                 lua_inflight: None,

@@ -138,8 +138,10 @@ and regex content searches over the project, the user's currently-
 picked files, or the persistent yanked-file cache — the last two
 are state Claude can't see through generic filesystem tools.
 
-Sessions are auto-saved on quit. `spyc -r` opens a session picker that
-restores all pane tabs and resumes each agent's conversation. Claude
+Sessions are auto-saved on quit — and re-saved a couple of seconds after
+any change, so a crash or hard kill loses at most that window, not the
+whole session. `spyc -r` opens a session picker that restores all pane
+tabs and resumes each agent's conversation. Claude
 tabs spawn a fresh `claude` and type `/resume <sessionId>` into it once
 it settles, verifying the submit landed and re-sending Enter if Claude's
 async startup ate it (the `--resume` CLI flag has a mount-crash

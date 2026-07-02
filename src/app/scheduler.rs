@@ -69,6 +69,12 @@ pub enum Deadline {
     /// `view.visual_bell.is_some()`, disarmed the instant it decays — so idle
     /// stays 0 dps. PRE-recv (`settle_visual_bell`).
     VisualBell,
+    /// P3-2 crash-sufficient autosave: debounced session save. Armed
+    /// `AUTOSAVE_DEBOUNCE` after a session-relevant change (tab/cwd/vsplit/
+    /// project-home/geometry); fires once when the quiet window elapses, then
+    /// disarms. Never armed while the session is clean, so idle stays 0 dps.
+    /// PRE-recv (`settle_autosave`).
+    Autosave,
 }
 
 /// Run()-local deadline scheduler (MVU Phase 2). **Advisory** — it only

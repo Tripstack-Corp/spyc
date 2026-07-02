@@ -125,7 +125,10 @@ pub fn save_session(session: &Session) -> std::io::Result<()> {
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{}.json", session.id));
     let json = serde_json::to_string_pretty(session).map_err(std::io::Error::other)?;
-    std::fs::write(&path, json)?;
+    // Atomic write (temp + rename) so a SIGKILL mid-write can't leave a
+    // truncated/corrupt `<id>.json` — the crash-sufficiency contract the P3-2
+    // debounced autosave relies on (and a free win for the quit-time save).
+    crate::fs::write_atomic(&path, json.as_bytes())?;
     prune_old(&dir);
     Ok(())
 }

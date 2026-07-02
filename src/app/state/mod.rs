@@ -598,6 +598,10 @@ pub struct AppState {
     pub start_dir: PathBuf,
     pub project_home: Option<PathBuf>,
     pub session_name: Option<String>,
+    /// Stable per-process session file id (millis timestamp), assigned once at
+    /// startup and carried through restore, so every save (quit + P3-2 autosave)
+    /// overwrites the same `<id>.json` instead of spawning a new file per save.
+    pub session_id: Option<u64>,
     pub prev_dir: Option<PathBuf>,
     pub last_search: Option<String>,
     pub last_captured_cmd: Option<String>,
@@ -968,6 +972,7 @@ impl AppState {
             start_dir: cwd,
             project_home: None,
             session_name: None,
+            session_id: None,
             prev_dir: None,
             last_search: None,
             last_captured_cmd: None,

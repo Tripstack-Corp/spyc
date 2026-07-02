@@ -30,6 +30,8 @@ impl App {
                 mcp_cmd_rx: None,
                 pane_wake_tx: None,
                 next_sink_id: 0,
+                autosave_last_saved_fp: None,
+                autosave_due: None,
                 lua: None,
                 lua_registry: super::lua::LuaRegistry::default(),
                 lua_inflight: None,

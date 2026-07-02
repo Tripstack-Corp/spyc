@@ -667,6 +667,13 @@ impl App {
                 ctx.draw.mark(3);
             }
 
+            // P3-2 crash-sufficient autosave: debounce a session save after any
+            // session-relevant change (tab/cwd/vsplit/project-home/geometry),
+            // firing ~AUTOSAVE_DEBOUNCE after the last change so a SIGKILL loses
+            // at most that window. Armed only while dirty ⇒ idle stays 0 dps; it
+            // never needs a redraw, so nothing to mark.
+            self.settle_autosave(now_pre, &mut ctx);
+
             // Fire the low-frequency `spyc.on` state-change events (dir_changed
             // / project_changed) by diffing against the last-fired baselines —
             // AFTER `handle_lua_done` + its `run_effects(lua_fx)` above, so a

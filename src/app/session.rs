@@ -17,16 +17,80 @@ use crate::state::sessions::AgentKind;
 use crate::ui::line_edit::LineEditor;
 use crate::ui::pager::{self, PagerView};
 
+use std::time::{Duration, Instant};
+
 use super::state::{Focus, Side, VSplit, VsplitMode};
-use super::{App, RESTORE_BANNER_SETTLE};
+use super::{App, Deadline, RESTORE_BANNER_SETTLE, RunCtx};
+
+/// P3-2 debounce window: persist this long after the last session-relevant
+/// change. Bounds SIGKILL data loss to ~this window while coalescing bursts of
+/// navigation / tab churn — short enough to be recovery-sufficient, long enough
+/// not to write on every keystroke.
+const AUTOSAVE_DEBOUNCE: Duration = Duration::from_secs(2);
+
+/// What `settle_autosave` should do this loop iteration — the pure half of the
+/// debounce, unit-tested below.
+#[derive(Debug, PartialEq, Eq)]
+enum AutosaveAction {
+    /// Nothing to persist (no restorable state, or unchanged since the last
+    /// save): clear any pending save and disarm.
+    Idle,
+    /// A change is pending and no debounce is running yet: arm at this instant.
+    Arm(Instant),
+    /// The debounce window elapsed: persist now.
+    Fire,
+    /// A change is pending but the window hasn't elapsed: keep waiting.
+    Wait,
+}
+
+/// Pure autosave debounce decision. `dirty` = there is restorable state whose
+/// fingerprint differs from the last-saved one; `due` = the armed fire instant
+/// (if any). Kept free of `self` so it's testable in isolation (the
+/// `route.rs` / `focus.rs` pure-decision template).
+fn autosave_action(dirty: bool, due: Option<Instant>, now: Instant) -> AutosaveAction {
+    if !dirty {
+        return AutosaveAction::Idle;
+    }
+    match due {
+        None => AutosaveAction::Arm(now + AUTOSAVE_DEBOUNCE),
+        Some(d) if now >= d => AutosaveAction::Fire,
+        Some(_) => AutosaveAction::Wait,
+    }
+}
 
 impl App {
     pub fn save_session(&mut self) {
+        let session = self.build_session_snapshot();
+        let save_result = crate::state::sessions::save_session(&session);
+        // A successful save resets the autosave baseline so a follow-up
+        // `settle_autosave` doesn't immediately re-write the identical session.
+        if save_result.is_ok() {
+            self.runtime.autosave_last_saved_fp = Some(self.session_fingerprint());
+        }
+        self.build_exit_summary(&session, &save_result);
+    }
+
+    /// P3-2 debounced autosave: persist the current session silently (no exit
+    /// summary), returning whether the write succeeded. Called by
+    /// [`Self::settle_autosave`] when the debounce window elapses.
+    fn autosave_session(&mut self) -> bool {
+        let session = self.build_session_snapshot();
+        crate::state::sessions::save_session(&session).is_ok()
+    }
+
+    /// Build the `Session` snapshot from live state (tabs + per-agent resume
+    /// ids, vsplit, project home, geometry). Shared by the quit-time
+    /// [`Self::save_session`] and the debounced [`Self::autosave_session`].
+    fn build_session_snapshot(&mut self) -> crate::state::sessions::Session {
         use crate::state::sessions::{SavedTab, Session};
         let epoch_secs = crate::sysinfo::epoch_secs();
-        // Session id is a millisecond timestamp -- unique within a
-        // single spyc instance and human-glanceable in the picker.
-        let id = (crate::sysinfo::epoch_nanos() / 1_000_000) as u64;
+        // Stable per-process session id (see `AppState::session_id`) so every
+        // save overwrites one `<id>.json`; fresh-millis fallback only if it was
+        // somehow never assigned.
+        let id = self
+            .state
+            .session_id
+            .unwrap_or_else(|| (crate::sysinfo::epoch_nanos() / 1_000_000) as u64);
 
         // Track session IDs already assigned to earlier tabs so each
         // Claude/Codex pane gets a distinct `agent_session_id` even
@@ -114,11 +178,11 @@ impl App {
             .project_home
             .clone()
             .unwrap_or_else(|| self.state.start_dir.clone());
-        let session = Session {
+        Session {
             id,
             saved_at: crate::sysinfo::format_now(),
             epoch_secs,
-            cwd: session_cwd.clone(),
+            cwd: session_cwd,
             tabs,
             active_tab: self
                 .runtime
@@ -147,18 +211,24 @@ impl App {
                         .and_then(|p| p.source_path.clone()),
                     right_cwd: self.state.right.as_ref().map(|c| c.listing.dir.clone()),
                 }),
-        };
-        let save_result = crate::state::sessions::save_session(&session);
+        }
+    }
 
-        // Build exit summary for post-TUI output. Report the write result
-        // truthfully — the old code ignored it and always said "session
-        // saved", so a failed write (disk full, unwritable state dir) told
-        // the user their session was safe when it wasn't, and `spyc -r`
-        // would later find nothing.
-        let cwd_display = crate::paths::display_tilde(&session_cwd);
+    /// Post-TUI exit summary line (`self.exit_summary`) from a just-saved
+    /// session + its write result. Quit-path only — the debounced autosave
+    /// persists silently.
+    fn build_exit_summary(
+        &mut self,
+        session: &crate::state::sessions::Session,
+        save_result: &std::io::Result<()>,
+    ) {
+        // Report the write result truthfully — a failed write (disk full,
+        // unwritable state dir) must not tell the user their session was safe
+        // when `spyc -r` would later find nothing.
+        let cwd_display = crate::paths::display_tilde(&session.cwd);
         let tab_count = session.tabs.len();
         let saved_ok = save_result.is_ok();
-        let mut parts = match &save_result {
+        let mut parts = match save_result {
             Ok(()) => vec![format!("session saved — {cwd_display}")],
             Err(e) => vec![format!("session NOT saved ({e}) — {cwd_display}")],
         };
@@ -208,6 +278,69 @@ impl App {
             parts.push("restore with spyc -r".to_string());
         }
         self.exit_summary = Some(parts.join(" · "));
+    }
+
+    /// Cheap structural fingerprint of the session-relevant state, so
+    /// [`Self::settle_autosave`] detects a genuine change without a full
+    /// snapshot build (which resolves agent resume ids off the filesystem).
+    /// Read-only; must track what [`Self::build_session_snapshot`] persists.
+    fn session_fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        if let Some(pt) = self.runtime.pane_tabs.as_ref() {
+            pt.active_index().hash(&mut h);
+            for t in pt.tabs() {
+                t.info.command.hash(&mut h);
+                t.info.cwd.hash(&mut h);
+            }
+        }
+        self.state.project_home.hash(&mut h);
+        self.state.pane.pane_height_pct.hash(&mut h);
+        self.state.pane_focused().hash(&mut h);
+        if let Some(v) = self.state.vsplit {
+            v.width_pct.hash(&mut h);
+            matches!(v.mode, VsplitMode::FullHeight).hash(&mut h);
+            matches!(v.focus, Side::Right).hash(&mut h);
+        }
+        if let Some(c) = self.state.right.as_ref() {
+            c.listing.dir.hash(&mut h);
+        }
+        h.finish()
+    }
+
+    /// P3-2 crash-sufficient autosave (PRE-recv settle). Debounce: on a
+    /// session-relevant change arm `Deadline::Autosave` `AUTOSAVE_DEBOUNCE` out
+    /// (re-armed while changes keep landing); when the quiet window elapses,
+    /// persist. Only armed while dirty ⇒ a clean/idle session wakes nothing
+    /// (0 dps). Never needs a redraw.
+    pub(crate) fn settle_autosave(&mut self, now: Instant, ctx: &mut RunCtx) {
+        // Nothing worth restoring (bare launch: no tabs, no split) ⇒ never write
+        // an empty session; stay disarmed.
+        let has_restorable = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .is_some_and(|pt| !pt.tabs().is_empty())
+            || self.state.vsplit.is_some();
+        let dirty = has_restorable
+            && Some(self.session_fingerprint()) != self.runtime.autosave_last_saved_fp;
+        match autosave_action(dirty, self.runtime.autosave_due, now) {
+            AutosaveAction::Idle => {
+                self.runtime.autosave_due = None;
+                ctx.scheduler.disarm(Deadline::Autosave);
+            }
+            AutosaveAction::Arm(when) => {
+                self.runtime.autosave_due = Some(when);
+                ctx.scheduler.arm(Deadline::Autosave, when);
+            }
+            AutosaveAction::Wait => {}
+            AutosaveAction::Fire => {
+                self.autosave_session();
+                self.runtime.autosave_last_saved_fp = Some(self.session_fingerprint());
+                self.runtime.autosave_due = None;
+                ctx.scheduler.disarm(Deadline::Autosave);
+            }
+        }
     }
 
     pub fn show_session_picker(&mut self) {
@@ -299,6 +432,9 @@ impl App {
         if !session.name.is_empty() {
             self.state.session_name = Some(session.name.clone());
         }
+        // Continue overwriting the restored session's own `<id>.json` on
+        // subsequent saves/autosaves (P3-2), rather than forking a new file.
+        self.state.session_id = Some(session.id);
         self.state.project_home = session.project_home.clone().filter(|p| p.is_dir());
         // Restore pane layout.
         self.state.pane.pane_height_pct = session.pane_height_pct;
@@ -609,5 +745,46 @@ impl App {
         view.picker_edit_cursor = Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
         self.view.pending_history_pick = Some(editor);
         self.set_pager(view);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AutosaveAction, autosave_action};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn autosave_idle_when_not_dirty() {
+        let now = Instant::now();
+        // Not dirty ⇒ always Idle, even with a due already armed (a save just
+        // landed / the change was reverted).
+        assert_eq!(autosave_action(false, None, now), AutosaveAction::Idle);
+        assert_eq!(autosave_action(false, Some(now), now), AutosaveAction::Idle);
+    }
+
+    #[test]
+    fn autosave_arms_debounce_on_first_dirty() {
+        let now = Instant::now();
+        match autosave_action(true, None, now) {
+            AutosaveAction::Arm(when) => {
+                assert!(when > now, "arm instant is debounced into the future");
+            }
+            other => panic!("expected Arm, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn autosave_waits_inside_window_then_fires_at_or_after_due() {
+        let now = Instant::now();
+        let due = now + Duration::from_secs(2);
+        // Dirty + armed, window not elapsed ⇒ Wait.
+        assert_eq!(autosave_action(true, Some(due), now), AutosaveAction::Wait);
+        // Exactly at due ⇒ Fire (the predicate is `>=`).
+        assert_eq!(autosave_action(true, Some(due), due), AutosaveAction::Fire);
+        // Past due ⇒ Fire.
+        assert_eq!(
+            autosave_action(true, Some(due), due + Duration::from_millis(1)),
+            AutosaveAction::Fire
+        );
     }
 }
