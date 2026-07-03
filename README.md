@@ -5,7 +5,7 @@
 <h1 align="center">spyc</h1>
 
 <p align="center">
-  The file commander is the noun the agent operates on.
+  The file commander built for collaborating with your coding agents.
 </p>
 
 <p align="center">
@@ -33,8 +33,8 @@ Pick three files and ask a question; the agent sees your selection. When
 it mentions a path in its response, press `gf` to jump there. Context
 flows both ways.
 
-The file commander is the noun the agent operates on, not the chrome
-around it.
+The file manager is where you and your agents actually work together —
+not just dressing and flash around a TUI chat.
 
 ## What it is
 
@@ -490,9 +490,9 @@ See [INSTALL.md](INSTALL.md) for detailed setup instructions.
 - [docs/AGENT_ORCHESTRATION.md](docs/AGENT_ORCHESTRATION.md) -- how the activity dots, notifications, session-resume, and scope registry fit together
 - [DESIGN.md](DESIGN.md) -- UI design language: components, surfaces, palette, extension checklist
 - [CHANGELOG.md](CHANGELOG.md) -- release history
-- [ROADMAP.md](ROADMAP.md) -- what's next
+- [ROADMAP.md](ROADMAP.md) -- strategy, direction, and the decisions log
 - [CONTRIBUTING.md](CONTRIBUTING.md) -- contribution guidelines and SemVer policy
-- [BACKLOG_DRAFT_NOTES.md](BACKLOG_DRAFT_NOTES.md) -- owner's raw backlog / draft notes (bugs, ideas, reports)
+- [Issues](https://github.com/Tripstack-Corp/spyc/issues) -- the live backlog: bugs, features, and ideas (labeled, on the [roadmap board](https://github.com/orgs/Tripstack-Corp/projects/1))
 
 ## License
 

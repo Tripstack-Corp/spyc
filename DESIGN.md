@@ -191,7 +191,7 @@ usually that an existing surface should be extended.
 Idle dps target is 0. Anything that polls — file watcher, capture
 streams, MCP socket — runs in a thread and pushes events; the
 loop only redraws when something changed. When background loading
-lands (see ROADMAP), the spinner is a single-row prompt-area
+lands (tracked in Issues), the spinner is a single-row prompt-area
 indicator with a >50ms threshold so the common case never sees it.
 
 ## Status segments: grammar
@@ -246,6 +246,6 @@ A checklist for adding a feature with UI surface:
    row in `ui/help.rs`.
 5. Confirm it reads in mono. If color carries meaning, also use a
    modifier (BOLD / DIM / REVERSED).
-6. Update CHANGELOG, BACKLOG_DRAFT_NOTES.md (if it closes one), and any user-facing
+6. Update CHANGELOG, the relevant GitHub Issue (if it closes one), and any user-facing
    doc. ARCHITECTURE only if the *engine* changed; DESIGN only if
    the *language* changed.
