@@ -385,7 +385,7 @@ Roadmap pointers cite `ROADMAP.md` by file only (line numbers go stale fast).
 | Signed artifacts                       | Partial | Minisign roadmap |
 | Docs site                              | Yes (yazi-rs.github.io) | Single-file `*.md` — deferred |
 | Migration page from peer tools         | Yes (per-tool keymap tables) | Roadmap |
-| GitHub presence                        | Yes (~39.9k★) | Bitbucket today; GitHub move is a 2.0 blocker |
+| GitHub presence                        | Yes (~39.9k★) | Private `Tripstack-Corp/spyc` (dev + CI on GitHub); goes public at the 2.0 launch |
 
 ### Where Yazi clearly leads
 

@@ -1,0 +1,45 @@
+# Weekly dependency-drift + advisory report. Ported from the Bitbucket
+# `weekly-deps` custom pipeline (archived under docs/archive/).
+#
+# `cargo deny check advisories` re-fetches the RUSTSEC DB on every run, so it
+# surfaces new advisories against existing deps even on weeks with no commits.
+# `cargo outdated` / `cargo tree --duplicates` are soft signals (never fail).
+#
+# NOTE: the Bitbucket version lit up a Bitbucket→Slack integration on failure;
+# that does not carry over. GitHub Actions failures notify via GitHub's own
+# watch/email; wire a Slack step here if the same push notification is wanted.
+name: Audit
+
+on:
+  schedule:
+    # Mondays 06:00 UTC. Scheduled runs use the default branch (main).
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+jobs:
+  deps:
+    name: Dependency drift report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain + C compiler
+        run: rustc --version && cc --version
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-deny (pinned, sha256-verified)
+        run: |
+          CARGO_DENY_VERSION=0.19.4
+          CARGO_DENY_SHA256=3bd58b784e83715b86ddbc9deac591890372ec77fda5741bb0826970b958506f
+          CARGO_DENY_DIR=cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl
+          if ! cargo-deny --version 2>/dev/null | grep -q "${CARGO_DENY_VERSION}"; then
+            curl -sSLo /tmp/cargo-deny.tar.gz "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${CARGO_DENY_DIR}.tar.gz"
+            echo "${CARGO_DENY_SHA256}  /tmp/cargo-deny.tar.gz" | sha256sum -c -
+            tar -xzf /tmp/cargo-deny.tar.gz -C /tmp
+            install -m 0755 "/tmp/${CARGO_DENY_DIR}/cargo-deny" "$HOME/.cargo/bin/cargo-deny"
+          fi
+      - run: cargo install cargo-outdated --locked
+      - name: Advisories (hard fail)
+        run: cargo deny check advisories
+      - name: Outdated direct deps (soft)
+        run: cargo outdated --root-deps-only || true
+      - name: Duplicate deps (soft)
+        run: cargo tree --duplicates || true

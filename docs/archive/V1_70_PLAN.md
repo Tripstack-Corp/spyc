@@ -1,6 +1,14 @@
 # spyc v1.70 — Mise en Place
 
-**Status:** plan, not yet implemented.
+> **Archived (2026-07-02).** Design-history, not an active plan — named for a
+> version (1.70) the project shipped past (now 1.97+) via other work. Live
+> summary: `ROADMAP.md` → "Post-2.0 (2.x) — the structural arc". The MCP socket
+> already delivers this thesis's *value* informally (`SPYC_PANE_ID` stable
+> handles, `get_spyc_context` read+drive, `wait_for_scope_clear` observed wait);
+> the unbuilt part is the *typed* protocol + crate split + SDK — revisit only if
+> external drive (an SDK / CLI harness) becomes a real ask.
+
+**Status:** archived design (superseded in spirit by the MCP socket; see banner).
 **Predecessor:** [`V1_60_PLAN.md`](V1_60_PLAN.md) (CounterTop hub —
 peer spycs discover each other, hub aggregates state).
 **Inspiration:** [rmux](https://github.com/helvesec/rmux) and its

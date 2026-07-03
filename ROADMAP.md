@@ -1,98 +1,120 @@
 # spyc roadmap
 
-The single living roadmap. Strategy, backlog, launch plan, and the
-post-2.0 arc all live here; `BACKLOG_DRAFT_NOTES.md` is the owner's raw intake
-backlog, and `CHANGELOG.md` is the shipped history. Detailed designs
-for not-yet-started work live in `docs/*_PLAN.md` (indexed at the
-bottom); shipped plans are archived in `docs/archive/`.
+The single living roadmap. Strategy, backlog, launch plan, and the post-2.0 arc
+all live here; `BACKLOG_DRAFT_NOTES.md` is the owner's raw intake backlog, and
+`CHANGELOG.md` is the shipped history. Detailed designs for not-yet-started
+work live in `docs/*_PLAN.md` (indexed at the bottom); shipped plans are
+archived in `docs/archive/`.
 
 ## Thesis
 
-spyc is a vi-keyboard-driven file commander that exposes itself to an
-AI coding agent as a queryable context source. The target user is a
-developer who already thinks in vi motions and wants Claude Code
-living in the same workspace -- not one window over, not in a browser
-tab, in the same session, sharing context.
+spyc is a vi-keyboard-driven file commander that exposes itself to an AI coding
+agent as a queryable context source. The target user is a developer who already
+thinks in vi motions and wants Claude Code living in the same workspace -- not
+one window over, not in a browser tab, in the same session, sharing context.
 
-The MCP server shifted the tool's nature: spyc isn't just "a file
-manager with Claude in a pane." It's a file manager that Claude can
-query -- current directory, cursor, picks, inventory, filter, git
-branch -- via a standard protocol. That bidirectional awareness is the
-positioning that differentiates spyc from `tmux` + `claude`.
+The MCP server shifted the tool's nature: spyc isn't just "a file manager with
+Claude in a pane." It's a file manager that Claude can query -- current
+directory, cursor, picks, inventory, filter, git branch -- via a standard
+protocol. That bidirectional awareness is the positioning that differentiates
+spyc from `tmux` + `claude`.
 
-Every other feature -- picks, inventory, pager, status bar, sessions --
-is supporting infrastructure that makes the split-pane workflow fast
-and comfortable. The roadmap is organized accordingly: the
-pane-and-agent integration is the defining work track, not the
-trailing milestone.
+Every other feature -- picks, inventory, pager, status bar, sessions -- is
+supporting infrastructure that makes the split-pane workflow fast and
+comfortable. The roadmap is organized accordingly: the pane-and-agent
+integration is the defining work track, not the trailing milestone.
 
-## Where we are (v1.57.0)
+## Where we are (v1.97.2)
 
-The structural foundation is **done**: the full MVU/Elm migration
-(Model/Runtime/ViewState split, effects-as-data, single message
-channel, pure render), the `app/mod.rs` decomposition (12.4k → ~1k
-lines, ceiling-guard-enforced), the 800-LoC file rule, the complete
-git→gix migration (100% in-process, guard-enforced, with in-house
-side-by-side diff/show/blame views), off-thread PagerStream (grep /
-git-view / agent transcripts on one seam), and unified input routing
-(`route_input`/`InputSink`, `Focus` as the routing authority).
-AGENTS.md is the architectural contract + conventions; ARCHITECTURE.md
-holds the deep design decisions. What remains before 2.0 is daily-driver
-papercuts, two gating thesis features, and the distribution/launch
-pass — see "Road to 2.0."
+The structural foundation has been **done** for a while: the full MVU/Elm
+migration (Model/Runtime/ViewState split, effects-as-data, single message
+channel, pure render), the `app/mod.rs` decomposition (12.4k → ~1k lines,
+ceiling-guard-enforced), the 800-LoC file rule, the complete git→gix migration
+(100% in-process, guard-enforced, with in-house side-by-side diff/show/blame
+views), off-thread PagerStream (grep / git-view / agent transcripts on one
+seam), and unified input routing (`route_input`/`InputSink`, `Focus` as the
+routing authority).
+
+Since then the **thesis work has largely shipped** — the differentiators the
+competitive review ([`docs/COMPETITIVE_REVIEW.md`](docs/COMPETITIVE_REVIEW.md))
+named as spyc's wedge are now real, not planned:
+
+- **Agent awareness (P0–P3, complete).** Per-pane activity dots driven by an
+  MCP/hook *self-report* channel (working/blocked/done) with an output-timing
+  fallback, desktop notifications + a branded visual-bell border pulse on the
+  attention transition, and live Claude session-id pinning so `-r` resumes the
+  *exact* conversation. The reliable, cooperative answer to "which agent needs
+  me" that herdr does fragile-ly by screen-scraping. See
+  [`docs/AGENT_ORCHESTRATION.md`](docs/AGENT_ORCHESTRATION.md).
+- **Worktree MCP suite.** `list`/`create`/`open`/`remove`/`clean_worktrees` +
+  leases, all in-process gix; safe-by-default teardown archives to the graveyard.
+- **Merge / scope registry (P2).** `register_scope`/`list_scopes`/
+  `wait_for_scope_clear`/`release_scope` for advisory multi-agent merge
+  coordination, plus the `spyc-semver` merge driver that auto-resolves the
+  version-line conflict every concurrent PR collides on.
+- **In-process review loop.** Syntax-highlighted side-by-side diff/show/blame
+  per worktree — the uncontested review wedge in the TUI lane.
+- **Vertical split (Stage 1 + 2).** A live-reloading preview column, plus a full
+  second file-commander with its own cwd/git/harpoon and worktree-scoped MCP.
+- **Lua scripting.** `map KEY lua` + an `init.lua` platform (`spyc.map`/
+  `spyc.command`/`spyc.on` events, full-`Action` `spyc.action`, live reads) on a
+  sandboxed off-thread worker.
+- **Chord + command overhaul.** which-key hint popup, `Space` leader, the
+  `command`/`lua` DSL verbs, and a guard-enforced global/frame/pane tier
+  taxonomy; low-frequency features demoted to `:`-commands.
+- **Crash-sufficient autosave**, `^z` pane suspend/resume, and per-channel
+  notification gating (`Blocked`-only bell/flash, quiet `Done` desktop ping).
+
+AGENTS.md is the architectural contract + conventions; ARCHITECTURE.md holds
+the deep design decisions. The feature set is **launch-ready** — what remains
+before 2.0 is just the distribution / launch pass. The daily-driver papercuts
+and the near-term thesis features (session forking, prompt templates) are
+post-2.0 work — see "Road to 2.0."
 
 ## Working tracks
 
-Work proceeds along three parallel tracks. They're not strictly
-sequential; distribution work can land while thesis work is still in
-flight, and foundations work continues throughout.
+Work proceeds along three parallel tracks. They're not strictly sequential;
+distribution work can land while thesis work is still in flight, and
+foundations work continues throughout.
 
-- **Foundations** -- testing, hardening, build hygiene. The minimum to
-  not embarrass ourselves and to make every other change safer.
-- **Thesis** -- deepening the agent integration until the split-pane
-  workflow is measurably better than `tmux` + `claude` for the target
+- **Foundations** -- testing, hardening, build hygiene. The minimum to not
+  embarrass ourselves and to make every other change safer.
+- **Thesis** -- deepening the agent integration until the split-pane workflow
+  is measurably better than `tmux` + `claude` for the target
   audience. This is where the tool earns its reason for being.
-- **Distribution** -- release automation, signing, packaging, docs.
-  Turns a repo into a tool people can install, trust, and find.
+- **Distribution** -- release automation, signing, packaging, docs.  Turns a
+  repo into a tool people can install, trust, and find.
 
 ## Road to 2.0
 
-2.0 is a public-distribution + signaling bump. The path is
-deliberately lean: fix the daily-driver papercuts, finish the gating
-thesis features, finish distribution, launch. (The structural items
-that used to lead this list — decomposition and the MVU rewrite —
-shipped, as has the test-de-risking campaign (workflow harness,
-proptest/cargo-fuzz, workflow coverage — see
-[`docs/archive/TESTING_STRATEGY.md`](docs/archive/TESTING_STRATEGY.md));
-the deep structural arc that *remains* is post-2.0.)
+2.0 is a public-distribution + signaling bump — **not** a feature gate. Where we
+stand today is launch-ready: the structural foundation, the agent-awareness
+wedge, the in-process review loop, worktrees + scope registry, vsplit, and Lua
+all shipped (see "Where we are"), on top of the MVU rewrite and the
+test-de-risking campaign (workflow harness, proptest/cargo-fuzz — see
+[`docs/archive/TESTING_STRATEGY.md`](docs/archive/TESTING_STRATEGY.md)).
 
-1. **Daily-driver fixes.** Small, high-value, mostly standalone:
-   - `^a s` path handoff Option A — anchor sent paths on the pane's
-     *live* cwd, not `PROJECT_HOME` (live bug;
-     [`docs/drafts/PATH_HANDOFF_PLAN.md`](docs/drafts/PATH_HANDOFF_PLAN.md)).
-   - Configurable startup pane tabs — `[pane] tabs = [...]`
-     ([`docs/drafts/PANE_STARTUP_TABS_PLAN.md`](docs/drafts/PANE_STARTUP_TABS_PLAN.md)).
-   - Pane recovery **Phase 0** — cosmetic vt100-snapshot backdrop on a
-     just-respawned pane
-     ([`docs/drafts/PANE_RECOVERY_PLAN.md`](docs/drafts/PANE_RECOVERY_PLAN.md)).
-   - Cwd-export-on-quit (`--cwd-file`), keymap-DSL completeness +
-     `unmap`, PgUp/PgDn pane discoverability — all under
-     "Foundations backlog" below.
-2. **Thesis features that gate 2.0.** Session forking (`^a f`) and
-   prompt templates in `.spycrc.toml` — both described under "Thesis
-   backlog," both implementable on current plumbing.
-3. **Distribution / launch.** The launch plan below, end to end.
+So the **only** thing between here and 2.0 is the **distribution / launch pass** —
+the launch plan below, end to end. Everything else moves to post-2.0: the
+daily-driver papercuts (path handoff, startup pane tabs, pane-recovery Phase 0,
+cwd-export, keymap-DSL completeness, PgUp/PgDn — Foundations backlog) and the
+near-term thesis features (session forking `^a f`, prompt templates — Thesis
+backlog). Good, standalone work; it just doesn't block the launch.
 
-**v2.0 — public distribution launch.** Cut once the daily-driver
-fixes, session forking, prompt templates, and the launch plan are
-done. External announcement (TripStack engineering blog, optional
-Show HN). The major bump is a signaling choice as much as a semver
-one — the MCP positioning shift + public distribution mark the
-transition.
+**v2.0 — public distribution launch.** Cut once the launch plan is done.
+External announcement (TripStack engineering blog, optional Show HN). The major
+bump is a signaling choice as much as a semver one — the MCP positioning shift +
+public distribution mark the transition.
 
 ## Launch plan (2.0)
 
-Benchmarked against Yazi (github.com/sxyazi/yazi, ~37k stars) as the
+> **Execution manual:** this section holds the strategic gates and open
+> decisions; the end-to-end release *mechanics* — release streams, CI
+> workflows, signing/notarization, Homebrew, org setup — live in
+> [`docs/RELEASE_ENGINEERING.md`](docs/RELEASE_ENGINEERING.md), the launch
+> operating manual. Keep the two in sync when a gate moves.
+
+Benchmarked against Yazi (github.com/sxyazi/yazi, ~39.9k stars) as the
 gold-standard reputable TUI tool. The MCP / Claude-Code pairing
 remains spyc's differentiator — Yazi has nothing like it; keep it
 front and centre. Goal: a release that someone reading the repo cold
@@ -102,19 +124,15 @@ works for me."
 
 ### Open decisions
 
-- [ ] **Repo home: GitHub move vs mirror.** The two positions on
-  record, unresolved — **decide before any github-side work**:
-  - *Move* (the launch-prep recommendation): create
-    `github.com/<org>/spyc` as canonical, push full history, retire
-    Bitbucket — single source of truth. Org choice (Etraveli vs
-    Tripstack vs personal) keys everything downstream: `Cargo.toml
-    repository =`, `.github/` workflows, Homebrew tap namespace.
-  - *Mirror* (the earlier roadmap position): read-only GitHub mirror
-    synced from Bitbucket on every push; Bitbucket stays canonical.
-    Cheaper, but splits attention and GitHub-native flows (issues,
-    releases, Actions) stay second-class.
-  - Operational reality to weigh: the team currently runs on
-    Bitbucket (bkt, Pipelines, branch conventions).
+- [x] **Repo home: RESOLVED (2026-07-02) — full move to GitHub.**
+  `github.com/Tripstack-Corp/spyc` is canonical; **all dev + CI move there**
+  (not a mirror). The repo stays **private** until launch. `Cargo.toml
+  repository =`, the clone URLs (README/INSTALL/CONTRIBUTING), and the CI moved
+  in this pass: `.github/workflows/{ci,audit}.yml` port the retired
+  `bitbucket-pipelines.yml` (archived under `docs/archive/`). Remaining
+  GitHub-side setup (branch protection on `main`, the weekly-audit schedule,
+  and the distribution workflows — release/snapshot/homebrew per
+  RELEASE_ENGINEERING.md) is done on the repo before it goes public.
 - [ ] **License footer.** Already BSD-3-Clause in `Cargo.toml`;
   confirm for public release and that LICENSE is at repo root.
 - [ ] **Status statement wording.** Default proposal: *"Public beta,
@@ -306,11 +324,11 @@ once we've daily-driven our own builds for a few days.
   with the DnD drop-action picker (Additional Ideas) — implement the
   routing once, expose via both. `^v` is currently a no-op outside
   prompts, so the binding is free.
-- **Session forking (`^a f`)** — 2.0 gate. Duplicate a pane tab with
+- **Session forking (`^a f`)** — post-2.0 (near-term). Duplicate a pane tab with
   scrollback replayed so a Claude conversation can branch without
   losing the prior line of inquiry. Implementable with current
   plumbing.
-- **Prompt templates in `.spycrc.toml`** — 2.0 gate. User-defined
+- **Prompt templates in `.spycrc.toml`** — post-2.0 (near-term). User-defined
   macros that send a pre-composed prompt with picks/inventory
   substituted — e.g. `map "<space>cr" claude-template review`. Turns
   spyc into a keyboard-driven Claude launcher for repeated workflows.
@@ -402,24 +420,44 @@ once we've daily-driven our own builds for a few days.
     concurrent `:land`s queue rather than race — plus an MCP `land_pr`
     tool. The useful 5% of "the conductor"; not scope declaration.
 
-## Post-2.0 (2.x) — the structural arc
+## Post-2.0 (2.x)
 
-Held until 2.0 has shipped and stabilized. These build on each other
-in order; the MVU prerequisite they used to wait on is done.
+Held until 2.0 has shipped and stabilized. Two layers: the **near-term deferred
+work** (launch-adjacent features that simply don't gate distribution), then the
+**structural arc** (larger pieces that build on each other in order; the MVU
+prerequisite they used to wait on is done).
+
+**Near-term deferred — first post-2.0 batch.** The daily-driver papercuts —
+`^a s` path handoff Option A, configurable startup pane tabs, pane-recovery
+Phase 0, cwd-export-on-quit, keymap-DSL completeness + `unmap`, PgUp/PgDn
+discoverability (all in Foundations backlog) — plus the two near-term thesis
+features: session forking (`^a f`) and prompt templates (Thesis backlog). All
+implementable on current plumbing; deferred purely so they don't block launch.
+
+**The structural arc:**
 
 - **Mise en Place — typed addressability + crate split**
-  ([`docs/drafts/V1_70_PLAN.md`](docs/drafts/V1_70_PLAN.md)). Stations (stable pane
-  handles), Plates (structured snapshots), the typed Order-rail
-  protocol, and Bell primitives (observed waits) that retire timer
-  hacks like `RESTORE_BANNER_SETTLE` and the resume verify-retry
-  loop. One protocol, three clients: MCP server, `spyc-sdk` crate,
-  `spyc` CLI subcommands. Includes the single-responsibility crate
-  split (`spyc-proto`/`spyc-pty`/`spyc-os` for unsafe isolation/…).
-  Lands *before* CounterTop so the hub rides a real protocol.
-- **CounterTop — multi-instance hub**
-  ([`docs/drafts/V1_60_PLAN.md`](docs/drafts/V1_60_PLAN.md)). Peer-spyc discovery,
-  a HUD aggregating per-workspace agent state, frame mirroring +
-  take-control, `--hub` mode. Rides on the Order rail.
+  (archived design: [`docs/archive/V1_70_PLAN.md`](docs/archive/V1_70_PLAN.md)).
+  Stations (stable pane handles), Plates (structured snapshots), the
+  typed Order-rail protocol, and Bell primitives (observed waits) that
+  retire timer hacks like `RESTORE_BANNER_SETTLE`. One protocol, three
+  clients: MCP server, `spyc-sdk` crate, `spyc` CLI subcommands; plus the
+  single-responsibility crate split (`spyc-proto`/`spyc-pty`/`spyc-os`).
+  **Already shipped in spirit:** the MCP socket delivers the *value*
+  informally today — `SPYC_PANE_ID` (stable handles), `get_spyc_context`
+  + `navigate_to`/`pick_files` (read + drive), `wait_for_scope_clear` (an
+  observed wait). Unbuilt = the *typed* protocol + crate split + SDK — a
+  large speculative refactor, worth it only if external drive (an SDK /
+  CLI harness) becomes a real ask.
+- **CounterTop — multi-instance hub** *(considered & parked — likely not the
+  path)* (archived design: [`docs/archive/V1_60_PLAN.md`](docs/archive/V1_60_PLAN.md)).
+  Peer-spyc discovery, a HUD aggregating per-workspace agent state, frame
+  mirroring + take-control, `--hub`/`--detached` headless spycs. The attention
+  pain it targets ("which agent needs me, across windows?") was met the
+  *single-process* way instead — in-instance agent-status dots + notifications
+  + the MCP scope registry — and the hub/headless-daemon shape fights spyc's
+  single-process MVU/sync core (the same reason a detach/reattach daemon is out
+  of scope). Stays archived design-history unless that calculus changes.
 - **Auto-approval & action log**
   ([`docs/drafts/AUTO_APPROVAL_PLAN.md`](docs/drafts/AUTO_APPROVAL_PLAN.md)).
   Curate each agent's *native* permission system + a `:approvals`
@@ -443,9 +481,10 @@ before graduating to a track.
     (probed: no `\e[?1049h`; just `\e[2K`/`\e[1G` line redraws +
     `\e[?2026` synchronized output). So vt100 scrollback already
     applies to the plain REPL. A plain-`ollama` `AgentProfile`
-    (detection + `AgentKind::Ollama` + restore-as-fresh) is
-    **complete but PARKED, unmerged, on branch
-    `feat/ollama-agent-profile`** — merge it if plain-REPL
+    (detection + restore-as-fresh) was drafted on branch
+    `feat/ollama-agent-profile`, but that branch was **pruned in the
+    2026-07 launch-prep branch cleanup** (its tip is recoverable from
+    reflog for ~90 days) — recover or re-do it if plain-REPL
     recognition is wanted on its own.
   - The user's actual "ollama harness" is a **full-screen (alt-screen)
     wrapper / third-party tool** backed by ollama (not plain
@@ -478,8 +517,8 @@ Lower-priority items. Will graduate to a track when picked up.
   is still syntect (regex-based). Tree-sitter is incremental, more
   accurate, and what Neovim/Helix use — a real refactor of
   `src/ui/syntax.rs` (grammars as crates, static or `.so`-loadable).
-  Pairs with the `spyc-render-core` crate split in V1_70. (Reported
-  by Spencer.)
+  Pairs with the `spyc-render-core` crate split from the archived Mise
+  en Place design. (Reported by Spencer.)
 - **History popup kind routing.** Double-Esc opens
   `show_history_popup`, but it's hardcoded to the shell bucket; for
   `:` (which has its own `command_history`) it shows the wrong one.
@@ -541,9 +580,9 @@ and the roadmap committing to that saves a lot of drift.
 
 - **Native Windows support.** WSL is the supported story.
   `portable-pty` technically works on Windows but debugging the
-  failure modes is a tax we're not paying. (V1_70's crate split
-  isolates platform code so a future volunteer *could* — that's the
-  extent of the commitment.)
+  failure modes is a tax we're not paying. (A future crate split — the
+  archived Mise en Place design — would isolate platform code so a
+  volunteer *could*; that's the extent of the commitment.)
 - **Plugin system.** A decade of maintenance debt for a feature 3% of
   users will touch. The `.spycrc` DSL and keymap extensibility are
   the customization surface.
@@ -597,7 +636,8 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   ps/lsof). "Lightweight" means small runtime + few transitive deps,
   not "avoid crates."
 - **No `unsafe` going forward** — DI / rustix / signal-hook over raw
-  libc; unsafe is exceptional and isolated (V1_70 gives it a crate).
+  libc; unsafe is exceptional and isolated (a future crate split would
+  give it a dedicated crate).
 
 ## Doc map
 
@@ -611,17 +651,20 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `ARCHITECTURE.md` | Deep stable design decisions. |
 | `DESIGN.md` | UI design language (theme, components, glyphs). |
 | `FEATURES.md` | User-facing feature reference. |
+| `CONFIGURATION.md` | Config reference (`.spycrc.toml`, notifications, keymap DSL, Lua). |
+| `docs/RELEASE_ENGINEERING.md` | The launch operating manual — release streams, CI, signing, Homebrew, org setup. |
+| `docs/BRAND.md` | Brand & identity — the name story, palette, voice. |
+| `docs/AGENT_ORCHESTRATION.md` | How the agent activity-dots / notifications / session-resume / scope registry fit together (living reference). |
 | `docs/drafts/AUTO_APPROVAL_PLAN.md` | Pending design (post-2.0). |
-| `docs/drafts/PANE_RECOVERY_PLAN.md` | Pending design (Phase 0 is road-to-2.0). |
 | `docs/drafts/PANE_STARTUP_TABS_PLAN.md` | Pending design (road-to-2.0). |
 | `docs/drafts/PATH_HANDOFF_PLAN.md` | Pending design (Option A is road-to-2.0). |
 | `docs/archive/TESTING_STRATEGY.md` | Testing strategy & guidelines (coverage, anti-"test theater", proptest/cargo-fuzz, AI-testing rules). Campaign complete (#426–#438); kept as the how-we-test reference. |
-| `docs/drafts/V1_60_PLAN.md` | Pending design (post-2.0, after V1_70). |
-| `docs/drafts/V1_70_PLAN.md` | Pending design (post-2.0, first in the arc). |
+| `docs/archive/V1_60_PLAN.md` | Archived design — CounterTop multi-instance hub. Considered & parked (fights the single-process core); summarized in Post-2.0. |
+| `docs/archive/V1_70_PLAN.md` | Archived design — Mise en Place typed addressability + crate split. Post-2.0 speculative; MCP already covers the basics. Summarized in Post-2.0. |
 | `docs/COMPETITIVE_REVIEW.md` | Consolidated competitive review + GTM: the AI coding-agent-manager category (§1–§1c: herdr, psmux, claude-code-ide.el) plus the TUI file-manager lane (§1d: Yazi, folded 2026-07-02). Refresh on a competitor's next major. (Standalone Yazi original archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md`.) |
 | `docs/archive/` | Shipped plans, kept as historical record. |
 
-> **Note on pending plans:** the four feature plans predate the MVU
+> **Note on pending plans:** the three feature plans predate the MVU
 > decomposition — their designs hold, but `src/app/mod.rs:NNNN`-style
 > file pointers are stale; re-resolve against the current module
 > layout when picking one up.

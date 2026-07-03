@@ -187,9 +187,8 @@ collapse to the current single-region behavior.
 
 ### Companion concerns
 
-- `toggle_pane` interaction: the hide-don't-kill path
-  ([`PANE_RECOVERY_PLAN.md`](PANE_RECOVERY_PLAN.md) Tier 1 and the
-  open `feature-pane-toggle-preserve-context` work) generalizes
+- `toggle_pane` interaction: the hide-don't-kill path (the open
+  `feature-pane-toggle-preserve-context` work) generalizes
   cleanly — hide the entire pane row regardless of split count.
 - Per-split persistence: `Session.splits: Vec<Vec<SavedTab>>` if we
   go there. Backwards-compat by treating today's `Session.tabs` as

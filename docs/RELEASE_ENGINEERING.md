@@ -129,8 +129,8 @@ and **Security Advisories**. spyc's equivalents:
   path, announced in the release notes under a dedicated "Errata" heading.
 - **Signing:** release notes + `SHA256SUMS` are signed (§9) so an advisory's
   artifacts are verifiable.
-- **Supply chain:** `audit.yml` runs `cargo deny check advisories` weekly (ports
-  the current Bitbucket `weekly-deps` pipeline) so RUSTSEC advisories surface
+- **Supply chain:** `audit.yml` runs `cargo deny check advisories` weekly (ported
+  from the retired Bitbucket `weekly-deps` pipeline) so RUSTSEC advisories surface
   between releases; optionally Dependabot for the Actions themselves.
 
 ## 7. Support & EOL policy
@@ -152,25 +152,28 @@ previous minor for a short tail.** Expand windows as the user base grows.
 
 Five workflows under `.github/workflows/`. All pin the toolchain via
 `rust-toolchain.toml` and run cargo with `--locked`. The local `make` targets
-are the source of truth — Actions *call them* so local and CI never drift (the
-same discipline the current Bitbucket pipeline uses).
+are the source of truth — Actions *call them* so local and CI never drift.
 
-> **Dev-platform decision (open — §13.3):** these Actions assume development
-> moves to GitHub for the public launch. If dev stays on Bitbucket and GitHub is
-> a distribution mirror, keep `bitbucket-pipelines.yml` as the quality gate and
-> port only `release.yml`/`snapshot.yml`/`homebrew.yml` to Actions on the public
-> repo. The workflows below are a direct port of the existing Bitbucket pipeline
-> either way.
+> **Dev-platform: RESOLVED (2026-07-02) — full move to GitHub.** All dev + CI run
+> on GitHub Actions; `bitbucket-pipelines.yml` is retired (archived under
+> `docs/archive/`). **`ci.yml` and `audit.yml` are implemented** — direct ports
+> of the retired pipeline. `release.yml`, `snapshot.yml`, and `homebrew.yml`
+> remain to build; they gate on the launch-distribution decisions (signing, org
+> secrets, the Homebrew tap), so they land with the distribution work, not the
+> dev-CI move.
 
-### `ci.yml` — quality gate (PR + push to `main` / `stable/*` / `releng/*`)
-- Matrix: `ubuntu-latest` + `macos-latest` (catch OS-gated lints both ways —
-  replaces `make lint-linux` needing zig locally).
-- Steps: checkout → toolchain (cached) → `cargo-deny` (prebuilt binary, sha-
-  pinned, as today) → `CARGO_INCREMENTAL=0 make check` (fmt + clippy + test +
-  deny) → coverage job `cargo llvm-cov --locked --all-targets --fail-under-lines
-  35`.
-- This is a direct port of `bitbucket-pipelines.yml` (quality + coverage,
-  parallel). Required status check for branch protection.
+### `ci.yml` — quality gate (PR + push to `main`) — **IMPLEMENTED**
+- Direct port of the retired `bitbucket-pipelines.yml`: `lint` (fmt + clippy +
+  deny) ∥ `test` on PRs, plus a `coverage` job (`cargo llvm-cov --locked
+  --all-targets --fail-under-lines 35`) on pushes to `main`. Toolchain cached via
+  `Swatinem/rust-cache`; `cargo-deny` + `cargo-llvm-cov` are the same sha-pinned
+  prebuilt binaries as before; `CARGO_INCREMENTAL=0` throughout. Make it a
+  required status check in branch protection.
+- **Follow-ups:** (1) add a `macos-latest` matrix leg to catch OS-gated lints
+  both ways (replaces needing `make lint-linux` + zig locally) — the initial
+  port is Linux-only, matching the retired pipeline; (2) extend the trigger to
+  `stable/*` / `releng/*` once Stage 2 branches exist. Both are cheap once the
+  Linux gate is confirmed green on GitHub.
 
 ### `release.yml` — build, sign, publish (on tag `v*`)
 - **Trigger:** `push: tags: ['v*']`. Detect `-beta`/`-rc` → mark GitHub Release
@@ -198,21 +201,20 @@ same discipline the current Bitbucket pipeline uses).
   recreate, or a dated tag pruned to last N). Unsigned-acceptable; clearly
   labeled "testing only."
 
-### `audit.yml` — supply-chain drift (schedule)
+### `audit.yml` — supply-chain drift (schedule) — **IMPLEMENTED**
 - Weekly `cargo deny check advisories` (fresh RUSTSEC DB) + `cargo outdated` +
-  `cargo tree --duplicates`. Ports the Bitbucket `weekly-deps` custom pipeline.
-  Failures open/notify (GitHub issue or Slack).
+  `cargo tree --duplicates` (Mon 06:00 UTC + manual dispatch). Ported from the
+  retired Bitbucket `weekly-deps` pipeline. The old Bitbucket→Slack failure
+  notification does *not* carry over — add a GitHub-issue/Slack step if wanted.
 
 ### `homebrew.yml` — tap bump (on release published)
 - On a non-prerelease publish, compute the new artifacts' SHAs and open a PR (or
   push) to `Tripstack-Corp/homebrew-tap` updating the `spyc` formula/cask.
   Needs a `HOMEBREW_TAP_TOKEN` secret.
 
-**Cross-cutting:** `concurrency` groups to cancel superseded runs; secrets =
-`GPG_KEY`/`GPG_PASSPHRASE` (if GPG signing) and `HOMEBREW_TAP_TOKEN`; cosign uses
-OIDC (no stored key). If development stays on Bitbucket (§13.3), the public repo
-still ships the Actions above; `bitbucket-pipelines.yml` remains the internal
-gate.
+**Cross-cutting:** `concurrency` groups to cancel superseded runs (already wired
+in `ci.yml`); secrets = `GPG_KEY`/`GPG_PASSPHRASE` (if GPG signing) and
+`HOMEBREW_TAP_TOKEN`; cosign uses OIDC (no stored key).
 
 ## 9. Artifacts, signing & distribution
 
@@ -303,15 +305,18 @@ mark).
 spyc keeps its name and git history — the public launch is publishing the
 existing repo, not seeding a clean slate. Ordered to stand the whole thing up:
 
-1. **Decide the public-repo topology (§13.4):** publish the existing spyc
-   history to `Tripstack-Corp/spyc`, or seed a fresh public repo and keep
-   Bitbucket as the internal history-of-record. Then create the supporting repos
-   — `Tripstack-Corp/.github` (org profile), `Tripstack-Corp/homebrew-tap`.
+1. **Decide the public-repo topology (§13.4):** the private
+   `Tripstack-Corp/spyc` is canonical — decide whether to flip it public with
+   full history intact or curate/squash a seed first (Bitbucket is retired, not
+   a fallback record). Then create the supporting repos — `Tripstack-Corp/.github`
+   (org profile), `Tripstack-Corp/homebrew-tap`.
 2. Set org avatar (Tripstack logo) + profile README + descriptions.
-3. **Resolve the launch gates (§13):** license final form + maintainer/IP
-   sign-off (§13.1–2); dev/CI platform (§13.3); the public homage-line framing
-   (§13.6).
-4. Add `.github/workflows/{ci,release,snapshot,audit,homebrew}.yml`.
+3. **Resolve the remaining launch gates (§13):** license final form +
+   maintainer/IP sign-off (§13.1–2, both launch blockers). Dev/CI platform
+   (§13.3) is resolved — full GitHub. The homage-line framing (§13.6) is already
+   implemented in the README (nominative lineage + disclaimer); confirm and close.
+4. Add the remaining workflows — `.github/workflows/{release,snapshot,homebrew}.yml`
+   (`ci.yml` + `audit.yml` already exist).
 5. Add/refresh community-health files (LICENSE, SECURITY.md Supported-Versions
    table, CONTRIBUTING, add CODE_OF_CONDUCT, issue/PR templates, CODEOWNERS).
 6. Repo About: description, homepage, topics; upload the social-preview card.
@@ -337,15 +342,17 @@ existing repo, not seeding a clean slate. Ordered to stand the whole thing up:
    root `LICENSE` file, `deny.toml`, and BRAND.md. **Launch blocker.**
 2. **Maintainer / IP:** confirm Tripstack owns the work and signs off on a public
    OSS release under the company name. **Launch blocker.**
-3. **CI / dev platform:** move development to GitHub (Actions + `gh`, keep-branch
-   rule becomes GitHub-native), or keep dev on Bitbucket (`bkt` + Pipelines) and
-   publish to GitHub as a distribution mirror? Canonical-public argues for
-   GitHub; the team's current flow is Bitbucket. *(Largest non-code workstream.)*
-4. **Public-repo topology:** carry the existing git history to the public repo
-   (transparent "built from scratch" trail) vs. seed a fresh public repo (drop
-   internal planning/review docs + the owner's backlog from the public record,
-   keep Bitbucket as provenance). *(Recommend: carry history if nothing sensitive
-   is in it; otherwise curate a seed.)*
+3. **CI / dev platform — RESOLVED (2026-07-02): full move to GitHub.** All dev +
+   CI run on `github.com/Tripstack-Corp/spyc` (Actions + `gh`); the repo stays
+   private until launch. `bitbucket-pipelines.yml` is retired (archived);
+   `ci.yml` + `audit.yml` are ported and live in `.github/workflows/`. `bkt` →
+   `gh`; PRs, branch protection, and required checks are GitHub-native.
+4. **Public-repo topology:** flip the private, full-history `Tripstack-Corp/spyc`
+   public with its history intact (transparent "built from scratch" trail) vs.
+   curate/squash a seed first (drop internal planning/review docs + the owner's
+   backlog from the public record). Bitbucket is retired, so it is no longer a
+   provenance fallback. *(Recommend: carry history if nothing sensitive is in it;
+   otherwise curate a seed.)*
 5. **crates.io:** publish `spyc` (reserve the name now) or stay source/binary
    install only? *(Recommend: reserve now; publish fast-follow.)*
 6. **Public homage-line framing:** the README's "spy + claude = spyc" origin

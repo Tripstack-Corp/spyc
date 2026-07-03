@@ -6,7 +6,7 @@ workflow, standards, and conventions for the project.
 ## Getting started
 
 ```sh
-git clone git@bitbucket.org:tripstack/spyc.git
+git clone git@github.com:Tripstack-Corp/spyc.git
 cd spyc
 make doctor    # check prerequisites (rustc, cargo, zig, etc.)
 cargo build    # dev build
@@ -17,7 +17,7 @@ See `INSTALL.md` for font and terminal setup.
 
 ## Pull request workflow
 
-We use Bitbucket pull requests. The target branch is `main`.
+We use GitHub pull requests. The target branch is `main`.
 
 1. **Create a feature branch** from `main`:
    ```sh
@@ -37,12 +37,13 @@ We use Bitbucket pull requests. The target branch is `main`.
    host clippy compiles that code out. `make aislop` is an advisory
    AI-slop scan (net-new findings vs the baseline).
 
-4. **Push and open a PR** on Bitbucket:
+4. **Push and open a PR** on GitHub:
    ```sh
    git push -u origin feature/short-description
+   gh pr create              # or open one from the GitHub UI
    ```
-   Then create the PR at
-   `https://bitbucket.org/tripstack/spyc/pull-requests/new`.
+   The PR targets `main` at
+   `https://github.com/Tripstack-Corp/spyc/pulls`.
 
 5. **PR title** should be concise (under 70 chars). Use the body for
    details. Format:
@@ -188,8 +189,12 @@ uses `merge=ours`) picks up the resolved version.
 
 ## CI
 
-Bitbucket Pipelines runs `make check` on every push. The pipeline
-must pass before merge.
+GitHub Actions (`.github/workflows/ci.yml`) runs the quality gate on every PR
+(fmt + clippy + deny as one job, tests in parallel) and adds a coverage gate on
+merges to `main`. All jobs must pass before merge. A weekly
+`.github/workflows/audit.yml` re-runs `cargo deny check advisories` against a
+fresh RUSTSEC DB. CI pins the toolchain via `rust-toolchain.toml`, so it matches
+your local `make check`.
 
 ## Cross-compilation
 
@@ -232,4 +237,4 @@ See `AGENTS.md` for the full per-module index.
 
 ## Questions?
 
-Open an issue on Bitbucket or reach out to Derek Marshall.
+Open an issue on GitHub or reach out to Derek Marshall.

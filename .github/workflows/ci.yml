@@ -1,0 +1,98 @@
+# spyc CI — fmt, clippy, tests, supply-chain (cargo-deny), coverage.
+#
+# Ported from the retired `bitbucket-pipelines.yml` (archived under
+# docs/archive/). Same contract:
+#   - PR                  → lint ∥ test
+#   - push to main (merge)→ lint ∥ test ∥ coverage
+#   - feature push, no PR → no CI (open the PR for feedback)
+#
+# Toolchain is pinned by `rust-toolchain.toml` (rustup auto-installs and
+# selects it on the first cargo call, incl. the rustfmt/clippy components),
+# so a new stable Rust release can't silently tighten lints. All cargo
+# invocations use --locked (via the Makefile) so a Cargo.lock drift fails
+# loudly. The C compiler on ubuntu-latest is load-bearing: spyc links
+# compiled-C deps (zstd-sys/libzstd, mlua-sys/vendored Lua 5.4).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same PR/branch cancels the in-flight run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The per-crate incremental metadata embeds paths/timestamps that go stale
+  # across runners and defeat warm-cache reuse; disabling it also shrinks the
+  # cache. (Matched the Bitbucket pipeline.)
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Lint + supply-chain (fmt, clippy, deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain + C compiler (load-bearing for *-sys crates)
+        run: rustc --version && cargo --version && cc --version
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-deny (pinned, sha256-verified)
+        run: |
+          CARGO_DENY_VERSION=0.19.4
+          CARGO_DENY_SHA256=3bd58b784e83715b86ddbc9deac591890372ec77fda5741bb0826970b958506f
+          CARGO_DENY_DIR=cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl
+          if ! cargo-deny --version 2>/dev/null | grep -q "${CARGO_DENY_VERSION}"; then
+            curl -sSLo /tmp/cargo-deny.tar.gz "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${CARGO_DENY_DIR}.tar.gz"
+            echo "${CARGO_DENY_SHA256}  /tmp/cargo-deny.tar.gz" | sha256sum -c -
+            tar -xzf /tmp/cargo-deny.tar.gz -C /tmp
+            install -m 0755 "/tmp/${CARGO_DENY_DIR}/cargo-deny" "$HOME/.cargo/bin/cargo-deny"
+          fi
+      # fmt-check + clippy + deny. Tests run in the parallel `test` job.
+      - run: make fmt-check lint deny
+
+  test:
+    name: Tests (cargo test --all-targets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain + C compiler
+        run: rustc --version && cc --version
+      - uses: Swatinem/rust-cache@v2
+      # line-tables-only DWARF keeps panic file:line for failures while
+      # trimming the test compile + shrinking the cache. CI-only override.
+      - name: Tests
+        env:
+          CARGO_PROFILE_DEV_DEBUG: line-tables-only
+          CARGO_PROFILE_TEST_DEBUG: line-tables-only
+        run: make test
+
+  coverage:
+    name: Coverage (ratcheting floor)
+    # MAIN-ONLY: a third full (instrumented) compile. Keeping it off the PR
+    # path lets a PR finish in max(lint, test); the --fail-under-lines ratchet
+    # then gates the merged result on main.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup component add llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov (pinned, sha256-verified)
+        run: |
+          CARGO_LLVM_COV_VERSION=0.8.7
+          CARGO_LLVM_COV_SHA256=967b5cc996c29d8baa52bbb4595ef1f53af35255af8e2036ddbc6468d7b523c7
+          if ! { cargo-llvm-cov --version 2>/dev/null || cargo-llvm-cov llvm-cov --version 2>/dev/null; } | grep -q "${CARGO_LLVM_COV_VERSION}"; then
+            curl -sSLo /tmp/cargo-llvm-cov.tar.gz "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${CARGO_LLVM_COV_VERSION}/cargo-llvm-cov-x86_64-unknown-linux-musl.tar.gz"
+            echo "${CARGO_LLVM_COV_SHA256}  /tmp/cargo-llvm-cov.tar.gz" | sha256sum -c -
+            tar -xzf /tmp/cargo-llvm-cov.tar.gz -C /tmp
+            install -m 0755 /tmp/cargo-llvm-cov "$HOME/.cargo/bin/cargo-llvm-cov"
+          fi
+      # target-cov keeps the instrumented build out of the test job's cache.
+      - name: Coverage (fail under 35% lines)
+        env:
+          CARGO_TARGET_DIR: target-cov
+        run: cargo llvm-cov --locked --all-targets --fail-under-lines 35

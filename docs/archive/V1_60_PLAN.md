@@ -1,7 +1,16 @@
 # spyc v1.60 — CounterTop
 
-**Status:** plan, not yet implemented.
-**Predecessor:** [`archive/V1_5_PLAN.md`](archive/V1_5_PLAN.md) (six-phase pager / task-viewer
+> **Archived (2026-07-02) — considered & parked.** Design-history, not an active
+> plan. A multi-instance hub with frame-mirroring + headless `--detached` spycs
+> fights spyc's single-process MVU/sync core (the same reason a detach/reattach
+> daemon is out of scope). The attention pain it targets — "which agent needs
+> me, across windows?" — was met the single-process way instead: in-instance
+> agent-status dots + notifications, and the MCP scope registry for merge
+> coordination. Live summary: `ROADMAP.md` → "Post-2.0 (2.x)". Named for a
+> version (1.60) the project shipped past (now 1.97+).
+
+**Status:** archived design (parked — see banner).
+**Predecessor:** [`V1_5_PLAN.md`](V1_5_PLAN.md) (six-phase pager / task-viewer
 unification, shipped at v1.50.0).
 
 ## Thesis

@@ -58,11 +58,11 @@ MCP socket the bottom-pane agent connects to.
 > `.spycrc.toml` (`spyc --print-config` shows the relevant
 > section). The same applies inside tmux: `^a` is screen's prefix
 > and `^b` is tmux's default — keep them distinct or `set -s
-> escape-time 0` in `.tmux.conf` to keep input snappy. When you pick three
-files and ask the agent a question, it can call `get_spyc_context`
-and see your cwd, cursor file, picks, inventory, active filter, and
-git branch — no copy-paste. When the agent mentions a path in its
-response, press `gf` to jump straight to it. Context flows both ways.
+> escape-time 0` in `.tmux.conf` to keep input snappy.
+
+When you pick three files and ask the agent a question, it can call
+`get_spyc_context` and see your cwd, cursor file, picks, inventory, active
+filter, and git branch — no copy-paste, no path description.
 
 Everything else — vi motions, marks, picks, inventory, pager, shell
 integration — is what you'd expect from a keyboard-driven file
@@ -93,7 +93,7 @@ coding agents. Precise, fast, no bulk.
 ### Install
 
 ```sh
-git clone https://bitbucket.org/tripstack/spyc.git
+git clone https://github.com/Tripstack-Corp/spyc.git
 cd spyc
 make install          # builds release + copies to ~/.local/bin (no sudo)
 ```
@@ -141,6 +141,23 @@ Search MCP tools (`search_paths`, `search_content`, `search_picks`,
 and regex content searches over the project, the user's currently-
 picked files, or the persistent yanked-file cache — the last two
 are state Claude can't see through generic filesystem tools.
+
+## Knowing which agent needs you
+
+Run agents across several tabs and the real question becomes *which one is
+waiting on me?* Each pane tab carries a live **activity dot** — a hot pulse
+while the agent works, a settled square when it's **blocked** (waiting on your
+input or a permission) or **done**. The state is self-reported by the agent
+over the same MCP/hook channel, so it's cooperative rather than screen-scraped
+and stays correct even while the agent redraws its own UI.
+
+On the transition *into* blocked or done, spyc fires a desktop notification
+naming the tab and a brief spice-heat border pulse (the visual bell) — so the
+nudge reaches you even when you're in another window. The intrusive channels
+(bell, flash) stay `Blocked`-only by default while the quiet desktop ping also
+fires on `Done`; all of it is configurable under `[notify]` (see
+[Configuration](#configuration)), and `:notify test` fires every channel on
+demand.
 
 Sessions are auto-saved on quit — and re-saved a couple of seconds after
 any change, so a crash or hard kill loses at most that window, not the
@@ -440,6 +457,7 @@ See [INSTALL.md](INSTALL.md) for detailed setup instructions.
 ## More docs
 
 - [FEATURES.md](FEATURES.md) -- complete feature reference
+- [CONFIGURATION.md](CONFIGURATION.md) -- config reference: `.spycrc.toml`, notifications, keymap DSL, Lua
 - [INSTALL.md](INSTALL.md) -- terminal, font, build, and cross-compilation setup
 - [ARCHITECTURE.md](ARCHITECTURE.md) -- concurrency model, MVU target shape, persistence, MCP transport
 - [DESIGN.md](DESIGN.md) -- UI design language: components, surfaces, palette, extension checklist

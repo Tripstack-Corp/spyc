@@ -64,7 +64,7 @@ to a newer release.
 ## Build and install
 
 ```sh
-git clone https://bitbucket.org/tripstack/spyc.git
+git clone https://github.com/Tripstack-Corp/spyc.git
 cd spyc
 make install          # builds release + copies to ~/.local/bin (no sudo)
 ```

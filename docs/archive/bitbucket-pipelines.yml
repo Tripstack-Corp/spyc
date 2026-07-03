@@ -1,3 +1,8 @@
+# ARCHIVED (2026-07-02) — RETIRED. Development + CI moved to GitHub Actions
+# (`.github/workflows/ci.yml` + `audit.yml`, ported from this file). Kept here
+# as historical record only; Bitbucket Pipelines no longer runs. Do not
+# re-activate — the repo home is github.com/Tripstack-Corp/spyc.
+#
 # spyc CI — fmt, clippy, tests, supply-chain (cargo-deny), coverage,
 # plus a scheduled dependency-drift report.
 #

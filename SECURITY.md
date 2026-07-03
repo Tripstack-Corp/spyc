@@ -10,7 +10,7 @@ If you find something wrong, contact derek.marshall@tripstack.com.
 
 spyc is a single-binary terminal file manager. It runs locally as the
 invoking user, has no network code of its own, and is distributed
-internally to Tripstack engineers from a private Bitbucket repo. The
+internally to Tripstack engineers from a private GitHub repo. The
 realistic threats are:
 
 - **Supply-chain compromise of a Rust dependency** — a transitive
@@ -35,8 +35,8 @@ beyond TOML config files we already control.
   of versions. `cargo build` will not silently bump deps.
 - **`--locked` everywhere.** `make test` / `make lint` / all release
   builds pass `--locked` to cargo, so a CI-time `Cargo.lock` drift
-  fails loudly. The Makefile and `bitbucket-pipelines.yml` both
-  enforce this.
+  fails loudly. The Makefile and the GitHub Actions CI
+  (`.github/workflows/ci.yml`) both enforce this.
 - **`cargo deny check`** runs on every CI build (advisories,
   licenses, sources, bans). Replaces the older `cargo audit` step.
   Configuration is checked in at `deny.toml` with documented reasons
@@ -60,7 +60,7 @@ beyond TOML config files we already control.
 There is no prebuilt binary distribution. Engineers install spyc by
 cloning the repo and running `make install` (default prefix
 `~/.local/bin`). The chain of trust is: SSH-authenticated `git clone`
-from Bitbucket → local Rust toolchain → local install.
+from GitHub → local Rust toolchain → local install.
 
 This means:
 
@@ -96,11 +96,11 @@ when that happens.
   give us a full audit trail, but we don't emit a CycloneDX or SPDX
   SBOM artifact. If a consumer needs one, generating it from
   `Cargo.lock` is a one-shot script away.
-- **No commit signing requirement.** Bitbucket does not enforce
-  `enforced_signed_commits` on this repo. A compromised dev account
-  could push unsigned commits indistinguishable from real ones,
-  bounded by branch restrictions (PR-only merge into `main`,
-  build-status check, single-user write list).
+- **No commit signing requirement.** The repo does not require signed
+  commits (no GitHub branch-protection rule enforcing them). A compromised
+  dev account could push unsigned commits indistinguishable from real ones,
+  bounded by branch protection (PR-only merge into `main`, required
+  status checks, restricted write access).
 - **MCP socket permissions are filesystem-default.** Anyone running
   as your user on the same machine can read the per-PID socket and
   exercise the MCP tool surface. We rely on user-process isolation,

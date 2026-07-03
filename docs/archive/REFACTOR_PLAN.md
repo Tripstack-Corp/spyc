@@ -251,7 +251,7 @@ the plan changed.)
   file crossed ~12k lines, navigation is search-not-scroll, and the
   agent-registry work showed how many fixes touch multiple handlers
   in the megafile. Decomposition also unblocks the 2.x crate split
-  (`docs/drafts/V1_70_PLAN.md`) — can't split a 12k-line monolith. Phase 3
+  (`docs/archive/V1_70_PLAN.md`) — can't split a 12k-line monolith. Phase 3
   (MVU) still held until 2.0 has shipped + stabilized ~2 weeks.
   *(Superseded later the same day — see the "GATE REVERSED" entry below;
   MVU moved pre-2.0.)*

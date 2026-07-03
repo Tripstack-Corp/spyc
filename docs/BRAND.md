@@ -14,8 +14,7 @@ default, any program in practice) — sharing a local MCP socket so the agent
 sees exactly what you're looking at: cursor, picks, inventory, branch. No
 copy-paste, no path description. macOS and Linux. Rust.
 
-That's the product in three sentences. Everything below is how it should look,
-sound, and be named.
+Everything below is how it should look, sound, and be named.
 
 ## Origin
 
@@ -35,16 +34,16 @@ sound, and be named.
 ```
 
 I learned 3D on an SGI IRIX workstation — a purple beast that sat on top of the
-desk, not under it. The software shipped a small file commander that ran in the
-terminal: keyboard only. `hjkl` to move, a key to tag, a key to yank, a key to
-go. It was the fastest I'd ever moved through a filesystem. Then the SGI went
-away, and for twenty years nothing matched it.
+desk. The software shipped a small file commander that ran in the terminal:
+keyboard only. `hjkl` to move, a key to tag, a key to yank, a key to go. It was
+the fastest I'd ever moved through a filesystem. Then the SGI went away, and
+for twenty years nothing matched it.
 
-I'm back in the terminal now, with a coding agent in the next pane. The agent is
-good. It also lives in a chat window, and I spend half my time telling it what
-it's already looking at — pasting paths, describing the tree, losing track of
-what it can see. The control I had on that purple machine and the agent I rely
-on now were in two different worlds.
+I'm back in the terminal now, with a coding agent in the next pane. The agent
+is good. It also lives in a chat window, and I spend half my time telling it
+what it's already looking at — pasting paths, describing the tree, losing track
+of what it can see. The control I had on that purple machine and the agent I
+rely on now were in two different worlds.
 
 spyc puts them in one. The file commander I missed, rebuilt in Rust, modal like
 neovim, with a socket the agent reads so it sees what I see.
@@ -62,7 +61,7 @@ keystrokes.
 
 Said aloud, *spy-see* is a near-homonym for *spicy* — and that pun is why the
 whole brand runs on chili and spice: the 🌶️ logo, the spice-pair session names,
-the warm-heat palette. The name earns the identity rather than borrowing it.
+the warm-heat palette.
 
 Spice is also the right metaphor for the tool. It's specific — not "flavor" in
 the abstract, but bright, sharp, and unmistakable, where a small amount does a
