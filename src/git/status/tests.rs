@@ -226,10 +226,12 @@ mod map_tests {
 #[cfg(test)]
 mod parity_tests {
     use super::super::{
-        StatusEntry, decode_porcelain, map_to_listing, repo_status, repo_status_stable,
+        StatusEntry, decode_porcelain, head_ref_mtime, map_to_listing, repo_status,
+        repo_status_stable,
     };
     use crate::git::test_support::run_git;
     use std::path::{Path, PathBuf};
+    use std::time::SystemTime;
 
     /// Hermetic `git status --porcelain -unormal` stdout for `dir`, via the
     /// shared `run_git` fixture (so config — e.g. rename detection — matches
@@ -461,6 +463,55 @@ mod parity_tests {
         assert!(
             index_mtime.is_some() && head_mtime.is_some(),
             "quiescent repo → both cache-key mtimes stamped"
+        );
+    }
+
+    /// Set a file's mtime to a fixed instant (no wall-clock dependence, so the
+    /// assertions below don't flake under the parallel suite's timing).
+    fn set_mtime(path: &Path, t: SystemTime) {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .and_then(|f| f.set_modified(t))
+            .unwrap_or_else(|e| panic!("set mtime on {path:?}: {e}"));
+    }
+
+    /// The HEAD-side freshness key must follow the branch ref (which a *commit*
+    /// moves), not the static `ref: refs/heads/…` HEAD pointer (which only a
+    /// *checkout* moves). Regression test for the stale-marker-after-commit bug.
+    #[test]
+    fn head_ref_mtime_tracks_branch_ref_not_static_head_pointer() {
+        let (_t, root) = repo_with_commit(); // attached HEAD → refs/heads/main
+        let gd = crate::git::discovery::gitdir(&root).expect("gitdir");
+        let branch_ref = gd.join("refs/heads/main");
+        assert!(
+            branch_ref.exists(),
+            "a fresh repo keeps the branch ref loose"
+        );
+        let older = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+        let newer = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(2_000_000_000);
+        set_mtime(&gd.join("HEAD"), older); // the pointer file last "moved" long ago
+        set_mtime(&branch_ref, newer); // a commit just advanced the ref
+        assert_eq!(
+            head_ref_mtime(&gd),
+            Some(newer),
+            "head key must follow the branch ref (moves on commit), not the HEAD pointer",
+        );
+    }
+
+    /// A detached HEAD stores the commit id in the HEAD file itself — no branch
+    /// ref to resolve — so the HEAD file's own mtime is the freshness signal.
+    #[test]
+    fn head_ref_mtime_detached_falls_back_to_head_file() {
+        let (_t, root) = repo_with_commit();
+        run_git(&root, &["checkout", "-q", "--detach"]);
+        let gd = crate::git::discovery::gitdir(&root).expect("gitdir");
+        let newer = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(2_000_000_000);
+        set_mtime(&gd.join("HEAD"), newer);
+        assert_eq!(
+            head_ref_mtime(&gd),
+            Some(newer),
+            "detached HEAD → the HEAD file's own mtime tracks commits",
         );
     }
 }
