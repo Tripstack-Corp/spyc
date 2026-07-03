@@ -1,9 +1,12 @@
-# Competitive review & go-to-market — AI coding-agent managers (June 2026)
+# Competitive review & go-to-market — AI coding-agent managers (+ the file-manager lane)
 
 Competitive analysis of the AI coding-agent orchestration tools spyc shares a
 category with, plus a go-to-market plan — grounded in **verified user voices**,
 not vendor marketing. Every quote below was fetched from its source and checked
-for verbatim text and correct attribution.
+for verbatim text and correct attribution. spyc straddles two lanes — the
+agent-manager category (§1, §1a–§1c) and the TUI **file-commander** lane, whose
+incumbent Yazi is covered in §1d (folded in 2026-07-01 from the standalone Yazi
+review; the raw original is archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md`).
 
 > **Method.** Two deep-research passes. The first (v1) drew only on vendor
 > primary sources (GitHub READMEs, changelogs, marketing pages) and produced a
@@ -62,6 +65,7 @@ lane** is where spyc lives — and it already has occupants.
 | **agent-deck** | TUI · cross-plat | 338★ · Go · MIT. Feature-maximalist: MCP socket pooling (claims 85–90% memory reduction), status-transition notifications, cost dashboard, "conductor" agents. |
 | **psmux** | TUI · **Windows** | Rust · "the native Windows tmux" (ConPTY, reads `.tmux.conf`, 83 tmux commands). A **multiplexer**, not a manager — its one agent feature renders Claude Code teammate agents into panes. No file manager, MCP, git, or context-sharing. Different lane (Windows) + different layer. See §1b. |
 | **claude-code-ide.el** | editor plugin | 1.6k★ · 109 forks · Emacs. The closest **architectural** twin outside the TUI-manager space: Claude Code runs in a hosted terminal pane (vterm/eat/ghostty) behind a **bidirectional MCP bridge** that pushes live editor context (file, selection, diagnostics, project) to Claude automatically. Different host (a 40-year-old editor, not a file commander) and different center of gravity — the buffer/editor is the noun, dired is a visited mode, not the driving UI. See §1c. |
+| **Yazi** | TUI · cross-plat · **file manager** | ~39.9k★ · Rust · the gold-standard TUI file commander (image preview, plugins + package manager, async scheduler). A *different lane* — no agent concept, no MCP; it sets the bar for the file-manager half of spyc's identity, not the agent half. See §1d. |
 | **long tail** | mixed | Chorus · Vibetunnel · VibeKanban · Mux · Happy · AutoClaude · Codirigent · Centurion · AgentWire · Baton … |
 | **spyc** | TUI · cross-plat | Rust/ratatui · in-process gix worktrees · MCP bridge · vi-keyboard **file+process+agent manager** (not just a multiplexer). |
 
@@ -293,6 +297,161 @@ you'd end up writing spyc, in Emacs Lisp, fighting the host's bones the whole
 way. It's the 30-year-old joke — *"Emacs: a great operating system, lacking
 only a decent editor"* — taken seriously and built on purpose, in Rust,
 without the Lisp tax.
+
+---
+
+## 1d. Yazi — the file-manager lane (adjacent axis, not agent-competitive)
+
+The sections above cover the *agent-manager* lane. spyc also lives in a second
+lane — the **TUI file commander** — and its closest neighbour there is
+**[Yazi](https://github.com/sxyazi/yazi)** (~39.9k★, Rust; latest stable
+v26.5.6 / 2026-05-05, no significant release since the 2026-05-28 pass — this
+fold tracks *spyc-side* changes: Lua scripting, mermaid rendering, and
+agent-awareness all shipped since). `ROADMAP.md` already cites Yazi as the
+gold-standard "reputable, install-and-rely-on TUI tool" we benchmark launch
+hygiene against, and carries four Yazi-inspired entries (bulk rename, cwd
+export, visual-mode range pick, structured event stream). Yazi is **not in the
+agent-manager game** — no MCP, no agent concept — so it doesn't move the wedge;
+it sets the bar for the *file-manager half* of spyc's identity. spyc's one-line
+distinction: a two-pane file commander whose distinguishing feature is a local
+MCP socket the bottom-pane agent (Claude Code / Codex / Gemini) calls into —
+**the file commander is the noun the agent operates on. Yazi is not in this
+game.**
+
+### Yazi's headline recent move: PR #4005 — drag and drop
+
+Merged 2026-05-28 via **kitty's OSC 72 DnD protocol**: drag files out to other
+apps, drop files in from external apps; kitty 0.47.0+ only (the only terminal
+implementing OSC 72 today); exposes Lua-facing `rt.tty` queue/flush APIs + DnD
+event bindings, ships a preset `dnd.lua` plugin (~50 files across
+`yazi-tty`/`yazi-term`/`yazi-shim`/`yazi-scheduler`/`yazi-plugin`/`yazi-binding`/`yazi-actor`).
+
+**Implication for spyc:** `ROADMAP.md`'s "drag and drop" entry predates the
+OSC 72 spec and is stale in two ways — OSC 52 is *clipboard*, not DnD (it was a
+placeholder); OSC 72 is the actual protocol but **kitty-only**, and spyc's macOS
+users are predominantly iTerm2/Ghostty/Terminal.app, so the kitty-gated payoff is
+small. Defer native DnD until ≥1 more terminal ships OSC 72; the path-paste
+fallback is an independent, cheap win that can ship on its own.
+
+### Feature-by-feature standing
+
+Columns: **Yazi** = ships it; **spyc** = ships it / on roadmap / out of scope.
+Roadmap pointers cite `ROADMAP.md` by file only (line numbers go stale fast).
+
+**Core capabilities**
+
+| Capability                             | Yazi    | spyc                                   |
+|----------------------------------------|---------|----------------------------------------|
+| Async I/O, multithreaded scheduler     | Yes     | Heavy work is off-thread (git-status walk, file ops, previews/git-view, fs-watch, pager streams, watcher-triggered listing refresh); the on-navigation `Listing::read` stays synchronous — background loading for 100K+ dirs is roadmapped, 50k-entry cap today |
+| Image preview (kitty/iTerm2/sixel)     | Yes     | No *general* image preview, but **mermaid diagrams render as terminal-graphics images** in the pager (v1.58.11) |
+| Code preview / syntax highlighting     | Yes     | Yes (tree-sitter, v1.50.61) |
+| Markdown rendered preview              | No (?)  | Yes (v1.26.0); fenced `mermaid` blocks render as diagrams (v1.58.11) |
+| Multi-tab                              | Yes     | Yes                                    |
+| Trash bin                              | Yes (single tier) | Yes — two-tier: in-app **graveyard** (compressed, undo-able) cascading to system trash (`src/state/graveyard.rs`) |
+| Archive extraction                     | Yes     | Not implemented                        |
+| Bulk rename via `$EDITOR`              | Yes     | Roadmap                                |
+| Visual-mode range select               | Yes     | Roadmap                                |
+| Cwd export on quit                     | Yes (`y` wrapper) | Roadmap (Foundations queue)  |
+| Drag and drop (OSC 72)                 | Yes (PR #4005) | Roadmap, stale — see above    |
+| `fzf`/`fd`/`ripgrep`/`zoxide` integration | Yes  | `F` finder, `:grep`, frecency `J` (homegrown) |
+| Mouse support                          | Yes     | Limited; explicit non-goal beyond current |
+
+**Extensibility**
+
+| Capability                             | Yazi    | spyc                                   |
+|----------------------------------------|---------|----------------------------------------|
+| Lua scripting / plugins                | Yes — plugins + package manager (BETA) | **Lua scripting shipped** (`map KEY lua`, `init.lua` platform, `spyc.on` events, full-`Action` `spyc.action`; off-thread worker, `src/lua/`, v1.84–1.89). No plugin *package manager* (deliberate). |
+| Theme system / "Flavors"               | Yes (BETA) | Themes in `.spycrc.toml` + nerd-font/mono toggle; no installable-theme package system |
+| Custom previewers / fetchers           | Yes (Lua) | Not exposed (spyc's Lua drives nav/actions/reads, not previewers) |
+| Keymap customization                   | Yes (`keymap.toml`) | Yes (`.spycrc.toml`)         |
+| Package manager for plugins/themes     | Yes     | No — Lua *scripting*, not a plugin/theme package ecosystem |
+
+**Automation / external integration**
+
+| Capability                             | Yazi    | spyc                                   |
+|----------------------------------------|---------|----------------------------------------|
+| Event publish (`ya pub`)               | Yes     | **Explicit non-goal** — wider attack surface, off thesis |
+| Event subscribe (`--local-events`/`--remote-events`) | Yes | **Partial** — `spyc.on(startup\|dir_changed\|project_changed\|agent_status)` Lua event hooks (in-process, v1.89); a subscriber socket on the MCP UDS stays roadmap |
+| Cross-instance state distribution      | Yes ("Data Distribution Service") | Per-PID MCP socket; instances coexist but don't share state |
+| MCP server (agent-callable)            | **No**  | **Yes — core thesis** |
+| Virtual filesystem for remote files    | Yes     | Out of scope                           |
+
+**Distribution / hygiene** (all spyc entries are the 2.0 "Launch plan")
+
+| Capability                             | Yazi    | spyc                                   |
+|----------------------------------------|---------|----------------------------------------|
+| Pre-built binaries on tagged release   | Yes     | Roadmap for 2.0  |
+| Homebrew tap                           | Yes     | Roadmap for 2.0  |
+| Signed artifacts                       | Partial | Minisign roadmap |
+| Docs site                              | Yes (yazi-rs.github.io) | Single-file `*.md` — deferred |
+| Migration page from peer tools         | Yes (per-tool keymap tables) | Roadmap |
+| GitHub presence                        | Yes (~39.9k★) | Bitbucket today; GitHub move is a 2.0 blocker |
+
+### Where Yazi clearly leads
+
+1. **Image preview.** Yazi treats it as a headline feature with multiple
+   protocols; spyc has none (mermaid aside). A real gap for image-heavy users —
+   acknowledge it plainly in the eventual migration page.
+2. **Plugin ecosystem.** Yazi's Lua plugins + package manager mean third parties
+   ship previewers, fetchers, themes. spyc's non-goal stance is a deliberate
+   trade — frame the *value of not having* a plugin API (single-binary
+   stability, no plugin-API churn).
+3. **Mass.** ~39.9k★ vs. our pre-launch numbers. Not a feature, but it changes
+   the "is this safe to install?" calculus — the 2.0 launch-hygiene pass is the
+   response.
+4. **Drag and drop (as of today).** kitty-only and Lua-gated, but they're first
+   in this corner of the design space.
+
+### Where spyc clearly leads
+
+1. **MCP bridge.** Yazi's automation story is `ya pub` / event streams into
+   custom shell scripts; spyc speaks MCP — the protocol Claude Code / Codex
+   already speak. No glue code on the user's side.
+2. **Two-pane agent pairing as a first-class layout** (Yazi approximates it via
+   plugins; spyc ships it as the default UX).
+3. **Picks / inventory as a structured selection model** the agent reads via
+   `get_spyc_context` — selection becomes a data structure the agent acts on,
+   not just highlighted rows.
+4. **Session save/restore for both Claude and Codex** — resume a spyc and the
+   agent panes resume too. Out of Yazi's scope by design.
+5. **Git-aware listings + frecency `J`** as built-ins (Yazi gets them via
+   plugins / external tools).
+6. **Two-tier delete (graveyard → system trash)** — compressed, undo-able from
+   inside spyc (`p`/`P`), FIFO-cascading to trash at a cap. "I deleted the wrong
+   thing" is one keystroke from recovery with no Finder context switch.
+7. **Live agent-status awareness** — per-pane working/blocked/done dot from an
+   MCP/hook self-report channel + desktop notifications on the transition. Yazi
+   has no agent concept at all. Charter `docs/archive/AGENT_AWARENESS_PLAN.md`.
+
+### Where we deliberately differ
+
+- **Plugin *package ecosystem*.** spyc shipped Lua *scripting* — but not a
+  plugin *marketplace* like Yazi's. The extensibility surface is in-process
+  scripting + the MCP bridge, not a third-party plugin API to version.
+- **Mouse beyond current** — non-goal; keyboard-first by thesis.
+- **Event publishing (`ya pub` equivalent)** — non-goal; the consumer ecosystem
+  we care about is agent-flavoured, not a generic automation bus, and accepting
+  arbitrary publishes from anywhere on the box isn't worth the attack surface.
+- **Virtual filesystem for remote files** — out of scope; ssh + local mount is
+  the supported workflow.
+- **Localization** — English-only by stated non-goal.
+
+### Recommendations (Yazi-specific)
+
+1. **Update `ROADMAP.md` (drag and drop):** replace OSC 52 with OSC 72, cite
+   Yazi PR #4005, note it's kitty-only today and defer until ≥1 more terminal
+   adopts OSC 72; keep the path-paste fallback as an independent cheap win.
+2. **Add an "image preview" row to the migration page** with honest framing:
+   "Yazi has it; spyc doesn't; if you live in image-heavy directories, Yazi may
+   suit you better." Hiding the gap burns trust faster than naming it.
+3. **Lead the migration page's differentiator paragraph with MCP/Claude
+   pairing**, then picks-as-data-structure, then session save/restore — the
+   three things Yazi cannot match without changing what it is.
+4. **Extensibility stays scripting + MCP, not a plugin marketplace.**
+5. **Re-run this fold** when Yazi cuts its next significant release or a second
+   terminal adopts OSC 72 (whichever comes first). The four Yazi-inspired
+   `ROADMAP.md` entries stay as the per-feature design notes; this section is
+   the synoptic view.
 
 ---
 
@@ -678,6 +837,11 @@ Primary sources, all fetched and verified:
   This Week in Rust + Terminal Trove + awesome-ratatui/awesome-tuis submission
   docs.
 - **Review:** [rywalker.com/research/supacode](https://rywalker.com/research/supacode).
+- **Yazi (§1d):** [repo](https://github.com/sxyazi/yazi) + [docs site](https://yazi-rs.github.io)
+  (the canonical feature list; the README bullets are a subset) · PR #4005
+  (OSC 72 drag-and-drop, merged 2026-05-28). Snapshot last refreshed 2026-07-01,
+  spyc-side; Yazi still v26.5.6. Full standalone history archived at
+  `docs/archive/YAZI_COMPETITIVE_REVIEW.md`.
 
 **Verification caveats.** Six mined quotes were discarded because the text was
 real but credited to the wrong author (e.g. a comment by the cmux dev attributed

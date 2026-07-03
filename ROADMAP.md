@@ -151,7 +151,7 @@ works for me."
   lf → spyc, Yazi → spyc, ~10 binds each) plus one paragraph on what
   spyc has that they don't (the MCP integration). Unblocks the two
   remaining Yazi-review recommendations
-  ([`docs/YAZI_COMPETITIVE_REVIEW.md`](docs/YAZI_COMPETITIVE_REVIEW.md)).
+  ([`docs/COMPETITIVE_REVIEW.md`](docs/COMPETITIVE_REVIEW.md) §1d).
 - **Signing & supply chain**: macOS Developer ID signing +
   notarization (without it the first user report is "macOS says spyc
   is damaged"); Linux minisign signatures with the public key in the
@@ -494,7 +494,7 @@ Lower-priority items. Will graduate to a track when picked up.
   first. On receive, present a drop-action picker: send to pane as
   raw bytes or image attachment (the spyc-shaped arm Yazi doesn't
   have), create file in cwd, add to picks/inventory, open in pager.
-  See [`docs/YAZI_COMPETITIVE_REVIEW.md`](docs/YAZI_COMPETITIVE_REVIEW.md).
+  See [`docs/COMPETITIVE_REVIEW.md`](docs/COMPETITIVE_REVIEW.md) §1d.
 - **Page scroll overlap** in the pager — keep 2–3 lines of the
   previous page visible.
 - **Auto-scroll reading mode** — continuous scroll at configurable
@@ -618,7 +618,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/archive/TESTING_STRATEGY.md` | Testing strategy & guidelines (coverage, anti-"test theater", proptest/cargo-fuzz, AI-testing rules). Campaign complete (#426–#438); kept as the how-we-test reference. |
 | `docs/drafts/V1_60_PLAN.md` | Pending design (post-2.0, after V1_70). |
 | `docs/drafts/V1_70_PLAN.md` | Pending design (post-2.0, first in the arc). |
-| `docs/YAZI_COMPETITIVE_REVIEW.md` | Competitive snapshot (refreshed 2026-07-01, spyc-side; Yazi still v26.5.6). Refresh on Yazi's next major. |
+| `docs/COMPETITIVE_REVIEW.md` | Consolidated competitive review + GTM: the AI coding-agent-manager category (§1–§1c: herdr, psmux, claude-code-ide.el) plus the TUI file-manager lane (§1d: Yazi, folded 2026-07-02). Refresh on a competitor's next major. (Standalone Yazi original archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md`.) |
 | `docs/archive/` | Shipped plans, kept as historical record. |
 
 > **Note on pending plans:** the four feature plans predate the MVU

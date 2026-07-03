@@ -1,5 +1,10 @@
 # Yazi competitive review
 
+> **Archived / folded (2026-07-02).** This standalone Yazi review has been
+> folded into the consolidated `docs/COMPETITIVE_REVIEW.md` as **§1d — Yazi, the
+> file-manager lane**. That section is the live, maintained version; this file
+> is kept verbatim as the full historical record. Update §1d, not this copy.
+
 Last reviewed: 2026-07-01 (spyc-side refresh)
 Yazi reference point: github.com/sxyazi/yazi @ ~39.9k stars; latest stable
 still v26.5.6 (2026-05-05) — no new significant Yazi release since the

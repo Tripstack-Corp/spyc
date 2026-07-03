@@ -1,7 +1,7 @@
 # Agent awareness & orchestration — implementation plan (herdr-informed)
 
 A prioritized plan for the ideas worth picking up from the June-2026 competitive
-deep dive on **herdr** (see `docs/COMPETITIVE_REVIEW_2026-06.md` §1a). herdr is
+deep dive on **herdr** (see `docs/COMPETITIVE_REVIEW.md` §1a). herdr is
 spyc's Rust-TUI twin; this plan steals the *good ideas* while turning herdr's
 biggest *weakness* — fragile, screen-scraped agent status — into a spyc strength.
 
@@ -100,7 +100,7 @@ backgrounded agent needs you *(shipped — P3-1)*.
 > a **Use cases** line — the concrete workflow it unlocks, with a real-world source.
 > These are grounded in a web scan of how herdr, cmux, Claude Squad, and Claude
 > Code's own *agent-teams* are actually used (herdr deep dive:
-> `docs/COMPETITIVE_REVIEW_2026-06.md` §1a). Recurring theme: the field keeps
+> `docs/COMPETITIVE_REVIEW.md` §1a). Recurring theme: the field keeps
 > arriving at the same design spyc already chose — self-report over scrape, state-
 > driven over timers, native-resume over tab-only restore — and keeps hitting the
 > same Claude-hook gaps spyc hit. Where a feature carries real risk (P2), the
