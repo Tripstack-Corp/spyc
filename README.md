@@ -168,6 +168,33 @@ it settles, verifying the submit landed and re-sending Enter if Claude's
 async startup ate it (the `--resume` CLI flag has a mount-crash
 regression).
 
+## Advanced usage
+
+### Coordinating multiple agents
+
+Running several agents in parallel — across tabs, or across worktrees in the
+vertical split — they can collide at merge time. spyc exposes an advisory
+**scope registry** over MCP so agents declare what they're touching *before*
+they touch it:
+
+- **`register_scope(paths, intent)`** — an agent claims the files it's editing
+  or about to merge; returns a claim id plus any conflicting merges already in
+  flight.
+- **`list_scopes`** — who's touching what, and who's mid-merge.
+- **`wait_for_scope_clear(paths)`** — blocks until no other agent's `merging`
+  claim overlaps yours, so two agents never merge the same files at once.
+- **`release_scope(id)`** — done (auto-released when the tab closes).
+
+It's advisory and in-memory (persisted across `spyc -r`), not a hard lock — the
+lightweight coordination that keeps parallel agents out of each other's way
+without a background daemon. Inspect it live with `:agent list` / `:agent
+registry`.
+
+Together with the per-tab activity dots above, that's spyc's agent-orchestration
+story: **see which agent needs you, and keep parallel agents from stepping on
+each other.** Full design and rationale:
+[`docs/AGENT_ORCHESTRATION.md`](docs/AGENT_ORCHESTRATION.md).
+
 ## Keybindings
 
 ### Navigation
@@ -460,6 +487,7 @@ See [INSTALL.md](INSTALL.md) for detailed setup instructions.
 - [CONFIGURATION.md](CONFIGURATION.md) -- config reference: `.spycrc.toml`, notifications, keymap DSL, Lua
 - [INSTALL.md](INSTALL.md) -- terminal, font, build, and cross-compilation setup
 - [ARCHITECTURE.md](ARCHITECTURE.md) -- concurrency model, MVU target shape, persistence, MCP transport
+- [docs/AGENT_ORCHESTRATION.md](docs/AGENT_ORCHESTRATION.md) -- how the activity dots, notifications, session-resume, and scope registry fit together
 - [DESIGN.md](DESIGN.md) -- UI design language: components, surfaces, palette, extension checklist
 - [CHANGELOG.md](CHANGELOG.md) -- release history
 - [ROADMAP.md](ROADMAP.md) -- what's next
