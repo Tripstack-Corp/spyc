@@ -19,7 +19,7 @@
 //! re-filtered per listing dir via [`map_to_listing`] on each chdir.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::ui::list_view::{GitChange, GitFileStatus};
@@ -364,8 +364,9 @@ pub fn repo_status(repo_root: &Path) -> Option<Vec<StatusEntry>> {
 }
 
 /// [`repo_status`] guarded against the racy-snapshot pitfall, returning the
-/// entries alongside the `.git/index` + `HEAD` mtimes they're consistent with
-/// (the `GitWorkerResult` shape the off-thread git worker sends).
+/// entries alongside the `.git/index` + resolved-HEAD-ref mtimes (see
+/// [`head_ref_mtime`]) they're consistent with (the `GitWorkerResult` shape the
+/// off-thread git worker sends).
 ///
 /// The status walk takes hundreds of ms on a large tree. If `.git/index` or
 /// `HEAD` is rewritten *during* it (a `commit` / `checkout` / `git add` landing
@@ -397,14 +398,62 @@ pub fn repo_status_stable(
             let index = std::fs::metadata(gd.join("index"))
                 .and_then(|m| m.modified())
                 .ok();
-            let head = std::fs::metadata(gd.join("HEAD"))
-                .and_then(|m| m.modified())
-                .ok();
+            let head = head_ref_mtime(gd);
             (index, head)
         })
     };
     let (entries, (index_mtime, head_mtime)) = stable_walk(stat, || repo_status(repo_root), 3);
     (entries, index_mtime, head_mtime)
+}
+
+/// The mtime that moves when the checked-out branch advances (a **commit**) or
+/// changes (a **checkout**) — the marker poll's HEAD-side freshness key.
+///
+/// `<gitdir>/HEAD` alone is insufficient: for an attached HEAD it's the symbolic
+/// `ref: refs/heads/<branch>` pointer, which git rewrites only on checkout —
+/// **never on commit**. A commit moves the resolved ref instead
+/// (`<common>/refs/heads/<branch>`, or `<common>/packed-refs` when the ref is
+/// packed). Watching only the pointer means an external commit (another shell,
+/// an agent) leaves this key unchanged, the poll short-circuits, and committed
+/// files keep showing as modified. We return the latest of the HEAD-file and
+/// resolved-ref mtimes so both a commit *and* a checkout refresh the poll. A
+/// detached HEAD stores the commit id in the HEAD file itself, so its own mtime
+/// already tracks commits — the `None` ref branch falls back to it.
+fn head_ref_mtime(gitdir: &Path) -> Option<SystemTime> {
+    let head_file = gitdir.join("HEAD");
+    let head_mtime = std::fs::metadata(&head_file)
+        .and_then(|m| m.modified())
+        .ok();
+    let ref_mtime = std::fs::read_to_string(&head_file)
+        .ok()
+        .and_then(|contents| {
+            let refname = contents.strip_prefix("ref: ")?.trim().to_string();
+            // Worktree branch refs live in the *common* gitdir, not the per-worktree one.
+            let common = common_gitdir(gitdir);
+            std::fs::metadata(common.join(&refname))
+                .and_then(|m| m.modified())
+                .ok()
+                // Ref packed away → no loose file; the packed-refs mtime is the signal.
+                .or_else(|| {
+                    std::fs::metadata(common.join("packed-refs"))
+                        .and_then(|m| m.modified())
+                        .ok()
+                })
+        });
+    match (head_mtime, ref_mtime) {
+        (Some(h), Some(r)) => Some(h.max(r)),
+        (h, r) => h.or(r),
+    }
+}
+
+/// The common gitdir shared across linked worktrees. A linked worktree's gitdir
+/// (`.git/worktrees/<name>`) records the shared dir in a `commondir` file
+/// (typically `../..`); a normal `.git` has none and is its own common dir. The
+/// returned path may keep unresolved `..` components — the OS resolves them on
+/// `stat`, so we skip a hot-path `canonicalize`.
+fn common_gitdir(gitdir: &Path) -> PathBuf {
+    std::fs::read_to_string(gitdir.join("commondir"))
+        .map_or_else(|_| gitdir.to_path_buf(), |rel| gitdir.join(rel.trim()))
 }
 
 /// Generic stat-walk-stat consistency guard (see [`repo_status_stable`]).
