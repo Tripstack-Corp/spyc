@@ -399,10 +399,11 @@ Architecture decisions land in:
 - **`AGENTS.md`** — slim, always loaded into Claude's context.
   Module index, conventions, "what spyc does" summary, MCP usage
   hints. Don't grow it past what's worth paying context tokens for.
-- **`ROADMAP.md`** — forward plan; move shipped items to Done.
+- **`ROADMAP.md`** — forward *strategy* (thesis, the 2.0 gate, non-goals, decisions).
+- **GitHub Issues** — the live per-item backlog (features, fixes, ideas), labeled
+  `area:*`/`type:*` on the roadmap board. (`docs/archive/BACKLOG_DRAFT_NOTES.md` is
+  the archived raw-intake predecessor.)
 - **`CHANGELOG.md`** — release notes (Keep-a-Changelog).
-- **`BACKLOG_DRAFT_NOTES.md`** — owner's raw backlog / draft notes (open +
-  fixed bugs, ideas, reports). Move from open buckets to FIXED on commit.
 - **`FEATURES.md`** — user-facing feature reference.
 - **`README.md`** — landing page, install, positioning.
 - **`src/ui/help.rs`** — in-app `?` help; user-visible keybindings.

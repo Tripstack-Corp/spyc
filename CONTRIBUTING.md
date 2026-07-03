@@ -129,7 +129,7 @@ When your change affects user-visible behavior, keybindings, or
 project status, update **all** of:
 
 - `FEATURES.md` — what the app does
-- `ROADMAP.md` — move items to Done, add new plans
+- `ROADMAP.md` — strategy/direction only; file or close a **GitHub Issue** for per-item work
 - `AGENTS.md` — architecture and conventions
 - `src/ui/help.rs` — the `?` help overlay
 - `docs/assets/presentation.html` — stats and feature lists (if significant)

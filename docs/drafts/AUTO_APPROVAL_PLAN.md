@@ -1,6 +1,6 @@
 # spyc auto-approval & action log
 
-**Status:** plan, not yet implemented. Tracking BACKLOG_DRAFT_NOTES.md entry:
+**Status:** plan, not yet implemented. Tracking issue: [#57](https://github.com/Tripstack-Corp/spyc/issues/57). Original note:
 > feature to allow spyc to approve certain Claude CLI actions automatically and keep a log
 
 **Target release:** v1.51 (feature-shaped, not blocking v1.60 hub work).

@@ -1,3 +1,9 @@
+> **Archived (2026-07-02).** This was the owner's raw intake backlog. Its open
+> items — the `SMALL` / `BIGGER` / `MAYBE` sections — migrated to **GitHub
+> Issues** (https://github.com/Tripstack-Corp/spyc/issues), labeled and on the
+> roadmap board. Kept here verbatim as history; `WON'T DO` / `COMPLETED` /
+> `FIXED` are the shipped record. **Not maintained — file new work as an Issue.**
+
 ### SMALL ###
 - BUG (Spencer): codex `/review` hangs on the first MCP call (get_spyc_context).
   ROOT-CAUSED 2026-06-30 — KNOWN OPEN CODEX BUG, not spyc. Match:
