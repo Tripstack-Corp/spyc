@@ -286,10 +286,8 @@ pub fn run() -> Result<()> {
     if let Some(p) = key_trace::init(cli.key_trace) {
         eprintln!("spyc: key trace → {p}");
     }
-    // Install signal handlers BEFORE the TUI starts so a stray
-    // ^C during a suspended-mode takeover (`p` → less, `v` →
-    // editor, `;` → top pane) doesn't bring spyc down with the
-    // child. See `install_signal_handlers` for the full reasoning.
+    // Before the TUI starts: a stray ^C during a child takeover (less/editor/;)
+    // must not bring spyc down with the child.
     install_signal_handlers();
     let mcp_takeover_allowed = prompt_mcp_takeover_if_needed();
     let mut terminal = setup_terminal()?;
@@ -609,22 +607,11 @@ pub fn resume_tui(terminal: &mut Tui) -> Result<()> {
 // the session, but only over SSH, so it passes every local test.
 /// Clear the whole screen and force a full repaint on the next draw.
 ///
-/// Deliberately avoids ratatui 0.30's `Terminal::clear()`, which snapshots
-/// the cursor via a `get_cursor_position()` (`ESC[6n`) round-trip and
-/// restores it afterward. That round-trip is fine on a fast local terminal
-/// but is a latent crash
-/// over SSH: the reply can exceed crossterm's ~2 s timeout, *and* the
-/// just-unparked input-reader thread races to read the same reply off stdin —
-/// either way `position()` fails with "cursor position could not be read",
-/// which propagated out of `resume_tui` / the `pending_clear` draw and tore
-/// the whole session down (e.g. closing a foreground pager, or any navigation
-/// that set `needs_full_repaint`, over an SSH link).
-///
-/// `Terminal::resize()` to the current size has the same on-screen effect
-/// (clears `All` + resets the back buffer so the next frame is a full
-/// repaint) but takes the no-cursor-read branch on a fullscreen viewport.
-/// The next `draw()` positions the cursor from the frame, so the snapshot
-/// `clear()` did was pointless for us anyway.
+/// Avoids ratatui's `Terminal::clear()`, which does a `get_cursor_position()`
+/// (`ESC[6n`) round-trip: over SSH the reply can exceed crossterm's timeout and
+/// races the just-unparked input reader, failing with "cursor position could
+/// not be read" and tearing the session down. `Terminal::resize()` to the
+/// current size clears and forces a full repaint without reading the cursor.
 pub fn force_full_repaint(terminal: &mut Tui) -> Result<()> {
     let area = ratatui::layout::Rect::from(terminal.size()?);
     terminal.resize(area)?;

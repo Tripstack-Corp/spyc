@@ -68,14 +68,10 @@ fn status_trace_enabled() -> bool {
 }
 
 /// The (event, matcher, reported-state) hooks spyc installs. `matcher` is the
-/// tool-name pattern for the per-tool events (`""` = all / not-a-tool-event).
-/// Three things map to `blocked`: `PermissionRequest` (the real-time
-/// permission-prompt signal), `Notification` (the slower idle "waiting for
-/// input" backstop), and a `PreToolUse` matching `AskUserQuestion`/`ExitPlanMode`
-/// — the agent asking a question or requesting plan approval, which fire no
-/// `PermissionRequest`/`Notification`/`Stop` of their own (they're mid-turn
-/// tools), so without this the dot keeps the working pulse while the agent
-/// waits on you.
+/// tool-name pattern for per-tool events (`""` = all / not-a-tool event). Three
+/// events map to `blocked`: `PermissionRequest`, `Notification` (idle backstop),
+/// and `PreToolUse` for `AskUserQuestion`/`ExitPlanMode` (mid-turn tools that
+/// fire none of the other events). See the module doc for the full mapping.
 const STATUS_HOOKS: [(&str, &str, &str); 5] = [
     ("UserPromptSubmit", "", "working"),
     ("PermissionRequest", "", "blocked"),
@@ -246,17 +242,12 @@ pub fn cleanup_claude_status_hooks(dir: &Path) -> ConfigCleanup {
 
 // ── Codex status hooks ────────────────────────────────────────────────
 //
-// Codex ships an event-hooks system parallel to claude's, but its config lives
-// as inline `[[hooks.<Event>]]` arrays-of-tables in the SAME
-// `.codex/config.toml` we write the MCP server into (see [`super::config`]),
-// not a separate file. The event names overlap with claude's:
-// `UserPromptSubmit` → working, `PermissionRequest` → blocked (the instant
-// "needs me" approval signal), `Stop` → done. Codex has no `Notification`/idle
-// event, so there's no idle-downgrade to apply — `effective_report_state` is
-// inert for codex payloads. Timing differs: codex reads its config ONCE at
-// startup (no live reload), so for an already-consented repo the hooks are
-// written before the pane spawns; a first-launch `yes` only takes effect on
-// codex's next launch.
+// Codex's hooks are inline `[[hooks.<Event>]]` tables in the same
+// `.codex/config.toml` as the MCP entry (see [`super::config`]), not a separate
+// file. `UserPromptSubmit` → working, `PermissionRequest` → blocked, `Stop` →
+// done; codex has no Notification/idle event. It reads config once at startup
+// (no live reload), so hooks are written pre-spawn; a first-launch `yes` only
+// takes effect on codex's next launch.
 
 /// Codex's (event, reported-state). No matcher: these events aren't
 /// tool-scoped, and the `--report-status` command string is the "ours" marker
@@ -425,24 +416,13 @@ pub fn cleanup_codex_status_hooks(dir: &Path) -> ConfigCleanup {
 
 // ── Agy (Antigravity CLI) status hooks ────────────────────────────────
 //
-// Agy's JSON hooks live in `<dir>/.agents/hooks.json`. Its root is a map of
-// *named hook-sets*; the matcher-less lifecycle events (`PreInvocation` /
-// `Stop`) take a FLAT list of handlers directly under the event key (unlike
-// claude/codex's `{hooks:[…]}` group + matcher, which agy uses only for
-// PreToolUse). spyc owns one named set, `spyc-status`:
-//
-// ```json
-// { "spyc-status": {
-//     "PreInvocation": [{ "type": "command", "command": "spyc --report-status working" }],
-//     "Stop":          [{ "type": "command", "command": "spyc --report-status done" }] } }
-// ```
-//
-// **Partial** coverage: only `working` (turn start) + `done` (turn end). Agy
-// exposes NO permission/approval event, so there's no `blocked` ("needs me")
-// signal — the dot is accurate except it never shows the red waiting square.
-// Read at startup → written pre-spawn like codex (`live_reload: false`). The
-// exact agy schema is derived from Google's hooks docs + community guides
-// rather than a verified live install.
+// Agy's JSON hooks live in `<dir>/.agents/hooks.json` as named hook-sets; the
+// lifecycle events (`PreInvocation` / `Stop`) take a flat handler list under
+// the event key (agy uses the claude/codex `{hooks,matcher}` group only for
+// PreToolUse). spyc owns one set, `spyc-status`: PreInvocation → working, Stop
+// → done. PARTIAL — agy exposes no approval event, so there's no `blocked`.
+// Read once at startup (written pre-spawn like codex). The schema is derived
+// from docs, not a verified live install.
 
 /// Agy's (event, reported-state). No `blocked`: agy has no approval/permission
 /// event to hang it on.

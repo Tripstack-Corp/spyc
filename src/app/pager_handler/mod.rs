@@ -249,18 +249,12 @@ impl App {
         self.set_pager(view);
     }
 
-    /// Install a freshly-spawned editor / `$PAGER` overlay PTY into the focused
-    /// column's slot, then focus it. The right column (`b`) gets its own
-    /// `top_overlay_right` slot — coexisting with a `V`/`D` in `a` and always
-    /// auto-dismissing on exit (`prepare_panes`). The left / single / no-split
-    /// case keeps the existing `top_overlay` slot with the auto-dismiss flag and
-    /// the column pin. Shared by `V` (`edit_in_pane`), `D`-on-a-huge-file
-    /// (`spawn_pager_overlay_for_path`), and the in-pager `v` editor handoff.
-    /// Spawn `cmd` as a top-overlay PTY: the `top_overlay_size` geometry, the
-    /// focused listing dir as cwd, the standard pane wake. Installs it into the
-    /// focused column's overlay slot on success, or flashes the spawn error.
-    /// Shared by the `V`/`D`-huge-file editor overlays and the in-pager `v`
-    /// `TopPane` editor handoff (the block was copy-pasted at three sites).
+    /// Spawn `cmd` as a top-overlay editor/`$PAGER` PTY (overlay geometry,
+    /// focused listing dir as cwd) and install it into the focused column's
+    /// slot, then focus it. The right column (`b`) uses its own
+    /// `top_overlay_right` slot so it coexists with a `V`/`D` in `a`; both
+    /// auto-dismiss on exit. Shared by `V` (`edit_in_pane`), `D` on a huge file,
+    /// and the in-pager `v` editor handoff.
     pub(super) fn spawn_top_overlay(&mut self, cmd: &str) {
         let (rows, cols) =
             Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());

@@ -111,10 +111,8 @@ fn search_one(
         .max_filesize(None)
         .parents(false)
         .build();
-    // Match ripgrep's default binary handling: stop searching a
-    // file on the first NUL byte. Without this, .docx / .pdf /
-    // .dll / .jar files (which `.gitignore` doesn't exclude when
-    // they're tracked) emit raw bytes that wreck the terminal.
+    // Match ripgrep: stop on the first NUL byte, so tracked binaries
+    // (.pdf, .jar, …) don't emit raw bytes that wreck the terminal.
     let mut searcher = SearcherBuilder::new()
         .binary_detection(BinaryDetection::quit(0))
         .line_number(true)

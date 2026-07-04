@@ -17,7 +17,7 @@ use super::{
 impl App {
     /// `^a-\` / F10 — toggle the bottom pane. Three states:
     ///   1. No tabs yet (`pane_tabs.is_none()`): spawn the default
-    ///      command. Same as before.
+    ///      command.
     ///   2. Tabs exist and visible: flip `pane_hidden = true`. The
     ///      child ptys keep running; render skips the pane area;
     ///      `pane_focused` parks at false so keystrokes go to the
@@ -27,14 +27,9 @@ impl App {
     ///      restore focus to the pane. Children pick up wherever
     ///      they left off.
     ///
-    /// Why this is hide-don't-kill: previously toggle was destructive
-    /// (`pane_tabs = None`, `Drop for PtyHost` → SIGKILL on the
-    /// claude process group). Daily-drivers reported losing their
-    /// in-flight conversation every time they wanted the whole
-    /// screen for a few seconds. Explicit kill of a tab still goes
-    /// through `^a-x` (`PaneCloseTab`); destroying the *whole*
-    /// pane container is now a multi-step intentional act (close
-    /// each tab via `^a-x`), not a one-keystroke side effect.
+    /// Hide, don't kill: the ptys keep running, so toggling for a few seconds
+    /// doesn't lose an in-flight conversation. Killing is explicit — `^a-x`
+    /// (`PaneCloseTab`) per tab, never a side effect of this toggle.
     pub fn toggle_pane(&mut self) {
         if self.runtime.pane_tabs.is_some() {
             self.state.pane.pane_hidden = !self.state.pane.pane_hidden;

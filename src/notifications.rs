@@ -46,13 +46,10 @@ pub fn ring_bell() {
     let _ = out.flush();
 }
 
-/// Emit an OSC 9 desktop-notification escape to the host terminal. Unlike
-/// [`send`], this reaches the terminal *emulator*, so over SSH the notification
-/// pops on the **client** machine. `message` is control-char-sanitized before it
-/// goes into the sequence — an embedded `\x1b`/`\x07` (the OSC terminator) could
-/// otherwise close it early and inject arbitrary escapes — and wrapped in tmux's
-/// DCS passthrough when inside tmux, mirroring `term_title`. Terminals without
-/// OSC 9 support silently ignore it; a failed stdout write is ignored.
+/// Emit an OSC 9 desktop-notification escape to the host terminal — unlike
+/// [`send`], this reaches the terminal *emulator*, so over SSH it pops on the
+/// client. `message` is sanitized (an embedded `\x1b`/`\x07` could close the
+/// sequence early and inject escapes) and wrapped for tmux passthrough.
 pub fn notify_osc9(message: &str) {
     let wrapped = osc9_sequence(message, std::env::var_os("TMUX").is_some());
     let mut out = io::stdout();

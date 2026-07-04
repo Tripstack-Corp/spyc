@@ -5,21 +5,11 @@
 //! The *styling* of the hex window into pager lines lives in the UI layer
 //! ([`crate::ui::hex`]) — `fs` reads bytes, `ui` paints them.
 //!
-//! The mutating ops replace the `sh -c "cp -r ..."`-style shell-outs we used
-//! originally. Benefits:
-//!
-//! - Portable: no dependency on the host's `cp`/`mv`/`rm`/`chmod` binaries.
-//! - Faster for small ops (no subprocess).
-//! - Errors come back as typed `io::Error`s we can surface in the UI.
-//!
-//! Non-goals:
-//!
-//! - Bit-for-bit parity with BSD `cp` flags. We mirror the *common* shape
-//!   (recursive, preserving symlinks, mv semantics) — if someone needs
-//!   obscure flags they can `!cp -X %` through the shell.
-//! - Preserving every attribute. `std::fs::copy` copies permissions on
-//!   Unix, which is enough for almost everything; xattrs / ACLs / xdev
-//!   reflinks are out of scope.
+//! The mutating ops replace the old `sh -c "cp -r …"` shell-outs: portable (no
+//! host `cp`/`mv`/`rm`), faster for small ops, and errors come back as typed
+//! `io::Error`s. They mirror the common shape (recursive, symlink-preserving)
+//! rather than every BSD flag; `std::fs::copy` carries Unix permissions but not
+//! xattrs / ACLs / reflinks.
 
 use std::fs;
 use std::io;

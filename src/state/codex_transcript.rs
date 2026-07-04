@@ -51,29 +51,17 @@ const MTIME_SKEW_SECS: u64 = 5;
 /// Walk `~/.codex/sessions/` for the rollout file belonging to the codex
 /// session running in this pane.
 ///
-/// The old strategy — pick the rollout whose `session_meta` start time is
-/// *closest* to the pane spawn — is wrong for codex, because **resuming a
-/// session appends to the original rollout file and leaves `session_meta`
-/// frozen at the original creation time**. A pane spawned today resuming a
-/// two-week-old session would compute a huge time delta and silently match
-/// some *other* session that merely started near "now" (the reported
-/// "fresh codex shows a previous session" / "long session goes stale" bugs).
+/// Resuming a session appends to the original rollout and leaves `session_meta`
+/// frozen at the original creation time, so matching on start-time-closest-to-
+/// spawn picks the wrong session. Signals, strongest first:
 ///
-/// The robust signals, strongest first:
-///
-/// 0. **Pinned session id** (`q.session_id`). The pane's session uuid, captured
-///    at spawn by `app::codex_pin` (Option B) — an exact rollout match, immune
-///    to time skew and multi-pane. The other signals are the fallback while a
-///    fresh pane's pin hasn't landed yet.
-/// 1. **Explicit session id.** When the spawn command is `codex resume
-///    <uuid>`, the uuid is the ground truth — codex embeds it in the rollout
-///    filename, so match that exactly. Immune to time skew and multi-pane.
-/// 2. **Written during this pane's lifetime.** Otherwise, among rollouts whose
-///    `session_meta.cwd` matches, keep those whose file *mtime* is at/after the
-///    pane spawn (codex appends every turn, so mtime tracks live activity even
-///    when the frozen start time doesn't) and pick the most-recently-written.
-///    A fresh session that hasn't flushed yet, or only stale sessions, yields
-///    `None` — caller flashes "no transcript yet" rather than the wrong file.
+/// 0. **Pinned session id** (`q.session_id`) — the pane's uuid, captured at
+///    spawn by `app::codex_pin`. Exact match; the rest are fallbacks until it lands.
+/// 1. **Resume uuid** from a `codex resume <uuid>` command — codex embeds it in
+///    the rollout filename.
+/// 2. **Written during this pane's lifetime** — among rollouts whose
+///    `session_meta.cwd` matches, keep those with mtime at/after spawn (codex
+///    appends every turn) and take the most recent. None if only stale sessions.
 pub fn resolve_active_rollout(q: crate::agent::TranscriptQuery) -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
     let sessions_dir = PathBuf::from(home).join(".codex/sessions");
@@ -81,10 +69,7 @@ pub fn resolve_active_rollout(q: crate::agent::TranscriptQuery) -> Option<PathBu
         return None;
     }
 
-    // Signal 0 (strongest): the session id pinned to this pane at spawn
-    // (Option B — `codex_pin`). An exact rollout match, immune to time skew and
-    // multi-pane; set once the spawn-time scan resolves it (or at launch for a
-    // `codex resume <uuid>` pane).
+    // Signal 0 (strongest): the session id pinned to this pane at spawn.
     if let Some(uuid) = q.session_id
         && let Some(path) = find_rollout_by_uuid(&sessions_dir, uuid)
     {
@@ -100,17 +85,15 @@ pub fn resolve_active_rollout(q: crate::agent::TranscriptQuery) -> Option<PathBu
     }
 
     let cwd_str = q.cwd.to_string_lossy();
-    // A symlinked pane cwd (e.g. /var → /private/var on macOS) records
-    // its *canonical* path in session_meta, so compare against that form
-    // too — mirrors the Claude resolver's canonicalize check.
+    // A symlinked cwd is recorded canonicalized in session_meta, so compare the
+    // canonical form too (mirrors the Claude resolver).
     let canon_str = std::fs::canonicalize(q.cwd)
         .ok()
         .map(|c| c.to_string_lossy().into_owned());
 
     // Signal 2: read each rollout's mtime + session_meta, then let the pure
-    // ranking pick the winner. Reading the meta for every file matches the
-    // pre-existing cost (the old resolver did the same); the decision itself is
-    // factored out so it's unit-testable without a `~/.codex` on disk.
+    // ranking pick the winner (factored out so it's unit-testable without a
+    // real `~/.codex`).
     let candidates: Vec<RolloutCandidate> = rollout_files(&sessions_dir)
         .into_iter()
         .filter_map(|path| {

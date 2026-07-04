@@ -209,27 +209,10 @@ struct Renderer<'t> {
     mermaid_blocks: Vec<MermaidBlock>,
 }
 
-/// Source-level preprocessor: insert markdown's two-space hard-break
-/// marker before any line that starts with `**Word(s):**`. CommonMark
-/// would otherwise collapse a stack like
-///
-/// ```text
-/// **To:** Alice
-/// **From:** Bob
-/// **Status:** Draft
-/// ```
-///
-/// into one wrapped paragraph (`**To:** Alice **From:** Bob ...`) —
-/// the canonical reflow loses the metadata semantics. Two-space-EOL
-/// is the standard markdown way to force a line break inside a
-/// paragraph, so this preprocessor opts each `**Key:**` line into
-/// that behavior automatically while leaving regular prose alone.
-///
-/// Pattern: a newline immediately followed by `**`, then 1+ chars
-/// that are neither `*` nor newline ending with `:`, then `**`.
-/// This catches `**Word:**`, `**Multi word:**`, `**With_under:**`,
-/// etc. It does NOT catch `**Bold without colon**` (no `:`) or
-/// `**Bold**: value` (colon outside the bold).
+/// Insert markdown's two-space hard-break marker before each `**Key:**` line.
+/// Without it, CommonMark collapses a stack of `**To:**`/`**From:**`/`**Status:**`
+/// lines into one wrapped paragraph, losing the metadata layout. Regular prose
+/// is left alone; `**Bold**` without a trailing colon isn't matched.
 fn force_hard_breaks_before_keyed_lines(source: &str) -> std::borrow::Cow<'_, str> {
     // Compiled once on first use, not per render call.
     static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {

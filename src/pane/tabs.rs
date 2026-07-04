@@ -25,25 +25,18 @@ pub enum PendingResumeSend {
         sid: String,
         after: std::time::Instant,
     },
-    /// Text has been written. After a small additional delay we
-    /// write `\r` so the prompt actually submits. Splitting the
-    /// write avoids the intermittent race where Claude's TUI was
-    /// mid-render and dropped the trailing `\r` from a combined
-    /// send.
+    /// Text written. After a short delay, send `\r` to submit — splitting the
+    /// write avoids the race where Claude's TUI drops a `\r` sent together with
+    /// text mid-render.
     Enter {
         sid: String,
         after: std::time::Instant,
     },
-    /// Enter has been written, but Claude's TUI intermittently drops
-    /// a `\r` that lands during async startup work (MCP connects,
-    /// version check, org-message fetch — each can remount the input
-    /// component). No fixed delay wins that race, so we close the
-    /// loop: at the deadline, scan the pane tail for the still-typed
-    /// `/resume <sid>` and re-send `\r` while it's visible. The guard
-    /// makes retries safe — once the prompt submits the sid leaves
-    /// the screen, and a stray `\r` can't fire into the resumed
-    /// session. Gives up after `retries_left` attempts (the user can
-    /// recover by pressing Enter themselves).
+    /// Enter written, but Claude's TUI can drop a `\r` that lands during its
+    /// async startup (component remounts). No fixed delay wins that race, so at
+    /// the deadline we scan the pane tail for the still-typed `/resume <sid>`
+    /// and re-send `\r` while it's visible. Safe to retry: once the prompt
+    /// submits the sid leaves the screen. Gives up after `retries_left` attempts.
     Verify {
         sid: String,
         after: std::time::Instant,
@@ -51,12 +44,9 @@ pub enum PendingResumeSend {
     },
 }
 
-/// True when the typed `/resume <sid>` is still sitting unsubmitted
-/// in the pane's prompt — i.e. the sid is visible in the screen tail.
-/// On submit Claude clears the input line, so the sid disappearing is
-/// the "it worked" signal. Per-line `contains` doesn't survive a
-/// hard wrap mid-sid, but the command is ~45 cols and real panes are
-/// wider; a missed match just means no retry (today's behavior).
+/// True when `/resume <sid>` is still unsubmitted — the sid is visible in the
+/// screen tail (Claude clears the input line on submit). A hard wrap mid-sid
+/// could miss the match, which just means no retry.
 pub fn resume_still_unsubmitted(tail_lines: &[String], sid: &str) -> bool {
     tail_lines.iter().any(|l| l.contains(sid))
 }
@@ -91,10 +81,10 @@ pub enum AgentActivity {
 /// `report_status` MCP tool — the P1 channel that supersedes output timing.
 ///
 /// Authority model (`App::effective_activity`): a report wins over the timing
-/// fallback **until** it expires (`expiry`, a backstop so a crashed agent's
-/// stale `working`/`blocked` doesn't stick forever) **or** the tab produces
-/// fresh output *after* the report (`at`) — new output means the agent resumed,
-/// so timing takes back over. `at` also lets a newer report supersede an older.
+/// fallback until it expires (`expiry`, a backstop against a crashed agent's
+/// stale report) or the tab produces fresh output after it (`at` — new output
+/// means the agent resumed, so timing takes over). `at` also lets a newer
+/// report supersede an older.
 #[derive(Clone, Copy, Debug)]
 pub struct ReportedStatus {
     /// The reported state (`Working` / `Blocked` / `Idle` / `Done`).

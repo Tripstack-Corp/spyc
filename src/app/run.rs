@@ -13,14 +13,11 @@ use super::{
 };
 
 impl App {
-    /// Build the event loop's run()-scoped scratch (`RunCtx`): the fs
-    /// watcher + initial watch topology, the advisory scheduler, the
-    /// coalesce buffers, the debounce timers, the last-keypress instant, and
-    /// the `Draw` accumulator. Also spawns the detached git/MCP forwarder
-    /// threads and installs `pane_wake_tx` (each needs a `msg_tx` clone).
-    /// Takes `&msg_tx` (does not consume it) so `run()` can hand the original
-    /// to the input reader afterward. Does NOT spawn the reader or build
-    /// `foreground_exec` — those stay bare `run()` locals for Drop ordering.
+    /// Build the run()-scoped scratch (`RunCtx`): fs watcher, scheduler,
+    /// coalesce buffers, timers, and the `Draw` accumulator; also spawns the
+    /// detached git/MCP forwarder threads. Borrows `msg_tx` so `run()` can hand
+    /// the original to the input reader. Does NOT spawn the reader or build
+    /// `foreground_exec` — those stay `run()` locals for Drop ordering.
     fn run_setup(&mut self, msg_tx: &std::sync::mpsc::Sender<Message>) -> RunCtx {
         // Filesystem watching runs on a dedicated worker thread
         // (`watch::spawn_watch_worker`). notify's recursive `watch()` does a
