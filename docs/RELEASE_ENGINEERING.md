@@ -157,10 +157,10 @@ are the source of truth — Actions *call them* so local and CI never drift.
 > **Dev-platform: RESOLVED (2026-07-02) — full move to GitHub.** All dev + CI run
 > on GitHub Actions; `bitbucket-pipelines.yml` is retired (archived under
 > `docs/archive/`). **`ci.yml` and `audit.yml` are implemented** — direct ports
-> of the retired pipeline. `release.yml`, `snapshot.yml`, and `homebrew.yml`
-> remain to build; they gate on the launch-distribution decisions (signing, org
-> secrets, the Homebrew tap), so they land with the distribution work, not the
-> dev-CI move.
+> of the retired pipeline, and **`release.yml` is implemented** (keyless signing,
+> no secrets). `snapshot.yml` and `homebrew.yml` remain to build; they gate on
+> the remaining distribution decisions (the Homebrew tap, nightly cadence), so
+> they land with that work.
 
 ### `ci.yml` — quality gate (PR + push to `main`) — **IMPLEMENTED**
 - Direct port of the retired `bitbucket-pipelines.yml`: `lint` (fmt + clippy +
@@ -175,9 +175,9 @@ are the source of truth — Actions *call them* so local and CI never drift.
   `stable/*` / `releng/*` once Stage 2 branches exist. Both are cheap once the
   Linux gate is confirmed green on GitHub.
 
-### `release.yml` — build, sign, publish (on tag `v*`)
-- **Trigger:** `push: tags: ['v*']`. Detect `-beta`/`-rc` → mark GitHub Release
-  as *pre-release*.
+### `release.yml` — build, sign, publish (on tag `v*`) — **IMPLEMENTED**
+- **Trigger:** `push: tags: ['v*']`. Detect `-alpha`/`-beta`/`-rc` → mark GitHub
+  Release as *pre-release*.
 - **Build matrix** (calls the existing Makefile targets):
   - `macos-latest` → `make release-macos-universal` (arm64 + x86_64 lipo).
   - `ubuntu-latest` → `make release-linux-x86` + `release-linux-arm` (musl
@@ -194,6 +194,17 @@ are the source of truth — Actions *call them* so local and CI never drift.
   `SHA256SUMS`, signatures. Trigger `homebrew.yml`.
 - **Permissions:** `contents: write`, `id-token: write` (attestations),
   `attestations: write`.
+- **As built (deviations from the sketch above):** the `macos`/`linux` build
+  jobs run per-runner and call the platform Makefile targets directly (rather
+  than `make dist` / `make dist-checksums`, which build *all* platforms on one
+  host); a final `publish` job downloads the artifacts, computes `SHA256SUMS`,
+  and creates the release with `gh release create` (no third-party publish
+  action). Three platform tarballs ship (macOS universal counts once). Signing
+  is **keyless only** — build-provenance attestations + a cosign-signed
+  `SHA256SUMS.cosign.bundle`; GPG (`make dist-sign`), the Homebrew tap, and the
+  hand-written highlights block are fast-follows. Zig for the musl cross-links
+  comes from `mlugg/setup-zig`; `cargo-zigbuild` + `git-cliff` from
+  `taiki-e/install-action`.
 
 ### `snapshot.yml` — nightly CURRENT builds (schedule + manual)
 - `schedule` (nightly) + `workflow_dispatch`. Build `main` with the release
