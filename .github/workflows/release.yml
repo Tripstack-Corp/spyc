@@ -60,8 +60,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # zig is cargo-zigbuild's cross-linker; the Makefile's musl targets shell
-      # out to `cargo zigbuild`.
+      # out to `cargo zigbuild`. Pin an explicit stable — the unpinned default
+      # resolves to an unreleased Zig (0.16.0) that 404s on every mirror.
       - uses: mlugg/setup-zig@v1
+        with:
+          version: 0.14.0
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-zigbuild
