@@ -36,7 +36,7 @@ jobs:
     name: Lint + supply-chain (fmt, clippy, deny)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain + C compiler (load-bearing for *-sys crates)
         run: rustc --version && cargo --version && cc --version
       - uses: Swatinem/rust-cache@v2
@@ -58,7 +58,7 @@ jobs:
     name: Tests (cargo test --all-targets)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain + C compiler
         run: rustc --version && cc --version
       - uses: Swatinem/rust-cache@v2
@@ -78,7 +78,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup component add llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov (pinned, sha256-verified)
