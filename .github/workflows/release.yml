@@ -115,7 +115,10 @@ jobs:
         with:
           subject-path: "dist/spyc-*.tar.gz"
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        # Pinned to an exact tag: sigstore/cosign-installer does NOT publish a
+        # moving `v4` major alias (only exact `v4.x.y`), so `@v4` fails to
+        # resolve. Dependabot bumps this as new versions ship.
+        uses: sigstore/cosign-installer@v4.1.2
       - name: Sign checksums (cosign keyless)
         run: |
           cd dist
