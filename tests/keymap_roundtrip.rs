@@ -11,7 +11,10 @@ use tempfile::tempdir;
 
 /// Parse a `.spycrc.toml` file and verify the TOML structure is accepted.
 fn parse_toml(content: &str) -> toml::Value {
-    content.parse::<toml::Value>().expect("valid TOML")
+    // `toml::from_str` is the whole-DOCUMENT parser the config loader itself
+    // uses. (toml 1.1's `str::parse::<Value>` / `FromStr` parses a single
+    // VALUE, not a document, so it rejects a `key = ...` file outright.)
+    toml::from_str(content).expect("valid TOML")
 }
 
 #[test]
