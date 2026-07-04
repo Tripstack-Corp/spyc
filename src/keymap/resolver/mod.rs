@@ -800,8 +800,11 @@ impl Resolver {
                 self.reset();
                 ResolverOutcome::Action(Action::NewFilePrompt)
             }
-            // `L` (long list → :longlist) and `f` (file type → :filetype)
-            // demoted to `:`-only to slim the default map.
+            KeyCode::Char('L') => {
+                self.reset();
+                ResolverOutcome::Action(Action::LongList)
+            }
+            // `f` (file type → :filetype) stays `:`-only to keep the map lean.
             KeyCode::Char('S') => {
                 self.reset();
                 ResolverOutcome::Action(Action::SortCycle)

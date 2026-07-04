@@ -239,7 +239,6 @@ keymap = [
   "map ^P unix ps aux",
   "map H patternpick *.hpp",
   "map A command activity",        # toggle the activity monitor
-  "map L command longlist",        # ls -lh long listing
   "map ^Y command graveyard",      # recover soft-deleted files
   "map z lua mymacro",             # ~/.config/spyc/lua/mymacro.lua
 ]
