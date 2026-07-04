@@ -1,26 +1,16 @@
 //! Off-thread filesystem-watch control worker.
 //!
-//! `notify`'s inotify backend (Linux) registers one watch per directory, and
-//! a `RecursiveMode::Recursive` `watch()` does a *synchronous* per-subdir
-//! `inotify_add_watch` walk on the calling thread. On a `$HOME`-shaped tree
-//! (`anaconda3/`, multiple `node_modules/`, `.cache/`, …) that walk runs for
-//! many milliseconds — long enough to stall the event loop if it ran there.
-//! macOS FSEvents and Windows `ReadDirectoryChangesW` are OS-level and don't
-//! pay this cost, but the seam is uniform across platforms.
+//! `notify`'s inotify backend (Linux) does a *synchronous* per-subdir
+//! `inotify_add_watch` walk on the calling thread — many milliseconds on a
+//! `$HOME`-shaped tree, enough to stall the event loop. So the watcher lives on
+//! this worker; the main loop only sends [`WatchCommand`]s and the blocking
+//! (un)watch syscalls happen here. (macOS FSEvents / Windows are OS-level and
+//! don't pay this cost, but the seam is uniform.)
 //!
-//! So the `RecommendedWatcher` (and thus `notify`'s internal thread) lives on
-//! this worker, never on the event-loop/input thread. The main loop only
-//! sends [`WatchCommand`]s; the blocking (un)watch syscalls happen here. This
-//! is what let us delete the old Linux `MAX_RECURSIVE_WATCH_DIRS` cap — the
-//! cap existed solely to bound that on-thread walk, and off-thread there's
-//! nothing to bound. The trade-off it leaves: on Linux a recursive watch of a
-//! genuinely huge tree registers an inotify watch per subdir (real kernel
-//! memory, and `watch()` returns `Err` if it hits `fs.inotify.max_user_watches`,
-//! in which case the dir is simply left unwatched and the 1 Hz git poll
-//! covers marker refresh).
-//!
-//! Events still arrive on the unified channel as [`Message::FsEvent`] exactly
-//! as before — only the watch *control* moved off-thread, not the delivery.
+//! Trade-off on Linux: a recursive watch of a huge tree registers an inotify
+//! watch per subdir; if it hits `fs.inotify.max_user_watches` the dir is left
+//! unwatched and the 1 Hz git poll covers marker refresh. Events still arrive
+//! on the unified channel as [`Message::FsEvent`].
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;

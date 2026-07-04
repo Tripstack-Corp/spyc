@@ -3,21 +3,9 @@
 //!
 //! ## Why a separate stage from "real" trash
 //!
-//! Two failure modes informed the design:
-//!
-//!   1. *Fat-finger `R`* — user removes the wrong file, wants to
-//!      undo it within seconds. The system trash works for this but
-//!      forces a context switch (Finder / Files / `gio trash list`).
-//!      We want a one-keystroke undo that lives inside spyc.
-//!   2. *Long-tail recovery* — three days later the user remembers
-//!      they did need that file. The graveyard is bounded; we can't
-//!      keep everything forever. The system trash is the natural
-//!      escape valve here — it has the user's familiar UI for
-//!      browsing old deletions.
-//!
-//! So spyc runs a two-stage pipeline: `R` → graveyard (compressed,
-//! tar.zst, undo-able from spyc) → system trash (uncompressed,
-//! browsable from the OS) when the graveyard exceeds its size cap.
+//! Two-stage: `R` → graveyard (compressed tar.zst, one-keystroke undo inside
+//! spyc, for the fat-finger case) → system trash (uncompressed, browsable in
+//! the OS's own UI, for long-tail recovery) once the graveyard exceeds its cap.
 //!
 //! ## Schema
 //!
@@ -37,14 +25,10 @@
 //!
 //! ## Cascade
 //!
-//! Total cap defaults to 500 MB. On `App::new` we walk the graveyard
-//! oldest-first; while `total > cap`, the oldest entry is unpacked
-//! into a temp dir and each top-level path handed to `trash::delete`,
-//! then the spyc artifacts are removed. The user is told via flash
-//! ("graveyard: N items moved to system trash"). This also runs as a
-//! one-time legacy migration: older paired `<uuid>.json` + `<uuid>.dat`
-//! entries (pre-v1.41.0 schema) can't be unpacked by the new reader,
-//! so they're cascaded too — flash text reflects the count.
+//! Cap defaults to 500 MB. On `App::new`, while `total > cap`, the oldest entry
+//! is unpacked and its paths handed to `trash::delete`, then the spyc artifacts
+//! removed (flash: "N items moved to system trash"). Legacy pre-v1.41.0 entries
+//! the new reader can't unpack are cascaded the same way.
 
 use std::path::{Path, PathBuf};
 

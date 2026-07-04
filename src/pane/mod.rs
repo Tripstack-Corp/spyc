@@ -603,25 +603,13 @@ fn append_pty_debug(bytes: &[u8]) {
     }
 }
 
-/// Parser worker thread: consumes bytes from the PTY reader-thread
-/// channel and processes them into the shared vt100 parser. Runs
-/// concurrently with the main thread; main thread reads the grid
-/// via `with_screen` while the worker writes — both serialized by
-/// the mutex.
-///
-/// vt100 0.15 has a known panic-on-`unwrap` path on some valid
-/// escape sequences (nvim's exit-from-alt-screen byte stream is a
-/// known trigger). `catch_unwind` recovers by rebuilding a fresh
-/// parser at the current dimensions; the screen looks blank
-/// briefly, then the child repaints. Same safety net as the
-/// pre-v1.50.84 main-thread `process_bytes_safe`.
-/// Replace a (poisoned / torn) parser with a fresh one at its CURRENT size —
-/// NOT a captured adopt-time size. `Pane::resize` keeps the screen size in sync
-/// with the pty and its coalescer skips a same-size resize, so rebuilding at a
-/// stale size would never get corrected (the next resize to the real current
-/// size is a no-op). Reading the live size off the parser keeps the recovered
-/// grid the right shape. The size fields survive a `process` panic (it tears
-/// cell/cursor state, not the grid dimensions).
+/// Replace a torn parser with a fresh one at its CURRENT size — NOT a captured
+/// adopt-time size. (vt100 0.15 can panic on some valid escape sequences, e.g.
+/// nvim's exit-from-alt-screen; the worker's `catch_unwind` calls this to
+/// recover.) `Pane::resize` coalesces same-size resizes, so a stale size would
+/// never get corrected. Reading the live size off the parser keeps the
+/// recovered grid the right shape; the size fields survive a `process` panic
+/// (it tears cell/cursor state, not dimensions).
 fn rebuild_parser_preserving_size(p: &mut vt100::Parser) {
     let (rows, cols) = p.screen().size();
     *p = vt100::Parser::new(rows, cols, 10_000);

@@ -72,9 +72,8 @@ pub fn render_transcript(
         .fg(theme.prompt_prefix)
         .add_modifier(Modifier::BOLD);
     let tool_style = Style::default().fg(theme.take);
-    // Muted but NOT Modifier::DIM: status_suffix is already a
-    // comment-gray, and DIM stacked on top of it rendered the result
-    // previews near-invisible on dark backgrounds (dogfood report).
+    // Muted via status_suffix's gray, NOT Modifier::DIM — DIM on top of it
+    // renders near-invisible on dark backgrounds.
     let dim_style = Style::default().fg(theme.status_suffix);
 
     let mut out: Vec<Line<'static>> = Vec::new();

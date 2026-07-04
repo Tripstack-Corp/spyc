@@ -65,18 +65,11 @@ pub fn list(dir: &Path) -> Option<Vec<Worktree>> {
     let repo = gix::discover(dir).ok()?;
     let mut worktrees = Vec::new();
 
-    // The main worktree is NOT in `repo.worktrees()` (which enumerates the
-    // LINKED worktrees only), and `git worktree list` shows it first. Resolve
-    // it from the shared COMMON dir, *not* from `repo.workdir()`: when the
-    // user has switched INTO a linked worktree, discovery opened that linked
-    // worktree, whose `workdir()` is the linked dir — emitting it here
-    // listed the *current* linked worktree as the `[1]` "main" entry and
-    // dropped the real main, so the user could no longer switch back to it
-    // (Spencer's "[1] shows where I currently am, can't get back to my git
-    // home"). The common dir (`<main>/.git`) is identical for every worktree;
-    // opening it yields the main worktree's repo view regardless of `dir`.
-    // Canonicalize first — gix can hand back a CWD-relative `common_dir`
-    // (see `add`), and the second open must not depend on the process CWD.
+    // The main worktree isn't in `repo.worktrees()` (linked only) but git lists
+    // it first. Resolve it from the shared common dir, NOT `repo.workdir()`:
+    // discovery from inside a linked worktree opens that worktree, so workdir()
+    // would list the current linked worktree as main and drop the real one.
+    // Canonicalize first — gix can hand back a CWD-relative `common_dir`.
     let common_dir = std::fs::canonicalize(repo.common_dir())
         .unwrap_or_else(|_| repo.common_dir().to_path_buf());
     match gix::open(&common_dir)
@@ -152,41 +145,24 @@ pub fn add(dir: &Path, branch: &str, base: Option<&str>) -> std::io::Result<Path
     // matching `git worktree add` from anywhere in the tree.
     let repo = gix::discover(dir).map_err(|e| std::io::Error::other(format!("open repo: {e}")))?;
 
-    // Resolve the working-tree root and common git dir to ABSOLUTE,
-    // fs-canonical paths up front. gix derives these relative to the
-    // process CWD it captures at open (`gix_fs::current_dir`); under spyc's
-    // own chdir (and, in tests, a parallel suite that thrashes the global
-    // CWD) gix can hand back a CWD-relative path. Canonicalizing here makes
-    // every path we *persist* (the worktree gitfile + admin `gitdir`)
-    // absolute — a relative `gitdir:` would make `git` resolve the admin
-    // dir against the worktree and fail to find it (the bug this guards).
+    // Canonicalize up front: gix returns paths relative to the CWD it captured
+    // at open, and a relative `gitdir:` in the persisted worktree gitfile makes
+    // git resolve it against the worktree and miss.
     let common_dir = std::fs::canonicalize(repo.common_dir())?;
-    // Anchor the sibling `.worktrees/` dir on the MAIN worktree root — NOT on
-    // whichever worktree `dir` was discovered from. `gix::discover` resolves the
-    // *enclosing* repo, so adding a worktree while the asking column sits inside
-    // an existing linked worktree would otherwise build the path from that
-    // linked worktree's root and nest the new one as
-    // `<linked>.worktrees/<branch>` (the recurring nesting bug: #511's POLA fix
-    // corrected the base BRANCH but not the PATH). The common dir is shared by
-    // every worktree of the repo, so opening it yields the main worktree's repo
-    // view regardless of where `dir` points.
+    // Anchor `.worktrees/` on the MAIN worktree root, not whatever enclosing
+    // worktree `dir` was discovered from — else adding from inside a linked
+    // worktree nests the new one under it (#511). The common dir is shared by
+    // every worktree, so opening it always yields the main repo view.
     let root = if let Some(workdir) = gix::open(&common_dir)
         .ok()
         .and_then(|main| main.workdir().map(std::path::Path::to_path_buf))
     {
-        // Non-bare: the main worktree root. Canonicalize so the persisted
-        // gitfile/admin paths are absolute (see the `common_dir` note above).
+        // Non-bare: the main worktree root, canonicalized (absolute persisted paths).
         std::fs::canonicalize(workdir)?
     } else {
-        // Bare repo: no workdir, so derive the logical root from the (already
-        // canonical) git dir and place worktrees beside it, matching
-        // `git worktree add` (which a bare repo fully supports):
-        //   `<root>/.git` (a bare-flagged gitdir-style repo — e.g. spyc's own
-        //                  bare main checkout with sibling worktrees) → `<root>`
-        //   `<root>.git`  (classic `git init --bare`)                  → `<root>`
-        //   otherwise (a bare dir with no `.git` suffix)               → itself
-        // Previously this bailed with "cannot add a worktree to a bare
-        // repository", which broke `create_worktree` on a bare main repo.
+        // Bare repo: derive the root from the (canonical) git dir and place
+        // worktrees beside it, matching `git worktree add`. Strip a `.git`
+        // basename or `.git` extension; otherwise the git dir is the root.
         let cd = common_dir.as_path();
         if cd.file_name() == Some(std::ffi::OsStr::new(".git")) {
             cd.parent().unwrap_or(cd).to_path_buf()
@@ -197,11 +173,8 @@ pub fn add(dir: &Path, branch: &str, base: Option<&str>) -> std::io::Result<Path
         }
     };
 
-    // Group worktrees under a per-repo sibling dir, so they don't clutter the
-    // repo's parent or collide with unrelated dirs:
-    //   <repo_parent>/<repo>.worktrees/<branch>
-    // (The old subprocess path put a bare `<repo_parent>/<branch>`, which
-    // collided with same-named siblings like an existing `~/src/test`.)
+    // Group worktrees under a per-repo `<repo>.worktrees/` sibling dir so they
+    // don't clutter the parent or collide with same-named siblings.
     let parent = root.parent().unwrap_or(&root);
     let repo_name = root.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
     let target = parent.join(format!("{repo_name}.worktrees")).join(branch);

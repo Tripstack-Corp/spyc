@@ -66,15 +66,9 @@ pub fn walk_streaming(root: &Path, tx: WakingSender<Vec<PathBuf>>) {
         return;
     }
 
-    // Pass 2: only meaningful when root is itself a git repo --
-    // find sibling-clone-style nested .git directories that pass 1's
-    // gitignore would have masked, and walk each as its own root.
-    // `.exists()` (not `.is_dir()`) so a worktree/submodule checkout,
-    // where `.git` is a *gitdir-pointer file* rather than a directory,
-    // still qualifies as a repo root -- otherwise running `F` from
-    // inside a worktree silently skips every nested sibling clone.
-    // Matches the nested-repo detector below, which already uses
-    // `.exists()`.
+    // Pass 2: when root is itself a git repo, walk nested sibling clones that
+    // pass 1's gitignore masked. `.exists()` not `.is_dir()`, so a worktree/
+    // submodule `.git` pointer file still counts as a repo root.
     if root.join(".git").exists() {
         for extra in find_nested_git_repos(root) {
             if !walk_one(&extra, root, &tx, &mut count) {

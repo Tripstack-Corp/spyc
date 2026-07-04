@@ -212,16 +212,10 @@ pub fn make_status_platform(
 ///
 /// ## Platform config (matching `git status --porcelain -unormal`)
 ///
-/// * `untracked_files(Collapsed)` — this maps to gix's
-///   `EmissionMode::CollapseDirectory`, which is exactly what `-unormal` does:
-///   a *fully*-untracked directory collapses to a single `dir/` entry, while
-///   an untracked file inside an otherwise-tracked directory is listed
-///   individually. `UntrackedFiles::Files` (the value PR 4's plan first
-///   suggested) maps to `EmissionMode::Matching`, which lists *every* untracked
-///   file — so a wholly-untracked `sub/` came back as `sub/a.txt`, `sub/b.txt`
-///   instead of git's single `sub/` entry (see DIVERGENCE note in
-///   `case10_fully_untracked_subdir`). `Collapsed` is the right match and is
-///   in fact gix's default.
+/// * `untracked_files(Collapsed)` — gix's `CollapseDirectory`, matching
+///   `-unormal`: a fully-untracked dir collapses to one `dir/` entry, while
+///   untracked files under a tracked dir list individually. `Files` mode lists
+///   every file separately, diverging from git.
 /// * `tree_index_track_renames(Given(default))` and
 ///   `index_worktree_rewrites(default)` — enable rename detection at 50%
 ///   similarity (`gix_diff::Rewrites::default().percentage == 0.5`), matching

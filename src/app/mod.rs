@@ -1252,11 +1252,6 @@ fn place_pty_cursor_from_screen(
     frame.set_cursor_position((x, y));
 }
 
-// `place_pty_cursor` removed in v1.50.84 — every pane render call-site
-// now folds the cursor placement into the same `with_screen` closure
-// as the widget render (single mutex window). See
-// `place_pty_cursor_from_screen` for the cursor logic.
-
 /// How long after a focus-switch chord (`^a-j` / `^a-k`) a same-key
 /// Press/Repeat is treated as a stray bounce and dropped. Covers
 /// system key-repeat (~30-50 ms) and kitty-keyboard Repeat events.

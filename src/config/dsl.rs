@@ -165,15 +165,13 @@ pub fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
 
         "search" => Ok(BoundAction::Plain(Action::SearchPrompt)),
         "next" | "searchnext" => Ok(BoundAction::Plain(Action::SearchNext)),
-        // Backward search repeat (the default `N`). Previously unbindable —
-        // `next` had no symmetric verb, and `previous` is cursor-up, not
+        // Backward search repeat (default `N`); `previous` is cursor-up, not
         // search-prev.
         "searchprev" => Ok(BoundAction::Plain(Action::SearchPrev)),
 
         "startshell" => Ok(BoundAction::Plain(Action::StartShell)),
-        // `unix_cmd` in spy was a prompted shell command. In spyc, `!`
-        // captures output into the pager while `;` runs foreground. DSL
-        // defaults to the captured variant; use `foreground_cmd` for `;`.
+        // `!` captures output into the pager, `;` runs foreground; this
+        // defaults to the captured variant, `foreground_cmd` is `;`.
         "unix_cmd" => Ok(BoundAction::Plain(Action::ShellCapturedPrompt)),
         "foreground_cmd" => Ok(BoundAction::Plain(Action::ShellForegroundPrompt)),
         "unix" => {
@@ -183,9 +181,8 @@ pub fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
                 Ok(BoundAction::UnixCmd(tail.to_string()))
             }
         }
-        // `command <name [args]>` — bind a key to a `:` command (the rest of
-        // the line is the command, e.g. `command graveyard`). Only honored in
-        // $HOME config (it's `is_executing` — it can reach `:!`/`:;` shell).
+        // `command <name>` — bind a key to a `:` command (e.g. `command
+        // graveyard`). $HOME-only (`is_executing`; can reach `:!`/`:;`).
         "command" => {
             if tail.is_empty() {
                 Err("`command` needs a : command (e.g. `command graveyard`)".to_string())
@@ -193,9 +190,8 @@ pub fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
                 Ok(BoundAction::Command(tail.to_string()))
             }
         }
-        // `lua <name>` — bind a key to a $HOME Lua script
-        // (`~/.config/spyc/lua/<name>.lua`). `is_executing` (runs arbitrary
-        // code), so only `$HOME` config may bind it.
+        // `lua <name>` — bind a key to a $HOME Lua script; `is_executing`
+        // (runs arbitrary code), so $HOME config only.
         "lua" => {
             if tail.is_empty() {
                 Err("`lua` needs a script name (e.g. `lua mymacro`)".to_string())
