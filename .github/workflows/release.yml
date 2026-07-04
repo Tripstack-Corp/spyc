@@ -1,0 +1,139 @@
+# spyc release pipeline — build, sign, and publish on a version tag.
+#
+# Trigger: pushing a tag matching `v*` (e.g. `v2.0.0-rc.1`, `v2.0.0`,
+# `v2.0.1`). `-alpha`/`-beta`/`-rc` tags publish as GitHub *pre-releases*;
+# a bare `vN.M.P` publishes as the latest release. The build jobs CALL the
+# existing Makefile targets so local `make dist` and CI never drift
+# (AGENTS.md; RELEASE_ENGINEERING.md §8).
+#
+# Artifacts (RELEASE_ENGINEERING.md §9):
+#   spyc-<tag>-macos-universal.tar.gz   arm64 + x86_64 lipo
+#   spyc-<tag>-linux-x86_64.tar.gz      static, musl
+#   spyc-<tag>-linux-aarch64.tar.gz     static, musl
+#   SHA256SUMS                          checksums over all three tarballs
+#
+# Signing is keyless — no stored secrets (RELEASE_ENGINEERING.md §13.8):
+#   - GitHub build-provenance attestations   verify: `gh attestation verify <file>`
+#   - cosign-signed SHA256SUMS bundle (OIDC)  verify: `cosign verify-blob`
+# GPG signing, the Homebrew tap, and cargo-binstall are documented fast-follows.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Don't cancel an in-flight release if another tag lands; releases are cheap
+# to let finish and cancelling mid-publish is worse than a little overlap.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: Build macOS universal
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain (auto from rust-toolchain.toml)
+        run: rustc --version && cc --version
+      - uses: Swatinem/rust-cache@v2
+      - name: Build universal binary
+        run: make release-macos-universal
+      - name: Package tarball
+        run: |
+          install -m 0755 dist/spyc-macos-universal spyc
+          tar -czf "spyc-${GITHUB_REF_NAME}-macos-universal.tar.gz" spyc LICENSE README.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: spyc-*-macos-universal.tar.gz
+          if-no-files-found: error
+
+  linux:
+    name: Build Linux musl (x86_64 + aarch64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # zig is cargo-zigbuild's cross-linker; the Makefile's musl targets shell
+      # out to `cargo zigbuild`.
+      - uses: mlugg/setup-zig@v1
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+      - name: Toolchain (auto from rust-toolchain.toml)
+        run: rustc --version
+      - uses: Swatinem/rust-cache@v2
+      - name: Build static musl binaries
+        run: |
+          make release-linux-x86
+          make release-linux-arm
+      - name: Package tarballs
+        run: |
+          install -m 0755 target/x86_64-unknown-linux-musl/release/spyc spyc
+          tar -czf "spyc-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" spyc LICENSE README.md
+          install -m 0755 target/aarch64-unknown-linux-musl/release/spyc spyc
+          tar -czf "spyc-${GITHUB_REF_NAME}-linux-aarch64.tar.gz" spyc LICENSE README.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-musl
+          path: spyc-*-linux-*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Sign + publish release
+    needs: [macos, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release + upload assets
+      id-token: write # OIDC for attestations + cosign keyless signing
+      attestations: write # build-provenance attestations
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so git-cliff can build the notes for this tag.
+          fetch-depth: 0
+      - name: Collect build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Stage dist/ + checksums
+        run: |
+          mkdir -p dist
+          find artifacts -name 'spyc-*.tar.gz' -exec cp {} dist/ \;
+          cd dist && shasum -a 256 spyc-*.tar.gz > SHA256SUMS
+          echo "=== SHA256SUMS ===" && cat SHA256SUMS
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "dist/spyc-*.tar.gz"
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign checksums (cosign keyless)
+        run: |
+          cd dist
+          cosign sign-blob --yes SHA256SUMS --bundle SHA256SUMS.cosign.bundle
+      - name: Generate release notes (git-cliff, this tag's section)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+      - run: git cliff --config cliff.toml --latest --strip header > RELEASE_NOTES.md
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=()
+          case "${GITHUB_REF_NAME}" in
+            *-alpha*|*-beta*|*-rc*) args+=(--prerelease) ;;
+          esac
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "spyc ${GITHUB_REF_NAME}" \
+            --notes-file RELEASE_NOTES.md \
+            "${args[@]}" \
+            dist/spyc-*.tar.gz \
+            dist/SHA256SUMS \
+            dist/SHA256SUMS.cosign.bundle
