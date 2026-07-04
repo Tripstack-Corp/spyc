@@ -218,8 +218,8 @@
 <div class="slide light" id="s4">
   <h2>Which agent needs my attention</h2>
   <p style="margin-bottom:20px;">
-    Run several agents across tabs and worktrees, and the real question is <em>which one is waiting on me.</em>
-    spyc answers it cooperatively, not by screen-scraping.
+    Run several agents across tabs and worktrees and the real question becomes <em>which one is waiting on me.</em>
+    Each agent reports its own state, so spyc can tell you.
   </p>
   <div class="three-col">
     <div class="card">
@@ -236,7 +236,7 @@
     </div>
   </div>
   <p style="margin-top:28px; text-align:center; font-size:1.2em; color:var(--chili); font-weight:600;">
-    Self-report over a socket, not a spinner on a screen — so it doesn't break when the agent's UI does.
+    See it at a glance in the tab bar, and get a desktop ping the moment an agent starts waiting on you.
   </p>
 </div>
 
@@ -284,9 +284,9 @@
     <div class="stat"><div class="stat-number">0</div><div class="stat-label">Async runtime</div></div>
   </div>
   <div style="margin-top:28px; max-width:960px; margin-left:auto; margin-right:auto; display:flex; flex-direction:column; gap:11px; text-align:left; font-size:1.02em; color:var(--charcoal);">
-    <p style="margin:0;"><span class="accent" style="font-weight:700;">Built by dogfooding.</span> spyc is both a product of Claude Code and a host for it — nearly every commit was written pairing with an agent (Claude, codex, gemini) in spyc's own pane, over the MCP bridge. Bugs surface live: a git-marker staleness one was caught during this deck's own edit. A scope registry keeps concurrent agents from colliding.</p>
-    <p style="margin:0;"><span class="accent" style="font-weight:700;">Guardrails are the build.</span> Key invariants are tests, not conventions — no git subprocess in production, a hard <code>mod.rs</code> size ceiling, the global / frame / pane binding taxonomy, doc-and-module-index sync, a comment-hygiene check. Break one and CI goes red.</p>
-    <p style="margin:0;"><span class="accent" style="font-weight:700;">Quality by construction.</span> Model-View-Update — a pure domain, a pure render pass, side-effects as data. Sync end-to-end, no async runtime. All under clippy pedantic + nursery with warnings-as-errors; <code>unwrap</code> denied in the pure layers; a single <code>unsafe</code> block in the whole codebase.</p>
+    <p style="margin:0;"><span class="accent" style="font-weight:700;">Dogfooded.</span> spyc is both a product of Claude Code and a host for it. Nearly every commit was written while pairing with an agent (Claude, codex, gemini) in spyc's own pane — a git-marker bug even turned up while this deck was being edited. A scope registry keeps concurrent agents from colliding.</p>
+    <p style="margin:0;"><span class="accent" style="font-weight:700;">Guardrails.</span> The invariants that matter are enforced as tests: no git subprocess in production, a size ceiling on <code>mod.rs</code>, the binding-tier taxonomy, doc and module-index sync, a comment-hygiene check. Break one and CI goes red.</p>
+    <p style="margin:0;"><span class="accent" style="font-weight:700;">Architecture.</span> Model-View-Update, with a pure domain, a pure render pass, and effects as data. It runs synchronously throughout, with no async runtime. Everything builds under clippy pedantic and nursery with warnings as errors, <code>unwrap</code> is denied in the pure layers, and there's one <code>unsafe</code> block in the whole codebase.</p>
   </div>
   <p style="margin-top:22px; font-size:0.95em; color:var(--ash); text-align:center;">
     <span class="accent">ratatui</span> · <span class="accent">crossterm</span> · <span class="accent">vt100</span> · <span class="accent">portable-pty</span> · <span class="accent">gix</span> · <span class="accent">mlua</span> — static musl Linux binaries, macOS universal.
@@ -334,7 +334,7 @@
   <div class="three-col" style="margin-top:24px;">
     <div class="card">
       <h3>Agent status, self-reported</h3>
-      <p>Cooperative report over the MCP/hook channel, with a tunable scrape fallback — dodges the fragility class that breaks scrape-only tools.</p>
+      <p>Each agent reports its own state over the MCP/hook channel, with a tunable scrape fallback for the ones that can't report.</p>
     </div>
     <div class="card">
       <h3>Off-thread everything</h3>
@@ -409,8 +409,8 @@
 <div class="slide light" id="s12">
   <h2>Road to <span class="accent">2.0</span></h2>
   <p style="margin-bottom:24px; font-size:1.25em;">
-    The feature set is launch-ready. 2.0 is a distribution and signaling bump —
-    <span class="accent">not</span> a feature gate.
+    The feature set is launch-ready. Everything left for 2.0 is distribution:
+    packaging, signing, and a public launch.
   </p>
   <div class="two-col">
     <div>
