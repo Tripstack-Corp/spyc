@@ -38,7 +38,7 @@ jobs:
     name: Build macOS universal
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain (auto from rust-toolchain.toml)
         run: rustc --version && cc --version
       - uses: Swatinem/rust-cache@v2
@@ -48,7 +48,7 @@ jobs:
         run: |
           install -m 0755 dist/spyc-macos-universal spyc
           tar -czf "spyc-${GITHUB_REF_NAME}-macos-universal.tar.gz" spyc LICENSE README.md
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-universal
           path: spyc-*-macos-universal.tar.gz
@@ -58,11 +58,11 @@ jobs:
     name: Build Linux musl (x86_64 + aarch64)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # zig is cargo-zigbuild's cross-linker; the Makefile's musl targets shell
       # out to `cargo zigbuild`. Pin an explicit stable — the unpinned default
       # resolves to an unreleased Zig (0.16.0) that 404s on every mirror.
-      - uses: mlugg/setup-zig@v1
+      - uses: mlugg/setup-zig@v2
         with:
           version: 0.14.0
       - uses: taiki-e/install-action@v2
@@ -81,7 +81,7 @@ jobs:
           tar -czf "spyc-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" spyc LICENSE README.md
           install -m 0755 target/aarch64-unknown-linux-musl/release/spyc spyc
           tar -czf "spyc-${GITHUB_REF_NAME}-linux-aarch64.tar.gz" spyc LICENSE README.md
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-musl
           path: spyc-*-linux-*.tar.gz
@@ -96,12 +96,12 @@ jobs:
       id-token: write # OIDC for attestations + cosign keyless signing
       attestations: write # build-provenance attestations
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history so git-cliff can build the notes for this tag.
           fetch-depth: 0
       - name: Collect build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Stage dist/ + checksums
@@ -111,11 +111,11 @@ jobs:
           cd dist && shasum -a 256 spyc-*.tar.gz > SHA256SUMS
           echo "=== SHA256SUMS ===" && cat SHA256SUMS
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: "dist/spyc-*.tar.gz"
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4
       - name: Sign checksums (cosign keyless)
         run: |
           cd dist
