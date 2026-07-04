@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="spyc demo: navigate, ask the agent, gf jump" width="720">
+  <img src="docs/assets/demo.gif" alt="spyc demo: pick three docs, ask the agent about them over MCP, gf jumps to the answer" width="760">
 </p>
 
 ---
