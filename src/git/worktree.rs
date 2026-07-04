@@ -282,11 +282,37 @@ fn checkout_and_write(
         checkout_opts,
     )
     .map_err(|e| std::io::Error::other(format!("checkout: {e}")))?;
-    index
-        .write(gix::index::write::Options::default())
-        .map_err(|e| std::io::Error::other(format!("write index: {e}")))?;
+    write_index_with_lock_retry(&mut index)?;
 
     write_admin_files(admin_dir, target, branch)
+}
+
+/// Write the worktree index, riding out transient contention on its lock file.
+///
+/// gix acquires `<admin>/index.lock` with `Fail::Immediately` — no internal
+/// wait — so a contender that holds the lock for even a moment (a concurrent
+/// gix operation in production, or the heavily-parallel test runner) makes the
+/// very first `write` fail instantly with `AcquireLock` rather than blocking.
+/// A short bounded backoff (5 attempts, ~0.3s total) lets a passing holder
+/// release, while a genuinely stuck lock still fails fast instead of hanging.
+/// Re-issuing `write` is safe: it re-serializes the same in-memory index and
+/// re-acquires from scratch, so no partial state carries across attempts.
+fn write_index_with_lock_retry(index: &mut gix::index::File) -> std::io::Result<()> {
+    const ATTEMPTS: u32 = 5;
+    let mut backoff = std::time::Duration::from_millis(20);
+    for attempt in 1..=ATTEMPTS {
+        match index.write(gix::index::write::Options::default()) {
+            Ok(()) => return Ok(()),
+            Err(gix::index::file::write::Error::AcquireLock(_)) if attempt < ATTEMPTS => {
+                std::thread::sleep(backoff);
+                backoff *= 2;
+            }
+            Err(e) => return Err(std::io::Error::other(format!("write index: {e}"))),
+        }
+    }
+    // The `attempt < ATTEMPTS` guard routes the final attempt's errors to the
+    // catch-all above, so every path through the loop has already returned.
+    unreachable!("write_index_with_lock_retry loop always returns")
 }
 
 /// Resolve `full_ref` (`refs/heads/<branch>`) to its commit id. If the branch
@@ -1006,5 +1032,42 @@ mod tests {
         let added = add(&main, "feature", None).expect("retry add after failure");
         assert_eq!(added, target);
         assert!(added.is_dir());
+    }
+
+    #[test]
+    fn write_index_gives_up_on_a_stuck_lock_instead_of_hanging() {
+        // A permanently-held `index.lock` must make the write FAIL (surfacing
+        // the lock error) after the bounded retries — never hang, never skip
+        // the write. The complementary recover-from-a-TRANSIENT-lock path is
+        // covered by add_succeeds_after_a_prior_failed_attempt, which now runs
+        // through the same retry helper.
+        let (_tmp, main) = init_repo();
+        let repo = gix::open(&main).expect("open repo");
+        let tree = repo
+            .head_commit()
+            .expect("head commit")
+            .tree_id()
+            .expect("tree id")
+            .detach();
+        let mut index = repo.index_from_tree(&tree).expect("index from tree");
+
+        let index_path = main.join(".git").join("wtidx-stuck-lock-test");
+        index.set_path(&index_path);
+        // Plant the lock gix acquires (`<resource>.lock`) so every attempt
+        // fails immediately.
+        let lock_path = index_path.with_extension("lock");
+        std::fs::write(&lock_path, b"").expect("plant stuck lock");
+
+        let err = super::write_index_with_lock_retry(&mut index)
+            .expect_err("a permanently-held lock must surface an error");
+        assert!(
+            err.to_string().contains("lock"),
+            "error should name the lock, got: {err}"
+        );
+        // The write never landed while the lock was held.
+        assert!(
+            !index_path.exists(),
+            "index must not be written out under a held lock"
+        );
     }
 }
