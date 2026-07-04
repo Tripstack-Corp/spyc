@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in spyc misbehaves
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. spyc is a terminal app, so the debug log and your
+        terminal/OS/multiplexer matter a lot — please fill in the environment and
+        attach a `--debug` log if you can.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        1. ...
+        2. ...
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: spyc version
+      description: "`spyc --version`, or the version shown in the status bar."
+      placeholder: "1.97.3"
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Terminal + OS
+      description: Terminal emulator, multiplexer (tmux?), OS + version, and whether over SSH.
+      placeholder: "WezTerm, macOS 15.5, local (no tmux)"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug log
+      description: >
+        Reproduce with `spyc --debug`, then paste the relevant lines from
+        `/tmp/spyc-debug-*.log`. For pane/agent issues, `--status-trace` adds
+        the status-hook payloads to `mcp.log`.
+      render: text
