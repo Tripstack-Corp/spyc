@@ -62,10 +62,10 @@ fn ctrl_x_is_unbound_after_chmod_demotion() {
 
 #[test]
 fn demoted_standalone_keys_are_unbound() {
-    // A (:activity), s (:set), L (:longlist), f (:filetype) lost their default
-    // key in the keymap slim — each is now free, reached via its : command and
+    // A (:activity), s (:set), f (:filetype) lost their default key in the
+    // keymap slim — each is now free, reached via its : command and
     // re-bindable with `map KEY command <name>`.
-    for c in ['A', 's', 'L', 'f'] {
+    for c in ['A', 's', 'f'] {
         let mut r = Resolver::new();
         assert_eq!(
             feed(&mut r, key(c)),
@@ -73,6 +73,17 @@ fn demoted_standalone_keys_are_unbound() {
             "`{c}` should be unbound after the demotion"
         );
     }
+}
+
+#[test]
+fn capital_l_long_lists() {
+    // `L` keeps its default binding — long listing is table stakes for a file
+    // commander, so it earns a key (the `:longlist` command remains too).
+    let mut r = Resolver::new();
+    assert_eq!(
+        feed(&mut r, key('L')),
+        ResolverOutcome::Action(Action::LongList)
+    );
 }
 
 #[test]

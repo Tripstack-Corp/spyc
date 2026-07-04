@@ -79,10 +79,6 @@ ignore = [
     # considers 1.3.3 a "complete" version. Transitive via syntect for
     # serializing the bundled syntax cache.
     { id = "RUSTSEC-2025-0141", reason = "unmaintained transitive via syntect; complete-as-shipped" },
-    # serial 0.4.0 — unmaintained since 2017. Transitive via
-    # portable-pty (which spyc uses for the embedded pane). No
-    # alternative without forking portable-pty.
-    { id = "RUSTSEC-2017-0008", reason = "unmaintained transitive via portable-pty; no alternative" },
     # quick-xml < 0.41.0 — XML-parse DoS advisories (RUSTSEC-2026-0194 quadratic
     # duplicate-attribute check; RUSTSEC-2026-0195 unbounded namespace-declaration
     # allocation). Two copies in the tree, neither reachable under the advisory's

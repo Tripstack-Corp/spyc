@@ -13,7 +13,14 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="spyc demo: navigate, ask the agent, gf jump" width="720">
+  <a href="https://github.com/Tripstack-Corp/spyc/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Tripstack-Corp/spyc/ci.yml?branch=main&label=CI&style=flat-square" alt="CI"></a>
+  <a href="https://github.com/Tripstack-Corp/spyc/actions/workflows/audit.yml"><img src="https://img.shields.io/github/actions/workflow/status/Tripstack-Corp/spyc/audit.yml?label=audit&style=flat-square" alt="Audit"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSD--3--Clause-blue?style=flat-square" alt="License: BSD-3-Clause"></a>
+  <img src="https://img.shields.io/badge/rust-1.96-orange?style=flat-square&logo=rust" alt="Rust 1.96">
+</p>
+
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="spyc demo: pick three docs, ask the agent about them over MCP, gf jumps to the answer" width="760">
 </p>
 
 ---
@@ -21,7 +28,7 @@
 ## Why spyc?
 
 Put an AI coding agent in your terminal and you usually get a chat
-window — you still describe your working tree to it, paste paths back
+window. You still describe your working tree to it, paste paths back
 and forth, and lose track of what it's looking at. spyc runs the agent
 in a pane beside a keyboard-driven file commander, on macOS and Linux,
 and gives it live, structured access to exactly what you're looking at
@@ -30,11 +37,10 @@ via a local MCP socket.
 The agent can ask spyc *what is the cursor on, what is staged, what is
 pinned, what is in this directory* — no copy-paste, no path description.
 Pick three files and ask a question; the agent sees your selection. When
-it mentions a path in its response, press `gf` to jump there. Context
-flows both ways.
+it mentions a path in its response, press `gf` to jump straight there.
 
-The file manager is where you and your agents actually work together —
-not just dressing and flash around a TUI chat.
+The file manager is the shared workspace where you and your agents actually
+work — not a file list bolted onto a chat window.
 
 ## What it is
 
@@ -64,15 +70,15 @@ When you pick three files and ask the agent a question, it can call
 `get_spyc_context` and see your cwd, cursor file, picks, inventory, active
 filter, and git branch — no copy-paste, no path description.
 
-Everything else — vi motions, marks, picks, inventory, pager, shell
-integration — is what you'd expect from a keyboard-driven file
+Everything else (vi motions, marks, picks, inventory, pager, shell
+integration) is what you'd expect from a keyboard-driven file
 manager. The MCP bridge is the part that distinguishes spyc from
 Yazi, Broot, Ranger, or the rest of the space.
 
 **The name.** Say it *"spy-see"* — near enough to *spicy*, which is where the
 chili comes from. It carries a lineage too: `spy` and the keyboard-driven file
 commanders that came before it, rebuilt from scratch in Rust for the age of
-coding agents. Precise, fast, no bulk.
+coding agents.
 
 <sub>spyc is an independent project, not affiliated with or endorsed by Side Effects Software Inc. or Anthropic.</sub>
 
@@ -134,7 +140,7 @@ for details.
 
 Claude can call `get_spyc_context` at any time to see exactly what
 you're looking at. Use `gf`/`gF` to jump from Claude's output back to
-the file list. The context is bidirectional and always current.
+the file list.
 
 Search MCP tools (`search_paths`, `search_content`, `search_picks`,
 `search_inventory`) let Claude run gitignore-aware fuzzy filename
@@ -147,9 +153,9 @@ are state Claude can't see through generic filesystem tools.
 Run agents across several tabs and the real question becomes *which one is
 waiting on me?* Each pane tab carries a live **activity dot** — a hot pulse
 while the agent works, a settled square when it's **blocked** (waiting on your
-input or a permission) or **done**. The state is self-reported by the agent
-over the same MCP/hook channel, so it's cooperative rather than screen-scraped
-and stays correct even while the agent redraws its own UI.
+input or a permission) or **done**. The agent reports the state itself over the same MCP/hook channel, so spyc
+isn't guessing from what's on screen, and it stays correct even while the agent
+redraws its own UI.
 
 On the transition *into* blocked or done, spyc fires a desktop notification
 naming the tab and a brief spice-heat border pulse (the visual bell) — so the
@@ -159,7 +165,7 @@ fires on `Done`; all of it is configurable under `[notify]` (see
 [Configuration](#configuration)), and `:notify test` fires every channel on
 demand.
 
-Sessions are auto-saved on quit — and re-saved a couple of seconds after
+Sessions are auto-saved on quit, and re-saved a couple of seconds after
 any change, so a crash or hard kill loses at most that window, not the
 whole session. `spyc -r` opens a session picker that restores all pane
 tabs and resumes each agent's conversation. Claude
@@ -185,14 +191,14 @@ they touch it:
   claim overlaps yours, so two agents never merge the same files at once.
 - **`release_scope(id)`** — done (auto-released when the tab closes).
 
-It's advisory and in-memory (persisted across `spyc -r`), not a hard lock — the
-lightweight coordination that keeps parallel agents out of each other's way
-without a background daemon. Inspect it live with `:agent list` / `:agent
+It's advisory and in-memory (persisted across `spyc -r`), not a hard lock: just
+enough coordination to keep parallel agents out of each other's way, without a
+background daemon. Inspect it live with `:agent list` / `:agent
 registry`.
 
-Together with the per-tab activity dots above, that's spyc's agent-orchestration
-story: **see which agent needs you, and keep parallel agents from stepping on
-each other.** Full design and rationale:
+With the per-tab activity dots above, those cover the two problems that show up
+when you run several agents at once: losing track of which one needs you, and two
+of them editing the same files. Full design and rationale:
 [`docs/AGENT_ORCHESTRATION.md`](docs/AGENT_ORCHESTRATION.md).
 
 ## Keybindings
@@ -303,8 +309,8 @@ syntax highlighting, search (`/` forward, `?` backward; `n` / `N`
 repeat), line numbers, hex dump, markdown rendering, and ANSI color
 support. Press `H` (or `F1`) inside the pager for its own help overlay.
 
-The pager is more than a centered overlay — it can also mount
-in-place:
+The pager isn't limited to a centered overlay. It can also mount
+in place:
 
 - **`D`** opens the cursor file in the **top pane** (bottom pane
   stays visible alongside).

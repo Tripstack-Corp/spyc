@@ -26,6 +26,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 Output docs/assets/demo.gif
+Output docs/assets/demo.mp4
 
 # ── Look & feel ──────────────────────────────────────────────────────────────
 Set Shell        "bash"
@@ -45,7 +46,9 @@ Set TypingSpeed  55ms
 
 # ── Setup (hidden): launch spyc with the scripted agent, wait for first paint ──
 Hide
-Type `export SPYC_PANE_CMD="$(pwd)/docs/assets/demo/fake-claude.sh"`
+Type `mkdir -p /tmp/spycbin && cp "$PWD/docs/assets/demo/fake-claude.sh" /tmp/spycbin/claude && chmod +x /tmp/spycbin/claude`
+Enter
+Type `export PATH="/tmp/spycbin:$PATH" SPYC_PANE_CMD=claude`
 Enter
 Type "spyc"
 Enter

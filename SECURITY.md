@@ -9,9 +9,9 @@ If you find something wrong, contact derek.marshall@tripstack.com.
 ## Threat model
 
 spyc is a single-binary terminal file manager. It runs locally as the
-invoking user, has no network code of its own, and is distributed
-internally to Tripstack engineers from a private GitHub repo. The
-realistic threats are:
+invoking user, has no network code of its own, and is distributed as
+source from a public GitHub repo (engineers build it locally via
+`make install`). The realistic threats are:
 
 - **Supply-chain compromise of a Rust dependency** — a transitive
   crate is yanked + republished with malicious code, or an unmaintained

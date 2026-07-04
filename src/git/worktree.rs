@@ -111,12 +111,35 @@ pub fn list(dir: &Path) -> Option<Vec<Worktree>> {
     }
 }
 
+/// Serialize worktree mutations across the whole test process.
+///
+/// gix acquires `<admin>/index.lock` and loose-ref locks with
+/// `Fail::Immediately` while building or tearing down a worktree. The parallel
+/// test runner starts many worktree-mutating tests at once, and on a loaded CI
+/// filesystem their lock lifecycles overlap enough that an acquire fails
+/// outright — an intermittent flake with no production analogue, since spyc
+/// drives worktree ops one at a time through its single update loop + the
+/// off-thread worktree worker. Holding this mutex for the whole mutation means
+/// at most one worktree is built or removed at a time under test,
+/// deterministically. Compiled out of release builds (`cfg(test)`), so
+/// production keeps its lock-free path plus the transient-contention retry in
+/// [`write_index_with_lock_retry`]. Poison is recovered so one panicking test
+/// can't wedge every other worktree test behind it.
+#[cfg(test)]
+fn serialize_worktree_mutation() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Create a new worktree under a per-repo `<repo>.worktrees/` dir next to
 /// the working-tree root (`<repo_parent>/<repo>.worktrees/<branch>`): use an
 /// EXISTING branch `<branch>` if present, else create it at `base` (a ref/rev,
 /// typically the repo's default branch), or HEAD when `base` is `None`.
 /// Returns the new worktree's path.
 pub fn add(dir: &Path, branch: &str, base: Option<&str>) -> std::io::Result<PathBuf> {
+    #[cfg(test)]
+    let _serial = serialize_worktree_mutation();
     // `gix::discover` (not `gix::open`) so adding from a repo subdirectory
     // resolves the enclosing repo and anchors the new worktree on its root,
     // matching `git worktree add` from anywhere in the tree.
@@ -255,11 +278,37 @@ fn checkout_and_write(
         checkout_opts,
     )
     .map_err(|e| std::io::Error::other(format!("checkout: {e}")))?;
-    index
-        .write(gix::index::write::Options::default())
-        .map_err(|e| std::io::Error::other(format!("write index: {e}")))?;
+    write_index_with_lock_retry(&mut index)?;
 
     write_admin_files(admin_dir, target, branch)
+}
+
+/// Write the worktree index, riding out transient contention on its lock file.
+///
+/// gix acquires `<admin>/index.lock` with `Fail::Immediately` — no internal
+/// wait — so a contender that holds the lock for even a moment (a concurrent
+/// gix operation in production, or the heavily-parallel test runner) makes the
+/// very first `write` fail instantly with `AcquireLock` rather than blocking.
+/// A short bounded backoff (5 attempts, ~0.3s total) lets a passing holder
+/// release, while a genuinely stuck lock still fails fast instead of hanging.
+/// Re-issuing `write` is safe: it re-serializes the same in-memory index and
+/// re-acquires from scratch, so no partial state carries across attempts.
+fn write_index_with_lock_retry(index: &mut gix::index::File) -> std::io::Result<()> {
+    const ATTEMPTS: u32 = 5;
+    let mut backoff = std::time::Duration::from_millis(20);
+    for attempt in 1..=ATTEMPTS {
+        match index.write(gix::index::write::Options::default()) {
+            Ok(()) => return Ok(()),
+            Err(gix::index::file::write::Error::AcquireLock(_)) if attempt < ATTEMPTS => {
+                std::thread::sleep(backoff);
+                backoff *= 2;
+            }
+            Err(e) => return Err(std::io::Error::other(format!("write index: {e}"))),
+        }
+    }
+    // The `attempt < ATTEMPTS` guard routes the final attempt's errors to the
+    // catch-all above, so every path through the loop has already returned.
+    unreachable!("write_index_with_lock_retry loop always returns")
 }
 
 /// Resolve `full_ref` (`refs/heads/<branch>`) to its commit id. If the branch
@@ -378,6 +427,8 @@ pub fn remove_force(path: &Path) -> std::io::Result<()> {
 }
 
 fn remove_inner(path: &Path, force_dirty: bool) -> std::io::Result<()> {
+    #[cfg(test)]
+    let _serial = serialize_worktree_mutation();
     // Resolve the admin dir from the worktree's `.git` gitfile.
     let admin_dir = admin_dir_of(path)?;
 
@@ -979,5 +1030,74 @@ mod tests {
         let added = add(&main, "feature", None).expect("retry add after failure");
         assert_eq!(added, target);
         assert!(added.is_dir());
+    }
+
+    #[test]
+    fn write_index_gives_up_on_a_stuck_lock_instead_of_hanging() {
+        // A permanently-held `index.lock` must make the write FAIL (surfacing
+        // the lock error) after the bounded retries — never hang, never skip
+        // the write. The complementary recover-from-a-TRANSIENT-lock path is
+        // covered by add_succeeds_after_a_prior_failed_attempt, which now runs
+        // through the same retry helper.
+        let (_tmp, main) = init_repo();
+        let repo = gix::open(&main).expect("open repo");
+        let tree = repo
+            .head_commit()
+            .expect("head commit")
+            .tree_id()
+            .expect("tree id")
+            .detach();
+        let mut index = repo.index_from_tree(&tree).expect("index from tree");
+
+        let index_path = main.join(".git").join("wtidx-stuck-lock-test");
+        index.set_path(&index_path);
+        // Plant the lock gix acquires (`<resource>.lock`) so every attempt
+        // fails immediately.
+        let lock_path = index_path.with_extension("lock");
+        std::fs::write(&lock_path, b"").expect("plant stuck lock");
+
+        let err = super::write_index_with_lock_retry(&mut index)
+            .expect_err("a permanently-held lock must surface an error");
+        assert!(
+            err.to_string().contains("lock"),
+            "error should name the lock, got: {err}"
+        );
+        // The write never landed while the lock was held.
+        assert!(
+            !index_path.exists(),
+            "index must not be written out under a held lock"
+        );
+    }
+
+    #[test]
+    fn worktree_mutations_are_serialized_under_test() {
+        // The cfg(test) mutex must give strict mutual exclusion so parallel
+        // worktree tests never overlap their gix lock lifecycles — the concurrency
+        // that produced the CI "could not acquire lock for index file" flake.
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let inside = Arc::new(AtomicUsize::new(0));
+        let max_seen = Arc::new(AtomicUsize::new(0));
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let inside = Arc::clone(&inside);
+                let max_seen = Arc::clone(&max_seen);
+                std::thread::spawn(move || {
+                    let _serial = super::serialize_worktree_mutation();
+                    let now = inside.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_seen.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    inside.fetch_sub(1, Ordering::SeqCst);
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("serialized worker joins");
+        }
+        assert_eq!(
+            max_seen.load(Ordering::SeqCst),
+            1,
+            "at most one worktree mutation may hold the serialization lock at a time"
+        );
     }
 }

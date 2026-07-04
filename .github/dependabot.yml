@@ -1,0 +1,40 @@
+# Dependabot version updates.
+#
+# Security coverage is elsewhere: GitHub Dependabot *alerts* + the weekly
+# cargo-deny advisory sweep (.github/workflows/audit.yml) catch CVEs. This
+# file opens the routine, non-security dependency-bump PRs.
+#
+# Bumps are grouped and conventional-commit-prefixed so:
+#   - git-cliff files each PR under a CHANGELOG section (the commit subject
+#     is the changelog line — see cliff.toml / CONTRIBUTING.md), and
+#   - the spyc-semver merge driver still auto-resolves the Cargo.toml
+#     version-line collision every PR creates on rebase.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Fold routine minor/patch bumps into a single PR to keep merge-train
+      # churn down; major bumps still open individually for a deliberate look.
+      cargo-minor-patch:
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

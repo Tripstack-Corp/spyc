@@ -157,15 +157,16 @@ become `%` in shell expansion.
   radius is visible before you press `y`. Removed items go to the
   **graveyard** (see below) — recover with `:graveyard` or `:undo`.
 - **+** create a new directory
-- **:longlist** long listing -- aligned table with inode, mode, octal,
+- **L** long listing -- aligned table with inode, mode, octal,
   links, owner, group, size, bytes, blocks, mtime/atime/ctime/birth,
   name (symlinks as `name -> target`). Pager height fits to content.
+  (Also reachable as `:longlist`.)
 - **:filetype** run `file(1)` on the selection
 - **:chmod** chmod +x
 
-  *(`:longlist` / `:filetype` / `:chmod` are the rarely-used file ops —
-  kept off the default keymap to keep it lean; bind a key if you use them,
-  e.g. `map L command longlist`.)*
+  *(`:filetype` / `:chmod` are the rarely-used file ops — kept off the
+  default keymap to keep it lean; bind a key if you use them,
+  e.g. `map f command filetype`.)*
 
 ## Split pane with multi-tab pty
 
