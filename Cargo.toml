@@ -25,7 +25,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # Rasterize the mermaid SVG → PNG (pure-Rust; same version mermaid-rs-renderer
 # pulls in, so no duplicate in the tree). We drive it directly to control the
 # white background + system-font loading.
-resvg = { version = "0.46", default-features = false, features = ["text", "system-fonts"] }
+resvg = { version = "0.47", default-features = false, features = ["text", "system-fonts"] }
 # base64 for the image-pager `b` verb (PNG → base64 text buffer). Already in the
 # tree transitively; making it direct.
 base64 = "0.22"
