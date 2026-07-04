@@ -59,8 +59,11 @@ We use GitHub pull requests. The target branch is `main`.
    Run `spyc --debug` to reproduce the issue, then attach the
    relevant lines from the `/tmp/spyc-debug-*.log` file.
 
-6. **One approval required** before merge. Squash-merge preferred to
-   keep `main` history clean.
+6. **Merge.** `main` is branch-protected: a PR is required and the CI
+   checks (lint + tests) must pass, then **squash-merge** to keep the
+   history clean. As a solo-maintained project `main` does not require a
+   separate approving review (the maintainer can't approve their own PR);
+   external contributions are reviewed by the maintainer before merge.
 
 ## Code conventions
 

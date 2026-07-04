@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or open-ended idea
+    url: https://github.com/Tripstack-Corp/spyc/discussions
+    about: For usage questions and discussion, start a Discussion instead of filing an issue.
