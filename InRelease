@@ -1,0 +1,41 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Architectures: amd64 arm64
+Components: main
+Date: Sun, 05 Jul 2026 16:57:14 +0000
+Label: spyc
+Origin: spyc
+Suite: stable
+MD5Sum:
+ 1d3908a79ad6e4682986b695a6c43a6b             1226 Packages
+ e8d85826797a8bc8035a3acd81147d1a              652 Packages.gz
+ cf157a1bb1118b44918ff0cc17e97a6e              121 Release
+SHA1:
+ e3b68d8145a5341394a554878eb6cf8fa616b862             1226 Packages
+ c418fb0e3d5544366cd5d0de47dd5064f637197c              652 Packages.gz
+ f64f383e170c6a0e4c1df4adfdfa051c2412f595              121 Release
+SHA256:
+ af323af0c5f5fe48807aea38e4b31b8854a26bbeadfd408d9be1a65e3ef92a2a             1226 Packages
+ 97c080870753d22c64492cbdd9006bf257370241bd190b5a3acf574e8868ec58              652 Packages.gz
+ 49f7b553b6f70d8138e2a87444852747050284dc2690ba620bd3a464681d9a64              121 Release
+SHA512:
+ 02539a69c3e3a6ade89a9ec5b6e1a827c45d9fe75e46f2dbea8d699894982b579a414f79167447a3f31eddf41ece8e8bf8ccb85e9aa8ac635fa5fb023565ad63             1226 Packages
+ 4553e0324232204c9a8590e6b613cbfa884f362a686122742525b24dec2038fc6e3622bc6c9f3b9e359fc0df4e5e0ccfc22186385cb7ae41a8e8651a55130b39              652 Packages.gz
+ 8ebfb543847eecb82dc5a47da3e40649e34f5bf416ad00842174b5835c0883446663609cd011cb39f4faacceeaa322b57cbbdb6e9a8ab204f77139ff2c4176a0              121 Release
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBCgAdFiEEYDkXY0D5IV4nVq/p1X49dMj8ZhgFAmpKjOoACgkQ1X49dMj8
+ZhhHGhAAjBSxZyl2d/tYvL6VaHMF9CNMSjuA1zjEmz7sRu0rOtLWDyFRNhuY5eQZ
+GdiWnRPuggCSLfuJl8VvB9FNlrQ0ehfxIkYiTaLEmZak9D+2wBAFyyA+bWYoGUTf
+F4PuTAU8ozY0Ad4/db1X9aXvQ53PMbv5RINAeQTSRJ+0nIdwNie5/F6MM4kp3TYl
+MR1v5S5UoRAU1XIMXiR2W2gRppXoCGP68F0aIcpSsk1p/qq0NLK8g/M/6VdnY8ij
+2bILLSNyxWHh4HQ8VUmVryOnME7g7IxJDSGKbC9BQUqT+K0mD4rO9CLglc+WvPPF
+rTPUREutKmJZ054YFw0URnYYVo3uHO3lNdMpQ3ZDmmVsIiDBNoGfYcH+0J4zw4er
+Vt+eQwx3e6QXfngqF+G/mm3ebqz+tUpAqSFOSrIgDCDYfvOSOSIlWW5rUBjUjC7t
+/wP+pj7I2Ya5+UzTg2vOZCdlqwZID1jgosaLMCr2URRifa5pAsMUb6x2VB8efpca
+htsMItNK6MxoRxKzsCjRbJdGO9c++50jB7LCBU7w/sq+PQrgE5PlLVaJqvkZgD+r
+1pVUbdxjqWe566avSmPcQZ/UcoetDKoTE3MphkAafmSCHDayjTzL8Na+rwWT4Gl+
+3OA2OF3k4ikPwY2auTqPBw4zofy6vaQvUd5bdWcJO8kpS2C/7xw=
+=5k2e
+-----END PGP SIGNATURE-----
