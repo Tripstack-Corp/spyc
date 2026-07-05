@@ -1,5 +1,84 @@
 # Installing spyc
 
+Pre-built, signed binaries are the easy path — Homebrew, `apt`, or a
+Release tarball, no Rust toolchain required. To compile spyc yourself
+(to hack on it or run unreleased changes), see [BUILD.md](BUILD.md).
+
+## Install
+
+### Homebrew (macOS and Linux)
+
+```sh
+brew install Tripstack-Corp/tap/spyc
+```
+
+Installs the latest signed release for your platform (macOS universal,
+Linux x86_64 / aarch64) and upgrades with `brew upgrade spyc`. Homebrew
+works on Linux too (Linuxbrew), if you'd rather not use `apt`. To build
+the tip of `main` from source through the tap instead:
+
+```sh
+brew install --HEAD Tripstack-Corp/tap/spyc
+```
+
+### Debian / Ubuntu (apt)
+
+spyc publishes a signed apt repository. Add it once, then install and
+upgrade through your package manager like any other package:
+
+```sh
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://tripstack-corp.github.io/spyc-apt/KEY.gpg \
+  | sudo tee /etc/apt/keyrings/spyc.asc >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/spyc.asc] https://tripstack-corp.github.io/spyc-apt ./" \
+  | sudo tee /etc/apt/sources.list.d/spyc.list >/dev/null
+sudo apt update
+sudo apt install spyc
+```
+
+`sudo apt upgrade` picks up new releases from then on. Both `amd64` and
+`arm64` are published.
+
+### Pre-built binary (any platform)
+
+Download a tarball from the
+[Releases page](https://github.com/Tripstack-Corp/spyc/releases), verify
+it, and put the binary on your `PATH`:
+
+```sh
+# pick the asset for your platform:
+#   spyc-<tag>-macos-universal.tar.gz   arm64 + x86_64
+#   spyc-<tag>-linux-x86_64.tar.gz      static, musl
+#   spyc-<tag>-linux-aarch64.tar.gz     static, musl
+tar xzf spyc-<tag>-<platform>.tar.gz
+install -m 755 spyc ~/.local/bin/
+```
+
+Every release ships a `SHA256SUMS` file plus keyless signatures — verify
+before installing:
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing        # checksum
+gh attestation verify spyc-<tag>-<platform>.tar.gz --repo Tripstack-Corp/spyc
+cosign verify-blob SHA256SUMS \
+  --bundle SHA256SUMS.cosign.bundle \
+  --certificate-identity-regexp '^https://github.com/Tripstack-Corp/spyc/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Make sure `~/.local/bin` is on your `PATH` (see below).
+
+### Build from source
+
+To compile spyc yourself — to hack on it or run unreleased changes —
+see **[BUILD.md](BUILD.md)** for the Rust toolchain, `make install`, and
+cross-compilation. Make sure `~/.local/bin` is on your `PATH`; on macOS
+add this to `~/.zshrc` (or `~/.bash_profile`):
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
 ## Terminal
 
 spyc is designed for modern terminals with true-color (24-bit) and
@@ -46,49 +125,6 @@ If you don't install a Nerd Font, spyc still works — the powerline
 separators will render as missing-glyph boxes. Toggle to mono mode
 with **C** for a plain-text fallback that uses no special glyphs.
 
-## Rust toolchain
-
-spyc is written in Rust. Install the toolchain via rustup:
-
-```sh
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-Minimum supported Rust version: **1.88** (for `if let` chains).
-
-The repo pins an exact toolchain in `rust-toolchain.toml` (currently
-**1.96.0**), so rustup auto-installs and selects it on first build —
-no manual `rustup default` needed. Bump that file to move the project
-to a newer release.
-
-## Build and install
-
-```sh
-git clone https://github.com/Tripstack-Corp/spyc.git
-cd spyc
-make install          # builds release + copies to ~/.local/bin (no sudo)
-```
-
-Make sure `~/.local/bin` is on your `PATH`. Most Linux distros include
-it by default; on macOS add this to `~/.zshrc` (or `~/.bash_profile`):
-
-```sh
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-To install system-wide instead, override `PREFIX` and use sudo:
-
-```sh
-sudo make install PREFIX=/usr/local
-```
-
-Or build and copy manually:
-
-```sh
-cargo build --release
-install -m 755 target/release/spyc ~/.local/bin/
-```
-
 ## Clipboard helper (Linux only)
 
 The yank-to-clipboard features (`yf`, `yp`, `yP`, `ya`, and pager-side
@@ -103,28 +139,6 @@ spyc auto-detects the session — `wl-copy` when `$WAYLAND_DISPLAY` is
 set, otherwise `xclip` → `xsel`. With none installed, yanks flash
 `yank failed: no clipboard helper available — install xclip, xsel,
 or wl-copy`.
-
-## Cross-compilation (optional)
-
-To build for Linux or create a macOS universal binary, you'll need a
-few extra tools:
-
-```sh
-brew install zig
-cargo install cargo-zigbuild
-rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
-rustup target add x86_64-apple-darwin aarch64-apple-darwin
-```
-
-Then use the Makefile targets:
-
-```sh
-make dist                    # all platforms → dist/
-make release-macos-universal # macOS universal (arm64 + x86_64)
-make release-linux-x86       # Linux x86_64 (static, musl)
-make release-linux-arm       # Linux aarch64 (static, musl)
-make deploy-fika             # scp to a remote host
-```
 
 ## Claude Code (pane default)
 

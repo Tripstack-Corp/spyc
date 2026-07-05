@@ -156,11 +156,13 @@ are the source of truth — Actions *call them* so local and CI never drift.
 
 > **Dev-platform: RESOLVED (2026-07-02) — full move to GitHub.** All dev + CI run
 > on GitHub Actions; `bitbucket-pipelines.yml` is retired (archived under
-> `docs/archive/`). **`ci.yml` and `audit.yml` are implemented** — direct ports
-> of the retired pipeline, and **`release.yml` is implemented** (keyless signing,
-> no secrets). `snapshot.yml` and `homebrew.yml` remain to build; they gate on
-> the remaining distribution decisions (the Homebrew tap, nightly cadence), so
-> they land with that work.
+> `docs/archive/`). **`ci.yml`, `audit.yml`, and `release.yml` are implemented**
+> (the last with keyless signing, no secrets). The **Homebrew tap is live** —
+> `Tripstack-Corp/homebrew-tap` carries a `Formula/spyc.rb` that installs the
+> signed release tarballs (macOS universal + Linux x86_64/aarch64) and supports
+> `--HEAD` source builds. **`apt.yml` is implemented** — it builds `.deb`
+> packages and publishes a signed apt repository to GitHub Pages (see below).
+> `snapshot.yml` (nightly cadence) remains to build.
 
 ### `ci.yml` — quality gate (PR + push to `main`) — **IMPLEMENTED**
 - Direct port of the retired `bitbucket-pipelines.yml`: `lint` (fmt + clippy +
@@ -218,14 +220,39 @@ are the source of truth — Actions *call them* so local and CI never drift.
   retired Bitbucket `weekly-deps` pipeline. The old Bitbucket→Slack failure
   notification does *not* carry over — add a GitHub-issue/Slack step if wanted.
 
-### `homebrew.yml` — tap bump (on release published)
-- On a non-prerelease publish, compute the new artifacts' SHAs and open a PR (or
-  push) to `Tripstack-Corp/homebrew-tap` updating the `spyc` formula/cask.
-  Needs a `HOMEBREW_TAP_TOKEN` secret.
+### `homebrew.yml` — tap bump (on release published) — **TAP LIVE**
+- `Tripstack-Corp/homebrew-tap` is live with `Formula/spyc.rb` (pins the release
+  version, its per-platform tarball URLs + SHA256s, and a `--HEAD` source build).
+  On a non-prerelease publish this workflow recomputes the SHAs and pushes the
+  formula bump. Needs a `HOMEBREW_TAP_TOKEN` secret (fine-grained PAT with
+  `contents:write` on the tap repo).
+
+### `apt.yml` — signed apt repo publish (on release published) — **IMPLEMENTED**
+- On a non-prerelease publish: download the release's Linux tarballs, build
+  `.deb`s (`make deb-x86` / `deb-arm`), regenerate the apt index
+  (`apt-ftparchive`), sign the `Release` file with the repo GPG key, and publish
+  the tree to `Tripstack-Corp/spyc-apt`'s GitHub Pages site
+  (`https://tripstack-corp.github.io/spyc-apt`) so users can `apt install spyc` /
+  `apt upgrade`. The publish job self-skips when its secrets are absent, so it
+  stays green until the operator setup below is done.
+- **Operator setup (one-time):**
+  1. Create the public repo `Tripstack-Corp/spyc-apt` and enable **GitHub Pages**
+     serving from its default branch, `/` root (the workflow commits the repo
+     tree straight to that branch).
+  2. Generate a dedicated signing key (`gpg --quick-gen-key "spyc apt <email>"`);
+     export the ASCII-armored private key + note its passphrase.
+  3. On the **spyc** repo add secrets: `APT_GPG_PRIVATE_KEY`, `APT_GPG_PASSPHRASE`,
+     and `APT_REPO_TOKEN` (fine-grained PAT, `contents:write` on `spyc-apt`).
+  4. The workflow publishes the ASCII-armored public key as `KEY.gpg` at the repo
+     root — it's what users pin via `signed-by`.
+- **Prerelease note:** publishing is gated to non-prerelease tags so package
+  versions stay clean `X.Y.Z` (a `2.0.0~rc.4`-style `~` epoch would otherwise be
+  needed for correct apt ordering).
 
 **Cross-cutting:** `concurrency` groups to cancel superseded runs (already wired
-in `ci.yml`); secrets = `GPG_KEY`/`GPG_PASSPHRASE` (if GPG signing) and
-`HOMEBREW_TAP_TOKEN`; cosign uses OIDC (no stored key).
+in `ci.yml`); secrets = `GPG_KEY`/`GPG_PASSPHRASE` (if GPG signing),
+`HOMEBREW_TAP_TOKEN`, and the apt trio (`APT_GPG_PRIVATE_KEY`,
+`APT_GPG_PASSPHRASE`, `APT_REPO_TOKEN`); cosign uses OIDC (no stored key).
 
 ## 9. Artifacts, signing & distribution
 
@@ -250,15 +277,14 @@ in `ci.yml`); secrets = `GPG_KEY`/`GPG_PASSPHRASE` (if GPG signing) and
 
 **Distribution channels:**
 - **GitHub Releases** — primary; the binaries + checksums + signatures live here.
-- **Homebrew tap** — `brew install Tripstack-Corp/tap/spyc` (the backlog already
-  flags "investigate a brew tap"). `homebrew.yml` keeps it current.
+- **Homebrew tap** — `brew install Tripstack-Corp/tap/spyc` (**live**; works on
+  macOS and Linux/Linuxbrew). `homebrew.yml` keeps the formula current.
+- **apt repository** — `apt install spyc` on Debian/Ubuntu from the signed
+  GitHub-Pages repo (`apt.yml`; amd64 + arm64).
 - **`cargo-binstall`** — add the `[package.metadata.binstall]` hints to
   `Cargo.toml` so `cargo binstall spyc` pulls the GitHub artifact (no compile).
 - **crates.io** — optional `cargo install spyc` (§13.5); reserve the name
   regardless.
-- **Install script** — an optional `curl --proto '=https' -sSf <url> | sh`
-  bootstrap (detect OS/arch → fetch the matching release asset → verify checksum
-  → drop in `~/.local/bin`), hosted in-repo. FreeBSD-ish "one command" install.
 
 ## 10. GitHub org & repo presentation (Tripstack-Corp)
 

@@ -86,7 +86,6 @@ coding agents.
 
 ### Prerequisites
 
-- **Rust** 1.88+ -- `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 - **Nerd Font** recommended for the powerline status bar; press `C`
   inside spyc to toggle a mono fallback if you don't have one.
   Install one with: `brew install --cask font-meslo-lg-nerd-font`
@@ -95,14 +94,27 @@ coding agents.
   `ya`, pager yanks) needs `wl-copy` (Wayland) or `xclip` / `xsel`
   (X11). macOS uses the built-in `pbcopy`. See
   [INSTALL.md](INSTALL.md#clipboard-helper-linux-only) for details.
+- **Rust** 1.88+ -- only if you build from source (see [BUILD.md](BUILD.md)).
 
 ### Install
 
+Pre-built, signed binaries — no Rust toolchain needed:
+
 ```sh
-git clone https://github.com/Tripstack-Corp/spyc.git
-cd spyc
-make install          # builds release + copies to ~/.local/bin (no sudo)
+# macOS & Linux — Homebrew
+brew install Tripstack-Corp/tap/spyc
+
+# Debian / Ubuntu — apt (signed repo)
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://tripstack-corp.github.io/spyc-apt/KEY.gpg | sudo tee /etc/apt/keyrings/spyc.asc >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/spyc.asc] https://tripstack-corp.github.io/spyc-apt ./" | sudo tee /etc/apt/sources.list.d/spyc.list >/dev/null
+sudo apt update && sudo apt install spyc
 ```
+
+Or grab a tarball from
+[Releases](https://github.com/Tripstack-Corp/spyc/releases). To **build
+from source** instead, see [BUILD.md](BUILD.md). Full setup — terminal,
+font, clipboard, MCP, and verification — is in [INSTALL.md](INSTALL.md).
 
 ### Launch
 
@@ -491,7 +503,8 @@ See [INSTALL.md](INSTALL.md) for detailed setup instructions.
 
 - [FEATURES.md](FEATURES.md) -- complete feature reference
 - [CONFIGURATION.md](CONFIGURATION.md) -- config reference: `.spycrc.toml`, notifications, keymap DSL, Lua
-- [INSTALL.md](INSTALL.md) -- terminal, font, build, and cross-compilation setup
+- [INSTALL.md](INSTALL.md) -- install (Homebrew, apt, binary), terminal, font, clipboard, and MCP setup
+- [BUILD.md](BUILD.md) -- build from source: Rust toolchain, `make install`, cross-compilation
 - [ARCHITECTURE.md](ARCHITECTURE.md) -- concurrency model, MVU target shape, persistence, MCP transport
 - [docs/AGENT_ORCHESTRATION.md](docs/AGENT_ORCHESTRATION.md) -- how the activity dots, notifications, session-resume, and scope registry fit together
 - [DESIGN.md](DESIGN.md) -- UI design language: components, surfaces, palette, extension checklist

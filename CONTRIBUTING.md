@@ -13,7 +13,9 @@ cargo build    # dev build
 cargo test     # run all tests
 ```
 
-See `INSTALL.md` for font and terminal setup.
+See [BUILD.md](BUILD.md) for the full toolchain, build, and
+cross-compilation reference, and [INSTALL.md](INSTALL.md) for terminal
+and font setup.
 
 ## Pull request workflow
 
@@ -204,12 +206,12 @@ your local `make check`.
 ```sh
 make doctor           # verify toolchain
 make release          # current platform
-make deploy-fika      # Linux x86_64 → fika-vm
 make dist             # all platforms → dist/
 ```
 
 The Makefile touches `src/main.rs` before zigbuild to avoid stale
-cross-compile caches.
+cross-compile caches. See [BUILD.md](BUILD.md) for the full set of
+cross-compile and packaging targets (`.deb`, checksums, signing).
 
 ## Project structure
 
