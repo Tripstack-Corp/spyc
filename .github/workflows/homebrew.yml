@@ -26,6 +26,10 @@ concurrency:
   group: homebrew-tap
   cancel-in-progress: false
 
+# Least-privilege GITHUB_TOKEN; the App token (not this) does the tap write.
+permissions:
+  contents: read
+
 jobs:
   bump:
     name: Bump the Homebrew tap formula
