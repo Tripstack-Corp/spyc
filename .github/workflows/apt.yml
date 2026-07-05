@@ -67,9 +67,11 @@ jobs:
 
       - name: Checkout spyc (for the Makefile)
         if: steps.guard.outputs.enabled == 'true'
+        # main, not the release tag: the .deb target just wraps the prebuilt
+        # binary (release-agnostic), and older tags predate `make deb`.
         uses: actions/checkout@v7
         with:
-          ref: ${{ steps.ver.outputs.tag }}
+          ref: main
 
       - name: Install apt tooling
         if: steps.guard.outputs.enabled == 'true'
