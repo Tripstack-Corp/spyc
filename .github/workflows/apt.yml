@@ -1,0 +1,144 @@
+# Publish spyc's signed apt repository on a stable release.
+#
+# On a non-prerelease GitHub Release (or manual dispatch) this:
+#   1. downloads the release's Linux tarballs,
+#   2. builds .deb packages via the Makefile (`make deb-x86` / `deb-arm`),
+#   3. regenerates the flat apt index (apt-ftparchive) and GPG-signs `Release`,
+#   4. publishes the tree to `Tripstack-Corp/spyc-apt` (served via GitHub Pages
+#      at https://tripstack-corp.github.io/spyc-apt), keeping older versions.
+#
+# Users then: `apt install spyc` (see INSTALL.md). RELEASE_ENGINEERING.md §8
+# has the one-time operator setup (create spyc-apt, enable Pages, add secrets).
+#
+# The publish job SELF-SKIPS when its secrets are absent, so this stays green
+# until that setup is done. Prereleases are skipped so package versions stay a
+# clean `X.Y.Z` (apt orders `~rc` before the final; we sidestep it entirely).
+name: apt
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v2.0.0)"
+        required: true
+
+concurrency:
+  group: apt-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build .debs + publish signed apt repo
+    # Skip prereleases; manual dispatch always runs.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}
+    runs-on: ubuntu-latest
+    env:
+      APT_REPO_TOKEN: ${{ secrets.APT_REPO_TOKEN }}
+      APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+      APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Gate on secrets (self-skip until configured)
+        id: guard
+        run: |
+          if [ -z "$APT_REPO_TOKEN" ] || [ -z "$APT_GPG_PRIVATE_KEY" ]; then
+            echo "::notice::apt secrets not configured — skipping publish"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve tag + version
+        if: steps.guard.outputs.enabled == 'true'
+        id: ver
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout spyc (for the Makefile)
+        if: steps.guard.outputs.enabled == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.ver.outputs.tag }}
+
+      - name: Install apt tooling
+        if: steps.guard.outputs.enabled == 'true'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dpkg-dev apt-utils gnupg
+
+      - name: Download release Linux tarballs
+        if: steps.guard.outputs.enabled == 'true'
+        run: |
+          gh release download "${{ steps.ver.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern 'spyc-*-linux-*.tar.gz'
+
+      - name: Unpack binaries into the paths the Makefile expects
+        if: steps.guard.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p target/x86_64-unknown-linux-musl/release \
+                   target/aarch64-unknown-linux-musl/release
+          tar xzf spyc-*-linux-x86_64.tar.gz spyc
+          mv spyc target/x86_64-unknown-linux-musl/release/spyc
+          tar xzf spyc-*-linux-aarch64.tar.gz spyc
+          mv spyc target/aarch64-unknown-linux-musl/release/spyc
+
+      - name: Build .debs
+        if: steps.guard.outputs.enabled == 'true'
+        run: make deb VERSION="${{ steps.ver.outputs.version }}"
+
+      - name: Import GPG signing key
+        if: steps.guard.outputs.enabled == 'true'
+        id: gpg
+        run: |
+          echo "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          KEYID=$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')
+          echo "keyid=$KEYID" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the apt repo (spyc-apt)
+        if: steps.guard.outputs.enabled == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: Tripstack-Corp/spyc-apt
+          token: ${{ env.APT_REPO_TOKEN }}
+          path: aptrepo
+
+      - name: Regenerate + sign the flat apt index
+        if: steps.guard.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          cp dist/spyc_*.deb aptrepo/
+          cd aptrepo
+          apt-ftparchive packages . > Packages
+          gzip -kf Packages
+          apt-ftparchive \
+            -o APT::FTPArchive::Release::Origin=spyc \
+            -o APT::FTPArchive::Release::Label=spyc \
+            -o APT::FTPArchive::Release::Suite=stable \
+            -o APT::FTPArchive::Release::Architectures="amd64 arm64" \
+            -o APT::FTPArchive::Release::Components=main \
+            release . > Release
+          rm -f InRelease Release.gpg
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$APT_GPG_PASSPHRASE" \
+            --local-user "${{ steps.gpg.outputs.keyid }}" --clearsign -o InRelease Release
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$APT_GPG_PASSPHRASE" \
+            --local-user "${{ steps.gpg.outputs.keyid }}" -abs -o Release.gpg Release
+          gpg --armor --export "${{ steps.gpg.outputs.keyid }}" > KEY.gpg
+          # GitHub Pages skips files/dirs starting with '_' and needs no Jekyll.
+          touch .nojekyll
+
+      - name: Commit + push to spyc-apt
+        if: steps.guard.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          cd aptrepo
+          git config user.name "spyc-release-bot"
+          git config user.email "noreply@tripstack.com"
+          git add -A
+          git commit -m "apt: publish spyc ${{ steps.ver.outputs.version }}" || {
+            echo "nothing to publish"; exit 0;
+          }
+          git push
