@@ -419,6 +419,73 @@ fn capture_backgrounds_with_ctrl_z_then_foregrounds_with_fg() {
     });
 }
 
+/// `^C` in a live capture sends a real SIGINT to the child's process group
+/// (not the 0x03 byte, which a raw-mode reader ignores) and leaves the capture
+/// running — it finalizes on its own EOF once interrupted.
+#[cfg(unix)]
+#[test]
+fn capture_ctrl_c_signals_the_group_not_the_byte() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("w");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.start_capture("cat", "cat", "cat");
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        let fx = app.handle_key(ctrl_c).unwrap();
+        assert!(
+            matches!(
+                fx.as_slice(),
+                [Effect::SignalCapture { sig, .. }] if *sig == rustix::process::Signal::INT
+            ),
+            "^C must emit one SIGINT SignalCapture, got {fx:?}"
+        );
+        assert!(
+            app.runtime.pending_capture.is_some(),
+            "^C interrupts but does not tear the capture down"
+        );
+    });
+}
+
+/// A non-control key still forwards to the child as bytes, so the user can
+/// answer a prompt (a password, a `y`/`n`) — only the control keys are
+/// spyc-managed.
+#[test]
+fn capture_plain_key_forwards_bytes() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("w");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.start_capture("cat", "cat", "cat");
+        let y = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::empty());
+        let fx = app.handle_key(y).unwrap();
+        assert!(
+            matches!(fx.as_slice(), [Effect::SendToCapture { bytes }] if bytes == b"y"),
+            "a plain key forwards its bytes, got {fx:?}"
+        );
+    });
+}
+
+/// `^\` hard-kills: the pager stays (marked interrupted) but the live capture
+/// is dropped.
+#[test]
+fn capture_ctrl_backslash_tears_down() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("w");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.start_capture("cat", "cat", "cat");
+        let ctrl_bs = KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL);
+        app.handle_key(ctrl_bs).unwrap();
+        assert!(
+            app.runtime.pending_capture.is_none(),
+            "^\\ tears down the live capture"
+        );
+    });
+}
+
 /// `gB` / `:task` views a backgrounded task WITHOUT taking ownership: the
 /// task stays in the list, gets marked viewed (clearing its unread divider),
 /// and the pager tracks its id.

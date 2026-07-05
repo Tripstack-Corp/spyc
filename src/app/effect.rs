@@ -103,6 +103,18 @@ pub enum Effect {
     #[cfg(unix)]
     SignalPane { pgrp: u32, resume: bool },
 
+    /// A-class. Send `sig` to a live `!`-capture's foreground process group —
+    /// the `^C` (SIGINT) / `^\` (SIGKILL) keys. A real signal, not the old
+    /// `0x03` byte, so it interrupts a raw-mode reader (e.g. `gh secret set`)
+    /// that ignores the byte. `pgrp` is the pty's foreground group — the actual
+    /// command under the `zsh -i -c` wrapper, not `process_id()` (the wrapper
+    /// shell) — derived in the producer. `#[cfg(unix)]`, like `SignalPane`.
+    #[cfg(unix)]
+    SignalCapture {
+        pgrp: u32,
+        sig: rustix::process::Signal,
+    },
+
     /// A-class. Deliver `input` (pre-encoded key or pre-built bytes) to a
     /// pane, then flash `on_ok` on success / `"{err_prefix}: {e}"` on
     /// failure — each `None` means "ignore that outcome silently" (the
@@ -685,6 +697,13 @@ impl App {
                     if super::kill_pg(pgrp, sig).is_err() {
                         self.state.flash_error("pane: signal failed");
                     }
+                }
+                // Capture `^C`/`^\`: a real signal to the running command's
+                // foreground group. A stale group (child already gone) fails
+                // silently — the capture is finalizing on its own EOF anyway.
+                #[cfg(unix)]
+                Effect::SignalCapture { pgrp, sig } => {
+                    let _ = super::kill_pg(pgrp, sig);
                 }
                 Effect::ForegroundExec {
                     program,
