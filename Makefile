@@ -197,7 +197,7 @@ release-macos-universal: release-macos-arm release-macos-x86 ## macOS Universal 
 
 # `ulimit -n 8192`: zig's linker opens an fd per object file (250+ for spyc),
 # so the final link dies with `ProcessFdQuotaExceeded` under macOS's 256-fd
-# default soft limit — which bites when `make deploy-fika` is invoked from a
+# default soft limit — which bites when a musl build is invoked from a
 # context that didn't raise it (e.g. spyc's own `!` shell). Raise it on the
 # same shell line as the build so it applies to that subshell.
 .PHONY: release-linux-x86
@@ -250,6 +250,45 @@ dist-sign: dist-checksums ## GPG-sign the checksums file (set GPG_KEY=<id> to ch
 		gpg --detach-sign --armor $(if $(GPG_KEY),--local-user $(GPG_KEY),) checksums-sha256.txt
 	@echo "✓ signature written to $(DIST_DIR)/checksums-sha256.txt.asc"
 
+# ---------- Debian packages --------------------------------------------------
+
+# Wrap an already-built static-musl binary in a .deb. `dpkg-deb` is Linux-only
+# (on macOS: `brew install dpkg`). Build the target binary first
+# (`make release-linux-x86` / `release-linux-arm`) — these targets PACKAGE an
+# existing binary rather than rebuild, so the release pipeline reuses the
+# artifacts it already produced. Output → dist/spyc_<version>_<arch>.deb.
+DEB_MAINTAINER ?= Derek Marshall <derek.marshall@tripstack.com>
+
+.PHONY: deb-x86
+deb-x86: ## Package the built Linux x86_64 binary → dist/spyc_<version>_amd64.deb
+	@$(MAKE) --no-print-directory _deb ARCH=amd64 \
+		SRC=target/x86_64-unknown-linux-musl/release/$(BINARY)
+
+.PHONY: deb-arm
+deb-arm: ## Package the built Linux aarch64 binary → dist/spyc_<version>_arm64.deb
+	@$(MAKE) --no-print-directory _deb ARCH=arm64 \
+		SRC=target/aarch64-unknown-linux-musl/release/$(BINARY)
+
+.PHONY: deb
+deb: deb-x86 deb-arm ## Package both Linux .debs (binaries must already be built)
+
+# Internal: build one .deb from $(SRC) for $(ARCH). Fails clearly if the binary
+# is missing — build it with the matching release-linux-* target first.
+.PHONY: _deb
+_deb:
+	@command -v dpkg-deb >/dev/null 2>&1 || { echo "dpkg-deb not found (Linux, or 'brew install dpkg')"; exit 1; }
+	@test -f "$(SRC)" || { echo "missing $(SRC) — run the matching 'make release-linux-*' first"; exit 1; }
+	@rm -rf "$(DIST_DIR)/deb-$(ARCH)"
+	@mkdir -p "$(DIST_DIR)/deb-$(ARCH)/DEBIAN" "$(DIST_DIR)/deb-$(ARCH)/usr/bin"
+	@install -m 0755 "$(SRC)" "$(DIST_DIR)/deb-$(ARCH)/usr/bin/$(BINARY)"
+	@printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: %s\nSection: utils\nPriority: optional\nHomepage: https://github.com/Tripstack-Corp/spyc\nDescription: Keyboard-driven, MCP-native terminal file commander\n' \
+		"$(BINARY)" "$(VERSION)" "$(ARCH)" "$(DEB_MAINTAINER)" \
+		> "$(DIST_DIR)/deb-$(ARCH)/DEBIAN/control"
+	dpkg-deb --build --root-owner-group "$(DIST_DIR)/deb-$(ARCH)" \
+		"$(DIST_DIR)/$(BINARY)_$(VERSION)_$(ARCH).deb"
+	@rm -rf "$(DIST_DIR)/deb-$(ARCH)"
+	@ls -lh "$(DIST_DIR)/$(BINARY)_$(VERSION)_$(ARCH).deb"
+
 # ---------- Install ----------------------------------------------------------
 
 PREFIX ?= $(HOME)/.local
@@ -294,15 +333,6 @@ install-hooks: ## Install pre-commit hook (runs `make check` before each commit)
 	@install -m 755 scripts/git-hooks/pre-commit .git/hooks/pre-commit
 	@echo "✓ installed .git/hooks/pre-commit — runs 'make check' on each commit"
 	@echo "  bypass with 'git commit --no-verify' (don't make a habit)"
-
-# --- Remote deploy ---
-
-FIKA_HOST := drek@10.130.1.36
-
-.PHONY: deploy-fika
-deploy-fika: release-linux-x86 ## Build Linux x86_64 and scp to fika-vm
-	scp target/x86_64-unknown-linux-musl/release/$(BINARY) $(FIKA_HOST):~/bin/$(BINARY)
-	@echo "deployed: $(FIKA_HOST):~/bin/$(BINARY)"
 
 # ---------- Doctor (preflight checks) ----------------------------------------
 
