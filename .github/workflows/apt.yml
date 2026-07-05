@@ -2,16 +2,19 @@
 #
 # On a non-prerelease GitHub Release (or manual dispatch) this:
 #   1. downloads the release's Linux tarballs,
-#   2. builds .deb packages via the Makefile (`make deb-x86` / `deb-arm`),
+#   2. builds .deb packages via the Makefile (`make deb`),
 #   3. regenerates the flat apt index (apt-ftparchive) and GPG-signs `Release`,
-#   4. publishes the tree to `Tripstack-Corp/spyc-apt` (served via GitHub Pages
-#      at https://tripstack-corp.github.io/spyc-apt), keeping older versions.
+#   4. commits the tree to THIS repo's `gh-pages` branch, served via GitHub
+#      Pages at https://tripstack-corp.github.io/spyc (keeping older versions).
 #
-# Users then: `apt install spyc` (see INSTALL.md). RELEASE_ENGINEERING.md §8
-# has the one-time operator setup (create spyc-apt, enable Pages, add secrets).
+# Users then: `apt install spyc` (see INSTALL.md). The apt repo lives on this
+# repo's own gh-pages branch, so the push uses no personal token — the built-in,
+# org-owned GITHUB_TOKEN (contents:write) publishes it.
 #
-# The publish job SELF-SKIPS when its secrets are absent, so this stays green
-# until that setup is done. Prereleases are skipped so package versions stay a
+# The signing key lives in the `apt-publish` protected Environment (only this
+# job, on a `v*` tag or `main`, can read it); operator setup is in
+# RELEASE_ENGINEERING.md §8. The job self-skips when the key is absent, so it
+# stays green until then. Prereleases are skipped so package versions stay a
 # clean `X.Y.Z` (apt orders `~rc` before the final; we sidestep it entirely).
 name: apt
 
@@ -28,23 +31,27 @@ concurrency:
   group: apt-publish
   cancel-in-progress: false
 
+permissions:
+  contents: write # push the apt index to the gh-pages branch
+
 jobs:
   publish:
     name: Build .debs + publish signed apt repo
     # Skip prereleases; manual dispatch always runs.
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}
     runs-on: ubuntu-latest
+    # Scopes the signing-key secrets to this job (and to `v*` / `main` refs).
+    environment: apt-publish
     env:
-      APT_REPO_TOKEN: ${{ secrets.APT_REPO_TOKEN }}
       APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
       APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Gate on secrets (self-skip until configured)
+      - name: Gate on signing key (self-skip until configured)
         id: guard
         run: |
-          if [ -z "$APT_REPO_TOKEN" ] || [ -z "$APT_GPG_PRIVATE_KEY" ]; then
-            echo "::notice::apt secrets not configured — skipping publish"
+          if [ -z "$APT_GPG_PRIVATE_KEY" ]; then
+            echo "::notice::apt signing key not configured — skipping publish"
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=true" >> "$GITHUB_OUTPUT"
@@ -98,12 +105,11 @@ jobs:
           KEYID=$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')
           echo "keyid=$KEYID" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout the apt repo (spyc-apt)
+      - name: Checkout the gh-pages branch (the apt repo)
         if: steps.guard.outputs.enabled == 'true'
         uses: actions/checkout@v7
         with:
-          repository: Tripstack-Corp/spyc-apt
-          token: ${{ env.APT_REPO_TOKEN }}
+          ref: gh-pages
           path: aptrepo
 
       - name: Regenerate + sign the flat apt index
@@ -130,7 +136,7 @@ jobs:
           # GitHub Pages skips files/dirs starting with '_' and needs no Jekyll.
           touch .nojekyll
 
-      - name: Commit + push to spyc-apt
+      - name: Commit + push to gh-pages
         if: steps.guard.outputs.enabled == 'true'
         run: |
           set -euo pipefail
@@ -141,4 +147,4 @@ jobs:
           git commit -m "apt: publish spyc ${{ steps.ver.outputs.version }}" || {
             echo "nothing to publish"; exit 0;
           }
-          git push
+          git push origin gh-pages
