@@ -7,8 +7,9 @@
 # nothing else changes. Prereleases are NOT skipped: the tap tracks the current
 # rc stream (unlike apt.yml, which stays on stable X.Y.Z).
 #
-# Needs HOMEBREW_TAP_TOKEN (fine-grained PAT, contents:write on the tap repo)
-# in the `homebrew-tap` environment. Self-skips when absent so it stays green
+# Auth is an org-owned GitHub App (contents:write on the tap repo, no personal
+# PAT): HOMEBREW_APP_ID + HOMEBREW_APP_KEY in the `homebrew-tap` environment
+# mint a short-lived token per run. Self-skips when absent so it stays green
 # until configured (RELEASE_ENGINEERING.md §8).
 name: homebrew
 
@@ -31,18 +32,29 @@ jobs:
     runs-on: ubuntu-latest
     environment: homebrew-tap
     env:
-      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      HOMEBREW_APP_ID: ${{ secrets.HOMEBREW_APP_ID }}
+      HOMEBREW_APP_KEY: ${{ secrets.HOMEBREW_APP_KEY }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Gate on tap token (self-skip until configured)
+      - name: Gate on App credentials (self-skip until configured)
         id: guard
         run: |
-          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
-            echo "::notice::HOMEBREW_TAP_TOKEN not configured — skipping tap bump"
+          if [ -z "$HOMEBREW_APP_ID" ] || [ -z "$HOMEBREW_APP_KEY" ]; then
+            echo "::notice::homebrew App credentials not configured — skipping tap bump"
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Mint a tap token from the GitHub App
+        if: steps.guard.outputs.enabled == 'true'
+        id: apptoken
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.HOMEBREW_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_APP_KEY }}
+          owner: Tripstack-Corp
+          repositories: homebrew-tap
 
       - name: Resolve tag + version
         if: steps.guard.outputs.enabled == 'true'
@@ -63,7 +75,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: Tripstack-Corp/homebrew-tap
-          token: ${{ env.HOMEBREW_TAP_TOKEN }}
+          token: ${{ steps.apptoken.outputs.token }}
           path: tap
 
       - name: Rewrite Formula/spyc.rb
