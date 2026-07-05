@@ -287,21 +287,24 @@ fn checkout_and_write(
 ///
 /// gix acquires `<admin>/index.lock` with `Fail::Immediately` — no internal
 /// wait — so a contender that holds the lock for even a moment (a concurrent
-/// gix operation in production, or the heavily-parallel test runner) makes the
-/// very first `write` fail instantly with `AcquireLock` rather than blocking.
-/// A short bounded backoff (5 attempts, ~0.3s total) lets a passing holder
-/// release, while a genuinely stuck lock still fails fast instead of hanging.
+/// gix operation in production, or the heavily-parallel test runner) makes a
+/// `write` fail instantly with `AcquireLock` rather than blocking. A bounded
+/// exponential backoff (10 attempts, capped at 300ms/step, ~1.8s total) rides
+/// out that transient contention on a loaded CI filesystem, while a genuinely
+/// stuck lock still fails in bounded time instead of hanging (it is NOT
+/// stomped — see `write_index_gives_up_on_a_stuck_lock_instead_of_hanging`).
 /// Re-issuing `write` is safe: it re-serializes the same in-memory index and
 /// re-acquires from scratch, so no partial state carries across attempts.
 fn write_index_with_lock_retry(index: &mut gix::index::File) -> std::io::Result<()> {
-    const ATTEMPTS: u32 = 5;
+    const ATTEMPTS: u32 = 10;
+    const MAX_BACKOFF: std::time::Duration = std::time::Duration::from_millis(300);
     let mut backoff = std::time::Duration::from_millis(20);
     for attempt in 1..=ATTEMPTS {
         match index.write(gix::index::write::Options::default()) {
             Ok(()) => return Ok(()),
             Err(gix::index::file::write::Error::AcquireLock(_)) if attempt < ATTEMPTS => {
                 std::thread::sleep(backoff);
-                backoff *= 2;
+                backoff = (backoff * 2).min(MAX_BACKOFF);
             }
             Err(e) => return Err(std::io::Error::other(format!("write index: {e}"))),
         }
