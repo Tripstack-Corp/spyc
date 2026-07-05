@@ -136,6 +136,7 @@ project status, update **all** of:
 - `FEATURES.md` — what the app does
 - `ROADMAP.md` — strategy/direction only; file or close a **GitHub Issue** for per-item work
 - `AGENTS.md` — architecture and conventions
+- `docs/KEYBINDINGS.md` — the full keymap reference (mirrors the `?` overlay)
 - `src/ui/help.rs` — the `?` help overlay
 - `docs/assets/presentation.html` — stats and feature lists (if significant)
 
