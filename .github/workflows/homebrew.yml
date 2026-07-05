@@ -1,0 +1,103 @@
+# Bump the Homebrew tap formula on a published release.
+#
+# On any published GitHub Release (or manual dispatch) this reads the release's
+# SHA256SUMS and rewrites Tripstack-Corp/homebrew-tap's Formula/spyc.rb —
+# `version` plus the three per-artifact sha256s (macOS universal, linux
+# x86_64, linux aarch64). The formula's URLs are `#{version}`-interpolated, so
+# nothing else changes. Prereleases are NOT skipped: the tap tracks the current
+# rc stream (unlike apt.yml, which stays on stable X.Y.Z).
+#
+# Needs HOMEBREW_TAP_TOKEN (fine-grained PAT, contents:write on the tap repo)
+# in the `homebrew-tap` environment. Self-skips when absent so it stays green
+# until configured (RELEASE_ENGINEERING.md §8).
+name: homebrew
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to bump the formula to (e.g. v2.0.0-rc.8)"
+        required: true
+
+concurrency:
+  group: homebrew-tap
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Bump the Homebrew tap formula
+    runs-on: ubuntu-latest
+    environment: homebrew-tap
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Gate on tap token (self-skip until configured)
+        id: guard
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN not configured — skipping tap bump"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve tag + version
+        if: steps.guard.outputs.enabled == 'true'
+        id: ver
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download release checksums
+        if: steps.guard.outputs.enabled == 'true'
+        run: |
+          gh release download "${{ steps.ver.outputs.tag }}" \
+            --repo "${{ github.repository }}" --pattern 'SHA256SUMS'
+
+      - name: Check out the tap
+        if: steps.guard.outputs.enabled == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: Tripstack-Corp/homebrew-tap
+          token: ${{ env.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Rewrite Formula/spyc.rb
+        if: steps.guard.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
+          # SHA256SUMS lines are "<hash>  <filename>".
+          sha() { awk -v f="$1" '$2==f {print $1}' SHA256SUMS; }
+          MAC=$(sha "spyc-v${V}-macos-universal.tar.gz")
+          LX=$(sha "spyc-v${V}-linux-x86_64.tar.gz")
+          LA=$(sha "spyc-v${V}-linux-aarch64.tar.gz")
+          [ -n "$MAC" ] && [ -n "$LX" ] && [ -n "$LA" ] || { echo "missing a checksum for v${V}"; exit 1; }
+          f=tap/Formula/spyc.rb
+          # The three sha256 lines are positional: macOS, then linux intel, then
+          # linux arm — the order they appear in the formula.
+          [ "$(grep -c 'sha256 "' "$f")" = 3 ] || { echo "formula sha256 layout changed — bailing"; exit 1; }
+          awk -v v="$V" -v m="$MAC" -v x="$LX" -v a="$LA" '
+            /^  version "/ { sub(/"[^"]*"/, "\"" v "\"") }
+            /sha256 "/ { n++
+              if (n==1) sub(/"[0-9a-f]+"/, "\"" m "\"")
+              else if (n==2) sub(/"[0-9a-f]+"/, "\"" x "\"")
+              else if (n==3) sub(/"[0-9a-f]+"/, "\"" a "\"") }
+            { print }
+          ' "$f" > "$f.new" && mv "$f.new" "$f"
+          echo "--- updated formula ---"; grep -E 'version "|sha256 "' "$f"
+
+      - name: Commit + push to the tap
+        if: steps.guard.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          cd tap
+          git config user.name "spyc-release-bot"
+          git config user.email "noreply@tripstack.com"
+          git add Formula/spyc.rb
+          git commit -m "spyc ${{ steps.ver.outputs.version }}" || { echo "formula already current"; exit 0; }
+          git push

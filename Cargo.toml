@@ -1,6 +1,6 @@
 [package]
 name = "spyc"
-version = "2.0.0-rc.8"
+version = "2.0.0-rc.9"
 edition = "2024"
 description = "A Rust TUI file commander where the AI agent in the side pane can query the file commander itself"
 license = "BSD-3-Clause"
