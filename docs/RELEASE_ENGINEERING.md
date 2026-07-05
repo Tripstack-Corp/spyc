@@ -193,9 +193,12 @@ are the source of truth — Actions *call them* so local and CI never drift.
   written highlights block (the 1Password/Slack "changelog for humans" style the
   backlog calls for).
 - **Publish:** create the GitHub Release, attach `spyc-vN.M.P-<target>.tar.gz` ×4,
-  `SHA256SUMS`, signatures. Trigger `homebrew.yml`.
+  `SHA256SUMS`, signatures. Then **dispatch** `homebrew.yml` + `apt.yml`: a
+  GITHUB_TOKEN-created release does NOT fire their `on: release` triggers (GitHub
+  blocks token events from cascading), so release.yml runs them via
+  `gh workflow run` — the one event a GITHUB_TOKEN can trigger.
 - **Permissions:** `contents: write`, `id-token: write` (attestations),
-  `attestations: write`.
+  `attestations: write`, `actions: write` (dispatch the channel bumps).
 - **As built (deviations from the sketch above):** the `macos`/`linux` build
   jobs run per-runner and call the platform Makefile targets directly (rather
   than `make dist` / `make dist-checksums`, which build *all* platforms on one

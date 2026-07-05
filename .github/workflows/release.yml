@@ -95,6 +95,7 @@ jobs:
       contents: write # create the release + upload assets
       id-token: write # OIDC for attestations + cosign keyless signing
       attestations: write # build-provenance attestations
+      actions: write # dispatch homebrew.yml / apt.yml (below)
     steps:
       - uses: actions/checkout@v7
         with:
@@ -143,3 +144,15 @@ jobs:
             dist/spyc-*.tar.gz \
             dist/SHA256SUMS \
             dist/SHA256SUMS.cosign.bundle
+      - name: Bump downstream channels (homebrew tap + apt)
+        # A release created with GITHUB_TOKEN does NOT fire `on: release`
+        # workflows (GitHub blocks token events from cascading), so dispatch
+        # homebrew.yml / apt.yml explicitly — `workflow_dispatch` is the one
+        # event GITHUB_TOKEN can trigger. Runs after the release above so both
+        # can download its assets. (Their `on: release` triggers still cover a
+        # manual/UI publish.)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run homebrew.yml -f tag="${GITHUB_REF_NAME}"
+          gh workflow run apt.yml      -f tag="${GITHUB_REF_NAME}"
