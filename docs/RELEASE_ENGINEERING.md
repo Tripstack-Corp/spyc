@@ -230,7 +230,8 @@ are the source of truth — Actions *call them* so local and CI never drift.
   short-lived token via `actions/create-github-app-token`.
 
 ### `apt.yml` — signed apt repo publish (on release published) — **LIVE**
-- On a non-prerelease publish: download the release's Linux tarballs, build
+- On any publish (prereleases included — apt tracks the rc stream): download the
+  release's Linux tarballs, build
   `.deb`s (`make deb`), regenerate the apt index (`apt-ftparchive`), sign the
   `Release` file with the signing key, and commit the tree to this repo's
   **`gh-pages`** branch — served via GitHub Pages at
@@ -249,9 +250,10 @@ are the source of truth — Actions *call them* so local and CI never drift.
      holds the two `APT_GPG_*` secrets.
   3. The signing key is backed up off-repo (owner's password manager) with a
      revocation certificate.
-- **Prerelease note:** publishing is gated to non-prerelease tags so package
-  versions stay clean `X.Y.Z` (a `2.0.0~rc.4`-style `~` epoch would otherwise be
-  needed for correct apt ordering).
+- **Prerelease ordering:** rc tags publish too. The deb version is tilde-formed
+  (`make deb`'s `DEB_VERSION` does `-`→`~`, e.g. `2.0.0~rc.4`) because dpkg sorts
+  `2.0.0-rc.4` ABOVE the final `2.0.0` — the `~` form sorts a prerelease BELOW
+  it, so an rc deb never blocks the stable upgrade.
 
 **Cross-cutting:** `concurrency` groups to cancel superseded runs (already wired
 in `ci.yml`); the `apt-publish` environment holds `APT_GPG_PRIVATE_KEY` +
