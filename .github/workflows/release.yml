@@ -33,6 +33,10 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
 
+# Least-privilege default; the publish job widens it (contents/id-token/…).
+permissions:
+  contents: read
+
 jobs:
   macos:
     name: Build macOS universal
