@@ -259,6 +259,12 @@ dist-sign: dist-checksums ## GPG-sign the checksums file (set GPG_KEY=<id> to ch
 # artifacts it already produced. Output → dist/spyc_<version>_<arch>.deb.
 DEB_MAINTAINER ?= Derek Marshall <derek.marshall@tripstack.com>
 
+# dpkg orders `2.0.0-rc.4` ABOVE the final `2.0.0` (a `-` starts the Debian
+# revision, and having one outranks having none). The tilde form `2.0.0~rc.4`
+# sorts a prerelease correctly BELOW `2.0.0`, so rc debs never block the stable
+# upgrade. `-` → `~` (a no-op for a final `X.Y.Z`, which has no `-`).
+DEB_VERSION := $(subst -,~,$(VERSION))
+
 .PHONY: deb-x86
 deb-x86: ## Package the built Linux x86_64 binary → dist/spyc_<version>_amd64.deb
 	@$(MAKE) --no-print-directory _deb ARCH=amd64 \
@@ -282,12 +288,12 @@ _deb:
 	@mkdir -p "$(DIST_DIR)/deb-$(ARCH)/DEBIAN" "$(DIST_DIR)/deb-$(ARCH)/usr/bin"
 	@install -m 0755 "$(SRC)" "$(DIST_DIR)/deb-$(ARCH)/usr/bin/$(BINARY)"
 	@printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: %s\nSection: utils\nPriority: optional\nHomepage: https://github.com/Tripstack-Corp/spyc\nDescription: Keyboard-driven, MCP-native terminal file commander\n' \
-		"$(BINARY)" "$(VERSION)" "$(ARCH)" "$(DEB_MAINTAINER)" \
+		"$(BINARY)" "$(DEB_VERSION)" "$(ARCH)" "$(DEB_MAINTAINER)" \
 		> "$(DIST_DIR)/deb-$(ARCH)/DEBIAN/control"
 	dpkg-deb --build --root-owner-group "$(DIST_DIR)/deb-$(ARCH)" \
-		"$(DIST_DIR)/$(BINARY)_$(VERSION)_$(ARCH).deb"
+		"$(DIST_DIR)/$(BINARY)_$(DEB_VERSION)_$(ARCH).deb"
 	@rm -rf "$(DIST_DIR)/deb-$(ARCH)"
-	@ls -lh "$(DIST_DIR)/$(BINARY)_$(VERSION)_$(ARCH).deb"
+	@ls -lh "$(DIST_DIR)/$(BINARY)_$(DEB_VERSION)_$(ARCH).deb"
 
 # ---------- Install ----------------------------------------------------------
 

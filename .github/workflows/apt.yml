@@ -1,6 +1,6 @@
-# Publish spyc's signed apt repository on a stable release.
+# Publish spyc's signed apt repository on a release (rc or stable).
 #
-# On a non-prerelease GitHub Release (or manual dispatch) this:
+# On any published GitHub Release (or manual dispatch) this:
 #   1. downloads the release's Linux tarballs,
 #   2. builds .deb packages via the Makefile (`make deb`),
 #   3. regenerates the flat apt index (apt-ftparchive) and GPG-signs `Release`,
@@ -14,8 +14,9 @@
 # The signing key lives in the `apt-publish` protected Environment (only this
 # job, on a `v*` tag or `main`, can read it); operator setup is in
 # RELEASE_ENGINEERING.md §8. The job self-skips when the key is absent, so it
-# stays green until then. Prereleases are skipped so package versions stay a
-# clean `X.Y.Z` (apt orders `~rc` before the final; we sidestep it entirely).
+# stays green until then. Prereleases publish too — the deb version uses a
+# tilde (`2.0.0~rc.4`), which dpkg sorts BELOW the final `2.0.0`, so an rc never
+# blocks the stable upgrade (the Makefile's `DEB_VERSION` does the `-`→`~`).
 name: apt
 
 on:
@@ -37,8 +38,6 @@ permissions:
 jobs:
   publish:
     name: Build .debs + publish signed apt repo
-    # Skip prereleases; manual dispatch always runs.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false }}
     runs-on: ubuntu-latest
     # Scopes the signing-key secrets to this job (and to `v*` / `main` refs).
     environment: apt-publish
