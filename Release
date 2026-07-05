@@ -1,0 +1,22 @@
+Architectures: amd64 arm64
+Components: main
+Date: Sun, 05 Jul 2026 15:17:33 +0000
+Label: spyc
+Origin: spyc
+Suite: stable
+MD5Sum:
+ 150cb463deeb542172b5457ca7f41bbc             1222 Packages
+ 8b92fe92b07e060f4c9b48b0df4d0ef6              650 Packages.gz
+ 2dff4c34770ca3a6f6ab2d11bacb5298              121 Release
+SHA1:
+ 1cdd5e477e265acf4e6780bcb15a93e9948b3017             1222 Packages
+ b7edd3adc0a2c7d6b80b2a8468c0b18d9c17ea33              650 Packages.gz
+ 262bcaf866c45cc80547440cd25ee5b8c502562c              121 Release
+SHA256:
+ 08fa5e1cc4dfecbed2ae503efcbebf8438876421c0900f4c572199d1dbdfd403             1222 Packages
+ f802a04b859c44f45637670a033c89dc54b41d7e86d0a5c1b3c54267132ae91e              650 Packages.gz
+ 876f21f5bbc889baa4424c3643a2b773c4a4524b843c3bcde7ad67b06fa11024              121 Release
+SHA512:
+ acaf4f120566bde634838f6bed589feeeaf082d03425d42a45647ba18aef2dd4eaf911935e22657fd9a016cd63e01f98e16e669b03bb12b14752814a56507c01             1222 Packages
+ 9e04905b8eaa4b22a29c8f34600fc303770ada18a0036511c82483bd998aba395995612fc7c3151eefac29cd987b24a233f7dbe72061dc9011b6e8c8bf2b0034              650 Packages.gz
+ e80a0991115c3c3419bc01d2b0764f3d3bc3abe5ab5d3cef5d39e0fe30e374d444522f8f755e7eb8ba4ee132f400d20ffdd3ac0f9c95ca4d298197f04880c043              121 Release
