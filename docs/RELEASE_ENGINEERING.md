@@ -227,32 +227,35 @@ are the source of truth — Actions *call them* so local and CI never drift.
   formula bump. Needs a `HOMEBREW_TAP_TOKEN` secret (fine-grained PAT with
   `contents:write` on the tap repo).
 
-### `apt.yml` — signed apt repo publish (on release published) — **IMPLEMENTED**
+### `apt.yml` — signed apt repo publish (on release published) — **LIVE**
 - On a non-prerelease publish: download the release's Linux tarballs, build
-  `.deb`s (`make deb-x86` / `deb-arm`), regenerate the apt index
-  (`apt-ftparchive`), sign the `Release` file with the repo GPG key, and publish
-  the tree to `Tripstack-Corp/spyc-apt`'s GitHub Pages site
-  (`https://tripstack-corp.github.io/spyc-apt`) so users can `apt install spyc` /
-  `apt upgrade`. The publish job self-skips when its secrets are absent, so it
-  stays green until the operator setup below is done.
-- **Operator setup (one-time):**
-  1. Create the public repo `Tripstack-Corp/spyc-apt` and enable **GitHub Pages**
-     serving from its default branch, `/` root (the workflow commits the repo
-     tree straight to that branch).
-  2. Generate a dedicated signing key (`gpg --quick-gen-key "spyc apt <email>"`);
-     export the ASCII-armored private key + note its passphrase.
-  3. On the **spyc** repo add secrets: `APT_GPG_PRIVATE_KEY`, `APT_GPG_PASSPHRASE`,
-     and `APT_REPO_TOKEN` (fine-grained PAT, `contents:write` on `spyc-apt`).
-  4. The workflow publishes the ASCII-armored public key as `KEY.gpg` at the repo
-     root — it's what users pin via `signed-by`.
+  `.deb`s (`make deb`), regenerate the apt index (`apt-ftparchive`), sign the
+  `Release` file with the signing key, and commit the tree to this repo's
+  **`gh-pages`** branch — served via GitHub Pages at
+  `https://tripstack-corp.github.io/spyc`, so users `apt install spyc` /
+  `apt upgrade`. Because the apt repo lives on this repo's own branch, the push
+  uses the built-in **`GITHUB_TOKEN`** (org-owned, `contents:write`) — no
+  personal/cross-repo token. The job self-skips when the signing key is absent.
+- **Signing key** — a dedicated RSA-4096 key signs `Release`; its public half is
+  published as `KEY.gpg` (what users pin via `signed-by`). The private key +
+  passphrase live in the **`apt-publish` protected Environment** (secrets
+  `APT_GPG_PRIVATE_KEY` + `APT_GPG_PASSPHRASE`), scoped so only this job — on a
+  `v*` tag or `main` — can read them.
+- **Operator setup — DONE** (kept for reference / rebuild):
+  1. `gh-pages` on `spyc` holds the apt tree; Pages serves it from `/` root.
+  2. The `apt-publish` Environment (deployment policy: `v*` tag + `main` branch)
+     holds the two `APT_GPG_*` secrets.
+  3. The signing key is backed up off-repo (owner's password manager) with a
+     revocation certificate.
 - **Prerelease note:** publishing is gated to non-prerelease tags so package
   versions stay clean `X.Y.Z` (a `2.0.0~rc.4`-style `~` epoch would otherwise be
   needed for correct apt ordering).
 
 **Cross-cutting:** `concurrency` groups to cancel superseded runs (already wired
-in `ci.yml`); secrets = `GPG_KEY`/`GPG_PASSPHRASE` (if GPG signing),
-`HOMEBREW_TAP_TOKEN`, and the apt trio (`APT_GPG_PRIVATE_KEY`,
-`APT_GPG_PASSPHRASE`, `APT_REPO_TOKEN`); cosign uses OIDC (no stored key).
+in `ci.yml`); repo secrets = `GPG_KEY`/`GPG_PASSPHRASE` (if GPG signing) and
+`HOMEBREW_TAP_TOKEN`; the `apt-publish` environment holds `APT_GPG_PRIVATE_KEY` +
+`APT_GPG_PASSPHRASE`. The apt push uses the built-in `GITHUB_TOKEN` and cosign
+uses OIDC — no other stored tokens.
 
 ## 9. Artifacts, signing & distribution
 

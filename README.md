@@ -106,8 +106,8 @@ brew install Tripstack-Corp/tap/spyc
 
 # Debian / Ubuntu — apt (signed repo)
 sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://tripstack-corp.github.io/spyc-apt/KEY.gpg | sudo tee /etc/apt/keyrings/spyc.asc >/dev/null
-echo "deb [signed-by=/etc/apt/keyrings/spyc.asc] https://tripstack-corp.github.io/spyc-apt ./" | sudo tee /etc/apt/sources.list.d/spyc.list >/dev/null
+curl -fsSL https://tripstack-corp.github.io/spyc/KEY.gpg | sudo tee /etc/apt/keyrings/spyc.asc >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/spyc.asc] https://tripstack-corp.github.io/spyc ./" | sudo tee /etc/apt/sources.list.d/spyc.list >/dev/null
 sudo apt update && sudo apt install spyc
 ```
 
