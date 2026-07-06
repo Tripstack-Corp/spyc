@@ -41,6 +41,7 @@ untrusted clone can't bind a key to run code. Lua scripts load only from
 [layout]
 status_position = "top"        # or "bottom" (vim/tmux convention; prompt sits above)
 chord_hint_delay_ms = 300      # ms holding a chord (g, ^a, H) before the which-key popup; 0 disables
+color_depth = "auto"           # "auto" (truecolor if $COLORTERM says so, else 256), "truecolor", or "256"
 
 [pane]
 default_command = "claude"     # pre-filled into the `^a c` new-tab prompt
@@ -63,6 +64,35 @@ confirm = true                 # y/N prompt before R / dd; false = yolo (still r
 
 All optional; anything unset uses the built-in default. See `spyc --print-config`
 for the annotated version of each.
+
+### Color depth — `[layout] color_depth`
+
+spyc's theme is 24-bit truecolor. Terminals that can't parse `\x1b[38;2;r;g;bm`
+drop it wholesale — you get no color and no highlight. The worst offender is
+macOS's **bundled GNU screen 4.00.03** (frozen at pre-GPLv3, from 2006), which
+also mangles the powerline/emoji glyphs.
+
+| value | behavior |
+|-------|----------|
+| `auto` (default) | 256 inside GNU screen; else truecolor when `$COLORTERM` advertises `truecolor`/`24bit`, else 256 |
+| `truecolor` | always emit 24-bit RGB |
+| `256` | quantize every color to the nearest xterm-256 index |
+
+When not truecolor, the finished frame is remapped once before it's written, so
+**all** colors degrade — theme, syntax highlighting, diffs, and ANSI passthrough.
+`--color auto|truecolor|256` overrides the config for a single run.
+
+**GNU screen:** `auto` drops to 256 whenever it's running inside screen (`$STY`
+set), *even if `$COLORTERM=truecolor`* — screen inherits that claim from the outer
+terminal but doesn't render 24-bit SGR (macOS's bundled 4.00.03 can't at all; 5.x
+needs `truecolor on`, off by default), so trusting it leaves you colorless. If
+you've turned `truecolor on` in a modern screen, force it back with
+`color_depth = "truecolor"`. tmux is unaffected — it renders RGB and keeps
+truecolor.
+
+In any non-truecolor mode spyc also swaps the 🌶️ header glyph for a spice-red
+block — old screen mangles the 2-cell emoji, so the block keeps the header
+looking intentional rather than broken.
 
 ---
 

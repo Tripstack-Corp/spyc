@@ -316,6 +316,11 @@ impl App {
                 // it from the diff + tty emission measured below.
                 let render_start = std::time::Instant::now();
                 self.render(frame);
+                // Single choke point: quantize RGB → 256-color for truecolor-blind
+                // terminals (old GNU screen). No-op at TrueColor, so capable
+                // terminals pay nothing; catches theme + syntect + diff + ANSI
+                // passthrough alike since it runs on the finished buffer.
+                crate::ui::color_depth::downgrade_buffer(frame.buffer_mut(), self.view.color_depth);
                 if self.view.show_activity {
                     let us = u64::try_from(render_start.elapsed().as_micros()).unwrap_or(u64::MAX);
                     self.view.activity.peaks_live.render_us =

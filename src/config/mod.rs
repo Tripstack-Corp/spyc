@@ -84,6 +84,37 @@ pub enum StatusPosition {
     Bottom,
 }
 
+/// Desired color depth (the on-disk / `--color` preference). Resolved into a
+/// concrete `crate::ui::color_depth::ColorDepth` at startup: `Auto` consults
+/// `$COLORTERM` (truecolor when it advertises `truecolor`/`24bit`, else 256),
+/// the explicit variants force it. `Ansi256` exists for terminals that can't
+/// parse 24-bit SGR — notably macOS's bundled GNU screen 4.00.03, which drops
+/// every `38;2;…m` and so renders spyc's RGB theme colorless.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+pub enum ColorMode {
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "truecolor", alias = "true", alias = "24bit", alias = "rgb")]
+    TrueColor,
+    #[serde(rename = "256", alias = "ansi256", alias = "8bit")]
+    Ansi256,
+}
+
+impl std::str::FromStr for ColorMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "truecolor" | "true" | "24bit" | "rgb" => Ok(Self::TrueColor),
+            "256" | "ansi256" | "8bit" => Ok(Self::Ansi256),
+            other => Err(format!(
+                "unknown color mode {other:?} (expected auto|truecolor|256)"
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LayoutConfig {
     /// `"top"` (default) or `"bottom"`. With `"bottom"` the prompt
@@ -93,6 +124,8 @@ pub struct LayoutConfig {
     /// Delay (ms) before the which-key chord-hint popup appears after a chord
     /// prefix is pressed and held. `0` disables the popup. Default 300.
     pub chord_hint_delay_ms: u64,
+    /// Color depth: `auto` (default), `truecolor`, or `256`. See [`ColorMode`].
+    pub color_depth: ColorMode,
 }
 
 impl Default for LayoutConfig {
@@ -100,6 +133,7 @@ impl Default for LayoutConfig {
         Self {
             status_position: StatusPosition::default(),
             chord_hint_delay_ms: 300,
+            color_depth: ColorMode::default(),
         }
     }
 }
@@ -115,6 +149,8 @@ struct FileLayout {
     status_position: Option<StatusPosition>,
     #[serde(default)]
     chord_hint_delay_ms: Option<u64>,
+    #[serde(default)]
+    color_depth: Option<ColorMode>,
 }
 
 /// Working directory a freshly-spawned pane tab opens in (the `^a c`
@@ -579,6 +615,9 @@ impl Config {
         if let Some(ms) = file.layout.chord_hint_delay_ms {
             self.layout.chord_hint_delay_ms = ms;
         }
+        if let Some(cd) = file.layout.color_depth {
+            self.layout.color_depth = cd;
+        }
 
         // Pane: per-field merge for the same reason.
         if let Some(cmd) = file.pane.default_command {
@@ -964,6 +1003,33 @@ mod tests {
         std::fs::write(&path, "[layout]\nstatus_position = \"bottom\"\n").unwrap();
         let cfg = Config::load_from(&[Some(&path)]).unwrap();
         assert_eq!(cfg.layout.status_position, StatusPosition::Bottom);
+    }
+
+    #[test]
+    fn color_depth_defaults_to_auto_and_parses_variants() {
+        assert_eq!(Config::default().layout.color_depth, ColorMode::Auto);
+        for (toml, want) in [
+            ("\"256\"", ColorMode::Ansi256),
+            ("\"ansi256\"", ColorMode::Ansi256),
+            ("\"truecolor\"", ColorMode::TrueColor),
+            ("\"24bit\"", ColorMode::TrueColor),
+            ("\"auto\"", ColorMode::Auto),
+        ] {
+            let tmp = tempdir().unwrap();
+            let path = tmp.path().join("rc.toml");
+            std::fs::write(&path, format!("[layout]\ncolor_depth = {toml}\n")).unwrap();
+            let cfg = Config::load_from(&[Some(&path)]).unwrap();
+            assert_eq!(cfg.layout.color_depth, want, "toml={toml}");
+        }
+    }
+
+    #[test]
+    fn color_mode_from_str_matches_cli_spellings() {
+        use std::str::FromStr;
+        assert_eq!(ColorMode::from_str("256"), Ok(ColorMode::Ansi256));
+        assert_eq!(ColorMode::from_str("TrueColor"), Ok(ColorMode::TrueColor));
+        assert_eq!(ColorMode::from_str(" auto "), Ok(ColorMode::Auto));
+        assert!(ColorMode::from_str("nonsense").is_err());
     }
 
     #[test]

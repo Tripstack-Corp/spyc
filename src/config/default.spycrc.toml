@@ -18,9 +18,16 @@
 # chord_hint_delay_ms: how long to hold a chord prefix (e.g. `g`, `^a`, `H`)
 # before the which-key popup lists its continuations. Default 300. Set to 0
 # to disable the popup entirely.
+#
+# color_depth (default "auto"): how many colors to emit. "auto" uses 256-color
+# inside GNU screen (which can't render 24-bit SGR even when $COLORTERM claims
+# truecolor), else 24-bit truecolor when $COLORTERM advertises it, else 256.
+# "truecolor" / "256" force it — e.g. set "truecolor" if you've enabled
+# `truecolor on` in a modern screen. `--color` overrides this for one run.
 [layout]
 # status_position = "top"
 # chord_hint_delay_ms = 300
+# color_depth = "auto"
 
 # ── pane ──────────────────────────────────────────────────────────────
 # Default command pre-filled into the `^a c` (new pane tab) prompt.

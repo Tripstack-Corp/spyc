@@ -177,6 +177,13 @@ struct Cli {
     #[arg(long)]
     no_lua: bool,
 
+    /// Color depth: `auto` (default — truecolor when $COLORTERM advertises it,
+    /// else 256-color), `truecolor`, or `256`. Force `256` on terminals that
+    /// can't parse 24-bit SGR (notably macOS's bundled GNU screen 4.00.03, which
+    /// otherwise drops every color). Overrides `[layout] color_depth`.
+    #[arg(long, value_name = "MODE")]
+    color: Option<String>,
+
     /// Internal git merge driver for spyc's version-line conflicts. git invokes
     /// it via `.gitattributes` as `spyc --merge-driver %O %A %B`; not for direct
     /// use. Resolves the `Cargo.toml` / `Cargo.lock` version-bump conflicts that
@@ -289,9 +296,17 @@ pub fn run() -> Result<()> {
     // Before the TUI starts: a stray ^C during a child takeover (less/editor/;)
     // must not bring spyc down with the child.
     install_signal_handlers();
+    // Parse `--color` before touching the terminal so a typo errors cleanly
+    // instead of after entering raw mode / the alt screen.
+    let color_mode = match cli.color.as_deref() {
+        Some(s) => s
+            .parse::<config::ColorMode>()
+            .map_err(|e| anyhow::anyhow!(e))?,
+        None => config::ColorMode::default(),
+    };
     let mcp_takeover_allowed = prompt_mcp_takeover_if_needed();
     let mut terminal = setup_terminal()?;
-    let mut app = App::new(cli.resume, mcp_takeover_allowed);
+    let mut app = App::new(cli.resume, mcp_takeover_allowed, color_mode);
     // Detect the terminal's graphics protocol (Kitty/iTerm2/Sixel/halfblocks +
     // font cell size) for inline diagram rendering — ONCE, here, before the
     // input reader spawns, because `from_query_stdio` reads stdin/cursor
@@ -514,6 +529,16 @@ fn setup_terminal() -> Result<Tui> {
     execute!(
         stdout,
         EnterAlternateScreen,
+        // Blank the buffer we just entered. On terminals that honor the alt
+        // screen this is redundant (the alt buffer starts empty), but GNU
+        // screen with `altscreen off` (macOS's bundled 4.00.03 default) ignores
+        // `?1049h` and leaves us on the main buffer with the shell's content
+        // still there. ratatui's first draw diffs against an all-blank previous
+        // buffer, so it never emits cells for regions spyc keeps blank — the old
+        // shell text bleeds through below the file list. `\x1b[2J` wipes it once;
+        // no cursor read, so the SSH trap (see `force_full_repaint`) doesn't apply.
+        Clear(ClearType::All),
+        MoveTo(0, 0),
         EnableBracketedPaste,
         EnableAlternateScroll,
         HideMousePointer
@@ -594,6 +619,12 @@ pub fn resume_tui(terminal: &mut Tui) -> Result<()> {
     execute!(
         terminal.backend_mut(),
         EnterAlternateScreen,
+        // Wipe the child's leftover output. Without a working alt screen (old
+        // GNU screen) the editor/pager we just returned from is still on the
+        // main buffer; the `force_full_repaint` below only repaints spyc's
+        // non-blank cells, so clear the rest here. See `setup_terminal`.
+        Clear(ClearType::All),
+        MoveTo(0, 0),
         EnableBracketedPaste,
         EnableAlternateScroll
     )?;
