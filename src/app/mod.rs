@@ -835,6 +835,12 @@ pub struct ViewState {
     pub hud_pid: u32,
     pub hud_term: String,
     pub hud_truecolor: bool,
+    /// Resolved color depth for this session (CLI `--color` > `[layout]
+    /// color_depth` > `$COLORTERM` auto-detect). When not `TrueColor`, the
+    /// per-frame render downgrades every `Color::Rgb` to the nearest 256-color
+    /// index so terminals that can't parse 24-bit SGR (old GNU screen) still get
+    /// colors. `hud_truecolor` is derived from this — they never disagree.
+    pub color_depth: crate::ui::color_depth::ColorDepth,
     /// Whether spyc is running over SSH (`$SSH_CONNECTION`/`$SSH_TTY`/`$SSH_CLIENT`),
     /// snapshotted once at construction (doesn't change mid-session). Drives the
     /// P3-1 `desktop_via = "auto"` routing — OSC-9 (client-side) over SSH, the OS
@@ -862,7 +868,14 @@ impl ViewState {
     /// caller-specific values; `context_dirty` (write-context-on-startup) and
     /// `mcp_running` differ between the live app (`true` / actual) and the test
     /// harness (`false` / `false`). Everything else starts empty.
-    fn new(theme: Theme, context_path: PathBuf, context_dirty: bool, mcp_running: bool) -> Self {
+    fn new(
+        theme: Theme,
+        context_path: PathBuf,
+        context_dirty: bool,
+        mcp_running: bool,
+        color_depth: crate::ui::color_depth::ColorDepth,
+    ) -> Self {
+        use crate::ui::color_depth::ColorDepth;
         Self {
             pager: None,
             scroll_pager: None,
@@ -917,8 +930,11 @@ impl ViewState {
             visual_bell: None,
             hud_pid: std::process::id(),
             hud_term: std::env::var("TERM").unwrap_or_else(|_| "?".to_string()),
-            hud_truecolor: std::env::var("COLORTERM")
-                .is_ok_and(|c| c.contains("truecolor") || c.contains("24bit")),
+            // Derived from the resolved depth, not a second COLORTERM read, so the
+            // HUD's "truecolor" line and the gradient path always match what we
+            // actually emit (forcing `--color 256` also disables the RGB gradient).
+            hud_truecolor: color_depth == ColorDepth::TrueColor,
+            color_depth,
             is_ssh: std::env::var_os("SSH_CONNECTION").is_some()
                 || std::env::var_os("SSH_TTY").is_some()
                 || std::env::var_os("SSH_CLIENT").is_some(),

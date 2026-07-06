@@ -24,7 +24,11 @@ impl App {
         self.runtime.picker = picker;
     }
 
-    pub fn new(resume: bool, mcp_takeover_allowed: bool) -> Self {
+    pub fn new(
+        resume: bool,
+        mcp_takeover_allowed: bool,
+        cli_color: crate::config::ColorMode,
+    ) -> Self {
         let (cwd, start_error) = if let Ok(d) = std::env::current_dir() {
             (d, None)
         } else {
@@ -70,6 +74,19 @@ impl App {
         };
         let user_keymap = UserKeymap::from_bindings(config.bindings.clone());
         let theme = Theme::default().with_overrides(&config.colors);
+        // Resolve the render color depth: `--color` (cli_color) > `[layout]
+        // color_depth` > auto-detect. When it isn't TrueColor the per-frame
+        // render quantizes RGB → 256-color for truecolor-blind terminals. Auto
+        // ignores $COLORTERM inside GNU screen ($STY set, not tmux) — screen
+        // inherits a truecolor claim it can't honor. Env reads are fine here
+        // (impure bootstrap).
+        let in_screen = std::env::var_os("STY").is_some() && std::env::var_os("TMUX").is_none();
+        let color_depth = crate::ui::color_depth::resolve(
+            cli_color,
+            config.layout.color_depth,
+            std::env::var("COLORTERM").ok().as_deref(),
+            in_screen,
+        );
 
         // Always anchor PROJECT_HOME on the launch dir. Gating this on
         // `cwd.join(".git").exists()` would leave `project_home` None
@@ -254,7 +271,7 @@ impl App {
             state: app_state,
             // Write context once on startup so claude sees initial state
             // (context_dirty: true).
-            view: ViewState::new(theme, context_path, true, mcp_running),
+            view: ViewState::new(theme, context_path, true, mcp_running, color_depth),
             exit_summary: None,
             runtime: Runtime {
                 git_result_rx: Some(git_res_rx),

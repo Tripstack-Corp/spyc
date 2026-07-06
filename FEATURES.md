@@ -915,6 +915,12 @@ unambiguous:
   is `"top"`. `"bottom"` matches vim/tmux convention and avoids a
   double status bar when running spyc inside tmux. With `"bottom"` the
   prompt sits one row above the status bar (vim cmdline ordering).
+- **Color depth** — `[layout] color_depth = "auto" | "truecolor" | "256"`
+  (or `--color` for one run). Default `"auto"` uses 256-color inside GNU
+  screen (which can't render 24-bit SGR even when `$COLORTERM` claims
+  truecolor), else 24-bit truecolor when `$COLORTERM` advertises it, else
+  256. When not truecolor the finished frame is remapped RGB→256, so theme,
+  syntax highlighting, diffs, and ANSI passthrough all degrade together.
 - **Live reload** — config changes are picked up automatically without
   restarting spyc. Manual reload with **^R**.
 

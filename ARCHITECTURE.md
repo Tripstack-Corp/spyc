@@ -125,6 +125,16 @@ Goal: 0 draws-per-second at idle. Implementation:
 - Per-frame: DEC 2026 synchronized output (`\x1b[?2026h…l`) wraps
   every render so terminals that support it (iTerm2, kitty, WezTerm,
   Alacritty current) draw atomically — no flicker.
+- Per-frame: color-depth downgrade. The theme is 24-bit `Color::Rgb`;
+  terminals that can't parse `\x1b[38;2…m` (old GNU screen) drop all
+  color. `ui::color_depth::downgrade_buffer` rewrites the finished
+  frame buffer's RGB cells to nearest-256 when the resolved
+  `ColorDepth` isn't `TrueColor`. Resolution is CLI `--color` >
+  `[layout] color_depth` > auto, where auto forces 256 inside GNU
+  screen (`$STY` set, not tmux — screen inherits a `$COLORTERM`
+  truecolor claim it can't honor) else keys off `$COLORTERM`. On the
+  buffer, not the theme, so it catches syntect / diffs / ANSI
+  passthrough too; a no-op at `TrueColor`.
 - Caching: `build_rows()` and grid stabilization keyed by a
   `list_generation` counter that increments on any listing /
   cursor / pick / mask change.
@@ -147,6 +157,15 @@ clear-and-full-repaint effect but takes the no-cursor-read branch. Any
 detection that *does* need a probe (the graphics-protocol query feeding
 `detect_image_picker`) runs **once at startup, before the input reader
 spawns**, so nothing races it. Fixed 1.58.8.
+
+Distinct from that: `setup_terminal` / `resume_tui` emit a one-shot
+`Clear(ClearType::All)` (`\x1b[2J`) right after `EnterAlternateScreen`.
+This is a plain erase-display *write* with no cursor read, so it's safe
+over SSH — don't confuse it with the banned `Terminal::clear()`. It
+exists for terminals with `altscreen off` (macOS's bundled GNU screen
+4.00.03): there `?1049h` is ignored, spyc stays on the main buffer, and
+ratatui never paints cells for regions it keeps blank, so pre-launch
+shell content bleeds through below the list until the buffer is wiped.
 
 ## Mermaid / image rendering
 

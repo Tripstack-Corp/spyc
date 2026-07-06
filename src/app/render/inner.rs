@@ -361,6 +361,8 @@ impl App {
             git_info: self.state.cur().git.info.as_deref(),
             agent_info: agent_info.as_deref(),
             theme: &self.view.theme,
+            // Non-truecolor terminals (GNU screen) mangle the 🌶️ glyph → red block.
+            plain_logo: self.view.color_depth != crate::ui::color_depth::ColorDepth::TrueColor,
         }
         .render(frame, rect);
     }

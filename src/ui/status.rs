@@ -25,6 +25,10 @@ pub struct StatusBar<'a> {
     /// same visual band as related state.
     pub agent_info: Option<&'a str>,
     pub theme: &'a Theme,
+    /// Render the leading logo as a plain spice-red block instead of the 🌶️
+    /// emoji. Set on terminals that mangle the 2-cell astral glyph (GNU screen,
+    /// anything not truecolor) so the header reads as branded, not broken.
+    pub plain_logo: bool,
 }
 
 /// Powerline right-pointing triangle (requires a Nerd Font or powerline-patched font).
@@ -112,8 +116,17 @@ impl StatusBar<'_> {
 
         let mut spans: Vec<Span> = Vec::new();
 
-        // Pepper (no background).
-        spans.push(Span::styled(emoji_text, Style::default().bg(term_bg)));
+        // Logo. Truecolor terminals get the 🌶️ emoji; degraded ones (GNU screen,
+        // non-truecolor) mangle the 2-cell astral glyph into junk, so paint a
+        // spice-red block instead — same 4-col footprint, reads as intentional.
+        if self.plain_logo {
+            let pepper_red = Color::Rgb(0xE0, 0x32, 0x22); // SPICE_HEAT[0]
+            spans.push(Span::styled(" ", Style::default().bg(term_bg)));
+            spans.push(Span::styled("  ", Style::default().bg(pepper_red)));
+            spans.push(Span::styled(" ", Style::default().bg(term_bg)));
+        } else {
+            spans.push(Span::styled(emoji_text, Style::default().bg(term_bg)));
+        }
 
         if let Some(ref text) = project_text {
             let next_bg = if session_text.is_some() {
@@ -292,6 +305,31 @@ mod tests {
         mono: bool,
         width: u16,
     ) -> String {
+        render_with_logo(
+            project_home,
+            session_name,
+            path,
+            suffix,
+            git_info,
+            agent_info,
+            mono,
+            false,
+            width,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
+    fn render_with_logo(
+        project_home: Option<&str>,
+        session_name: Option<&str>,
+        path: &str,
+        suffix: &str,
+        git_info: Option<&str>,
+        agent_info: Option<&str>,
+        mono: bool,
+        plain_logo: bool,
+        width: u16,
+    ) -> String {
         let backend = TestBackend::new(width, 1);
         let mut terminal = Terminal::new(backend).unwrap();
         let theme = if mono {
@@ -313,6 +351,7 @@ mod tests {
                     git_info,
                     agent_info,
                     theme: &theme,
+                    plain_logo,
                 };
                 bar.render(f, area);
             })
@@ -400,5 +439,26 @@ mod tests {
             96,
         );
         insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn plain_logo_replaces_pepper_emoji_with_a_block() {
+        // Truecolor: the 🌶️ emoji is present in the rendered header.
+        let emoji = render_with_logo(None, Some("S"), "/tmp", "", None, None, false, false, 60);
+        assert!(
+            emoji.contains('\u{1f336}'),
+            "expected pepper emoji, got {emoji:?}"
+        );
+        // Degraded (GNU screen / non-truecolor): the mangled glyph is gone,
+        // replaced by a plain block — the segment text still renders after it.
+        let plain = render_with_logo(None, Some("S"), "/tmp", "", None, None, false, true, 60);
+        assert!(
+            !plain.contains('\u{1f336}'),
+            "emoji must be dropped, got {plain:?}"
+        );
+        assert!(
+            plain.contains("/tmp"),
+            "rest of the bar still renders: {plain:?}"
+        );
     }
 }

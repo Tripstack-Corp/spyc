@@ -22,7 +22,13 @@ impl App {
         let context_path = crate::context::context_path(&cwd);
         let mut app = Self {
             state: state::AppState::test_default(cwd),
-            view: ViewState::new(Theme::default(), context_path, false, false),
+            view: ViewState::new(
+                Theme::default(),
+                context_path,
+                false,
+                false,
+                crate::ui::color_depth::ColorDepth::TrueColor,
+            ),
             exit_summary: None,
             runtime: Runtime {
                 git_result_rx: None,
