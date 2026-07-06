@@ -217,7 +217,7 @@ the `I` info overlay or a flash.
 | **marks** | vi-style `m{a-z}` named cursor positions, persistent |
 | **session** | workspace snapshot at quit (cwd, tabs, focus, `PROJECT_HOME`, etc.) |
 | **session name** | spice-pair display name (`SAFFRON_CUMIN`); editable via `:name` |
-| **`PROJECT_HOME`** | sticky per-session project root; `gh` jumps; new pane tabs default cwd here |
+| **`PROJECT_HOME`** | sticky per-session project root; `Space p` jumps; `[pane] new_tab_cwd = "project_home"` anchors new panes here (default is the focused worktree root) |
 | **`start_dir`** | backtick-jump target; not project-scoped |
 | **limit filter** | temporary glob applied to the listing (`=*.rs`); `=` clears |
 | **mask** | persistent ignore-glob group (`a` toggles mask 1, `o` mask 2) |

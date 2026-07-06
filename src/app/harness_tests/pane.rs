@@ -7,30 +7,51 @@ use super::*;
 // logic (decide_scroll_source, PaneTabs index math) is unit-tested in
 // src/pane.
 
-/// By default (`new_tab_cwd = project_home`) a bare pane tab spawns at
-/// PROJECT_HOME — not wherever the file list has been browsed to — and moves
-/// focus into the pane.
+/// By default (`new_tab_cwd = worktree_root`) a bare pane tab spawns at the
+/// focused column's worktree root — `gw`'s target — not wherever the file
+/// list has been browsed to, and moves focus into the pane.
 #[test]
-fn open_pane_tab_defaults_to_project_home_and_focuses_pane() {
+fn open_pane_tab_defaults_to_worktree_root_and_focuses_pane() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let home = tmp.path().join("proj");
-        let browsed = tmp.path().join("proj/sub");
+        let root = tmp.path().join("repo");
+        let browsed = tmp.path().join("repo/src/app");
         std::fs::create_dir_all(&browsed).unwrap();
-        // Browsing has moved the list into a subdir, but PROJECT_HOME is the
-        // project root — the pane must anchor to the root.
+        // Browsing has moved the list deep into the tree, but the pane must
+        // anchor to the worktree root (wherever `gw` would jump).
         let mut app = App::test_app(browsed.clone());
-        app.state.project_home = Some(home.clone());
+        app.state.left.git_cache.current_repo_root = Some(root.clone());
         assert!(app.runtime.pane_tabs.is_none());
         app.open_pane_tab("cat");
         let tabs = app.runtime.pane_tabs.as_ref().expect("a tab was opened");
-        assert_eq!(tabs.active_info().cwd, home, "anchors at PROJECT_HOME");
+        assert_eq!(tabs.active_info().cwd, root, "anchors at the worktree root");
         assert_ne!(tabs.active_info().cwd, browsed, "not the browsed dir");
         assert_eq!(
             app.state.focus,
             state::Focus::Pane,
             "opening a pane focuses it"
         );
+    });
+}
+
+/// `new_tab_cwd = project_home` anchors a bare pane tab at PROJECT_HOME — not
+/// the focused worktree root, and not wherever the list has been browsed to.
+#[test]
+fn open_pane_tab_project_home_anchors_at_project_root() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("proj");
+        let browsed = tmp.path().join("proj/sub");
+        std::fs::create_dir_all(&browsed).unwrap();
+        let mut app = App::test_app(browsed.clone());
+        app.state.config.pane.new_tab_cwd = crate::config::NewTabCwd::ProjectHome;
+        app.state.project_home = Some(home.clone());
+        // A worktree root is set too — ProjectHome must win over it.
+        app.state.left.git_cache.current_repo_root = Some(browsed.clone());
+        app.open_pane_tab("cat");
+        let tabs = app.runtime.pane_tabs.as_ref().expect("a tab was opened");
+        assert_eq!(tabs.active_info().cwd, home, "anchors at PROJECT_HOME");
+        assert_ne!(tabs.active_info().cwd, browsed, "not the browsed dir");
     });
 }
 
@@ -52,8 +73,8 @@ fn open_pane_tab_browse_dir_uses_listing_dir() {
     });
 }
 
-/// With no PROJECT_HOME set, the project_home default falls back to the
-/// browsed dir rather than spawning at an empty path.
+/// With no worktree root resolved (no git repo), the worktree_root default
+/// falls back to the browsed dir rather than spawning at an empty path.
 #[test]
 fn open_pane_tab_falls_back_to_listing_dir_without_project_home() {
     let tmp = tempfile::tempdir().unwrap();

@@ -212,6 +212,7 @@ global/workspace menu: `Space w l\|n\|d` (worktree list/new/delete),
 which-key popup.
 
 `PROJECT_HOME` is auto-set on startup if the launch directory contains
-`.git`. New pane tabs default their cwd to `PROJECT_HOME` when set
-(set `[pane] new_tab_cwd = "browse_dir"` to open them in the current
-listing dir instead).
+`.git`. New pane tabs default their cwd to the focused column's
+worktree/repo root (`gw`'s target); set `[pane] new_tab_cwd =
+"project_home"` to pin them to `PROJECT_HOME` instead, or `"browse_dir"`
+to open them in the current listing dir.

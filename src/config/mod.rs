@@ -155,16 +155,24 @@ struct FileLayout {
 
 /// Working directory a freshly-spawned pane tab opens in (the `^a c`
 /// prompt pre-fill and the bare-spawn / `F9 resume` paths).
-/// `ProjectHome` (the default) anchors new panes to the sticky session
-/// project root, so a pane lands at the project regardless of where the
-/// file list has been browsed to; `BrowseDir` opens "here" — the focused
-/// column's current listing dir. When `ProjectHome` is selected but no
-/// PROJECT_HOME is set, both fall back to the browse dir.
+/// `WorktreeRoot` (the default) anchors new panes to the focused column's
+/// worktree/repo root — `gw`'s target and the column `^a k` returns to — so
+/// a pane opened while browsing a linked worktree lands at that worktree's
+/// root. `ProjectHome` pins to the sticky session project root regardless of
+/// the focused worktree; `BrowseDir` opens "here" — the current listing dir.
+/// `WorktreeRoot`/`ProjectHome` fall back to the browse dir when their target
+/// is unresolved (no repo / PROJECT_HOME unset).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NewTabCwd {
+    /// The focused column's worktree/repo root (`gw`'s target).
     #[default]
+    WorktreeRoot,
+    /// The sticky session project root (`PROJECT_HOME`). Accepts the
+    /// `project_root` spelling as an alias.
+    #[serde(alias = "project_root")]
     ProjectHome,
+    /// The focused column's current listing dir ("open here").
     BrowseDir,
 }
 
@@ -767,8 +775,8 @@ mod tests {
     }
 
     #[test]
-    fn new_tab_cwd_defaults_to_project_home() {
-        assert_eq!(Config::default().pane.new_tab_cwd, NewTabCwd::ProjectHome);
+    fn new_tab_cwd_defaults_to_worktree_root() {
+        assert_eq!(Config::default().pane.new_tab_cwd, NewTabCwd::WorktreeRoot);
     }
 
     #[test]
@@ -778,6 +786,30 @@ mod tests {
         std::fs::write(&path, "[pane]\nnew_tab_cwd = \"browse_dir\"\n").unwrap();
         let cfg = Config::load_from(&[Some(&path)]).unwrap();
         assert_eq!(cfg.pane.new_tab_cwd, NewTabCwd::BrowseDir);
+    }
+
+    #[test]
+    fn parses_pane_new_tab_cwd_worktree_root() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[pane]\nnew_tab_cwd = \"worktree_root\"\n").unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert_eq!(cfg.pane.new_tab_cwd, NewTabCwd::WorktreeRoot);
+    }
+
+    #[test]
+    fn pane_new_tab_cwd_accepts_project_home_and_project_root_alias() {
+        for token in ["project_home", "project_root"] {
+            let tmp = tempdir().unwrap();
+            let path = tmp.path().join("rc.toml");
+            std::fs::write(&path, format!("[pane]\nnew_tab_cwd = \"{token}\"\n")).unwrap();
+            let cfg = Config::load_from(&[Some(&path)]).unwrap();
+            assert_eq!(
+                cfg.pane.new_tab_cwd,
+                NewTabCwd::ProjectHome,
+                "`{token}` parses to ProjectHome"
+            );
+        }
     }
 
     #[test]

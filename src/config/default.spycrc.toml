@@ -34,12 +34,15 @@
 # Falls back to "claude" if unset. The $SPYC_PANE_CMD env var still
 # overrides this value, so per-shell experimentation keeps working.
 #
-# `new_tab_cwd` (default "project_home"): the working directory a new
-# pane tab opens in. "project_home" anchors new panes to the sticky
-# session project root (so a pane lands at the project no matter where
-# the file list has wandered); "browse_dir" opens "here" — the focused
-# column's current directory. Falls back to the browse dir when
-# "project_home" is set but no PROJECT_HOME exists.
+# `new_tab_cwd` (default "worktree_root"): the working directory a new
+# pane tab opens in. "worktree_root" anchors new panes to the focused
+# column's worktree/repo root — the same target as `gw`, and the column
+# `^a k` returns to — so opening nvim/codex/zsh while browsing a linked
+# worktree lands them at that worktree's root. "project_home" pins to the
+# sticky session project root regardless of the focused worktree (accepts
+# the "project_root" spelling); "browse_dir" opens "here" — the focused
+# column's current directory. "worktree_root"/"project_home" fall back to
+# the browse dir when their target is unresolved.
 #
 # `claude_transcript_scrollback` (default false): when true, `^a v` on
 # a Claude pane reads Claude's on-disk conversation JSONL and renders
@@ -54,7 +57,7 @@
 # cleanly without terminal artifacts.
 [pane]
 # default_command = "claude"
-# new_tab_cwd = "project_home"
+# new_tab_cwd = "worktree_root"
 # claude_transcript_scrollback = false
 # agy_transcript_scrollback = true
 # codex_mcp = true

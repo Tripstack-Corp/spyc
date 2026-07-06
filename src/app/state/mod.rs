@@ -712,13 +712,22 @@ impl AppState {
     }
 
     /// The working directory a freshly-spawned pane tab opens in, honoring
-    /// `[pane] new_tab_cwd`. `ProjectHome` (the default) anchors the pane to
-    /// the sticky session project root; `BrowseDir` opens at the focused
-    /// column's current listing dir. Falls back to the browse dir when
-    /// PROJECT_HOME is requested but unset. Goes through `cur()` so a focused
-    /// second commander is honored (`state_left_listing_dir_uses_are_allowlisted`).
+    /// `[pane] new_tab_cwd`. `WorktreeRoot` (the default) anchors the pane to
+    /// the focused column's worktree/repo root (`gw`'s target); `ProjectHome`
+    /// anchors to the sticky session project root; `BrowseDir` opens at the
+    /// focused column's current listing dir. `WorktreeRoot`/`ProjectHome` fall
+    /// back to the browse dir when their target is unresolved. Goes through
+    /// `cur()` so a focused second commander is honored — and so a pane
+    /// launched from the pane view follows the last-focused column, the one
+    /// `^a k` returns to (`state_left_listing_dir_uses_are_allowlisted`).
     pub fn default_pane_cwd(&self) -> std::path::PathBuf {
         match self.config.pane.new_tab_cwd {
+            crate::config::NewTabCwd::WorktreeRoot => self
+                .cur()
+                .git_cache
+                .current_repo_root
+                .clone()
+                .unwrap_or_else(|| self.cur().listing.dir.clone()),
             crate::config::NewTabCwd::ProjectHome => self
                 .project_home
                 .clone()

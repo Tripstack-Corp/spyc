@@ -412,9 +412,12 @@ Multiple tabs, each running an independent pty:
   driver to codex (or anything else) by adding
   `[pane]\ndefault_command = "codex"` to your config.
 - **Default cwd** for a new pane (`^a c` and bare-spawn / `F9 resume`)
-  follows `[pane] new_tab_cwd`: `"project_home"` (default) anchors it
-  to `PROJECT_HOME`, `"browse_dir"` opens it in the focused column's
-  current dir.
+  follows `[pane] new_tab_cwd`: `"worktree_root"` (default) anchors it
+  to the focused column's worktree/repo root — `gw`'s target, and the
+  column `^a k` returns to, so a pane opened while browsing a linked
+  worktree lands there; `"project_home"` pins it to `PROJECT_HOME`
+  regardless of the focused worktree; `"browse_dir"` opens it in the
+  focused column's current dir.
 
 ## In-app pager
 
@@ -776,10 +779,11 @@ shown on the top bar and persist across `spyc -r`.
   `:project clear` manage the value. `:startdir` manages start dir.
   `:name <NEW>` renames the session (normalized to
   `[A-Z0-9_]`). `:whoami` flashes `user@host`.
-- **New pane tabs** default their cwd to `PROJECT_HOME` when set,
-  otherwise to the current listing dir. Set `[pane] new_tab_cwd =
-  "browse_dir"` in `.spycrc.toml` to open new panes in the current
-  listing dir instead ("open here").
+- **New pane tabs** default their cwd to the focused column's
+  worktree/repo root (`gw`'s target), falling back to the current
+  listing dir when there's no repo. Set `[pane] new_tab_cwd` in
+  `.spycrc.toml` to `"project_home"` (pin to `PROJECT_HOME`) or
+  `"browse_dir"` (open in the current listing dir, "open here").
 - **Session names** are generated at session creation from ~30
   spices, joined pairwise: `CUMIN_SAFFRON`, `HARISSA_SUMAC`, etc.
   Shown as the primary column in the `-r` session picker so you can
