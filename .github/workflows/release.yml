@@ -160,3 +160,21 @@ jobs:
         run: |
           gh workflow run homebrew.yml -f tag="${GITHUB_REF_NAME}"
           gh workflow run apt.yml      -f tag="${GITHUB_REF_NAME}"
+      - name: Prune old RC pre-releases (keep newest 3)
+        # RC pre-releases each carry ~38 MB of assets and pile up on the tags
+        # page. Keep only the 3 most recent `*-rc*` pre-releases; delete older
+        # ones together with their git tags (`--cleanup-tag`), which also removes
+        # their assets. Stable releases (isPrerelease=false) and non-rc tags are
+        # never selected — final `vX.Y.Z` releases and `v1.50.0` are untouched.
+        # Runs last, so the tag just published is always among the kept 3.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t old < <(gh release list --limit 100 \
+            --json tagName,isPrerelease,createdAt \
+            --jq 'map(select(.isPrerelease and (.tagName|test("-rc"))))
+                  | sort_by(.createdAt) | reverse | .[3:] | .[].tagName')
+          for tag in "${old[@]}"; do
+            echo "pruning old RC release + tag: $tag"
+            gh release delete "$tag" --cleanup-tag --yes
+          done
