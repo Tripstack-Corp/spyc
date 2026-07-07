@@ -72,7 +72,7 @@ ignore = "0.4"
 # networking, credentials, worktree archive/stream, progress reporting,
 # and ~40 other default features stay off. `worktree-mutation` is on for
 # the hand-rolled worktree create/remove (gix-worktree-state checkout).
-gix = { version = "0.84", default-features = false, features = [
+gix = { version = "0.85", default-features = false, features = [
     "sha1",
     "status",
     "dirwalk",
