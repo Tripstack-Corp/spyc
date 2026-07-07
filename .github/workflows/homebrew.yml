@@ -53,7 +53,7 @@ jobs:
       - name: Mint a tap token from the GitHub App
         if: steps.guard.outputs.enabled == 'true'
         id: apptoken
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.HOMEBREW_APP_ID }}
           private-key: ${{ secrets.HOMEBREW_APP_KEY }}
