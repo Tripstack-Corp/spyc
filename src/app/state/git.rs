@@ -84,11 +84,14 @@ impl AppState {
         if !force_rewalk && key.is_some() && key == self.col(side).git_cache.git_poll_cache {
             return false;
         }
-        // mtime moved — invalidate the raw-status cache before going through
-        // `git_file_statuses_cached`, which re-spawns and refills it on this dir.
-        self.col_mut(side).git_cache.git_status_cache = None;
+        // A re-walk is warranted (mtime moved, or `force_rewalk` — a working-tree
+        // edit the mtime key can't see). `git_file_statuses_cached` hands it to
+        // the background worker and returns the CURRENT (stale-but-same-repo)
+        // markers rather than blanking the cache, so the dirty star + gutter hold
+        // steady until `apply_git_worker_result` swaps in the fresh walk. Nulling
+        // here is what made the status bar flicker under worktree churn.
         let listing_dir = self.col(side).listing.dir.clone();
-        let new_git_files = self.git_file_statuses_cached(side, &listing_dir);
+        let new_git_files = self.git_file_statuses_cached(side, &listing_dir, force_rewalk);
         let new_git_info = self.compute_git_info_fast(side);
         // Stash on success so the next idle poll skips the subprocesses.
         self.col_mut(side).git_cache.git_poll_cache = key;
@@ -109,10 +112,19 @@ impl AppState {
     ///
     /// Caller must have already called [`Self::update_repo_root`] for `side` so
     /// its `current_repo_root` reflects the new dir.
+    ///
+    /// `force` requests a fresh walk even when the mtime cache would be reused —
+    /// a working-tree edit moves no `.git/index`/`HEAD` mtime, so the poll and
+    /// the listing refresh flag it to converge a stale ` M`/clean marker. When a
+    /// walk is needed and the worker is live, it runs off-thread and this returns
+    /// the CURRENT cache's markers (stale but same-repo), NOT an empty map, and
+    /// does not clear the cache — [`Self::apply_git_worker_result`] swaps in the
+    /// fresh entries when the walk lands.
     pub fn git_file_statuses_cached(
         &mut self,
         side: Side,
         canonical: &Path,
+        force: bool,
     ) -> std::collections::HashMap<String, crate::ui::list_view::GitFileStatus> {
         let Some(repo_root) = self.col(side).git_cache.current_repo_root.clone() else {
             // Not in a repo — nothing to do, no cache to maintain.
@@ -130,12 +142,16 @@ impl AppState {
                     && mtimes
                         .is_some_and(|(idx, head)| idx == c.index_mtime && head == c.head_mtime)
             });
-        if !reuse {
-            // Cache miss — the `git status` spawn walks the entire index
-            // (200-500 ms on a ~110k-file repo) and would block the UI thread.
-            // Hand it to the background worker (stamped with this column's
+        if force || !reuse {
+            // A walk is needed. The `git status` spawn walks the entire index
+            // (200-500 ms on a ~110k-file repo) and would block the UI thread,
+            // so hand it to the background worker (stamped with this column's
             // `side` + generation so the result routes back to the right column
-            // and stale results are discarded) and return an empty map for now.
+            // and stale results are discarded) and fall through to return the
+            // CURRENT cache below — the display holds steady until the walk lands
+            // (`apply_git_worker_result`). Returning an empty map / nulling here
+            // flickers the dirty star + gutter for the ~1 poll the walk takes
+            // under worktree churn.
             if self.col(side).git_cache.git_worker_available {
                 let generation = self.col(side).git_cache.git_generation.wrapping_add(1);
                 let c = self.col_mut(side);
@@ -146,24 +162,28 @@ impl AppState {
                     side,
                 });
                 c.git_cache.last_git_request_at = Some(std::time::Instant::now());
-                return std::collections::HashMap::new();
-            }
-            // No worker (tests, App::new bootstrap) — fall through to the
-            // synchronous walk path below.
-            self.col_mut(side).git_cache.git_status_cache = None;
-            if let Some(entries) = crate::git::status::repo_status(&repo_root)
-                && let Some((index_mtime, head_mtime)) = mtimes
-            {
-                self.col_mut(side).git_cache.git_status_cache = Some(GitStatusCache {
-                    repo_root: repo_root.clone(),
-                    index_mtime,
-                    head_mtime,
-                    entries,
-                });
+            } else {
+                // No worker (tests, App::new bootstrap) — walk synchronously and
+                // refill in-band; the fresh entries are immediate, no async
+                // window to flicker.
+                self.col_mut(side).git_cache.git_status_cache = None;
+                if let Some(entries) = crate::git::status::repo_status(&repo_root)
+                    && let Some((index_mtime, head_mtime)) = mtimes
+                {
+                    self.col_mut(side).git_cache.git_status_cache = Some(GitStatusCache {
+                        repo_root: repo_root.clone(),
+                        index_mtime,
+                        head_mtime,
+                        entries,
+                    });
+                }
             }
         }
-        // Re-filter the cached repo-wide entries to this listing dir's prefix —
-        // no repo re-walk needed (the cache survives chdir within the repo).
+        // Re-filter the cached repo-wide entries to this listing dir's prefix — no
+        // repo re-walk needed (the cache survives chdir within the repo). On the
+        // async path this is the previous (stale-but-same-repo) snapshot; with no
+        // cache yet (first walk / just switched repos) it's empty — the correct
+        // "nothing to show yet".
         let Some(cache) = self.col(side).git_cache.git_status_cache.as_ref() else {
             return std::collections::HashMap::new();
         };

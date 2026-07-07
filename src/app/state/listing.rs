@@ -262,7 +262,6 @@ impl AppState {
             .last_git_invalidation
             .is_none_or(|t| t.elapsed() >= throttle);
         if should_invalidate {
-            self.col_mut(side).git_cache.git_status_cache = None;
             self.col_mut(side).git_cache.last_git_invalidation = Some(std::time::Instant::now());
             // This walk reflects the current worktree, so any earlier
             // deferred re-walk is now satisfied.
@@ -276,7 +275,11 @@ impl AppState {
             self.col_mut(side).git_cache.pending_worktree_rewalk = true;
         }
         let dir = self.col(side).listing.dir.clone();
-        let new_git_files = self.git_file_statuses_cached(side, &dir);
+        // `force` a fresh walk when not throttled — a working-tree edit moves no
+        // mtime, so the reuse check alone would skip it. The walk runs off-thread
+        // and returns the current (stale-but-same-repo) markers, so the gutter
+        // holds steady until the fresh result lands rather than blanking.
+        let new_git_files = self.git_file_statuses_cached(side, &dir, should_invalidate);
         let new_git_info = self.compute_git_info_fast(side);
         let mut new_keys: Vec<&str> = new_git_files.keys().map(String::as_str).collect();
         new_keys.sort_unstable();
@@ -333,7 +336,7 @@ impl AppState {
         // Refill the raw-status cache (if needed) before computing
         // branch/dirty — `compute_git_info_fast` reads `dirty` off
         // the cached raw output, so it must be current.
-        let files = self.git_file_statuses_cached(side, &canonical);
+        let files = self.git_file_statuses_cached(side, &canonical, false);
         let info = self.compute_git_info_fast(side);
         self.col_mut(side).git.set(info, files);
         // Cache key from the cached repo root — no subprocess. The

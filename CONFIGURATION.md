@@ -45,7 +45,7 @@ color_depth = "auto"           # "auto" (truecolor if $COLORTERM says so, else 2
 
 [pane]
 default_command = "claude"     # pre-filled into the `^a c` new-tab prompt
-new_tab_cwd = "project_home"   # or "browse_dir" (open the focused column's dir)
+new_tab_cwd = "worktree_root"  # focused column's worktree root (gw's target); or "project_home" (PROJECT_HOME), "browse_dir" (the focused column's dir)
 claude_transcript_scrollback = false  # `^a v` reads Claude's JSONL transcript instead of terminal scrollback
 codex_mcp = true               # register spyc's MCP server for codex panes
 
