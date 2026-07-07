@@ -53,7 +53,7 @@ diffy = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = { version = "1", default-features = false, features = ["parse", "display", "serde"] }
-notify = { version = "6", default-features = false, features = ["macos_fsevent"] }
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 portable-pty = "0.9"
 vt100 = "0.16"
 ansi-to-tui = "8"
