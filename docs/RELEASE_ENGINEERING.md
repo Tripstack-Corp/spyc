@@ -115,6 +115,12 @@ from `stable/N`, run `-beta.X` → `-rc.X` → `vN.M.0` on that branch, and keep
 Each tag matching `v*` triggers `release.yml` (§8); `-beta`/`-rc` tags are
 auto-marked pre-release by pattern.
 
+**RC retention:** `release.yml` keeps only the **3 most recent `-rc` pre-releases**,
+deleting older ones (release + git tag + assets) on every publish. Only `-rc`
+pre-releases are pruned — stable `vN.M.P` releases are never touched. Older RCs are
+throwaway soak builds (~38 MB of assets each); the changelog and stable tags are the
+durable record.
+
 ## 6. Maintenance: Errata & Security (EN / SA)
 
 FreeBSD splits post-release fixes into **Errata Notices** (critical non-security)
