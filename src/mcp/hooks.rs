@@ -5,6 +5,13 @@
 //! itself. The reporter reads `SPYC_MCP_SOCK` + `SPYC_PANE_ID` from the env
 //! spyc injects into the pane (inherited by the hook).
 //!
+//! The reporter binary is resolved PATH-first (a bare `spyc` when one is on
+//! `$PATH`, else the running binary's absolute path), and the command is
+//! fail-soft (`… 2>/dev/null || true`), so a hook survives the binary MOVING
+//! (a cleaned build dir, `~/.local/bin` → Homebrew) and a moved/uninstalled
+//! spyc degrades to a no-op instead of erroring every turn. See
+//! [`reporter_binary`] / [`reporter_command`].
+//!
 //! Three agents are wired (all share the lifecycle-event → reported-state idea):
 //! * **claude** — `.claude/settings.json` (JSON), reloaded live → hooks take
 //!   effect on the next turn (the functions below).
@@ -42,7 +49,7 @@
 //! `--report-status` command), deleting an emptied file/dir; never touch a
 //! git-tracked `settings.json` (don't dirty something the user committed).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Value, json};
@@ -65,6 +72,51 @@ pub fn set_status_trace(on: bool) {
 
 fn status_trace_enabled() -> bool {
     STATUS_TRACE.load(Ordering::Relaxed)
+}
+
+/// The spyc binary to bake into an installed status-hook command. Prefers a
+/// `spyc` discoverable on `$PATH` so the hook survives the binary MOVING (a
+/// cleaned build dir, `~/.local/bin` → Homebrew, an apt↔brew switch): the
+/// reporter only needs *some* spyc that speaks `--report-status`, not the exact
+/// running binary. Falls back to the running binary's absolute path when spyc
+/// isn't on PATH. `None` only when neither is a UTF-8 string embeddable in the
+/// command (mirrors the prior skip-on-non-UTF-8-exe behavior).
+fn reporter_binary() -> Option<String> {
+    if spyc_on_path() {
+        return Some("spyc".to_string());
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.to_str().map(str::to_owned))
+}
+
+/// Is an executable `spyc` resolvable on `$PATH`?
+fn spyc_on_path() -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|dir| is_executable_file(&dir.join("spyc")))
+}
+
+/// A regular file with any execute bit set.
+fn is_executable_file(p: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+/// Build the shell command an installed status hook runs: the (shell-quoted)
+/// reporter binary, `--report-status <state>`, `--status-trace` when tracing, and
+/// a fail-soft tail. The reporter is fire-and-forget (it just pings the pane's
+/// MCP socket), so a moved/uninstalled binary must degrade to a no-op — WITHOUT
+/// the `2>/dev/null || true`, a missing binary's nonzero exit surfaces as a
+/// per-turn hook error in the agent (the "No such file or directory" report a
+/// stale absolute path produced). The `--report-status` token stays in the
+/// string: it's the "ours" marker cleanup keys on.
+fn reporter_command(exe: &str, state: &str, trace: bool) -> String {
+    let trace = if trace { " --status-trace" } else { "" };
+    // Shell-quote so a spaced install path stays one token or the hook never fires.
+    let exe = crate::shell::shell_quote(exe);
+    format!("{exe} --report-status {state}{trace} 2>/dev/null || true")
 }
 
 /// The (event, matcher, reported-state) hooks spyc installs. `matcher` is the
@@ -113,14 +165,13 @@ pub fn ensure_claude_status_hooks(dir: &Path) -> bool {
     if crate::git::discovery::is_tracked(&path) {
         return false;
     }
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
-    // A non-UTF-8 exe path can't be embedded faithfully in the shell command
-    // string; skip rather than write one a shell would mis-exec (cf. `expand_percent`).
-    let Some(exe) = exe.to_str() else {
+    // Resolve the reporter binary (PATH-preferring, so the hook survives the
+    // binary moving); skip on a non-UTF-8 path a shell would mis-exec.
+    let Some(exe) = reporter_binary() else {
         return false;
     };
     let existing = std::fs::read_to_string(&path).ok();
-    let Some(out) = merged_status_hooks_json(existing.as_deref(), exe, status_trace_enabled())
+    let Some(out) = merged_status_hooks_json(existing.as_deref(), &exe, status_trace_enabled())
     else {
         return false;
     };
@@ -149,16 +200,10 @@ fn merged_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) -> O
     let obj = root.as_object_mut()?;
     let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
     let hooks_obj = hooks.as_object_mut()?;
-    // `--status-trace` rides in the command string (not env) so the reporter
-    // logs even when Claude sanitizes the hook env.
-    let suffix = if trace { " --status-trace" } else { "" };
-    // Shell-quote the exe: agents hand this command to `sh -c`, so a spaced
-    // install path must stay one token or the hook silently never fires.
-    let exe = crate::shell::shell_quote(exe);
     for (event, matcher, state) in STATUS_HOOKS {
         let group = json!({
             "matcher": matcher,
-            "hooks": [ { "type": "command", "command": format!("{exe} --report-status {state}{suffix}") } ],
+            "hooks": [ { "type": "command", "command": reporter_command(exe, state, trace) } ],
         });
         let arr = hooks_obj.entry(event).or_insert_with(|| json!([]));
         let Some(list) = arr.as_array_mut() else {
@@ -282,13 +327,12 @@ pub fn ensure_codex_status_hooks(dir: &Path) -> bool {
     if crate::git::discovery::is_tracked(&path) {
         return false;
     }
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
-    let Some(exe) = exe.to_str() else {
+    let Some(exe) = reporter_binary() else {
         return false;
     };
     let existing = std::fs::read_to_string(&path).ok();
     let Some(out) =
-        merged_codex_status_hooks_toml(existing.as_deref(), exe, status_trace_enabled())
+        merged_codex_status_hooks_toml(existing.as_deref(), &exe, status_trace_enabled())
     else {
         return false;
     };
@@ -321,18 +365,12 @@ fn merged_codex_status_hooks_toml(
         .entry("hooks")
         .or_insert_with(|| toml::Value::Table(toml::Table::new()));
     let hooks_obj = hooks.as_table_mut()?;
-    // `--status-trace` rides in the command string (not env) so the reporter
-    // logs even when codex sanitizes the hook env.
-    let suffix = if trace { " --status-trace" } else { "" };
-    // Shell-quote the exe (agents run this via a shell): a spaced install path
-    // must stay one token or the hook silently never fires.
-    let exe = crate::shell::shell_quote(exe);
     for (event, state) in CODEX_STATUS_HOOKS {
         let mut handler = toml::Table::new();
         handler.insert("type".into(), toml::Value::String("command".into()));
         handler.insert(
             "command".into(),
-            toml::Value::String(format!("{exe} --report-status {state}{suffix}")),
+            toml::Value::String(reporter_command(exe, state, trace)),
         );
         let mut group = toml::Table::new();
         group.insert(
@@ -456,12 +494,11 @@ pub fn ensure_agy_status_hooks(dir: &Path) -> bool {
     if crate::git::discovery::is_tracked(&path) {
         return false;
     }
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
-    let Some(exe) = exe.to_str() else {
+    let Some(exe) = reporter_binary() else {
         return false;
     };
     let existing = std::fs::read_to_string(&path).ok();
-    let Some(out) = merged_agy_status_hooks_json(existing.as_deref(), exe, status_trace_enabled())
+    let Some(out) = merged_agy_status_hooks_json(existing.as_deref(), &exe, status_trace_enabled())
     else {
         return false;
     };
@@ -484,13 +521,11 @@ fn merged_agy_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) 
         .filter(Value::is_object)
         .unwrap_or_else(|| json!({}));
     let obj = root.as_object_mut()?;
-    let suffix = if trace { " --status-trace" } else { "" };
-    let exe = crate::shell::shell_quote(exe);
     let mut set = serde_json::Map::new();
     for (event, state) in AGY_STATUS_HOOKS {
         set.insert(
             event.to_string(),
-            json!([{ "type": "command", "command": format!("{exe} --report-status {state}{suffix}") }]),
+            json!([{ "type": "command", "command": reporter_command(exe, state, trace) }]),
         );
     }
     // We own the whole `spyc-status` key, so an insert replaces a prior ours
@@ -688,6 +723,53 @@ mod tests {
         assert!(codex.contains(quoted), "codex not quoted: {codex}");
         let agy = merged_agy_status_hooks_json(None, exe, false).expect("agy merge");
         assert!(agy.contains(quoted), "agy not quoted: {agy}");
+    }
+
+    #[test]
+    fn reporter_command_is_fail_soft_and_quoted() {
+        // A moved/uninstalled binary must no-op, not error the agent turn: every
+        // installed command ends in the fail-soft tail; `--status-trace` rides
+        // before it.
+        // `shell_quote` always single-quotes; a quoted word with no slash is
+        // still PATH-resolved by the shell, so the bare-name preference holds.
+        assert_eq!(
+            reporter_command("spyc", "done", false),
+            "'spyc' --report-status done 2>/dev/null || true"
+        );
+        assert_eq!(
+            reporter_command("spyc", "working", true),
+            "'spyc' --report-status working --status-trace 2>/dev/null || true"
+        );
+        // A spaced install path stays one shell token, tail still present, and the
+        // `--report-status` "ours" marker survives (cleanup keys on it).
+        let q = reporter_command("/opt/my spyc/spyc", "blocked", false);
+        assert!(
+            q.starts_with("'/opt/my spyc/spyc' --report-status blocked"),
+            "not quoted: {q}"
+        );
+        assert!(
+            q.ends_with(" 2>/dev/null || true"),
+            "no fail-soft tail: {q}"
+        );
+        assert!(q.contains("--report-status"));
+    }
+
+    #[test]
+    fn is_executable_file_requires_the_exec_bit() {
+        use std::fs::Permissions;
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("spyc");
+        std::fs::write(&f, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&f, Permissions::from_mode(0o644)).unwrap();
+        assert!(!is_executable_file(&f), "a non-exec file must not resolve");
+        std::fs::set_permissions(&f, Permissions::from_mode(0o755)).unwrap();
+        assert!(is_executable_file(&f), "an exec file resolves");
+        // A directory (even +x) is not an executable file, and a missing path is not.
+        let d = tmp.path().join("dir");
+        std::fs::create_dir(&d).unwrap();
+        assert!(!is_executable_file(&d), "a dir is not an executable file");
+        assert!(!is_executable_file(&tmp.path().join("missing")));
     }
 
     #[test]
