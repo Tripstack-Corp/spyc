@@ -1,6 +1,6 @@
 [package]
 name = "spyc"
-version = "2.0.0-rc.19"
+version = "2.0.0-rc.20"
 edition = "2024"
 description = "A Rust TUI file commander where the AI agent in the side pane can query the file commander itself"
 license = "BSD-3-Clause"
@@ -118,7 +118,7 @@ infer = { version = "0.19.0", default-features = false }
 # use the host/image C compiler, and the musl/darwin cross-builds route it
 # through `cargo zigbuild`'s `zig cc` like every other `*-sys` crate. No `send`
 # feature — the interpreter is pinned to a single worker thread.
-mlua = { version = "0.10", features = ["lua54", "vendored"] }
+mlua = { version = "0.12", features = ["lua54", "vendored"] }
 # `strum::EnumIter` on the `Action` enum lets the `action_names_round_trip`
 # guard test iterate every variant, so a new action that isn't wired into
 # `canonical_name` / `action_from_name` fails the build (the completeness

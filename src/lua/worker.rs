@@ -271,13 +271,19 @@ fn new_interpreter(
 ) -> mlua::Result<Lua> {
     let lua = Lua::new();
     api::install(&lua, bridge, fnreg)?;
-    install_hook(&lua, abort, deadline);
+    install_hook(&lua, abort, deadline)?;
     Ok(lua)
 }
 
-fn install_hook(lua: &Lua, abort: &Arc<AtomicBool>, deadline: &Rc<Cell<Option<Instant>>>) {
+fn install_hook(
+    lua: &Lua,
+    abort: &Arc<AtomicBool>,
+    deadline: &Rc<Cell<Option<Instant>>>,
+) -> mlua::Result<()> {
     let abort = Arc::clone(abort);
     let deadline = Rc::clone(deadline);
+    // mlua 0.12: `set_hook` is fallible (returns `Result`); propagate to the
+    // `new_interpreter` caller, which is already `mlua::Result`.
     lua.set_hook(
         HookTriggers::default().every_nth_instruction(HOOK_EVERY),
         move |_lua, _debug| {
@@ -289,7 +295,7 @@ fn install_hook(lua: &Lua, abort: &Arc<AtomicBool>, deadline: &Rc<Cell<Option<In
             }
             Ok(VmState::Continue)
         },
-    );
+    )
 }
 
 /// Reset the bridge for a new run: drop the prior run's requests/registrations
