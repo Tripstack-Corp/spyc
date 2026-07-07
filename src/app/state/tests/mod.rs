@@ -776,11 +776,11 @@ fn git_worker_available_enqueues_request_instead_of_spawning() {
     s.left.git_cache.pending_git_requests.clear();
     let gen_before = s.left.git_cache.git_generation;
 
-    let map = s.git_file_statuses_cached(crate::app::state::Side::Left, &root);
+    let map = s.git_file_statuses_cached(crate::app::state::Side::Left, &root, false);
 
     assert!(
         map.is_empty(),
-        "worker path returns an empty map this frame (markers arrive async)"
+        "no cache yet → the worker path returns an empty map this frame (markers arrive async)"
     );
     assert_eq!(
         s.left.git_cache.pending_git_requests.len(),
@@ -805,6 +805,90 @@ fn git_worker_available_enqueues_request_instead_of_spawning() {
     assert!(
         s.left.git_cache.last_git_request_at.is_some(),
         "request-sent timestamp stamped for the activity overlay"
+    );
+}
+
+/// Regression (status-bar flicker): the git poll used to null the status cache
+/// before handing the re-walk to the async worker, blanking the dirty star +
+/// gutter markers for the ~1 poll the walk took — which reads as a flicker under
+/// worktree churn (a running build fires a working-tree event every poll). A
+/// forced re-walk with a live worker must ENQUEUE the fresh walk yet keep
+/// showing the current (stale-but-same-repo) markers until it lands.
+#[test]
+fn forced_rewalk_keeps_stale_markers_and_star_instead_of_blanking() {
+    use crate::app::state::Side;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+    let run_git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@x")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@x")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("spawn git");
+        assert!(status.success(), "git {args:?} failed");
+    };
+    run_git(&["init", "-q", "--initial-branch=main"]);
+    std::fs::write(root.join("file.txt"), "v1\n").unwrap();
+    run_git(&["add", "file.txt"]);
+    run_git(&["commit", "-q", "-m", "v1"]);
+
+    let mut s = test_state();
+    s.left.listing.dir = root.clone();
+    s.update_repo_root(Side::Left, &root);
+    s.left.git_cache.git_worker_available = true;
+
+    // Seed a populated cache stamped with the CURRENT mtimes, so the reuse check
+    // would normally skip the walk — `force` must re-walk anyway. This is exactly
+    // the poll's `force_rewalk` case: a working-tree edit moves no
+    // `.git/index`/`HEAD` mtime, so only the flag forces a fresh walk.
+    let (idx, head) = s
+        .compute_git_mtime_key_fast(Side::Left)
+        .expect("repo mtimes");
+    s.left.git_cache.git_status_cache = Some(crate::app::state::GitStatusCache {
+        repo_root: root.clone(),
+        index_mtime: idx,
+        head_mtime: head,
+        entries: vec![crate::git::status::StatusEntry {
+            rela_path: "file.txt".to_string(),
+            staged: None,
+            unstaged: Some(crate::ui::list_view::GitChange::Modified),
+            untracked: false,
+        }],
+    });
+    s.left.git_cache.pending_git_requests.clear();
+    let gen_before = s.left.git_cache.git_generation;
+
+    let map = s.git_file_statuses_cached(Side::Left, &root, true);
+
+    // The markers survive the async window — NOT blanked (the flicker fix).
+    assert!(
+        map.contains_key("file.txt"),
+        "forced re-walk must keep the current markers, not blank them"
+    );
+    // ...and the fresh walk is still enqueued off-thread.
+    assert_eq!(
+        s.left.git_cache.pending_git_requests.len(),
+        1,
+        "forced re-walk still enqueues the async walk"
+    );
+    assert_eq!(
+        s.left.git_cache.git_generation,
+        gen_before.wrapping_add(1),
+        "generation bumped once for the enqueued walk"
+    );
+    // The dirty star holds steady too — `compute_git_info_fast` reads the
+    // retained (non-nulled) cache, so it stays `main*` rather than flipping to
+    // `main` for the frame the async walk is in flight.
+    assert_eq!(
+        s.compute_git_info_fast(Side::Left).as_deref(),
+        Some("main*"),
+        "the dirty star holds steady across the forced re-walk"
     );
 }
 
