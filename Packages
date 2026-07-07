@@ -118,3 +118,33 @@ SHA512: f13af9a2dc8e6caf2d93ab6ef42ad56992c941a9014876d63eaaf396ac8a5776798ef4ed
 Homepage: https://github.com/Tripstack-Corp/spyc
 Description: Keyboard-driven, MCP-native terminal file commander
 
+Package: spyc
+Architecture: amd64
+Version: 2.0.0~rc.21
+Priority: optional
+Section: utils
+Maintainer: Derek Marshall <derek.marshall@tripstack.com>
+Filename: ./spyc_2.0.0~rc.21_amd64.deb
+Size: 8177988
+MD5sum: 00d9579412a4bc4d1d5c622260991180
+SHA1: 08c79c5b6da01ef4e6c974fbad8ae1875547b949
+SHA256: c125bfa1deeb37801860561f5c8540f2b4cc22efdefa86e632ce07af615f8401
+SHA512: 6d36d8c5a786fc22e9f5eeec4072786dd955cae3c564063fb67fe6f1b73e74c77cbdc1210eb00267b98122d111a9536d11ed83f57426cefd654b0f0f68dfb15a
+Homepage: https://github.com/Tripstack-Corp/spyc
+Description: Keyboard-driven, MCP-native terminal file commander
+
+Package: spyc
+Architecture: arm64
+Version: 2.0.0~rc.21
+Priority: optional
+Section: utils
+Maintainer: Derek Marshall <derek.marshall@tripstack.com>
+Filename: ./spyc_2.0.0~rc.21_arm64.deb
+Size: 7717846
+MD5sum: 3e0a07b3401c66d3d1c959afe1e930f2
+SHA1: 714554c6604c145d223640427ce58dfea173c179
+SHA256: f24ee461ba3bc8ad50ce7d50d17f04ae575e0bce205d49b2c1fdb615efd38044
+SHA512: 74bd096472a9dda6c06c4c8335116bd71af298479a373db63842be4a8d1401f02d19050981822f4985f91190e55ce4404b0b7cba7c2ccaf9b088bcc2dedfbeed
+Homepage: https://github.com/Tripstack-Corp/spyc
+Description: Keyboard-driven, MCP-native terminal file commander
+
