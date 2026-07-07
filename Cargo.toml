@@ -20,7 +20,7 @@ ratatui = "0.30"
 # halfblocks are built in. ratatui-image tracks ratatui 0.30; mermaid-rs-renderer
 # emits PNG via resvg (no Node/Chromium); `image` (png only) decodes it.
 ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
-mermaid-rs-renderer = { version = "0.2", default-features = false, features = ["png"] }
+mermaid-rs-renderer = { version = "0.3", default-features = false, features = ["png"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Rasterize the mermaid SVG → PNG (pure-Rust; same version mermaid-rs-renderer
 # pulls in, so no duplicate in the tree). We drive it directly to control the
