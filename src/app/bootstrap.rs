@@ -338,7 +338,7 @@ impl App {
         app.state.left.git.info = app.state.compute_git_info_fast(state::Side::Left);
         let _ = app
             .state
-            .git_file_statuses_cached(state::Side::Left, &initial_cwd);
+            .git_file_statuses_cached(state::Side::Left, &initial_cwd, false);
         // The bootstrap cache-miss queued a request into the Model's
         // outbox (git_worker_available is now true); flush it onto the
         // worker channel so the first per-file markers land as early as
