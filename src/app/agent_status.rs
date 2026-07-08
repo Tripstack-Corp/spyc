@@ -40,6 +40,16 @@ type ScrapeCandidate = Option<(AgentActivity, u8)>;
 /// P1-2 scanned / confirmed scrape result: `(state, optional `:why-status` hint)`.
 type ScrapeResult = Option<(AgentActivity, Option<&'static str>)>;
 
+/// The active pane's agent identity for status resolution: profile, kind, cwd,
+/// spawn-time cache key, and the tab's pinned session id (if any).
+type ActiveAgentKey = (
+    &'static dyn crate::agent::AgentProfile,
+    AgentKind,
+    std::path::PathBuf,
+    u64,
+    Option<String>,
+);
+
 /// Cadence of the "spicy pulse" working animation (~4 Hz). Armed only while
 /// ≥1 agent tab is `Working`, so an all-idle pane set still draws 0 fps.
 const AGENT_ANIM_INTERVAL: Duration = Duration::from_millis(250);
@@ -187,6 +197,28 @@ fn notification_text(label: &str, tab_number: usize, new: AgentActivity) -> (Str
     }
 }
 
+/// Choose the active pane's status-bar agent suffix. The tab's pinned session id
+/// (its exact per-tab identity) wins over the `cached` proximity-resolved
+/// short-id, which can't tell two agent tabs sharing a cwd apart — both would
+/// show one id (#156). `cache_matches` gates the cached value to the current
+/// pane; with no pin and no matching cache, the bare label shows until the first
+/// resolve lands. Pure so the pin-preference is testable without pane fixtures.
+fn choose_status_suffix(
+    name: &str,
+    pinned: Option<&str>,
+    cached: Option<&str>,
+    cache_matches: bool,
+) -> Option<String> {
+    if let Some(sid) = pinned {
+        return Some(format!("{name}:{}", crate::state::sessions::short_id(sid)));
+    }
+    if cache_matches {
+        cached.map(str::to_string)
+    } else {
+        Some(name.to_string())
+    }
+}
+
 impl App {
     /// PURE `&self` read for the draw pass: the active pane's cached agent
     /// short-id, or the bare agent label until the first refresh lands. Never
@@ -197,20 +229,21 @@ impl App {
     /// snapshot render no longer silently spawns a worker that walks
     /// `~/.claude/sessions`.
     pub(crate) fn active_agent_status(&self) -> Option<String> {
-        let (profile, kind, cwd, spawn) = self.active_agent_key()?;
-        // Show this pane's cached short-id. Until the first refresh for a
-        // freshly-focused pane lands, fall back to the bare agent label (no
-        // short-id yet) — never block, never show another pane's id. A
-        // same-pane 30 s refresh updates the cache in place, so the steady
-        // state never flickers.
-        if self.agent_cache_matches(kind, &cwd, spawn) {
-            self.view
-                .agent_status_cache
-                .as_ref()
-                .and_then(|c| c.status.clone())
-        } else {
-            Some(profile.name().to_string())
-        }
+        let (profile, kind, cwd, spawn, pinned) = self.active_agent_key()?;
+        // Prefer the tab's pinned session id — its exact identity, a pure
+        // short-id truncation with no session-index walk. The cached proximity
+        // resolve is only the fallback for a pane with no pin yet (before its
+        // first status hook fires); it can't tell two same-cwd tabs apart, which
+        // is why both used to show one id. Until the first refresh for an
+        // unpinned freshly-focused pane lands, the bare label shows — never
+        // block, never another pane's id.
+        let cache_matches = self.agent_cache_matches(kind, &cwd, spawn);
+        let cached = self
+            .view
+            .agent_status_cache
+            .as_ref()
+            .and_then(|c| c.status.as_deref());
+        choose_status_suffix(profile.name(), pinned.as_deref(), cached, cache_matches)
     }
 
     /// The active pane's agent identity for status resolution: the `'static`
@@ -218,21 +251,21 @@ impl App {
     /// `None` when there's no active pane or it isn't a known agent. The
     /// `pane_tabs` borrow is dropped at return (cwd is cloned), so callers can
     /// freely touch the cache / runtime slots afterward.
-    fn active_agent_key(
-        &self,
-    ) -> Option<(
-        &'static dyn crate::agent::AgentProfile,
-        AgentKind,
-        std::path::PathBuf,
-        u64,
-    )> {
+    fn active_agent_key(&self) -> Option<ActiveAgentKey> {
         let active = self.runtime.pane_tabs.as_ref()?.active_info();
         let profile = crate::agent::detect(&active.command);
         let kind = profile.kind();
         if kind == AgentKind::Other {
             return None;
         }
-        Some((profile, kind, active.cwd.clone(), active.spawn_epoch_secs))
+        let pinned = active.pinned_session_id().map(str::to_string);
+        Some((
+            profile,
+            kind,
+            active.cwd.clone(),
+            active.spawn_epoch_secs,
+            pinned,
+        ))
     }
 
     /// Is the cached short-id for the CURRENT active pane?
@@ -263,9 +296,15 @@ impl App {
     // off render. Hence the allow.
     #[allow(clippy::needless_pass_by_ref_mut)]
     pub(crate) fn kick_agent_status_refresh(&mut self) {
-        let Some((profile, kind, cwd, spawn)) = self.active_agent_key() else {
+        let Some((profile, kind, cwd, spawn, pinned)) = self.active_agent_key() else {
             return;
         };
+        // A pinned pane resolves its suffix purely in `active_agent_status` (an
+        // exact per-tab short-id, no session-index walk) — don't spawn the
+        // proximity resolver for it. (#156)
+        if pinned.is_some() {
+            return;
+        }
         let fresh = self.agent_cache_matches(kind, &cwd, spawn)
             && self
                 .view
@@ -1142,5 +1181,49 @@ mod tests {
         let p = super::notification_for_transition(Working, Done, &cfg, false, false, "codex", 1);
         assert!(p.bell, "bell_done rings the bell on Done");
         assert!(p.visual, "visual_done flashes on Done");
+    }
+
+    #[test]
+    fn pinned_session_id_wins_and_distinguishes_tabs() {
+        // The bug: two tabs sharing a cwd both showed one proximity-resolved id.
+        // Distinct pins must yield distinct suffixes, and the pin must override
+        // whatever the (shared) cache holds.
+        let a = super::choose_status_suffix(
+            "claude",
+            Some("aaaaaaaa-1111-2222"),
+            Some("claude:zz"),
+            true,
+        );
+        let b = super::choose_status_suffix(
+            "claude",
+            Some("bbbbbbbb-3333-4444"),
+            Some("claude:zz"),
+            true,
+        );
+        assert!(a.as_deref().is_some_and(|s| s.starts_with("claude:")));
+        assert_ne!(a, b, "distinct pins → distinct suffixes");
+        assert_ne!(
+            a.as_deref(),
+            Some("claude:zz"),
+            "pin overrides the cached proximity id"
+        );
+    }
+
+    #[test]
+    fn unpinned_uses_cache_when_it_matches_else_bare_label() {
+        assert_eq!(
+            super::choose_status_suffix("claude", None, Some("claude:zz"), true),
+            Some("claude:zz".to_string()),
+        );
+        // Cache is for another pane (no match) → bare label until this pane's
+        // own resolve lands.
+        assert_eq!(
+            super::choose_status_suffix("claude", None, Some("claude:zz"), false),
+            Some("claude".to_string()),
+        );
+        assert_eq!(
+            super::choose_status_suffix("codex", None, None, false),
+            Some("codex".to_string()),
+        );
     }
 }
