@@ -30,6 +30,11 @@ env:
   # cache. (Matched the Bitbucket pipeline.)
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
+  # Full backtrace on any panic so a CI-only failure is diagnosable from the
+  # log alone. Aimed at the intermittent gix worktree index-lock flake
+  # (`write index: Could not acquire lock`), which doesn't reproduce on macOS —
+  # the next occurrence must show WHERE the lock acquisition unwinds.
+  RUST_BACKTRACE: full
 
 permissions:
   contents: read
