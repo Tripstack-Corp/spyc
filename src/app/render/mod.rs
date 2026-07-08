@@ -431,6 +431,11 @@ impl App {
         // ring, above the chrome + HUD (an attention flash), below the mermaid
         // image. A no-op unless a flash is live (only armed on a transition).
         self.render_visual_bell(frame, frame_area);
+        // First-launch status-hooks consent — a centered modal pop-up drawn over
+        // everything (chrome + HUD), so an auto-fired ask can't be mistaken for a
+        // frozen pane while the user's eyes are on the agent. No-op unless the
+        // `HookConsent` prompt is active.
+        self.render_hook_consent_popup(frame, h_divider_row, v_divider_col);
         // Full-screen mermaid image overlay (the `i` key) — drawn last so it
         // sits on top of everything, including the HUD.
         self.render_mermaid_overlay(frame, frame_area);
@@ -874,6 +879,42 @@ mod render_tests {
         let mut app = demo_app(&files());
         app.state.mode = Mode::Prompting(Prompt::shell(PromptKind::Command, ":"));
         insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
+    }
+
+    #[test]
+    fn hook_consent_draws_a_centered_popup_not_the_prompt_line() {
+        let mut app = demo_app(&files());
+        app.state.mode = Mode::Prompting(Prompt::simple(
+            PromptKind::HookConsent {
+                root: PathBuf::from("/projects/demo"),
+                cwd: PathBuf::from("/projects/demo"),
+                agent: crate::state::sessions::AgentKind::Claude,
+            },
+            "Show this agent's live status on its tab? spyc will write status \
+             hooks to .claude/settings.json (removed when the pane exits)."
+                .to_string(),
+        ));
+        let out = render_to_string(&mut app, 80, 24);
+        // The pop-up drew: the question, the prominent y/n footer, and a border.
+        assert!(
+            out.contains("live status"),
+            "consent question shown:\n{out}"
+        );
+        assert!(
+            out.contains("[y]") && out.contains("[n]"),
+            "y/n keys shown in the popup:\n{out}"
+        );
+        assert!(
+            out.contains('┌') && out.contains('│'),
+            "a bordered box drew:\n{out}"
+        );
+        // It's a CENTERED modal, NOT the one-line prompt bar: the question must
+        // not sit on the final (chrome) row — that's the confusing old behavior.
+        let last = out.lines().last().unwrap_or_default();
+        assert!(
+            !last.contains("live status"),
+            "question must not be on the prompt-line row:\n{out}"
+        );
     }
 
     #[test]

@@ -191,7 +191,7 @@ impl App {
                         agent: kind,
                     },
                     format!(
-                        "Let spyc show this agent's live status? Writes hooks to {} (removed on exit). [y]es / [n]o ",
+                        "Show this agent's live status on its tab? spyc will write status hooks to {} (removed when the pane exits).",
                         support.config_label
                     ),
                 ));
