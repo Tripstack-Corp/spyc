@@ -41,17 +41,47 @@ use ratatui::{
 use crate::ui::theme::Theme;
 
 /// Resolve the conversation JSONL for the Claude session running in the pane.
-/// Picks the session whose start time is closest to the pane's spawn time
-/// (handles multiple Claude tabs sharing a cwd), then maps it to its on-disk
-/// path. Claude rewrites its session index live, so the closest-start heuristic
-/// holds here (unlike codex — see [`crate::state::codex_transcript`]); the
-/// `command` field of the query is unused.
+///
+/// Prefers the pane's pinned live session id (`q.session_id`, lifted from the
+/// status hook) when it names an on-disk conversation — the exact per-tab match.
+/// Only with no pin (or its file gone) does it fall back to the session whose
+/// start time is closest to the pane's spawn. The proximity guess alone
+/// collapses two Claude tabs sharing a cwd onto one transcript (both `^a v`
+/// views showed the same conversation); the pin is the reliable discriminator.
+/// The `command` field of the query is unused.
 pub fn resolve_active_jsonl(q: crate::agent::TranscriptQuery) -> Option<PathBuf> {
-    let sessions = crate::state::sessions::find_claude_sessions(q.cwd);
-    let best = sessions
+    let sessions: Vec<(u64, String)> = crate::state::sessions::find_claude_sessions(q.cwd)
         .into_iter()
-        .min_by_key(|s| s.started_at_secs.abs_diff(q.spawn_epoch_secs))?;
-    crate::state::sessions::claude_jsonl_path(q.cwd, &best.session_id)
+        .map(|s| (s.started_at_secs, s.session_id))
+        .collect();
+    let chosen = choose_session(
+        q.session_id,
+        |sid| crate::state::sessions::claude_jsonl_path(q.cwd, sid).is_some(),
+        &sessions,
+        q.spawn_epoch_secs,
+    )?;
+    crate::state::sessions::claude_jsonl_path(q.cwd, &chosen)
+}
+
+/// Choose the Claude session id for a pane: the pinned live id when it names an
+/// existing on-disk conversation (`exists`), else the candidate whose start time
+/// is closest to the pane's spawn. Pure so the pin-wins-over-proximity rule is
+/// unit-testable without touching `$HOME` / the filesystem.
+fn choose_session(
+    pinned: Option<&str>,
+    exists: impl Fn(&str) -> bool,
+    sessions: &[(u64, String)],
+    spawn_epoch_secs: u64,
+) -> Option<String> {
+    if let Some(sid) = pinned
+        && exists(sid)
+    {
+        return Some(sid.to_string());
+    }
+    sessions
+        .iter()
+        .min_by_key(|(started, _)| started.abs_diff(spawn_epoch_secs))
+        .map(|(_, id)| id.clone())
 }
 
 /// Parse a Claude conversation JSONL into styled pager lines, in
@@ -360,5 +390,41 @@ mod tests {
             flat.iter()
                 .any(|l| l.contains("\u{276f} look at this screenshot"))
         );
+    }
+
+    // Two sessions in one cwd, started ~3 min apart — mirrors the real repro
+    // (dfbcf56f @231, 1d1bc388 @412): two Claude tabs whose `^a v` both resolved
+    // to the same transcript.
+    fn two_sessions() -> Vec<(u64, String)> {
+        vec![(231, "pr-review".to_string()), (412, "docs".to_string())]
+    }
+
+    #[test]
+    fn pinned_session_wins_over_spawn_proximity() {
+        // The PR-review pane, but spawned closest to the *docs* session's start —
+        // proximity alone picks "docs" (the bug). The pin must win so the tab
+        // shows its own transcript.
+        let chosen = choose_session(Some("pr-review"), |_| true, &two_sessions(), 412);
+        assert_eq!(chosen.as_deref(), Some("pr-review"));
+    }
+
+    #[test]
+    fn falls_back_to_proximity_when_unpinned() {
+        // No pin yet (hook hasn't fired) → closest start to spawn.
+        let chosen = choose_session(None, |_| true, &two_sessions(), 410);
+        assert_eq!(chosen.as_deref(), Some("docs"));
+    }
+
+    #[test]
+    fn falls_back_when_pinned_file_missing() {
+        // Pinned id whose JSONL is gone (rotated/deleted) → proximity, not a dead
+        // pin that resolves to nothing.
+        let chosen = choose_session(Some("ghost"), |sid| sid != "ghost", &two_sessions(), 230);
+        assert_eq!(chosen.as_deref(), Some("pr-review"));
+    }
+
+    #[test]
+    fn none_when_no_candidates_and_no_pin() {
+        assert_eq!(choose_session(None, |_| true, &[], 100), None);
     }
 }
