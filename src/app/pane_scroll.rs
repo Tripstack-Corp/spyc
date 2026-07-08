@@ -169,12 +169,8 @@ impl App {
         // The session uuid pinned to this pane — the codex rollout claim, or the
         // claude session id lifted from its status hook. The resolver's strongest
         // signal, and the only reliable one when two agent tabs share a cwd (the
-        // spawn-time proximity fallback collapses them onto one transcript). A tab
-        // runs one agent, so at most one is set.
-        let session_id = active_info
-            .codex_session_id
-            .clone()
-            .or_else(|| active_info.claude_session_id.clone());
+        // spawn-time proximity fallback collapses them onto one transcript).
+        let session_id = active_info.pinned_session_id().map(str::to_string);
         let is_alt_screen = tabs.active().is_alternate_screen();
 
         // Agent-aware scrollback. An agent's `AgentProfile` may carry a

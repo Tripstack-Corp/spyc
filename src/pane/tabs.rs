@@ -244,6 +244,16 @@ impl TabInfo {
             claim_owner: uuid::Uuid::now_v7().to_string(),
         }
     }
+
+    /// This tab's pinned agent session uuid — the codex rollout claim or the
+    /// claude session id (a tab runs one agent, so at most one is set). The
+    /// exact per-tab identity that transcript resolution and the status suffix
+    /// prefer over the fragile spawn-time-proximity guess.
+    pub fn pinned_session_id(&self) -> Option<&str> {
+        self.codex_session_id
+            .as_deref()
+            .or(self.claude_session_id.as_deref())
+    }
 }
 
 /// A single tab: a `Pane` plus its metadata.
