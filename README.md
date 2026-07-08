@@ -96,9 +96,16 @@ sudo apt update && sudo apt install spyc
 ```
 
 Or grab a tarball from
-[Releases](https://github.com/Tripstack-Corp/spyc/releases). To **build
-from source** instead, see [BUILD.md](BUILD.md). Full setup — terminal,
-font, clipboard, MCP, and verification — is in [INSTALL.md](INSTALL.md).
+[Releases](https://github.com/Tripstack-Corp/spyc/releases), or — with a Rust
+toolchain — install from [crates.io](https://crates.io/crates/spyc) (also the
+easy path on Arch and any distro without a native package):
+
+```sh
+cargo install spyc --version '2.0.0-rc.<N>'   # bare `cargo install spyc` once 2.0.0 ships
+```
+
+To **build from source** instead, see [BUILD.md](BUILD.md). Full setup —
+terminal, font, clipboard, MCP, and verification — is in [INSTALL.md](INSTALL.md).
 
 ### Launch
 
