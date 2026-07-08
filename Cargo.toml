@@ -1,11 +1,30 @@
 [package]
 name = "spyc"
-version = "2.0.0-rc.24"
+version = "2.0.0-rc.25"
 edition = "2024"
 description = "A Rust TUI file commander where the AI agent in the side pane can query the file commander itself"
 license = "BSD-3-Clause"
 repository = "https://github.com/Tripstack-Corp/spyc"
 rust-version = "1.88"
+readme = "README.md"
+keywords = ["tui", "file-manager", "terminal", "mcp", "agent"]
+categories = ["command-line-utilities", "filesystem"]
+# Trim the published crate to what's needed to build + a README: keep `src/`
+# (incl. the `include_str!`'d `src/config/default.spycrc.toml`), Cargo.{toml,lock},
+# README, LICENSE, CHANGELOG. Drop the dev/CI/media bulk (`docs/` alone is ~5 MB
+# of assets + archives) so `cargo package` stays small and `cargo install` fast.
+exclude = [
+    "/docs",
+    "/.github",
+    "/.aislop",
+    "/fuzz",
+    "/tests",
+    "/assets",
+    "/Makefile",
+    "/cliff.toml",
+    "/deny.toml",
+    "/.gitattributes",
+]
 
 [[bin]]
 name = "spyc"
