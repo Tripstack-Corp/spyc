@@ -305,6 +305,12 @@ impl App {
             widgets::Paragraph,
         };
         if let Mode::Prompting(p) = &self.state.mode {
+            // HookConsent is shown as a centered pop-up (`render_hook_consent_popup`),
+            // not this one-line bar — leave the prompt row blank so the ask reads
+            // as a modal, not a status line lost beneath the pane.
+            if matches!(p.kind, crate::app::PromptKind::HookConsent { .. }) {
+                return;
+            }
             PromptLine {
                 prefix: &p.prefix,
                 buffer: &p.buffer,

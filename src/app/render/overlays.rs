@@ -5,7 +5,7 @@
 
 use ratatui::Frame;
 
-use crate::app::{App, format_uptime};
+use crate::app::{App, Mode, PromptKind, format_uptime};
 
 impl App {
     /// P3-1 visual bell: paint spyc's spice-heat gradient border pulse over the
@@ -173,6 +173,83 @@ impl App {
             Paragraph::new(Span::styled(footer_text, footer_style)),
             footer_rect,
         );
+    }
+
+    /// Render the first-launch status-hooks consent (`PromptKind::HookConsent`)
+    /// as a centered modal pop-up. It fires automatically when an agent pane
+    /// launches — while the user's eyes are on the pane — so the old one-line
+    /// prompt bar read as "spyc isn't taking my input". A bordered box in the
+    /// middle of the screen with a prominent `y`/`n` footer makes the ask
+    /// unmissable. Only `y`/`n` dismiss it (the confirm handler enforces that);
+    /// drawn on top of everything from `render`. `h_divider_row`/`v_divider_col`
+    /// nudge the border off a structural divider (see [`Self::render_harpoon_menu`]).
+    pub(super) fn render_hook_consent_popup(
+        &self,
+        frame: &mut Frame,
+        h_divider_row: Option<u16>,
+        v_divider_col: Option<u16>,
+    ) {
+        use ratatui::{
+            layout::Rect,
+            style::{Modifier, Style},
+            text::{Line, Span},
+            widgets::{Block, Borders, Clear, Paragraph},
+        };
+        let Mode::Prompting(prompt) = &self.state.mode else {
+            return;
+        };
+        if !matches!(prompt.kind, PromptKind::HookConsent { .. }) {
+            return;
+        }
+
+        let area = frame.area();
+        let width = area.width.clamp(40, 68);
+        // Body wraps to the inner width (box minus two border columns + a
+        // one-column pad each side).
+        let text_w = usize::from(width).saturating_sub(4).max(1);
+        let body = wrap_label(&prompt.prefix, text_w);
+        // 2 borders + body rows + 1 blank spacer + 1 footer.
+        let height = (2 + body.len() as u16 + 2).min(area.height);
+        let cx = area.x + (area.width.saturating_sub(width)) / 2;
+        let cy = area.y + (area.height.saturating_sub(height)) / 2;
+        let x = place_clear_of_line(cx, width, v_divider_col, area.x, area.right());
+        let y = place_clear_of_line(cy, height, h_divider_row, area.y, area.bottom());
+        let rect = Rect {
+            x,
+            y,
+            width,
+            height,
+        };
+        frame.render_widget(Clear, rect);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" spyc — agent status ")
+            .border_style(
+                Style::default()
+                    .fg(self.view.theme.popup_border)
+                    .add_modifier(Modifier::BOLD),
+            );
+        let inner = block.inner(rect);
+        frame.render_widget(block, rect);
+
+        let body_style = Style::default().fg(self.view.theme.status_path);
+        let mut lines: Vec<Line> = body
+            .into_iter()
+            .map(|l| Line::from(Span::styled(format!(" {l}"), body_style)))
+            .collect();
+        lines.push(Line::from("")); // spacer
+        let key = Style::default()
+            .fg(self.view.theme.prompt_prefix)
+            .add_modifier(Modifier::BOLD);
+        let word = Style::default().fg(self.view.theme.status_suffix);
+        lines.push(Line::from(vec![
+            Span::styled(" [y] ", key),
+            Span::styled("yes     ", word),
+            Span::styled("[n] ", key),
+            Span::styled("no", word),
+        ]));
+        frame.render_widget(Paragraph::new(lines), inner);
     }
 
     /// Render the activity (`A`) monitor overlay (top-right corner). Called
