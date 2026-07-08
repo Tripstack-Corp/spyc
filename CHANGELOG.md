@@ -2,6 +2,58 @@
 
 All notable changes to spyc. Entries from v1.57.0 onward are generated from the conventional-commit history by [git-cliff](https://git-cliff.org) (config in `cliff.toml`); regenerate the pending section with `make changelog` and cut a release with `make release-tag VERSION=x.y.z`. Entries at v1.56.0 and earlier are the original hand-written log, kept verbatim.
 
+## [2.0.0] - 2026-07-08
+
+spyc 2.0 — the file commander built for collaborating with your coding agents.
+The terminal file manager and the agent in its side pane now share one context
+over MCP. Highlights since the 1.x line (per-change detail is in the
+`v2.0.0-rc.*` release notes + git history):
+
+### Agent integration (MCP-native)
+
+- The embedded agent pane (claude / codex / gemini / antigravity) queries and
+  drives spyc over a PID-scoped MCP server — grounding itself in the cursor,
+  picks, filter, and git branch, and navigating / picking / filtering /
+  searching / reading files / running git in-process instead of shelling out.
+- Per-tab **activity dots**: output-timing heat-pulse overridden by semantic
+  self-report (`report_status`) via status hooks, with a latched `Blocked`
+  "needs me" signal. Consent-gated hook writes; `:why-status` / `:activity`
+  diagnostics.
+- **Desktop notifications** on Blocked/Done (notify-rust locally, OSC-9 over
+  SSH) plus a branded visual-bell border pulse.
+- Live **session-id pinning** so `spyc -r` resumes the exact agent conversation.
+
+### Worktrees & multi-agent coordination
+
+- First-class git **worktree** tools over MCP (list / create / open / remove /
+  clean + claim/release leases), safe-by-default teardown (archive to the
+  graveyard, delete the branch only if merged), and ahead/behind/merged signals.
+- A **merge/scope registry** so parallel agents declare and wait on file scopes
+  before they collide, plus the `spyc-semver` git merge driver that
+  auto-resolves the version-line conflict every concurrent PR hits.
+
+### Editor & views
+
+- **Vertical split** with a live file preview and a second commander column.
+- **Lua scripting** (`~/.config/spyc/init.lua`, `map KEY lua`) — off-thread
+  mlua with an instruction-budget kill switch and a runaway prompt; exposes
+  `spyc.map`/`command`/`on` events plus the full built-in Action API.
+- **Mermaid + image pager**: render ` ```mermaid ` blocks and images inline.
+- In-house, syntax-highlighted **git diff / show / blame** (split or unified).
+
+### Under the hood
+
+- Git is **100% in-process via gix** — no `git` subprocess in production.
+- Model-View-Update throughout; event-driven repaint targeting 0 draws/sec at
+  idle.
+- **Chord & command overhaul**: a which-key hint popup, the `Space` leader, a
+  binding-tier taxonomy, and a `:` command line.
+
+### Install
+
+- Now on **Homebrew**, **apt**, and **crates.io** (`cargo install spyc`), with
+  signed release binaries (build-provenance attestations + cosign).
+
 ## [1.61.0] - 2026-06-22
 
 ### Bug Fixes
