@@ -101,7 +101,7 @@ toolchain — install from [crates.io](https://crates.io/crates/spyc) (also the
 easy path on Arch and any distro without a native package):
 
 ```sh
-cargo install spyc --version '2.0.0-rc.<N>'   # bare `cargo install spyc` once 2.0.0 ships
+cargo install spyc
 ```
 
 To **build from source** instead, see [BUILD.md](BUILD.md). Full setup —

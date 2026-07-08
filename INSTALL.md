@@ -78,17 +78,7 @@ scripting engine is vendored and built from source):
 cargo install spyc
 ```
 
-During the 2.0 release-candidate phase there's no stable version yet, and bare
-`cargo install spyc` resolves only stable releases — pin the current
-pre-release (the latest `-rc.<N>` on
-[crates.io](https://crates.io/crates/spyc)):
-
-```sh
-cargo install spyc --version '2.0.0-rc.<N>'
-```
-
-Once 2.0.0 ships, bare `cargo install spyc` works. The pre-built binaries above
-are faster if you'd rather not compile.
+The pre-built binaries above are faster if you'd rather not compile.
 
 ### Build from source
 
