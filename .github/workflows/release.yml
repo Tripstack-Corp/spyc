@@ -182,25 +182,38 @@ jobs:
   crates:
     name: Publish to crates.io
     runs-on: ubuntu-latest
-    # Independent of the GitHub release (only needs the tag's source + the
-    # token), so a crates.io hiccup never blocks shipping the binaries. Skips
-    # cleanly when CARGO_REGISTRY_TOKEN is unset (forks) and is idempotent — a
+    # Independent of the GitHub release (only needs the tag's source), so a
+    # crates.io hiccup never blocks shipping the binaries. Idempotent — a
     # re-run of an already-published version is a no-op, not a failure. rc/beta
     # tags publish too: crates.io keeps prereleases out of the default
     # `cargo install` resolution, so they can't poison the stable channel.
+    #
+    # Trusted Publishing (OIDC, no stored secret): crates-io-auth-action
+    # exchanges this job's GitHub-issued OIDC token (`id-token: write`, below)
+    # for a crates.io token scoped to THIS repo + workflow file, valid only for
+    # the step's lifetime — auto-revoked in the action's `post` step. Requires
+    # a trusted-publisher entry on the crate's crates.io settings page
+    # (repository + workflow filename) and, per crates.io, an existing crate
+    # (spyc's first publish already happened via a token, so this is live from
+    # the next release on).
+    permissions:
+      id-token: write # OIDC for crates.io Trusted Publishing
     steps:
       - uses: actions/checkout@v7
       - name: Toolchain (auto from rust-toolchain.toml)
         run: rustc --version && cargo --version
       - uses: Swatinem/rust-cache@v2
+      - name: Authenticate with crates.io (OIDC)
+        id: auth
+        # Pinned to an exact tag: rust-lang/crates-io-auth-action does NOT
+        # publish a moving `v1` major alias (only exact `v1.x.y`), so `@v1`
+        # 404s — same gotcha as the cosign-installer pin below. Dependabot
+        # bumps this as new versions ship.
+        uses: rust-lang/crates-io-auth-action@v1.0.5
       - name: Publish
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
-          if [ -z "${CARGO_REGISTRY_TOKEN}" ]; then
-            echo "CARGO_REGISTRY_TOKEN unset — skipping crates.io publish."
-            exit 0
-          fi
           ver="${GITHUB_REF_NAME#v}"
           if curl -sf -H "User-Agent: spyc-release" \
                "https://crates.io/api/v1/crates/spyc/${ver}" >/dev/null; then
