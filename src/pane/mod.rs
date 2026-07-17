@@ -439,6 +439,14 @@ impl Pane {
         self.with_screen(vt100::Screen::alternate_screen)
     }
 
+    /// Has the child enabled bracketed-paste mode (DECSET 2004)? Gates paste
+    /// wrapping: claude/codex/a shell with the mode on want the `\e[200~`…`\e[201~`
+    /// markers; a plain shell that never turned it on (e.g. a remote `/bin/sh`
+    /// over ssh) would take those bytes as literal input.
+    pub fn bracketed_paste_enabled(&self) -> bool {
+        self.with_screen(vt100::Screen::bracketed_paste)
+    }
+
     /// Return visible screen content as individual lines (plain text,
     /// no ANSI escapes). When the pane is in scroll mode, this is
     /// exactly the viewport the user is looking at — *not* the live

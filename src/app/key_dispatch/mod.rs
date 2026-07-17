@@ -42,6 +42,19 @@ fn bracketed_paste(text: &str) -> Vec<u8> {
     buf
 }
 
+/// Encode a paste for a pane child. Wrap in bracketed-paste markers only when
+/// the child has the mode on (`child_bracketed`) — otherwise send raw, the way
+/// the `Capture` sink already does: a shell that never enabled DECSET 2004
+/// (a remote `/bin/sh` over ssh, `csh`) takes the literal `\e[200~`/`\e[201~`
+/// bytes as input and runs a multi-line paste line-by-line.
+fn paste_bytes_for_pane(text: &str, child_bracketed: bool) -> Vec<u8> {
+    if child_bracketed {
+        bracketed_paste(text)
+    } else {
+        text.as_bytes().to_vec()
+    }
+}
+
 /// What a key destined for the bottom pane should do, w.r.t. `^z` job control.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PaneKeyAction {
@@ -579,15 +592,23 @@ impl App {
             }
             route::InputSink::BottomPane => {
                 // The user is interacting with the bottom pane — focus it (as a
-                // keystroke there would), track the text for `yP`, and forward
-                // bracketed so claude/codex/shell sees one paste block.
+                // keystroke there would) and track the text for `yP`. Wrap in
+                // bracketed-paste markers only when the child actually enabled
+                // the mode (claude/codex/a shell with it on); a plain shell over
+                // ssh that never did would otherwise take the literal `\e[200~`
+                // bytes as input. Mirrors the raw `Capture` forward above.
                 if !self.state.pane_focused() {
                     self.set_pane_focus(true);
                 }
                 self.state.pane.pane_prompt_buf.push_str(&text);
+                let child_bracketed = self
+                    .runtime
+                    .pane_tabs
+                    .as_ref()
+                    .is_some_and(|t| t.active().bracketed_paste_enabled());
                 vec![Effect::SendToPane {
                     target: PaneTarget::Active,
-                    input: PaneInput::Bytes(bracketed_paste(&text)),
+                    input: PaneInput::Bytes(paste_bytes_for_pane(&text, child_bracketed)),
                     on_ok: None,
                     err_prefix: None,
                 }]
@@ -723,11 +744,35 @@ mod prompts;
 
 #[cfg(test)]
 mod paste_tests {
-    use super::bracketed_paste;
+    use super::{bracketed_paste, paste_bytes_for_pane};
 
     #[test]
     fn wraps_plain_text() {
         assert_eq!(bracketed_paste("hello"), b"\x1b[200~hello\x1b[201~");
+    }
+
+    /// A child with the mode on (claude/codex/shell that enabled DECSET 2004)
+    /// gets the wrapped block; a child without it gets the bytes raw so the
+    /// literal markers aren't injected as input.
+    #[test]
+    fn pane_paste_wraps_only_when_child_enabled_the_mode() {
+        assert_eq!(
+            paste_bytes_for_pane("ls -la", true),
+            b"\x1b[200~ls -la\x1b[201~"
+        );
+        assert_eq!(paste_bytes_for_pane("ls -la", false), b"ls -la");
+    }
+
+    /// The regression: multi-line paste into a shell that never enabled the
+    /// mode must not carry any `\e[200~`/`\e[201~` bytes (they'd land as the
+    /// stray input seen when pasting into a remote `/bin/sh` over ssh).
+    #[test]
+    fn raw_pane_paste_has_no_bracket_markers() {
+        let out = paste_bytes_for_pane("line one\nline two\n", false);
+        assert_eq!(out, b"line one\nline two\n");
+        let s = String::from_utf8(out).unwrap();
+        assert!(!s.contains("\x1b[200~"));
+        assert!(!s.contains("\x1b[201~"));
     }
 
     #[test]
