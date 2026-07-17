@@ -70,6 +70,23 @@ same pattern: spawn a worker, push a typed message into a channel,
 drop stale messages by generation. See `ROADMAP.md`'s "Background
 directory loading" entry.
 
+## Watcher event filtering (read-only access events)
+
+<!-- SPYC-TRAP: fs-watch-readonly-access -->
+The watch worker's notify callback drops read-only access events —
+`Access(Open(_))`, `Access(Read)`, `Access(Close(Read))` — before they
+reach the loop (`app/watch.rs`, `is_readonly_access`). Load-bearing on
+Linux: notify's inotify mask includes `IN_OPEN` / `IN_CLOSE_NOWRITE`, so
+every file *open* fires an event. spyc's own git-status + gitignore-excludes
+machinery opens every `.gitignore` in the tree to build the ignore stack;
+under the recursive listing watch those opens fire `Access(Open)` events,
+which drive a refresh that opens them again — a self-sustaining storm
+(~21 k events/s in a small repo, enough to starve the input path). macOS
+FSEvents never reports opens, so it's invisible in local dev — the reason
+this went unnoticed until a WSL user hit it. `Access(Close(Write))` (a real
+write completion) and every Create / Modify / Remove event still pass
+through. Removing the filter silently reintroduces the storm on Linux/WSL.
+
 ## Update model: Elm-architecture (MVU)
 
 spyc follows the Elm/Model-View-Update pattern. The structural migration

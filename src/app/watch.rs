@@ -15,9 +15,34 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 
-use notify::{RecursiveMode, Watcher};
+use notify::event::{AccessKind, AccessMode};
+use notify::{EventKind, RecursiveMode, Watcher};
 
 use super::Message;
+
+/// True for a pure read/open watcher event — one that never changes a file's
+/// content or the directory structure, so a file manager has nothing to react
+/// to. Dropped at the callback so it never reaches the loop.
+///
+/// This is load-bearing on Linux: `notify`'s inotify mask includes `IN_OPEN`
+/// (→ `Access(Open)`) and `IN_CLOSE_NOWRITE` (→ `Access(Close(Read))`). spyc's
+/// own git-status / gitignore-excludes machinery opens every `.gitignore` in
+/// the tree to build the ignore stack; under the recursive watch each open
+/// fires an `Access(Open)` event, which drives a refresh that opens them
+/// again — a self-sustaining storm (observed at ~21 k events/s in a small
+/// repo). macOS FSEvents never reports opens, so it's invisible in dev.
+/// `Access(Close(Write))` (a real write completion) and every Create / Modify
+/// / Remove event pass through.
+// SPYC-TRAP(fs-watch-readonly-access): dropping open/read events breaks a
+// self-sustaining inotify storm invisible on macOS (FSEvents has no opens).
+const fn is_readonly_access(kind: EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::Access(
+            AccessKind::Open(_) | AccessKind::Read | AccessKind::Close(AccessMode::Read)
+        )
+    )
+}
 
 /// Watch-topology change requested by the event loop. The worker owns the
 /// actual watch state; the main loop just describes the target topology.
@@ -62,7 +87,9 @@ pub fn spawn_watch_worker(
     // prior Ok-only drain contract).
     let watcher_tx = msg_tx.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Ok(ev) = res {
+        if let Ok(ev) = res
+            && !is_readonly_access(ev.kind)
+        {
             let _ = watcher_tx.send(Message::FsEvent(ev));
         }
     })
@@ -226,8 +253,40 @@ fn preview_parent_to_watch(preview: Option<&Path>, new_dir: &Path) -> Option<Pat
 
 #[cfg(test)]
 mod tests {
-    use super::preview_parent_to_watch;
+    use super::{is_readonly_access, preview_parent_to_watch};
+    use notify::EventKind;
+    use notify::event::{AccessKind, AccessMode, CreateKind, DataChange, MetadataKind, ModifyKind};
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn readonly_access_events_are_dropped() {
+        // The inotify `IN_OPEN` / `IN_CLOSE_NOWRITE` storm: pure reads.
+        assert!(is_readonly_access(EventKind::Access(AccessKind::Open(
+            AccessMode::Any
+        ))));
+        assert!(is_readonly_access(EventKind::Access(AccessKind::Read)));
+        assert!(is_readonly_access(EventKind::Access(AccessKind::Close(
+            AccessMode::Read
+        ))));
+    }
+
+    #[test]
+    fn mutating_events_pass_through() {
+        // `Access(Close(Write))` is a real write completion — it must survive.
+        assert!(!is_readonly_access(EventKind::Access(AccessKind::Close(
+            AccessMode::Write
+        ))));
+        assert!(!is_readonly_access(EventKind::Create(CreateKind::File)));
+        assert!(!is_readonly_access(EventKind::Modify(ModifyKind::Data(
+            DataChange::Any
+        ))));
+        assert!(!is_readonly_access(EventKind::Modify(
+            ModifyKind::Metadata(MetadataKind::Any)
+        )));
+        assert!(!is_readonly_access(EventKind::Modify(ModifyKind::Name(
+            notify::event::RenameMode::Both
+        ))));
+    }
 
     #[test]
     fn no_preview_means_no_watch() {
