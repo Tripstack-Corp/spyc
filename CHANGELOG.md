@@ -2,6 +2,15 @@
 
 All notable changes to spyc. Entries from v1.57.0 onward are generated from the conventional-commit history by [git-cliff](https://git-cliff.org) (config in `cliff.toml`); regenerate the pending section with `make changelog` and cut a release with `make release-tag VERSION=x.y.z`. Entries at v1.56.0 and earlier are the original hand-written log, kept verbatim.
 
+## [2.0.2] - 2026-07-17
+
+### Bug Fixes
+- **watch**: Drop read-only access events to kill the inotify open-storm (#169)
+- **pane**: Only bracket-wrap pane pastes when the child enabled the mode (#170)
+
+### Build & Tooling
+- **deps**: Bump the cargo-minor-patch group with 5 updates (#165)
+
 ## [2.0.0] - 2026-07-08
 
 spyc 2.0 — the file commander built for collaborating with your coding agents.
