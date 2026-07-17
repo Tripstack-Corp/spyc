@@ -1,22 +1,22 @@
 Architectures: amd64 arm64
 Components: main
-Date: Wed, 08 Jul 2026 20:27:48 +0000
+Date: Fri, 17 Jul 2026 20:45:17 +0000
 Label: spyc
 Origin: spyc
 Suite: stable
 MD5Sum:
- 152d03c7666eb6d6fe526067c27b7301            12236 Packages
- 09f40bded1e6b2337c0e7cc27af42032             3931 Packages.gz
- 1f0b0c9952bbb5bcc921337193cce7d3              121 Release
+ f9d795aef897d2d2a3bd095d06ef9565            13438 Packages
+ 7fab0240d4252bc75f4a9b65adc4d889             4313 Packages.gz
+ 8e1fac48fc35cd3cac69b0349898c67a              121 Release
 SHA1:
- 70615a1a66e520b1c54ad72b0d9c4b01dd7d9dee            12236 Packages
- 810e89e7e6bc22b86e80eaa98f4a2d757c1b211d             3931 Packages.gz
- c2b3c5935da5b92cf8ae66adeb14b38e77dc3779              121 Release
+ 8e9f46f24a537676cc3b327b7bc0ec9f9e85b110            13438 Packages
+ 3ee4d3d4a6736bf48aca6604ac8eae85e237f82c             4313 Packages.gz
+ 162a7f8861fab1e76cc55c746fb34a8dae3ca696              121 Release
 SHA256:
- bec8e02a74cfdfad48529f93f6cc5defefea13fdace938f6047c079feeba20c1            12236 Packages
- b9ca0d0a569abff9bf9119141bdad56a03e015132b780855da96397c75707319             3931 Packages.gz
- 15ec4f8d483603fcde3a7e0e9603e3c97c9605680d9e83e32dc622753c121ea0              121 Release
+ 9a491657cdcffeb69565650070bfe5c109f705b32df41b2cfd69452521f86b9d            13438 Packages
+ f8271d6590f5aff3385b5f01137891fb63ee8c0c525a05776bcffa9ef33df8af             4313 Packages.gz
+ a99485317418bcdcaa42afd1b1e85d6f2265237f07f1be27ee6f3ae3208d90a6              121 Release
 SHA512:
- 08e74afb842a5dd28f0a55469baefa53d7e173ca73c9d6209fe038cf60d5dcc6040e5e1e5c51027144c59bf9795cbeab25c2e71e0dce9f63953559afb5c1bf92            12236 Packages
- 307a472c5755517ca6f7fb17250547cf451c5725c46724f5c0172229314bc20219fbffc0c39dd3c3d0f89824d3a904aa13068160e207c6ab4533fd65d1b9ea2a             3931 Packages.gz
- c65edefae577bb56b12f90445e5702c34448d393e6794b9f0a4df56832da59b088020d35fb55168815c6c1cd34537e1fb3b3a23a055efb62e3a7d7b47bdb29d4              121 Release
+ fdd567b2626e64a18a799bd81608304449759b6b302e1066a246334de21485ad85d7cd54fe2f2049dca7e368d1b756fd067d59069a95dd6758c8a06f4d41e358            13438 Packages
+ 1a9e34403a29d1939636516fd49cb4b5c6940c87eedb813fe3cfab3a284463df2ac018fc4ea0aefd95a023de1de4fde86bb03c292b1d7abebac14188ab79dbfc             4313 Packages.gz
+ 0a099814982d09eb220924b901b111243e950ba2a29017f3a729b2d9e76c35ab1731d412f1e8a1c5cd4f8b765b9b14bfc49862949030212ad52ac7d83705686d              121 Release
