@@ -129,7 +129,7 @@ rustix = { version = "1.1.4", features = ["process", "termios", "fs", "system"] 
 # disk/network/component/user backends). Aliased because spyc has an
 # internal `crate::sysinfo` module.
 sysinfo_crate = { package = "sysinfo", version = "0.33", default-features = false, features = ["system"] }
-infer = { version = "0.19.0", default-features = false }
+infer = { version = "0.22.0", default-features = false }
 # Lua scripting engine (docs/archive/LUA_SCRIPTING_PLAN.md): embeds Lua 5.4 so a
 # `~/.config/spyc/init.lua` / keybinding can run user logic. `vendored` compiles
 # the Lua 5.4 C source via the `cc` crate — another compiled-C dependency
