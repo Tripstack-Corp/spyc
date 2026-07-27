@@ -70,15 +70,6 @@ feature-depth = 1
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
-    # yaml-rust 0.4.5 — unmaintained, no security advisory. Transitive
-    # via syntect, no upgrade path until syntect drops it. We don't
-    # parse YAML at runtime — only syntect's bundled .sublime-syntax
-    # files load it during build.
-    { id = "RUSTSEC-2024-0320", reason = "unmaintained transitive via syntect; build-time only" },
-    # bincode 1.3.3 — unmaintained per maintainer's choice; the team
-    # considers 1.3.3 a "complete" version. Transitive via syntect for
-    # serializing the bundled syntax cache.
-    { id = "RUSTSEC-2025-0141", reason = "unmaintained transitive via syntect; complete-as-shipped" },
     # quick-xml < 0.41.0 — XML-parse DoS advisories (RUSTSEC-2026-0194 quadratic
     # duplicate-attribute check; RUSTSEC-2026-0195 unbounded namespace-declaration
     # allocation). Two copies in the tree, neither reachable under the advisory's
@@ -105,8 +96,11 @@ ignore = [
 # transitive font/parsing dep we can't upgrade doesn't break CI. The trigger
 # was ttf-parser 0.25.1 (author declared EOL, recommends skrifa) — transitive
 # via resvg/fontdb for the mermaid SVG→PNG render only, no runtime untrusted
-# font input, and no safe upgrade in the resvg 0.46 tree. RUSTSEC-db
-# unmaintained advisories (real ids) are unaffected and still enforced above.
+# font input, and no safe upgrade in the resvg 0.46 tree. This scope covers the
+# RUSTSEC-db unmaintained advisories too, so a transitive one needs no `ignore`
+# entry — yaml-rust 0.4.5 (RUSTSEC-2024-0320) and bincode 1.3.3
+# (RUSTSEC-2025-0141) are still in the tree via syntect and go unreported here.
+# Vulnerability advisories are a different class and stay enforced tree-wide.
 unmaintained = "workspace"
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
