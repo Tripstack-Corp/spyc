@@ -282,6 +282,7 @@ mod route;
 mod run;
 mod scheduler;
 mod session;
+mod skill;
 mod sources;
 pub mod state;
 mod streaming;

@@ -270,6 +270,10 @@ const SECTIONS: &[Section] = &[
                 "fire every notification channel (bell + visual + desktop) to verify setup",
             ),
             (
+                ":skill",
+                "agent skill (claude + codex skills dirs): status | update | remove | ask",
+            ),
+            (
                 "^a +  ^a -",
                 "grow / shrink the focused split (pane height / vsplit width)",
             ),

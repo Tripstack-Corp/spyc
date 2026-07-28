@@ -249,6 +249,64 @@ impl App {
         self.view.needs_full_repaint = true;
         Vec::new()
     }
+
+    /// `[Y/n]` on the startup skill offer. Mirrors [`Self::handle_hook_consent_key`]:
+    /// a decision is required, so anything but y/n re-raises it. Unlike the hook
+    /// consent, `Esc` is NOT a defer — a stray keypress must not silently answer
+    /// a question about overwriting the user's files.
+    pub(super) fn handle_skill_update_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        let prev_mode = std::mem::replace(&mut self.state.mode, Mode::Normal);
+        let Mode::Prompting(Prompt {
+            kind:
+                PromptKind::SkillUpdate {
+                    fingerprint,
+                    overwrites_edits,
+                },
+            prefix,
+            buffer,
+            editor,
+        }) = prev_mode
+        else {
+            return Vec::new();
+        };
+        match key.code {
+            // `true` = refresh only the hosts that already have it. Accepting an
+            // update must not silently adopt a host the user never installed to.
+            KeyCode::Char('y' | 'Y') => match crate::skill::install_all(true) {
+                Ok(done) => {
+                    let hosts = done
+                        .iter()
+                        .map(|(h, _)| h.label())
+                        .collect::<Vec<_>>()
+                        .join(" + ");
+                    self.state.flash_info(format!(
+                        "spyc skill updated for {hosts} (`:skill` to manage)"
+                    ));
+                }
+                Err(e) => self.state.flash_error(format!("skill install failed: {e}")),
+            },
+            KeyCode::Char('n' | 'N') => {
+                crate::state::skill_prompt::decline(&fingerprint);
+                self.state
+                    .flash_info("skill update declined (`:skill update` when you want it)");
+            }
+            _ => {
+                self.state.mode = Mode::Prompting(Prompt {
+                    kind: PromptKind::SkillUpdate {
+                        fingerprint,
+                        overwrites_edits,
+                    },
+                    prefix,
+                    buffer,
+                    editor,
+                });
+                self.state.flash_info("press y or n");
+                return Vec::new();
+            }
+        }
+        self.view.needs_full_repaint = true;
+        Vec::new()
+    }
 }
 
 #[cfg(test)]

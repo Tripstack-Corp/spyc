@@ -973,6 +973,60 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   specific-session resume and transcript scrollback are a follow-up
   pending its on-disk session-file format.
 
+## Installable agent skill
+
+```sh
+spyc --install-skill
+#  → ~/.claude/skills/spyc/     (Claude Code)
+#  → ~/.codex/skills/spyc/      (codex; honors $CODEX_HOME)
+```
+
+Writes an embedded usage guide into each agent's **personal** skills directory,
+so it applies in every project without touching any repo.
+
+Claude Code and codex independently converged on the same format —
+`<skills-dir>/<name>/SKILL.md` with YAML frontmatter plus optional `references/`
+sub-files — so one embedded copy serves both **verbatim**; only the directory
+differs. Adding another host is one `Host` variant and its directory.
+
+Contents:
+
+| File | Covers |
+|---|---|
+| `SKILL.md` | grounding via `get_spyc_context`, the shell-vs-spyc tool table, status reporting, scope coordination, the gotchas |
+| `references/worktrees.md` | full worktree lifecycle, claims, the scope registry, the squash-merge kept-branch case |
+| `references/search.md` | which of the four search corpora to use, and `root` scoping |
+| `references/git.md` | the three `git_diff` scopes, and when to shell out anyway |
+
+This is the depth *underneath* the MCP handshake: `initialize`'s
+`SERVER_INSTRUCTIONS` is prepended to every session so it has to stay short and
+can only point at the tools. The skill is loaded on demand instead.
+
+**Staying current.** spyc offers a single `[Y/n]` update on startup when its
+embedded copy differs from what's installed — one prompt covering every host,
+naming the ones that are behind, and refreshing only those (accepting never
+silently adopts a host you never installed to). If hosts disagree about whether
+edits are at stake, the cautious warning wins. It only ever offers for an
+**already-installed** skill — install it explicitly once, and you're never
+nagged about a feature you didn't opt into. Declining is remembered against the
+skill's *content fingerprint* rather than spyc's version, so it re-asks when the
+skill genuinely changes rather than on every version bump (and, since `main`
+carries a static `N.M.0-CURRENT` for a whole cycle, a version-keyed decline
+would have silenced it for months).
+
+**Your edits are safe.** A `.spyc-skill.json` manifest records what spyc wrote,
+which is what lets it tell "spyc's copy moved on" from "you edited this." An
+edited skill is reported as such and never overwritten without saying so.
+
+Manage it in-app with `:skill`:
+
+| Arg | Does |
+|---|---|
+| `:skill` / `:skill status` | report installed version and whether it's stale or edited |
+| `:skill update` | install/overwrite now (also clears a remembered decline) |
+| `:skill remove` | delete `~/.claude/skills/spyc/` |
+| `:skill ask` | forget a decline, so the next launch offers again |
+
 ## MCP server (Claude + Codex integration)
 
 spyc runs a background MCP server on a PID-scoped Unix domain socket

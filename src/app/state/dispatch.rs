@@ -386,6 +386,7 @@ impl AppState {
             PromptKind::RemoveConfirm
             | PromptKind::ClaudeCrashRecover { .. }
             | PromptKind::HookConsent { .. }
+            | PromptKind::SkillUpdate { .. }
             | PromptKind::ClosePane
             | PromptKind::LuaRunaway
             | PromptKind::GraveyardPurgeAllConfirm => PromptResult::Handled,
