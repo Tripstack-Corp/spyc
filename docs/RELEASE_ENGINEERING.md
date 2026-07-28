@@ -57,6 +57,22 @@ SemVer, with FreeBSD's patch-level mapping made explicit:
 
 - `MAJOR.MINOR.PATCH` — `MAJOR.MINOR` names the release branch (`releng/2.0`),
   `PATCH` is FreeBSD's `-pK` errata/security level (`v2.0.0` → `v2.0.1` → …).
+- **What `main` carries between releases: `N.M.0-CURRENT`** — the *next* minor,
+  suffixed to mark it as the rolling CURRENT stream (`2.1.0-CURRENT` while 2.1
+  is in development). It is **static** for the whole cycle: no PR bumps it, and
+  the release PR is what strips the suffix to `N.M.0`. Three consequences:
+  - A dev build is self-identifying: `spyc --version` prints
+    `2.1.0-CURRENT (<sha>)`. The SHA gives exact build identity, which is what
+    the former bump-every-PR rule provided.
+  - Version-line merge conflicts stop happening, since nothing edits that line.
+    The `spyc-semver` driver goes dormant on CURRENT (it parses plain triples
+    and declines a `-CURRENT` line) and still serves release branches.
+  - Nothing publishes a CURRENT version: only `v*` tags trigger `release.yml`,
+    and CURRENT is never tagged. Were one ever packaged, `make deb`'s
+    `DEB_VERSION` tilde-forms it to `2.1.0~CURRENT`, which dpkg sorts *below*
+    the real `2.1.0` — the same ordering rule the `2.0.0~rc.N` debs rely on.
+  - After a minor ships, a follow-up PR opens the next cycle by setting `main`
+    to the following `-CURRENT`.
 - **Prereleases:** `vN.M.0-beta.1`, `vN.M.0-rc.1` — published as GitHub
   *pre-releases* (the "Latest" badge stays on the last stable).
 - **Breaking changes** bump MAJOR and (Stage 2) start a new `stable/N`.
@@ -98,15 +114,24 @@ tag RELEASEs directly off `main` until a second major needs `stable/`.
 
 **Stage 1 (single line, what we launch with):**
 
-1. Development accrues on `main`; CI green on every PR.
+1. Development accrues on `main`, which sits at `N.M.0-CURRENT` (§3); CI green
+   on every PR.
 2. **Cut RC:** tag `vN.M.0-rc.1` on `main`. `release.yml` builds + publishes a
    GitHub *pre-release* with full artifacts. Soak (e.g., 3–7 days / dogfood).
 3. Fix blockers on `main`; re-tag `-rc.2` as needed.
-4. **Release:** `make release-tag VERSION=N.M.0` (bumps `Cargo.toml`, prepends
-   the git-cliff changelog section, commits, tags `vN.M.0`). Push the tag →
-   `release.yml` publishes the RELEASE.
-5. **Patch:** for a post-release fix, `make release-tag VERSION=N.M.(P+1)` →
-   tag → release. (Stage 2: cherry-pick onto `releng/N.M` first.)
+4. **Release — two steps, because `main` only takes PRs.** A single
+   bump-commit-and-tag would put the tag on a release-branch commit that the
+   squash-merge then orphans, leaving it outside `main`'s history:
+   1. On a `chore/release-N.M.P` branch: `make release-prep VERSION=N.M.P` —
+      strips the `-CURRENT` suffix to the real version, prepends the git-cliff
+      section, commits. Open it as a PR and merge it.
+   2. On `main` once merged: `make release-tag VERSION=N.M.P` — verifies the
+      merged commit really is that version, that the changelog has its section,
+      and that `HEAD` is `origin/main`, then tags. Push the tag →
+      `release.yml` publishes the RELEASE.
+   Then open a follow-up PR setting `main` to the next `-CURRENT`.
+5. **Patch:** same two steps with `VERSION=N.M.(P+1)`. (Stage 2: cherry-pick
+   onto `releng/N.M` first.)
 
 **Stage 2 (parallel majors):** add a freeze on a `releng/N.M` branch forked
 from `stable/N`, run `-beta.X` → `-rc.X` → `vN.M.0` on that branch, and keep

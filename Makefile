@@ -143,32 +143,60 @@ release-debug: ## Optimized build with debug symbols (for `sample`, `lldb`, `per
 
 # --- Changelog & release tagging (git-cliff) ---------------------------------
 # CHANGELOG.md is git-cliff-generated from v1.57.0 onward (older entries are
-# frozen hand-written history). `make changelog` PREVIEWS the pending section;
-# `make release-tag VERSION=x.y.z` cuts a release by *prepending* the new
-# version's section (never rewriting prior entries), bumping, committing, and
-# tagging. Both are LOCAL / release-time — neither is part of `make check` or CI.
+# frozen hand-written history). `make changelog` PREVIEWS the pending section.
+#
+# Releasing is TWO steps because `main` only takes PRs — a single
+# bump-commit-and-tag target would put the tag on a release-branch commit that
+# the squash-merge then orphans, leaving the tag pointing at a commit outside
+# `main`'s history:
+#
+#   1. `make release-prep VERSION=x.y.z` on a release branch — strips `main`'s
+#      `-CURRENT` suffix down to the real version, prepends the changelog
+#      section, commits. Open that as a PR and merge it.
+#   2. `make release-tag VERSION=x.y.z` on `main` after the merge — verifies the
+#      merged commit really is that version, then tags it.
+#
+# All LOCAL / release-time — none of this runs in `make check` or CI.
 
 .PHONY: changelog
 changelog: ## Preview the pending (unreleased) CHANGELOG section from commits since the last tag
 	@command -v git-cliff >/dev/null 2>&1 || { echo "git-cliff MISSING — brew install git-cliff"; exit 1; }
 	@git cliff --config cliff.toml --unreleased
 
-.PHONY: release-tag
-release-tag: ## Cut a release: VERSION=x.y.z → bump Cargo.toml, prepend changelog section, commit, tag (local; push yourself)
-	@test "$(origin VERSION)" = "command line" || { echo "usage: make release-tag VERSION=x.y.z (VERSION defaults to the Cargo.toml value, so it must be passed explicitly)"; exit 1; }
-	@echo "$(VERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$$' || { echo "VERSION must be semver x.y.z (got '$(VERSION)')"; exit 1; }
+.PHONY: release-prep
+release-prep: ## Step 1 of 2, on a release branch: VERSION=x.y.z → set version, prepend changelog, commit (then PR it)
+	@test "$(origin VERSION)" = "command line" || { echo "usage: make release-prep VERSION=x.y.z (VERSION defaults to the Cargo.toml value, so it must be passed explicitly)"; exit 1; }
+	@echo "$(VERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$$' || { echo "VERSION must be semver x.y.z (got '$(VERSION)') — a release drops any -CURRENT suffix"; exit 1; }
 	@command -v git-cliff >/dev/null 2>&1 || { echo "git-cliff MISSING — brew install git-cliff"; exit 1; }
 	@test -z "$$(git status --porcelain)" || { echo "working tree not clean — commit or stash first"; exit 1; }
+	@test "$$(git rev-parse --abbrev-ref HEAD)" != "main" || { echo "refusing to prepare a release on main — main takes PRs only; branch first (e.g. chore/release-$(VERSION))"; exit 1; }
 	@git rev-parse "v$(VERSION)" >/dev/null 2>&1 && { echo "tag v$(VERSION) already exists"; exit 1; } || true
-	@echo "→ bumping to v$(VERSION) and prepending its changelog section…"
+	@echo "→ setting version to $(VERSION) and prepending its changelog section…"
 	@tmp=$$(mktemp); sed 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml > $$tmp && mv $$tmp Cargo.toml
 	cargo update -p $(BINARY)
 	git cliff --config cliff.toml --unreleased --tag v$(VERSION) --prepend CHANGELOG.md
 	git add Cargo.toml Cargo.lock CHANGELOG.md
 	git commit -m "chore(release): v$(VERSION)"
+	@echo "✓ prepared v$(VERSION) on $$(git rev-parse --abbrev-ref HEAD). Next:"
+	@echo "    git push -u origin HEAD && gh pr create --title 'chore(release): v$(VERSION)'"
+	@echo "    # after it merges, on main: make release-tag VERSION=$(VERSION)"
+
+.PHONY: release-tag
+release-tag: ## Step 2 of 2, on main after the release PR merged: VERSION=x.y.z → verify + tag (push yourself)
+	@test "$(origin VERSION)" = "command line" || { echo "usage: make release-tag VERSION=x.y.z (VERSION defaults to the Cargo.toml value, so it must be passed explicitly)"; exit 1; }
+	@echo "$(VERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$$' || { echo "VERSION must be semver x.y.z (got '$(VERSION)')"; exit 1; }
+	@test -z "$$(git status --porcelain)" || { echo "working tree not clean — commit or stash first"; exit 1; }
+	@test "$$(git rev-parse --abbrev-ref HEAD)" = "main" || { echo "refusing to tag off main (on $$(git rev-parse --abbrev-ref HEAD)) — the tag must land on main's merged release commit"; exit 1; }
+	@git rev-parse "v$(VERSION)" >/dev/null 2>&1 && { echo "tag v$(VERSION) already exists"; exit 1; } || true
+	@# The release PR is what sets the version, so a mismatch here means it has
+	@# not merged yet (or main is still on its -CURRENT suffix).
+	@test "$(VERSION)" = "$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')" || { echo "Cargo.toml says '$$(grep '^version' Cargo.toml | head -1 | sed 's/.*\"\(.*\)\".*/\1/')', not '$(VERSION)' — run release-prep on a branch and merge that PR first"; exit 1; }
+	@grep -q '^## \[$(VERSION)\]' CHANGELOG.md || { echo "CHANGELOG.md has no [$(VERSION)] section — merge the release-prep PR first"; exit 1; }
+	@git fetch -q origin main && test "$$(git rev-parse HEAD)" = "$$(git rev-parse origin/main)" || { echo "HEAD is not origin/main — pull first so the tag lands on the merged commit"; exit 1; }
 	git tag v$(VERSION)
-	@echo "✓ committed + tagged v$(VERSION). Push per your flow, e.g.:"
-	@echo "    git push origin HEAD && git push origin v$(VERSION)"
+	@echo "✓ tagged v$(VERSION) at $$(git rev-parse --short HEAD). Push it to publish:"
+	@echo "    git push origin v$(VERSION)"
+	@echo "  then open a PR setting main's version to the next minor + '-CURRENT'."
 
 # --- macOS ---
 
