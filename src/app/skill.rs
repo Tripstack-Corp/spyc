@@ -16,20 +16,40 @@ impl App {
             return;
         }
         let fingerprint = skill::embedded_fingerprint();
-        let status = skill::status();
+        let statuses = skill::status_all();
         let declined = crate::state::skill_prompt::declined(&fingerprint);
-        let Some(overwrites_edits) = skill::startup_offer(&status, declined) else {
+        let Some(overwrites_edits) = skill::startup_offer(&statuses, declined) else {
             return;
         };
-        let installed = status.installed_version().unwrap_or("unknown");
+        // Name the hosts that are actually behind, so the prompt says whose skill
+        // is being touched rather than a vague "your skill".
+        let behind: Vec<&str> = statuses
+            .iter()
+            .filter(|(_, s)| {
+                !matches!(
+                    s,
+                    skill::Status::NotInstalled | skill::Status::UpToDate { .. }
+                )
+            })
+            .map(|(h, _)| h.label())
+            .collect();
+        let who = if behind.is_empty() {
+            "skill".to_string()
+        } else {
+            format!("{} skill", behind.join(" + "))
+        };
+        let installed = statuses
+            .iter()
+            .find_map(|(_, s)| s.installed_version())
+            .unwrap_or("unknown");
         let prompt = if overwrites_edits {
             format!(
-                "Claude skill 'spyc' is out of date (installed {installed}, available {}) — but you have local edits an update would REPLACE. Update anyway?",
+                "{who} 'spyc' is out of date (installed {installed}, available {}) — but you have local edits an update would REPLACE. Update anyway?",
                 skill::embedded_version()
             )
         } else {
             format!(
-                "Claude skill 'spyc' is out of date (installed {installed}, available {}). Update it?",
+                "{who} 'spyc' is out of date (installed {installed}, available {}). Update it?",
                 skill::embedded_version()
             )
         };
@@ -47,50 +67,67 @@ impl App {
     pub(super) fn cmd_skill(&mut self, arg: &str) -> Vec<Effect> {
         match arg.trim() {
             "" | "status" => {
-                let status = skill::status();
                 let embedded = skill::embedded_version();
-                let msg = match &status {
-                    skill::Status::NotInstalled => format!(
-                        "spyc skill not installed (v{embedded} available) — `:skill update` or `spyc --install-skill`"
-                    ),
-                    skill::Status::UpToDate { version } => {
-                        format!("spyc skill v{version} installed, up to date")
-                    }
-                    skill::Status::Stale { version } => {
-                        format!(
-                            "spyc skill v{version} installed, STALE (v{embedded} available) — `:skill update`"
-                        )
-                    }
-                    skill::Status::Modified { version, stale } => {
-                        let tail = if *stale {
-                            format!(
-                                ", and STALE (v{embedded} available) — `:skill update` REPLACES your edits"
-                            )
-                        } else {
-                            String::new()
-                        };
-                        format!("spyc skill v{version} installed, locally EDITED{tail}")
-                    }
-                };
-                self.state.flash_info(msg);
+                // One line per host, so it's clear which agents have it.
+                let parts: Vec<String> = skill::status_all()
+                    .iter()
+                    .map(|(host, status)| {
+                        let h = host.label();
+                        match status {
+                            skill::Status::NotInstalled => format!("{h}: not installed"),
+                            skill::Status::UpToDate { version } => format!("{h}: v{version} ok"),
+                            skill::Status::Stale { version } => {
+                                format!("{h}: v{version} STALE")
+                            }
+                            skill::Status::Modified { version, stale } => {
+                                if *stale {
+                                    format!("{h}: v{version} EDITED + STALE")
+                                } else {
+                                    format!("{h}: v{version} EDITED")
+                                }
+                            }
+                        }
+                    })
+                    .collect();
+                self.state.flash_info(format!(
+                    "spyc skill (v{embedded} available) — {} — `:skill update`",
+                    parts.join(", ")
+                ));
             }
-            "update" | "install" => match skill::install() {
-                Ok(dir) => {
+            "update" | "install" => match skill::install_all(false) {
+                Ok(done) if done.is_empty() => {
+                    self.state.flash_error("nowhere to install the skill");
+                }
+                Ok(done) => {
                     // A manual update is an explicit decision, so clear any
                     // remembered decline — otherwise a later edit to the skill
                     // would stay silenced by a stale "no".
                     crate::state::skill_prompt::clear();
+                    let where_ = done
+                        .iter()
+                        .map(|(h, _)| h.label())
+                        .collect::<Vec<_>>()
+                        .join(" + ");
                     self.state.flash_info(format!(
-                        "spyc skill v{} installed \u{2192} {}",
+                        "spyc skill v{} installed for {where_}",
                         skill::embedded_version(),
-                        crate::paths::display_tilde(&dir)
                     ));
                 }
                 Err(e) => self.state.flash_error(format!("skill install failed: {e}")),
             },
-            "remove" | "uninstall" => match skill::remove() {
-                Ok(true) => self.state.flash_info("spyc skill removed"),
-                Ok(false) => self.state.flash_info("spyc skill was not installed"),
+            "remove" | "uninstall" => match skill::remove_all() {
+                Ok(gone) if gone.is_empty() => {
+                    self.state.flash_info("spyc skill was not installed");
+                }
+                Ok(gone) => {
+                    let where_ = gone
+                        .iter()
+                        .map(|h| h.label())
+                        .collect::<Vec<_>>()
+                        .join(" + ");
+                    self.state
+                        .flash_info(format!("spyc skill removed from {where_}"));
+                }
                 Err(e) => self.state.flash_error(format!("skill remove failed: {e}")),
             },
             "ask" => {

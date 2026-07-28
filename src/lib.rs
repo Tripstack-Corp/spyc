@@ -173,10 +173,12 @@ struct Cli {
     #[arg(long)]
     print_config: bool,
 
-    /// Install spyc's Claude skill into `~/.claude/skills/spyc/` and exit — the
-    /// usage guide that teaches Claude spyc's worktree / search / git tools.
-    /// Re-run to update; spyc also offers an update on startup when its embedded
-    /// copy has moved on. Manage it in-app with `:skill`.
+    /// Install spyc's agent skill and exit — the usage guide that teaches an
+    /// agent spyc's worktree / search / git tools. Written to every host that
+    /// supports personal skills: `~/.claude/skills/spyc/` (Claude Code) and
+    /// `$CODEX_HOME/skills/spyc/` (codex, default `~/.codex/skills/`). Re-run to
+    /// update; spyc also offers an update on startup when its embedded copy has
+    /// moved on. Manage it in-app with `:skill`.
     #[arg(long)]
     install_skill: bool,
 
@@ -249,20 +251,22 @@ pub fn run() -> Result<()> {
     }
 
     if cli.install_skill {
-        // Report whether this replaced hand-edits, since --install-skill
-        // overwrites unconditionally and that is otherwise silent.
-        let before = skill::status();
-        let dir = skill::install()?;
-        let note = match before {
-            skill::Status::Modified { .. } => " (replaced your local edits)",
-            _ => "",
-        };
-        println!(
-            "\u{1f336}\u{fe0f} installed the spyc skill v{} \u{2192} {}{}",
-            skill::embedded_version(),
-            dir.display(),
-            note
-        );
+        // Note where hand-edits were replaced: --install-skill overwrites
+        // unconditionally, and that is otherwise silent.
+        let before = skill::status_all();
+        for (host, dir) in skill::install_all(false)? {
+            let note = match before.iter().find(|(h, _)| *h == host).map(|(_, s)| s) {
+                Some(skill::Status::Modified { .. }) => " (replaced your local edits)",
+                _ => "",
+            };
+            println!(
+                "\u{1f336}\u{fe0f} installed the spyc skill v{} for {} \u{2192} {}{}",
+                skill::embedded_version(),
+                host.label(),
+                dir.display(),
+                note
+            );
+        }
         return Ok(());
     }
 

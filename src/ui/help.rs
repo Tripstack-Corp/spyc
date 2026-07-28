@@ -271,7 +271,7 @@ const SECTIONS: &[Section] = &[
             ),
             (
                 ":skill",
-                "Claude skill in ~/.claude/skills/spyc: status | update | remove | ask",
+                "agent skill (claude + codex skills dirs): status | update | remove | ask",
             ),
             (
                 "^a +  ^a -",

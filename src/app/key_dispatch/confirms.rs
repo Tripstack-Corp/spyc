@@ -270,11 +270,19 @@ impl App {
             return Vec::new();
         };
         match key.code {
-            KeyCode::Char('y' | 'Y') => match crate::skill::install() {
-                Ok(dir) => self.state.flash_info(format!(
-                    "spyc skill installed \u{2192} {} (`:skill` to manage)",
-                    crate::paths::display_tilde(&dir)
-                )),
+            // `true` = refresh only the hosts that already have it. Accepting an
+            // update must not silently adopt a host the user never installed to.
+            KeyCode::Char('y' | 'Y') => match crate::skill::install_all(true) {
+                Ok(done) => {
+                    let hosts = done
+                        .iter()
+                        .map(|(h, _)| h.label())
+                        .collect::<Vec<_>>()
+                        .join(" + ");
+                    self.state.flash_info(format!(
+                        "spyc skill updated for {hosts} (`:skill` to manage)"
+                    ));
+                }
                 Err(e) => self.state.flash_error(format!("skill install failed: {e}")),
             },
             KeyCode::Char('n' | 'N') => {

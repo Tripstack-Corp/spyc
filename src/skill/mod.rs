@@ -1,5 +1,12 @@
-//! The installable Claude skill: spyc's own usage guide, embedded in the binary
-//! and written into `~/.claude/skills/spyc/` on `spyc --install-skill`.
+//! The installable agent skill: spyc's own usage guide, embedded in the binary
+//! and written into each host agent's personal skills directory on
+//! `spyc --install-skill`.
+//!
+//! Claude Code and codex independently converged on the same format —
+//! `<skills-dir>/<name>/SKILL.md` with YAML frontmatter, plus optional
+//! `references/` sub-files — so one embedded copy serves both verbatim. Only the
+//! directory differs: `~/.claude/skills/` vs `$CODEX_HOME/skills/`
+//! (default `~/.codex/skills/`).
 //!
 //! Why a skill at all, when MCP `initialize` already carries
 //! `SERVER_INSTRUCTIONS`: that field must stay short (it is prepended to every
@@ -76,17 +83,14 @@ impl Status {
     }
 }
 
-/// Whether startup should offer an update, and whether accepting would discard
-/// local edits.
+/// Whether one host's skill is worth offering an update for, and whether
+/// accepting would discard local edits.
 ///
-/// Only an **already-installed** skill that has fallen behind gets an offer: a
-/// user who never ran `--install-skill` is never nagged about a feature they
-/// didn't ask for. A remembered decline suppresses it until the content changes.
+/// Only an **already-installed** skill that has fallen behind qualifies: a user
+/// who never ran `--install-skill` is never nagged about a feature they didn't
+/// ask for.
 #[must_use]
-pub const fn startup_offer(status: &Status, declined: bool) -> Option<bool> {
-    if declined {
-        return None;
-    }
+const fn host_offer(status: &Status) -> Option<bool> {
     match status {
         // Behind, with local edits an update would discard — offer, and say so.
         Status::Modified { stale: true, .. } => Some(true),
@@ -102,14 +106,79 @@ pub const fn startup_offer(status: &Status, declined: bool) -> Option<bool> {
     }
 }
 
-/// `~/.claude/skills/spyc`. `None` when `$HOME` can't be resolved.
+/// Whether startup should offer an update across all hosts, and whether
+/// accepting would discard local edits in any of them.
+///
+/// One prompt covers every host — a single `[Y/n]` that refreshes whichever are
+/// behind, not one popup per agent. A remembered decline suppresses it until the
+/// skill content changes.
 #[must_use]
-pub fn skill_dir() -> Option<PathBuf> {
+pub fn startup_offer(statuses: &[(Host, Status)], declined: bool) -> Option<bool> {
+    if declined {
+        return None;
+    }
+    let at_risk: Vec<bool> = statuses.iter().filter_map(|(_, s)| host_offer(s)).collect();
+    if at_risk.is_empty() {
+        return None;
+    }
+    // If ANY host has edits at stake the prompt must warn: when hosts disagree,
+    // the more cautious framing wins.
+    Some(at_risk.into_iter().any(|risk| risk))
+}
+
+/// An agent that discovers personal skills from a directory.
+///
+/// Claude Code and codex converged on the same format — `<dir>/<name>/SKILL.md`
+/// with YAML frontmatter, plus optional `references/` sub-files — so one embedded
+/// copy serves both with no per-host content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Host {
+    Claude,
+    Codex,
+}
+
+impl Host {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+        }
+    }
+}
+
+fn home() -> Option<PathBuf> {
     let home = crate::paths::expand("~");
     if home.as_os_str().is_empty() || home == Path::new("~") {
         return None;
     }
-    Some(home.join(".claude").join("skills").join(SKILL_NAME))
+    Some(home)
+}
+
+/// Where each host looks for personal skills:
+/// `~/.claude/skills/spyc` and `$CODEX_HOME/skills/spyc` (codex honors
+/// `CODEX_HOME`, defaulting to `~/.codex`).
+#[must_use]
+pub fn host_dir(host: Host) -> Option<PathBuf> {
+    match host {
+        Host::Claude => Some(home()?.join(".claude").join("skills").join(SKILL_NAME)),
+        Host::Codex => {
+            let base = match std::env::var_os("CODEX_HOME") {
+                Some(v) if !v.is_empty() => PathBuf::from(v),
+                _ => home()?.join(".codex"),
+            };
+            Some(base.join("skills").join(SKILL_NAME))
+        }
+    }
+}
+
+/// Every install target, in report order.
+#[must_use]
+pub fn hosts() -> Vec<(Host, PathBuf)> {
+    [Host::Claude, Host::Codex]
+        .into_iter()
+        .filter_map(|h| host_dir(h).map(|d| (h, d)))
+        .collect()
 }
 
 /// FNV-1a. Change detection only — never a security boundary — so a short
@@ -170,10 +239,13 @@ pub fn status_in(dir: &Path) -> Status {
     }
 }
 
-/// Inspect the installed skill.
+/// Inspect the skill for every host.
 #[must_use]
-pub fn status() -> Status {
-    skill_dir().map_or(Status::NotInstalled, |d| status_in(&d))
+pub fn status_all() -> Vec<(Host, Status)> {
+    hosts()
+        .into_iter()
+        .map(|(h, dir)| (h, status_in(&dir)))
+        .collect()
 }
 
 /// Write every asset + the manifest into `dir`, creating it if needed.
@@ -197,24 +269,38 @@ pub fn install_in(dir: &Path) -> std::io::Result<()> {
     )
 }
 
-/// Install into `~/.claude/skills/spyc`, returning where it landed.
-pub fn install() -> anyhow::Result<PathBuf> {
-    let dir = skill_dir()
-        .ok_or_else(|| anyhow::anyhow!("cannot resolve $HOME — no place to install the skill"))?;
-    install_in(&dir)?;
-    Ok(dir)
+/// Install for every host, returning what landed where.
+///
+/// `only_installed` refreshes just the hosts that already have the skill — what
+/// the startup update offer wants, so accepting an update never silently adopts a
+/// host the user never installed into. `false` installs everywhere, which is what
+/// `--install-skill` and `:skill update` mean.
+pub fn install_all(only_installed: bool) -> anyhow::Result<Vec<(Host, PathBuf)>> {
+    let targets = hosts();
+    if targets.is_empty() {
+        anyhow::bail!("cannot resolve $HOME — no place to install the skill");
+    }
+    let mut done = Vec::new();
+    for (host, dir) in targets {
+        if only_installed && matches!(status_in(&dir), Status::NotInstalled) {
+            continue;
+        }
+        install_in(&dir)?;
+        done.push((host, dir));
+    }
+    Ok(done)
 }
 
-/// Remove the installed skill. `Ok(false)` when there was nothing there.
-pub fn remove() -> anyhow::Result<bool> {
-    let Some(dir) = skill_dir() else {
-        return Ok(false);
-    };
-    if !dir.exists() {
-        return Ok(false);
+/// Remove the skill from every host. Returns the hosts it was removed from.
+pub fn remove_all() -> anyhow::Result<Vec<Host>> {
+    let mut gone = Vec::new();
+    for (host, dir) in hosts() {
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir)?;
+            gone.push(host);
+        }
     }
-    std::fs::remove_dir_all(&dir)?;
-    Ok(true)
+    Ok(gone)
 }
 
 /// The version this binary would install.
@@ -239,7 +325,14 @@ pub fn embedded_fingerprint() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ASSETS, Status, content_hash, embedded_hashes, install_in, skill_dir, status_in};
+    use super::{
+        ASSETS, Host, Status, content_hash, embedded_hashes, host_dir, install_in, status_in,
+    };
+
+    /// Wrap a single host's status as the slice `startup_offer` takes.
+    fn only(status: Status) -> Vec<(Host, Status)> {
+        vec![(Host::Claude, status)]
+    }
 
     #[test]
     fn fresh_dir_reads_as_not_installed() {
@@ -325,7 +418,7 @@ mod tests {
         }
         // And that is the state startup offers an update for.
         assert_eq!(
-            super::startup_offer(&status_in(tmp.path()), false),
+            super::startup_offer(&only(status_in(tmp.path())), false),
             Some(false)
         );
     }
@@ -339,7 +432,7 @@ mod tests {
         let second = std::fs::read_to_string(tmp.path().join(".spyc-skill.json")).unwrap();
         assert_eq!(first, second, "re-installing must not churn the manifest");
         assert_eq!(
-            super::startup_offer(&status_in(tmp.path()), false),
+            super::startup_offer(&only(status_in(tmp.path())), false),
             None,
             "a fresh re-install has nothing to offer"
         );
@@ -347,7 +440,10 @@ mod tests {
 
     #[test]
     fn startup_never_nags_someone_who_never_installed_it() {
-        assert_eq!(super::startup_offer(&Status::NotInstalled, false), None);
+        assert_eq!(
+            super::startup_offer(&only(Status::NotInstalled), false),
+            None
+        );
     }
 
     #[test]
@@ -355,21 +451,21 @@ mod tests {
         let v = || "2.1.0".to_string();
         // Nothing to do.
         assert_eq!(
-            super::startup_offer(&Status::UpToDate { version: v() }, false),
+            super::startup_offer(&only(Status::UpToDate { version: v() }), false),
             None
         );
         // Behind — offer, no edits at risk.
         assert_eq!(
-            super::startup_offer(&Status::Stale { version: v() }, false),
+            super::startup_offer(&only(Status::Stale { version: v() }), false),
             Some(false)
         );
         // Behind AND locally edited — offer, but the prompt must warn.
         assert_eq!(
             super::startup_offer(
-                &Status::Modified {
+                &only(Status::Modified {
                     version: v(),
                     stale: true
-                },
+                }),
                 false
             ),
             Some(true)
@@ -378,10 +474,10 @@ mod tests {
         // overwrite their work for no gain.
         assert_eq!(
             super::startup_offer(
-                &Status::Modified {
+                &only(Status::Modified {
                     version: v(),
                     stale: false
-                },
+                }),
                 false
             ),
             None
@@ -399,7 +495,7 @@ mod tests {
             },
         ] {
             assert_eq!(
-                super::startup_offer(&status, true),
+                super::startup_offer(&only(status.clone()), true),
                 None,
                 "a declined update must not re-prompt: {status:?}"
             );
@@ -423,13 +519,71 @@ mod tests {
     }
 
     #[test]
-    fn skill_dir_lands_under_dot_claude_skills() {
-        // Guards the install location itself: Claude Code only discovers
-        // personal skills at ~/.claude/skills/<name>/.
-        let dir = skill_dir().expect("HOME resolvable in tests");
+    fn each_host_dir_matches_where_that_agent_looks() {
+        // Guards the install locations themselves — both agents only discover
+        // personal skills from their own directory, and a wrong path fails
+        // silently (the skill simply never triggers).
+        let claude = host_dir(Host::Claude).expect("HOME resolvable in tests");
         assert!(
-            dir.ends_with(".claude/skills/spyc"),
-            "unexpected install path: {dir:?}"
+            claude.ends_with(".claude/skills/spyc"),
+            "unexpected claude path: {claude:?}"
+        );
+        let codex = host_dir(Host::Codex).expect("HOME resolvable in tests");
+        // With CODEX_HOME unset this is the documented default. (Not asserting
+        // the override path: setting env in-process is unsafe in edition 2024.)
+        if std::env::var_os("CODEX_HOME").is_none() {
+            assert!(
+                codex.ends_with(".codex/skills/spyc"),
+                "unexpected codex path: {codex:?}"
+            );
+        }
+        assert_ne!(claude, codex, "hosts must not share a directory");
+    }
+
+    #[test]
+    fn one_offer_covers_every_host() {
+        let v = || "2.1.0".to_string();
+        // Claude behind, codex never installed: still offer (for claude), and
+        // nothing is at risk.
+        assert_eq!(
+            super::startup_offer(
+                &[
+                    (Host::Claude, Status::Stale { version: v() }),
+                    (Host::Codex, Status::NotInstalled),
+                ],
+                false
+            ),
+            Some(false)
+        );
+        // Both current: nothing to say.
+        assert_eq!(
+            super::startup_offer(
+                &[
+                    (Host::Claude, Status::UpToDate { version: v() }),
+                    (Host::Codex, Status::UpToDate { version: v() }),
+                ],
+                false
+            ),
+            None
+        );
+        // When hosts disagree, the cautious framing must win: codex has edits at
+        // stake, so the single prompt has to warn even though claude's don't.
+        assert_eq!(
+            super::startup_offer(
+                &[
+                    (Host::Claude, Status::Stale { version: v() }),
+                    (
+                        Host::Codex,
+                        Status::Modified {
+                            version: v(),
+                            stale: true
+                        }
+                    ),
+                ],
+                false
+            ),
+            Some(true),
+            "a host with edits at risk must escalate the shared prompt"
         );
     }
 
