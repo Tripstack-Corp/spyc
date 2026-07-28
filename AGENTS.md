@@ -106,14 +106,14 @@ spyc is Model-View-Update. Keep these — they're what make it reason-about-able
 - **Repaint:** event-driven dirty-frame; `needs_draw` reason codes (pane=1, event=2, other=3), `needs_full_repaint` for teardown transitions; DEC 2026 sync output wraps every frame; rows/grid cached via `list_generation`. Target 0 dps at idle.
 - **Pane I/O:** keys via `input::encode_key()`, raw bytes via `pane.send_bytes()`, paste wrapped in `\x1b[200~`…`\x1b[201~`. Prefix `^a` (`^w` alias); `^a ↓` sends a literal `^a` to the child. Panes `exec` the agent (`PtySpec.exec_replace` → `$SHELL -i -c 'exec <agent>'`, no job-control wrapper shell), so on an **agent** tab `^z` toggles a spyc-managed suspend — `Effect::SignalPane` sends `SIGSTOP`/`SIGCONT` to the pty foreground group (the agent), `TabInfo.suspended` → 💤. `SIGSTOP` not `SIGTSTP` (Claude catches `SIGTSTP` → its self-suspend handler trips the macOS false-exit `[exited 146]`); `exec` so no wrapper reclaims the tty on resume. Pure decision `pane_suspend_key_action`; a shell tab's `^z` forwards (captures/tasks keep the wrapper — no `exec`).
 - **Keep docs in sync (same commit, not a follow-up):** for user-visible / keybinding / status changes update the affected ones of `README.md`, `FEATURES.md`, `AGENTS.md` (the module index is guard-checked: `every_app_module_is_in_the_agents_index`), `ARCHITECTURE.md` (only on an architectural decision), `DESIGN.md` (only on a UI-language change), `ROADMAP.md` (strategy only — per-item work is filed as GitHub Issues), `CHANGELOG.md`, `INSTALL.md`, `docs/KEYBINDINGS.md` (the keymap reference — mirrors `?`), `src/ui/help.rs`.
-- **Bump version** in `Cargo.toml` on user-visible changes (patch = fix, minor = feature); see `CONTRIBUTING.md`.
+- **Don't bump the version in a PR.** `main` is the CURRENT stream and carries `N.M.0-CURRENT` (the next minor, unreleased) until that minor ships; the release PR is what strips the suffix. Build identity comes from the git SHA baked into `--version`. See `CONTRIBUTING.md` → Versioning.
 
 ### Commits, merges, CHANGELOG
 
 - **Commit subject = actual scope, not its caption.** A commit touching a feature + a version bump says both (`feat: gemini agent + bump cargo-deny`). The body holds the long form.
 - **Squash on merge** (`bkt pr merge <N> --strategy squash`) — `main`'s log becomes one commit per shipped shape.
-- **Version-line conflicts auto-resolve.** Because every PR bumps `version`, concurrent PRs collide on that one `Cargo.toml`/`Cargo.lock` line. The `spyc-semver` merge driver (`src/merge_driver.rs`, installed into git config on spyc launch via `.gitattributes`) keeps the higher semver on rebase; `Cargo.lock` uses `merge=ours` + a `cargo` regen. So a merge-train rebase only stops on a *real* conflict — don't hand-resolve version lines.
-- **`CHANGELOG.md` is git-cliff-generated from v1.57.0** (config `cliff.toml`): the section comes from the commit *type*, the line from `scope: subject` — so **the commit message _is_ the changelog entry** (a category-spanning PR wants multiple well-typed commits). v1.56.0 and earlier are frozen hand-written history, left verbatim. Preview with `make changelog`; release with `make release-tag VERSION=x.y.z`.
+- **Version-line conflicts are extinct on CURRENT.** A static `N.M.0-CURRENT` means no PR touches the version line, so concurrent PRs can't collide on it. The `spyc-semver` merge driver (`src/merge_driver.rs`, installed into git config on spyc launch via `.gitattributes`) therefore sits dormant here; it still earns its keep on release branches, where patch bumps resume. It parses plain `MAJOR.MINOR.PATCH` only — a conflict against a `-CURRENT` line is declined and reported as a real conflict, which is correct, since a version-line conflict on CURRENT means something unexpected happened. `Cargo.lock` keeps `merge=ours` + a `cargo` regen.
+- **`CHANGELOG.md` is git-cliff-generated from v1.57.0** (config `cliff.toml`): the section comes from the commit *type*, the line from `scope: subject` — so **the commit message _is_ the changelog entry** (a category-spanning PR wants multiple well-typed commits). v1.56.0 and earlier are frozen hand-written history, left verbatim. Preview with `make changelog`; release in two steps — `make release-prep VERSION=x.y.z` on a release branch, then `make release-tag VERSION=x.y.z` on `main` once that PR merged.
 
 ## Building
 
@@ -123,7 +123,8 @@ make install      # release build + copy to ~/.local/bin
 make check        # fmt + clippy + test + deny (CI gate)
 make fuzz         # nightly + cargo-fuzz, on-demand (NOT in check)
 make changelog    # preview the pending CHANGELOG section
-make release-tag VERSION=x.y.z        # bump + prepend changelog + commit + tag
+make release-prep VERSION=x.y.z       # step 1, on a release branch: set version + changelog + commit
+make release-tag VERSION=x.y.z        # step 2, on main after that PR merged: verify + tag
 ```
 
 **Crate shape: lib + bin.** `src/lib.rs` owns every module + the `run()` entry point; `src/main.rs` is a thin shim. The split lets `fuzz/` (a standalone workspace; nightly, on-demand) link the lib. New fuzz entry points go through the `pub mod fuzz` facade in `lib.rs`, not by widening module visibility.

@@ -145,14 +145,26 @@ This is a hard requirement, not a nice-to-have. Stale docs are bugs.
 ## Versioning
 
 We use [SemVer](https://semver.org/). The version lives in
-`Cargo.toml` (currently 1.x).
+`Cargo.toml`.
 
-- **Patch** (1.57.1): bug fixes, doc updates, minor polish
-- **Minor** (1.58.0): new features, new keybindings, new milestones
-- **Major** (2.0.0): breaking changes to config, state files, or
+- **Patch** (2.0.1): bug fixes, doc updates, minor polish
+- **Minor** (2.1.0): new features, new keybindings, new milestones
+- **Major** (3.0.0): breaking changes to config, state files, or
   the command surface
 
-Bump the version in your PR if your change is user-visible.
+**Don't bump the version in your PR.** `main` is the CURRENT stream
+(FreeBSD's `-CURRENT`; see `docs/RELEASE_ENGINEERING.md`) and carries the
+*next* minor with a `-CURRENT` suffix — e.g. `2.1.0-CURRENT` while 2.1 is
+in development. It stays there for the whole cycle: the release PR is
+what strips the suffix down to `2.1.0`.
+
+So a feature PR touches no version line at all. Two things follow:
+
+- You can tell a dev build from a release at a glance — `spyc --version`
+  prints `2.1.0-CURRENT (<sha>)`, and the SHA identifies the exact build,
+  which is what per-PR bumps used to be for.
+- Concurrent PRs can no longer collide on the version line (see
+  *Merge-train conflicts* below).
 
 ## Commit messages
 
@@ -175,7 +187,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>
   headline. A category-spanning PR wants multiple well-typed
   commits, not one.
 - Preview the pending section with `make changelog`; cut a release
-  with `make release-tag VERSION=x.y.z`.
+  with `make release-prep` then `make release-tag` (see
+  `docs/RELEASE_ENGINEERING.md` § The release cycle).
 - Include the `Co-Authored-By` trailer when Claude Code contributed.
 
 See `AGENTS.md` ("Commits, merges, and CHANGELOG") for the longer
@@ -183,15 +196,23 @@ rationale.
 
 ## Merge-train conflicts
 
-Because every PR bumps `version`, concurrent PRs collide on that one
-`Cargo.toml` / `Cargo.lock` line. spyc ships a git merge driver
-(`src/merge_driver.rs`) that resolves it automatically — it keeps the
+Since `main` sits on a static `-CURRENT` version, no PR touches the
+version line and concurrent PRs can't collide on it — the conflict this
+section exists for doesn't arise on CURRENT any more.
+
+spyc still ships the git merge driver (`src/merge_driver.rs`) that
+resolves it, for release branches where patch bumps resume: it keeps the
 higher semver on rebase, so a merge-train rebase only stops on a *real*
 conflict. The driver is installed into the repo's git config the first
 time you launch spyc in the repo (idempotent); to set it up without
 launching, the `.gitattributes` driver name is `spyc-semver`. After a
 driver-assisted rebase, run `cargo build` once so `Cargo.lock` (which
 uses `merge=ours`) picks up the resolved version.
+
+Note the driver parses plain `MAJOR.MINOR.PATCH` only. A conflict against
+a `-CURRENT` line is declined and surfaces as a real conflict — correct,
+because a version-line conflict on CURRENT means something unexpected
+happened and wants a human.
 
 ## CI
 
