@@ -106,6 +106,16 @@ pub enum PromptKind {
         cwd: std::path::PathBuf,
         agent: crate::state::sessions::AgentKind,
     },
+    /// Startup offer to install/update the Claude skill in `~/.claude/skills/`,
+    /// raised only when the embedded copy differs from what's installed. Same
+    /// single-key `[Y/n]` shape as `HookConsent`; `n` is remembered against
+    /// `fingerprint` (the skill's content identity) so it asks again only when
+    /// the skill itself changes. `overwrites_edits` is set when the installed
+    /// copy carries local edits an update would discard, so the prompt can say so.
+    SkillUpdate {
+        fingerprint: String,
+        overwrites_edits: bool,
+    },
     /// `^a x` on a tab whose child is still running — confirm before killing it
     /// (closing a live claude loses the session). Single-key: `y`/`Y` closes,
     /// anything else keeps it. Always targets the active tab (the modal prompt
@@ -810,6 +820,13 @@ mod tests {
             ),
             ("ClosePane", K::ClosePane),
             ("LuaRunaway", K::LuaRunaway),
+            (
+                "SkillUpdate",
+                K::SkillUpdate {
+                    fingerprint: String::new(),
+                    overwrites_edits: false,
+                },
+            ),
         ] {
             assert!(
                 !k.wants_path_completion(),

@@ -148,6 +148,22 @@ Press `gf` / `gF` to jump from the agent's output back to a file (and line).
 Multiple instances coexist safely, and enterprise `managed-mcp.json` policies
 are respected — details in [INSTALL.md](INSTALL.md#mcp-configuration).
 
+### Teaching Claude to use it
+
+The MCP handshake tells an agent these tools exist, but it has to stay short.
+For the depth — worktree lifecycle, which of the four search corpora to reach
+for, the three `git_diff` scopes — install spyc's skill:
+
+```sh
+spyc --install-skill      # → ~/.claude/skills/spyc/
+```
+
+Claude picks it up automatically in every project. spyc offers a `[Y/n]` update
+on startup when its own copy has moved past what you installed; decline and it
+won't ask again until the skill actually changes. If you've edited the installed
+copy, it says so rather than overwriting your work silently. Manage it in-app
+with `:skill` (`status`, `update`, `remove`, `ask`).
+
 ## Running multiple agents
 
 Run agents across several tabs and two problems show up; spyc handles both.

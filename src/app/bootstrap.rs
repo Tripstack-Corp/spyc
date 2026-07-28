@@ -378,6 +378,13 @@ impl App {
         if resume {
             app.show_session_picker();
         }
+        // Offer to refresh the Claude skill when spyc's embedded copy has moved
+        // past what's installed. Only ever for an already-installed skill (see
+        // `skill::startup_offer`), and never over the resume picker — that one
+        // owns the screen, and the offer is not urgent.
+        if !resume {
+            app.maybe_offer_skill_update();
+        }
         // The MCP client config (`.mcp.json` / `.codex/config.toml`) is no
         // longer written here; it's written lazily when an agent pane launches
         // (`open_pane_tab_in` → `ensure_agent_mcp_config`), so we don't create a

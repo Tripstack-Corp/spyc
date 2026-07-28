@@ -39,6 +39,12 @@ impl App {
         }
         if matches!(
             &self.state.mode,
+            Mode::Prompting(p) if matches!(p.kind, PromptKind::SkillUpdate { .. })
+        ) {
+            return self.handle_skill_update_key(key);
+        }
+        if matches!(
+            &self.state.mode,
             Mode::Prompting(p) if matches!(p.kind, PromptKind::ClosePane)
         ) {
             return self.handle_close_pane_confirm_key(key);

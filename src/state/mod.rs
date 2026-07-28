@@ -22,6 +22,7 @@ pub mod picks;
 pub mod scope_registry;
 pub mod session_names;
 pub mod sessions;
+pub mod skill_prompt;
 
 pub use cursor::Cursor;
 pub use frecency::Frecency;

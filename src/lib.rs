@@ -26,6 +26,7 @@ mod pane;
 mod paths;
 mod proc_cwd;
 mod shell;
+mod skill;
 mod state;
 mod sysinfo;
 mod term_title;
@@ -172,6 +173,13 @@ struct Cli {
     #[arg(long)]
     print_config: bool,
 
+    /// Install spyc's Claude skill into `~/.claude/skills/spyc/` and exit — the
+    /// usage guide that teaches Claude spyc's worktree / search / git tools.
+    /// Re-run to update; spyc also offers an update on startup when its embedded
+    /// copy has moved on. Manage it in-app with `:skill`.
+    #[arg(long)]
+    install_skill: bool,
+
     /// Disable the embedded Lua engine for this session — no worker thread, and
     /// `map KEY lua` / init.lua won't run. The startup equivalent of `:lua off`.
     #[arg(long)]
@@ -237,6 +245,24 @@ pub fn run() -> Result<()> {
 
     if cli.print_config {
         print!("{}", config::DEFAULT_TEMPLATE);
+        return Ok(());
+    }
+
+    if cli.install_skill {
+        // Report whether this replaced hand-edits, since --install-skill
+        // overwrites unconditionally and that is otherwise silent.
+        let before = skill::status();
+        let dir = skill::install()?;
+        let note = match before {
+            skill::Status::Modified { .. } => " (replaced your local edits)",
+            _ => "",
+        };
+        println!(
+            "\u{1f336}\u{fe0f} installed the spyc skill v{} \u{2192} {}{}",
+            skill::embedded_version(),
+            dir.display(),
+            note
+        );
         return Ok(());
     }
 
