@@ -2,6 +2,21 @@
 
 All notable changes to spyc. Entries from v1.57.0 onward are generated from the conventional-commit history by [git-cliff](https://git-cliff.org) (config in `cliff.toml`); regenerate the pending section with `make changelog` and cut a release with `make release-tag VERSION=x.y.z`. Entries at v1.56.0 and earlier are the original hand-written log, kept verbatim.
 
+## [2.0.3] - 2026-07-28
+
+### Bug Fixes
+- **git**: Classify index-lock failures instead of retrying them blindly (#184)
+
+### Build & Tooling
+- **deps**: Bump the cargo-minor-patch group with 12 updates (#172)
+- **deps**: Bump infer from 0.19.0 to 0.22.0 (#173)
+- **deps**: Bump the cargo-minor-patch group with 5 updates (#180)
+- **deps**: Bump base64 from 0.22.1 to 0.23.0 (#182)
+- **deps**: Bump gix from 0.85.0 to 0.86.0 (#181)
+
+### Miscellaneous
+- **deny**: Drop unreachable unmaintained ignores + bump v2.0.3 (#183)
+
 ## [2.0.2] - 2026-07-17
 
 ### Bug Fixes
