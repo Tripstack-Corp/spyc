@@ -107,6 +107,56 @@ cargo install spyc
 To **build from source** instead, see [BUILD.md](BUILD.md). Full setup —
 terminal, font, clipboard, MCP, and verification — is in [INSTALL.md](INSTALL.md).
 
+### Running CURRENT (the development stream)
+
+Everything above installs a **RELEASE** — a tagged, signed, frozen version. If
+you'd rather run ahead of it, `main` is spyc's **CURRENT** stream: every merged
+change lands there, gated by CI. It's what the author dog-foods daily, and it's
+where a fix reaches you first.
+
+It is also, by definition, unreleased: rolling, and it may break. There are no
+prebuilt binaries — CURRENT is source-only, so you need a Rust toolchain.
+
+```sh
+git clone https://github.com/Tripstack-Corp/spyc.git
+cd spyc
+make install        # release build → ~/.local/bin/spyc
+```
+
+Update it by pulling and rebuilding:
+
+```sh
+git pull && make install
+```
+
+A CURRENT build says so: the version carries a `-CURRENT` suffix naming the minor
+it's heading for.
+
+```sh
+$ spyc --version
+spyc 2.1.0-CURRENT
+```
+
+That suffix is how you tell a development build from the release of the same
+number — `2.1.0-CURRENT` is *on the way to* 2.1.0, never 2.1.0 itself. The
+suffix stays put for the whole cycle, so for a bug report you want the commit
+too, which `--verbose` prints alongside the toolchain and terminal it saw:
+
+```sh
+$ spyc --verbose
+🌶️ spyc 2.1.0-CURRENT
+  git:     69a5ff1
+  built:   …
+  rustc:   …
+```
+
+On a rolling stream that SHA is what actually identifies your build — quote it.
+
+To go back to a release, install via any channel above; a tagged build simply has
+no suffix. Toolchain and cross-compilation detail is in [BUILD.md](BUILD.md); the
+full stream model — CURRENT, STABLE, RELEASE, and how releases are cut — is in
+[docs/RELEASE_ENGINEERING.md](docs/RELEASE_ENGINEERING.md).
+
 ### Launch
 
 ```sh
