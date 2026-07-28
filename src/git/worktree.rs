@@ -295,6 +295,12 @@ fn checkout_and_write(
 /// stomped — see `write_index_gives_up_on_a_stuck_lock_instead_of_hanging`).
 /// Re-issuing `write` is safe: it re-serializes the same in-memory index and
 /// re-acquires from scratch, so no partial state carries across attempts.
+///
+/// Only genuine contention is retried — see [`lock_contention_is_transient`].
+/// Failures are reported with their whole source chain: `AcquireLock`'s own
+/// Display is just "Could not acquire lock for index file", which names neither
+/// the cause nor the path, and that opacity is why three earlier rounds of
+/// widening this retry could not tell contention from an IO failure.
 fn write_index_with_lock_retry(index: &mut gix::index::File) -> std::io::Result<()> {
     const ATTEMPTS: u32 = 10;
     const MAX_BACKOFF: std::time::Duration = std::time::Duration::from_millis(300);
@@ -302,16 +308,58 @@ fn write_index_with_lock_retry(index: &mut gix::index::File) -> std::io::Result<
     for attempt in 1..=ATTEMPTS {
         match index.write(gix::index::write::Options::default()) {
             Ok(()) => return Ok(()),
-            Err(gix::index::file::write::Error::AcquireLock(_)) if attempt < ATTEMPTS => {
+            Err(e) if attempt < ATTEMPTS && lock_contention_is_transient(&e) => {
                 std::thread::sleep(backoff);
                 backoff = (backoff * 2).min(MAX_BACKOFF);
             }
-            Err(e) => return Err(std::io::Error::other(format!("write index: {e}"))),
+            Err(e) => {
+                return Err(std::io::Error::other(format!(
+                    "write index ({} attempt(s)): {}",
+                    attempt,
+                    error_chain(&e)
+                )));
+            }
         }
     }
     // The `attempt < ATTEMPTS` guard routes the final attempt's errors to the
     // catch-all above, so every path through the loop has already returned.
     unreachable!("write_index_with_lock_retry loop always returns")
+}
+
+/// Whether a failed index write is worth another attempt.
+///
+/// `AcquireLock` collapses two unrelated causes: `PermanentlyLocked` (someone
+/// holds `index.lock` — transient, retry) and `Io` (the lock file could not be
+/// created at all). Retrying a deterministic `Io` — a missing parent directory,
+/// EPERM, ENOSPC — just burns the whole backoff budget and then reports it as
+/// lock contention, hiding the real fault. Only the IO kinds that describe
+/// *momentary* unavailability are retried; every other kind fails fast.
+fn lock_contention_is_transient(e: &gix::index::file::write::Error) -> bool {
+    let gix::index::file::write::Error::AcquireLock(acquire) = e else {
+        return false;
+    };
+    match acquire {
+        gix::lock::acquire::Error::PermanentlyLocked { .. } => true,
+        gix::lock::acquire::Error::Io(io) => matches!(
+            io.kind(),
+            std::io::ErrorKind::AlreadyExists
+                | std::io::ErrorKind::WouldBlock
+                | std::io::ErrorKind::Interrupted
+        ),
+    }
+}
+
+/// Render an error with every `source()` behind it, so a wrapper whose Display
+/// omits the cause still reports one.
+fn error_chain(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut src = e.source();
+    while let Some(cause) = src {
+        out.push_str(" -> ");
+        out.push_str(&cause.to_string());
+        src = cause.source();
+    }
+    out
 }
 
 /// Resolve `full_ref` (`refs/heads/<branch>`) to its commit id. If the branch
@@ -1065,10 +1113,89 @@ mod tests {
             err.to_string().contains("lock"),
             "error should name the lock, got: {err}"
         );
+        // A held lock is contention, so it must consume the whole retry budget
+        // rather than fail on the first attempt — the classifier added alongside
+        // this fails fast on deterministic faults, and must not catch this one.
+        assert!(
+            err.to_string().contains("10 attempt(s)"),
+            "contention should exhaust the retries, got: {err}"
+        );
         // The write never landed while the lock was held.
         assert!(
             !index_path.exists(),
             "index must not be written out under a held lock"
+        );
+    }
+
+    #[test]
+    fn only_genuine_contention_is_retried() {
+        use gix::index::file::write::Error as WriteErr;
+        use gix::lock::acquire::Error as AcquireErr;
+        use std::io::{Error as IoErr, ErrorKind};
+
+        // Someone holds index.lock — the case the backoff exists for.
+        let held = WriteErr::AcquireLock(AcquireErr::PermanentlyLocked {
+            resource_path: std::path::PathBuf::from("/somewhere/index"),
+            mode: gix::lock::acquire::Fail::Immediately,
+            attempts: 1,
+        });
+        assert!(
+            super::lock_contention_is_transient(&held),
+            "a held lock is the retryable case"
+        );
+
+        // Momentary unavailability — a contender created the lock file just now.
+        for kind in [
+            ErrorKind::AlreadyExists,
+            ErrorKind::WouldBlock,
+            ErrorKind::Interrupted,
+        ] {
+            let e = WriteErr::AcquireLock(AcquireErr::Io(IoErr::new(kind, "momentary")));
+            assert!(
+                super::lock_contention_is_transient(&e),
+                "{kind:?} describes momentary unavailability and should retry"
+            );
+        }
+
+        // Deterministic faults. Retrying these burns the whole backoff budget
+        // and then reports the fault as lock contention, which is what made the
+        // CI failure undiagnosable for three rounds.
+        for kind in [
+            ErrorKind::PermissionDenied,
+            ErrorKind::NotFound,
+            ErrorKind::Other,
+        ] {
+            let e = WriteErr::AcquireLock(AcquireErr::Io(IoErr::new(kind, "deterministic")));
+            assert!(
+                !super::lock_contention_is_transient(&e),
+                "{kind:?} cannot be fixed by waiting and must fail fast"
+            );
+        }
+
+        // A failure that isn't about the lock at all is never contention.
+        let serialize = WriteErr::Io(IoErr::new(ErrorKind::BrokenPipe, "write out").into());
+        assert!(
+            !super::lock_contention_is_transient(&serialize),
+            "a serialization failure is not lock contention"
+        );
+    }
+
+    #[test]
+    fn error_chain_names_the_cause_an_opaque_wrapper_hides() {
+        // `AcquireLock`'s own Display names neither the cause nor the path, so
+        // reporting it alone (what this code used to do) says only "could not
+        // acquire lock" no matter why. The chain has to carry the real cause.
+        let e = gix::index::file::write::Error::AcquireLock(gix::lock::acquire::Error::Io(
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied by fs"),
+        ));
+        let rendered = super::error_chain(&e);
+        assert!(
+            rendered.contains("Could not acquire lock"),
+            "keeps the outer message: {rendered}"
+        );
+        assert!(
+            rendered.contains("denied by fs"),
+            "must surface the underlying cause: {rendered}"
         );
     }
 
