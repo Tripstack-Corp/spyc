@@ -146,6 +146,28 @@ pre-releases are pruned — stable `vN.M.P` releases are never touched. Older RC
 throwaway soak builds (~38 MB of assets each); the changelog and stable tags are the
 durable record.
 
+**RC retention in apt** mirrors it, but on a different rule, because a published
+deb is an *installable artifact* rather than a download. `apt.yml` runs
+`scripts/prune-apt-repo.sh` on every publish, before regenerating the index:
+
+- A prerelease deb is dropped **once its final release is present**. dpkg sorts
+  `2.0.0~rc.11` below `2.0.0`, so once the stable exists that deb can never be
+  selected again — it is pure index weight.
+- Otherwise the **3 newest prereleases of an in-flight version** are kept, per
+  version line, so a soak in progress stays installable.
+- **Stable versions are never pruned** — pinning an older release is legitimate.
+
+The prune runs in the same step as the reindex on purpose: `Packages` /
+`Release` / `InRelease` are GPG-signed over the file set, so deleting debs
+without regenerating and re-signing would leave the signed index advertising
+files that are gone, failing apt's hash check on every client. That is also why
+this can't be done by hand-editing `gh-pages` — the signing key only exists
+inside the `apt-publish` environment. To purge retroactively, dispatch `apt.yml`
+with any recent tag; the prune runs on the way through.
+
+Inspect the policy against a local gh-pages checkout without publishing:
+`make apt-prune-check APT_REPO=<dir>`.
+
 ## 6. Maintenance: Errata & Security (EN / SA)
 
 FreeBSD splits post-release fixes into **Errata Notices** (critical non-security)

@@ -17,6 +17,11 @@
 # stays green until then. Prereleases publish too — the deb version uses a
 # tilde (`2.0.0~rc.4`), which dpkg sorts BELOW the final `2.0.0`, so an rc never
 # blocks the stable upgrade (the Makefile's `DEB_VERSION` does the `-`→`~`).
+#
+# Because rc debs publish, they also accumulate: step 3 runs
+# `scripts/prune-apt-repo.sh` first, dropping prereleases whose final release
+# has shipped (and all but the 3 newest of an in-flight version) so the index
+# doesn't grow without bound. Stable versions are never pruned.
 name: apt
 
 on:
@@ -118,6 +123,11 @@ jobs:
         run: |
           set -euo pipefail
           cp dist/spyc_*.deb aptrepo/
+          # Prune BEFORE indexing, in this same step: the index and its GPG
+          # signature must describe the pruned set. Deleting debs without
+          # reindexing would leave the signed Packages advertising files that
+          # are gone, which fails apt's hash check on every client.
+          ./scripts/prune-apt-repo.sh aptrepo
           cd aptrepo
           apt-ftparchive packages . > Packages
           gzip -kf Packages

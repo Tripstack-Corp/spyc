@@ -306,6 +306,15 @@ deb-arm: ## Package the built Linux aarch64 binary → dist/spyc_<version>_arm64
 .PHONY: deb
 deb: deb-x86 deb-arm ## Package both Linux .debs (binaries must already be built)
 
+# apt.yml runs this against the gh-pages checkout on every publish, so the repo
+# self-maintains. Exposed here to inspect the policy against a local checkout of
+# gh-pages without publishing: `make apt-prune-check APT_REPO=../spyc-gh-pages`.
+APT_REPO ?=
+.PHONY: apt-prune-check
+apt-prune-check: ## Dry-run the apt prerelease pruning (set APT_REPO=<gh-pages checkout>)
+	@test -n "$(APT_REPO)" || { echo "usage: make apt-prune-check APT_REPO=<dir>"; exit 1; }
+	@./scripts/prune-apt-repo.sh --dry-run "$(APT_REPO)"
+
 # Internal: build one .deb from $(SRC) for $(ARCH). Fails clearly if the binary
 # is missing — build it with the matching release-linux-* target first.
 .PHONY: _deb
