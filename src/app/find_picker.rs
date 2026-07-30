@@ -201,7 +201,7 @@ impl App {
                     let abs = root.join(&rel);
                     if let Some(parent) = abs.parent() {
                         if let Err(e) = self.state.chdir(parent) {
-                            self.state.flash_error(format!("chdir: {e}"));
+                            self.state.flash_error(format!("chdir: {e:#}"));
                         } else if let Some(idx) =
                             self.state.cur().rows.iter().position(|r| r.path == abs)
                         {

@@ -159,7 +159,7 @@ impl App {
         // re-anchored — it stays the overall anchor (`g h`). (`g w` jumps to
         // this column's worktree root.)
         if let Err(e) = self.state.chdir(&path) {
-            self.state.flash_error(format!("chdir: {e}"));
+            self.state.flash_error(format!("chdir: {e:#}"));
             return;
         }
         // Re-key the focused column's harpoon to the new worktree root.

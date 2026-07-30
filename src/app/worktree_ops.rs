@@ -311,7 +311,7 @@ impl App {
                             self.state
                                 .flash_info(format!("created worktree: {}", path.display()));
                             if let Err(e) = self.state.chdir(&path) {
-                                self.state.flash_error(format!("chdir: {e}"));
+                                self.state.flash_error(format!("chdir: {e:#}"));
                             }
                         }
                         None => {
