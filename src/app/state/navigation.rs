@@ -221,12 +221,12 @@ impl AppState {
         let md = std::fs::metadata(&canonical)?;
         if md.is_dir() {
             if let Err(e) = self.chdir(&canonical) {
-                self.flash_error(format!("chdir: {e}"));
+                self.flash_error(format!("chdir: {e:#}"));
                 return Ok(());
             }
         } else if let Some(parent) = canonical.parent() {
             if let Err(e) = self.chdir(parent) {
-                self.flash_error(format!("chdir: {e}"));
+                self.flash_error(format!("chdir: {e:#}"));
                 return Ok(());
             }
             self.focus_on_path(&canonical);

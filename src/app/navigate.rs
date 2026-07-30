@@ -54,7 +54,7 @@ impl App {
             return;
         };
         if let Err(e) = self.state.chdir(&chdir_to) {
-            self.state.flash_error(format!("chdir: {e}"));
+            self.state.flash_error(format!("chdir: {e:#}"));
             return;
         }
         if let Some(p) = focus {
@@ -207,7 +207,7 @@ impl App {
                     .map_or_else(|| path.clone(), Path::to_path_buf)
             };
             if let Err(e) = self.state.chdir(&target_dir) {
-                self.state.flash_error(format!("chdir: {e}"));
+                self.state.flash_error(format!("chdir: {e:#}"));
                 return Vec::new();
             }
             self.state.cur_mut().view = View::Dir;
@@ -229,7 +229,7 @@ impl App {
 
         if descend {
             if let Err(e) = self.state.chdir(&path) {
-                self.state.flash_error(format!("chdir: {e}"));
+                self.state.flash_error(format!("chdir: {e:#}"));
             }
             return Vec::new();
         }

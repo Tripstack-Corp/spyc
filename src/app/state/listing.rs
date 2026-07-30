@@ -428,7 +428,11 @@ impl AppState {
                     self.flash_info(msg.to_string());
                 }
             }
-            Err(e) => self.flash_error(format!("{err_prefix}: {e}")),
+            // `{e:#}` (anyhow alternate) renders the whole source chain. Plain
+            // `{e}` shows only the outermost context, which silently dropped
+            // the real cause — e.g. a macOS privacy denial arrived as the
+            // unactionable "chdir: reading directory <path>".
+            Err(e) => self.flash_error(format!("{err_prefix}: {e:#}")),
         }
     }
 

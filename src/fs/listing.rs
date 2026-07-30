@@ -1,9 +1,44 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use super::entry::{Entry, EntryKind};
+
+/// Whether a directory-read failure is a macOS privacy (TCC) denial rather than
+/// an ordinary permission problem.
+///
+/// macOS reports a TCC denial on a protected folder (`~/Downloads`, `~/Desktop`,
+/// `~/Documents`, iCloud, removable volumes) as **`EPERM`**, while a genuine
+/// mode-based refusal is `EACCES` — and Rust maps *both* to
+/// `ErrorKind::PermissionDenied`, so only the raw errno separates them. The
+/// giveaway is that the POSIX mode already grants the owner read (`drwx------`
+/// owned by you) and the read still fails, which no `chmod` can fix: the grant
+/// lives in System Settings, not the filesystem.
+#[cfg(target_os = "macos")]
+fn is_privacy_denial(e: &std::io::Error) -> bool {
+    e.raw_os_error() == Some(1) // EPERM
+}
+
+/// Attach the path to a `read_dir` failure — plus, on macOS, the one hint that
+/// makes a TCC denial actionable.
+///
+/// The bare OS message for that case is "Operation not permitted", which reads
+/// like a filesystem problem and sends you to `chmod`. Naming the real cause is
+/// the difference between an unactionable error and a two-click fix.
+fn read_dir_error(dir: &Path, e: std::io::Error) -> anyhow::Error {
+    #[cfg(target_os = "macos")]
+    if is_privacy_denial(&e) {
+        return anyhow::anyhow!(
+            "reading directory {}: {e} — macOS privacy protection, not file \
+             permissions: grant your terminal access to this folder under System \
+             Settings \u{2192} Privacy & Security \u{2192} Files and Folders (or \
+             Full Disk Access)",
+            dir.display()
+        );
+    }
+    anyhow::Error::new(e).context(format!("reading directory {}", dir.display()))
+}
 
 /// Sort order for the file listing. Dirs-first grouping is always applied;
 /// this controls the secondary sort within each group.
@@ -108,8 +143,7 @@ impl Listing {
         let dir = dir.as_ref().to_path_buf();
         let mut entries: Vec<Entry> = Vec::new();
         let mut truncated = false;
-        let rd = std::fs::read_dir(&dir)
-            .with_context(|| format!("reading directory {}", dir.display()))?;
+        let rd = std::fs::read_dir(&dir).map_err(|e| read_dir_error(&dir, e))?;
         for item in rd {
             if entries.len() >= cap {
                 truncated = true;
@@ -308,6 +342,116 @@ mod tests {
         assert_eq!(
             names(&l),
             ["Alpha", "zeta", "apple.rs", "cherry.rs", "Banana.txt"]
+        );
+    }
+
+    /// The reported bug: navigating into a directory spyc can't read produced
+    /// "chdir: reading directory <path>" and nothing else, because the flash
+    /// rendered the anyhow error with `{e}` (outermost context only). The cause
+    /// must survive into the message the user actually sees.
+    #[test]
+    fn an_unreadable_directory_reports_why_not_just_the_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let locked = tmp.path().join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        // Drop all permissions so read_dir genuinely fails. (Skipped when
+        // running as root, which ignores the mode.)
+        let mut perms = std::fs::metadata(&locked).unwrap().permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            perms.set_mode(0o000);
+        }
+        std::fs::set_permissions(&locked, perms).unwrap();
+
+        let result = Listing::read(&locked);
+        // Restore so the tempdir can be cleaned up regardless of outcome.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut p = std::fs::metadata(&locked).unwrap().permissions();
+            p.set_mode(0o700);
+            let _ = std::fs::set_permissions(&locked, p);
+        }
+
+        let Err(e) = result else {
+            // Running as root (CI containers sometimes do): the mode is
+            // ignored, so there is no failure to inspect.
+            return;
+        };
+        let plain = format!("{e}");
+        let full = format!("{e:#}");
+        assert!(
+            plain.contains("locked"),
+            "the path should always be named: {plain}"
+        );
+        // The regression guard: the alternate form must carry a cause beyond the
+        // context line, otherwise the user is told what failed but never why.
+        assert!(
+            full.len() > plain.len(),
+            "`{{e:#}}` must add the cause; got the same string both ways: {full}"
+        );
+        assert!(
+            full.to_lowercase().contains("permission")
+                || full.to_lowercase().contains("denied")
+                || full.to_lowercase().contains("not permitted"),
+            "the cause should name the permission failure: {full}"
+        );
+    }
+
+    /// A macOS privacy (TCC) denial arrives as EPERM even though the POSIX mode
+    /// grants the owner read, so `chmod` can never fix it. Keying the hint on
+    /// `ErrorKind::PermissionDenied` would be wrong — Rust maps both EPERM and
+    /// EACCES to it — so this pins the errno-level discrimination.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn only_eperm_is_treated_as_a_privacy_denial() {
+        use std::io::{Error, ErrorKind};
+        let eperm = Error::from_raw_os_error(1);
+        let eacces = Error::from_raw_os_error(13);
+        // Both look identical at the ErrorKind level — hence the raw errno.
+        assert_eq!(eperm.kind(), ErrorKind::PermissionDenied);
+        assert_eq!(eacces.kind(), ErrorKind::PermissionDenied);
+        assert!(super::is_privacy_denial(&eperm));
+        assert!(
+            !super::is_privacy_denial(&eacces),
+            "EACCES is an ordinary permission problem, not a TCC denial"
+        );
+    }
+
+    /// The hint has to name System Settings, since that is the only place the
+    /// grant can be made — the whole point of distinguishing this case.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_privacy_denial_points_at_system_settings() {
+        let e = super::read_dir_error(
+            std::path::Path::new("/Users/someone/Downloads"),
+            std::io::Error::from_raw_os_error(1),
+        );
+        let msg = format!("{e:#}");
+        assert!(
+            msg.contains("/Users/someone/Downloads"),
+            "names the path: {msg}"
+        );
+        assert!(msg.contains("Privacy"), "points at System Settings: {msg}");
+        assert!(
+            msg.contains("not file permissions") || msg.contains("privacy"),
+            "distinguishes it from a chmod problem: {msg}"
+        );
+    }
+
+    /// An ordinary failure must NOT be dressed up as a privacy problem.
+    #[test]
+    fn a_missing_directory_gets_no_privacy_hint() {
+        let e = super::read_dir_error(
+            std::path::Path::new("/nope/missing"),
+            std::io::Error::from_raw_os_error(2), // ENOENT
+        );
+        let msg = format!("{e:#}");
+        assert!(msg.contains("/nope/missing"), "names the path: {msg}");
+        assert!(
+            !msg.contains("Privacy"),
+            "ENOENT is not a privacy denial: {msg}"
         );
     }
 }
