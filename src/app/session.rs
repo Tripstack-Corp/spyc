@@ -424,7 +424,7 @@ impl App {
         // jumps to the session's home, not where spyc was launched from.
         if session.cwd.is_dir() {
             if let Err(e) = self.state.chdir(&session.cwd) {
-                self.state.flash_error(format!("session chdir: {e}"));
+                self.state.flash_error(format!("session chdir: {e:#}"));
                 return;
             }
             self.state.start_dir.clone_from(&session.cwd);

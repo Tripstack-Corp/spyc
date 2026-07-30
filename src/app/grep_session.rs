@@ -95,7 +95,7 @@ impl App {
             .case_smart(true)
             .build(pattern)
         {
-            self.state.flash_error(format!("grep: {e}"));
+            self.state.flash_error(format!("grep: {e:#}"));
             return;
         }
         let pat = pattern.to_string();

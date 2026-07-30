@@ -622,7 +622,7 @@ impl App {
                     // swallowing it — `jump_to` errors only when the path can't
                     // be resolved (chdir failures already flash inside it).
                     if let Err(e) = self.state.jump_to(trimmed) {
-                        self.state.flash_error(format!("jump: {e}"));
+                        self.state.flash_error(format!("jump: {e:#}"));
                     }
                 }
                 self.reconcile_harpoon();
@@ -641,7 +641,7 @@ impl App {
                         Ok(()) => self
                             .state
                             .flash_info(format!("created {}", resolved.display())),
-                        Err(e) => self.state.flash_error(format!("error: {e}")),
+                        Err(e) => self.state.flash_error(format!("error: {e:#}")),
                     }
                     self.state.refresh_listing();
                 }
@@ -689,7 +689,7 @@ impl App {
                             let _ = self.state.chdir(parent);
                         }
                     }
-                    Err(e) => self.state.flash_error(format!("worktree remove: {e}")),
+                    Err(e) => self.state.flash_error(format!("worktree remove: {e:#}")),
                 }
                 self.reconcile_harpoon();
                 Vec::new()

@@ -113,7 +113,9 @@ impl App {
                         skill::embedded_version(),
                     ));
                 }
-                Err(e) => self.state.flash_error(format!("skill install failed: {e}")),
+                Err(e) => self
+                    .state
+                    .flash_error(format!("skill install failed: {e:#}")),
             },
             "remove" | "uninstall" => match skill::remove_all() {
                 Ok(gone) if gone.is_empty() => {
@@ -128,7 +130,9 @@ impl App {
                     self.state
                         .flash_info(format!("spyc skill removed from {where_}"));
                 }
-                Err(e) => self.state.flash_error(format!("skill remove failed: {e}")),
+                Err(e) => self
+                    .state
+                    .flash_error(format!("skill remove failed: {e:#}")),
             },
             "ask" => {
                 crate::state::skill_prompt::clear();

@@ -443,7 +443,7 @@ impl App {
                 // run loop on a transient backend failure).
                 Effect::CopyToClipboard { text, ok } => match crate::clipboard::copy(&text) {
                     Ok(()) => self.state.flash_info(ok.success(&text)),
-                    Err(e) => self.state.flash_error(format!("yank failed: {e}")),
+                    Err(e) => self.state.flash_error(format!("yank failed: {e:#}")),
                 },
                 // A-class: copy + flash the ACTIVE PAGER's title (not the status
                 // bar), so a yank inside a pager confirms where the user is
@@ -519,7 +519,7 @@ impl App {
                                 match crate::clipboard::copy(&text) {
                                     Ok(()) => self.state.flash_info(ok.success(&text)),
                                     Err(e) => {
-                                        self.state.flash_error(format!("yank failed: {e}"));
+                                        self.state.flash_error(format!("yank failed: {e:#}"));
                                     }
                                 }
                             }
@@ -595,7 +595,7 @@ impl App {
                         }
                         Some(Err(e)) => {
                             if let Some(prefix) = err_prefix {
-                                self.state.flash_error(format!("{prefix}: {e}"));
+                                self.state.flash_error(format!("{prefix}: {e:#}"));
                             }
                         }
                         None => {}
@@ -808,7 +808,7 @@ impl App {
                     // screen) — never fatal. The TUI and pager were already
                     // restored above.
                     if let Err(e) = fg_result {
-                        self.state.flash_error(format!("{program}: {e}"));
+                        self.state.flash_error(format!("{program}: {e:#}"));
                     }
                 }
                 // Tier 5: run the tar+zstd / trash IO on a detached worker —

@@ -217,7 +217,7 @@ impl App {
                         prompted: false,
                     });
                 }
-                Err(e) => self.state.flash_error(format!("lua: {e}")),
+                Err(e) => self.state.flash_error(format!("lua: {e:#}")),
             }
         }
     }
@@ -309,7 +309,7 @@ impl App {
                     Ok(c) => c,
                     Err(e) => {
                         self.state
-                            .flash_error(format!("lua: spyc.map bad key '{key}': {e}"));
+                            .flash_error(format!("lua: spyc.map bad key '{key}': {e:#}"));
                         return;
                     }
                 };
@@ -408,7 +408,8 @@ impl App {
             match self.apply(&action) {
                 Ok(e) => fx.extend(e),
                 Err(e) => {
-                    self.state.flash_error(format!("lua: action '{name}': {e}"));
+                    self.state
+                        .flash_error(format!("lua: action '{name}': {e:#}"));
                     break;
                 }
             }

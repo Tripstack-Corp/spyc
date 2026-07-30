@@ -195,7 +195,7 @@ impl App {
         let mut commander = match state::Commander::for_dir(&dir, &self.state.config) {
             Ok(c) => c,
             Err(e) => {
-                self.state.flash_error(format!("open: {e}"));
+                self.state.flash_error(format!("open: {e:#}"));
                 return;
             }
         };

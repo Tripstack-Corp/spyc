@@ -836,7 +836,7 @@ impl AppState {
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
                 self.flash_info(format!("saved: {name}"));
             }
-            Err(e) => self.flash_info(format!("save error: {e}")),
+            Err(e) => self.flash_info(format!("save error: {e:#}")),
         }
     }
 

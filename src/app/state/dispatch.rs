@@ -189,7 +189,7 @@ impl AppState {
                     self.flash_info(format!("start dir: {}", canon.display()));
                     self.start_dir = canon;
                 }
-                Err(e) => self.flash_error(format!("startdir: {e}")),
+                Err(e) => self.flash_error(format!("startdir: {e:#}")),
             }
             return CommandResult::Handled;
         }
@@ -211,7 +211,7 @@ impl AppState {
                     self.flash_info(format!("PROJECT_HOME: {}", canon.display()));
                     self.project_home = Some(canon);
                 }
-                Err(e) => self.flash_error(format!("project: {e}")),
+                Err(e) => self.flash_error(format!("project: {e:#}")),
             }
             return CommandResult::Handled;
         }
@@ -329,7 +329,7 @@ impl AppState {
                     }
                     // Don't swallow an invalid glob — tell the user why nothing
                     // got picked instead of silently no-op'ing.
-                    Err(e) => self.flash_error(format!("bad pattern: {e}")),
+                    Err(e) => self.flash_error(format!("bad pattern: {e:#}")),
                 }
                 PromptResult::Handled
             }

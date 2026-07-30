@@ -2,7 +2,7 @@
 //! viewport visibility, incremental find, and mark/dir/git-change jumps.
 //! Split from `state` verbatim; `impl AppState` reading fields directly.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::app::{Effect, Matcher};
 
@@ -217,8 +217,12 @@ impl AppState {
         } else {
             self.cur().listing.dir.join(&expanded)
         };
-        let canonical = std::fs::canonicalize(&abs)?;
-        let md = std::fs::metadata(&canonical)?;
+        // Name the path: a bare `?` here surfaced as "chdir: No such file or
+        // directory" with no indication of WHICH path was missing.
+        let canonical =
+            std::fs::canonicalize(&abs).with_context(|| format!("resolving {}", abs.display()))?;
+        let md = std::fs::metadata(&canonical)
+            .with_context(|| format!("reading {}", canonical.display()))?;
         if md.is_dir() {
             if let Err(e) = self.chdir(&canonical) {
                 self.flash_error(format!("chdir: {e:#}"));

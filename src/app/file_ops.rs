@@ -366,7 +366,7 @@ impl App {
                     Ok(()) => self
                         .state
                         .flash_info(format!("copied {count} item(s) to {}", dest.display())),
-                    Err(e) => self.state.flash_error(format!("error: {e}")),
+                    Err(e) => self.state.flash_error(format!("error: {e:#}")),
                 }
                 self.state.cur_mut().picks.clear();
                 self.state.refresh_listing();
@@ -380,7 +380,7 @@ impl App {
                     Ok(()) => self
                         .state
                         .flash_info(format!("moved {count} item(s) to {}", dest.display())),
-                    Err(e) => self.state.flash_error(format!("error: {e}")),
+                    Err(e) => self.state.flash_error(format!("error: {e:#}")),
                 }
                 self.state.cur_mut().picks.clear();
                 self.state.refresh_listing();
@@ -393,7 +393,7 @@ impl App {
                 let verb = if is_move { "renamed" } else { "copied" };
                 match result {
                     Ok(()) => self.state.flash_info(format!("{verb} {count} item(s)")),
-                    Err(e) => self.state.flash_error(format!("error: {e}")),
+                    Err(e) => self.state.flash_error(format!("error: {e:#}")),
                 }
                 self.state.cur_mut().picks.clear();
                 self.state.refresh_listing();
@@ -401,7 +401,7 @@ impl App {
             FileOutcome::Restored { rela_path, result } => {
                 match result {
                     Ok(()) => self.state.flash_info(format!("restored {rela_path}")),
-                    Err(e) => self.state.flash_error(format!("restore failed: {e}")),
+                    Err(e) => self.state.flash_error(format!("restore failed: {e:#}")),
                 }
                 // The file is back on disk (so its ghost row clears) and the
                 // git status changes — refresh both.

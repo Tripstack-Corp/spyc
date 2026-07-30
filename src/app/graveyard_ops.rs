@@ -150,7 +150,7 @@ impl App {
                 }
                 Err(e) => self
                     .state
-                    .flash_error(format!("undo: {e} — try `gy` then `p` to restore to cwd")),
+                    .flash_error(format!("undo: {e:#} — try `gy` then `p` to restore to cwd")),
             },
             GraveyardOutcome::Purged { trashed, errors } => {
                 if errors > 0 {

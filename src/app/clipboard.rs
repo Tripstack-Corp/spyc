@@ -254,7 +254,7 @@ impl App {
     pub fn run_and_flash(&mut self, result: std::io::Result<()>, success_msg: String) {
         match result {
             Ok(()) => self.state.flash_info(success_msg),
-            Err(e) => self.state.flash_error(format!("error: {e}")),
+            Err(e) => self.state.flash_error(format!("error: {e:#}")),
         }
     }
 }

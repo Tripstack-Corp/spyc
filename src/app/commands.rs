@@ -42,7 +42,7 @@ impl App {
                 self.runtime.top_overlay = Some(p);
                 self.state.focus = Focus::Overlay;
             }
-            Err(e) => self.state.flash_error(format!("spawn: {e}")),
+            Err(e) => self.state.flash_error(format!("spawn: {e:#}")),
         }
     }
 

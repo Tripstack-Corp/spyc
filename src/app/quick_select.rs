@@ -149,7 +149,7 @@ impl App {
                 self.state
                     .flash_info(format!("yanked {kind_label}: {preview}{ellipsis}"));
             }
-            Err(e) => self.state.flash_error(format!("yank failed: {e}")),
+            Err(e) => self.state.flash_error(format!("yank failed: {e:#}")),
         }
     }
 
@@ -166,7 +166,7 @@ impl App {
                 self.state
                     .flash_info(format!("opening: {preview}{ellipsis}"));
             }
-            Err(e) => self.state.flash_error(format!("open: {e}")),
+            Err(e) => self.state.flash_error(format!("open: {e:#}")),
         }
     }
 

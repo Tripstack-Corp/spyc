@@ -339,7 +339,7 @@ impl App {
                             },
                         ),
                         Err(e) => {
-                            self.state.flash_error(format!("write temp: {e}"));
+                            self.state.flash_error(format!("write temp: {e:#}"));
                             return Vec::new();
                         }
                     }

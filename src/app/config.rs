@@ -49,7 +49,7 @@ impl App {
                 // init.lua — a configless `^R` shouldn't flash about Lua).
                 self.reload_init_lua(false);
             }
-            Err(e) => self.state.flash_error(format!("config error: {e}")),
+            Err(e) => self.state.flash_error(format!("config error: {e:#}")),
         }
     }
 

@@ -155,7 +155,7 @@ impl App {
                 true
             }
             Err(e) => {
-                self.state.flash_error(format!("pane spawn failed: {e}"));
+                self.state.flash_error(format!("pane spawn failed: {e:#}"));
                 false
             }
         }
@@ -377,7 +377,8 @@ impl App {
                 true
             }
             Err(e) => {
-                self.state.flash_error(format!("pane respawn failed: {e}"));
+                self.state
+                    .flash_error(format!("pane respawn failed: {e:#}"));
                 false
             }
         }
@@ -845,7 +846,7 @@ impl App {
                     .flash_info(format!("wrote {} lines to {display}", lines.len())),
                 Err(e) => self
                     .state
-                    .flash_error(format!("dump-scrollback: write failed: {e}")),
+                    .flash_error(format!("dump-scrollback: write failed: {e:#}")),
             },
             None => self
                 .state

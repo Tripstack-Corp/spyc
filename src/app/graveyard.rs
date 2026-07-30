@@ -163,7 +163,7 @@ impl App {
             }
             Err(e) => {
                 self.state
-                    .flash_error(format!("restore failed: {e} (target may already exist)"));
+                    .flash_error(format!("restore failed: {e:#} (target may already exist)"));
             }
         }
     }
@@ -187,7 +187,7 @@ impl App {
                 self.state.left.cursor.clamp(self.state.graveyard.len());
                 self.state.rebuild_rows();
             }
-            Err(e) => self.state.flash_error(format!("purge failed: {e}")),
+            Err(e) => self.state.flash_error(format!("purge failed: {e:#}")),
         }
     }
 }

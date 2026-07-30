@@ -63,7 +63,7 @@ impl App {
                         false
                     }
                     Err(e) => {
-                        self.state.flash_error(format!(".mcp.json: {e}"));
+                        self.state.flash_error(format!(".mcp.json: {e:#}"));
                         false
                     }
                 }
@@ -99,7 +99,7 @@ impl App {
                     Ok(crate::mcp::McpConfigStatus::Configured) => true,
                     Ok(_) => false,
                     Err(e) => {
-                        self.state.flash_error(format!(".codex/config.toml: {e}"));
+                        self.state.flash_error(format!(".codex/config.toml: {e:#}"));
                         false
                     }
                 }
