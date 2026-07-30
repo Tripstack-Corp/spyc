@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::fs::{Entry, Listing};
 use crate::state::Cursor;
@@ -307,7 +307,8 @@ impl AppState {
     /// the process cwd or back-nav history out from under the focused one.
     /// `chdir` is the `side == focused_side()` case, behavior-for-behavior.
     pub fn chdir_side(&mut self, side: Side, path: &Path) -> Result<()> {
-        let canonical = std::fs::canonicalize(path)?;
+        let canonical =
+            std::fs::canonicalize(path).with_context(|| format!("resolving {}", path.display()))?;
         let new_listing = Listing::read(&canonical)?;
         let focused = self.focused_side() == side;
         if focused && self.col(side).listing.dir != canonical {

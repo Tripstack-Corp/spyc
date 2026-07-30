@@ -283,7 +283,9 @@ impl App {
                         "spyc skill updated for {hosts} (`:skill` to manage)"
                     ));
                 }
-                Err(e) => self.state.flash_error(format!("skill install failed: {e}")),
+                Err(e) => self
+                    .state
+                    .flash_error(format!("skill install failed: {e:#}")),
             },
             KeyCode::Char('n' | 'N') => {
                 crate::state::skill_prompt::decline(&fingerprint);

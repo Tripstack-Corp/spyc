@@ -35,7 +35,7 @@ impl AppState {
         );
         match self.marks.save() {
             Ok(()) => self.flash_info(format!("mark '{letter}' set")),
-            Err(e) => self.flash_error(format!("mark saved in-memory only: {e}")),
+            Err(e) => self.flash_error(format!("mark saved in-memory only: {e:#}")),
         }
     }
 

@@ -49,6 +49,45 @@ mod guard_tests {
     /// column has its own `watched_listing_right`), the startup `initial_cwd`
     /// (`bootstrap.rs`, pre-split), and the status-bar header (`chrome.rs`,
     /// deliberately anchored to the primary column).
+    /// A user-visible error must carry its CAUSE, not just its context line.
+    ///
+    /// anyhow's plain `Display` (`{e}`) prints only the OUTERMOST context and
+    /// silently drops everything beneath it. That is how `chdir: reading
+    /// directory /Users/…/Downloads` reached a user with the actual reason — a
+    /// macOS privacy denial — discarded at the final step, even though the error
+    /// value carried it the whole way. Fifty flash sites had independently made
+    /// the same choice.
+    ///
+    /// `{e:#}` (the alternate form) renders the full `source()` chain. It is
+    /// also safe for a plain `io::Error`, whose `Display` ignores the flag — so
+    /// there is no case where the short form is the right one here.
+    #[test]
+    fn flashed_errors_render_their_whole_chain() {
+        // Split so this guard's own source can't match its needle.
+        let needle = format!("{}{}", "{e", "}");
+        let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut offenders = Vec::new();
+        scan_rs(&app, &mut |path, src| {
+            for (i, line) in src.lines().enumerate() {
+                let flashes =
+                    line.contains("flash_error(format!(") || line.contains("flash_info(format!(");
+                if flashes && line.contains(&needle) {
+                    offenders.push(format!(
+                        "{}:{}",
+                        path.file_name().and_then(|n| n.to_str()).unwrap_or("?"),
+                        i + 1
+                    ));
+                }
+            }
+        });
+        assert!(
+            offenders.is_empty(),
+            "these flashes drop the error's cause — use `{{e:#}}` so the whole \
+             source chain reaches the user:\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+
     #[test]
     fn state_left_listing_dir_uses_are_allowlisted() {
         const ALLOW: &[&str] = &["run.rs", "bootstrap.rs", "chrome.rs"];

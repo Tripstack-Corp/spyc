@@ -49,7 +49,8 @@ impl App {
         match h.append(path) {
             crate::state::harpoon::AppendResult::Added(slot) => {
                 if let Err(e) = h.save() {
-                    self.state.flash_error(format!("harpoon save failed: {e}"));
+                    self.state
+                        .flash_error(format!("harpoon save failed: {e:#}"));
                     return;
                 }
                 self.sync_harpoon_filter_set();
@@ -96,7 +97,8 @@ impl App {
         match h.remove(&path) {
             Some(slot) => {
                 if let Err(e) = h.save() {
-                    self.state.flash_error(format!("harpoon save failed: {e}"));
+                    self.state
+                        .flash_error(format!("harpoon save failed: {e:#}"));
                     return;
                 }
                 self.sync_harpoon_filter_set();
@@ -146,7 +148,7 @@ impl App {
             return;
         };
         if let Err(e) = self.state.chdir(&chdir_to) {
-            self.state.flash_error(format!("harpoon chdir: {e}"));
+            self.state.flash_error(format!("harpoon chdir: {e:#}"));
             return;
         }
         if let Some(p) = focus {
@@ -237,7 +239,8 @@ impl App {
                 h.swap(menu.cursor, menu.cursor - 1);
                 menu.cursor -= 1;
                 if let Err(e) = h.save() {
-                    self.state.flash_error(format!("harpoon save failed: {e}"));
+                    self.state
+                        .flash_error(format!("harpoon save failed: {e:#}"));
                 }
                 self.sync_harpoon_filter_set();
             }
@@ -245,7 +248,8 @@ impl App {
                 h.swap(menu.cursor, menu.cursor + 1);
                 menu.cursor += 1;
                 if let Err(e) = h.save() {
-                    self.state.flash_error(format!("harpoon save failed: {e}"));
+                    self.state
+                        .flash_error(format!("harpoon save failed: {e:#}"));
                 }
                 self.sync_harpoon_filter_set();
             }
@@ -254,7 +258,8 @@ impl App {
                     let removed_idx = menu.cursor;
                     h.remove_at(removed_idx);
                     if let Err(e) = h.save() {
-                        self.state.flash_error(format!("harpoon save failed: {e}"));
+                        self.state
+                            .flash_error(format!("harpoon save failed: {e:#}"));
                     }
                     self.sync_harpoon_filter_set();
                     if matches!(self.state.cur().temp_filter.as_deref(), Some("h")) {

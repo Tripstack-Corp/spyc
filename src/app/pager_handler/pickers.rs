@@ -48,7 +48,7 @@ impl App {
                                 // popup instead of typing.
                                 self.state.jump_history.push(path_str);
                             }
-                            Err(e) => self.state.flash_error(format!("cd: {e}")),
+                            Err(e) => self.state.flash_error(format!("cd: {e:#}")),
                         }
                     }
                     return Some(Vec::new());

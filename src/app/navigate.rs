@@ -135,7 +135,7 @@ impl App {
         // its parent and focus on it.
         if path.is_dir() {
             if let Err(e) = self.state.chdir(&path) {
-                self.state.flash_error(format!("gf: {e}"));
+                self.state.flash_error(format!("gf: {e:#}"));
             }
             return;
         }
@@ -144,7 +144,7 @@ impl App {
             if parent != self.state.cur().listing.dir
                 && let Err(e) = self.state.chdir(parent)
             {
-                self.state.flash_error(format!("gf: {e}"));
+                self.state.flash_error(format!("gf: {e:#}"));
                 return;
             }
             self.state.focus_on_path(&path);

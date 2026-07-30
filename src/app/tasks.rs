@@ -163,7 +163,7 @@ impl App {
                     full_log,
                 });
             }
-            Err(e) => self.state.flash_error(format!("exec: {e}")),
+            Err(e) => self.state.flash_error(format!("exec: {e:#}")),
         }
     }
 

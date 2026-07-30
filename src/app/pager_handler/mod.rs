@@ -262,7 +262,7 @@ impl App {
         let wake = self.make_pane_wake();
         match Pane::spawn(cmd, rows, cols, &cwd, &self.view.context_path, wake) {
             Ok(p) => self.install_overlay_pty(p),
-            Err(e) => self.state.flash_error(format!("spawn: {e}")),
+            Err(e) => self.state.flash_error(format!("spawn: {e:#}")),
         }
     }
 
