@@ -430,10 +430,16 @@ impl App {
                 return r.status;
             }
         }
+        let timing = Self::activity_for(is_agent, last_output_at, now);
         if let Some(s) = scrape {
-            return s;
+            // Only apply the scrape fallback if the agent has stopped printing output.
+            // This prevents false positive 'flashes' while the agent is streaming text
+            // that happens to match the scrape rules.
+            if timing == AgentActivity::Idle {
+                return s;
+            }
         }
-        Self::activity_for(is_agent, last_output_at, now)
+        timing
     }
 
     /// P1-2 pure hysteresis step: given the prior `(state, consecutive-match
@@ -862,6 +868,11 @@ mod tests {
         assert_eq!(
             App::effective_activity(None, Some(AgentActivity::Blocked), true, None, base),
             AgentActivity::Blocked
+        );
+        // Scrape guess is suppressed if the agent is still actively outputting.
+        assert_eq!(
+            App::effective_activity(None, Some(AgentActivity::Blocked), true, Some(base), base),
+            AgentActivity::Working
         );
         // A live report still wins over a scrape guess.
         let report = Some(crate::pane::ReportedStatus {
