@@ -360,8 +360,8 @@ impl AgentProfile for CodexProfile {
 /// so it relies on this scrape fallback for the `Blocked` signal when
 /// a tool execution needs approval.
 static AGY_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {
-    region: detect_rules::Region::BottomNonEmptyLines(1),
-    matcher: detect_rules::Matcher::Contains("esc to cancel"),
+    region: detect_rules::Region::BottomNonEmptyLines(15),
+    matcher: detect_rules::Matcher::Contains("Do you want to proceed?"),
     state: crate::pane::AgentActivity::Blocked,
     visible_blocker: Some("awaiting tool-execution approval"),
 }];
