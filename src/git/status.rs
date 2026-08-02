@@ -413,7 +413,7 @@ pub fn repo_status_stable(
 /// resolved-ref mtimes so both a commit *and* a checkout refresh the poll. A
 /// detached HEAD stores the commit id in the HEAD file itself, so its own mtime
 /// already tracks commits — the `None` ref branch falls back to it.
-pub(crate) fn head_ref_mtime(gitdir: &Path) -> Option<SystemTime> {
+pub fn head_ref_mtime(gitdir: &Path) -> Option<SystemTime> {
     let head_file = gitdir.join("HEAD");
     let head_mtime = std::fs::metadata(&head_file)
         .and_then(|m| m.modified())
