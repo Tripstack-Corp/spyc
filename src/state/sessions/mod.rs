@@ -392,8 +392,6 @@ pub fn most_recent_jsonl_for_cwd(cwd: &std::path::Path) -> Option<String> {
     best.map(|(_, id)| id)
 }
 
-
-
 #[derive(Debug, Clone)]
 pub struct AgySessionInfo {
     pub session_id: String,
@@ -411,7 +409,9 @@ impl SessionCandidate for AgySessionInfo {
 
 /// True if a conversation ID exists for the given cwd in agy's history.jsonl
 pub fn agy_jsonl_exists(cwd: &std::path::Path, session_id: &str) -> bool {
-    find_agy_sessions(cwd).into_iter().any(|s| s.session_id == session_id)
+    find_agy_sessions(cwd)
+        .into_iter()
+        .any(|s| s.session_id == session_id)
 }
 
 /// Find every Agy session for a given cwd by parsing `history.jsonl`.
@@ -439,7 +439,7 @@ pub fn find_agy_sessions(cwd: &std::path::Path) -> Vec<AgySessionInfo> {
         };
         let mut matches = workspace == cwd_str
             || workspace.strip_prefix("/private").unwrap_or(workspace) == cwd_str.as_ref();
-        
+
         if !matches {
             if let Some(main_repo) = gix::open(cwd).ok().and_then(|repo| {
                 std::fs::canonicalize(repo.common_dir())
@@ -483,8 +483,6 @@ pub fn find_agy_sessions(cwd: &std::path::Path) -> Vec<AgySessionInfo> {
     found.sort_by_key(|f| std::cmp::Reverse(f.started_at_secs));
     found
 }
-
-
 
 /// Parse an ISO-8601 / RFC 3339 timestamp
 /// to epoch seconds via `jiff`. Accepts both forms emitted in the

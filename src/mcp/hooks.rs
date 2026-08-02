@@ -457,15 +457,11 @@ pub fn cleanup_codex_status_hooks(dir: &Path) -> ConfigCleanup {
 // lifecycle events (`PreInvocation` / `PostInvocation` / `PermissionRequest`) take a flat
 // handler list under the event key (agy uses the claude/codex `{hooks,matcher}`
 // group only for PreToolUse). spyc owns one set, `spyc-status`: PreInvocation →
-// working, PermissionRequest → blocked, PostInvocation → done.
+// working, PermissionRequest → blocked.
 // Read once at startup (written pre-spawn like codex).
 
 /// Agy's (event, reported-state). No matcher: these events aren't tool-scoped.
-const AGY_STATUS_HOOKS: [(&str, &str); 3] = [
-    ("PreInvocation", "working"),
-    ("PermissionRequest", "blocked"),
-    ("PostInvocation", "done"),
-];
+const AGY_STATUS_HOOKS: [(&str, &str); 1] = [("PreInvocation", "working")];
 
 /// The named hook-set spyc owns in agy's `hooks.json` (our namespace there).
 const AGY_HOOK_SET: &str = "spyc-status";
@@ -1026,8 +1022,6 @@ mod tests {
         let twice = merged_agy_status_hooks_json(Some(&once), "spyc", false).expect("re-merge");
         assert_eq!(once, twice, "re-applying the merge changed a byte");
         assert!(once.contains("--report-status working"));
-        assert!(once.contains("--report-status done"));
-        assert!(once.contains("--report-status blocked"));
         assert!(
             !once.contains("--status-trace"),
             "trace off → no baked flag"

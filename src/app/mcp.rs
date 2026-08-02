@@ -78,9 +78,8 @@ impl App {
                         true
                     }
                     Ok(crate::mcp::McpConfigStatus::SkippedTakeover { old_pid }) => {
-                        self.state.flash_info(format!(
-                            "Agy MCP: kept PID {old_pid} as owner"
-                        ));
+                        self.state
+                            .flash_info(format!("Agy MCP: kept PID {old_pid} as owner"));
                         false
                     }
                     Ok(_) => false,

@@ -498,7 +498,11 @@ fn remove_spyc_from_mcp_json(
 /// wrote from `<dir>/.mcp.json`, deleting the file if it's left empty. Leaves a
 /// successor instance's entry and any git-tracked file untouched.
 pub fn cleanup_mcp_json(dir: &Path) -> ConfigCleanup {
-    remove_spyc_from_mcp_json(&dir.join(".mcp.json"), |sock| sock.is_some_and(sock_is_ours), true)
+    remove_spyc_from_mcp_json(
+        &dir.join(".mcp.json"),
+        |sock| sock.is_some_and(sock_is_ours),
+        true,
+    )
 }
 
 /// Teardown counterpart to [`ensure_codex_config_toml`]: remove the spyc entry
@@ -893,8 +897,6 @@ mod tests {
     }
 }
 
-
-
 pub fn detect_existing_spyc_agy(dir: &Path) -> Option<u32> {
     let path = dir.join(".agents/mcp_config.json");
     let our_sock = socket_path();
@@ -912,9 +914,9 @@ pub fn ensure_agy_mcp_config(
 ) -> Result<McpConfigStatus, io::Error> {
     let our_sock = socket_path();
     let our_pid = std::process::id();
-    
+
     let path = dir.join(".agents/mcp_config.json");
-    
+
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
 
     let mut took_over: Option<u32> = None;

@@ -73,8 +73,6 @@ pub fn command_without_codex_resume(cmd: &str) -> String {
     }
 }
 
-
-
 /// Strip Antigravity's `--conversation <UUID>`, `-c <UUID>`, and `--continue` flags from a command line.
 pub fn command_without_agy_resume(cmd: &str) -> String {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
@@ -204,8 +202,6 @@ pub fn resolve_claude_resume_target(
     resolved
 }
 
-
-
 #[cfg(test)]
 mod claude_resume_tests {
     use super::command_without_resume;
@@ -254,8 +250,6 @@ mod claude_resume_tests {
         assert_eq!(command_without_resume(""), "claude");
     }
 }
-
-
 
 #[cfg(test)]
 mod agy_helpers_tests {

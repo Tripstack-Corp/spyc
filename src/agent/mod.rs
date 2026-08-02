@@ -141,11 +141,7 @@ pub trait AgentProfile: Sync {
 
     /// SAVE: validate a live-reported session ID against the agent's history.
     /// Returns `(id, optional_name)` if valid, `None` if invalid or unsupported.
-    fn validate_live_session_id(
-        &self,
-        _cwd: &Path,
-        _id: &str,
-    ) -> Option<(String, Option<String>)> {
+    fn validate_live_session_id(&self, _cwd: &Path, _id: &str) -> Option<(String, Option<String>)> {
         None
     }
 
@@ -238,11 +234,7 @@ impl AgentProfile for ClaudeProfile {
     ) -> (Option<String>, Option<String>) {
         resume::resolve_claude_resume_target(pane, cwd, spawn_epoch_secs, claimed)
     }
-    fn validate_live_session_id(
-        &self,
-        cwd: &Path,
-        id: &str,
-    ) -> Option<(String, Option<String>)> {
+    fn validate_live_session_id(&self, cwd: &Path, id: &str) -> Option<(String, Option<String>)> {
         if crate::state::sessions::claude_jsonl_exists(cwd, id) {
             Some((
                 id.to_string(),
@@ -364,7 +356,6 @@ impl AgentProfile for CodexProfile {
     }
 }
 
-
 /// P1-2: Gemini CLI has no `status_hooks()` (no lifecycle-hook config format
 /// spyc writes to today), so it relies entirely on this scrape fallback.
 /// Verified against Gemini CLI's own docs: a shell-command tool call raises a
@@ -410,11 +401,7 @@ impl AgentProfile for AgyProfile {
 
         (None, None)
     }
-    fn validate_live_session_id(
-        &self,
-        cwd: &Path,
-        id: &str,
-    ) -> Option<(String, Option<String>)> {
+    fn validate_live_session_id(&self, cwd: &Path, id: &str) -> Option<(String, Option<String>)> {
         if crate::state::sessions::agy_jsonl_exists(cwd, id) {
             Some((id.to_string(), None))
         } else {
@@ -463,6 +450,9 @@ impl AgentProfile for AgyProfile {
             config_label: ".agents/hooks.json",
             live_reload: false,
         })
+    }
+    fn detection_rules(&self) -> &'static [DetectionRule] {
+        &[]
     }
 }
 
