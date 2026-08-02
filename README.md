@@ -118,7 +118,8 @@ It is also, by definition, unreleased: rolling, and it may break. There are no
 prebuilt binaries — CURRENT is source-only, so you need a Rust toolchain.
 
 ```sh
-git clone https://github.com/Tripstack-Corp/spyc.git
+# Use single-branch to avoid downloading the heavy gh-pages branch
+git clone --single-branch --branch main https://github.com/Tripstack-Corp/spyc.git
 cd spyc
 make install        # release build → ~/.local/bin/spyc
 ```
