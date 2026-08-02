@@ -258,9 +258,7 @@ impl AppState {
         let index_mt = std::fs::metadata(gitdir.join("index"))
             .and_then(|m| m.modified())
             .ok()?;
-        let head_mt = std::fs::metadata(gitdir.join("HEAD"))
-            .and_then(|m| m.modified())
-            .ok()?;
+        let head_mt = crate::git::status::head_ref_mtime(gitdir)?;
         Some((index_mt, head_mt))
     }
 
