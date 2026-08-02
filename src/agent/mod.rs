@@ -364,6 +364,16 @@ impl AgentProfile for CodexProfile {
 /// pattern is here — inventing more would risk a false `Blocked` worse than no
 /// fallback.
 
+/// P1-2: Agy CLI has `status_hooks()` but they don't cover approval events,
+/// so it relies on this scrape fallback for the `Blocked` signal when
+/// a tool execution needs approval.
+static AGY_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {
+    region: detect_rules::Region::BottomNonEmptyLines(1),
+    matcher: detect_rules::Matcher::Contains("esc to cancel"),
+    state: crate::pane::AgentActivity::Blocked,
+    visible_blocker: Some("awaiting tool-execution approval"),
+}];
+
 pub struct AgyProfile;
 impl AgentProfile for AgyProfile {
     fn kind(&self) -> AgentKind {
@@ -452,7 +462,7 @@ impl AgentProfile for AgyProfile {
         })
     }
     fn detection_rules(&self) -> &'static [DetectionRule] {
-        &[]
+        AGY_DETECTION_RULES
     }
 }
 
