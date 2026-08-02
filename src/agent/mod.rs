@@ -356,10 +356,16 @@ impl AgentProfile for CodexProfile {
     }
 }
 
-/// P1-2: Gemini CLI has no `status_hooks()` (no lifecycle-hook config format
-/// spyc writes to today), so it relies entirely on this scrape fallback.
-/// Verified against Gemini CLI's own docs: a shell-command tool call raises a
-/// `y/n/always` confirmation prompt reading `Allow execution of: '<cmd>'?`
+/// Agy CLI has `status_hooks()` but they don't cover approval events,
+/// so it relies on this scrape fallback for the `Blocked` signal when
+/// a tool execution needs approval.
+static AGY_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {
+    region: detect_rules::Region::BottomNonEmptyLines(1),
+    matcher: detect_rules::Matcher::Contains("esc to cancel"),
+    state: crate::pane::AgentActivity::Blocked,
+    visible_blocker: Some("awaiting tool-execution approval"),
+}];
+
 pub struct AgyProfile;
 impl AgentProfile for AgyProfile {
     fn kind(&self) -> AgentKind {
@@ -448,7 +454,7 @@ impl AgentProfile for AgyProfile {
         })
     }
     fn detection_rules(&self) -> &'static [DetectionRule] {
-        &[]
+        AGY_DETECTION_RULES
     }
 }
 

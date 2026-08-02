@@ -461,11 +461,8 @@ pub fn cleanup_codex_status_hooks(dir: &Path) -> ConfigCleanup {
 // Read once at startup (written pre-spawn like codex).
 
 /// Agy's (event, matcher, reported-state). `matcher` is only used by `PreToolUse`.
-const AGY_STATUS_HOOKS: [(&str, &str, &str); 3] = [
-    ("PreInvocation", "", "working"),
-    ("PreToolUse", "*", "blocked"),
-    ("Stop", "", "done"),
-];
+pub const AGY_STATUS_HOOKS: &[(&str, &str, &str)] =
+    &[("PreInvocation", "", "working"), ("Stop", "", "done")];
 
 /// The named hook-set spyc owns in agy's `hooks.json` (our namespace there).
 const AGY_HOOK_SET: &str = "spyc-status";
@@ -530,17 +527,9 @@ fn merged_agy_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) 
         .unwrap_or_else(|| json!({}));
     let obj = root.as_object_mut()?;
     let mut set = serde_json::Map::new();
-    for (event, matcher, state) in AGY_STATUS_HOOKS {
+    for (event, _matcher, state) in AGY_STATUS_HOOKS {
         let hook = json!({ "type": "command", "command": reporter_command(exe, state, trace) });
-        let group_or_hook = if event == "PreToolUse" {
-            json!({
-                "matcher": matcher,
-                "hooks": [hook]
-            })
-        } else {
-            hook
-        };
-        set.insert(event.to_string(), json!([group_or_hook]));
+        set.insert(event.to_string(), json!([hook]));
     }
     // We own the whole `spyc-status` key, so an insert replaces a prior ours
     // outright — idempotent — without disturbing the user's other named sets.
@@ -960,19 +949,8 @@ mod tests {
         let path = dir.join(".agents/hooks.json");
         let v = read(&path);
         for (event, _matcher, state) in AGY_STATUS_HOOKS {
-            let (cmd_ptr, type_ptr) = if event == "PreToolUse" {
-                (
-                    format!("/{AGY_HOOK_SET}/{event}/0/hooks/0/command"),
-                    format!("/{AGY_HOOK_SET}/{event}/0/hooks/0/type"),
-                )
-            } else {
-                (
-                    format!("/{AGY_HOOK_SET}/{event}/0/command"),
-                    format!("/{AGY_HOOK_SET}/{event}/0/type"),
-                )
-            };
             let cmd = v
-                .pointer(&cmd_ptr)
+                .pointer(&format!("/{AGY_HOOK_SET}/{event}/0/command"))
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             assert!(
@@ -980,7 +958,8 @@ mod tests {
                 "{event} → {state}: got {cmd:?}"
             );
             assert_eq!(
-                v.pointer(&type_ptr).and_then(Value::as_str),
+                v.pointer(&format!("/{AGY_HOOK_SET}/{event}/0/type"))
+                    .and_then(Value::as_str),
                 Some("command")
             );
         }
