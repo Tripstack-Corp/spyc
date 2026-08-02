@@ -387,14 +387,28 @@ impl AgentProfile for AgyProfile {
     fn resolve_resume_target(
         &self,
         pane: &Pane,
-        _cwd: &Path,
-        _spawn_epoch_secs: u64,
+        cwd: &Path,
+        spawn_epoch_secs: u64,
         claimed: &HashSet<String>,
     ) -> (Option<String>, Option<String>) {
         let lines = pane.recent_lines(200);
-        let id = crate::state::sessions::extract_agy_resume_token(&lines)
-            .filter(|tok| !claimed.contains(tok));
-        (id, None)
+        if let Some(id) = crate::state::sessions::extract_agy_resume_token(&lines)
+            .filter(|tok| !claimed.contains(tok))
+        {
+            return (Some(id), None);
+        }
+
+        // Fallback: pick the per-pane match by spawn-time proximity
+        let candidates = crate::state::sessions::find_agy_sessions(cwd);
+        if let Some(c) = crate::state::sessions::pick_closest_unclaimed_session(
+            candidates,
+            spawn_epoch_secs,
+            claimed,
+        ) {
+            return (Some(c.session_id), None);
+        }
+
+        (None, None)
     }
     fn validate_live_session_id(
         &self,
