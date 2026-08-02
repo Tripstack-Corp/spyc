@@ -437,8 +437,22 @@ pub fn find_agy_sessions(cwd: &std::path::Path) -> Vec<AgySessionInfo> {
         let Some(workspace) = val.get("workspace").and_then(|v| v.as_str()) else {
             continue;
         };
-        let matches = workspace == cwd_str
+        let mut matches = workspace == cwd_str
             || workspace.strip_prefix("/private").unwrap_or(workspace) == cwd_str.as_ref();
+        
+        if !matches {
+            if let Some(main_repo) = gix::open(cwd).ok().and_then(|repo| {
+                std::fs::canonicalize(repo.common_dir())
+                    .unwrap_or_else(|_| repo.common_dir().to_path_buf())
+                    .parent()
+                    .map(|p| p.to_path_buf())
+            }) {
+                let main_str = main_repo.to_string_lossy();
+                matches = workspace == main_str
+                    || workspace.strip_prefix("/private").unwrap_or(workspace) == main_str.as_ref();
+            }
+        }
+
         if !matches {
             continue;
         }
