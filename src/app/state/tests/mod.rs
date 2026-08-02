@@ -1020,6 +1020,39 @@ fn compute_git_info_fast_memoizes_branch_by_head_mtime() {
     );
 }
 
+#[test]
+fn compute_git_mtime_key_fast_tracks_branch_ref_updates() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    crate::git::test_support::run_git(root, &["init"]);
+    
+    // Initial commit so we have a branch ref
+    std::fs::write(root.join("f"), "data").unwrap();
+    crate::git::test_support::run_git(root, &["add", "f"]);
+    crate::git::test_support::run_git(root, &["commit", "-m", "init"]);
+    
+    let mut s = test_state();
+    s.left.listing.dir = root.to_path_buf();
+    s.update_repo_root(crate::app::state::Side::Left, root);
+    
+    let (_, head_before) = s.compute_git_mtime_key_fast(crate::app::state::Side::Left).unwrap();
+    
+    // Sleep to ensure the next commit has a visibly newer mtime (OS dependent resolution)
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    
+    // Commit a file, which updates the branch ref (e.g. refs/heads/main) but NOT .git/HEAD
+    std::fs::write(root.join("g"), "data2").unwrap();
+    crate::git::test_support::run_git(root, &["add", "g"]);
+    crate::git::test_support::run_git(root, &["commit", "-m", "update"]);
+    
+    let (_, head_after) = s.compute_git_mtime_key_fast(crate::app::state::Side::Left).unwrap();
+    
+    assert!(
+        head_after > head_before,
+        "fast poll must resolve the branch ref so commits trigger a re-walk"
+    );
+}
+
 // ── count_files_in_dir_capped (R blast-radius walk, bounded) ──────
 #[test]
 fn count_files_capped_counts_under_cap_and_stops_at_cap() {
