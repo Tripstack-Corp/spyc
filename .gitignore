@@ -89,3 +89,6 @@ Cargo.lock.bak
 # aislop local trend log (written on every `make aislop`); the baseline
 # (.aislop/baseline.json) IS committed, this churn log is not.
 .aislop/history.jsonl
+
+# Antigravity agent environment files
+.agents/

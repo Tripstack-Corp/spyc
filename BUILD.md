@@ -26,7 +26,8 @@ to a newer release.
 ## Build and install
 
 ```sh
-git clone https://github.com/Tripstack-Corp/spyc.git
+# Use single-branch to avoid downloading the heavy gh-pages branch
+git clone --single-branch --branch main https://github.com/Tripstack-Corp/spyc.git
 cd spyc
 make install          # builds release + copies to ~/.local/bin (no sudo)
 ```
