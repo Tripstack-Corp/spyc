@@ -460,8 +460,12 @@ pub fn cleanup_codex_status_hooks(dir: &Path) -> ConfigCleanup {
 // working, PermissionRequest → blocked.
 // Read once at startup (written pre-spawn like codex).
 
-/// Agy's (event, reported-state). No matcher: these events aren't tool-scoped.
-const AGY_STATUS_HOOKS: [(&str, &str); 1] = [("PreInvocation", "working")];
+/// Agy's (event, matcher, reported-state). `matcher` is only used by `PreToolUse`.
+const AGY_STATUS_HOOKS: [(&str, &str, &str); 3] = [
+    ("PreInvocation", "", "working"),
+    ("PreToolUse", "*", "blocked"),
+    ("Stop", "", "done"),
+];
 
 /// The named hook-set spyc owns in agy's `hooks.json` (our namespace there).
 const AGY_HOOK_SET: &str = "spyc-status";
@@ -474,8 +478,15 @@ fn agy_set_is_ours(set: &Value) -> bool {
         events.values().any(|arr| {
             arr.as_array().is_some_and(|handlers| {
                 handlers.iter().any(|h| {
-                    h.get("command")
-                        .and_then(Value::as_str)
+                    let cmd = h.get("command");
+                    // If it's a {hooks, matcher} group (like PreToolUse), check its inner hooks
+                    let cmd = cmd.or_else(|| {
+                        h.get("hooks")
+                            .and_then(Value::as_array)
+                            .and_then(|inner| inner.first())
+                            .and_then(|inner_h| inner_h.get("command"))
+                    });
+                    cmd.and_then(Value::as_str)
                         .is_some_and(|c| c.contains("--report-status"))
                 })
             })
@@ -519,11 +530,17 @@ fn merged_agy_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) 
         .unwrap_or_else(|| json!({}));
     let obj = root.as_object_mut()?;
     let mut set = serde_json::Map::new();
-    for (event, state) in AGY_STATUS_HOOKS {
-        set.insert(
-            event.to_string(),
-            json!([{ "type": "command", "command": reporter_command(exe, state, trace) }]),
-        );
+    for (event, matcher, state) in AGY_STATUS_HOOKS {
+        let hook = json!({ "type": "command", "command": reporter_command(exe, state, trace) });
+        let group_or_hook = if event == "PreToolUse" {
+            json!({
+                "matcher": matcher,
+                "hooks": [hook]
+            })
+        } else {
+            hook
+        };
+        set.insert(event.to_string(), json!([group_or_hook]));
     }
     // We own the whole `spyc-status` key, so an insert replaces a prior ours
     // outright — idempotent — without disturbing the user's other named sets.
@@ -942,10 +959,20 @@ mod tests {
         assert!(ensure_agy_status_hooks(dir));
         let path = dir.join(".agents/hooks.json");
         let v = read(&path);
-        for (event, state) in AGY_STATUS_HOOKS {
-            // Flat handler list directly under the event key (no matcher/group).
+        for (event, _matcher, state) in AGY_STATUS_HOOKS {
+            let (cmd_ptr, type_ptr) = if event == "PreToolUse" {
+                (
+                    format!("/{AGY_HOOK_SET}/{event}/0/hooks/0/command"),
+                    format!("/{AGY_HOOK_SET}/{event}/0/hooks/0/type"),
+                )
+            } else {
+                (
+                    format!("/{AGY_HOOK_SET}/{event}/0/command"),
+                    format!("/{AGY_HOOK_SET}/{event}/0/type"),
+                )
+            };
             let cmd = v
-                .pointer(&format!("/{AGY_HOOK_SET}/{event}/0/command"))
+                .pointer(&cmd_ptr)
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             assert!(
@@ -953,8 +980,7 @@ mod tests {
                 "{event} → {state}: got {cmd:?}"
             );
             assert_eq!(
-                v.pointer(&format!("/{AGY_HOOK_SET}/{event}/0/type"))
-                    .and_then(Value::as_str),
+                v.pointer(&type_ptr).and_then(Value::as_str),
                 Some("command")
             );
         }

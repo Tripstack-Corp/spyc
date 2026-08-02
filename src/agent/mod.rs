@@ -461,7 +461,7 @@ impl AgentProfile for AgyProfile {
         })
     }
     fn detection_rules(&self) -> &'static [DetectionRule] {
-        AGY_DETECTION_RULES
+        &[]
     }
 }
 
