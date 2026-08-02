@@ -33,7 +33,10 @@ const AGENT_ACTIVE_WINDOW: Duration = Duration::from_secs(2);
 /// flip the dot. Adapts herdr's timer-based debounce to spyc's event-driven
 /// drain: fewer, real events beat a fixed-interval poll for the same
 /// flicker-killing purpose.
-const SCRAPE_CONFIRM_COUNT: u8 = 2;
+/// Confirm a scrape candidate after this many consecutive matches.
+/// 1 means immediate confirmation (needed for static prompts like Agy's that print
+/// all at once and then stop outputting, generating only 1 output event).
+const SCRAPE_CONFIRM_COUNT: u8 = 1;
 
 /// P1-2 running scrape-hysteresis candidate: `(state, consecutive-match count)`.
 type ScrapeCandidate = Option<(AgentActivity, u8)>;
@@ -903,12 +906,11 @@ mod tests {
     fn scrape_candidate_after_requires_consecutive_agreement() {
         use crate::pane::AgentActivity;
 
-        // First match ever → becomes the candidate, not yet confirmed
-        // (SCRAPE_CONFIRM_COUNT is 2).
+        // Hit 1: Immediately confirmed because SCRAPE_CONFIRM_COUNT is 1.
         let (candidate, confirmed) =
             App::scrape_candidate_after(None, Some((AgentActivity::Blocked, Some("hint"))));
         assert_eq!(candidate, Some((AgentActivity::Blocked, 1)));
-        assert_eq!(confirmed, None);
+        assert_eq!(confirmed, Some((AgentActivity::Blocked, Some("hint"))));
 
         // Same state again → count hits the threshold → confirmed.
         let (candidate, confirmed) =
@@ -921,7 +923,7 @@ mod tests {
         let (candidate, confirmed) =
             App::scrape_candidate_after(candidate, Some((AgentActivity::Working, None)));
         assert_eq!(candidate, Some((AgentActivity::Working, 1)));
-        assert_eq!(confirmed, None);
+        assert_eq!(confirmed, Some((AgentActivity::Working, None)));
 
         // A miss (rule no longer matches) clears both immediately — no
         // hysteresis on the way down.
