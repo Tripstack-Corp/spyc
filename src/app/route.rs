@@ -75,7 +75,7 @@ pub(super) enum InputSink {
     /// command) pty owns the keystroke — encode and forward.
     OverlayPty,
     /// Bottom pty pane has keyboard focus; encode and forward to
-    /// the subprocess (claude / codex / gemini / shell / …).
+    /// the subprocess (claude / codex / agy / shell / …).
     BottomPane,
     /// Pane is in scrollback mode and a non-meta key drives the
     /// pane-scroll handler (j/k/G/etc.).

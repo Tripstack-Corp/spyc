@@ -19,7 +19,6 @@ const MAX_SESSIONS: usize = 20;
 pub enum AgentKind {
     Claude,
     Codex,
-    Gemini,
     Agy,
     Zot,
     /// Anything else (`bash`, `vim`, `make`, …). No session resume.
@@ -263,7 +262,7 @@ pub fn find_claude_sessions(cwd: &std::path::Path) -> Vec<ClaudeSessionInfo> {
 
 /// What a "session candidate" looks like to the picker — just enough
 /// for the closest-match-with-claim-skip logic. Implemented for
-/// `ClaudeSessionInfo` and `GeminiSessionInfo`.
+/// `ClaudeSessionInfo` and `AgySessionInfo`.
 pub trait SessionCandidate {
     fn session_id(&self) -> &str;
     fn started_at_secs(&self) -> u64;
@@ -279,7 +278,7 @@ impl SessionCandidate for ClaudeSessionInfo {
 }
 
 /// Pure helper: out of a list of session candidates (typically from
-/// `find_claude_sessions` or `find_gemini_sessions`), pick the one
+/// `find_claude_sessions` or `find_agy_sessions`), pick the one
 /// whose `started_at_secs` is closest to `pane_spawn_epoch_secs` AND
 /// whose `session_id` is not in `claimed`. Returns `None` if every
 /// candidate is already claimed or the list is empty. Stable: ties
@@ -393,46 +392,7 @@ pub fn most_recent_jsonl_for_cwd(cwd: &std::path::Path) -> Option<String> {
     best.map(|(_, id)| id)
 }
 
-/// Gemini session info returned by `find_gemini_sessions`.
-pub struct GeminiSessionInfo {
-    /// UUID — what `gemini --list-sessions` prints in `[…]` and what
-    /// our restore-time index lookup keys on.
-    pub session_id: String,
-    /// Wall-clock start time in epoch seconds, parsed from the
-    /// chat JSONL's first-line `startTime` ISO-8601 string.
-    pub started_at_secs: u64,
-}
 
-impl SessionCandidate for GeminiSessionInfo {
-    fn session_id(&self) -> &str {
-        &self.session_id
-    }
-    fn started_at_secs(&self) -> u64 {
-        self.started_at_secs
-    }
-}
-
-/// Map a cwd to the project name Gemini stores it under
-/// (`~/.gemini/projects.json`). Returns `None` if Gemini hasn't seen
-/// this cwd yet (no chats to resume from).
-pub fn gemini_project_name(cwd: &std::path::Path) -> Option<String> {
-    let home = std::env::var_os("HOME")?;
-    let path = PathBuf::from(home).join(".gemini/projects.json");
-    let text = std::fs::read_to_string(&path).ok()?;
-    let val: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let projects = val.get("projects")?.as_object()?;
-    let cwd_str = cwd.to_string_lossy();
-    if let Some(name) = projects.get(cwd_str.as_ref()).and_then(|v| v.as_str()) {
-        return Some(name.to_string());
-    }
-    // macOS /private symlink mirror, mirroring the Claude logic.
-    if let Some(stripped) = cwd_str.strip_prefix("/private")
-        && let Some(name) = projects.get(stripped).and_then(|v| v.as_str())
-    {
-        return Some(name.to_string());
-    }
-    None
-}
 
 #[derive(Debug, Clone)]
 pub struct AgySessionInfo {
@@ -447,6 +407,11 @@ impl SessionCandidate for AgySessionInfo {
     fn started_at_secs(&self) -> u64 {
         self.started_at_secs
     }
+}
+
+/// True if a conversation ID exists for the given cwd in agy's history.jsonl
+pub fn agy_jsonl_exists(cwd: &std::path::Path, session_id: &str) -> bool {
+    find_agy_sessions(cwd).into_iter().any(|s| s.session_id == session_id)
 }
 
 /// Find every Agy session for a given cwd by parsing `history.jsonl`.
@@ -505,66 +470,9 @@ pub fn find_agy_sessions(cwd: &std::path::Path) -> Vec<AgySessionInfo> {
     found
 }
 
-/// Find every Gemini chat session for a given cwd. Each
-/// `~/.gemini/tmp/<project>/chats/session-*.jsonl` first line is JSON
-/// with `sessionId`, `startTime`, `lastUpdated`, etc. — we read just
-/// enough of each file to extract the metadata we need.
-///
-/// Returned sorted by `started_at_secs` descending.
-pub fn find_gemini_sessions(cwd: &std::path::Path) -> Vec<GeminiSessionInfo> {
-    let Some(name) = gemini_project_name(cwd) else {
-        return Vec::new();
-    };
-    let Some(home) = std::env::var_os("HOME") else {
-        return Vec::new();
-    };
-    let chats = PathBuf::from(home)
-        .join(".gemini/tmp")
-        .join(&name)
-        .join("chats");
-    let Ok(entries) = std::fs::read_dir(&chats) else {
-        return Vec::new();
-    };
 
-    let mut found: Vec<GeminiSessionInfo> = Vec::new();
-    for entry in entries.filter_map(Result::ok) {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-            continue;
-        }
-        let Ok(file) = std::fs::File::open(&path) else {
-            continue;
-        };
-        let mut reader = std::io::BufReader::new(file);
-        let mut first_line = String::new();
-        use std::io::BufRead;
-        if reader.read_line(&mut first_line).is_err() || first_line.is_empty() {
-            continue;
-        }
-        let Ok(val) = serde_json::from_str::<serde_json::Value>(first_line.trim()) else {
-            continue;
-        };
-        let Some(session_id) = val.get("sessionId").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let started = val
-            .get("startTime")
-            .and_then(|v| v.as_str())
-            .and_then(parse_iso8601_to_epoch_secs)
-            .unwrap_or(0);
-        if !is_uuid(session_id) {
-            continue;
-        }
-        found.push(GeminiSessionInfo {
-            session_id: session_id.to_string(),
-            started_at_secs: started,
-        });
-    }
-    found.sort_by_key(|f| std::cmp::Reverse(f.started_at_secs));
-    found
-}
 
-/// Parse Gemini's chat-metadata `startTime` (ISO-8601 / RFC 3339)
+/// Parse an ISO-8601 / RFC 3339 timestamp
 /// to epoch seconds via `jiff`. Accepts both forms emitted in the
 /// wild — `2026-05-08T12:27:31.927Z` and `2026-05-08T12:27:31Z` —
 /// plus naive `2026-05-08T12:27:31` (no zone) by tagging UTC.
@@ -577,9 +485,8 @@ pub fn parse_iso8601_to_epoch_secs(s: &str) -> Option<u64> {
         }
         return Some(secs as u64);
     }
-    // Fallback: zoneless `YYYY-MM-DDTHH:MM:SS` — assume UTC, since
-    // every Gemini chat we've observed writes `Z`. Defensive against
-    // upstream drift.
+    // Fallback: zoneless `YYYY-MM-DDTHH:MM:SS` — assume UTC.
+    // Defensive against upstream drift.
     let civil: jiff::civil::DateTime = s.parse().ok()?;
     let zoned = civil.to_zoned(jiff::tz::TimeZone::UTC).ok()?;
     let secs = zoned.timestamp().as_second();

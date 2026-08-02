@@ -139,6 +139,16 @@ pub trait AgentProfile: Sync {
         (None, None)
     }
 
+    /// SAVE: validate a live-reported session ID against the agent's history.
+    /// Returns `(id, optional_name)` if valid, `None` if invalid or unsupported.
+    fn validate_live_session_id(
+        &self,
+        _cwd: &Path,
+        _id: &str,
+    ) -> Option<(String, Option<String>)> {
+        None
+    }
+
     /// SAVE: strip resume flag(s) so the saved baseline restores
     /// cleanly. Default: identity.
     fn command_without_resume(&self, cmd: &str) -> String {
@@ -227,6 +237,20 @@ impl AgentProfile for ClaudeProfile {
         claimed: &HashSet<String>,
     ) -> (Option<String>, Option<String>) {
         resume::resolve_claude_resume_target(pane, cwd, spawn_epoch_secs, claimed)
+    }
+    fn validate_live_session_id(
+        &self,
+        cwd: &Path,
+        id: &str,
+    ) -> Option<(String, Option<String>)> {
+        if crate::state::sessions::claude_jsonl_exists(cwd, id) {
+            Some((
+                id.to_string(),
+                crate::state::sessions::find_claude_session_name(id),
+            ))
+        } else {
+            None
+        }
     }
     fn command_without_resume(&self, cmd: &str) -> String {
         resume::command_without_resume(cmd)
@@ -340,58 +364,6 @@ impl AgentProfile for CodexProfile {
     }
 }
 
-pub struct GeminiProfile;
-impl AgentProfile for GeminiProfile {
-    fn kind(&self) -> AgentKind {
-        AgentKind::Gemini
-    }
-    fn name(&self) -> &'static str {
-        "gemini"
-    }
-    fn binary(&self) -> &'static str {
-        "gemini"
-    }
-    fn resolve_resume_target(
-        &self,
-        _pane: &Pane,
-        cwd: &Path,
-        spawn_epoch_secs: u64,
-        claimed: &HashSet<String>,
-    ) -> (Option<String>, Option<String>) {
-        resume::resolve_gemini_resume_target(cwd, spawn_epoch_secs, claimed)
-    }
-    fn command_without_resume(&self, cmd: &str) -> String {
-        resume::command_without_gemini_resume(cmd)
-    }
-    fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, cwd: &Path) -> RestorePlan {
-        let base = resume::command_without_gemini_resume(cmd);
-        // Gemini's `--resume` consumes an *index* into `--list-sessions`,
-        // not a UUID; recompute it synchronously. Fall back to bare on
-        // lookup failure (binary missing, session pruned, format drift).
-        let command = match sid {
-            Some(uuid) => match resume::gemini_resume_index_for(cwd, uuid) {
-                Some(idx) => format!("{base} --resume {idx}"),
-                None => base,
-            },
-            None => base,
-        };
-        RestorePlan {
-            command,
-            resume: ResumeAction::None,
-        }
-    }
-    fn resolve_short_id(&self, cwd: &Path, spawn_epoch_secs: u64) -> Option<String> {
-        closest_short_id(
-            crate::state::sessions::find_gemini_sessions(cwd),
-            spawn_epoch_secs,
-        )
-    }
-    // exit_summary_mode: None (gemini is omitted from the summary).
-    // transcript: None (gemini has no transcript renderer).
-    fn detection_rules(&self) -> &'static [DetectionRule] {
-        GEMINI_DETECTION_RULES
-    }
-}
 
 /// P1-2: Gemini CLI has no `status_hooks()` (no lifecycle-hook config format
 /// spyc writes to today), so it relies entirely on this scrape fallback.
@@ -400,12 +372,6 @@ impl AgentProfile for GeminiProfile {
 /// (google-gemini/gemini-cli docs + issue #4340). Only the one verified
 /// pattern is here — inventing more would risk a false `Blocked` worse than no
 /// fallback.
-static GEMINI_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {
-    region: detect_rules::Region::BottomNonEmptyLines(15),
-    matcher: detect_rules::Matcher::Contains("Allow execution of:"),
-    state: crate::pane::AgentActivity::Blocked,
-    visible_blocker: Some("awaiting tool-execution approval"),
-}];
 
 pub struct AgyProfile;
 impl AgentProfile for AgyProfile {
@@ -429,6 +395,17 @@ impl AgentProfile for AgyProfile {
         let id = crate::state::sessions::extract_agy_resume_token(&lines)
             .filter(|tok| !claimed.contains(tok));
         (id, None)
+    }
+    fn validate_live_session_id(
+        &self,
+        cwd: &Path,
+        id: &str,
+    ) -> Option<(String, Option<String>)> {
+        if crate::state::sessions::agy_jsonl_exists(cwd, id) {
+            Some((id.to_string(), None))
+        } else {
+            None
+        }
     }
     fn command_without_resume(&self, cmd: &str) -> String {
         resume::command_without_agy_resume(cmd)
@@ -463,8 +440,8 @@ impl AgentProfile for AgyProfile {
         })
     }
     fn status_hooks(&self) -> Option<StatusHookSupport> {
-        // Partial: agy exposes PreInvocation/Stop (→ working/done) but NO
-        // permission/approval event, so there's no `blocked` signal. Hooks live
+        // claude uses `.claude/settings.json`, codex uses `.codex/config.toml`,
+        // agy uses `.agents/hooks.json` (named hook-set). Hooks live
         // in `.agents/hooks.json`, read at startup → written pre-spawn.
         Some(StatusHookSupport {
             ensure: crate::mcp::ensure_agy_status_hooks,
@@ -560,14 +537,13 @@ impl AgentProfile for OtherProfile {
 
 static CLAUDE: ClaudeProfile = ClaudeProfile;
 static CODEX: CodexProfile = CodexProfile;
-static GEMINI: GeminiProfile = GeminiProfile;
 static AGY: AgyProfile = AgyProfile;
 static ZOT: ZotProfile = ZotProfile;
 static OTHER: OtherProfile = OtherProfile;
 
 /// All real agents, in detection-precedence order. Binaries don't
 /// overlap, so order is not load-bearing — but keep it stable.
-pub static REGISTRY: &[&dyn AgentProfile] = &[&CLAUDE, &CODEX, &GEMINI, &AGY, &ZOT];
+pub static REGISTRY: &[&dyn AgentProfile] = &[&CLAUDE, &CODEX, &AGY, &ZOT];
 
 /// Profile for a persisted [`AgentKind`] (restored tabs, exit summary,
 /// picker). Returns the no-op [`OtherProfile`] for `Other`.
@@ -600,7 +576,6 @@ mod tests {
             detect("/usr/local/bin/codex resume").kind(),
             AgentKind::Codex
         );
-        assert_eq!(detect("gemini mcp").kind(), AgentKind::Gemini);
         assert_eq!(detect("agy --continue").kind(), AgentKind::Agy);
         assert_eq!(detect("zot").kind(), AgentKind::Zot);
         assert_eq!(detect("/opt/bin/zot -c").kind(), AgentKind::Zot);
@@ -626,7 +601,6 @@ mod tests {
         assert_eq!(agy.config_label, ".agents/hooks.json");
         assert!(!agy.live_reload, "agy reads config at startup");
 
-        assert!(GeminiProfile.status_hooks().is_none());
         assert!(ZotProfile.status_hooks().is_none());
         assert!(OtherProfile.status_hooks().is_none());
     }
@@ -719,11 +693,6 @@ mod tests {
     /// so it's exercised only when an id is present — kept out of unit
     /// tests to avoid spawning the CLI).
     #[test]
-    fn gemini_restore_without_id_is_bare() {
-        let plan = GeminiProfile.reconstruct_restore("gemini", None, Path::new("/tmp"));
-        assert_eq!(plan.command, "gemini");
-        assert!(matches!(plan.resume, ResumeAction::None));
-    }
 
     /// Other (bash/vim/make): the saved command runs verbatim and any
     /// stray session id is ignored — no resume, no panic.
@@ -765,7 +734,6 @@ mod tests {
         for k in [
             AgentKind::Claude,
             AgentKind::Codex,
-            AgentKind::Gemini,
             AgentKind::Agy,
             AgentKind::Zot,
         ] {

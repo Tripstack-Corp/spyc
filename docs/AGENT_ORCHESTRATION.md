@@ -50,7 +50,7 @@ the agent files a newer report) — no timer or stray output bounces it off.
 **Auto-reporting.** So it works without the agent choosing to call the tool, spyc
 installs lifecycle hooks that run `spyc --report-status` (prompt-submit→working,
 needs-permission→blocked, turn-end→done): **claude** (`.claude/settings.json`),
-**codex** (`.codex/config.toml`), **agy** (`.agents/hooks.json`, no `blocked`).
+**codex** (`.codex/config.toml`), **agy** (`.agents/hooks.json`).
 It asks first — a `[Y/n]` on the first launch per repo, saved; change it later
 with **`:hooks on|on!|off`**.
 

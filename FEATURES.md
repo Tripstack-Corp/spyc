@@ -228,9 +228,7 @@ spyc's workflow: browse files above, talk to Claude below.
     **codex** writes inline `[[hooks.*]]` into the same `.codex/config.toml` that
     already holds the MCP entry (read once at startup, so for an already-consented
     repo the hooks are written *before* codex spawns); **agy** (Antigravity)
-    writes a `spyc-status` set into `.agents/hooks.json` but is **partial** —
-    agy exposes no permission/approval event, so it gets `working` + `done` only,
-    never the red `blocked` "needs me" square.
+    writes a `spyc-status` set into `.agents/hooks.json`.
     **It asks first**, once per project: the first `claude`/`codex`/`agy` launch
     in a repo pops a `[Y/n]` ("let spyc show this agent's live status? writes
     hooks to `<config>`, removed on exit"), and the answer is **saved per repo** —

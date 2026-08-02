@@ -135,6 +135,7 @@ pub fn startup_offer(statuses: &[(Host, Status)], declined: bool) -> Option<bool
 pub enum Host {
     Claude,
     Codex,
+    Agy,
 }
 
 impl Host {
@@ -143,6 +144,7 @@ impl Host {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::Agy => "agy",
         }
     }
 }
@@ -169,13 +171,20 @@ pub fn host_dir(host: Host) -> Option<PathBuf> {
             };
             Some(base.join("skills").join(SKILL_NAME))
         }
+        Host::Agy => Some(
+            home()?
+                .join(".gemini")
+                .join("antigravity-cli")
+                .join("skills")
+                .join(SKILL_NAME),
+        ),
     }
 }
 
 /// Every install target, in report order.
 #[must_use]
 pub fn hosts() -> Vec<(Host, PathBuf)> {
-    [Host::Claude, Host::Codex]
+    [Host::Claude, Host::Codex, Host::Agy]
         .into_iter()
         .filter_map(|h| host_dir(h).map(|d| (h, d)))
         .collect()

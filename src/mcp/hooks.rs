@@ -18,8 +18,7 @@
 //! * **codex** — inline `[[hooks.<Event>]]` arrays in the SAME
 //!   `.codex/config.toml` we write the MCP entry into; read once at startup, so
 //!   they must be written BEFORE the pane spawns (see the codex section).
-//! * **agy** (Antigravity) — a `spyc-status` named set in `.agents/hooks.json`;
-//!   PARTIAL (working/done only — agy has no approval event for `blocked`). See
+//! * **agy** (Antigravity) — a `spyc-status` named set in `.agents/hooks.json`. See
 //!   the agy section.
 //!
 //! Event → state (verified against the Claude Code hooks docs):
@@ -455,16 +454,18 @@ pub fn cleanup_codex_status_hooks(dir: &Path) -> ConfigCleanup {
 // ── Agy (Antigravity CLI) status hooks ────────────────────────────────
 //
 // Agy's JSON hooks live in `<dir>/.agents/hooks.json` as named hook-sets; the
-// lifecycle events (`PreInvocation` / `Stop`) take a flat handler list under
-// the event key (agy uses the claude/codex `{hooks,matcher}` group only for
-// PreToolUse). spyc owns one set, `spyc-status`: PreInvocation → working, Stop
-// → done. PARTIAL — agy exposes no approval event, so there's no `blocked`.
-// Read once at startup (written pre-spawn like codex). The schema is derived
-// from docs, not a verified live install.
+// lifecycle events (`PreInvocation` / `PostInvocation` / `PermissionRequest`) take a flat
+// handler list under the event key (agy uses the claude/codex `{hooks,matcher}`
+// group only for PreToolUse). spyc owns one set, `spyc-status`: PreInvocation →
+// working, PermissionRequest → blocked, PostInvocation → done.
+// Read once at startup (written pre-spawn like codex).
 
-/// Agy's (event, reported-state). No `blocked`: agy has no approval/permission
-/// event to hang it on.
-const AGY_STATUS_HOOKS: [(&str, &str); 2] = [("PreInvocation", "working"), ("Stop", "done")];
+/// Agy's (event, reported-state). No matcher: these events aren't tool-scoped.
+const AGY_STATUS_HOOKS: [(&str, &str); 3] = [
+    ("PreInvocation", "working"),
+    ("PermissionRequest", "blocked"),
+    ("PostInvocation", "done"),
+];
 
 /// The named hook-set spyc owns in agy's `hooks.json` (our namespace there).
 const AGY_HOOK_SET: &str = "spyc-status";
@@ -1026,10 +1027,7 @@ mod tests {
         assert_eq!(once, twice, "re-applying the merge changed a byte");
         assert!(once.contains("--report-status working"));
         assert!(once.contains("--report-status done"));
-        assert!(
-            !once.contains("blocked"),
-            "agy has no blocked signal (no approval event)"
-        );
+        assert!(once.contains("--report-status blocked"));
         assert!(
             !once.contains("--status-trace"),
             "trace off → no baked flag"

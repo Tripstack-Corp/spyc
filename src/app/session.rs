@@ -119,13 +119,10 @@ impl App {
                         // internally so multi-pane saves don't collapse onto one
                         // conversation.
                         let (agent_session_id, agent_session_name) =
-                            match t.info.claude_session_id.as_deref().filter(|id| {
-                                crate::state::sessions::claude_jsonl_exists(&t.info.cwd, id)
+                            match t.info.claude_session_id.as_deref().and_then(|id| {
+                                profile.validate_live_session_id(&t.info.cwd, id)
                             }) {
-                                Some(id) => (
-                                    Some(id.to_string()),
-                                    crate::state::sessions::find_claude_session_name(id),
-                                ),
+                                Some((id, name)) => (Some(id), name),
                                 None => profile.resolve_resume_target(
                                     &t.pane,
                                     &t.info.cwd,
@@ -243,7 +240,7 @@ impl App {
         // Per-agent session summary, in registry order. `Names` lists
         // human-readable session names (claude); `Count` reports how
         // many panes captured a session id (codex/agy); `None` agents
-        // (gemini) are omitted.
+        // are omitted.
         for profile in crate::agent::REGISTRY {
             let kind = profile.kind();
             match profile.exit_summary_mode() {
@@ -460,7 +457,7 @@ impl App {
                 // so we always spawn fresh and type `/resume <sid>`
                 // once it has settled.
                 // Reconstruct the spawn command via the agent profile.
-                // Codex/gemini/agy bake the resume into the command;
+                // Codex/agy bake the resume into the command;
                 // claude spawns fresh and arms the `/resume <sid>` stdin
                 // send below (its `--resume` CLI flag crashes at mount
                 // with non-empty initialMessages).

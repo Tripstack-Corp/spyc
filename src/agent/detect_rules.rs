@@ -15,6 +15,7 @@ use crate::pane::AgentActivity;
 /// from the same vt100 screen text `gf`/quick-select already read
 /// (`Pane::recent_lines`) — no new OSC-sequence tracking.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum Region {
     /// The last `n` non-empty lines of the pane's recent output, newest first
     /// collapsed into one block — where a confirmation prompt almost always
@@ -26,6 +27,7 @@ pub enum Region {
 /// extension point for `Regex` / `Any` / `All` / `Not` when a real rule needs
 /// composition — none do today, so `Contains` is the only variant.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum Matcher {
     /// A plain substring match (case-sensitive — agent prompt text is stable
     /// enough that this beats a regex dependency for the rules that exist
