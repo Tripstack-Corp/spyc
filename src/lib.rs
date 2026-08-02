@@ -380,8 +380,9 @@ fn prompt_mcp_takeover_if_needed() -> bool {
     // can hold a stale-by-PID spyc entry; check both so the takeover
     // prompt fires regardless of which agent the prior instance had
     // configured.
-    let Some(old_pid) =
-        mcp::detect_existing_spyc(&cwd).or_else(|| mcp::detect_existing_spyc_codex(&cwd))
+    let Some(old_pid) = mcp::detect_existing_spyc(&cwd)
+        .or_else(|| mcp::detect_existing_spyc_codex(&cwd))
+        .or_else(|| mcp::detect_existing_spyc_agy(&cwd))
     else {
         return true;
     };

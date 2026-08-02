@@ -68,6 +68,27 @@ impl App {
                     }
                 }
             }
+
+            crate::state::sessions::AgentKind::Agy => {
+                match crate::mcp::ensure_agy_mcp_config(cwd, takeover) {
+                    Ok(crate::mcp::McpConfigStatus::Configured) => true,
+                    Ok(crate::mcp::McpConfigStatus::TookOver { old_pid }) => {
+                        self.state
+                            .flash_info(format!("Agy MCP: took over from PID {old_pid}"));
+                        true
+                    }
+                    Ok(crate::mcp::McpConfigStatus::SkippedTakeover { old_pid }) => {
+                        self.state
+                            .flash_info(format!("Agy MCP: kept PID {old_pid} as owner"));
+                        false
+                    }
+                    Ok(_) => false,
+                    Err(e) => {
+                        self.state.flash_error(format!("mcp_config.json: {e:#}"));
+                        false
+                    }
+                }
+            }
             // Codex equivalent: both agents share the same socket; the writer
             // just registers a stdio entry that re-execs `spyc --mcp` to proxy.
             // Enterprise-flavored statuses are claude-specific; codex shouldn't
@@ -131,6 +152,11 @@ impl App {
                     crate::mcp::ConfigCleanup::SkippedTracked
                 )
                 .then(|| dir.join(".mcp.json")),
+                matches!(
+                    crate::mcp::cleanup_agy_mcp_config(&dir),
+                    crate::mcp::ConfigCleanup::SkippedTracked
+                )
+                .then(|| dir.join(".agents").join("mcp_config.json")),
                 matches!(
                     crate::mcp::cleanup_codex_config(&dir),
                     crate::mcp::ConfigCleanup::SkippedTracked

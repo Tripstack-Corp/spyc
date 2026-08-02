@@ -338,7 +338,7 @@ impl Clone for ClaudeSessionInfo {
     }
 }
 
-// ── Gemini ISO-8601 → epoch ────────────────────────────────────
+// ── ISO-8601 → epoch ────────────────────────────────────
 
 #[test]
 fn parse_iso8601_unix_epoch() {
@@ -386,25 +386,6 @@ fn parse_iso8601_orders_by_seconds() {
     let early = parse_iso8601_to_epoch_secs("2026-05-08T12:27:31Z").unwrap();
     let late = parse_iso8601_to_epoch_secs("2026-05-08T12:30:00Z").unwrap();
     assert_eq!(late - early, 2 * 60 + 29);
-}
-
-// ── pick_closest_unclaimed_session also works for Gemini ───────
-
-#[test]
-fn picker_works_for_gemini_records() {
-    let candidates = vec![
-        GeminiSessionInfo {
-            session_id: "11111111-1111-1111-1111-111111111111".into(),
-            started_at_secs: 1000,
-        },
-        GeminiSessionInfo {
-            session_id: "22222222-2222-2222-2222-222222222222".into(),
-            started_at_secs: 2000,
-        },
-    ];
-    let claimed = std::collections::HashSet::new();
-    let pick = pick_closest_unclaimed_session(candidates, 1900, &claimed).unwrap();
-    assert_eq!(pick.session_id, "22222222-2222-2222-2222-222222222222");
 }
 
 // Sub-cases share one tempdir/state-root for sequencing; per-thread

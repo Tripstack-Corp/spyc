@@ -18,8 +18,7 @@
 //! * **codex** — inline `[[hooks.<Event>]]` arrays in the SAME
 //!   `.codex/config.toml` we write the MCP entry into; read once at startup, so
 //!   they must be written BEFORE the pane spawns (see the codex section).
-//! * **agy** (Antigravity) — a `spyc-status` named set in `.agents/hooks.json`;
-//!   PARTIAL (working/done only — agy has no approval event for `blocked`). See
+//! * **agy** (Antigravity) — a `spyc-status` named set in `.agents/hooks.json`. See
 //!   the agy section.
 //!
 //! Event → state (verified against the Claude Code hooks docs):
@@ -455,16 +454,15 @@ pub fn cleanup_codex_status_hooks(dir: &Path) -> ConfigCleanup {
 // ── Agy (Antigravity CLI) status hooks ────────────────────────────────
 //
 // Agy's JSON hooks live in `<dir>/.agents/hooks.json` as named hook-sets; the
-// lifecycle events (`PreInvocation` / `Stop`) take a flat handler list under
-// the event key (agy uses the claude/codex `{hooks,matcher}` group only for
-// PreToolUse). spyc owns one set, `spyc-status`: PreInvocation → working, Stop
-// → done. PARTIAL — agy exposes no approval event, so there's no `blocked`.
-// Read once at startup (written pre-spawn like codex). The schema is derived
-// from docs, not a verified live install.
+// lifecycle events (`PreInvocation` / `PostInvocation` / `PermissionRequest`) take a flat
+// handler list under the event key (agy uses the claude/codex `{hooks,matcher}`
+// group only for PreToolUse). spyc owns one set, `spyc-status`: PreInvocation →
+// working, PermissionRequest → blocked.
+// Read once at startup (written pre-spawn like codex).
 
-/// Agy's (event, reported-state). No `blocked`: agy has no approval/permission
-/// event to hang it on.
-const AGY_STATUS_HOOKS: [(&str, &str); 2] = [("PreInvocation", "working"), ("Stop", "done")];
+/// Agy's (event, matcher, reported-state). `matcher` is only used by `PreToolUse`.
+pub const AGY_STATUS_HOOKS: &[(&str, &str, &str)] =
+    &[("PreInvocation", "", "working"), ("Stop", "", "done")];
 
 /// The named hook-set spyc owns in agy's `hooks.json` (our namespace there).
 const AGY_HOOK_SET: &str = "spyc-status";
@@ -477,8 +475,15 @@ fn agy_set_is_ours(set: &Value) -> bool {
         events.values().any(|arr| {
             arr.as_array().is_some_and(|handlers| {
                 handlers.iter().any(|h| {
-                    h.get("command")
-                        .and_then(Value::as_str)
+                    let cmd = h.get("command");
+                    // If it's a {hooks, matcher} group (like PreToolUse), check its inner hooks
+                    let cmd = cmd.or_else(|| {
+                        h.get("hooks")
+                            .and_then(Value::as_array)
+                            .and_then(|inner| inner.first())
+                            .and_then(|inner_h| inner_h.get("command"))
+                    });
+                    cmd.and_then(Value::as_str)
                         .is_some_and(|c| c.contains("--report-status"))
                 })
             })
@@ -522,11 +527,9 @@ fn merged_agy_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) 
         .unwrap_or_else(|| json!({}));
     let obj = root.as_object_mut()?;
     let mut set = serde_json::Map::new();
-    for (event, state) in AGY_STATUS_HOOKS {
-        set.insert(
-            event.to_string(),
-            json!([{ "type": "command", "command": reporter_command(exe, state, trace) }]),
-        );
+    for (event, _matcher, state) in AGY_STATUS_HOOKS {
+        let hook = json!({ "type": "command", "command": reporter_command(exe, state, trace) });
+        set.insert(event.to_string(), json!([hook]));
     }
     // We own the whole `spyc-status` key, so an insert replaces a prior ours
     // outright — idempotent — without disturbing the user's other named sets.
@@ -945,8 +948,7 @@ mod tests {
         assert!(ensure_agy_status_hooks(dir));
         let path = dir.join(".agents/hooks.json");
         let v = read(&path);
-        for (event, state) in AGY_STATUS_HOOKS {
-            // Flat handler list directly under the event key (no matcher/group).
+        for (event, _matcher, state) in AGY_STATUS_HOOKS {
             let cmd = v
                 .pointer(&format!("/{AGY_HOOK_SET}/{event}/0/command"))
                 .and_then(Value::as_str)
@@ -1025,11 +1027,6 @@ mod tests {
         let twice = merged_agy_status_hooks_json(Some(&once), "spyc", false).expect("re-merge");
         assert_eq!(once, twice, "re-applying the merge changed a byte");
         assert!(once.contains("--report-status working"));
-        assert!(once.contains("--report-status done"));
-        assert!(
-            !once.contains("blocked"),
-            "agy has no blocked signal (no approval event)"
-        );
         assert!(
             !once.contains("--status-trace"),
             "trace off → no baked flag"

@@ -99,67 +99,64 @@ impl App {
         // pane the same ID and they all collapsed onto one
         // conversation at restore.
         let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let tabs: Vec<SavedTab> = self
-            .runtime
-            .pane_tabs
-            .as_mut()
-            .map(|pt| {
-                pt.tabs_mut()
-                    .iter_mut()
-                    .map(|t| {
-                        let profile = crate::agent::detect(&t.info.command);
-                        let kind = profile.kind();
-                        // Resolve the (session_id, session_name) to persist.
-                        // Prefer this tab's PINNED claude session id (set at
-                        // restore from the exact `/resume <sid>`) when its JSONL
-                        // still exists — that's the conversation this pane is
-                        // definitively running, so it bypasses the spawn-proximity
-                        // resolver that crosses panes restored together. Otherwise
-                        // fall back to the profile resolver, which honors `claimed`
-                        // internally so multi-pane saves don't collapse onto one
-                        // conversation.
-                        let (agent_session_id, agent_session_name) =
-                            match t.info.claude_session_id.as_deref().filter(|id| {
-                                crate::state::sessions::claude_jsonl_exists(&t.info.cwd, id)
-                            }) {
-                                Some(id) => (
-                                    Some(id.to_string()),
-                                    crate::state::sessions::find_claude_session_name(id),
-                                ),
-                                None => profile.resolve_resume_target(
-                                    &t.pane,
-                                    &t.info.cwd,
-                                    t.info.spawn_epoch_secs,
-                                    &claimed,
-                                ),
-                            };
-                        if let Some(ref id) = agent_session_id {
-                            claimed.insert(id.clone());
-                        }
-                        // The sid lives in agent_session_id; baking
-                        // --resume / `resume` into `command` would survive
-                        // past a resolver miss and pollute the next restore.
-                        let saved_command = profile.command_without_resume(&t.info.command);
-                        SavedTab {
-                            command: saved_command,
-                            // Strip any `[exited N]` suffix — that's
-                            // runtime display state for a tab whose
-                            // child has died, not persistent identity.
-                            // Without this, restoring a session that
-                            // saw a tab exit at any point shows the
-                            // freshly-respawned process tagged with
-                            // a stale "exited" suffix.
-                            label: crate::pane::tabs::strip_exit_suffix(&t.info.label),
-                            cwd: t.info.cwd.clone(),
-                            agent_kind: kind,
-                            agent_session_id,
-                            agent_session_name,
-                            claim_owner: t.info.claim_owner.clone(),
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let tabs: Vec<SavedTab> =
+            self.runtime
+                .pane_tabs
+                .as_mut()
+                .map(|pt| {
+                    pt.tabs_mut()
+                        .iter_mut()
+                        .map(|t| {
+                            let profile = crate::agent::detect(&t.info.command);
+                            let kind = profile.kind();
+                            // Resolve the (session_id, session_name) to persist.
+                            // Prefer this tab's PINNED claude session id (set at
+                            // restore from the exact `/resume <sid>`) when its JSONL
+                            // still exists — that's the conversation this pane is
+                            // definitively running, so it bypasses the spawn-proximity
+                            // resolver that crosses panes restored together. Otherwise
+                            // fall back to the profile resolver, which honors `claimed`
+                            // internally so multi-pane saves don't collapse onto one
+                            // conversation.
+                            let (agent_session_id, agent_session_name) =
+                                match t.info.claude_session_id.as_deref().and_then(|id| {
+                                    profile.validate_live_session_id(&t.info.cwd, id)
+                                }) {
+                                    Some((id, name)) => (Some(id), name),
+                                    None => profile.resolve_resume_target(
+                                        &t.pane,
+                                        &t.info.cwd,
+                                        t.info.spawn_epoch_secs,
+                                        &claimed,
+                                    ),
+                                };
+                            if let Some(ref id) = agent_session_id {
+                                claimed.insert(id.clone());
+                            }
+                            // The sid lives in agent_session_id; baking
+                            // --resume / `resume` into `command` would survive
+                            // past a resolver miss and pollute the next restore.
+                            let saved_command = profile.command_without_resume(&t.info.command);
+                            SavedTab {
+                                command: saved_command,
+                                // Strip any `[exited N]` suffix — that's
+                                // runtime display state for a tab whose
+                                // child has died, not persistent identity.
+                                // Without this, restoring a session that
+                                // saw a tab exit at any point shows the
+                                // freshly-respawned process tagged with
+                                // a stale "exited" suffix.
+                                label: crate::pane::tabs::strip_exit_suffix(&t.info.label),
+                                cwd: t.info.cwd.clone(),
+                                agent_kind: kind,
+                                agent_session_id,
+                                agent_session_name,
+                                claim_owner: t.info.claim_owner.clone(),
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
 
         // Anchor the session on `project_home` (explicit) → `start_dir`
         // (where spyc was launched) → `listing.dir` (last resort).
@@ -243,7 +240,7 @@ impl App {
         // Per-agent session summary, in registry order. `Names` lists
         // human-readable session names (claude); `Count` reports how
         // many panes captured a session id (codex/agy); `None` agents
-        // (gemini) are omitted.
+        // are omitted.
         for profile in crate::agent::REGISTRY {
             let kind = profile.kind();
             match profile.exit_summary_mode() {
@@ -460,7 +457,7 @@ impl App {
                 // so we always spawn fresh and type `/resume <sid>`
                 // once it has settled.
                 // Reconstruct the spawn command via the agent profile.
-                // Codex/gemini/agy bake the resume into the command;
+                // Codex/agy bake the resume into the command;
                 // claude spawns fresh and arms the `/resume <sid>` stdin
                 // send below (its `--resume` CLI flag crashes at mount
                 // with non-empty initialMessages).

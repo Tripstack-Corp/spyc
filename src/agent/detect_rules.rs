@@ -15,6 +15,7 @@ use crate::pane::AgentActivity;
 /// from the same vt100 screen text `gf`/quick-select already read
 /// (`Pane::recent_lines`) — no new OSC-sequence tracking.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum Region {
     /// The last `n` non-empty lines of the pane's recent output, newest first
     /// collapsed into one block — where a confirmation prompt almost always
@@ -26,17 +27,21 @@ pub enum Region {
 /// extension point for `Regex` / `Any` / `All` / `Not` when a real rule needs
 /// composition — none do today, so `Contains` is the only variant.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum Matcher {
     /// A plain substring match (case-sensitive — agent prompt text is stable
     /// enough that this beats a regex dependency for the rules that exist
     /// today).
     Contains(&'static str),
+    /// Matches if the region ends with this string (ignoring trailing whitespace).
+    EndsWith(&'static str),
 }
 
 impl Matcher {
     fn matches(self, haystack: &str) -> bool {
         match self {
             Self::Contains(needle) => haystack.contains(needle),
+            Self::EndsWith(needle) => haystack.trim_end().ends_with(needle),
         }
     }
 }
@@ -109,9 +114,17 @@ mod tests {
 
     #[test]
     fn contains_matches_substring_anywhere_in_region() {
-        let m = Matcher::Contains("Allow execution of:");
-        assert!(m.matches("blah\nAllow execution of: 'rm -rf /'?\nblah"));
+        let m = Matcher::Contains("Do you want to proceed?");
+        assert!(m.matches("blah\nDo you want to proceed?\nblah"));
         assert!(!m.matches("nothing interesting here"));
+    }
+
+    #[test]
+    fn ends_with_matches_at_end_ignoring_whitespace() {
+        let m = Matcher::EndsWith("esc to cancel");
+        assert!(m.matches("blah\nesc to cancel"));
+        assert!(m.matches("blah\nesc to cancel\n  \n"));
+        assert!(!m.matches("esc to cancel\nblah"));
     }
 
     #[test]
@@ -119,9 +132,9 @@ mod tests {
         let rules = &[
             DetectionRule {
                 region: Region::BottomNonEmptyLines(5),
-                matcher: Matcher::Contains("Allow execution of:"),
+                matcher: Matcher::Contains("Do you want to proceed?"),
                 state: AgentActivity::Blocked,
-                visible_blocker: Some("awaiting approval"),
+                visible_blocker: Some("awaiting tool-execution approval"),
             },
             DetectionRule {
                 region: Region::BottomNonEmptyLines(5),
@@ -130,11 +143,14 @@ mod tests {
                 visible_blocker: None,
             },
         ];
-        let l = lines(&["Allow execution of: 'ls'?", "anything else"]);
+        let l = lines(&["Do you want to proceed?", "anything else"]);
         // First rule wins even though the second would also match.
         assert_eq!(
             scan(&l, rules),
-            Some((AgentActivity::Blocked, Some("awaiting approval")))
+            Some((
+                AgentActivity::Blocked,
+                Some("awaiting tool-execution approval")
+            ))
         );
     }
 
@@ -142,7 +158,7 @@ mod tests {
     fn scan_returns_none_when_no_rule_matches() {
         let rules = &[DetectionRule {
             region: Region::BottomNonEmptyLines(5),
-            matcher: Matcher::Contains("Allow execution of:"),
+            matcher: Matcher::Contains("Do you want to proceed?"),
             state: AgentActivity::Blocked,
             visible_blocker: None,
         }];
@@ -151,6 +167,6 @@ mod tests {
 
     #[test]
     fn scan_empty_ruleset_is_none() {
-        assert_eq!(scan(&lines(&["Allow execution of: 'ls'?"]), &[]), None);
+        assert_eq!(scan(&lines(&["Do you want to proceed?"]), &[]), None);
     }
 }

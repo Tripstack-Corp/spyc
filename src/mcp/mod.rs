@@ -145,8 +145,9 @@ pub mod readers;
 mod server;
 
 pub use config::{
-    ConfigCleanup, McpConfigStatus, cleanup_codex_config, cleanup_mcp_json, detect_existing_spyc,
-    detect_existing_spyc_codex, ensure_codex_config_toml, ensure_mcp_json, enterprise_defines_spyc,
+    ConfigCleanup, McpConfigStatus, cleanup_agy_mcp_config, cleanup_codex_config, cleanup_mcp_json,
+    detect_existing_spyc, detect_existing_spyc_agy, detect_existing_spyc_codex,
+    ensure_agy_mcp_config, ensure_codex_config_toml, ensure_mcp_json, enterprise_defines_spyc,
     sweep_orphan_spyc_configs,
 };
 pub use hooks::{

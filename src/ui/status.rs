@@ -19,7 +19,7 @@ pub struct StatusBar<'a> {
     /// Git branch + dirty flag, e.g. `"main*"` or `None` if not in a repo.
     pub git_info: Option<&'a str>,
     /// Active pane's agent identity (e.g. `"claude:76422c62"` /
-    /// `"gemini:4c130f82"` / `"codex"`). `None` when no pane is open
+    /// `"agy:4c130f82"` / `"codex"`). `None` when no pane is open
     /// or its command isn't a known agent. Rendered as its own
     /// segment between `git` and `suffix` so it sits in roughly the
     /// same visual band as related state.
@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn snapshot_status_powerline_with_agent() {
-        // New segment: agent identity (claude/codex/gemini with short
+        // New segment: agent identity (claude/codex/agy with short
         // session-id when known) renders between `git` and `suffix`.
         let out = render_status_to_string(
             Some("spyc"),
