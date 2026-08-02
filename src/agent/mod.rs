@@ -363,7 +363,6 @@ impl AgentProfile for CodexProfile {
 /// (google-gemini/gemini-cli docs + issue #4340). Only the one verified
 /// pattern is here — inventing more would risk a false `Blocked` worse than no
 /// fallback.
-
 /// P1-2: Agy CLI has `status_hooks()` but they don't cover approval events,
 /// so it relies on this scrape fallback for the `Blocked` signal when
 /// a tool execution needs approval.
@@ -706,8 +705,6 @@ mod tests {
     /// `--resume <index>` lookup needs a live `gemini --list-sessions`,
     /// so it's exercised only when an id is present — kept out of unit
     /// tests to avoid spawning the CLI).
-    #[test]
-
     /// Other (bash/vim/make): the saved command runs verbatim and any
     /// stray session id is ignored — no resume, no panic.
     #[test]
