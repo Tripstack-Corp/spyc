@@ -364,8 +364,6 @@ static AGY_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {
     matcher: detect_rules::Matcher::All(&[
         "Requesting permission for:",
         "Do you want to proceed?",
-        "1. Yes",
-        "4. No",
     ]),
     state: crate::pane::AgentActivity::Blocked,
     visible_blocker: Some("awaiting tool-execution approval"),
