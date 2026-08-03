@@ -69,7 +69,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.14.0
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.5
         with:
           tool: cargo-zigbuild
       - name: Toolchain (auto from rust-toolchain.toml)
@@ -129,7 +129,7 @@ jobs:
           cd dist
           cosign sign-blob --yes SHA256SUMS --bundle SHA256SUMS.cosign.bundle
       - name: Generate release notes (git-cliff, this tag's section)
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.5
         with:
           tool: git-cliff
       - run: git cliff --config cliff.toml --latest --strip header > RELEASE_NOTES.md
