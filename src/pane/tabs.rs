@@ -196,6 +196,10 @@ pub struct TabInfo {
     /// a report always wins, and scrape must not accumulate a stale guess
     /// behind one that could resurface if the report later expires.
     pub scrape_status: Option<(AgentActivity, Option<&'static str>)>,
+    /// P1-2 scrape-fallback dirty flag: set `true` on output for agent tabs
+    /// with detection rules. Consumed by `settle_scrape_quiet` after
+    /// `SCRAPE_QUIET_WINDOW` to perform a single debounced screen scan.
+    pub scrape_dirty: bool,
     /// P2 scope-coordination owner key: a uuid assigned once, here, and —
     /// unlike [`Self::id`] (the ephemeral `SPYC_PANE_ID`, fresh every spawn) —
     /// **carried across `-r` restore** (`restore_session` copies the saved
@@ -239,6 +243,7 @@ impl TabInfo {
             claude_session_id: None,
             scrape_candidate: None,
             scrape_status: None,
+            scrape_dirty: false,
             // A separate uuid from `id`: this one is restore-stable (see the
             // field doc), so it must not alias the ephemeral pane-wake id.
             claim_owner: uuid::Uuid::now_v7().to_string(),
