@@ -27,21 +27,11 @@ use crate::pane::{AgentActivity, ReportedStatus};
 /// the P1 semantic hook (`docs/archive/AGENT_AWARENESS_PLAN.md`), not output timing.
 const AGENT_ACTIVE_WINDOW: Duration = Duration::from_secs(2);
 
-/// P1-2 scrape-fallback hysteresis: a scrape-detected state must match this
-/// many consecutive *output events* (never a poll tick — spyc re-scans only
-/// when the pane actually produces new bytes) before it's trusted enough to
-/// flip the dot. Adapts herdr's timer-based debounce to spyc's event-driven
-/// drain: fewer, real events beat a fixed-interval poll for the same
-/// flicker-killing purpose.
-/// Confirm a scrape candidate after this many consecutive matches.
-/// 1 means immediate confirmation (needed for static prompts like Agy's that print
-/// all at once and then stop outputting, generating only 1 output event).
-const SCRAPE_CONFIRM_COUNT: u8 = 1;
+/// P1-2 scrape-fallback quiet window: fire a single screen scan after an agent
+/// tab with detection rules stops producing output for this long.
+const SCRAPE_QUIET_WINDOW: Duration = Duration::from_millis(250);
 
-/// P1-2 running scrape-hysteresis candidate: `(state, consecutive-match count)`.
-type ScrapeCandidate = Option<(AgentActivity, u8)>;
-/// P1-2 scanned / confirmed scrape result: `(state, optional `:why-status` hint)`.
-type ScrapeResult = Option<(AgentActivity, Option<&'static str>)>;
+
 
 /// The active pane's agent identity for status resolution: profile, kind, cwd,
 /// spawn-time cache key, and the tab's pinned session id (if any).
@@ -433,65 +423,67 @@ impl App {
                 return r.status;
             }
         }
-        let timing = Self::activity_for(is_agent, last_output_at, now);
+        // P1-2 scrape fallback: the debounced `settle_scrape_quiet` fires a
+        // single scan after `SCRAPE_QUIET_WINDOW` of silence, so the result
+        // here is already timing-safe — no per-event race with `reported`.
         if let Some(s) = scrape {
-            // Only apply the scrape fallback if the agent has stopped printing output.
-            // This prevents false positive 'flashes' while the agent is streaming text
-            // that happens to match the scrape rules.
-            if timing == AgentActivity::Idle {
-                return s;
+            return s;
+        }
+        Self::activity_for(is_agent, last_output_at, now)
+    }
+    /// P1-2 scrape-fallback settle: after `SCRAPE_QUIET_WINDOW` of silence from a
+    /// dirty agent tab with detection rules, fire a single screen scan. Consumes
+    /// the dirty flag.
+    ///
+    /// `&mut` settle point, PRE-recv. Returns `true` if any tab's status changed.
+    pub(crate) fn settle_scrape_quiet(
+        &mut self,
+        now: std::time::Instant,
+        ctx: &mut RunCtx,
+    ) -> bool {
+        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+            ctx.scheduler.disarm(Deadline::ScrapeQuiet);
+            return false;
+        };
+        let mut changed = false;
+        let mut earliest_fire: Option<std::time::Instant> = None;
+        for entry in tabs.tabs_mut().iter_mut() {
+            if !entry.info.scrape_dirty {
+                continue;
+            }
+            // When does this tab's quiet window expire?
+            let fire_at = entry
+                .info
+                .last_output_at
+                .map(|at| at + SCRAPE_QUIET_WINDOW)
+                .unwrap_or(now);
+            if now < fire_at {
+                // Not quiet long enough yet — track the earliest pending fire.
+                earliest_fire = Some(earliest_fire.map_or(fire_at, |m| m.min(fire_at)));
+                continue;
+            }
+            // Quiet window elapsed — fire a single scan and consume the flag.
+            entry.info.scrape_dirty = false;
+            let rules = crate::agent::detect(&entry.info.command).detection_rules();
+            if rules.is_empty() {
+                continue;
+            }
+            let lines = entry.pane.visible_lines();
+            let scanned = crate::agent::detect_rules::scan(&lines, rules);
+            let old = entry.info.scrape_status;
+            entry.info.scrape_status = scanned;
+            // Clear the legacy hysteresis candidate (no longer used, but keep
+            // the field in sync for `:why-status`).
+            entry.info.scrape_candidate = scanned.map(|(s, _)| (s, 1));
+            if old != scanned {
+                changed = true;
             }
         }
-        timing
-    }
-
-    /// P1-2 pure hysteresis step: given the prior `(state, consecutive-match
-    /// count)` candidate and a fresh `detect_rules::scan` result, return the
-    /// updated candidate to store plus the CONFIRMED status (once the same
-    /// state has matched `SCRAPE_CONFIRM_COUNT` times in a row). A scan miss
-    /// (`None`) immediately drops both — a rule ceasing to match (the prompt
-    /// scrolled away / was answered) should clear the guess right away, not
-    /// linger through its own hysteresis.
-    fn scrape_candidate_after(
-        prior: ScrapeCandidate,
-        scanned: ScrapeResult,
-    ) -> (ScrapeCandidate, ScrapeResult) {
-        let Some((state, hint)) = scanned else {
-            return (None, None);
-        };
-        let count = match prior {
-            Some((s, c)) if s == state => c.saturating_add(1),
-            _ => 1,
-        };
-        let confirmed = (count >= SCRAPE_CONFIRM_COUNT).then_some((state, hint));
-        (Some((state, count)), confirmed)
-    }
-
-    /// P1-2 producer: refresh a tab's scrape-fallback status from its current
-    /// screen. Called on each output event (`drain_pane_output`) — the only
-    /// moment the screen can have changed. A no-op unless the tab is an agent
-    /// with a non-empty [`detection_rules`](crate::agent::AgentProfile::detection_rules)
-    /// ruleset AND has no live self-report (an empty ruleset short-circuits
-    /// *before* any screen read, so hooked agents like claude/codex pay
-    /// nothing). Scans the LIVE visible screen — never scrollback, so a prompt
-    /// that was answered and scrolled off can't linger as a false `Blocked` —
-    /// and folds the result through the hysteresis in [`Self::scrape_candidate_after`].
-    pub(crate) fn update_tab_scrape(entry: &mut crate::pane::tabs::TabEntry) {
-        // A live report is authoritative (`settle_agent_activity` also clears
-        // any scrape state while one exists); don't do the scan work behind it.
-        if entry.info.reported.is_some() {
-            return;
+        match earliest_fire {
+            Some(t) => ctx.scheduler.arm(Deadline::ScrapeQuiet, t),
+            None => ctx.scheduler.disarm(Deadline::ScrapeQuiet),
         }
-        let rules = crate::agent::detect(&entry.info.command).detection_rules();
-        if rules.is_empty() {
-            return;
-        }
-        let lines = entry.pane.visible_lines();
-        let scanned = crate::agent::detect_rules::scan(&lines, rules);
-        let (candidate, confirmed) =
-            Self::scrape_candidate_after(entry.info.scrape_candidate, scanned);
-        entry.info.scrape_candidate = candidate;
-        entry.info.scrape_status = confirmed;
+        changed
     }
 
     /// Agent-activity (P0): derive each agent tab's [`AgentActivity`] from the
@@ -861,6 +853,8 @@ mod tests {
 
     // P1-2: the scrape fallback sits BETWEEN a live report and output timing —
     // consulted only when there's no report, and itself beaten by one.
+    // The debounced `settle_scrape_quiet` guarantees a scrape result is only
+    // written after silence, so effective_activity trusts it unconditionally.
     #[test]
     fn effective_activity_scrape_fallback_sits_between_report_and_timing() {
         use crate::pane::AgentActivity;
@@ -872,10 +866,11 @@ mod tests {
             App::effective_activity(None, Some(AgentActivity::Blocked), true, None, base),
             AgentActivity::Blocked
         );
-        // Scrape guess is suppressed if the agent is still actively outputting.
+        // Scrape is trusted even with recent output (settle_scrape_quiet
+        // handles the timing — effective_activity just reads the result).
         assert_eq!(
             App::effective_activity(None, Some(AgentActivity::Blocked), true, Some(base), base),
-            AgentActivity::Working
+            AgentActivity::Blocked
         );
         // A live report still wins over a scrape guess.
         let report = Some(crate::pane::ReportedStatus {
@@ -897,39 +892,6 @@ mod tests {
             App::effective_activity(None, Some(AgentActivity::Blocked), false, None, base),
             AgentActivity::Unknown
         );
-    }
-
-    // P1-2 hysteresis: N consecutive agreeing scans confirm; a disagreement
-    // resets the count; a miss clears everything immediately (no lingering
-    // stale guess once the matched text scrolls away / gets answered).
-    #[test]
-    fn scrape_candidate_after_requires_consecutive_agreement() {
-        use crate::pane::AgentActivity;
-
-        // Hit 1: Immediately confirmed because SCRAPE_CONFIRM_COUNT is 1.
-        let (candidate, confirmed) =
-            App::scrape_candidate_after(None, Some((AgentActivity::Blocked, Some("hint"))));
-        assert_eq!(candidate, Some((AgentActivity::Blocked, 1)));
-        assert_eq!(confirmed, Some((AgentActivity::Blocked, Some("hint"))));
-
-        // Same state again → count hits the threshold → confirmed.
-        let (candidate, confirmed) =
-            App::scrape_candidate_after(candidate, Some((AgentActivity::Blocked, Some("hint"))));
-        assert_eq!(candidate, Some((AgentActivity::Blocked, 2)));
-        assert_eq!(confirmed, Some((AgentActivity::Blocked, Some("hint"))));
-
-        // A different state resets the count to 1, not accumulating onto the
-        // old one.
-        let (candidate, confirmed) =
-            App::scrape_candidate_after(candidate, Some((AgentActivity::Working, None)));
-        assert_eq!(candidate, Some((AgentActivity::Working, 1)));
-        assert_eq!(confirmed, Some((AgentActivity::Working, None)));
-
-        // A miss (rule no longer matches) clears both immediately — no
-        // hysteresis on the way down.
-        let (candidate, confirmed) = App::scrape_candidate_after(candidate, None);
-        assert_eq!(candidate, None);
-        assert_eq!(confirmed, None);
     }
 
     // A `blocked` report is LATCHED: neither output NOR its TTL supersedes it —

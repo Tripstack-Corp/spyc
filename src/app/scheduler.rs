@@ -75,6 +75,11 @@ pub enum Deadline {
     /// disarms. Never armed while the session is clean, so idle stays 0 dps.
     /// PRE-recv (`settle_autosave`).
     Autosave,
+    /// P1-2 scrape-fallback: wake to run a one-shot screen scan after an
+    /// agent tab with detection rules has been quiet for `SCRAPE_QUIET_WINDOW`.
+    /// Re-armed on output; disarmed when scan fires or no dirty tab remains.
+    /// PRE-recv (`settle_scrape_quiet`).
+    ScrapeQuiet,
     /// P2 `wait_for_scope_clear`: wake at the earliest parked scope-waiter's
     /// deadline so a timeout fires with no other activity. Armed only while a
     /// waiter is parked, disarmed when none remain — idle stays 0 dps. PRE-recv
