@@ -361,7 +361,11 @@ impl AgentProfile for CodexProfile {
 /// a tool execution needs approval.
 static AGY_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {
     region: detect_rules::Region::BottomNonEmptyLines(15),
-    matcher: detect_rules::Matcher::Contains("Do you want to proceed?"),
+    matcher: detect_rules::Matcher::All(&[
+        "Requesting permission for:",
+        "Do you want to proceed?",
+        "esc to cancel",
+    ]),
     state: crate::pane::AgentActivity::Blocked,
     visible_blocker: Some("awaiting tool-execution approval"),
 }];

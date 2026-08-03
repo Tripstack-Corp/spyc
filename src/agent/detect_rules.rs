@@ -35,6 +35,8 @@ pub enum Matcher {
     Contains(&'static str),
     /// Matches if the region ends with this string (ignoring trailing whitespace).
     EndsWith(&'static str),
+    /// Matches if all the strings are found in the region.
+    All(&'static [&'static str]),
 }
 
 impl Matcher {
@@ -42,6 +44,7 @@ impl Matcher {
         match self {
             Self::Contains(needle) => haystack.contains(needle),
             Self::EndsWith(needle) => haystack.trim_end().ends_with(needle),
+            Self::All(needles) => needles.iter().all(|n| haystack.contains(n)),
         }
     }
 }
