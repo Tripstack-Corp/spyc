@@ -641,6 +641,13 @@ impl App {
                 ctx.draw.mark(3);
             }
 
+            // P1-2 scrape fallback: single visible-screen scan after 250 ms of quiet.
+            // Runs BEFORE settle_agent_activity so scrape_status is fresh.
+            // Armed only while a dirty tab exists ⇒ idle stays 0 dps.
+            if self.settle_scrape_quiet(now_pre, &mut ctx) {
+                ctx.draw.mark(3);
+            }
+
             // Agent-activity (P0): derive each agent tab's Working/Idle from the
             // `last_output_at` stamped in `drain_pane_output`, advance the spicy
             // pulse frame, and arm AgentIdle (flip Working→Idle) + AgentAnim

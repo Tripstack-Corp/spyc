@@ -605,6 +605,17 @@ pub fn sweep_orphan_spyc_configs(dir: &Path, our_pid: u32) -> usize {
     ) {
         cleaned += 1;
     }
+    // Agy `.agents/mcp_config.json` uses the same schema as `.mcp.json`.
+    let agy_path = dir.join(".agents/mcp_config.json");
+    if matches!(
+        remove_spyc_from_mcp_json(&agy_path, is_dead_orphan, true),
+        ConfigCleanup::Cleaned
+    ) {
+        if !agy_path.exists() {
+            let _ = std::fs::remove_dir(dir.join(".agents"));
+        }
+        cleaned += 1;
+    }
     cleaned
 }
 
@@ -696,7 +707,11 @@ pub fn ensure_agy_mcp_config(
 
 pub fn cleanup_agy_mcp_config(dir: &Path) -> ConfigCleanup {
     let path = dir.join(".agents/mcp_config.json");
-    remove_spyc_from_mcp_json(&path, |sock| sock.is_some_and(sock_is_ours), true)
+    let result = remove_spyc_from_mcp_json(&path, |sock| sock.is_some_and(sock_is_ours), true);
+    if matches!(result, ConfigCleanup::Cleaned) && !path.exists() {
+        let _ = std::fs::remove_dir(dir.join(".agents"));
+    }
+    result
 }
 #[cfg(test)]
 mod tests {
