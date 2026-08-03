@@ -31,8 +31,6 @@ const AGENT_ACTIVE_WINDOW: Duration = Duration::from_secs(2);
 /// tab with detection rules stops producing output for this long.
 const SCRAPE_QUIET_WINDOW: Duration = Duration::from_millis(250);
 
-
-
 /// The active pane's agent identity for status resolution: profile, kind, cwd,
 /// spawn-time cache key, and the tab's pinned session id (if any).
 type ActiveAgentKey = (
@@ -455,8 +453,7 @@ impl App {
             let fire_at = entry
                 .info
                 .last_output_at
-                .map(|at| at + SCRAPE_QUIET_WINDOW)
-                .unwrap_or(now);
+                .map_or(now, |at| at + SCRAPE_QUIET_WINDOW);
             if now < fire_at {
                 // Not quiet long enough yet — track the earliest pending fire.
                 earliest_fire = Some(earliest_fire.map_or(fire_at, |m| m.min(fire_at)));
