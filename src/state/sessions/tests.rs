@@ -454,6 +454,39 @@ fn picker_works_for_agy_records() {
     assert_eq!(pick.session_id, "22222222-2222-2222-2222-222222222222");
 }
 
+// ── agy_jsonl_exists validates against the transcript file, ────
+// ── NOT history.jsonl (the bug: a brand-new, never-`--conversation`- ─
+// ── resumed conversation never appears in history.jsonl at all) ──
+
+#[test]
+fn agy_conversation_exists_reads_the_transcript_file_not_history_jsonl() {
+    use super::agy_conversation_exists_under_home as exists;
+
+    let home = tempdir().unwrap();
+    let id = "bf207b97-123e-449d-9709-5403a214c99e";
+
+    // No transcript on disk yet ⇒ doesn't exist, regardless of history.jsonl.
+    assert!(!exists(home.path(), id));
+
+    let transcript_dir = home
+        .path()
+        .join(".gemini/antigravity-cli/brain")
+        .join(id)
+        .join(".system_generated/logs");
+    std::fs::create_dir_all(&transcript_dir).unwrap();
+    std::fs::write(transcript_dir.join("transcript.jsonl"), "{}\n").unwrap();
+
+    // The transcript existing is sufficient — no history.jsonl was ever written
+    // in this tempdir, reproducing the real failure: a conversation started
+    // fresh (never `--conversation <id>`-resumed) has no entry there at all, yet
+    // must still validate as real. Before this fix, `agy_jsonl_exists` delegated
+    // to `find_agy_sessions` (history.jsonl-based) and would have wrongly
+    // returned `false` here, rejecting a perfectly good live-reported pin and
+    // falling back to a spawn-proximity guess that could land on a stale,
+    // weeks-old conversation instead.
+    assert!(exists(home.path(), id));
+}
+
 // Sub-cases share one tempdir/state-root for sequencing; per-thread
 // `with_state_root` isolates this test from siblings.
 

@@ -428,13 +428,40 @@ impl SessionCandidate for AgySessionInfo {
     }
 }
 
-/// True if `session_id` is one of the conversations agy recorded for `cwd`.
-/// Reads (and parses) the whole history file, so prefer it on cold paths —
-/// session save, not per-frame.
-pub fn agy_jsonl_exists(cwd: &std::path::Path, session_id: &str) -> bool {
-    find_agy_sessions(cwd)
-        .into_iter()
-        .any(|s| s.session_id == session_id)
+/// Where agy stores one conversation's transcript:
+/// `<home>/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`.
+/// Shared with `state::agy_transcript`'s `^a v` resolver — same file, same ground
+/// truth for "this conversation exists".
+pub fn agy_transcript_path(home: &std::path::Path, conversation_id: &str) -> PathBuf {
+    home.join(".gemini/antigravity-cli/brain")
+        .join(conversation_id)
+        .join(".system_generated/logs/transcript.jsonl")
+}
+
+/// True if `session_id` names a real agy conversation — its own transcript file
+/// exists. `cwd` is unused: unlike claude's per-project transcript dir, agy's
+/// `brain/<id>/` is keyed purely by conversation id.
+///
+/// Deliberately NOT history.jsonl-based (`find_agy_sessions`), despite the name
+/// mirroring `claude_jsonl_exists`. `history.jsonl` is agy's typed-PROMPT log,
+/// not a conversation index: it only tags a line with `conversationId` when that
+/// message was sent inside an ALREADY-`--conversation`/`--continue`-resumed
+/// process. A brand-new conversation's id NEVER appears there, no matter how
+/// real or active it is — so validating a live-reported id against it made a
+/// perfectly good pin look nonexistent, silently fell back to spawn-proximity
+/// guessing, and resumed a stale conversation from weeks earlier instead of the
+/// one the user was actually just in.
+pub fn agy_jsonl_exists(_cwd: &std::path::Path, session_id: &str) -> bool {
+    let Some(home) = std::env::var_os("HOME") else {
+        return false;
+    };
+    agy_conversation_exists_under_home(std::path::Path::new(&home), session_id)
+}
+
+/// [`agy_jsonl_exists`] with `home` passed in, so it's testable without
+/// mutating the process environment.
+fn agy_conversation_exists_under_home(home: &std::path::Path, session_id: &str) -> bool {
+    agy_transcript_path(home, session_id).exists()
 }
 
 /// The main checkout's root for `cwd` — the parent of the *common* git dir, so a
@@ -459,6 +486,14 @@ fn agy_workspace_matches(workspace: &str, target: &str) -> bool {
 
 /// Find every Agy session for a given cwd by parsing `history.jsonl`.
 /// Agy writes all history to `~/.gemini/antigravity-cli/history.jsonl`.
+///
+/// **Known gap:** `history.jsonl` only tags a line with `conversationId` for a
+/// message sent inside an already-resumed (`--conversation`/`--continue`)
+/// process — a conversation that's never been explicitly resumed by id is
+/// invisible here, no matter how active it is. This is fine for what this
+/// function is actually for (a best-effort proximity GUESS when there's no live
+/// pin), but it means this is NOT a reliable existence check — see
+/// `agy_jsonl_exists`, which deliberately does NOT go through this.
 ///
 /// Returned sorted by `started_at_secs` descending.
 pub fn find_agy_sessions(cwd: &std::path::Path) -> Vec<AgySessionInfo> {
