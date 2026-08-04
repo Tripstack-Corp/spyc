@@ -84,9 +84,11 @@ pub struct TranscriptSpec {
     pub config_key: Option<&'static str>,
     /// Default when the config key is unset.
     pub default_enabled: bool,
-    /// When no transcript is found: `Some(msg)` flashes `msg` and stops
-    /// (codex — its history isn't in the terminal grid); `None` falls
-    /// through to vt100 terminal capture (claude / agy).
+    /// Flash text when no transcript is found. Either way `^a v` flashes and
+    /// closes back to the pane (`pane_scroll`'s `TranscriptStream`): `Some(msg)`
+    /// uses `msg`, `None` uses a generic "`<agent>`: no transcript found for this
+    /// session". There is no fall-through to vt100 terminal capture — that only
+    /// runs when the agent has no transcript spec at all, or the view is disabled.
     pub miss_message: Option<&'static str>,
 }
 

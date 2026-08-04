@@ -53,8 +53,9 @@
 # artifacts), the terminal capture is verbatim.
 #
 # `agy_transcript_scrollback` (default true): same as above, but for
-# Antigravity (`agy`) panes. Reads from `history.jsonl` and renders
-# cleanly without terminal artifacts.
+# Antigravity (`agy`) panes. Reads that conversation's own transcript
+# (`~/.gemini/antigravity-cli/brain/<conversation-id>/.../transcript.jsonl`)
+# and renders cleanly without terminal artifacts.
 [pane]
 # default_command = "claude"
 # new_tab_cwd = "worktree_root"

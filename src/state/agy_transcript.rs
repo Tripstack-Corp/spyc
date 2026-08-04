@@ -18,9 +18,11 @@ use crate::ui::theme::Theme;
 /// within the same second — which is every `-r` restore.
 ///
 /// A pinned id with no transcript on disk yet returns `None` rather than
-/// proximity-matching: we know which conversation this pane is running, so
-/// falling through to `^a v`'s terminal capture is right and showing a *different*
-/// conversation's history is not. The `command` field of the query is unused.
+/// proximity-matching: `None` makes `^a v` flash "no transcript found" and close,
+/// which is the right answer for a conversation we've positively identified but
+/// have nothing on disk for. Showing a *different* conversation's history — what
+/// proximity-matching would do here — is worse than showing none.
+/// The `command` field of the query is unused.
 pub fn resolve_active_jsonl(q: crate::agent::TranscriptQuery) -> Option<PathBuf> {
     resolve_under_home(Path::new(&std::env::var_os("HOME")?), q)
 }
@@ -175,8 +177,8 @@ mod tests {
         );
 
         // A pin whose transcript isn't on disk yet resolves to nothing rather than
-        // proximity-matching some other conversation — `^a v` then falls through to
-        // terminal capture.
+        // proximity-matching some other conversation — `^a v` then flashes
+        // "no transcript found" and closes.
         assert_eq!(
             resolve_under_home(
                 home.path(),

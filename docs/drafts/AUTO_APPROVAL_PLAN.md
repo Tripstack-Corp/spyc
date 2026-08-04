@@ -110,10 +110,18 @@ parsed today; tool-use schema needs confirming.
 ### Gemini CLI — out of scope
 
 Dropped. Google deprecated the Gemini CLI in favour of Antigravity, and spyc
-removed its `AgentProfile` accordingly. Anything this plan ships for a
-third agent targets **agy** instead: its transcript is
-`~/.gemini/antigravity-cli/history.jsonl` (one JSON line per turn, keyed by
-`conversationId` + `workspace`), parsed today in `find_agy_sessions`.
+removed its `AgentProfile` accordingly. Anything this plan ships for a third
+agent targets **agy** instead. Two separate files, easy to confuse:
+
+* **The transcript** (what a tool-use log would come from) —
+  `~/.gemini/antigravity-cli/brain/<conversation-id>/.system_generated/logs/transcript.jsonl`,
+  one JSON step per line (`step_index` / `source` / `type` / `content`), rendered
+  today by `state::agy_transcript`.
+* **`~/.gemini/antigravity-cli/history.jsonl`** — NOT a transcript: agy's
+  typed-prompt log, one line per message the user sent, and it only carries a
+  `conversationId` for messages sent inside an already-`--conversation`-resumed
+  process. Parsed by `find_agy_sessions` as a best-effort session guess; do not
+  treat it as a conversation index.
 
 ### Unified abstraction
 
