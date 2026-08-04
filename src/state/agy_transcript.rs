@@ -28,21 +28,17 @@ pub fn resolve_active_jsonl(q: crate::agent::TranscriptQuery) -> Option<PathBuf>
 /// [`resolve_active_jsonl`] with `home` passed in, so the resolution order is
 /// testable without mutating the process environment.
 fn resolve_under_home(home: &Path, q: crate::agent::TranscriptQuery) -> Option<PathBuf> {
-    let transcript_for = |id: &str| {
-        home.join(".gemini/antigravity-cli/brain")
-            .join(id)
-            .join(".system_generated/logs/transcript.jsonl")
-    };
+    use crate::state::sessions::agy_transcript_path;
 
     if let Some(id) = q.session_id {
-        let path = transcript_for(id);
+        let path = agy_transcript_path(home, id);
         return path.exists().then_some(path);
     }
 
     let best = crate::state::sessions::find_agy_sessions(q.cwd)
         .into_iter()
         .min_by_key(|s| s.started_at_secs.abs_diff(q.spawn_epoch_secs))?;
-    Some(transcript_for(&best.session_id))
+    Some(agy_transcript_path(home, &best.session_id))
 }
 
 /// Parse an Agy conversation JSONL into styled pager lines, in
