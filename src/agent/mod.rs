@@ -1,7 +1,7 @@
 //! Agent profile registry.
 //!
-//! Each AI coding agent spyc can host in the pane (claude/codex/gemini/
-//! agy/zot) is described by an [`AgentProfile`] impl. The registry plus
+//! Each AI coding agent spyc can host in the pane (claude/codex/agy/zot)
+//! is described by an [`AgentProfile`] impl. The registry plus
 //! [`detect`] / [`profile_for`] replace what used to be ~10
 //! `match AgentKind` dispatch sites scattered across `app`, `state`,
 //! and `config`. Adding an agent is a new impl + one `REGISTRY` entry —
@@ -27,7 +27,7 @@ use detect_rules::DetectionRule;
 
 /// How a restored pane re-establishes its conversation.
 pub enum ResumeAction {
-    /// Resume is baked into the spawned command (codex/gemini/agy/zot)
+    /// Resume is baked into the spawned command (codex/agy/zot)
     /// or there's nothing to resume (Other).
     None,
     /// Claude: spawn fresh, then type `/resume <sid>` into stdin once
@@ -44,7 +44,7 @@ pub struct RestorePlan {
 
 /// How an agent contributes to the on-quit exit-summary line.
 pub enum ExitSummaryMode {
-    /// No summary line (gemini / Other).
+    /// No summary line (Other).
     None,
     /// List human-readable session names (claude).
     Names,
@@ -139,8 +139,11 @@ pub trait AgentProfile: Sync {
         (None, None)
     }
 
-    /// SAVE: validate a live-reported session ID against the agent's history.
-    /// Returns `(id, optional_name)` if valid, `None` if invalid or unsupported.
+    /// SAVE: confirm the session id pinned to this tab
+    /// ([`crate::pane::tabs::TabInfo::claude_session_id`], lifted from a status-hook
+    /// payload) still names a real conversation, so save can prefer it over the
+    /// spawn-proximity resolver. `Some((id, name))` when it checks out; `None`
+    /// when it's stale or the agent has no history to check it against.
     fn validate_live_session_id(&self, _cwd: &Path, _id: &str) -> Option<(String, Option<String>)> {
         None
     }
@@ -175,7 +178,7 @@ pub trait AgentProfile: Sync {
         ExitSummaryMode::None
     }
 
-    /// Transcript scrollback spec, if any. Default: none (gemini).
+    /// Transcript scrollback spec, if any. Default: none.
     fn transcript(&self) -> Option<TranscriptSpec> {
         None
     }
@@ -356,9 +359,19 @@ impl AgentProfile for CodexProfile {
     }
 }
 
-/// Agy CLI has `status_hooks()` but they don't cover approval events,
-/// so it relies on this scrape fallback for the `Blocked` signal when
-/// a tool execution needs approval.
+/// P1-2: agy DOES have `status_hooks()`, but its event vocabulary is
+/// `PreToolUse` / `PostToolUse` / `PreInvocation` / `PostInvocation` / `Stop`
+/// (agy's own `agy-customizations/docs/hooks.md`) — none of which fires when
+/// agy asks the *user* to approve a tool call. `PreToolUse` is the nearest
+/// thing and is the wrong instrument: it runs *instead of* the prompt and must
+/// answer with an `allow`/`deny`/`ask` decision, so hanging a status report on
+/// it would make spyc arbitrate agy's permissions. Hence `blocked` — the one
+/// state that actually earns the user's attention — comes from this screen
+/// scrape instead.
+///
+/// All three phrases are required (see [`detect_rules::Matcher::All`]): an
+/// agent discussing permissions prints any one of them readily, and a false
+/// red "needs me" square is worse than no fallback.
 static AGY_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {
     region: detect_rules::Region::BottomNonEmptyLines(15),
     matcher: detect_rules::Matcher::All(&[
@@ -447,9 +460,9 @@ impl AgentProfile for AgyProfile {
         })
     }
     fn status_hooks(&self) -> Option<StatusHookSupport> {
-        // claude uses `.claude/settings.json`, codex uses `.codex/config.toml`,
-        // agy uses `.agents/hooks.json` (named hook-set). Hooks live
-        // in `.agents/hooks.json`, read at startup → written pre-spawn.
+        // A named hook-set in `.agents/hooks.json`, read at startup → written
+        // pre-spawn. Covers `working` + `done` only; `blocked` has no event to
+        // hang on and comes from AGY_DETECTION_RULES instead.
         Some(StatusHookSupport {
             ensure: crate::mcp::ensure_agy_status_hooks,
             cleanup: crate::mcp::cleanup_agy_status_hooks,
@@ -698,10 +711,6 @@ mod tests {
         );
     }
 
-    /// Gemini with no recorded id restores the bare command (the
-    /// `--resume <index>` lookup needs a live `gemini --list-sessions`,
-    /// so it's exercised only when an id is present — kept out of unit
-    /// tests to avoid spawning the CLI).
     /// Other (bash/vim/make): the saved command runs verbatim and any
     /// stray session id is ignored — no resume, no panic.
     #[test]

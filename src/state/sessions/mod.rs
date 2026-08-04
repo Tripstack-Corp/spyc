@@ -14,7 +14,7 @@ const MAX_SESSIONS: usize = 20;
 /// Drives session-save and resume-on-restore behavior — claude uses
 /// a UUID-or-name token plus `/resume` over stdin (CLI flag is
 /// regression-prone), codex uses `codex resume <UUID>` directly.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentKind {
     Claude,
@@ -24,6 +24,27 @@ pub enum AgentKind {
     /// Anything else (`bash`, `vim`, `make`, …). No session resume.
     #[default]
     Other,
+}
+
+/// Hand-written so an unrecognized kind degrades to [`AgentKind::Other`]
+/// instead of failing the parse. `load_sessions` drops any session file it
+/// can't deserialize, so a derived impl turns "spyc retired an agent" into
+/// "every tab, cwd and vsplit in that restore point silently disappears from
+/// `-r`" — which is what dropping the `gemini` variant did.
+impl<'de> Deserialize<'de> for AgentKind {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        // An unrecognized NAME degrades to `Other` — "restore this tab without
+        // agent resume", a far cheaper loss than the session. A non-string still
+        // errors: that's a corrupt file, not a spyc-version difference, and
+        // swallowing it would leave the input stream unconsumed anyway.
+        Ok(match String::deserialize(d)?.as_str() {
+            "claude" => Self::Claude,
+            "codex" => Self::Codex,
+            "agy" => Self::Agy,
+            "zot" => Self::Zot,
+            _ => Self::Other,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -407,11 +428,33 @@ impl SessionCandidate for AgySessionInfo {
     }
 }
 
-/// True if a conversation ID exists for the given cwd in agy's history.jsonl
+/// True if `session_id` is one of the conversations agy recorded for `cwd`.
+/// Reads (and parses) the whole history file, so prefer it on cold paths —
+/// session save, not per-frame.
 pub fn agy_jsonl_exists(cwd: &std::path::Path, session_id: &str) -> bool {
     find_agy_sessions(cwd)
         .into_iter()
         .any(|s| s.session_id == session_id)
+}
+
+/// The main checkout's root for `cwd` — the parent of the *common* git dir, so a
+/// linked worktree resolves to the repo it was created from.
+///
+/// `discover` rather than `open`: a pane's cwd is often a subdirectory, and
+/// `gix::open` only accepts a worktree root or a `.git` dir (it does no upward
+/// search), so `open` would silently return `None` for exactly the nested case
+/// this exists to handle.
+fn main_repo_root(cwd: &std::path::Path) -> Option<PathBuf> {
+    let repo = gix::discover(cwd).ok()?;
+    let common = repo.common_dir();
+    let canon = std::fs::canonicalize(common).unwrap_or_else(|_| common.to_path_buf());
+    canon.parent().map(std::path::Path::to_path_buf)
+}
+
+/// True if agy's recorded `workspace` names `target`, tolerating macOS's
+/// `/private` symlink mirror (agy may record either form).
+fn agy_workspace_matches(workspace: &str, target: &str) -> bool {
+    workspace == target || workspace.strip_prefix("/private").unwrap_or(workspace) == target
 }
 
 /// Find every Agy session for a given cwd by parsing `history.jsonl`.
@@ -428,6 +471,11 @@ pub fn find_agy_sessions(cwd: &std::path::Path) -> Vec<AgySessionInfo> {
     };
 
     let cwd_str = cwd.to_string_lossy();
+    // Resolved ONCE, not per line: it's a repo discovery plus a `canonicalize`,
+    // and it doesn't vary with the line being examined. Agy records the
+    // workspace it was launched in, which for a pane in a linked worktree may be
+    // the main checkout, so both spellings count as this pane's.
+    let main_repo = main_repo_root(cwd).map(|p| p.to_string_lossy().into_owned());
     let mut sessions: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
 
     for line in text.lines() {
@@ -437,22 +485,10 @@ pub fn find_agy_sessions(cwd: &std::path::Path) -> Vec<AgySessionInfo> {
         let Some(workspace) = val.get("workspace").and_then(|v| v.as_str()) else {
             continue;
         };
-        let mut matches = workspace == cwd_str
-            || workspace.strip_prefix("/private").unwrap_or(workspace) == cwd_str.as_ref();
-
-        if !matches
-            && let Some(main_repo) = gix::open(cwd).ok().and_then(|repo| {
-                std::fs::canonicalize(repo.common_dir())
-                    .unwrap_or_else(|_| repo.common_dir().to_path_buf())
-                    .parent()
-                    .map(std::path::Path::to_path_buf)
-            })
-        {
-            let main_str = main_repo.to_string_lossy();
-            matches = workspace == main_str
-                || workspace.strip_prefix("/private").unwrap_or(workspace) == main_str.as_ref();
-        }
-
+        let matches = agy_workspace_matches(workspace, &cwd_str)
+            || main_repo
+                .as_deref()
+                .is_some_and(|main| agy_workspace_matches(workspace, main));
         if !matches {
             continue;
         }
@@ -465,11 +501,11 @@ pub fn find_agy_sessions(cwd: &std::path::Path) -> Vec<AgySessionInfo> {
             .unwrap_or(0);
         let secs = timestamp / 1000;
 
+        // Keep the EARLIEST stamp per conversation: history holds one line per
+        // turn, and the picker matches a session against the pane's spawn time,
+        // which lines up with when the conversation started — not its last turn.
         let entry = sessions.entry(conversation_id.to_string()).or_insert(secs);
-        // We want the earliest timestamp seen for this conversationId
-        if secs < *entry {
-            *entry = secs;
-        }
+        *entry = (*entry).min(secs);
     }
 
     let mut found: Vec<AgySessionInfo> = sessions

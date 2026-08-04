@@ -228,7 +228,10 @@ spyc's workflow: browse files above, talk to Claude below.
     **codex** writes inline `[[hooks.*]]` into the same `.codex/config.toml` that
     already holds the MCP entry (read once at startup, so for an already-consented
     repo the hooks are written *before* codex spawns); **agy** (Antigravity)
-    writes a `spyc-status` set into `.agents/hooks.json`.
+    writes a `spyc-status` set into `.agents/hooks.json` and is **partial** — agy
+    exposes no user-approval event, so its hooks cover `working` + `done` only
+    and the red `blocked` "needs me" square comes from spyc reading agy's
+    approval prompt off the pane instead.
     **It asks first**, once per project: the first `claude`/`codex`/`agy` launch
     in a repo pops a `[Y/n]` ("let spyc show this agent's live status? writes
     hooks to `<config>`, removed on exit"), and the answer is **saved per repo** —
@@ -243,14 +246,16 @@ spyc's workflow: browse files above, talk to Claude below.
     spyc is a throwaway build-dir binary whose path went stale), **`:hooks on!`**
     force-restarts the active claude pane and resumes the conversation so the
     hooks load from launch.
-  - **Scrape fallback** (for agents spyc can't hook, e.g. `gemini`) — when an
+  - **Scrape fallback** (for a state an agent's hooks can't report) — when an
     agent has no self-report, spyc reads its **visible screen** for a known
-    prompt and infers status. Today that's gemini's `Allow execution of:`
-    approval prompt lighting the red `blocked` square. Deliberately last-resort:
-    any live self-report always wins, it needs a couple of consecutive matches
-    before trusting a guess (no flicker), and it only matches prompt text spyc
-    has actually verified — so it never invents a false alarm. This is the one
-    place spyc reads the screen, and only as a graceful degradation.
+    prompt and infers status. Today that's `agy`'s tool-approval prompt lighting
+    the red `blocked` square, because agy exposes no approval event to hook.
+    Deliberately last-resort: any live self-report always wins; it waits for the
+    pane to go quiet so a half-drawn prompt can't flip the dot; it requires
+    *several* phrases of a prompt spyc has actually verified, so an agent merely
+    discussing permissions doesn't trip it; and answering with Enter clears it.
+    This is the one place spyc reads the screen, and only as a graceful
+    degradation.
 
   **`:why-status`** flashes the active tab's state, its source (self-reported /
   scrape-fallback / output-timing), and seconds since last output, for debugging.
@@ -958,7 +963,7 @@ spyc auto-saves your workspace on quit and can restore it on startup.
 - Sessions are de-duplicated by cwd + tab commands (most recent kept).
 - Capped at 20 most recent sessions.
 - **Agent session resume** — for tabs running `claude`, `codex`,
-  `gemini`, `agy`, or `zot`, quitting spyc and launching with `spyc -r`
+  `agy`, or `zot`, quitting spyc and launching with `spyc -r`
   will restore. Claude tabs spawn a fresh `claude` and type
   `/resume <id>` once it's settled (the CLI flag has a regression),
   then verify the submit landed — re-sending Enter while the command

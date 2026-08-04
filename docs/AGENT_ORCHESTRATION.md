@@ -28,9 +28,10 @@ three tiers; a higher tier always wins:
 
 1. **Semantic self-report** (best) — the agent calls the `report_status` MCP tool
    (or its lifecycle hook does): `working` / `blocked` / `done` / `idle`.
-2. **Scrape fallback** — for an agent that can't self-report, spyc reads its
-   *visible screen* for a known prompt (today: gemini's `Allow execution of:`
-   approval → `blocked`). Second-class; a live report always overrides it.
+2. **Scrape fallback** — for a state an agent's hooks can't report, spyc reads
+   its *visible screen* for a known prompt (today: agy's tool-approval prompt →
+   `blocked`, since agy has no approval event). Second-class; a live report
+   always overrides it, and it only scans once the pane goes quiet.
 3. **Output timing** — with neither of the above, output flowing = `working`,
    silence = `idle`.
 
@@ -50,7 +51,9 @@ the agent files a newer report) — no timer or stray output bounces it off.
 **Auto-reporting.** So it works without the agent choosing to call the tool, spyc
 installs lifecycle hooks that run `spyc --report-status` (prompt-submit→working,
 needs-permission→blocked, turn-end→done): **claude** (`.claude/settings.json`),
-**codex** (`.codex/config.toml`), **agy** (`.agents/hooks.json`).
+**codex** (`.codex/config.toml`), **agy** (`.agents/hooks.json` — working/done only;
+agy has no approval event, so its `blocked` comes from spyc reading the approval
+prompt off the pane).
 It asks first — a `[Y/n]` on the first launch per repo, saved; change it later
 with **`:hooks on|on!|off`**.
 

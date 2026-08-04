@@ -59,6 +59,17 @@ topo_order = false
 # it can double-list within a release range that mixes both merge styles.)
 commit_preprocessors = [
   { pattern = '^Merged in [^\n]*\(pull request #[0-9]+\)\s*\n+', replace = "" },
+
+  # Retro-typing for three merged commits that landed without a conventional
+  # subject (#193–#195). `filter_unconventional` drops them, so the whole agy /
+  # gemini-removal shape was missing from the pending section — and a squashed
+  # subject on `main` can't be rewritten after the fact. Typing them here is
+  # durable: it survives every `make changelog` / `make release-prep` regen.
+  # This list is for accidents already on `main`; the fix for new work is a
+  # conventional subject, not another entry here.
+  { pattern = '^Fix git status endless re-walk bug due to HEAD mtime cache drift', replace = "fix(git): resolve the branch ref in the marker poll so commits trigger a re-walk" },
+  { pattern = '^agy mcp support', replace = "feat(agent): agy MCP config, scrape-fallback blocked detection, worktree-aware session restore — and drop deprecated gemini support" },
+  { pattern = '^Refine Agy block detection', replace = "fix(agent): debounce the agy approval-prompt scrape so a half-drawn screen can't flip a dot" },
 ]
 
 commit_parsers = [

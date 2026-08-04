@@ -5,9 +5,9 @@
 //! class; see the plan's "Explicitly OUT of scope").
 //!
 //! Kept deliberately small: one [`Region`] (the bottom of the pane's recent
-//! text, where an interactive prompt renders) and one [`Matcher`] shape
-//! (substring). Extend with `Regex` / composition (`Any`/`All`/`Not`) / more
-//! regions only when a real rule needs one — no speculative surface.
+//! text, where an interactive prompt renders) and one [`Matcher`] (a conjunction
+//! of substrings). Extend with `Regex` / more regions only when a real rule
+//! needs one — no speculative surface.
 
 use crate::pane::AgentActivity;
 
@@ -15,7 +15,6 @@ use crate::pane::AgentActivity;
 /// from the same vt100 screen text `gf`/quick-select already read
 /// (`Pane::recent_lines`) — no new OSC-sequence tracking.
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
 pub enum Region {
     /// The last `n` non-empty lines of the pane's recent output, newest first
     /// collapsed into one block — where a confirmation prompt almost always
@@ -23,27 +22,25 @@ pub enum Region {
     BottomNonEmptyLines(usize),
 }
 
-/// Text matcher for a [`DetectionRule`]. An enum (not a bare `&str`) so it's the
-/// extension point for `Regex` / `Any` / `All` / `Not` when a real rule needs
-/// composition — none do today, so `Contains` is the only variant.
+/// Text matcher for a [`DetectionRule`]. An enum (not a bare slice) so it's the
+/// extension point for `Regex` / `Any` / `Not` when a real rule needs one.
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
 pub enum Matcher {
-    /// A plain substring match (case-sensitive — agent prompt text is stable
-    /// enough that this beats a regex dependency for the rules that exist
-    /// today).
-    Contains(&'static str),
-    /// Matches if the region ends with this string (ignoring trailing whitespace).
-    EndsWith(&'static str),
-    /// Matches if all the strings are found in the region.
+    /// Every needle must appear somewhere in the region — a conjunction of plain
+    /// substring matches (case-sensitive; agent prompt text is stable enough
+    /// that this beats a regex dependency). Order is not significant, so a
+    /// single-element slice is a plain "contains".
+    ///
+    /// Requiring *several* phrases is what makes a rule safe to trust: an agent
+    /// readily prints any one phrase from a permission prompt while merely
+    /// discussing permissions, and a false red "needs me" square is worse than
+    /// no detection at all.
     All(&'static [&'static str]),
 }
 
 impl Matcher {
     fn matches(self, haystack: &str) -> bool {
         match self {
-            Self::Contains(needle) => haystack.contains(needle),
-            Self::EndsWith(needle) => haystack.trim_end().ends_with(needle),
             Self::All(needles) => needles.iter().all(|n| haystack.contains(n)),
         }
     }
@@ -78,9 +75,10 @@ fn region_text(lines: &[String], region: Region) -> String {
 }
 
 /// Scan `lines` (a pane's recent text) against `rules` in priority order,
-/// returning the first match's `(state, visible_blocker)`. Pure — no I/O, no
-/// clock, no hysteresis (the caller, [`crate::app::agent_status`], debounces
-/// across calls so one transient line of scrolling text can't flip a dot).
+/// returning the first match's `(state, visible_blocker)`. Pure — no I/O and no
+/// clock: WHEN to scan is the caller's problem, and
+/// [`crate::app::agent_status`] only calls this once a tab's output has gone
+/// quiet, so a half-drawn prompt can't flip a dot.
 pub fn scan(
     lines: &[String],
     rules: &[DetectionRule],
@@ -116,18 +114,30 @@ mod tests {
     }
 
     #[test]
-    fn contains_matches_substring_anywhere_in_region() {
-        let m = Matcher::Contains("Do you want to proceed?");
+    fn single_needle_matches_substring_anywhere_in_region() {
+        let m = Matcher::All(&["Do you want to proceed?"]);
         assert!(m.matches("blah\nDo you want to proceed?\nblah"));
         assert!(!m.matches("nothing interesting here"));
     }
 
     #[test]
-    fn ends_with_matches_at_end_ignoring_whitespace() {
-        let m = Matcher::EndsWith("esc to cancel");
-        assert!(m.matches("blah\nesc to cancel"));
-        assert!(m.matches("blah\nesc to cancel\n  \n"));
-        assert!(!m.matches("esc to cancel\nblah"));
+    fn all_requires_every_needle_in_any_order() {
+        let m = Matcher::All(&["Requesting permission for:", "Do you want to proceed?"]);
+        assert!(m.matches("Requesting permission for: ls\nDo you want to proceed?"));
+        // Order doesn't matter — it's a conjunction, not a sequence.
+        assert!(m.matches("Do you want to proceed?\nRequesting permission for: ls"));
+        // The whole point: one phrase alone must NOT match. An agent that merely
+        // *writes about* permissions trips a single needle, never the conjunction.
+        assert!(!m.matches("Do you want to proceed?"));
+        assert!(!m.matches("Requesting permission for: ls"));
+    }
+
+    #[test]
+    fn all_with_no_needles_matches_vacuously() {
+        // Degenerate but total: an empty conjunction is true. Documented so a
+        // future empty ruleset entry is a visible mistake, not a silent always-on
+        // `Blocked`.
+        assert!(Matcher::All(&[]).matches("anything"));
     }
 
     #[test]
@@ -135,13 +145,13 @@ mod tests {
         let rules = &[
             DetectionRule {
                 region: Region::BottomNonEmptyLines(5),
-                matcher: Matcher::Contains("Do you want to proceed?"),
+                matcher: Matcher::All(&["Do you want to proceed?"]),
                 state: AgentActivity::Blocked,
                 visible_blocker: Some("awaiting tool-execution approval"),
             },
             DetectionRule {
                 region: Region::BottomNonEmptyLines(5),
-                matcher: Matcher::Contains("anything"),
+                matcher: Matcher::All(&["anything"]),
                 state: AgentActivity::Working,
                 visible_blocker: None,
             },
@@ -161,7 +171,7 @@ mod tests {
     fn scan_returns_none_when_no_rule_matches() {
         let rules = &[DetectionRule {
             region: Region::BottomNonEmptyLines(5),
-            matcher: Matcher::Contains("Do you want to proceed?"),
+            matcher: Matcher::All(&["Do you want to proceed?"]),
             state: AgentActivity::Blocked,
             visible_blocker: None,
         }];

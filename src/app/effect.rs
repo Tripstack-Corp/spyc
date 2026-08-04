@@ -563,12 +563,20 @@ impl App {
                             // `blocked` self-report so the dot leaves red and follows
                             // the agent's resumed output again.
                             let info = t.active_info_mut();
-                            if clears_blocked
-                                && info.reported.is_some_and(|r| {
-                                    r.status == crate::pane::AgentActivity::Blocked
-                                })
-                            {
+                            let blocked = |s: crate::pane::AgentActivity| {
+                                s == crate::pane::AgentActivity::Blocked
+                            };
+                            if clears_blocked && info.reported.is_some_and(|r| blocked(r.status)) {
                                 info.reported = None;
+                            }
+                            // Same for a scrape-derived `blocked` (agy's only source
+                            // for it — no hook event covers approval). Without this
+                            // the dot can't clear until the tab goes quiet enough for
+                            // the next debounced scan, so answering a prompt and
+                            // watching the agent work still reads as "needs me".
+                            if clears_blocked && info.scrape_status.is_some_and(|(s, _)| blocked(s))
+                            {
+                                info.scrape_status = None;
                             }
                             input.send_to(t.active_mut())
                         }),

@@ -171,10 +171,15 @@ pub fn host_dir(host: Host) -> Option<PathBuf> {
             };
             Some(base.join("skills").join(SKILL_NAME))
         }
+        // Antigravity's cross-flavor personal skills root. `~/.gemini/config/` is
+        // the customization root every flavor reads (CLI, IDE, app);
+        // `~/.gemini/antigravity-cli/skills/` also works but is CLI-only, and
+        // `antigravity-cli/builtin/skills/` is agy's own shipped bundle — not
+        // ours to write into.
         Host::Agy => Some(
             home()?
                 .join(".gemini")
-                .join("antigravity-cli")
+                .join("config")
                 .join("skills")
                 .join(SKILL_NAME),
         ),
