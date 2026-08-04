@@ -174,13 +174,19 @@ pub struct TabInfo {
     /// exact rollout when present (the strongest signal). `None` for non-codex
     /// tabs and codex tabs not yet pinned.
     pub codex_session_id: Option<String>,
-    /// Claude session uuid pinned to this tab. Set at restore from the exact
-    /// `/resume <sid>` we inject (we KNOW which conversation this pane is
-    /// resuming), so the next session save persists it directly instead of
-    /// re-deriving it from the fragile spawn-time-proximity heuristic — which
-    /// crosses panes restored together (they all spawn within the same second).
-    /// `None` for non-claude tabs and for a fresh (never-resumed) claude pane.
-    pub claude_session_id: Option<String>,
+    /// The conversation uuid this tab is known to be running, from either of the
+    /// two sources that KNOW rather than guess: the exact `/resume <sid>` session
+    /// restore injects, or the id an agent's status hook reported
+    /// (`session_id` for claude, `conversationId` for agy). The next session save
+    /// persists it directly instead of re-deriving it from the fragile
+    /// spawn-time-proximity heuristic — which crosses panes restored together
+    /// (they all spawn within the same second).
+    ///
+    /// `None` for a fresh pane that hasn't reported or resumed yet, and for
+    /// agents with neither channel. Codex pins to
+    /// [`Self::codex_session_id`] instead (a spawn-ordered rollout claim, not a
+    /// reported id); [`Self::pinned_session_id`] reads whichever is set.
+    pub live_session_id: Option<String>,
     /// P1-2 scrape-inferred status (state + `:why-status` hint) from the last
     /// settled screen scan. Third-tier input to `effective_activity`
     /// (self-report > this > output timing). Cleared the instant a live
@@ -234,7 +240,7 @@ impl TabInfo {
             spawn_at: std::time::Instant::now(),
             spawn_epoch_secs: crate::sysinfo::epoch_secs(),
             codex_session_id: None,
-            claude_session_id: None,
+            live_session_id: None,
             scrape_status: None,
             scrape_dirty: false,
             // A separate uuid from `id`: this one is restore-stable (see the
@@ -243,14 +249,14 @@ impl TabInfo {
         }
     }
 
-    /// This tab's pinned agent session uuid — the codex rollout claim or the
-    /// claude session id (a tab runs one agent, so at most one is set). The
+    /// This tab's pinned agent session uuid — the codex rollout claim or a
+    /// reported/resumed id (a tab runs one agent, so at most one is set). The
     /// exact per-tab identity that transcript resolution and the status suffix
     /// prefer over the fragile spawn-time-proximity guess.
     pub fn pinned_session_id(&self) -> Option<&str> {
         self.codex_session_id
             .as_deref()
-            .or(self.claude_session_id.as_deref())
+            .or(self.live_session_id.as_deref())
     }
 }
 

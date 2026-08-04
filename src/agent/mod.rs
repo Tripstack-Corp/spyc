@@ -140,10 +140,11 @@ pub trait AgentProfile: Sync {
     }
 
     /// SAVE: confirm the session id pinned to this tab
-    /// ([`crate::pane::tabs::TabInfo::claude_session_id`], lifted from a status-hook
-    /// payload) still names a real conversation, so save can prefer it over the
-    /// spawn-proximity resolver. `Some((id, name))` when it checks out; `None`
-    /// when it's stale or the agent has no history to check it against.
+    /// ([`crate::pane::tabs::TabInfo::live_session_id`] — from a status-hook
+    /// payload or an injected `/resume`) still names a real conversation, so save
+    /// can prefer it over the spawn-proximity resolver. `Some((id, name))` when it
+    /// checks out; `None` when it's stale or the agent has no history to check it
+    /// against.
     fn validate_live_session_id(&self, _cwd: &Path, _id: &str) -> Option<(String, Option<String>)> {
         None
     }

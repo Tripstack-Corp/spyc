@@ -1100,10 +1100,25 @@ fn session_id_piggybacks_from_hook_payload() {
     let payload = r#"{"hook_event_name":"UserPromptSubmit","session_id":"abc-123","transcript_path":"/x/y.jsonl","cwd":"/proj"}"#;
     assert_eq!(sid(payload), Some("abc-123".to_string()));
 
+    // Agy's payload is camelCase throughout (protojson), so its conversation id
+    // is `conversationId` — a `session_id`-only lift silently never pinned an agy
+    // tab, leaving it on the spawn-proximity guess.
+    let agy = r#"{"conversationId":"ec33ebf9-0cba-4100-8142-c61503f6c587","workspacePaths":["/proj"],"transcriptPath":"/proj/.gemini/antigravity-cli/transcript.jsonl","modelName":"auto"}"#;
+    assert_eq!(
+        sid(agy),
+        Some("ec33ebf9-0cba-4100-8142-c61503f6c587".to_string())
+    );
+
     // Absent / empty / unparseable ⇒ None (the reporter then omits it; a direct
     // agent report_status call has no payload at all).
     assert_eq!(sid(r#"{"hook_event_name":"Stop"}"#), None);
     assert_eq!(sid(r#"{"session_id":""}"#), None);
+    assert_eq!(sid(r#"{"conversationId":""}"#), None);
+    // An empty `session_id` must not shadow a usable `conversationId`.
+    assert_eq!(
+        sid(r#"{"session_id":"","conversationId":"c-1"}"#),
+        Some("c-1".to_string())
+    );
     assert_eq!(sid(""), None);
     assert_eq!(sid("not json"), None);
 }

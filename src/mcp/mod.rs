@@ -197,16 +197,23 @@ fn effective_report_state<'a>(configured: &'a str, hook_payload: &str) -> &'a st
     }
 }
 
-/// Extract the agent's live session UUID from a status-hook stdin payload
-/// (Claude includes `session_id` in every hook event's JSON). `None` when the
-/// payload is empty / unparseable / lacks the field — the reporter then simply
-/// omits it. The P1-3 piggyback: a live-reported id lets `save_session` resume
-/// the exact conversation instead of guessing by spawn proximity.
+/// Extract the agent's live conversation UUID from a status-hook stdin payload.
+/// `None` when the payload is empty / unparseable / lacks the field — the
+/// reporter then simply omits it. The P1-3 piggyback: a live-reported id lets
+/// `save_session` resume the exact conversation instead of guessing by spawn
+/// proximity.
+///
+/// Two spellings, because the agents disagree: claude puts `session_id` in every
+/// hook event, agy uses camelCase `conversationId` (protojson — its whole payload
+/// is camelCase). Checked in that order; a payload carrying both is not a case
+/// that arises, since only one agent produces any given payload.
 fn session_id_from_hook_payload(payload: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(payload)
-        .ok()
-        .and_then(|v| v["session_id"].as_str().map(String::from))
-        .filter(|s| !s.is_empty())
+    let v: serde_json::Value = serde_json::from_str(payload).ok()?;
+    ["session_id", "conversationId"]
+        .into_iter()
+        .filter_map(|key| v[key].as_str())
+        .find(|s| !s.is_empty())
+        .map(String::from)
 }
 
 /// Agent status-hook reporter (`spyc --report-status <state>`): a one-shot that
