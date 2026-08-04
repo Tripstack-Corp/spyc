@@ -478,11 +478,14 @@ impl App {
                 entry.info.activity = activity;
                 // P1-3: a live session id piggybacked on the hook report supersedes
                 // the spawn-proximity resolver at save time — route it to the id
-                // field for this tab's agent (only Claude's hooks carry one today).
+                // field for this tab's agent. claude reports `session_id` and agy
+                // `conversationId` (both land in `live_session_id`); codex has its
+                // own spawn-ordered rollout claim.
                 if let Some(sid) = session_id {
                     match crate::agent::detect(&entry.info.command).kind() {
-                        crate::state::sessions::AgentKind::Claude => {
-                            entry.info.claude_session_id = Some(sid);
+                        crate::state::sessions::AgentKind::Claude
+                        | crate::state::sessions::AgentKind::Agy => {
+                            entry.info.live_session_id = Some(sid);
                         }
                         crate::state::sessions::AgentKind::Codex => {
                             entry.info.codex_session_id = Some(sid);

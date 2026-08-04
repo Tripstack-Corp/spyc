@@ -539,8 +539,8 @@ fn activity_dump_lines(app: &App) -> Vec<String> {
             info.spawn_at.elapsed().as_secs_f32()
         ));
         out.push(format!("    pane_id: {}", info.id));
-        if let Some(s) = &info.claude_session_id {
-            out.push(format!("    claude_session_id: {s}"));
+        if let Some(s) = &info.live_session_id {
+            out.push(format!("    live_session_id: {s}"));
         }
         if let Some(s) = &info.codex_session_id {
             out.push(format!("    codex_session_id: {s}"));

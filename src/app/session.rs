@@ -119,7 +119,7 @@ impl App {
                             // internally so multi-pane saves don't collapse onto one
                             // conversation.
                             let (agent_session_id, agent_session_name) =
-                                match t.info.claude_session_id.as_deref().and_then(|id| {
+                                match t.info.live_session_id.as_deref().and_then(|id| {
                                     profile.validate_live_session_id(&t.info.cwd, id)
                                 }) {
                                     Some((id, name)) => (Some(id), name),
@@ -495,7 +495,7 @@ impl App {
                         // save persists it directly, never re-deriving it from the
                         // spawn-proximity heuristic that crosses panes restored
                         // together (they all spawn within the same second).
-                        entry.info.claude_session_id = Some(session_id.clone());
+                        entry.info.live_session_id = Some(session_id.clone());
                         entry.info.pending_resume_send =
                             Some(crate::pane::tabs::PendingResumeSend::Text {
                                 sid: session_id,

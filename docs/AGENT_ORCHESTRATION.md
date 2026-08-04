@@ -86,9 +86,10 @@ after any change (a debounced, crash-sufficient autosave written atomically), so
 a `SIGKILL` / crash / laptop-sleep loses at most that window — not the session.
 
 **`spyc -r`** restores: pane tabs (each agent respawned + its *exact* conversation
-resumed — Claude's live session id is captured as it runs, so restore replays the
-right `--resume <id>` instead of guessing), the vertical split, **and the scope
-registry** (§4) — coordination survives a restart mid-merge-train.
+resumed — claude and agy report their live conversation id as they run, so restore
+replays the right one instead of guessing by spawn time, which collides when
+several panes come up together), the vertical split, **and the scope registry**
+(§4) — coordination survives a restart mid-merge-train.
 
 Restored panes are **fresh shells + resumed conversations**, not PID-preserved
 live processes (spyc is single-process by design; no detach/reattach daemon).

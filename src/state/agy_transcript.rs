@@ -11,20 +11,38 @@ use ratatui::{
 use crate::ui::theme::Theme;
 
 /// Resolve the conversation JSONL for the Agy session running in the pane.
-/// Picks the session whose start time is closest to the pane's spawn time. The
-/// `command` field of the query is unused.
+///
+/// Prefers the id pinned to THIS pane (agy's `conversationId`, reported by its
+/// status hook), falling back to the session whose start time is closest to the
+/// pane's spawn time. Proximity is a guess that collides whenever two panes start
+/// within the same second — which is every `-r` restore.
+///
+/// A pinned id with no transcript on disk yet returns `None` rather than
+/// proximity-matching: we know which conversation this pane is running, so
+/// falling through to `^a v`'s terminal capture is right and showing a *different*
+/// conversation's history is not. The `command` field of the query is unused.
 pub fn resolve_active_jsonl(q: crate::agent::TranscriptQuery) -> Option<PathBuf> {
-    let sessions = crate::state::sessions::find_agy_sessions(q.cwd);
-    let best = sessions
+    resolve_under_home(Path::new(&std::env::var_os("HOME")?), q)
+}
+
+/// [`resolve_active_jsonl`] with `home` passed in, so the resolution order is
+/// testable without mutating the process environment.
+fn resolve_under_home(home: &Path, q: crate::agent::TranscriptQuery) -> Option<PathBuf> {
+    let transcript_for = |id: &str| {
+        home.join(".gemini/antigravity-cli/brain")
+            .join(id)
+            .join(".system_generated/logs/transcript.jsonl")
+    };
+
+    if let Some(id) = q.session_id {
+        let path = transcript_for(id);
+        return path.exists().then_some(path);
+    }
+
+    let best = crate::state::sessions::find_agy_sessions(q.cwd)
         .into_iter()
         .min_by_key(|s| s.started_at_secs.abs_diff(q.spawn_epoch_secs))?;
-
-    std::env::var_os("HOME").map(|h| {
-        PathBuf::from(h)
-            .join(".gemini/antigravity-cli/brain")
-            .join(best.session_id)
-            .join(".system_generated/logs/transcript.jsonl")
-    })
+    Some(transcript_for(&best.session_id))
 }
 
 /// Parse an Agy conversation JSONL into styled pager lines, in
@@ -130,6 +148,46 @@ mod tests {
             true,
         );
         assert!(lines.is_empty());
+    }
+
+    /// A pinned `conversationId` addresses the transcript directly. The
+    /// proximity fallback picks by spawn time, which collides across panes
+    /// restored together — so a pane that KNOWS its conversation must not use it.
+    #[test]
+    fn pinned_conversation_id_resolves_its_own_transcript() {
+        let home = tempfile::tempdir().unwrap();
+        let id = "ec33ebf9-0cba-4100-8142-c61503f6c587";
+        let expected = home
+            .path()
+            .join(".gemini/antigravity-cli/brain")
+            .join(id)
+            .join(".system_generated/logs/transcript.jsonl");
+        std::fs::create_dir_all(expected.parent().unwrap()).unwrap();
+        std::fs::write(&expected, "{}\n").unwrap();
+
+        let cwd = home.path().to_path_buf();
+        let query = |sid: Option<&'static str>| crate::agent::TranscriptQuery {
+            cwd: &cwd,
+            spawn_epoch_secs: 0,
+            command: "agy",
+            session_id: sid,
+        };
+
+        assert_eq!(
+            resolve_under_home(home.path(), query(Some(id))),
+            Some(expected)
+        );
+
+        // A pin whose transcript isn't on disk yet resolves to nothing rather than
+        // proximity-matching some other conversation — `^a v` then falls through to
+        // terminal capture.
+        assert_eq!(
+            resolve_under_home(
+                home.path(),
+                query(Some("11111111-1111-1111-1111-111111111111"))
+            ),
+            None
+        );
     }
 
     /// Flatten rendered lines into plain text for assertions.
