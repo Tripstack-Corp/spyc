@@ -1039,13 +1039,24 @@ fn compute_git_mtime_key_fast_tracks_branch_ref_updates() {
         .compute_git_mtime_key_fast(crate::app::state::Side::Left)
         .unwrap();
 
-    // Sleep to ensure the next commit has a visibly newer mtime (OS dependent resolution)
-    std::thread::sleep(std::time::Duration::from_millis(1500));
-
-    // Commit a file, which updates the branch ref (e.g. refs/heads/main) but NOT .git/HEAD
-    std::fs::write(root.join("g"), "data2").unwrap();
-    crate::git::test_support::run_git(root, &["add", "g"]);
-    crate::git::test_support::run_git(root, &["commit", "-m", "update"]);
+    // A commit moves the branch ref (`refs/heads/<branch>`) and leaves
+    // `.git/HEAD` — the symbolic pointer — untouched, so the key must follow the
+    // resolved ref. Advance that ref's mtime directly instead of committing and
+    // sleeping out the filesystem's mtime granularity: the requirement is
+    // "the resolved ref is what's watched", and an explicit stamp tests it
+    // deterministically rather than racing a 1 s-granularity filesystem.
+    let head_contents = std::fs::read_to_string(root.join(".git/HEAD")).unwrap();
+    let refname = head_contents
+        .strip_prefix("ref: ")
+        .expect("fresh repo has an attached HEAD")
+        .trim();
+    let ref_path = root.join(".git").join(refname);
+    std::fs::File::options()
+        .write(true)
+        .open(&ref_path)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(30))
+        .unwrap();
 
     let (_, head_after) = s
         .compute_git_mtime_key_fast(crate::app::state::Side::Left)

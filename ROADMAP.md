@@ -284,9 +284,8 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 - **Claude restore types `/resume <sid>`** into a fresh spawn (the
   `--resume` CLI flag has a mount-crash regression) with
   verify-and-retry on the Enter; codex restores via
-  `codex resume <UUID>` directly; gemini recomputes its unstable
-  resume index from the saved UUID at restore time; zot uses
-  `--continue`.
+  `codex resume <UUID>` directly; agy uses `--conversation <UUID>`;
+  zot uses `--continue`.
 - **OSC 72 DnD deferred** until a second terminal (beyond kitty)
   implements it.
 - **Renovate auto-merges patch bumps** once public (May 2026); minors

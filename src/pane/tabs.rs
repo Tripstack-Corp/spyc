@@ -181,24 +181,18 @@ pub struct TabInfo {
     /// crosses panes restored together (they all spawn within the same second).
     /// `None` for non-claude tabs and for a fresh (never-resumed) claude pane.
     pub claude_session_id: Option<String>,
-    /// P1-2 scrape-fallback hysteresis: the last `(state, consecutive-match
-    /// count)` a `detect_rules::scan` produced for this tab, across real
-    /// output events (never a poll). Lets `scrape_candidate_after` require
-    /// `SCRAPE_CONFIRM_COUNT` consecutive agreeing scans before promoting a
-    /// guess into [`Self::scrape_status`] — kills flicker from a transient
-    /// line of scrolling text. `None` when the last scan found no match, or
-    /// the tab has no live report to fall back from.
-    pub scrape_candidate: Option<(AgentActivity, u8)>,
-    /// P1-2 CONFIRMED scrape-inferred status (state + `:why-status` hint),
-    /// once `scrape_candidate` reaches the confirm threshold. Third-tier input
-    /// to `effective_activity` (self-report > this > output timing). Cleared
-    /// the instant a live `report_status` self-report exists for this tab —
-    /// a report always wins, and scrape must not accumulate a stale guess
-    /// behind one that could resurface if the report later expires.
+    /// P1-2 scrape-inferred status (state + `:why-status` hint) from the last
+    /// settled screen scan. Third-tier input to `effective_activity`
+    /// (self-report > this > output timing). Cleared the instant a live
+    /// `report_status` self-report exists for this tab — a report always wins,
+    /// and scrape must not hold a stale guess behind one that could resurface if
+    /// the report later expires. Also cleared when the user answers the pane
+    /// with Enter, same as a latched `Blocked` report.
     pub scrape_status: Option<(AgentActivity, Option<&'static str>)>,
     /// P1-2 scrape-fallback dirty flag: set `true` on output for agent tabs
     /// with detection rules. Consumed by `settle_scrape_quiet` after
-    /// `SCRAPE_QUIET_WINDOW` to perform a single debounced screen scan.
+    /// `SCRAPE_QUIET_WINDOW` of silence, so the one scan it runs reads a
+    /// settled screen rather than a half-drawn prompt.
     pub scrape_dirty: bool,
     /// P2 scope-coordination owner key: a uuid assigned once, here, and —
     /// unlike [`Self::id`] (the ephemeral `SPYC_PANE_ID`, fresh every spawn) —
@@ -241,7 +235,6 @@ impl TabInfo {
             spawn_epoch_secs: crate::sysinfo::epoch_secs(),
             codex_session_id: None,
             claude_session_id: None,
-            scrape_candidate: None,
             scrape_status: None,
             scrape_dirty: false,
             // A separate uuid from `id`: this one is restore-stable (see the

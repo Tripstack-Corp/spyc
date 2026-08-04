@@ -49,8 +49,7 @@ A two-pane terminal program:
 - The **top pane** is a keyboard-driven, vim-flavoured file commander with
   git-aware listings.
 - The **bottom pane** is a child process — Claude Code by default (Codex,
-  Gemini, Antigravity, and zot are first-class too), but in practice any
-  program.
+  Antigravity, and zot are first-class too), but in practice any program.
 
 The panes share focus through a screen-style `^a` chord prefix, and the
 commander exposes a local MCP socket the agent connects to. Everything else
@@ -70,8 +69,7 @@ coding agents.
 ### Prerequisites
 
 - **A coding agent** — Claude Code is the default
-  (`npm install -g @anthropic-ai/claude-code`); Codex, Gemini, and Antigravity
-  also work. spyc runs as a plain file manager without one, but the agent
+  (`npm install -g @anthropic-ai/claude-code`); Codex and Antigravity also work. spyc runs as a plain file manager without one, but the agent
   bridge is the whole point.
 - **Nerd Font** (recommended) for the powerline status bar; press `C` inside
   spyc for a mono fallback. Install: `brew install --cask font-meslo-lg-nerd-font`

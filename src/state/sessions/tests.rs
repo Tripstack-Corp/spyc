@@ -388,6 +388,72 @@ fn parse_iso8601_orders_by_seconds() {
     assert_eq!(late - early, 2 * 60 + 29);
 }
 
+// ── AgentKind is forward/backward compatible ───────────────────
+
+/// Retiring an agent must not destroy old restore points. `load_sessions` drops
+/// a session file it can't deserialize, so an unrecognized kind has to degrade
+/// to `Other` (restore the tab, skip agent resume) rather than fail the parse —
+/// otherwise every tab, cwd and vsplit in that session silently vanishes.
+#[test]
+fn unknown_agent_kind_degrades_to_other_instead_of_failing() {
+    // `gemini` was a real kind until spyc dropped it.
+    let tab: SavedTab =
+        serde_json::from_str(r#"{"command":"gemini","label":"gemini","cwd":"/tmp","agent_kind":"gemini","agent_session_id":"x"}"#)
+            .expect("a retired kind must not fail the parse");
+    assert_eq!(tab.agent_kind, AgentKind::Other);
+    // The rest of the tab survives — that's the point.
+    assert_eq!(tab.command, "gemini");
+
+    // Any unrecognized name degrades the same way.
+    for raw in [r#""nonsense""#, r#""GEMINI""#, r#""""#] {
+        assert_eq!(
+            serde_json::from_str::<AgentKind>(raw).unwrap(),
+            AgentKind::Other,
+            "{raw} should degrade to Other"
+        );
+    }
+    // A non-string is corruption, not a version difference — still an error, so
+    // it can't be mistaken for a deliberately-retired kind.
+    assert!(serde_json::from_str::<AgentKind>("42").is_err());
+}
+
+#[test]
+fn every_live_agent_kind_round_trips() {
+    for kind in [
+        AgentKind::Claude,
+        AgentKind::Codex,
+        AgentKind::Agy,
+        AgentKind::Zot,
+        AgentKind::Other,
+    ] {
+        let json = serde_json::to_string(&kind).unwrap();
+        assert_eq!(
+            serde_json::from_str::<AgentKind>(&json).unwrap(),
+            kind,
+            "{kind:?} must survive a save/load cycle"
+        );
+    }
+}
+
+// ── pick_closest_unclaimed_session also works for agy records ───
+
+#[test]
+fn picker_works_for_agy_records() {
+    let candidates = vec![
+        AgySessionInfo {
+            session_id: "11111111-1111-1111-1111-111111111111".into(),
+            started_at_secs: 1000,
+        },
+        AgySessionInfo {
+            session_id: "22222222-2222-2222-2222-222222222222".into(),
+            started_at_secs: 2000,
+        },
+    ];
+    let claimed = std::collections::HashSet::new();
+    let pick = pick_closest_unclaimed_session(candidates, 1900, &claimed).unwrap();
+    assert_eq!(pick.session_id, "22222222-2222-2222-2222-222222222222");
+}
+
 // Sub-cases share one tempdir/state-root for sequencing; per-thread
 // `with_state_root` isolates this test from siblings.
 

@@ -107,17 +107,13 @@ before we write to it — putting it on the verification list.
 **Transcript location:** `~/.codex/sessions/<uuid>.jsonl` — partially
 parsed today; tool-use schema needs confirming.
 
-### Gemini CLI
+### Gemini CLI — out of scope
 
-**Settings location:** **NEEDS VERIFICATION** — Gemini's permission
-config story has been moving. As of last check, `~/.gemini/settings.json`
-exists but the permission knobs aren't yet stable. We may need to ship
-"read-only log" for Gemini in v1 and add rule editing in a follow-up.
-
-**Transcript location:** `~/.gemini/tmp/<project>/chats/*.jsonl` —
-parsed today in `find_gemini_sessions`. Each JSONL's first line is
-metadata; subsequent lines are turns. Tool-call entries embedded
-inside turns; schema needs walking.
+Dropped. Google deprecated the Gemini CLI in favour of Antigravity, and spyc
+removed its `AgentProfile` accordingly. Anything this plan ships for a
+third agent targets **agy** instead: its transcript is
+`~/.gemini/antigravity-cli/history.jsonl` (one JSON line per turn, keyed by
+`conversationId` + `workspace`), parsed today in `find_agy_sessions`.
 
 ### Unified abstraction
 

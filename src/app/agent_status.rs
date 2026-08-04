@@ -31,6 +31,14 @@ const AGENT_ACTIVE_WINDOW: Duration = Duration::from_secs(2);
 /// tab with detection rules stops producing output for this long.
 const SCRAPE_QUIET_WINDOW: Duration = Duration::from_millis(250);
 
+/// What [`App::scrape_step`] decided for one dirty tab: scan its screen now, or
+/// re-check once its quiet window expires.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScrapeStep {
+    Scan,
+    WaitUntil(Instant),
+}
+
 /// The active pane's agent identity for status resolution: profile, kind, cwd,
 /// spawn-time cache key, and the tab's pinned session id (if any).
 type ActiveAgentKey = (
@@ -394,12 +402,12 @@ impl App {
     /// [`ReportedStatus`] wins over the P1-2 scrape fallback, which wins over
     /// the output-timing fallback. A report is *live* until it expires or the
     /// tab produces output **after** it (the agent resumed → timing takes back
-    /// over). `scrape` is the tab's CONFIRMED scrape-inferred state (already
-    /// hysteresis-gated by `scrape_candidate_after`); it's a fallback for
-    /// agents with no live report, never consulted while one is authoritative
-    /// (the caller clears it the instant a report exists — see
-    /// `settle_agent_activity`). Non-agent tabs are always `Unknown` (a report
-    /// targeting one is ignored — dots are agent-only).
+    /// over). `scrape` is the tab's scrape-inferred state, written only by the
+    /// debounced [`Self::settle_scrape_quiet`]; it's a fallback for agents with
+    /// no live report, never consulted while one is authoritative (the caller
+    /// clears it the instant a report exists — see `settle_agent_activity`).
+    /// Non-agent tabs are always `Unknown` (a report targeting one is ignored —
+    /// dots are agent-only).
     fn effective_activity(
         reported: Option<ReportedStatus>,
         scrape: Option<AgentActivity>,
@@ -429,6 +437,27 @@ impl App {
         }
         Self::activity_for(is_agent, last_output_at, now)
     }
+
+    /// P1-2 pure debounce step for one dirty tab: scan its screen now, or wait
+    /// until its quiet window expires.
+    ///
+    /// A prompt renders over several output events, so scanning mid-draw reads a
+    /// half-written screen. Waiting for `SCRAPE_QUIET_WINDOW` of silence means
+    /// the one scan we do run sees a settled frame. `None` last-output can't
+    /// happen for a dirty tab (the same drain stamps both), but reads as due so
+    /// the function is total.
+    fn scrape_step(last_output_at: Option<Instant>, now: Instant) -> ScrapeStep {
+        let Some(at) = last_output_at else {
+            return ScrapeStep::Scan;
+        };
+        let fire_at = at + SCRAPE_QUIET_WINDOW;
+        if now >= fire_at {
+            ScrapeStep::Scan
+        } else {
+            ScrapeStep::WaitUntil(fire_at)
+        }
+    }
+
     /// P1-2 scrape-fallback settle: after `SCRAPE_QUIET_WINDOW` of silence from a
     /// dirty agent tab with detection rules, fire a single screen scan. Consumes
     /// the dirty flag.
@@ -449,31 +478,28 @@ impl App {
             if !entry.info.scrape_dirty {
                 continue;
             }
-            // When does this tab's quiet window expire?
-            let fire_at = entry
-                .info
-                .last_output_at
-                .map_or(now, |at| at + SCRAPE_QUIET_WINDOW);
-            if now < fire_at {
-                // Not quiet long enough yet — track the earliest pending fire.
-                earliest_fire = Some(earliest_fire.map_or(fire_at, |m| m.min(fire_at)));
+            // A live self-report is authoritative and `settle_agent_activity`
+            // clears any scrape guess behind one, so don't pay for the screen
+            // read. Drop the flag: the next output event re-sets it.
+            if entry.info.reported.is_some() {
+                entry.info.scrape_dirty = false;
                 continue;
             }
-            // Quiet window elapsed — fire a single scan and consume the flag.
-            entry.info.scrape_dirty = false;
-            let rules = crate::agent::detect(&entry.info.command).detection_rules();
-            if rules.is_empty() {
-                continue;
-            }
-            let lines = entry.pane.visible_lines();
-            let scanned = crate::agent::detect_rules::scan(&lines, rules);
-            let old = entry.info.scrape_status;
-            entry.info.scrape_status = scanned;
-            // Clear the legacy hysteresis candidate (no longer used, but keep
-            // the field in sync for `:why-status`).
-            entry.info.scrape_candidate = scanned.map(|(s, _)| (s, 1));
-            if old != scanned {
-                changed = true;
+            match Self::scrape_step(entry.info.last_output_at, now) {
+                ScrapeStep::WaitUntil(fire_at) => {
+                    earliest_fire = Some(earliest_fire.map_or(fire_at, |m| m.min(fire_at)));
+                }
+                ScrapeStep::Scan => {
+                    entry.info.scrape_dirty = false;
+                    let rules = crate::agent::detect(&entry.info.command).detection_rules();
+                    if rules.is_empty() {
+                        continue;
+                    }
+                    let lines = entry.pane.visible_lines();
+                    let scanned = crate::agent::detect_rules::scan(&lines, rules);
+                    changed |= entry.info.scrape_status != scanned;
+                    entry.info.scrape_status = scanned;
+                }
             }
         }
         match earliest_fire {
@@ -548,7 +574,6 @@ impl App {
             // expires (the tab would then correctly fall through to a FRESH
             // scan on its next output event, not a carried-over one).
             if entry.info.reported.is_some() {
-                entry.info.scrape_candidate = None;
                 entry.info.scrape_status = None;
             }
             let new = Self::effective_activity(
@@ -889,6 +914,43 @@ mod tests {
             App::effective_activity(None, Some(AgentActivity::Blocked), false, None, base),
             AgentActivity::Unknown
         );
+    }
+
+    // P1-2 debounce: a dirty tab is scanned only once its output has gone quiet
+    // for SCRAPE_QUIET_WINDOW, so the scan reads a settled screen instead of a
+    // half-drawn prompt. Below the window it reports when to re-check, which is
+    // what `settle_scrape_quiet` arms `Deadline::ScrapeQuiet` on.
+    #[test]
+    fn scrape_step_waits_for_the_quiet_window_then_scans() {
+        use super::{SCRAPE_QUIET_WINDOW, ScrapeStep};
+        use std::time::{Duration, Instant};
+        let base = Instant::now();
+
+        // Output just landed → not due; wait until exactly one window later.
+        assert_eq!(
+            App::scrape_step(Some(base), base),
+            ScrapeStep::WaitUntil(base + SCRAPE_QUIET_WINDOW)
+        );
+        // A hair short of the window still waits (no early scan).
+        let almost = SCRAPE_QUIET_WINDOW
+            .checked_sub(Duration::from_millis(1))
+            .expect("the quiet window is longer than 1ms");
+        assert_eq!(
+            App::scrape_step(Some(base), base + almost),
+            ScrapeStep::WaitUntil(base + SCRAPE_QUIET_WINDOW)
+        );
+        // Exactly at the boundary is due — the deadline we armed must fire, not
+        // re-arm itself for the same instant and spin.
+        assert_eq!(
+            App::scrape_step(Some(base), base + SCRAPE_QUIET_WINDOW),
+            ScrapeStep::Scan
+        );
+        assert_eq!(
+            App::scrape_step(Some(base), base + Duration::from_secs(5)),
+            ScrapeStep::Scan
+        );
+        // Total for the unreachable case (dirty implies an output stamp).
+        assert_eq!(App::scrape_step(None, base), ScrapeStep::Scan);
     }
 
     // A `blocked` report is LATCHED: neither output NOR its TTL supersedes it —
