@@ -301,12 +301,19 @@ The pane is already live and visible, so swallowing the first click to "just
 focus" would feel broken. Consequence: left-click is the child's, which is why the
 other two buttons are spyc's.
 
-Deferred within this tier: **click-to-select a list row** (move the cursor to the
-clicked line). It needs a row→index mapping that doesn't exist yet — the list
-renderer owns the visible window, and there is no `first_visible`/`scroll_offset`
-accessor to hit-test against. Focus-only first; add row selection once that
-mapping is extracted (and it must respect `list_generation`, wrapped rows, and the
-vsplit column widths).
+**Click-to-select a list row is out of scope — not deferred, rejected.** Owner
+call: too finicky. Clicking a *region* is a coarse gesture that's hard to get
+wrong; clicking a specific text row demands pixel-accurate targeting of a
+one-cell-tall line, and a near-miss silently moves the cursor and loses the user's
+place. `j`/`k`, `F`, and frecency jumps are all faster and more precise than
+aiming at a row, so the feature would add a mis-click failure mode in exchange for
+nothing.
+
+That also drops the only piece of this plan that needed new list internals: a
+row→index mapping doesn't exist today (the renderer owns the visible window; there
+is no `first_visible`/`scroll_offset` accessor to hit-test against) and it would
+have had to respect `list_generation`, wrapped rows, and the vsplit column widths.
+Left-click stays purely *which region owns the keyboard*, which needs none of it.
 
 #### Middle-click — paste
 
