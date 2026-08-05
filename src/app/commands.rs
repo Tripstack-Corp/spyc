@@ -271,7 +271,7 @@ fn why_git_lines(app: &App) -> Vec<String> {
     let mut out = vec![
         format!(
             "spyc {} (pid {}) — git dump @ {}",
-            env!("CARGO_PKG_VERSION"),
+            crate::VERSION,
             std::process::id(),
             crate::sysinfo::format_now(),
         ),
@@ -521,7 +521,7 @@ fn activity_dump_lines(app: &App) -> Vec<String> {
     let now = std::time::Instant::now();
     let mut out = vec![format!(
         "spyc {} (pid {}) — activity dump @ {}",
-        env!("CARGO_PKG_VERSION"),
+        crate::VERSION,
         std::process::id(),
         crate::sysinfo::format_now(),
     )];
@@ -629,7 +629,7 @@ fn agent_registry_lines(app: &App) -> Vec<String> {
     let now = crate::sysinfo::epoch_secs();
     let mut out = vec![format!(
         "spyc {} (pid {}) — scope registry @ {}",
-        env!("CARGO_PKG_VERSION"),
+        crate::VERSION,
         std::process::id(),
         crate::sysinfo::format_now(),
     )];
@@ -675,7 +675,7 @@ fn agent_list_lines(app: &App) -> Vec<String> {
     };
     let mut out = vec![format!(
         "spyc {} — agents @ {}",
-        env!("CARGO_PKG_VERSION"),
+        crate::VERSION,
         crate::sysinfo::format_now(),
     )];
     let Some(tabs) = app.runtime.pane_tabs.as_ref() else {

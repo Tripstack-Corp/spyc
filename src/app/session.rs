@@ -591,10 +591,7 @@ impl App {
 
     pub fn show_session_info(&mut self) {
         let mut lines: Vec<String> = Vec::new();
-        lines.push(format!(
-            "\u{1f336}\u{fe0f} spyc {}",
-            env!("CARGO_PKG_VERSION")
-        ));
+        lines.push(format!("\u{1f336}\u{fe0f} spyc {}", crate::VERSION));
         lines.push(format!("session  : {}", self.state.session_display()));
         lines.push(format!("project  : {}", self.state.project_home_display()));
         lines.push(format!("user@host: {}", self.state.user_host));
