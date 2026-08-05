@@ -107,6 +107,7 @@ pub mod fuzz {
 }
 
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 use clap::Parser;
@@ -230,6 +231,10 @@ pub fn run() -> Result<()> {
             ShowMousePointer,
             crossterm::cursor::Show,
         );
+        // This hook is NOT exit-only (`pane::Pane` catches a known vt100 panic
+        // and spyc keeps running), so the flag has to follow the terminal or the
+        // reconcile will believe capture is still on and never restore it.
+        MOUSE_CAPTURE_ON.store(false, Ordering::Relaxed);
         let _ = term_title::pop();
 
         // Dump to the debug log if active.
@@ -497,12 +502,80 @@ impl crossterm::Command for DisableWheelReporting {
     fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
         // Reverse order of the enable, so a terminal that tracks a mode stack
         // unwinds cleanly.
-        f.write_str("\x1b[?1006l\x1b[?1000l")
+        //
+        // Clears 1002/1003 too, which spyc never ENABLES: a foreground child
+        // (vim, htop) sets its own motion reporting, and one that dies without
+        // resetting — SIGKILL, a crash — hands the tty back with 1002/1003 still
+        // on. Clearing only our own pair would then leave motion reporting live,
+        // which both defeats the 1007 exclusivity `resume_tui` re-establishes and
+        // leaks motion events into the user's shell after spyc exits.
+        f.write_str("\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l")
     }
     #[cfg(windows)]
     fn execute_winapi(&self) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+/// Whether the TERMINAL is currently in real mouse reporting — as distinct from
+/// whether the user asked for it (`[mouse] capture` + the `:mouse` override).
+///
+/// A process-global rather than a field on `ViewState`, because two of the three
+/// things that change this state run outside `App` and cannot reach its fields:
+/// [`restore_terminal`] and the **panic hook**. The hook is not exit-only —
+/// `pane::Pane` deliberately `catch_unwind`s a known vt100 panic (nvim leaving
+/// the alternate screen is the documented trigger) and spyc keeps running — so
+/// with the flag on `ViewState` that path disabled reporting at the terminal
+/// while `App` still believed it was on. `settle_mouse_mode` then saw no
+/// divergence and never re-enabled: the mouse was dead for the rest of the
+/// session, and `:mouse` reported "on" because want matched the stale actual.
+static MOUSE_CAPTURE_ON: AtomicBool = AtomicBool::new(false);
+
+/// Read the terminal's actual mouse-reporting state. The `settle_mouse_mode`
+/// reconcile compares this against what the user asked for.
+pub fn mouse_capture_is_on() -> bool {
+    MOUSE_CAPTURE_ON.load(Ordering::Relaxed)
+}
+
+/// Set the terminal-state flag WITHOUT touching the terminal — tests only.
+///
+/// Lets a unit test stand in for the executor / panic hook / `suspend_tui`, none
+/// of which a test can drive (they need a real `Tui`).
+#[cfg(test)]
+pub(crate) fn set_mouse_capture_for_test(on: bool) {
+    MOUSE_CAPTURE_ON.store(on, Ordering::Relaxed);
+}
+
+/// Serialize the tests that drive [`MOUSE_CAPTURE_ON`].
+///
+/// It's process-global and `cargo test` runs tests on parallel threads, so
+/// without this they clobber each other's setup — an intermittent failure that
+/// depends on scheduling, which is the worst kind to chase (see the CI-only gix
+/// index-lock flake for the same lesson). Recovers from a poisoned lock so one
+/// failing test doesn't cascade into every other test in the group.
+#[cfg(test)]
+pub(crate) fn mouse_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The escape sequence [`set_mouse_capture`] emits for `capture`.
+///
+/// Extracted from the `execute!` so the exclusivity invariant is unit-testable:
+/// `set_mouse_capture` takes `&mut Tui`, which no test can construct, so before
+/// this the one rule the whole feature rests on — 1007 and 1000 are never both
+/// enabled — had no test at all.
+fn mouse_mode_seq(capture: bool) -> String {
+    let mut s = String::new();
+    if capture {
+        let _ = crossterm::Command::write_ansi(&DisableAlternateScroll, &mut s);
+        let _ = crossterm::Command::write_ansi(&EnableWheelReporting, &mut s);
+    } else {
+        let _ = crossterm::Command::write_ansi(&DisableWheelReporting, &mut s);
+        let _ = crossterm::Command::write_ansi(&EnableAlternateScroll, &mut s);
+    }
+    s
 }
 
 /// No-op handler for SIGINT / SIGQUIT. Replaces the default
@@ -659,6 +732,7 @@ fn restore_terminal(terminal: &mut Tui) -> Result<()> {
         DisableWheelReporting,
         ShowMousePointer
     )?;
+    MOUSE_CAPTURE_ON.store(false, Ordering::Relaxed);
     let _ = term_title::pop();
     terminal.show_cursor()?;
     Ok(())
@@ -673,19 +747,16 @@ fn restore_terminal(terminal: &mut Tui) -> Result<()> {
 /// only from the `Effect::SetMouseMode` executor, which in turn is emitted only by
 /// the reconcile in `App::settle_mouse_mode`.
 pub fn set_mouse_capture(terminal: &mut Tui, capture: bool) -> Result<()> {
-    if capture {
-        execute!(
-            terminal.backend_mut(),
-            DisableAlternateScroll,
-            EnableWheelReporting
-        )?;
-    } else {
-        execute!(
-            terminal.backend_mut(),
-            DisableWheelReporting,
-            EnableAlternateScroll
-        )?;
-    }
+    use std::io::Write as _;
+    // One write of the paired sequence (see `mouse_mode_seq`) so the disable and
+    // the enable cannot be separated by a failure between two `execute!` calls.
+    let seq = mouse_mode_seq(capture);
+    terminal.backend_mut().write_all(seq.as_bytes())?;
+    terminal.backend_mut().flush()?;
+    // Record only on success: a failed write leaves the terminal in its previous
+    // mode, and claiming otherwise is what makes the reconcile go quiet on a
+    // state it never reached.
+    MOUSE_CAPTURE_ON.store(capture, Ordering::Relaxed);
     Ok(())
 }
 
@@ -709,6 +780,9 @@ pub fn suspend_tui(terminal: &mut Tui) -> Result<()> {
         // and leaving ours on would have both of us reading the same events.
         DisableWheelReporting,
     )?;
+    // The child owns the mouse now. Clearing this is what makes
+    // `settle_mouse_mode` reclaim it on the next iteration after we resume.
+    MOUSE_CAPTURE_ON.store(false, Ordering::Relaxed);
     terminal.show_cursor()?;
     Ok(())
 }
@@ -730,8 +804,16 @@ pub fn resume_tui(terminal: &mut Tui) -> Result<()> {
         Clear(ClearType::All),
         MoveTo(0, 0),
         EnableBracketedPaste,
+        // Clear any reporting the child left behind BEFORE turning 1007 back on.
+        // A child killed without resetting (SIGKILLed vim, a crashed TUI) hands
+        // the tty back with its own 1000/1002/1003 still live; enabling 1007 on
+        // top of that is the both-modes-on state the pairing exists to prevent,
+        // and the terminal may then deliver one wheel tick twice.
+        DisableWheelReporting,
         EnableAlternateScroll
     )?;
+    // `suspend_tui` already cleared this; the reconcile re-enables per config on
+    // the next iteration if the user wants capture.
     terminal.hide_cursor()?;
     force_full_repaint(terminal)?;
     Ok(())
@@ -799,5 +881,123 @@ mod mouse_reporting_tests {
         let sgr = disable.find("1006").expect("1006");
         let btn = disable.find("1000").expect("1000");
         assert!(sgr < btn, "expected 1006l before 1000l: {disable:?}");
+    }
+
+    /// The disable also clears 1002/1003, which spyc never *enables*.
+    ///
+    /// A foreground child (vim, htop) sets its own motion reporting; one killed
+    /// without resetting hands the tty back with those still live. Clearing only
+    /// our own pair would leave motion reporting on — which breaks the 1007
+    /// exclusivity `resume_tui` re-establishes, and leaks motion events into the
+    /// user's shell after spyc exits.
+    #[test]
+    fn disable_also_clears_a_childs_leftover_motion_reporting() {
+        let disable = ansi(&DisableWheelReporting);
+        for mode in ["1002", "1003"] {
+            assert!(
+                disable.contains(&format!("\x1b[?{mode}l")),
+                "?{mode}l missing — a child's leaked motion mode would survive: {disable:?}"
+            );
+        }
+    }
+
+    /// **The invariant the whole feature rests on**, in both directions: DEC 1007
+    /// (wheel-as-arrows) and DEC 1000 (real reporting) are never both enabled. A
+    /// terminal honoring both delivers one wheel tick twice — once as arrow keys,
+    /// once as a mouse event.
+    ///
+    /// Untestable before `mouse_mode_seq` was split out of `set_mouse_capture`,
+    /// which takes `&mut Tui` — a type no unit test can construct. So the one rule
+    /// that matters most had no coverage at all.
+    #[test]
+    fn the_two_modes_are_never_both_enabled() {
+        // Enabling capture: 1007 off, 1000/1006 on.
+        let on = super::mouse_mode_seq(true);
+        assert!(on.contains("\x1b[?1007l"), "must disable 1007: {on:?}");
+        assert!(on.contains("\x1b[?1000h"), "must enable 1000: {on:?}");
+        assert!(!on.contains("\x1b[?1007h"), "must not enable 1007: {on:?}");
+
+        // Disabling capture: the mirror.
+        let off = super::mouse_mode_seq(false);
+        assert!(off.contains("\x1b[?1000l"), "must disable 1000: {off:?}");
+        assert!(off.contains("\x1b[?1007h"), "must enable 1007: {off:?}");
+        assert!(
+            !off.contains("\x1b[?1000h"),
+            "must not enable 1000: {off:?}"
+        );
+
+        // Ordering: in each direction the disable precedes the enable, so there is
+        // no instant with both modes live even for a terminal applying them
+        // sequentially.
+        assert!(
+            on.find("1007l") < on.find("1000h"),
+            "disable 1007 before enabling 1000: {on:?}"
+        );
+        assert!(
+            off.find("1000l") < off.find("1007h"),
+            "disable 1000 before enabling 1007: {off:?}"
+        );
+    }
+
+    /// Neither direction may request motion reporting — the `?1003h` redraw storm
+    /// is invisible on a still pointer, so only a byte assertion catches it.
+    #[test]
+    fn neither_direction_requests_motion_reporting() {
+        for capture in [true, false] {
+            let seq = super::mouse_mode_seq(capture);
+            for motion in ["1002h", "1003h"] {
+                assert!(
+                    !seq.contains(motion),
+                    "capture={capture} must not request ?{motion}: {seq:?}"
+                );
+            }
+        }
+    }
+
+    /// Source-scan guard: nothing in `src/` may use crossterm's own
+    /// `EnableMouseCapture`.
+    ///
+    /// The byte tests above only cover the structs spyc defines. `EnableMouseCapture`
+    /// emits `?1000h ?1002h ?1003h ?1015h ?1006h` — the motion modes included — so
+    /// one convenient-looking call anywhere (`setup_terminal`, `resume_tui`, a future
+    /// feature) reintroduces the redraw storm while every existing test still passes.
+    /// It reads as the obvious API to reach for, which is exactly why this is a
+    /// guard and not a comment.
+    #[test]
+    fn production_code_never_uses_crossterms_mouse_capture() {
+        use std::path::{Path, PathBuf};
+
+        // Assembled so this test's own source doesn't trip the scan.
+        let banned = ["Enable", "MouseCapture"].concat();
+
+        fn scan(dir: &Path, banned: &str, offenders: &mut Vec<PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("read src dir") {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() {
+                    scan(&path, banned, offenders);
+                } else if path.extension().is_some_and(|e| e == "rs")
+                    && std::fs::read_to_string(&path)
+                        .expect("read .rs")
+                        .contains(banned)
+                {
+                    offenders.push(path);
+                }
+            }
+        }
+
+        let mut offenders = Vec::new();
+        scan(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &banned,
+            &mut offenders,
+        );
+        // This file legitimately names it in prose (the doc comment on
+        // `EnableWheelReporting` explains why spyc doesn't use it).
+        offenders.retain(|p| p.file_name().is_none_or(|n| n != "lib.rs"));
+        assert!(
+            offenders.is_empty(),
+            "crossterm's EnableMouseCapture emits ?1003h (any-motion) — use \
+             EnableWheelReporting instead. Offenders: {offenders:?}"
+        );
     }
 }

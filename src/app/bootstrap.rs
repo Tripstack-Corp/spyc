@@ -168,6 +168,8 @@ impl App {
             resolver: Resolver::new(),
             user_keymap,
             config,
+            // No runtime `:mouse` toggle yet — follow the config.
+            mouse_capture_override: None,
             mode: Mode::Normal,
             project_home,
             session_name,

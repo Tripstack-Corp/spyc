@@ -12,9 +12,8 @@
 //! [`FrameLayout`] the renderer used, and [`route_mouse`] takes that region —
 //! never `state.focus`.
 //!
-//! This module decides; it does not act. Wiring the decision to an
-//! `Event::Mouse` arm is a later change, which is why nothing here reads or
-//! mutates `App`.
+//! The pure half ([`route_mouse`], [`region_at`]) decides; the `impl App` half
+//! below acts on that decision.
 
 use ratatui::layout::Rect;
 
@@ -212,12 +211,20 @@ use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 impl super::App {
     /// Handle one mouse event: hit-test the pointer, route it, dispatch the sink.
     ///
-    /// Only reachable while `[mouse] capture` is on — with it off the terminal
-    /// sends DEC 1007 arrow keys instead and this never fires.
+    /// Ignores everything unless spyc actually asked the terminal for mouse
+    /// reporting.
+    ///
+    /// Not a redundant assertion: spyc receiving a mouse event does NOT imply it
+    /// requested one. A foreground child can leave its own reporting enabled when
+    /// it dies without resetting, and some terminals/multiplexers report
+    /// regardless of what was asked — the case `proc.rs`'s motion filter already
+    /// guards against. Without this gate those unsolicited events were fully acted
+    /// upon with the feature switched off: middle-click pasted the clipboard and
+    /// right-click opened the leader menu.
     pub(super) fn handle_mouse(&mut self, ev: MouseEvent) -> Vec<Effect> {
-        // Wheel only for now; buttons are a later change and `route_mouse` is
-        // deliberately reached through one `MouseEventKind` match so adding them
-        // is contained.
+        if !crate::mouse_capture_is_on() {
+            return Vec::new();
+        }
         let lines = self.state.config.mouse.scroll_lines.max(1);
         // `delta` is only meaningful for a wheel gesture; buttons ignore it.
         let (gesture, delta): (Gesture, i32) = match ev.kind {
