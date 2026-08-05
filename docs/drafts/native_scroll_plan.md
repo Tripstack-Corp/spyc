@@ -272,7 +272,7 @@ the sequence, and spyc asked the terminal for SGR (1006) while the child may hav
 requested X10 or UTF-8. `encode_mouse` must emit the child's
 `mouse_protocol_encoding()`, not ours.
 
-### Tier 3b — button gestures: click-to-focus, middle-paste, right-chord
+### Tier 3b — button gestures: click-to-focus, middle-paste, right-leader
 
 `1000h` already reports buttons alongside the wheel (Tier 0), so this needs **no
 new escape sequences** — only routing. All three are `MouseEventKind::Down(..)`.
@@ -331,7 +331,7 @@ inherits the bracketed-paste gating from #170 (`bracketed_paste_enabled`,
 > equivalent, and a gesture that pastes different content per platform is worse
 > than one that's merely conventional.
 
-#### Right-click — open a chord menu
+#### Right-click — open the leader menu
 
 The nicest of the three, because it turns the mouse into a *discovery* surface for
 a dense keymap: right-click sets a pending chord prefix (`PendingSeq`,
@@ -339,18 +339,22 @@ a dense keymap: right-click sets a pending chord prefix (`PendingSeq`,
 `chord_hint_delay_ms` debounce exists to avoid startling a keyboard user mid-chord,
 and a deliberate right-click needs no such grace.
 
-Which prefix should follow the **binding taxonomy** the repo already enforces
-(AGENTS.md → "Binding taxonomy", guarded by
-`leader_and_pane_namespaces_respect_tiers`) rather than being a global choice:
+**Always the leader menu** (`PendingSeq::Leader`), wherever the pointer is —
+decided; the taxonomy-aware alternative (`^a` over the pane, leader over the list)
+was rejected as too clever. One gesture, one menu, nothing to learn, and no need
+for the user to model which region they're over before they right-click.
 
-| Pointer over | Prefix | Rationale |
-|---|---|---|
-| the pane | `^a` (`PendingSeq::W`) | PANE-tier commands live there |
-| the list / a column | leader (`PendingSeq::Leader`) | GLOBAL + workspace ops live there |
+It works over the pane too, and for a reason worth spelling out: right-click is
+intercepted by spyc *before* any child forwarding, so it doesn't need the `^a`
+wake-up that a keyboard leader does from a focused pane
+(`is_spyc_meta_when_pane_focused` + `PendingSeq::Leader`, `app/mod.rs:1332` —
+`Space` is literal text to the child, a right-click never is). So the gesture is
+uniform even though the keyboard path isn't.
 
-That way the mouse surfaces the same vocabulary the keyboard does in that region,
-and neither menu offers actions the guard would reject for that tier. See **Open
-decisions** — this one is worth confirming before implementation.
+Accepted cost: **`^a`'s PANE-tier menu stays keyboard-only.** Right-click will not
+reach tab/split/zoom commands. If that turns out to bite during dog-fooding, the
+taxonomy-aware split is a one-line change in `route_mouse` — the routing already
+knows which region the pointer is over.
 
 Right-click is **always spyc's**, never forwarded, even to a mouse-aware child;
 otherwise the gesture would be unavailable exactly where the pane is focused. Same
@@ -562,8 +566,10 @@ silently dies over another.
     collapsed region declines with the same hint `^a j` gives.
 17. Middle-click pastes into the pane, the `:` line, and the shell prompt — and a
     child that never enabled bracketed paste receives no `\e[200~` wrapper (#170).
-18. Right-click over the pane shows the `^a` menu, over the list the leader menu,
-    both with **no** `chord_hint_delay_ms` wait. `Esc` dismisses without acting.
+18. Right-click shows the **leader** menu from every region — list, pane, either
+    split column — with **no** `chord_hint_delay_ms` wait. `Esc` dismisses without
+    acting. Over a focused pane it must open without an `^a` first, and the child
+    must receive nothing.
 19. Right/middle-click over a mouse-aware child (claude) is spyc's, not
     forwarded — confirm the child sees nothing.
 
@@ -580,12 +586,9 @@ silently dies over another.
    discoverability work in *User review required* is part of that commit, not a
    follow-up.
 
-3. **Right-click prefix: taxonomy-aware, or always leader?** Plan proposes
-   `^a` over the pane and leader over the list, so each menu offers the tier that
-   region actually owns (and can't offer actions the tier guard rejects). The
-   simpler alternative is *always* leader — one gesture, one menu, nothing to
-   learn — at the cost of making pane commands unreachable by mouse. Worth your
-   call; it's a one-line change either way.
+3. ~~**Right-click prefix: taxonomy-aware, or always leader?**~~
+   **Resolved: always leader.** One gesture, one menu; the taxonomy-aware split
+   was rejected as too clever for the gain. Cost accepted: `^a`'s PANE-tier menu
+   stays keyboard-only, revisitable as a one-line `route_mouse` change.
 
-Decisions 1 and 2 are settled; 3 is the only open one, and it doesn't block
-starting PR 1.
+**No open decisions remain — the plan is ready to implement.**
