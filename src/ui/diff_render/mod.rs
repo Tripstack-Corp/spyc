@@ -54,6 +54,29 @@ const LNUM_W: usize = 4;
 /// source line.
 const MAX_WRAP_ROWS_PER_CELL: usize = 512;
 
+/// Display columns `s` occupies once the pager has expanded its tabs.
+///
+/// `unicode_width` scores a `\t` as ONE column, but the pager rewrites every
+/// `\t` to `tab_width` spaces before drawing (`pager::render::expand_tabs`). The
+/// side-by-side layout pads each cell to an exact width, so measuring with
+/// `display_width` alone under-counts a tab-indented line by
+/// `tab_width - 1` per tab — the cell then renders wider than its budget and
+/// shoves the `│` separator (and the whole right column) right by that much.
+/// Since indent depth varies line to line, so does the shove: the columns come
+/// out visibly ragged on any tab-indented file (gofmt, Makefiles, plenty of C).
+fn tabbed_width(s: &str, tab_width: usize) -> usize {
+    let tabs = s.bytes().filter(|b| *b == b'\t').count();
+    display_width(s) + tabs * tab_width.max(1).saturating_sub(1)
+}
+
+/// Per-character counterpart to [`tabbed_width`], for the wrap scan.
+fn char_cols(ch: char, tab_width: usize) -> usize {
+    if ch == '\t' {
+        return tab_width.max(1);
+    }
+    UnicodeWidthChar::width(ch).unwrap_or(0)
+}
+
 /// A diff's syntax highlight, computed once and reused across every
 /// layout/width re-render. syntect (in [`highlight_side`]) is by far the most
 /// expensive part of rendering a diff, and it depends only on the model — not
@@ -103,6 +126,11 @@ fn highlight_file(file: &FileDiff) -> FileHighlight {
 /// production always splits the two so the highlight is computed once off-thread
 /// and the layout (width/`layout`-dependent) re-runs cheaply (see
 /// [`crate::app::git_view_session`]).
+/// `[pager] tab_width`'s default, used by the test-only render helpers so the
+/// existing cases don't all have to name it.
+#[cfg(test)]
+const TEST_TAB_WIDTH: usize = 4;
+
 #[cfg(test)]
 pub fn render_diff(
     model: &DiffModel,
@@ -110,7 +138,27 @@ pub fn render_diff(
     layout: DiffLayout,
     width: usize,
 ) -> Vec<Line<'static>> {
-    render_diff_highlighted(model, &highlight_diff(model), theme, layout, width)
+    render_diff_tw(model, theme, layout, width, TEST_TAB_WIDTH)
+}
+
+/// [`render_diff`] with an explicit `tab_width` — for the alignment cases where
+/// tab expansion is the thing under test.
+#[cfg(test)]
+pub fn render_diff_tw(
+    model: &DiffModel,
+    theme: &Theme,
+    layout: DiffLayout,
+    width: usize,
+    tab_width: usize,
+) -> Vec<Line<'static>> {
+    render_diff_highlighted(
+        model,
+        &highlight_diff(model),
+        theme,
+        layout,
+        width,
+        tab_width,
+    )
 }
 
 /// Lay out a diff at `width`/`layout` using a precomputed [`DiffHighlight`].
@@ -122,6 +170,7 @@ pub fn render_diff_highlighted(
     theme: &Theme,
     layout: DiffLayout,
     width: usize,
+    tab_width: usize,
 ) -> Vec<Line<'static>> {
     let mut out = Vec::new();
     if model.files.is_empty() {
@@ -135,7 +184,9 @@ pub fn render_diff_highlighted(
         let fhl = hl.files.get(i);
         match layout {
             DiffLayout::Unified => render_file_unified(file, fhl, theme, &mut out),
-            DiffLayout::SideBySide => render_file_split(file, fhl, theme, width, &mut out),
+            DiffLayout::SideBySide => {
+                render_file_split(file, fhl, theme, width, tab_width, &mut out);
+            }
         }
     }
     if model.truncated {
@@ -160,7 +211,15 @@ pub fn render_show(
     layout: DiffLayout,
     width: usize,
 ) -> Vec<Line<'static>> {
-    render_show_highlighted(meta, model, &highlight_diff(model), theme, layout, width)
+    render_show_highlighted(
+        meta,
+        model,
+        &highlight_diff(model),
+        theme,
+        layout,
+        width,
+        TEST_TAB_WIDTH,
+    )
 }
 
 /// Lay out `git show <rev>` using a precomputed [`DiffHighlight`].
@@ -171,9 +230,12 @@ pub fn render_show_highlighted(
     theme: &Theme,
     layout: DiffLayout,
     width: usize,
+    tab_width: usize,
 ) -> Vec<Line<'static>> {
     let mut out = commit_header(meta, theme);
-    out.extend(render_diff_highlighted(model, hl, theme, layout, width));
+    out.extend(render_diff_highlighted(
+        model, hl, theme, layout, width, tab_width,
+    ));
     out
 }
 
@@ -295,6 +357,7 @@ fn render_file_split(
     hl: Option<&FileHighlight>,
     theme: &Theme,
     width: usize,
+    tab_width: usize,
     out: &mut Vec<Line<'static>>,
 ) {
     let Some(prep) = prepare_file(file, hl, theme, out) else {
@@ -323,6 +386,7 @@ fn render_file_split(
                     styled_content(pick(old_ref, oi, &lines[i].text, theme, None), None, None),
                     col_w,
                     lnum_w,
+                    tab_width,
                 );
                 let right_rows = split_cell_rows(
                     theme,
@@ -331,6 +395,7 @@ fn render_file_split(
                     styled_content(pick(new_ref, ni, &lines[i].text, theme, None), None, None),
                     col_w,
                     lnum_w,
+                    tab_width,
                 );
                 push_split_rows(out, left_rows, right_rows, col_w, theme);
                 old_no += 1;
@@ -372,6 +437,7 @@ fn render_file_split(
                         content,
                         col_w,
                         lnum_w,
+                        tab_width,
                     );
                     old_no += 1;
                     oi += 1;
@@ -393,6 +459,7 @@ fn render_file_split(
                         content,
                         col_w,
                         lnum_w,
+                        tab_width,
                     );
                     new_no += 1;
                     ni += 1;
@@ -438,6 +505,7 @@ fn split_cell_rows(
     content: Vec<Span<'static>>,
     col_w: usize,
     lnum_w: usize,
+    tab_width: usize,
 ) -> Vec<Vec<Span<'static>>> {
     let (marker, row_bg, gutter_style) = match origin {
         LineOrigin::Context => (' ', None, Style::default()),
@@ -453,7 +521,7 @@ fn split_cell_rows(
     let content_w = col_w.saturating_sub(prefix_w);
     let pad_style = row_bg.map_or_else(Style::default, |c| Style::default().bg(c));
 
-    wrap_spans(&content, content_w)
+    wrap_spans(&content, content_w, tab_width)
         .into_iter()
         .enumerate()
         .map(|(i, row_spans)| {
@@ -472,7 +540,7 @@ fn split_cell_rows(
             }
             let used: usize = row_spans
                 .iter()
-                .map(|s| display_width(s.content.as_ref()))
+                .map(|s| tabbed_width(s.content.as_ref(), tab_width))
                 .sum();
             spans.extend(row_spans);
             if used < content_w {
@@ -636,7 +704,7 @@ fn pick(
 /// Split `spans` into visual rows of at most `width` display columns each,
 /// preserving span styles across row boundaries. Returns at least one row
 /// (an empty row when `spans` is empty or `width` is zero).
-fn wrap_spans(spans: &[Span<'static>], width: usize) -> Vec<Vec<Span<'static>>> {
+fn wrap_spans(spans: &[Span<'static>], width: usize, tab_width: usize) -> Vec<Vec<Span<'static>>> {
     if width == 0 {
         return vec![spans.to_vec()];
     }
@@ -654,7 +722,7 @@ fn wrap_spans(spans: &[Span<'static>], width: usize) -> Vec<Vec<Span<'static>>> 
             let mut consumed_bytes = 0usize;
             let mut visual = 0usize;
             for (idx, ch) in rest.char_indices() {
-                let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+                let w = char_cols(ch, tab_width);
                 if visual + w > remaining {
                     break;
                 }
@@ -667,7 +735,7 @@ fn wrap_spans(spans: &[Span<'static>], width: usize) -> Vec<Vec<Span<'static>>> 
                 && let Some(first) = rest.chars().next()
             {
                 consumed_bytes = first.len_utf8();
-                visual = UnicodeWidthChar::width(first).unwrap_or(1);
+                visual = char_cols(first, tab_width).max(1);
             }
             let chunk = rest[..consumed_bytes].to_string();
             rest = &rest[consumed_bytes..];
