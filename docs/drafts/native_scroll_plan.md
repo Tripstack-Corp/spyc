@@ -211,9 +211,10 @@ preview) fall out for free.
 1000 that translation stops. Ship without this arm and we trade a pane bug for a
 list bug.
 
-Keep every non-wheel `MouseEventKind` a no-op for now (`Down`/`Up`/`Drag`/
-`ScrollLeft`/`ScrollRight`). `route_mouse` matching exhaustively means
-click-to-focus is a later, contained addition.
+`route_mouse` takes the whole `MouseEventKind`, not just wheel — the three button
+gestures in Tier 3b are routed by the same pure fn against the same snapshot.
+`Drag` / `ScrollLeft` / `ScrollRight` stay no-ops; exhaustive matching keeps
+adding them contained.
 
 ### Tier 3 — the agent pane: forward to the child (the whole point)
 
@@ -270,6 +271,91 @@ clicks land N rows off — which reads as the *agent's* bug, not ours.
 the sequence, and spyc asked the terminal for SGR (1006) while the child may have
 requested X10 or UTF-8. `encode_mouse` must emit the child's
 `mouse_protocol_encoding()`, not ours.
+
+### Tier 3b — button gestures: click-to-focus, middle-paste, right-chord
+
+`1000h` already reports buttons alongside the wheel (Tier 0), so this needs **no
+new escape sequences** — only routing. All three are `MouseEventKind::Down(..)`.
+
+#### Left-click — focus the surface under the pointer
+
+Route through the **existing** `set_pane_focus(want_pane: bool)`
+(`pane_tabs.rs:686`), never by assigning `state.focus`. It already encodes two
+behaviours a fresh implementation would get wrong:
+
+- **Zoom refusal.** While `pane.zoom != ZoomTarget::None` it declines with a hint,
+  because the other region is collapsed off-screen. A click landing in a region
+  that isn't visible must do the same thing `^a j` does.
+- **Vsplit interaction.** From the right column `^a j` descends to the pane but
+  *keeps* `vsplit.focus` on the right, so `^a k` climbs back to `b` rather than
+  `a`. Clicking pane→list has to restore the same column the user came from.
+
+For a click into the *other* list column, pair it with `vsplit_focus(Side)` — the
+existing handler behind `Action::VsplitFocusLeft`/`Right` (`actions.rs:362`).
+`recompute_focus` (`pane_tabs.rs:799`) then derives overlay/pager focus from the
+`want_pane` bool as usual; nothing new decides focus.
+
+**Click-through, not click-to-focus-then-click.** When the pane is under the
+pointer and the child requested mouse, focus it *and* forward the event (Tier 3).
+The pane is already live and visible, so swallowing the first click to "just
+focus" would feel broken. Consequence: left-click is the child's, which is why the
+other two buttons are spyc's.
+
+Deferred within this tier: **click-to-select a list row** (move the cursor to the
+clicked line). It needs a row→index mapping that doesn't exist yet — the list
+renderer owns the visible window, and there is no `first_visible`/`scroll_offset`
+accessor to hit-test against. Focus-only first; add row selection once that
+mapping is extracted (and it must respect `list_generation`, wrapped rows, and the
+vsplit column widths).
+
+#### Middle-click — paste
+
+Terminals normally paste PRIMARY on middle-click, but capture takes that away, so
+spyc has to do it. Route it as a **paste, not as bytes**: synthesize the same path
+`Event::Paste` takes (`run.rs:206` → `route_input` → `InputSink::Paste`), so it
+lands wherever a paste already lands — pane, `:` command line, shell prompt — and
+inherits the bracketed-paste gating from #170 (`bracketed_paste_enabled`,
+`pane/mod.rs:446`) for free. Do **not** add a second paste path.
+
+> [!NOTE]
+> **This needs a clipboard *read*, which does not exist yet.** `src/clipboard.rs`
+> is write-only: `copy` / `copy_image`, with text shelling out (`pbcopy`;
+> a candidate list on Linux) and `arboard` used only for images. So Tier 3b adds
+> the mirror — `pbpaste` on macOS, `xclip -o` / `wl-paste` on Linux, sibling to
+> `spawn_and_pipe`, or `arboard::Clipboard::get_text` if we'd rather not grow the
+> shell-out list. Model it as an `Effect` alongside `Effect::CopyToClipboard`
+> (`effect.rs:56`) so the pure layer stays clean; note it's a subprocess spawn on
+> a user gesture, which matches what yank already does.
+>
+> X11 PRIMARY-vs-CLIPBOARD: use the regular clipboard. PRIMARY has no macOS
+> equivalent, and a gesture that pastes different content per platform is worse
+> than one that's merely conventional.
+
+#### Right-click — open a chord menu
+
+The nicest of the three, because it turns the mouse into a *discovery* surface for
+a dense keymap: right-click sets a pending chord prefix (`PendingSeq`,
+`keymap/resolver/mod.rs:15`) and shows the which-key popup **immediately** — the
+`chord_hint_delay_ms` debounce exists to avoid startling a keyboard user mid-chord,
+and a deliberate right-click needs no such grace.
+
+Which prefix should follow the **binding taxonomy** the repo already enforces
+(AGENTS.md → "Binding taxonomy", guarded by
+`leader_and_pane_namespaces_respect_tiers`) rather than being a global choice:
+
+| Pointer over | Prefix | Rationale |
+|---|---|---|
+| the pane | `^a` (`PendingSeq::W`) | PANE-tier commands live there |
+| the list / a column | leader (`PendingSeq::Leader`) | GLOBAL + workspace ops live there |
+
+That way the mouse surfaces the same vocabulary the keyboard does in that region,
+and neither menu offers actions the guard would reject for that tier. See **Open
+decisions** — this one is worth confirming before implementation.
+
+Right-click is **always spyc's**, never forwarded, even to a mouse-aware child;
+otherwise the gesture would be unavailable exactly where the pane is focused. Same
+for middle-click. Document both in the selection-caveat block, since a user who
+wants the child's own right-click menu needs to know `:mouse off` is the way.
 
 ### Configuration
 
@@ -470,6 +556,16 @@ silently dies over another.
 15. Confirm PR 1 in isolation (before the flip) leaves `capture = false` and
     behaves exactly like today — the guard against landing the broken
     intermediate the PR-split note describes.
+16. Buttons (Tier 3b): left-click the pane → pane takes focus; left-click a list
+    column → that column takes focus, and from the *right* column the pane→list
+    return lands back on `b`, not `a`. While `^a z`-zoomed, a click into the
+    collapsed region declines with the same hint `^a j` gives.
+17. Middle-click pastes into the pane, the `:` line, and the shell prompt — and a
+    child that never enabled bracketed paste receives no `\e[200~` wrapper (#170).
+18. Right-click over the pane shows the `^a` menu, over the list the leader menu,
+    both with **no** `chord_hint_delay_ms` wait. `Esc` dismisses without acting.
+19. Right/middle-click over a mouse-aware child (claude) is spyc's, not
+    forwarded — confirm the child sees nothing.
 
 ## Open decisions
 
@@ -484,4 +580,12 @@ silently dies over another.
    discoverability work in *User review required* is part of that commit, not a
    follow-up.
 
-**No open decisions remain — the plan is ready to implement.**
+3. **Right-click prefix: taxonomy-aware, or always leader?** Plan proposes
+   `^a` over the pane and leader over the list, so each menu offers the tier that
+   region actually owns (and can't offer actions the tier guard rejects). The
+   simpler alternative is *always* leader — one gesture, one menu, nothing to
+   learn — at the cost of making pane commands unreachable by mouse. Worth your
+   call; it's a one-line change either way.
+
+Decisions 1 and 2 are settled; 3 is the only open one, and it doesn't block
+starting PR 1.
