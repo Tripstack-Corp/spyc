@@ -51,6 +51,9 @@ pub struct Config {
     /// Agent-status notification knobs (`[notify]`).
     pub notify: NotifyConfig,
 
+    /// Mouse reporting knobs (`[mouse]`).
+    pub mouse: MouseConfig,
+
     /// Ignore-mask definitions. When non-empty, they replace the
     /// built-in defaults wholesale.
     pub ignore_masks: Vec<IgnoreMask>,
@@ -292,6 +295,29 @@ impl Default for PagerConfig {
     }
 }
 
+/// Mouse-reporting knobs (`[mouse]`).
+#[derive(Debug, Clone)]
+pub struct MouseConfig {
+    /// Ask the terminal for real mouse reporting (wheel + buttons) so spyc can
+    /// scroll whatever is under the pointer. Costs native click-drag selection
+    /// while on — the terminal's bypass modifier (Shift on most, Option/Fn on
+    /// iTerm2) or `:mouse off` reclaims it.
+    pub capture: bool,
+    /// Lines per wheel tick for the surfaces spyc scrolls itself. A pane
+    /// forwarding to a mouse-aware child is unaffected: the child gets one event
+    /// per tick and picks its own step. Clamped to at least 1 on load.
+    pub scroll_lines: usize,
+}
+
+impl Default for MouseConfig {
+    fn default() -> Self {
+        Self {
+            capture: false,
+            scroll_lines: 3,
+        }
+    }
+}
+
 /// On-disk shape of `[pager]`. `Option` for the same "didn't set"
 /// distinguishability as the other tables.
 #[derive(Debug, Default, Deserialize)]
@@ -299,6 +325,17 @@ impl Default for PagerConfig {
 struct FilePager {
     #[serde(default)]
     tab_width: Option<usize>,
+}
+
+/// `[mouse]` as parsed from the file — every field optional so an absent key
+/// keeps the built-in default rather than zeroing it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileMouse {
+    #[serde(default)]
+    capture: Option<bool>,
+    #[serde(default)]
+    scroll_lines: Option<usize>,
 }
 
 /// Markdown viewer knobs.
@@ -516,6 +553,8 @@ struct FileConfig {
     #[serde(default)]
     pager: FilePager,
     #[serde(default)]
+    mouse: FileMouse,
+    #[serde(default)]
     markdown: FileMarkdown,
     #[serde(default)]
     delete: FileDelete,
@@ -653,6 +692,15 @@ impl Config {
         // config can't make tabs render as zero-width (invisible).
         if let Some(w) = file.pager.tab_width {
             self.pager.tab_width = w.max(1);
+        }
+
+        // Mouse: per-field merge. Clamp scroll_lines to >= 1 so a 0 can't make
+        // the wheel a no-op on spyc-owned surfaces.
+        if let Some(b) = file.mouse.capture {
+            self.mouse.capture = b;
+        }
+        if let Some(n) = file.mouse.scroll_lines {
+            self.mouse.scroll_lines = n.max(1);
         }
 
         // Markdown: per-field merge.

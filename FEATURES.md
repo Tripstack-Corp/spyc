@@ -540,6 +540,12 @@ end).
 - **`:marks`** — show all marks in a pager popup
 - **`:set key=value`** — runtime settings (e.g. `:set sort=mtime`)
 - **`:bprev`** / **`:bnext`** — navigate pager buffer history (also `[b`/`]b` in pager)
+- **`:mouse on|off`** — real mouse reporting, so the wheel scrolls whatever is
+  under the pointer instead of sending arrow keys. **Costs native click-drag text
+  selection while on** (hold Shift to select anyway — Option/Fn on iTerm2);
+  `:mouse off` gives it back immediately, no restart. Default off (`[mouse]
+  capture`). `^a u` quick-select and `y` in the pager are the mouse-free yank
+  paths.
 - **`:limit <glob>`** — temporary filter (e.g. `:limit *.rs`)
 - **`:limit !`** — show only picked files
 - **`:limit git`** / **`:limit g`** — show only files in `git status`

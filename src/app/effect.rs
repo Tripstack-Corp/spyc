@@ -37,6 +37,11 @@ use super::{
 /// `None` variant) — see `From<PostAction>`.
 #[derive(Debug)]
 pub enum Effect {
+    /// Put the terminal into (or out of) real mouse reporting. Emitted only by
+    /// [`App::settle_mouse_mode`], which reconciles `[mouse] capture` against
+    /// what the terminal is actually in — so this is idempotent by construction
+    /// and never needs to be emitted speculatively.
+    SetMouseMode { capture: bool },
     /// Tear the TUI down, run a child in the foreground, restore. The
     /// only TUI-tearing effect; == the former `PostAction::Spawn`.
     ForegroundExec {
@@ -629,6 +634,16 @@ impl App {
                 // text all happened in the producer (`settle_agent_activity`);
                 // here we just fire the OS notification (off-thread, best-effort)
                 // and ring the bell if requested (inline stdout write).
+                Effect::SetMouseMode { capture } => {
+                    // Mutually exclusive with 1007 alternate-scroll: a terminal
+                    // honoring both could deliver one wheel tick twice.
+                    if let Err(e) = crate::set_mouse_capture(terminal, capture) {
+                        self.state
+                            .flash_error(format!("mouse: could not set reporting: {e:#}"));
+                    } else {
+                        self.view.mouse_capture_on = capture;
+                    }
+                }
                 Effect::Notify { system, osc9, bell } => {
                     if let Some((summary, body)) = system {
                         crate::notifications::send(summary, body);
@@ -726,6 +741,12 @@ impl App {
                     // restored the TUI on the spawn-error path, so here we just
                     // flash it (below) and carry on.
                     let fg_result = fg.run(terminal, &program, &args, pause_after);
+                    // `suspend_tui` handed mouse reporting to the child; record
+                    // that so the loop-bottom `settle_mouse_mode` re-enables it
+                    // if the user wants it. `resume_tui` deliberately doesn't do
+                    // this itself — it has no config access, and the settle is
+                    // the single place that decides.
+                    self.view.mouse_capture_on = false;
                     // --- after-work (moved verbatim from the run loop's
                     // former `if let PostAction::Spawn` call site) ---
                     // Runs regardless of the spawn result: the pager

@@ -414,6 +414,44 @@ pub(super) fn cmd_hooks(app: &mut App, args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
+/// `:mouse on|off` — flip real mouse reporting for this session.
+///
+/// Writes only `state.config.mouse.capture`; the terminal follows on the next
+/// loop bottom via [`App::settle_mouse_mode`]. That's the runtime escape hatch
+/// from the selection trade-off: capture takes native click-drag selection away
+/// from the emulator, and a user who needs it back mid-session shouldn't have to
+/// edit an rc file and restart.
+pub(super) fn cmd_mouse(app: &mut App, args: &str) -> Vec<Effect> {
+    match args.trim() {
+        "on" | "enable" | "yes" | "y" => {
+            app.state.config.mouse.capture = true;
+            app.state.flash_info(
+                "mouse: reporting on — terminal text selection needs Shift (Option/Fn on iTerm2)",
+            );
+        }
+        "off" | "disable" | "no" | "n" => {
+            app.state.config.mouse.capture = false;
+            app.state
+                .flash_info("mouse: reporting off — native text selection restored");
+        }
+        "" | "status" => {
+            let want = app.state.config.mouse.capture;
+            // Report both halves: they diverge for exactly one loop iteration,
+            // and if they ever diverge for longer that's the bug to see.
+            let actual = app.view.mouse_capture_on;
+            let note = if want == actual { "" } else { " (applying…)" };
+            app.state.flash_info(format!(
+                "mouse: {}{note} — `:mouse on|off` to change",
+                if want { "on" } else { "off" }
+            ));
+        }
+        other => app
+            .state
+            .flash_error(format!("usage: :mouse on|off  (got `{other}`)")),
+    }
+    Vec::new()
+}
+
 /// `:dump-scrollback` — diagnostic for the ^a-v snapshot path. Drains the active
 /// pane and writes the snapshot (one line per row) to /tmp/spyc-scrollback.txt;
 /// useful when content visible on the live pane seems to go missing in the pager

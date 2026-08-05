@@ -223,6 +223,10 @@ pub fn run() -> Result<()> {
             LeaveAlternateScreen,
             DisableBracketedPaste,
             DisableAlternateScroll,
+            // Unconditional: cheap, harmless when capture was never on, and a
+            // leaked `?1000h` silently breaks click-drag selection in the user's
+            // shell for the rest of the session.
+            DisableWheelReporting,
             ShowMousePointer,
             crossterm::cursor::Show,
         );
@@ -461,6 +465,46 @@ impl crossterm::Command for DisableAlternateScroll {
     }
 }
 
+/// DEC private modes 1000 (button press/release) + 1006 (SGR extended
+/// coordinates) — real mouse reporting, so spyc gets `ScrollUp`/`ScrollDown` and
+/// button events *with coordinates* instead of 1007's coordinate-free arrow keys.
+///
+/// Deliberately NOT 1002/1003 (drag / any-motion reporting), which is what
+/// `crossterm::event::EnableMouseCapture` emits. `run.rs` marks a redraw for every
+/// `Message::Input` and `coalesce_pending` surfaces input one event per loop
+/// iteration, so motion reporting would turn idle pointer movement into a
+/// redraw-per-motion storm — straight through the 0-dps-at-idle invariant.
+///
+/// 1000h alone already reports the wheel (buttons 64/65) and clicks; 1006h keeps
+/// coordinates correct past column 223. Mutually exclusive with
+/// [`EnableAlternateScroll`]: a terminal honoring both could deliver one tick
+/// twice (once as arrows, once as a mouse event), so the two are always toggled
+/// as a pair.
+struct EnableWheelReporting;
+struct DisableWheelReporting;
+
+impl crossterm::Command for EnableWheelReporting {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        f.write_str("\x1b[?1000h\x1b[?1006h")
+    }
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl crossterm::Command for DisableWheelReporting {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        // Reverse order of the enable, so a terminal that tracks a mode stack
+        // unwinds cleanly.
+        f.write_str("\x1b[?1006l\x1b[?1000l")
+    }
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// No-op handler for SIGINT / SIGQUIT. Replaces the default
 /// "terminate-the-process" disposition so spyc can survive a stray
 /// `^C` (or `^\`) that arrives while raw mode is off and the kernel
@@ -612,10 +656,36 @@ fn restore_terminal(terminal: &mut Tui) -> Result<()> {
         LeaveAlternateScreen,
         DisableBracketedPaste,
         DisableAlternateScroll,
+        DisableWheelReporting,
         ShowMousePointer
     )?;
     let _ = term_title::pop();
     terminal.show_cursor()?;
+    Ok(())
+}
+
+/// Switch the terminal between 1007 alternate-scroll (wheel as arrow keys, native
+/// selection intact) and real mouse reporting (`?1000h?1006h`).
+///
+/// The two are mutually exclusive on purpose — a terminal honoring both could
+/// deliver one wheel tick twice, once as arrows and once as a mouse event — so
+/// this always emits the disable of one alongside the enable of the other. Called
+/// only from the `Effect::SetMouseMode` executor, which in turn is emitted only by
+/// the reconcile in `App::settle_mouse_mode`.
+pub fn set_mouse_capture(terminal: &mut Tui, capture: bool) -> Result<()> {
+    if capture {
+        execute!(
+            terminal.backend_mut(),
+            DisableAlternateScroll,
+            EnableWheelReporting
+        )?;
+    } else {
+        execute!(
+            terminal.backend_mut(),
+            DisableWheelReporting,
+            EnableAlternateScroll
+        )?;
+    }
     Ok(())
 }
 
@@ -635,6 +705,9 @@ pub fn suspend_tui(terminal: &mut Tui) -> Result<()> {
         MoveTo(0, 0),
         DisableBracketedPaste,
         DisableAlternateScroll,
+        // Hand the mouse to the child: `less`/`vim` set up their own reporting,
+        // and leaving ours on would have both of us reading the same events.
+        DisableWheelReporting,
     )?;
     terminal.show_cursor()?;
     Ok(())
@@ -678,4 +751,53 @@ pub fn force_full_repaint(terminal: &mut Tui) -> Result<()> {
     let area = ratatui::layout::Rect::from(terminal.size()?);
     terminal.resize(area)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod mouse_reporting_tests {
+    use super::{DisableWheelReporting, EnableWheelReporting};
+    use crossterm::Command;
+
+    fn ansi(cmd: &impl Command) -> String {
+        let mut out = String::new();
+        cmd.write_ansi(&mut out).expect("write to String");
+        out
+    }
+
+    /// The bytes matter and are invisible in manual testing on a still pointer:
+    /// `?1003h` (any-event motion) would wake the loop and mark a redraw on every
+    /// pointer move, straight through the 0-dps-at-idle invariant — and you'd only
+    /// notice by waving the mouse while watching the `A` overlay. `crossterm`'s own
+    /// `EnableMouseCapture` emits it, which is exactly why spyc doesn't use that.
+    #[test]
+    fn enable_asks_for_buttons_and_sgr_but_never_motion_reporting() {
+        let seq = ansi(&EnableWheelReporting);
+        assert!(seq.contains("\x1b[?1000h"), "button reporting: {seq:?}");
+        assert!(seq.contains("\x1b[?1006h"), "SGR coordinates: {seq:?}");
+        for motion in ["1002", "1003"] {
+            assert!(
+                !seq.contains(motion),
+                "must not request motion reporting (?{motion}h): {seq:?}"
+            );
+        }
+    }
+
+    /// A leaked `?1000h` silently breaks click-drag selection in the user's shell
+    /// for the rest of the session, so the disable has to undo everything the
+    /// enable asked for — this is the pair the panic hook and `restore_terminal`
+    /// rely on.
+    #[test]
+    fn disable_undoes_every_mode_the_enable_set() {
+        let disable = ansi(&DisableWheelReporting);
+        for mode in ["1000", "1006"] {
+            assert!(
+                disable.contains(&format!("\x1b[?{mode}l")),
+                "?{mode}l missing from {disable:?}"
+            );
+        }
+        // Unwound in reverse, so a terminal tracking a mode stack pops cleanly.
+        let sgr = disable.find("1006").expect("1006");
+        let btn = disable.find("1000").expect("1000");
+        assert!(sgr < btn, "expected 1006l before 1000l: {disable:?}");
+    }
 }

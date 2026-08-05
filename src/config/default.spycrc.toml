@@ -88,6 +88,25 @@
 [pager]
 # tab_width = 4
 
+# ── mouse ─────────────────────────────────────────────────────────────
+# `capture` (default false): ask the terminal for real mouse reporting
+# (wheel + buttons) so spyc can scroll whatever is under the pointer.
+#
+# TRADE-OFF, read before enabling: any mouse capture takes native
+# click-drag text selection away from your terminal emulator. Hold the
+# bypass modifier to select anyway — Shift on most terminals (Ghostty,
+# WezTerm, kitty, Alacritty), Option or Fn on iTerm2. `:mouse off`
+# reclaims selection for the session without editing this file or
+# restarting; `:mouse on` puts it back. spyc's mouse-free yank paths are
+# `^a u` (quick-select URLs / paths / SHAs) and `y` in the pager.
+#
+# `scroll_lines` (default 3): lines per wheel tick, for the surfaces spyc
+# scrolls itself. A pane forwarding to a mouse-aware child is unaffected —
+# the child gets one event per tick and picks its own step. Clamped to >= 1.
+[mouse]
+# capture = false
+# scroll_lines = 3
+
 # ── markdown ──────────────────────────────────────────────────────────
 # Default view for `.md` / `.markdown` files in the pager.
 # `open_as_rendered` (default true) opens them in the rendered view;
