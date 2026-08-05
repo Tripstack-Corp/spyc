@@ -1,0 +1,227 @@
+# Mouse text selection — implementation plan
+
+## Goal
+
+Drag to select text, release to have it on the clipboard — on the agent pane,
+the pager, and the file list. The missing half of `[mouse] capture`: capture
+takes the terminal's own click-drag selection away, and until spyc gives an
+equivalent back, "select and copy" means either remembering a bypass modifier or
+reaching for a screenshot.
+
+That is not hypothetical. The trigger for this plan was the owner screenshotting
+`:activity` output to send it, because that was easier than copying the text —
+with a `y` yank sitting in the pager the whole time. When the discoverable path
+loses to a screenshot, the feature is missing regardless of what exists.
+
+## Why this is cheaper than it looks
+
+Three things already exist that would otherwise be most of the work.
+
+**`vt100::Screen::contents_between(start_row, start_col, end_row, end_col)` is
+public and purpose-built.** Its own doc: *"This is useful for things like
+determining the contents of a clipboard selection."* Two details make it the
+right primitive rather than merely a convenient one:
+
+- it walks `grid().visible_rows()`, so it follows the pane's **current scroll
+  position** — the same rows the widget drew, no coordinate translation;
+- it honors `row.wrapped()`, emitting a newline only on a **hard** line end. A
+  hand-rolled cell walk gets soft-wrapped lines wrong (a spurious `\n` mid-line),
+  which is the single most annoying bug in a terminal selection.
+
+**The pane widget already applies a per-cell modifier.**
+`PaneWidget::render` (`src/pane/widget.rs`) walks `screen.cell(row, col)` and
+adds `Modifier::DIM` to every cell when unfocused. A selection highlight is one
+more condition inside that existing loop, not a new render path.
+
+**The routing skeleton is done.** `route_mouse` / `MouseSnapshot` / `region_at` /
+`Gesture` landed in #212–#221, `mouse_report` encodes any event kind, and
+`clipboard::copy` exists. `^a u` quick-select is the established precedent for
+"point at text, yank it".
+
+## What must be built
+
+### Tier 0 — ask for drag events (DEC 1002, *not* 1003)
+
+spyc requests `?1000h?1006h` today, and `src/app/proc.rs` drops
+`Moved`/`Drag` in the reader. No drag ever reaches the loop.
+
+Adding **1002** (button-event tracking) reports motion **only while a button is
+held**. That distinction is the whole reason this is affordable: the redraw storm
+the campaign has been avoiding is `?1003h` (any-event motion), which fires on
+idle pointer movement. With 1002, no button held means no events, so the
+0-dps-at-idle invariant is untouched — and during a drag the per-motion redraw is
+exactly what we want, since the highlight has to track the pointer.
+
+`EnableWheelReporting` becomes `?1000h?1002h?1006h`. Note
+`DisableWheelReporting` **already** clears 1002/1003 (#218), so teardown needs no
+change — and `mouse_mode_seq`'s existing test asserting no `1003h` stays valid
+and still meaningful.
+
+The reader filter must stop dropping `Drag`. It should keep dropping `Moved`
+(no button held — with 1002 that shouldn't arrive at all, so a `Moved` means the
+terminal ignored what we asked for, which is precisely the case the filter was
+written for).
+
+### Tier 1 — press is ambiguous until it moves
+
+At press time a click and a drag are indistinguishable. So:
+
+```
+press          → record anchor, mark pending. Do NOT start a selection.
+first motion   → promote to a drag; selection begins at the anchor
+release, moved → finish the selection, copy
+release, still → it was a click; existing click behaviour applies
+```
+
+The load-bearing constraint: **left-click is already click-through** (#219 —
+focus the pane *and* forward to a mouse-aware child). A press over such a child
+has already been delivered. spyc cannot retroactively claim the drag, which
+forces Tier 2's split rather than making it a preference.
+
+### Tier 2 — who owns a drag
+
+| Pointer over | Owner | Why |
+|---|---|---|
+| a **mouse-aware** child (claude, vim, htop) | **the child** | Its own selection is better than ours and it already got the press. claude's `onSelectionDrag` / `onHoverAt` exist and are currently dead only because we drop motion — forwarding brings them alive for free. |
+| a **non-mouse** child (plain shell) | **spyc** | Nothing else can. This is the case the deferred "spyc-owned pane scrollback" left as a no-op. |
+| the **pager** | **spyc** | No child involved. |
+| the **file list** | **spyc** | No child involved. |
+
+So drag ownership follows the same `can_forward_to_child` predicate the wheel and
+buttons already use. One rule, four surfaces.
+
+### Tier 3 — the selection model
+
+A `Selection { surface, anchor: (row, col), focus: (row, col), mode }` in
+`ViewState` (render ephemeral, cleared freely, never persisted). Coordinates are
+**surface-relative**, so the pane's are pane-relative — the same translation
+`mouse_report` already does.
+
+`mode` is linewise-by-default with a modifier for block/rectangular. **Not
+Shift** — Shift is the terminal's own selection-bypass modifier and is frequently
+consumed before spyc sees it (the note already in `native_scroll_plan.md`). Alt
+is the conventional block-select modifier and is available.
+
+### Tier 4 — rendering the highlight
+
+- **Pane**: one condition in `PaneWidget`'s existing cell loop.
+- **Pager**: the pager renders `Vec<Line>`; a highlight means restyling spans
+  within the selected range. More work than the pane because a `Line` is spans,
+  not cells, and the selection cuts across span boundaries.
+- **List**: rows are already styled per-row; a selection here is arguably just
+  the existing pick mechanism and may not be worth a second concept.
+
+Use a theme color, not a hardcoded `REVERSED` — `REVERSED` collides with the
+block cursor the widget already draws, and with a diff's own background wash.
+
+### Tier 5 — copy, and the SSH problem this exposes
+
+On release, extract and copy. Pane text comes from `contents_between`; pager text
+from the existing `source_yank_text` / `visible_yank_text` machinery, range-scoped.
+
+Trailing whitespace must be trimmed per line: a terminal grid is space-padded to
+its full width, so an untrimmed selection pastes a rectangle of spaces.
+
+> [!IMPORTANT]
+> **`src/clipboard.rs` copies to the WRONG MACHINE over SSH, today.** It shells
+> out to `pbcopy` / `xclip` / `wl-copy`, which are the *server's* clipboard. Yank
+> something over SSH and it lands on the remote host, not the laptop the user is
+> typing on.
+>
+> This is not new and not caused by selection — it already affects `y` in the
+> pager and `^a u` quick-select. But selection makes it the primary path, so it
+> stops being ignorable.
+>
+> The fix is **OSC 52**, which asks the *terminal* to set the clipboard, so it
+> lands client-side. spyc already has the precedent for exactly this shape:
+> `[notify] desktop_via = "auto"` routes OSC-9 to the client terminal over SSH
+> versus the OS notifier locally (`desktop_delivery(via, is_ssh)`, `view.is_ssh`).
+> Clipboard writes want the same `auto` treatment.
+>
+> Caveat to verify, not assume: OSC 52 write support varies (kitty, WezTerm,
+> iTerm2, Ghostty, Alacritty yes; tmux needs `set -g set-clipboard on`; some
+> terminals gate it behind a setting for good security reasons). So it's
+> `auto` with a fallback, not a replacement. `term_title.rs` already sanitizes
+> OSC payloads and has a test using a hostile `\x1b]52;c;…` string — the escaping
+> hazard is understood in-tree.
+
+## Open decisions
+
+These need answers before implementation, and two of them change the shape.
+
+### 1. Selection stability under live output — the real design question
+
+A selection anchored to visible-grid coordinates is **wrong the instant the child
+emits output**, because the grid scrolls under it. Three options:
+
+| | Behaviour | Cost |
+|---|---|---|
+| **(a) clear on output** | Any pane output drops the selection | Trivial. But an agent emitting output while you drag makes selection unusable in exactly the pane that matters most. |
+| **(b) freeze on drag** | Drag start enters the pane's scroll mode; the viewport stops following the tail | What tmux and WezTerm do. Stable by construction. spyc already has pane scroll mode and `^a v`. |
+| **(c) absolute anchoring** | Anchor to scrollback-absolute rows, translate per frame | Correct under scrolling AND live output, but needs a coordinate space `contents_between` doesn't speak. |
+
+**Recommendation: (b).** It matches what users already expect from tmux, it makes
+the whole class of bug impossible rather than handled, and the machinery exists.
+Cost: a drag implicitly freezes the pane, which must be visible (the divider
+already indicates scroll mode) and must auto-exit on release-with-no-selection.
+
+### 2. Which surfaces in v1
+
+Pane-only is a coherent, useful v1 and is where the demand came from. The pager
+is the second-most valuable (`:activity dump`, `:grep` results, diffs) but costs
+more (spans, not cells). The list is the least valuable and overlaps picks.
+
+**Recommendation: pane + pager. Skip the list.**
+
+### 3. Auto-copy on release, or an explicit copy step?
+
+X11 primary-selection convention is auto-copy on release. A terminal's own
+selection also copies on release in most emulators. But auto-copy silently
+overwrites the clipboard on a stray drag.
+
+**Recommendation: auto-copy**, matching the emulator behaviour being replaced,
+with the flash naming the byte/line count so it's never silent.
+
+### 4. Does this replace Shift-drag?
+
+No — the terminal's bypass keeps working regardless, and it stays the documented
+escape hatch. Worth stating explicitly so the docs don't imply otherwise.
+
+### 5. Is OSC 52 in this plan or its own?
+
+It's a **pre-existing bug** with a wider blast radius than selection (`y`, `^a u`).
+Arguably it should land first, independently, so selection inherits a correct
+clipboard rather than shipping alongside a fix for something it didn't break.
+
+**Recommendation: separate PR, landed before Tier 5.**
+
+## Suggested PR split
+
+1. **OSC 52 clipboard routing** — `auto` (client-side over SSH, OS clipboard
+   locally), applied to the existing yank paths. Independently valuable; fixes a
+   live bug for every SSH user.
+2. **1002 + drag plumbing** — enable button-event tracking, stop dropping `Drag`,
+   extend `Gesture`, and forward drags to mouse-aware children. **This alone
+   brings claude's native selection alive inside the pane**, which may satisfy
+   most of the original complaint before spyc-side selection exists at all.
+3. **Pane selection** — the state machine, freeze-on-drag, highlight, and
+   copy-on-release for a non-mouse child.
+4. **Pager selection** — the span-range highlight and range-scoped extraction.
+
+PR 2 is the one to land first and evaluate: if dragging inside claude works, the
+remaining gap is only non-mouse children and the pager, and the priority of 3–4
+should be re-judged against real use rather than assumed.
+
+## Verification
+
+- **Automated**: `mouse_mode_seq` asserts `1002h` present and `1003h` absent
+  (the storm guard must survive the change); `contents_between` range extraction
+  round-trips a known grid including a soft-wrapped line and a CJK cell; trailing
+  whitespace is trimmed; the press→motion→release state machine is a pure
+  decision with a table test, including release-without-motion still being a click.
+- **Manual**: idle with capture on and the pointer moving with **no button held**
+  → the `A` overlay must show **0 dps** (this is the whole 1002-vs-1003 bet, and
+  it is invisible in any test); drag inside claude selects in claude; drag in a
+  plain `zsh` pane selects in spyc; drag across a soft-wrapped line pastes one
+  logical line with no interior newline; over SSH, a yank lands on the **laptop**
+  clipboard; `Shift`-drag still hands selection to the terminal.
