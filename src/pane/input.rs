@@ -171,6 +171,12 @@ pub struct MouseReport {
     /// True for a button release. Wheel events are always presses — a wheel
     /// "release" isn't a thing, and emitting one confuses apps that count clicks.
     pub release: bool,
+    /// True for a drag: the pointer moved to a new cell while a button was held.
+    ///
+    /// Sets xterm's motion bit (32) in `Cb`. Only meaningful for a child that
+    /// asked for motion — [`encode_mouse`] drops it otherwise, since DEC 1000
+    /// reports press/release and no motion at all.
+    pub motion: bool,
     /// **Pane-relative**, 0-based. The child believes it owns a grid starting at
     /// its own `0,0`; passing frame-absolute coordinates here is the bug that
     /// makes clicks land N rows off and read as the child's fault.
@@ -197,16 +203,24 @@ pub fn encode_mouse(
     encoding: vt100::MouseProtocolEncoding,
 ) -> Vec<u8> {
     use vt100::MouseProtocolMode as M;
-    // `Press` (X10) reports presses only — a release would be noise it has no
-    // grammar for. Every other active mode reports both.
+    // Send only what the child's declared mode covers. `Press` (X10) reports
+    // presses only — a release is noise it has no grammar for. And **only
+    // ButtonMotion (1002) / AnyMotion (1003) report motion at all**: DEC 1000
+    // is press+release, so handing a drag to a `PressRelease` child is the same
+    // class of fault as forwarding to a child that asked for nothing.
     match mode {
         M::None => return Vec::new(),
         M::Press if ev.release => return Vec::new(),
+        M::Press | M::PressRelease if ev.motion => return Vec::new(),
         _ => {}
     }
 
     // xterm's Cb: button in the low bits, modifiers above it.
     let mut cb = u32::from(ev.button);
+    if ev.motion {
+        // Bit 5 marks "this is motion, not a fresh press".
+        cb |= 32;
+    }
     if ev.shift {
         cb |= 4;
     }
@@ -265,11 +279,93 @@ mod mouse_tests {
         MouseReport {
             button: 64,
             release: false,
+            motion: false,
             col: 0,
             row: 0,
             shift: false,
             alt: false,
             ctrl: false,
+        }
+    }
+
+    /// A left-drag at pane-relative (4,2): the held button plus the motion bit.
+    const fn left_drag() -> MouseReport {
+        MouseReport {
+            button: 0,
+            release: false,
+            motion: true,
+            col: 4,
+            row: 2,
+            shift: false,
+            alt: false,
+            ctrl: false,
+        }
+    }
+
+    /// **A drag only goes to a child that asked for motion.**
+    ///
+    /// DEC 1000 (`PressRelease`) reports press and release and *no motion at all*,
+    /// so handing it a drag is the same class of fault as forwarding to a child
+    /// that enabled nothing — bytes it has no grammar for. Only 1002
+    /// (`ButtonMotion`) and 1003 (`AnyMotion`) report motion.
+    ///
+    /// This is the one rule that makes drag-forwarding safe to turn on globally:
+    /// spyc now receives drags for every pane, and most children want none of them.
+    #[test]
+    fn a_drag_reaches_only_a_child_that_asked_for_motion() {
+        for mode in [Mode::None, Mode::Press, Mode::PressRelease] {
+            assert!(
+                encode_mouse(left_drag(), mode, Enc::Sgr).is_empty(),
+                "{mode:?} does not report motion — a drag must not be sent"
+            );
+        }
+        for mode in [Mode::ButtonMotion, Mode::AnyMotion] {
+            assert!(
+                !encode_mouse(left_drag(), mode, Enc::Sgr).is_empty(),
+                "{mode:?} reports motion — a drag must be sent"
+            );
+        }
+    }
+
+    /// A drag sets xterm's motion bit (32) on top of the held button, and keeps
+    /// the press final byte — it is motion, not a release.
+    #[test]
+    fn drag_sets_the_motion_bit_on_the_held_button() {
+        let out = encode_mouse(left_drag(), Mode::ButtonMotion, Enc::Sgr);
+        // button 0 | 32 = 32; coords 1-based → (5,3); `M` because it is not a release.
+        assert_eq!(
+            out,
+            b"\x1b[<32;5;3M".to_vec(),
+            "got {:?}",
+            String::from_utf8_lossy(&out)
+        );
+
+        // Middle and right carry their own button under the same bit.
+        for (button, cb) in [(1u8, 33), (2u8, 34)] {
+            let r = super::MouseReport {
+                button,
+                ..left_drag()
+            };
+            let out = encode_mouse(r, Mode::ButtonMotion, Enc::Sgr);
+            let expected = format!("\x1b[<{cb};5;3M").into_bytes();
+            assert_eq!(out, expected, "button {button} drag");
+        }
+    }
+
+    /// The legacy encodings mark a release with button 3, and that must not
+    /// swallow the motion bit — a drag is neither a fresh press nor a release, and
+    /// conflating it with either is how a child ends up thinking a button is stuck.
+    #[test]
+    fn drag_survives_the_legacy_encodings_release_trick() {
+        for enc in [Enc::Default, Enc::Utf8] {
+            let out = encode_mouse(left_drag(), Mode::ButtonMotion, enc);
+            assert!(!out.is_empty(), "{enc:?}: drag must encode");
+            // `ESC [ M` then Cb+32 = 32+32 = 64 = b'@'.
+            assert_eq!(&out[..3], b"\x1b[M", "{enc:?}: legacy prefix");
+            assert_eq!(
+                out[3], b'@',
+                "{enc:?}: Cb must be 32 (motion|button 0) + 32"
+            );
         }
     }
 
