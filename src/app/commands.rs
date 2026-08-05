@@ -424,30 +424,46 @@ pub(super) fn cmd_hooks(app: &mut App, args: &str) -> Vec<Effect> {
 pub(super) fn cmd_mouse(app: &mut App, args: &str) -> Vec<Effect> {
     match args.trim() {
         "on" | "enable" | "yes" | "y" => {
-            app.state.config.mouse.capture = true;
+            // The override, not `config.mouse.capture`: a config reload replaces
+            // the whole config struct and would silently undo this.
+            app.state.mouse_capture_override = Some(true);
             app.state.flash_info(
                 "mouse: reporting on — terminal text selection needs Shift (Option/Fn on iTerm2)",
             );
         }
         "off" | "disable" | "no" | "n" => {
-            app.state.config.mouse.capture = false;
+            app.state.mouse_capture_override = Some(false);
             app.state
                 .flash_info("mouse: reporting off — native text selection restored");
         }
         "" | "status" => {
-            let want = app.state.config.mouse.capture;
+            let want = app.mouse_capture_wanted();
             // Report both halves: they diverge for exactly one loop iteration,
             // and if they ever diverge for longer that's the bug to see.
-            let actual = app.view.mouse_capture_on;
+            let actual = crate::mouse_capture_is_on();
             let note = if want == actual { "" } else { " (applying…)" };
+            let src = if app.state.mouse_capture_override.is_some() {
+                " (this session)"
+            } else {
+                ""
+            };
             app.state.flash_info(format!(
-                "mouse: {}{note} — `:mouse on|off` to change",
+                "mouse: {}{note}{src} — `:mouse on|off` to change",
                 if want { "on" } else { "off" }
+            ));
+        }
+        // Hand control back to `[mouse] capture`, so a config change takes effect
+        // again without restarting.
+        "auto" | "default" | "config" => {
+            app.state.mouse_capture_override = None;
+            let want = app.state.config.mouse.capture;
+            app.state.flash_info(format!(
+                "mouse: following config ([mouse] capture = {want})"
             ));
         }
         other => app
             .state
-            .flash_error(format!("usage: :mouse on|off  (got `{other}`)")),
+            .flash_error(format!("usage: :mouse on|off|auto  (got `{other}`)")),
     }
     Vec::new()
 }

@@ -594,6 +594,13 @@ pub struct AppState {
     pub resolver: Resolver,
     pub user_keymap: UserKeymap,
     pub config: Config,
+    /// `:mouse on|off` for this session, overriding `[mouse] capture`.
+    ///
+    /// Separate from `config` on purpose: `reload_config` replaces the whole
+    /// `Config`, so a runtime toggle stored there is silently reverted by any
+    /// save of a watched config file — including the automatic fs-watch reload.
+    /// `:mouse auto` clears it and hands control back to the config.
+    pub mouse_capture_override: Option<bool>,
     pub mode: Mode,
     pub start_dir: PathBuf,
     pub project_home: Option<PathBuf>,
@@ -983,6 +990,7 @@ impl AppState {
             resolver: Resolver::new(),
             user_keymap: UserKeymap::default(),
             config: Config::default(),
+            mouse_capture_override: None,
             mode: Mode::Normal,
             start_dir: cwd,
             project_home: None,

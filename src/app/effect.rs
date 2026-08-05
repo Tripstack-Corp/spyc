@@ -636,10 +636,9 @@ impl App {
                 Effect::SetTerminalTitle { title } => {
                     let _ = crate::term_title::set(&title);
                 }
-                // A-class: the P3-1 agent-status ping. The gating + suppression +
-                // text all happened in the producer (`settle_agent_activity`);
-                // here we just fire the OS notification (off-thread, best-effort)
-                // and ring the bell if requested (inline stdout write).
+                // Middle-click paste. Reads the system clipboard, then hands the
+                // text to `handle_paste` so routing and bracketed-paste gating are
+                // inherited rather than duplicated.
                 Effect::PasteFromClipboard => match crate::clipboard::paste() {
                     Ok(text) if text.is_empty() => {
                         self.state.flash_info("paste: clipboard is empty");
@@ -656,11 +655,14 @@ impl App {
                 Effect::SetMouseMode { capture } => {
                     // Mutually exclusive with 1007 alternate-scroll: a terminal
                     // honoring both could deliver one wheel tick twice.
+                    //
+                    // `set_mouse_capture` records the new terminal state itself, and
+                    // only on success — so a failed write leaves the reconcile
+                    // seeing divergence and retrying, rather than going quiet on a
+                    // state the terminal never reached.
                     if let Err(e) = crate::set_mouse_capture(terminal, capture) {
                         self.state
                             .flash_error(format!("mouse: could not set reporting: {e:#}"));
-                    } else {
-                        self.view.mouse_capture_on = capture;
                     }
                 }
                 Effect::Notify { system, osc9, bell } => {
@@ -765,7 +767,6 @@ impl App {
                     // if the user wants it. `resume_tui` deliberately doesn't do
                     // this itself — it has no config access, and the settle is
                     // the single place that decides.
-                    self.view.mouse_capture_on = false;
                     // --- after-work (moved verbatim from the run loop's
                     // former `if let PostAction::Spawn` call site) ---
                     // Runs regardless of the spawn result: the pager

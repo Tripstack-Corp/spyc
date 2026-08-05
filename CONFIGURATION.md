@@ -195,7 +195,7 @@ arrow keys (which a focused pane receives as history navigation).
 > | | |
 > |---|---|
 > | **Bypass modifier** (per-drag) | Hold **Shift** — Ghostty, WezTerm, kitty, Alacritty, most others. **Option** or **Fn** on iTerm2. |
-> | **`:mouse off`** (per-session) | Immediate, no restart, no file edit. `:mouse on` to re-enable. |
+> | **`:mouse off`** (per-session) | Immediate, no restart, no file edit. `:mouse on` to re-enable, `:mouse auto` to follow the config again. Survives a config reload — it is scoped to the session, not written to a file. |
 > | **`capture = false`** (permanent) | The default. |
 >
 > spyc's mouse-free yank paths: **`^a u`** quick-select (URLs / paths / SHAs) and
