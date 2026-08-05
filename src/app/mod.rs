@@ -266,6 +266,7 @@ mod mermaid_ops;
 #[cfg(test)]
 mod mod_tests;
 mod modal;
+mod mouse;
 mod mouse_mode;
 mod navigate;
 mod pager_handler;

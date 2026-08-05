@@ -158,6 +158,242 @@ fn push_fn_key(out: &mut Vec<u8>, m: KeyModifiers, final_byte: u8) {
     }
 }
 
+// ── mouse → pty byte encoding ─────────────────────────────────────────────
+
+/// One mouse event, already reduced to what the wire format needs. Built by the
+/// caller so this module never sees a `crossterm::MouseEvent` (and so the
+/// coordinate translation happens where the layout is known).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MouseReport {
+    /// Which button, in xterm's numbering: 0 left, 1 middle, 2 right,
+    /// 64 wheel-up, 65 wheel-down.
+    pub button: u8,
+    /// True for a button release. Wheel events are always presses — a wheel
+    /// "release" isn't a thing, and emitting one confuses apps that count clicks.
+    pub release: bool,
+    /// **Pane-relative**, 0-based. The child believes it owns a grid starting at
+    /// its own `0,0`; passing frame-absolute coordinates here is the bug that
+    /// makes clicks land N rows off and read as the child's fault.
+    pub col: u16,
+    pub row: u16,
+    pub shift: bool,
+    pub alt: bool,
+    pub ctrl: bool,
+}
+
+/// Encode a mouse event in the protocol/encoding the CHILD asked for.
+///
+/// Returns empty when the child requested no mouse reporting (`Mode::None`) —
+/// the caller must not send anything then, or the escape bytes land as literal
+/// input at its prompt. That's the bracketed-paste bug (#170) in a new costume;
+/// see `Pane::wants_mouse`.
+///
+/// Never relays the bytes spyc received: spyc asks the terminal for SGR (1006),
+/// but the child may have requested the default or UTF-8 encoding, so the event
+/// is re-encoded from the decoded form.
+pub fn encode_mouse(
+    ev: MouseReport,
+    mode: vt100::MouseProtocolMode,
+    encoding: vt100::MouseProtocolEncoding,
+) -> Vec<u8> {
+    use vt100::MouseProtocolMode as M;
+    // `Press` (X10) reports presses only — a release would be noise it has no
+    // grammar for. Every other active mode reports both.
+    match mode {
+        M::None => return Vec::new(),
+        M::Press if ev.release => return Vec::new(),
+        _ => {}
+    }
+
+    // xterm's Cb: button in the low bits, modifiers above it.
+    let mut cb = u32::from(ev.button);
+    if ev.shift {
+        cb |= 4;
+    }
+    if ev.alt {
+        cb |= 8;
+    }
+    if ev.ctrl {
+        cb |= 16;
+    }
+
+    // The wire is 1-based; our input is 0-based.
+    let (x, y) = (u32::from(ev.col) + 1, u32::from(ev.row) + 1);
+
+    match encoding {
+        vt100::MouseProtocolEncoding::Sgr => {
+            // `ESC [ < Cb ; Cx ; Cy (M|m)` — release is the lowercase final byte,
+            // which is how SGR distinguishes it without a sentinel button value.
+            let final_byte = if ev.release { 'm' } else { 'M' };
+            format!("\x1b[<{cb};{x};{y}{final_byte}").into_bytes()
+        }
+        vt100::MouseProtocolEncoding::Utf8 => {
+            // Like the default encoding, but the three values go out as chars so
+            // coordinates past 223 survive. A release is button 3 (the default
+            // encoding has no lowercase-final trick).
+            let mut out = b"\x1b[M".to_vec();
+            let cb = if ev.release { 3 | (cb & !3) } else { cb };
+            for v in [cb, x, y] {
+                let ch = char::from_u32(v + 32).unwrap_or('\u{fffd}');
+                let mut buf = [0u8; 4];
+                out.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+            }
+            out
+        }
+        vt100::MouseProtocolEncoding::Default => {
+            // `ESC [ M Cb+32 Cx+32 Cy+32`, one byte each. Coordinates past 223
+            // don't fit — xterm's own behaviour is to clamp rather than emit a
+            // byte that would be read as part of the next sequence.
+            let mut out = b"\x1b[M".to_vec();
+            let cb = if ev.release { 3 | (cb & !3) } else { cb };
+            for v in [cb, x, y] {
+                out.push(u8::try_from(v + 32).unwrap_or(u8::MAX));
+            }
+            out
+        }
+    }
+}
+
+#[cfg(test)]
+mod mouse_tests {
+    use super::{MouseReport, encode_mouse};
+    use vt100::{MouseProtocolEncoding as Enc, MouseProtocolMode as Mode};
+
+    /// Wheel-up at pane-relative (0,0) — the origin case, which is where an
+    /// off-by-one in the 0-based→1-based conversion shows up.
+    const fn wheel_up() -> MouseReport {
+        MouseReport {
+            button: 64,
+            release: false,
+            col: 0,
+            row: 0,
+            shift: false,
+            alt: false,
+            ctrl: false,
+        }
+    }
+
+    /// The gate. A child that never enabled mouse reporting must receive NOTHING —
+    /// the bytes would land as literal input at its prompt (#170's failure mode).
+    #[test]
+    fn mode_none_encodes_nothing_for_every_encoding() {
+        for enc in [Enc::Default, Enc::Utf8, Enc::Sgr] {
+            assert!(
+                encode_mouse(wheel_up(), Mode::None, enc).is_empty(),
+                "{enc:?} must emit nothing when the child wants no mouse"
+            );
+        }
+    }
+
+    /// X10 (`Press`) has no grammar for a release, so one must not be invented.
+    #[test]
+    fn press_only_mode_drops_releases_but_keeps_presses() {
+        let release = MouseReport {
+            button: 0,
+            release: true,
+            ..wheel_up()
+        };
+        assert!(encode_mouse(release, Mode::Press, Enc::Sgr).is_empty());
+        assert!(!encode_mouse(wheel_up(), Mode::Press, Enc::Sgr).is_empty());
+    }
+
+    /// Coordinates are 1-based on the wire; ours are 0-based pane-relative.
+    #[test]
+    fn sgr_is_one_based_and_wheel_up_is_button_64() {
+        let bytes = encode_mouse(wheel_up(), Mode::PressRelease, Enc::Sgr);
+        assert_eq!(
+            bytes,
+            b"\x1b[<64;1;1M",
+            "got {:?}",
+            String::from_utf8_lossy(&bytes)
+        );
+    }
+
+    #[test]
+    fn sgr_encodes_position_and_wheel_down() {
+        let ev = MouseReport {
+            button: 65,
+            col: 11,
+            row: 4,
+            ..wheel_up()
+        };
+        let bytes = encode_mouse(ev, Mode::PressRelease, Enc::Sgr);
+        assert_eq!(bytes, b"\x1b[<65;12;5M");
+    }
+
+    /// Modifier bits ride in Cb above the button: shift 4, alt 8, ctrl 16.
+    #[test]
+    fn sgr_folds_modifiers_into_the_button_byte() {
+        let ev = MouseReport {
+            button: 0,
+            shift: true,
+            ctrl: true,
+            ..wheel_up()
+        };
+        let bytes = encode_mouse(ev, Mode::PressRelease, Enc::Sgr);
+        assert_eq!(bytes, b"\x1b[<20;1;1M", "0 | 4 | 16 = 20");
+    }
+
+    /// SGR marks a release with a lowercase final byte rather than a sentinel
+    /// button — the one structural difference from the older encodings.
+    #[test]
+    fn sgr_release_uses_lowercase_final_byte() {
+        let ev = MouseReport {
+            button: 0,
+            release: true,
+            ..wheel_up()
+        };
+        let bytes = encode_mouse(ev, Mode::PressRelease, Enc::Sgr);
+        assert_eq!(bytes, b"\x1b[<0;1;1m");
+    }
+
+    /// Default encoding: three single bytes, each offset by 32.
+    #[test]
+    fn default_encoding_offsets_every_field_by_32() {
+        let ev = MouseReport {
+            button: 64,
+            col: 11,
+            row: 4,
+            ..wheel_up()
+        };
+        let bytes = encode_mouse(ev, Mode::PressRelease, Enc::Default);
+        assert_eq!(bytes, vec![0x1b, b'[', b'M', 64 + 32, 12 + 32, 5 + 32]);
+    }
+
+    /// Past column 223 a single byte can't hold `x + 32`. Clamping is xterm's own
+    /// behaviour; the alternative (wrapping) emits a byte the child would read as
+    /// part of the *next* escape sequence.
+    #[test]
+    fn default_encoding_clamps_rather_than_wrapping_past_223() {
+        let ev = MouseReport {
+            col: 400,
+            row: 400,
+            ..wheel_up()
+        };
+        let bytes = encode_mouse(ev, Mode::PressRelease, Enc::Default);
+        assert_eq!(bytes.len(), 6, "still one byte per field");
+        assert_eq!(bytes[4], u8::MAX, "column clamped, not wrapped");
+        assert_eq!(bytes[5], u8::MAX, "row clamped, not wrapped");
+    }
+
+    /// UTF-8 encoding exists precisely so large coordinates survive, so the same
+    /// position must NOT clamp here.
+    #[test]
+    fn utf8_encoding_carries_coordinates_past_223_intact() {
+        let ev = MouseReport {
+            col: 400,
+            row: 400,
+            ..wheel_up()
+        };
+        let bytes = encode_mouse(ev, Mode::PressRelease, Enc::Utf8);
+        let text = String::from_utf8(bytes).expect("utf-8 by construction");
+        let chars: Vec<char> = text.chars().collect();
+        assert_eq!(&chars[..3], &['\x1b', '[', 'M']);
+        assert_eq!(chars[4] as u32, 401 + 32, "column survives");
+        assert_eq!(chars[5] as u32, 401 + 32, "row survives");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

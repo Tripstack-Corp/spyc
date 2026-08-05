@@ -447,6 +447,20 @@ impl Pane {
         self.with_screen(vt100::Screen::bracketed_paste)
     }
 
+    /// Has the child asked for mouse reporting, and in which protocol/encoding?
+    ///
+    /// The gate on forwarding: when the mode is `None` the child never opted in,
+    /// and the escape bytes would land as literal input at its prompt — the same
+    /// failure [`Self::bracketed_paste_enabled`] exists to prevent (#170).
+    pub fn mouse_protocol(&self) -> (vt100::MouseProtocolMode, vt100::MouseProtocolEncoding) {
+        self.with_screen(|s| (s.mouse_protocol_mode(), s.mouse_protocol_encoding()))
+    }
+
+    /// True when the child requested any mouse reporting.
+    pub fn wants_mouse(&self) -> bool {
+        self.with_screen(|s| s.mouse_protocol_mode() != vt100::MouseProtocolMode::None)
+    }
+
     /// Return visible screen content as individual lines (plain text,
     /// no ANSI escapes). When the pane is in scroll mode, this is
     /// exactly the viewport the user is looking at — *not* the live
