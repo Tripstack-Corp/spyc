@@ -124,6 +124,16 @@ impl App {
     /// The pager's content viewport height (body rows). Prefers the
     /// renderer's cached `last_viewport_h`; falls back to the centered-
     /// overlay heuristic only before the first frame has run.
+    /// Scroll the active pager by `delta` rows, clamped to its content. The
+    /// mouse-wheel entry point; keyboard motion goes through
+    /// `handle_pager_motion`, which already holds a `&mut PagerView`.
+    pub(super) fn scroll_active_pager_by(&mut self, delta: i32) {
+        let viewport = self.pager_viewport();
+        if let Some(view) = active_pager_mut!(self) {
+            view.scroll_by(delta, viewport);
+        }
+    }
+
     fn pager_viewport(&self) -> u16 {
         let Some(view) = self.active_pager_ref() else {
             return 2;

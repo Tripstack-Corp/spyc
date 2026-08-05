@@ -208,6 +208,13 @@ impl App {
                         self.run_effects(effects, terminal, foreground_exec);
                     }
                     Event::Resize(cols, rows) => self.handle_resize(cols, rows),
+                    // Only arrives while `[mouse] capture` is on — with it off the
+                    // terminal sends DEC 1007 arrow keys instead. The decision is
+                    // pure and lives in `mouse.rs`; this arm is the wire.
+                    Event::Mouse(m) => {
+                        let effects = self.handle_mouse(m);
+                        self.run_effects(effects, terminal, foreground_exec);
+                    }
                     _ => {}
                 }
             }
