@@ -173,14 +173,25 @@ more (spans, not cells). The list is the least valuable and overlaps picks.
 
 **Recommendation: pane + pager. Skip the list.**
 
-### 3. Auto-copy on release, or an explicit copy step?
+### 3. ~~Auto-copy on release, or an explicit copy step?~~ RESOLVED
 
-X11 primary-selection convention is auto-copy on release. A terminal's own
-selection also copies on release in most emulators. But auto-copy silently
-overwrites the clipboard on a stray drag.
+**Auto-copy on release, with a config toggle to disable it.** Owner decision:
+auto-copy is the preferred behaviour — it matches the emulator behaviour being
+replaced and the X11 primary-selection convention — but someone who dislikes
+having their clipboard overwritten by a stray drag must be able to turn it off.
 
-**Recommendation: auto-copy**, matching the emulator behaviour being replaced,
-with the flash naming the byte/line count so it's never silent.
+```toml
+[mouse]
+# Copy the selection to the clipboard as soon as the drag ends. Off means the
+# selection is made and highlighted, and an explicit yank key copies it.
+selection_auto_copy = true
+```
+
+Default `true`. With it `false` the drag still selects and highlights; copying
+becomes an explicit key, which the pager's existing `y` already models.
+
+The flash names the copied line/byte count either way, so an auto-copy is never
+silent — that's what keeps the default honest rather than surprising.
 
 ### 4. Does this replace Shift-drag?
 
