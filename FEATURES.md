@@ -548,6 +548,12 @@ end).
   reload (`:mouse auto` returns to following the config). Default off (`[mouse]
   capture`). `^a u` quick-select and `y` in the pager are the mouse-free yank
   paths.
+  Over an agent pane the wheel does whatever that agent can actually receive:
+  **claude** requests mouse reporting, so the event is forwarded and claude
+  scrolls itself; **agy** ignores mouse reports but scrolls on Shift+Arrow, so
+  spyc sends those instead; **codex** discards mouse events *and* has no
+  main-view scroll (its transcript is behind its own `^T`), so the wheel does
+  nothing there — use `^a v` for spyc's transcript view.
 - **`:limit <glob>`** — temporary filter (e.g. `:limit *.rs`)
 - **`:limit !`** — show only picked files
 - **`:limit git`** / **`:limit g`** — show only files in `git status`
