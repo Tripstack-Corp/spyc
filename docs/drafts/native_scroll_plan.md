@@ -46,8 +46,32 @@ with **coordinates**, which is what makes correct routing possible.
 > Mitigation to document alongside it: `^a u` quick-select already yanks
 > URLs/paths/SHAs without the mouse, and `y` yanks in the scrollback pager.
 
-Two decisions worth your call before implementation — see **Open decisions** at
-the bottom.
+One decision remains — see **Open decisions** at the bottom.
+
+## Scope: forward to the child, don't reimplement scrolling
+
+The load-bearing observation is that **modern TUIs already scroll themselves**.
+claude/codex/vim/htop all manage their own viewport; they simply never receive
+mouse events today, because spyc has never enabled capture. So the job is mostly
+*plumbing*: turn reporting on, work out what the pointer is over, and hand the
+event to whoever owns that region — usually the child, in its own protocol.
+
+That collapses the original plan's back half. spyc-owned pane scrollback and
+wheel-burst coalescing are **deferred** (see *Deferred* below) because they exist
+only to serve children that don't speak mouse, and they carry the most risk for
+the least payoff.
+
+What is emphatically *not* optional, and is where this will break if rushed:
+
+1. **Disabling reporting on every exit path** — leak `?1000h` and the user's
+   shell loses click-drag selection until they `reset`.
+2. **Gating the forward on what the child asked for** — see Tier 3. Forwarding to
+   a child that never enabled mouse mode types escape bytes into its prompt.
+3. **Translating coordinates into the pane's own space** — the child believes it
+   owns a grid starting at `0,0`.
+4. **Keeping a list arm** — enabling real reporting *stops* the terminal's 1007
+   wheel→arrow translation, so the file list stops scrolling unless spyc handles
+   it. Dropping this would regress behaviour that works today.
 
 ## Design
 
@@ -143,18 +167,15 @@ struct MouseSnapshot {
     is_prompting: bool,
     pager_mount: Option<Mount>,
     has_scroll_pager: bool,
-    pane_scrolling: bool,
     pane_closed: bool,
     pane_wants_mouse: bool,     // the child requested mouse reporting (see Tier 3)
 }
 
 enum MouseSink {
-    Swallow,                    // a modal owns the screen
+    Swallow,                    // a modal owns the screen, or the child can't use it
     ListCursor,                 // move the file-list cursor
     Pager,                      // scroll the pager under the pointer
     PaneForward,                // encode + send to the child
-    PaneScrollback,             // spyc-owned pane scrollback
-    PaneScrollbackMount,        // not in scrollback yet — mount it
 }
 
 const fn route_mouse(snap: MouseSnapshot, ev: WheelEvent) -> MouseSink
@@ -169,11 +190,16 @@ Scrolling the pane while the keyboard is in the list — without stealing keyboa
 focus — is the ergonomics win, and it makes the vsplit case (`list` vs `right`
 preview) fall out for free.
 
+`ListCursor` is **not** a nice-to-have. Wheel-over-list works today only because
+1007 has the *terminal* translate wheel into arrow keys; the moment we enable
+1000 that translation stops. Ship without this arm and we trade a pane bug for a
+list bug.
+
 Keep every non-wheel `MouseEventKind` a no-op for now (`Down`/`Up`/`Drag`/
 `ScrollLeft`/`ScrollRight`). `route_mouse` matching exhaustively means
 click-to-focus is a later, contained addition.
 
-### Tier 3 — the agent pane: forward to a mouse-aware child first
+### Tier 3 — the agent pane: forward to the child (the whole point)
 
 The draft's answer for a focused pane was "synthesize a scrollback mount on
 wheel-up". That's wrong for the primary dog-fooding case, in three ways:
@@ -190,9 +216,8 @@ wheel-up". That's wrong for the primary dog-fooding case, in three ways:
    mount — and if scrollback is empty it flashes and mounts *nothing*
    (`pane_scroll.rs:290`), so every subsequent wheel tick pays the 40 ms again.
    At ~30 ticks/s that is a hang.
-3. **Modern agent TUIs scroll themselves.** claude/codex on the alt screen do
-   their own viewport management; they just never receive mouse events today,
-   because spyc has never enabled capture.
+3. **The child already does this better.** Per *Scope* above, claude/codex manage
+   their own viewport — they just never receive the events.
 
 `vt100::Screen::mouse_protocol_mode()` and `mouse_protocol_encoding()` are
 **public** in vt100 0.16 (`screen.rs:578,584`). So spyc can ask the child what it
@@ -200,54 +225,35 @@ wants and act accordingly:
 
 | Pointer over pane | Child requested mouse? | Behavior |
 |---|---|---|
-| yes | yes (`mode != None`) | encode the event in the child's protocol/encoding, `send_bytes` — the agent scrolls itself |
-| yes | no, has scrollback | spyc-owned pane scrollback (see below) |
-| yes | no, alt-screen non-agent (vim/htop/less) | swallow with a one-shot hint — same dead-end `^a v` already reports |
+| yes | yes (`mode != None`) | translate coordinates, encode in the child's protocol/encoding, `send_bytes` — the child scrolls itself |
+| yes | no | **swallow** (optionally a one-shot hint pointing at `^a v`) |
 
 This also fixes clicks inside the child for free, and it's the reason to prefer
-forwarding over mounting: the agent's own scrollback is *better* than ours.
+forwarding over mounting: the child's own scrollback is *better* than ours.
 
 New: `pane::input::encode_mouse(ev, mode, encoding) -> Vec<u8>` — sits beside the
 existing `encode_key` (`src/pane/input.rs`), pure, table-testable.
 
-### Tier 4 — spyc-owned pane scrollback (non-mouse children)
+Three requirements that are easy to skip and each produce a *worse-than-broken*
+result — mouse that appears to work but misbehaves:
 
-For a plain shell pane the wheel should drive vt100 reverse-scroll — the *live*
-screen scrolling up, no pager mount, no 40 ms stall, no transcript. `Pane` already
-exposes `scroll_up(n)` / `scroll_down_or_exit(n)` / `enter_scroll_mode()` /
-`exit_scroll_mode()`. Wheel-up enters scroll mode and scrolls; wheel-down scrolls
-back; wheel-down **at the bottom** exits scroll mode and returns to live.
+**1. Gate on the child's requested mode.** If `mouse_protocol_mode()` is `None`,
+send nothing. This is exactly the bracketed-paste bug fixed in #170, and the
+precedent is already in the tree — `Pane::bracketed_paste_enabled`
+(`pane/mod.rs:446`), whose own doc spells out the failure: a shell that never
+enabled the mode "would take those bytes as literal input." Forward
+unconditionally and a plain `sh` prompt fills with `\e[<64;20;5M`.
 
-Two notes on the draft's version of this:
+**2. Translate coordinates into the pane's space.** `MouseEvent.row`/`column` are
+**frame-absolute**; the child believes it occupies a grid starting at its own
+`0,0` with the pane's dimensions. Subtract the pane rect's origin (from the same
+`compute_layout` call the hit-test already made) before encoding. Skip this and
+clicks land N rows off — which reads as the *agent's* bug, not ours.
 
-- Its auto-exit heuristic ("only exit if already at bottom *before* this event")
-  is the right rule — keep it. Sticky bottom, one deliberate extra tick to leave.
-- Don't assume `scroll_down_or_exit` implements it. Despite the name it only does
-  `scroll_offset.saturating_sub(n)` (`pane/mod.rs:533`) — the "or_exit" half is
-  vestigial. Either implement the exit at the call site or fix the function and
-  its name; don't rely on the label.
-
-Mounting the `^a v` **pager** from the wheel is dropped from the plan. If we ever
-want it, the "hide line numbers / suppress EOF marker" polish the draft described
-(`view.show_line_numbers = false`, reuse `streaming`) is the right idea, but
-overloading `streaming` to mean "cosmetically suppress the EOF marker" is a lie
-that will confuse the stream-drain code (`pending_scroll_to_bottom`, `stream_id`
-gating in `pager_stream.rs`). Add an explicit `show_eof_marker: bool` instead.
-
-### Tier 5 — wheel bursts must not become a redraw storm
-
-A trackpad flick delivers dozens of events; each is one loop iteration and one
-`draw.mark(2)`. Two cheap defenses:
-
-1. **Accumulate, then apply.** In `dispatch_effective`'s new mouse arm, drain any
-   immediately-available follow-on wheel events of the same direction from the
-   channel and apply the summed delta once. Analogous to the existing
-   `view.scroll_last` arrow throttle (`run.rs:183`) but *lossless* — sum the
-   ticks rather than dropping them, so a fast flick scrolls far instead of
-   scrolling slowly.
-2. **Configurable step.** `[mouse] scroll_lines` (default 3). macOS trackpads and
-   kitty/Ghostty already emit one event per notional line, so a hardcoded ×3
-   overshoots badly for some users; a mouse wheel with detents undershoots at ×1.
+**3. Re-encode; never relay the received bytes.** crossterm has already decoded
+the sequence, and spyc asked the terminal for SGR (1006) while the child may have
+requested X10 or UTF-8. `encode_mouse` must emit the child's
+`mouse_protocol_encoding()`, not ours.
 
 ### Configuration
 
@@ -260,7 +266,9 @@ existing per-feature shape (`layout`, `pane`, `yank`, `pager`, `markdown`,
 # Real mouse reporting (wheel + click). Breaks native click-drag selection —
 # hold Shift (most terminals) or Option/Fn (iTerm2) to bypass. Default off.
 capture = false
-# Lines per wheel tick.
+# Lines per wheel tick, for the surfaces spyc scrolls itself (list, pager).
+# It does NOT apply to a pane forwarding to its child — the child receives one
+# event per tick and decides its own step.
 scroll_lines = 3
 ```
 
@@ -290,6 +298,49 @@ to existing methods keeps the Action vocabulary clean. If a sink needs behavior 
 `Action` already names, call `self.apply(&Action::Down(n))` — note it's `apply`
 (or `update(UiMsg::Action(..))`, `update.rs:43`), not `apply_action`.
 
+## Deferred (deliberately not in v1)
+
+Both of these existed to serve children that don't speak mouse. They're the
+highest-risk, lowest-payoff part of the original plan, and forwarding makes them
+optional rather than foundational.
+
+### Deferred: spyc-owned pane scrollback
+
+Driving vt100 reverse-scroll (`Pane::scroll_up`) from the wheel for a plain shell
+pane. **Consequence of deferring:** wheel over a non-mouse pane does nothing.
+Worth stating plainly that this is still better than today, where the 1007 hack
+turns the wheel into arrow keys and walks your shell history.
+
+Two notes to keep if it's ever picked up:
+
+- The draft's auto-exit heuristic ("only exit scroll mode if already at bottom
+  *before* this event") is the right rule — sticky bottom, one deliberate extra
+  tick to leave.
+- Don't trust `scroll_down_or_exit`'s name: it only does
+  `scroll_offset.saturating_sub(n)` (`pane/mod.rs:533`) and the "or_exit" half is
+  vestigial. Pre-existing wart, unrelated to this work.
+
+Mounting the `^a v` pager from the wheel stays rejected outright, for the reasons
+in Tier 3: for an alt-screen agent `decide_scroll_source` takes the *transcript*
+branch (a 4 MB tail-read + per-line parse + markdown render), and the vt100 branch
+stalls the loop `3 × 10 ms` per mount — at ~30 ticks/s that's a hang. The wheel
+must never mount anything.
+
+### Deferred: wheel-burst coalescing
+
+Summing same-direction wheel events before applying them. Two reasons this is no
+longer urgent: the alarming figure it was defending against (40 ms of main-loop
+stall per tick) belonged to the pager-mount idea now rejected outright; and on the
+forwarding path the *child* absorbs its own burst, which is what happens in any
+terminal app. spyc still marks one redraw per event, but that's the cost of any
+keypress and it's bounded by the pane repaint already happening when the child
+emits output.
+
+Revisit if dog-fooding shows a trackpad flick over the **list** or a **pager**
+(the spyc-owned surfaces, where each tick is a real spyc redraw) feels heavy. The
+fix, if needed, is lossless accumulation — sum the ticks, don't drop them like the
+existing `view.scroll_last` arrow throttle (`run.rs:183`).
+
 ## Files touched
 
 | File | Change |
@@ -298,13 +349,13 @@ to existing methods keeps the Action vocabulary clean. If a sink needs behavior 
 | `src/config/mod.rs` | `MouseConfig { capture, scroll_lines }` + `DEFAULT_TEMPLATE` block |
 | `src/app/mouse.rs` | **new** — `MouseSnapshot` / `MouseSink` / `route_mouse` + hit-test + handler |
 | `src/app/mod.rs` | `ViewState.mouse_capture_on` |
-| `src/app/run.rs` | `Event::Mouse` arm → `handle_mouse` + burst accumulation (thin — the decision lives in `mouse.rs`) |
+| `src/app/run.rs` | `Event::Mouse` arm → `handle_mouse` (thin — the decision lives in `mouse.rs`) |
 | `src/app/proc.rs` | drop `Moved`/`Drag` in the forward filter |
 | `src/app/effect.rs` | `Effect::SetMouseMode { capture }` + executor arm |
 | `src/app/scheduler.rs` *or* loop bottom | `settle_mouse_mode` |
 | `src/app/commands.rs` + `command_table.rs` | `:mouse on\|off` |
-| `src/pane/input.rs` | `encode_mouse(ev, mode, encoding)` |
-| `src/pane/mod.rs` | expose the child's `mouse_protocol_mode`/`encoding`; fix or rename `scroll_down_or_exit` |
+| `src/pane/input.rs` | `encode_mouse(ev, mode, encoding)` — pane-relative coords, child's encoding |
+| `src/pane/mod.rs` | expose the child's `mouse_protocol_mode`/`encoding`, mirroring `bracketed_paste_enabled` |
 
 Docs, same commit (AGENTS.md "Keep docs in sync"): `AGENTS.md` (module index —
 guarded by `every_app_module_is_in_the_agents_index`), `FEATURES.md`,
@@ -314,19 +365,23 @@ well-typed commit subject — the commit *is* the changelog entry).
 
 ## Suggested PR split
 
-Each is independently shippable and testable; 1–2 are inert without 3.
+Two PRs. The first is inert by design, so it can land and sit safely.
 
-1. **Terminal plumbing** — wheel-reporting commands, `MouseConfig`,
-   `Effect::SetMouseMode`, `settle_mouse_mode`, all five lifecycle sites,
-   `:mouse on|off`. Behavior with `capture = false`: identical to today.
-2. **Pure routing** — `src/app/mouse.rs`: snapshot, hit-test, `route_mouse`,
-   unit tests. No wiring.
-3. **Wire it up** — `Event::Mouse` arm + burst accumulation; list-cursor and
-   pager sinks. Wheel works over the list, the pager, and the vsplit preview.
-4. **Pane forwarding** — `encode_mouse` + `pane_wants_mouse`. Agent panes scroll
-   natively. *This is the headline fix.*
-5. **Pane scrollback** — vt100 reverse-scroll for non-mouse children, sticky
-   bottom, exit-on-extra-tick-down.
+1. **Terminal plumbing + pure routing** — wheel-reporting commands, `MouseConfig`,
+   `Effect::SetMouseMode`, `settle_mouse_mode` and all five lifecycle sites,
+   `:mouse on|off`, plus `src/app/mouse.rs` (snapshot, hit-test, `route_mouse`,
+   unit tests). No `Event::Mouse` arm yet, so with `capture = false` — the default
+   — behaviour is **identical to today**, and the routing logic lands fully tested
+   before anything depends on it.
+2. **Wire it up** — the `Event::Mouse` arm, `encode_mouse` (coords + child's
+   encoding), `pane_wants_mouse` gating, and the list/pager sinks. This is where
+   it starts working: wheel over an agent pane scrolls the agent, wheel over the
+   list moves the cursor, wheel over a pager scrolls it.
+
+If PR 2 wants splitting further, the seam is pane-forwarding vs the
+list/pager sinks — but they share the `Event::Mouse` arm, so landing them together
+avoids a half-wired intermediate state where the wheel works over one surface and
+silently dies over another.
 
 ## Verification
 
@@ -336,12 +391,16 @@ Each is independently shippable and testable; 1–2 are inert without 3.
   `cargo test --all-targets`.
 - `route_mouse` table tests over the snapshot matrix, mirroring `route.rs`'s
   regression matrix. Must include: each modal swallows the wheel; pointer over
-  the pane while the **list** holds keyboard focus scrolls the pane; a prompt
-  wins where it wins for keys; an exited tab doesn't mount anything.
+  the pane while the **list** holds keyboard focus routes to the pane; a prompt
+  wins where it wins for keys; **`pane_wants_mouse: false` yields `Swallow`, never
+  `PaneForward`** (the #170 class — the one that types garbage into a shell).
 - Hit-test tests against `compute_layout` for pane-open/closed × status
   top/bottom × vsplit on/off. The `status_position = "bottom"` case is the
   off-by-one trap (`FrameLayout.top_unit`'s doc comment calls it out).
-- `encode_mouse` byte-exact tests per `MouseProtocolMode` × `Encoding`.
+- `encode_mouse` byte-exact tests per `MouseProtocolMode` × `Encoding`, including
+  **coordinate translation**: a click at frame row `R` inside a pane whose rect
+  starts at row `Y` must encode as pane row `R - Y`, for both `status_position`
+  values (the `FrameLayout.top_unit` off-by-one trap).
 - Config round-trip: `[mouse]` deserializes, defaults hold on an absent section,
   and `--print-config` output still parses.
 - Assert the emitted enable sequence contains **no** `?1003h` — that's the
@@ -350,13 +409,15 @@ Each is independently shippable and testable; 1–2 are inert without 3.
 
 ### Manual (in spyc, `capture = true`)
 
-1. List focus: wheel moves the cursor `scroll_lines` per tick; a fast flick
-   scrolls far, not slowly (burst accumulation).
+1. List focus: wheel moves the cursor `scroll_lines` per tick. (Confirms the 1007
+   translation loss is covered — this is the arm most likely to be forgotten.)
 2. **The headline:** claude in the pane, keyboard focus in the **list**. Wheel
    over the pane scrolls claude's own view; keyboard focus does not move.
-3. Shell pane (`zsh`), run `ls -la`; wheel up enters scroll mode and scrolls the
-   live screen — no pager, no history cycling, no 40 ms hitch per tick.
-4. Wheel down to the bottom, then one more tick → back to live.
+3. Shell pane (`zsh`), run `ls -la`, wheel up: nothing happens, and critically **no
+   escape garbage appears at the prompt** and no shell history cycling. This is
+   the deferred-scrollback case; silence is the correct v1 outcome.
+4. Click inside claude (e.g. a menu item) → lands where you actually clicked, not
+   offset by the pane's row origin.
 5. `vim` in a pane → wheel scrolls vim (it requests mouse mode). `htop` likewise.
 6. `^a v` transcript pager open → wheel scrolls the pager.
 7. Vsplit: wheel over the `b` preview scrolls the preview, not column `a`.
@@ -375,11 +436,11 @@ Each is independently shippable and testable; 1–2 are inert without 3.
 
 ## Open decisions
 
-1. **Wheel-up on a non-mouse pane: reverse-scroll the live screen (Tier 4) or
-   mount the `^a v` pager?** Plan assumes reverse-scroll — cheaper, no mode
-   change, and the pager stays a deliberate `^a v` gesture. Confirm that matches
-   your mental model.
-2. **Ship `capture` default-off permanently, or flip it once Tier 3 lands?**
+1. ~~**Wheel-up on a non-mouse pane: reverse-scroll or mount the pager?**~~
+   **Resolved: neither, in v1.** Mounting is rejected outright (loop stalls,
+   transcript hijack); reverse-scroll is deferred. Wheel over a non-mouse pane is
+   a no-op — see *Deferred*.
+2. **Ship `capture` default-off permanently, or flip it once forwarding lands?**
    Once agent panes forward natively, capture-on is a large win for the primary
    workflow and the only cost is click-drag selection (which has a modifier
    bypass and a `^a u` alternative). Proposal: ship off, flip in a later minor
