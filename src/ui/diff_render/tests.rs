@@ -1,7 +1,7 @@
 //! Tests for the diff/show renderers (`super::render_diff` / `render_show`).
 //! Split out of `diff_render.rs` verbatim during the 800-LoC decomposition.
 
-use super::{DiffLayout, render_diff, render_show};
+use super::{DiffLayout, TEST_TAB_WIDTH, render_diff, render_show};
 use crate::git::model::{
     CommitMeta, DiffKind, DiffLine, DiffModel, FileDiff, FileStatus, Hunk, LineOrigin,
 };
@@ -326,15 +326,19 @@ fn side_by_side_rows_never_exceed_width() {
     // display width must be ≤ the width it was rendered for. (A row wider
     // than the pager body wraps, and the wrapped padding tail shows as a
     // stray tinted bar — the bug this guards against.)
+    //
+    // Measured POST tab-expansion, on the flattened row. Summing per span over
+    // the raw text measures neither what the user sees (the pager expands tabs
+    // to `tab_width` first) nor the width the layout budgeted against, and it
+    // splits grapheme clusters at span boundaries — so it would pass while the
+    // drawn row overran.
     let theme = Theme::default();
     for width in [40usize, 60, 80, 81, 100, 137] {
         let out = render_diff(&modify_model(), &theme, DiffLayout::SideBySide, width);
         for line in &out {
-            let w: usize = line
-                .spans
-                .iter()
-                .map(|s| crate::ui::display_width(s.content.as_ref()))
-                .sum();
+            let flat: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let expanded = flat.replace('\t', &" ".repeat(TEST_TAB_WIDTH));
+            let w = crate::ui::display_width(&expanded);
             assert!(w <= width, "row width {w} exceeds {width}: {line:?}");
         }
     }
@@ -734,6 +738,57 @@ fn split_separator_column_is_identical_on_every_row() {
                     .join("\n")
             );
         }
+    }
+}
+
+/// The separator must also hold for content whose grapheme clusters are wider
+/// than the sum of their chars. An emoji-presentation sequence (base char +
+/// U+FE0F) is the common case: `unicode_width` scores the cluster as 2 columns —
+/// which is what the terminal draws — while a per-`char` walk sees 1 + 0.
+///
+/// The wrap scan and the cell padding must therefore measure the SAME way. When
+/// they disagree the padding believes the row is full, skips the pad, and the
+/// cell runs over its budget — the separator shifts right by one column per
+/// sequence, which is the same ragged-column symptom tab handling produced.
+/// Lines are long enough to pack the column, since a short row pads either way.
+#[test]
+fn split_separator_holds_for_clusters_wider_than_their_chars() {
+    // `⚠️` / `✔️` are base-char + VS16. The trailing text pushes each line up
+    // against the column budget so the padding branch is actually exercised.
+    let emoji = DiffKind::Text(vec![Hunk {
+        old_start: 1,
+        old_lines: 4,
+        new_start: 1,
+        new_lines: 4,
+        lines: vec![
+            ctx("// ⚠️ the checked path below is load-bearing, do not reorder it"),
+            rem("let status = \"✔️ ok\"; // ⚠️ verified against the upstream fixture"),
+            add("let status = \"✔️ done\"; // ⚠️ verified against the upstream table"),
+            ctx("// ⚠️ ✔️ ⚠️ ✔️ trailing cluster run to fill out the column budget"),
+        ],
+    }]);
+    let model = single_file(FileStatus::Modified, emoji, Some("a.rs"), Some("a.rs"));
+
+    for width in [80, 100, 120] {
+        let out =
+            super::render_diff_tw(&model, &Theme::default(), DiffLayout::SideBySide, width, 4);
+        let cols = separator_columns(&out, 4);
+        assert!(
+            cols.len() >= 3,
+            "expected >=3 split rows, got {}",
+            cols.len()
+        );
+        let first = cols[0].1;
+        let bad: Vec<_> = cols.iter().filter(|(_, c, _)| *c != first).collect();
+        assert!(
+            bad.is_empty(),
+            "width={width}: separator wanders on cluster-wide content — rows {:?} differ from column {first}.\n{}",
+            bad.iter().map(|(i, c, _)| (*i, *c)).collect::<Vec<_>>(),
+            cols.iter()
+                .map(|(i, c, f)| format!("  row {i:>2} sep@{c:>3}  {f:?}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
     }
 }
 

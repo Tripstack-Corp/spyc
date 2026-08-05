@@ -25,7 +25,7 @@ use std::ops::Range;
 
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::git::model::{CommitMeta, DiffKind, DiffModel, FileDiff, FileStatus, Hunk, LineOrigin};
 use crate::ui::display_width;
@@ -56,6 +56,13 @@ const MAX_WRAP_ROWS_PER_CELL: usize = 512;
 
 /// Display columns `s` occupies once the pager has expanded its tabs.
 ///
+/// The **single** width metric for the side-by-side layout: both the wrap scan
+/// ([`wrap_spans`]) and the cell padding ([`split_cell_rows`]) measure with this,
+/// and the layout is only correct while they agree. Two metrics that disagree by
+/// one column produce exactly the raggedness this exists to prevent, so measure
+/// per grapheme cluster and route it through here rather than adding a
+/// per-`char` shortcut.
+///
 /// `unicode_width` scores a `\t` as ONE column, but the pager rewrites every
 /// `\t` to `tab_width` spaces before drawing (`pager::render::expand_tabs`). The
 /// side-by-side layout pads each cell to an exact width, so measuring with
@@ -64,17 +71,11 @@ const MAX_WRAP_ROWS_PER_CELL: usize = 512;
 /// shoves the `│` separator (and the whole right column) right by that much.
 /// Since indent depth varies line to line, so does the shove: the columns come
 /// out visibly ragged on any tab-indented file (gofmt, Makefiles, plenty of C).
+/// Tabs expand to a fixed width rather than to the next tab stop, which is what
+/// makes a flat `tab_width` per tab exact.
 fn tabbed_width(s: &str, tab_width: usize) -> usize {
     let tabs = s.bytes().filter(|b| *b == b'\t').count();
     display_width(s) + tabs * tab_width.max(1).saturating_sub(1)
-}
-
-/// Per-character counterpart to [`tabbed_width`], for the wrap scan.
-fn char_cols(ch: char, tab_width: usize) -> usize {
-    if ch == '\t' {
-        return tab_width.max(1);
-    }
-    UnicodeWidthChar::width(ch).unwrap_or(0)
 }
 
 /// A diff's syntax highlight, computed once and reused across every
@@ -721,21 +722,26 @@ fn wrap_spans(spans: &[Span<'static>], width: usize, tab_width: usize) -> Vec<Ve
             }
             let mut consumed_bytes = 0usize;
             let mut visual = 0usize;
-            for (idx, ch) in rest.char_indices() {
-                let w = char_cols(ch, tab_width);
+            // Advance by grapheme cluster, measured with `tabbed_width` — the
+            // same fn the cell padding uses. A per-`char` walk under-counts an
+            // emoji-presentation sequence (base + U+FE0F: 1 + 0 per char, 2 as
+            // a cluster), so it would admit a column the padding then believes
+            // is already occupied, and the cell would overrun its budget.
+            for (idx, cluster) in rest.grapheme_indices(true) {
+                let w = tabbed_width(cluster, tab_width);
                 if visual + w > remaining {
                     break;
                 }
-                consumed_bytes = idx + ch.len_utf8();
+                consumed_bytes = idx + cluster.len();
                 visual += w;
             }
-            // Force at least one char even if it's wider than `remaining`
+            // Force at least one cluster even if it's wider than `remaining`
             // so a 2-col glyph in a 1-col viewport doesn't infinite-loop.
             if consumed_bytes == 0
-                && let Some(first) = rest.chars().next()
+                && let Some(first) = rest.graphemes(true).next()
             {
-                consumed_bytes = first.len_utf8();
-                visual = char_cols(first, tab_width).max(1);
+                consumed_bytes = first.len();
+                visual = tabbed_width(first, tab_width).max(1);
             }
             let chunk = rest[..consumed_bytes].to_string();
             rest = &rest[consumed_bytes..];
