@@ -240,7 +240,7 @@ impl super::App {
         // actual click on RELEASE, so a press-only click leaves it drag-selecting
         // forever and never clicks anything.
         if let MouseEventKind::Up(button) = ev.kind {
-            return self.forward_release(ev, button, &frame);
+            return self.forward_release(ev, button, frame);
         }
 
         let lines = self.state.config.mouse.scroll_lines.max(1);
@@ -329,21 +329,68 @@ impl super::App {
                 self.view.chord_hint_due = Some(std::time::Instant::now());
                 Vec::new()
             }
-            MouseSink::PaneForward => {
-                let report = wheel_report(ev, delta < 0, &layout);
-                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
-                    let (mode, encoding) = tabs.active().mouse_protocol();
-                    let bytes = crate::pane::input::encode_mouse(report, mode, encoding);
-                    if !bytes.is_empty() {
-                        // Best-effort, like every other pane write: a dead pty
-                        // surfaces through the exit path, and flashing per wheel
-                        // tick would bury the real message under repeats.
-                        let _ = tabs.active_mut().send_bytes(&bytes);
-                    }
-                }
-                Vec::new()
+            // Left-click into a mouse-aware child: focus the pane AND deliver the
+            // click. Both, or it reads as broken — see `MouseSink::FocusAndForward`.
+            MouseSink::FocusAndForward => {
+                self.focus_region(region);
+                self.forward_to_child(ev, &layout)
             }
+            MouseSink::PaneForward => self.forward_to_child(ev, &layout),
         }
+    }
+
+    /// Encode `ev` in the child's own protocol and send it to the active pane.
+    ///
+    /// Records whether the press was forwarded, so [`Self::forward_release`] can
+    /// pair the matching release to the same child.
+    fn forward_to_child(&mut self, ev: MouseEvent, layout: &FrameLayout) -> Vec<Effect> {
+        let Some(report) = mouse_report(ev, layout) else {
+            return Vec::new();
+        };
+        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+            return Vec::new();
+        };
+        let (mode, encoding) = tabs.active().mouse_protocol();
+        let bytes = crate::pane::input::encode_mouse(report, mode, encoding);
+        if bytes.is_empty() {
+            return Vec::new();
+        }
+        // A press we forwarded owes the child a release. Wheel ticks don't (they
+        // have no release half), so only a real button arms the obligation.
+        if matches!(ev.kind, MouseEventKind::Down(_)) {
+            self.view.mouse_press_forwarded = true;
+        }
+        // `Effect::SendToPane`, not a direct `send_bytes`: the executor is the only
+        // thing that touches the OS.
+        vec![Effect::SendToPane {
+            target: super::effect::PaneTarget::Active,
+            input: super::effect::PaneInput::Bytes(bytes),
+            on_ok: None,
+            // No flash on failure: a dead pty surfaces through the exit path, and
+            // one per wheel tick would bury the real message under repeats.
+            err_prefix: None,
+        }]
+    }
+
+    /// Deliver a button release to the child that received the press.
+    ///
+    /// Keyed on the press having been forwarded rather than on where the pointer
+    /// is now, which is what makes the pairing exact: a press that went to the list
+    /// never produces a release for the child, and a press delivered to the child
+    /// always gets its release even if the pointer left the pane before the button
+    /// came up. An unpaired release is as bad as a missing one — the child would
+    /// see a button it never saw pressed.
+    fn forward_release(
+        &mut self,
+        ev: MouseEvent,
+        _button: MouseButton,
+        frame: ratatui::layout::Rect,
+    ) -> Vec<Effect> {
+        if !std::mem::take(&mut self.view.mouse_press_forwarded) {
+            return Vec::new();
+        }
+        let layout = self.frame_layout(frame);
+        self.forward_to_child(ev, &layout)
     }
 }
 
@@ -372,32 +419,60 @@ impl super::App {
     }
 }
 
-/// Build the child-facing report for a wheel event, translating the pointer into
-/// the pane's own coordinate space.
+/// Build the child-facing report for any forwardable mouse event, translating the
+/// pointer into the pane's own coordinate space. `None` for kinds spyc doesn't
+/// forward.
 ///
-/// The translation is the part that's easy to skip and produces a *worse than
-/// broken* result: frame-absolute coordinates make the child think the pointer is
-/// `pane.y` rows above where it is, which reads as the child's bug.
-fn wheel_report(
+/// Takes the whole event rather than a direction flag, which is the shape error
+/// this replaces: the previous `wheel_report(ev, up, layout)` hardcoded
+/// `if up { 64 } else { 65 }`, so when buttons started routing here they were
+/// handed `up = false` and every click went out as **xterm wheel-down (65)**.
+/// Claude's own decoder reads 65 as a wheel tick and its button decoder rejects
+/// anything with bit 64 set, so a left-click scrolled the agent and never clicked.
+/// A function that maps the kind to its button can't express that mistake.
+///
+/// The coordinate translation is the other easy-to-skip half, and it produces a
+/// *worse than broken* result: frame-absolute coordinates make the child think the
+/// pointer is `pane.y` rows above where it is, which reads as the child's bug.
+fn mouse_report(
     ev: MouseEvent,
-    up: bool,
     layout: &super::FrameLayout,
-) -> crate::pane::input::MouseReport {
+) -> Option<crate::pane::input::MouseReport> {
     use crossterm::event::KeyModifiers as K;
+    use crossterm::event::MouseButton as B;
+
+    // xterm button encoding: 0/1/2 = left/middle/right, 64/65 = wheel up/down.
+    let (button, release) = match ev.kind {
+        MouseEventKind::ScrollUp => (64, false),
+        MouseEventKind::ScrollDown => (65, false),
+        MouseEventKind::Down(B::Left) => (0, false),
+        MouseEventKind::Down(B::Middle) => (1, false),
+        MouseEventKind::Down(B::Right) => (2, false),
+        MouseEventKind::Up(B::Left) => (0, true),
+        MouseEventKind::Up(B::Middle) => (1, true),
+        MouseEventKind::Up(B::Right) => (2, true),
+        // Not forwarded. Motion (`Drag`/`Moved`) shouldn't arrive at all — spyc
+        // requests only 1000 — and horizontal wheel has no spyc behaviour. Listed
+        // exhaustively so a new `MouseEventKind` is a compile error here rather
+        // than a silent no-op.
+        MouseEventKind::Drag(_)
+        | MouseEventKind::Moved
+        | MouseEventKind::ScrollLeft
+        | MouseEventKind::ScrollRight => return None,
+    };
+
     let origin = layout
         .pane
         .unwrap_or(ratatui::layout::Rect::new(0, 0, 0, 0));
-    crate::pane::input::MouseReport {
-        button: if up { 64 } else { 65 },
-        // A wheel tick has no release half; emitting one makes click-counting
-        // apps see phantom input.
-        release: false,
+    Some(crate::pane::input::MouseReport {
+        button,
+        release,
         col: ev.column.saturating_sub(origin.x),
         row: ev.row.saturating_sub(origin.y),
         shift: ev.modifiers.contains(K::SHIFT),
         alt: ev.modifiers.contains(K::ALT),
         ctrl: ev.modifiers.contains(K::CONTROL),
-    }
+    })
 }
 
 #[cfg(test)]
@@ -577,15 +652,24 @@ mod tests {
         }
     }
 
-    /// Left is click-through: over a mouse-aware child the event reaches the
-    /// child; everywhere else it moves the keyboard.
+    /// Left is click-through: over a mouse-aware child it focuses the pane **and**
+    /// the event reaches the child; everywhere else it just moves the keyboard.
+    ///
+    /// The sink carries both halves for a reason. The previous `PaneForward` did
+    /// only the forwarding, so the keyboard stayed in the file list after clicking
+    /// into the agent — and this test still passed, because a sink's name says
+    /// nothing about what the handler does with it.
     #[test]
     fn left_click_focuses_but_forwards_into_a_mouse_aware_pane() {
         let aware = MouseSnapshot {
             pane_wants_mouse: true,
             ..snap(Some(Region::Pane))
         };
-        assert_eq!(route_mouse(aware, Gesture::Left), MouseSink::PaneForward);
+        assert_eq!(
+            route_mouse(aware, Gesture::Left),
+            MouseSink::FocusAndForward,
+            "must do both, not just forward"
+        );
 
         // A child that never asked for mouse still gets focused, not forwarded —
         // the #170 gate applies to buttons exactly as it does to the wheel.
@@ -650,7 +734,7 @@ mod tests {
     /// reach the child as pane row `R - Y`; skipping this makes clicks land
     /// `pane.y` rows off, which reads as the child's bug rather than ours.
     #[test]
-    fn wheel_report_translates_into_the_panes_coordinate_space() {
+    fn mouse_report_translates_into_the_panes_coordinate_space() {
         use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
 
         for pos in [StatusPosition::Top, StatusPosition::Bottom] {
@@ -668,7 +752,7 @@ mod tests {
                 row: pane.y + 2,
                 modifiers: KeyModifiers::NONE,
             };
-            let report = super::wheel_report(ev, true, &layout);
+            let report = super::mouse_report(ev, &layout).expect("wheel is forwardable");
             assert_eq!(report.row, 2, "{pos:?}: row must be pane-relative");
             assert_eq!(report.col, 5, "{pos:?}: col must be pane-relative");
             assert_eq!(report.button, 64, "wheel up");
@@ -681,9 +765,67 @@ mod tests {
                 row: pane.y,
                 modifiers: KeyModifiers::NONE,
             };
-            let report = super::wheel_report(at_origin, false, &layout);
+            let report = super::mouse_report(at_origin, &layout).expect("wheel is forwardable");
             assert_eq!((report.col, report.row), (0, 0), "{pos:?}: pane origin");
             assert_eq!(report.button, 65, "wheel down");
+        }
+    }
+
+    /// **Every gesture must encode as its own xterm button.**
+    ///
+    /// The bug this pins: the encoder used to be wheel-shaped —
+    /// `wheel_report(ev, up, ..)` with `button: if up { 64 } else { 65 }` — so when
+    /// buttons started routing through it they arrived with `up = false` and every
+    /// click went out as **wheel-down**. Claude's decoder reads 65 as a wheel tick
+    /// and its button decoder rejects anything with bit 64 set, so a left-click
+    /// scrolled the agent and never clicked. The old test only ever passed
+    /// `ScrollUp`/`ScrollDown`, so it sailed through.
+    #[test]
+    fn every_button_encodes_as_itself_not_as_a_wheel_tick() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let layout = App::compute_layout(Rect::new(0, 0, 80, 24), true, 40, StatusPosition::Top);
+        let pane = layout.pane.expect("pane_open = true");
+        let at = |kind| MouseEvent {
+            kind,
+            column: pane.x + 3,
+            row: pane.y + 1,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        // xterm: 0/1/2 = left/middle/right; 64/65 = wheel up/down.
+        for (kind, button, release) in [
+            (MouseEventKind::Down(MouseButton::Left), 0, false),
+            (MouseEventKind::Down(MouseButton::Middle), 1, false),
+            (MouseEventKind::Down(MouseButton::Right), 2, false),
+            (MouseEventKind::Up(MouseButton::Left), 0, true),
+            (MouseEventKind::Up(MouseButton::Middle), 1, true),
+            (MouseEventKind::Up(MouseButton::Right), 2, true),
+            (MouseEventKind::ScrollUp, 64, false),
+            (MouseEventKind::ScrollDown, 65, false),
+        ] {
+            let r = super::mouse_report(at(kind), &layout).expect("forwardable");
+            assert_eq!(r.button, button, "{kind:?} must encode button {button}");
+            assert_eq!(r.release, release, "{kind:?} release flag");
+            // The wheel bit must not leak onto a real button, and vice versa.
+            assert_eq!(
+                r.button & 64 != 0,
+                matches!(kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown),
+                "{kind:?}: bit 64 marks a wheel tick and nothing else"
+            );
+        }
+
+        // Motion and horizontal wheel are not forwarded at all.
+        for kind in [
+            MouseEventKind::Moved,
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::ScrollLeft,
+            MouseEventKind::ScrollRight,
+        ] {
+            assert!(
+                super::mouse_report(at(kind), &layout).is_none(),
+                "{kind:?} must not be forwarded"
+            );
         }
     }
 
