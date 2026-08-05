@@ -470,18 +470,22 @@ impl crossterm::Command for DisableAlternateScroll {
     }
 }
 
-/// DEC private modes 1000 (button press/release) + 1006 (SGR extended
-/// coordinates) — real mouse reporting, so spyc gets `ScrollUp`/`ScrollDown` and
-/// button events *with coordinates* instead of 1007's coordinate-free arrow keys.
+/// DEC private modes 1000 (button press/release), 1002 (button-event tracking)
+/// and 1006 (SGR extended coordinates) — real mouse reporting, so spyc gets
+/// `ScrollUp`/`ScrollDown`, button and drag events *with coordinates* instead of
+/// 1007's coordinate-free arrow keys.
 ///
-/// Deliberately NOT 1002/1003 (drag / any-motion reporting), which is what
-/// `crossterm::event::EnableMouseCapture` emits. `run.rs` marks a redraw for every
-/// `Message::Input` and `coalesce_pending` surfaces input one event per loop
-/// iteration, so motion reporting would turn idle pointer movement into a
-/// redraw-per-motion storm — straight through the 0-dps-at-idle invariant.
+/// **1002 yes, 1003 emphatically no**, and the difference is the whole reason
+/// drags are affordable. 1002 reports motion only while a button is HELD; 1003
+/// (any-event) reports every pointer move. `run.rs` marks a redraw for every
+/// `Message::Input` and `coalesce_pending` surfaces one per loop iteration, so
+/// 1003 turns idle pointer movement into a redraw-per-motion storm — straight
+/// through the 0-dps-at-idle invariant. Under 1002 an untouched mouse generates
+/// nothing at all, and the redraws during a drag are the ones a drag needs.
+/// `crossterm::event::EnableMouseCapture` emits 1003, which is why spyc doesn't
+/// use it (guarded by `production_code_never_uses_crossterms_mouse_capture`).
 ///
-/// 1000h alone already reports the wheel (buttons 64/65) and clicks; 1006h keeps
-/// coordinates correct past column 223. Mutually exclusive with
+/// 1006h keeps coordinates correct past column 223. Mutually exclusive with
 /// [`EnableAlternateScroll`]: a terminal honoring both could deliver one tick
 /// twice (once as arrows, once as a mouse event), so the two are always toggled
 /// as a pair.
@@ -490,7 +494,7 @@ struct DisableWheelReporting;
 
 impl crossterm::Command for EnableWheelReporting {
     fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        f.write_str("\x1b[?1000h\x1b[?1006h")
+        f.write_str("\x1b[?1000h\x1b[?1002h\x1b[?1006h")
     }
     #[cfg(windows)]
     fn execute_winapi(&self) -> std::io::Result<()> {
@@ -851,17 +855,26 @@ mod mouse_reporting_tests {
     /// pointer move, straight through the 0-dps-at-idle invariant — and you'd only
     /// notice by waving the mouse while watching the `A` overlay. `crossterm`'s own
     /// `EnableMouseCapture` emits it, which is exactly why spyc doesn't use that.
+    ///
+    /// **1002 is requested and 1003 is not**, which is not a fine distinction: 1002
+    /// reports motion only while a button is held, so an untouched mouse generates
+    /// nothing and the invariant is untouched. Asserting only "no motion modes"
+    /// would have made drag support impossible to add without deleting the guard
+    /// that matters.
     #[test]
-    fn enable_asks_for_buttons_and_sgr_but_never_motion_reporting() {
+    fn enable_asks_for_buttons_drags_and_sgr_but_never_any_event_motion() {
         let seq = ansi(&EnableWheelReporting);
         assert!(seq.contains("\x1b[?1000h"), "button reporting: {seq:?}");
+        assert!(
+            seq.contains("\x1b[?1002h"),
+            "button-event tracking, for drags: {seq:?}"
+        );
         assert!(seq.contains("\x1b[?1006h"), "SGR coordinates: {seq:?}");
-        for motion in ["1002", "1003"] {
-            assert!(
-                !seq.contains(motion),
-                "must not request motion reporting (?{motion}h): {seq:?}"
-            );
-        }
+        assert!(
+            !seq.contains("1003"),
+            "must never request ANY-EVENT motion (?1003h) — that is the idle \
+             redraw storm: {seq:?}"
+        );
     }
 
     /// A leaked `?1000h` silently breaks click-drag selection in the user's shell
@@ -939,19 +952,28 @@ mod mouse_reporting_tests {
         );
     }
 
-    /// Neither direction may request motion reporting — the `?1003h` redraw storm
+    /// Neither direction may request ANY-EVENT motion — the `?1003h` redraw storm
     /// is invisible on a still pointer, so only a byte assertion catches it.
+    ///
+    /// `?1002h` (motion only while a button is held) is expected when enabling and
+    /// absent when disabling.
     #[test]
-    fn neither_direction_requests_motion_reporting() {
+    fn neither_direction_requests_any_event_motion() {
         for capture in [true, false] {
             let seq = super::mouse_mode_seq(capture);
-            for motion in ["1002h", "1003h"] {
-                assert!(
-                    !seq.contains(motion),
-                    "capture={capture} must not request ?{motion}: {seq:?}"
-                );
-            }
+            assert!(
+                !seq.contains("1003h"),
+                "capture={capture} must not request ?1003h: {seq:?}"
+            );
         }
+        assert!(
+            super::mouse_mode_seq(true).contains("1002h"),
+            "enabling capture must ask for drags"
+        );
+        assert!(
+            !super::mouse_mode_seq(false).contains("1002h"),
+            "disabling capture must not enable anything"
+        );
     }
 
     /// Source-scan guard: nothing in `src/` may use crossterm's own

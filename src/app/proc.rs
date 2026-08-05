@@ -101,18 +101,20 @@ pub(super) fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> Reader
                                         k.kind == KeyEventKind::Press
                                             || k.kind == KeyEventKind::Repeat
                                     }
-                                    // Motion reporting is never requested (spyc
-                                    // emits 1000+1006, not 1002/1003), but a few
-                                    // terminals report it anyway. Drop it here:
-                                    // `run.rs` marks a redraw for every
-                                    // `Message::Input` and `coalesce_pending`
-                                    // surfaces one per loop iteration, so idle
-                                    // pointer movement would otherwise become a
-                                    // redraw-per-motion storm.
-                                    Event::Mouse(m) => !matches!(
-                                        m.kind,
-                                        MouseEventKind::Moved | MouseEventKind::Drag(_)
-                                    ),
+                                    // `Drag` is forwarded: spyc asks for 1002
+                                    // (button-event tracking), so a drag is a
+                                    // deliberate gesture and its redraw is wanted.
+                                    //
+                                    // `Moved` is still dropped. 1002 reports motion
+                                    // only while a button is HELD, so a buttonless
+                                    // `Moved` means the terminal reported motion
+                                    // spyc never asked for — and `run.rs` marks a
+                                    // redraw for every `Message::Input`, so idle
+                                    // pointer movement would become a
+                                    // redraw-per-motion storm. That is the 1003
+                                    // hazard arriving by accident, and this is the
+                                    // belt to 1002's braces.
+                                    Event::Mouse(m) => !matches!(m.kind, MouseEventKind::Moved),
                                     _ => true,
                                 };
                                 if forward && tx.send(Message::Input(ev)).is_err() {

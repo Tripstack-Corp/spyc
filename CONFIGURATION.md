@@ -205,13 +205,25 @@ arrow keys (which a focused pane receives as history navigation).
 
 | Button | Action |
 |---|---|
-| **Left** | Focus the region under the pointer. Over a mouse-aware child (claude, vim, htop) the click also reaches it — the pane is live, so swallowing the first click just to focus would read as broken. |
+| **Left** | Focus the region under the pointer. Over a mouse-aware child (claude, vim, htop) the click also reaches it — the pane is live, so swallowing the first click just to focus would read as broken. **Dragging** is forwarded too, so the child's own text selection works. |
 | **Middle** | Paste the system clipboard wherever a paste would land (pane, `:` line, shell prompt). |
 | **Right** | Open the leader menu, from any region, with no chord-hint delay. |
 
 Middle and right are **always spyc's** — never forwarded, even over a mouse-aware
 child, since otherwise the gesture would be unavailable in exactly the region where
 the pane holds focus. If you need a child's own right-click menu, `:mouse off`.
+
+### Selecting text
+
+Capture takes the terminal's own click-drag selection away. Where that leaves you:
+
+| | |
+|---|---|
+| **Inside a mouse-aware child** (claude, vim, htop) | Drag normally — the drag is forwarded, so the child's own selection works. |
+| **Anywhere else** (plain shell pane, pager, file list) | Hold **Shift** (Option/Fn on iTerm2) to hand the drag to your terminal, or `:mouse off`. |
+| **Copying a diagnostic** | `:activity dump`, `:grep`, `:why-git` etc. open a pager — **`y`** yanks the source to the clipboard, **`Y`** the visible text. No mouse needed. |
+
+spyc-owned selection for the surfaces it draws itself is planned, not built.
 
 Clicking a *row* in the file list is deliberately not a thing: clicking a region is
 coarse and hard to get wrong, while aiming at a one-cell-tall line invites

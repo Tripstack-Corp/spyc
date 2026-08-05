@@ -311,6 +311,21 @@ impl super::App {
             return self.forward_release(ev, button, frame);
         }
 
+        // A drag belongs to whoever received the press, for the same reason a
+        // release does: it is the middle of one gesture, not a new decision. So it
+        // rides the same `mouse_press_forwarded` pairing — which also means a drag
+        // that began on the file list never leaks into the child, and a drag that
+        // began in the child keeps reaching it after the pointer leaves the pane
+        // (children track their own selection across the whole drag).
+        //
+        // spyc-side selection for a NON-mouse child is deliberately not here: this
+        // change only stops throwing drags away, so a child that speaks mouse gets
+        // its own selection back (claude's `onSelectionDrag` was dead solely
+        // because these events were dropped). See `docs/drafts/mouse_selection_plan.md`.
+        if matches!(ev.kind, MouseEventKind::Drag(_)) {
+            return self.forward_drag(ev, frame);
+        }
+
         let lines = self.state.config.mouse.scroll_lines.max(1);
         // `delta` is only meaningful for a wheel gesture; buttons ignore it.
         let (gesture, delta): (Gesture, i32) = match ev.kind {
@@ -445,6 +460,19 @@ impl super::App {
         }]
     }
 
+    /// Deliver a drag to the child that received the press, if any.
+    ///
+    /// Unlike a release this does NOT consume the pairing flag — a drag is the
+    /// middle of the gesture and more will follow, so the flag has to survive
+    /// until the release actually arrives.
+    fn forward_drag(&mut self, ev: MouseEvent, frame: ratatui::layout::Rect) -> Vec<Effect> {
+        if !self.view.mouse_press_forwarded {
+            return Vec::new();
+        }
+        let layout = self.frame_layout(frame);
+        self.forward_to_child(ev, &layout)
+    }
+
     /// Deliver a button release to the child that received the press.
     ///
     /// Keyed on the press having been forwarded rather than on where the pointer
@@ -514,24 +542,27 @@ fn mouse_report(
     use crossterm::event::KeyModifiers as K;
     use crossterm::event::MouseButton as B;
 
-    // xterm button encoding: 0/1/2 = left/middle/right, 64/65 = wheel up/down.
-    let (button, release) = match ev.kind {
-        MouseEventKind::ScrollUp => (64, false),
-        MouseEventKind::ScrollDown => (65, false),
-        MouseEventKind::Down(B::Left) => (0, false),
-        MouseEventKind::Down(B::Middle) => (1, false),
-        MouseEventKind::Down(B::Right) => (2, false),
-        MouseEventKind::Up(B::Left) => (0, true),
-        MouseEventKind::Up(B::Middle) => (1, true),
-        MouseEventKind::Up(B::Right) => (2, true),
-        // Not forwarded. Motion (`Drag`/`Moved`) shouldn't arrive at all — spyc
-        // requests only 1000 — and horizontal wheel has no spyc behaviour. Listed
-        // exhaustively so a new `MouseEventKind` is a compile error here rather
-        // than a silent no-op.
-        MouseEventKind::Drag(_)
-        | MouseEventKind::Moved
-        | MouseEventKind::ScrollLeft
-        | MouseEventKind::ScrollRight => return None,
+    // xterm button encoding: 0/1/2 = left/middle/right, 64/65 = wheel up/down;
+    // a drag is the held button with the motion bit set (added by `encode_mouse`).
+    let (button, release, motion) = match ev.kind {
+        MouseEventKind::ScrollUp => (64, false, false),
+        MouseEventKind::ScrollDown => (65, false, false),
+        MouseEventKind::Down(B::Left) => (0, false, false),
+        MouseEventKind::Down(B::Middle) => (1, false, false),
+        MouseEventKind::Down(B::Right) => (2, false, false),
+        MouseEventKind::Up(B::Left) => (0, true, false),
+        MouseEventKind::Up(B::Middle) => (1, true, false),
+        MouseEventKind::Up(B::Right) => (2, true, false),
+        MouseEventKind::Drag(B::Left) => (0, false, true),
+        MouseEventKind::Drag(B::Middle) => (1, false, true),
+        MouseEventKind::Drag(B::Right) => (2, false, true),
+        // Not forwarded. `Moved` is buttonless motion, which spyc never asks for
+        // (1002 reports only while a button is held) and `proc.rs` filters;
+        // horizontal wheel has no spyc behaviour. Listed exhaustively so a new
+        // `MouseEventKind` is a compile error here rather than a silent no-op.
+        MouseEventKind::Moved | MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
+            return None;
+        }
     };
 
     let origin = layout
@@ -540,6 +571,7 @@ fn mouse_report(
     Some(crate::pane::input::MouseReport {
         button,
         release,
+        motion,
         col: ev.column.saturating_sub(origin.x),
         row: ev.row.saturating_sub(origin.y),
         shift: ev.modifiers.contains(K::SHIFT),
@@ -969,20 +1001,25 @@ mod tests {
             modifiers: KeyModifiers::NONE,
         };
 
-        // xterm: 0/1/2 = left/middle/right; 64/65 = wheel up/down.
-        for (kind, button, release) in [
-            (MouseEventKind::Down(MouseButton::Left), 0, false),
-            (MouseEventKind::Down(MouseButton::Middle), 1, false),
-            (MouseEventKind::Down(MouseButton::Right), 2, false),
-            (MouseEventKind::Up(MouseButton::Left), 0, true),
-            (MouseEventKind::Up(MouseButton::Middle), 1, true),
-            (MouseEventKind::Up(MouseButton::Right), 2, true),
-            (MouseEventKind::ScrollUp, 64, false),
-            (MouseEventKind::ScrollDown, 65, false),
+        // xterm: 0/1/2 = left/middle/right; 64/65 = wheel up/down. A drag is the
+        // held button with the motion flag — `encode_mouse` turns that into bit 32.
+        for (kind, button, release, motion) in [
+            (MouseEventKind::Down(MouseButton::Left), 0, false, false),
+            (MouseEventKind::Down(MouseButton::Middle), 1, false, false),
+            (MouseEventKind::Down(MouseButton::Right), 2, false, false),
+            (MouseEventKind::Up(MouseButton::Left), 0, true, false),
+            (MouseEventKind::Up(MouseButton::Middle), 1, true, false),
+            (MouseEventKind::Up(MouseButton::Right), 2, true, false),
+            (MouseEventKind::Drag(MouseButton::Left), 0, false, true),
+            (MouseEventKind::Drag(MouseButton::Middle), 1, false, true),
+            (MouseEventKind::Drag(MouseButton::Right), 2, false, true),
+            (MouseEventKind::ScrollUp, 64, false, false),
+            (MouseEventKind::ScrollDown, 65, false, false),
         ] {
             let r = super::mouse_report(at(kind), &layout).expect("forwardable");
             assert_eq!(r.button, button, "{kind:?} must encode button {button}");
             assert_eq!(r.release, release, "{kind:?} release flag");
+            assert_eq!(r.motion, motion, "{kind:?} motion flag");
             // The wheel bit must not leak onto a real button, and vice versa.
             assert_eq!(
                 r.button & 64 != 0,
@@ -991,10 +1028,11 @@ mod tests {
             );
         }
 
-        // Motion and horizontal wheel are not forwarded at all.
+        // Buttonless motion and horizontal wheel are not forwarded at all.
+        // `Moved` in particular: spyc asks for 1002, which reports motion only
+        // while a button is held, so a `Moved` is motion nobody requested.
         for kind in [
             MouseEventKind::Moved,
-            MouseEventKind::Drag(MouseButton::Left),
             MouseEventKind::ScrollLeft,
             MouseEventKind::ScrollRight,
         ] {
