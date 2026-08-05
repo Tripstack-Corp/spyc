@@ -10,6 +10,7 @@ use super::server::{notify_disconnect, pid_from_sock_path};
 use super::{mcp_log, socket_path};
 
 /// Status of MCP configuration for this directory.
+#[derive(Debug)]
 pub enum McpConfigStatus {
     /// .mcp.json written/updated to point at our socket.
     Configured,
@@ -24,6 +25,21 @@ pub enum McpConfigStatus {
     /// resolves through the org config; we run the socket server but
     /// skip writing local `.mcp.json` (and clean up any prior write).
     ManagedByEnterprise,
+}
+
+/// An "I won't touch that file" error.
+///
+/// Returned instead of rewriting an agent config we can't safely splice into.
+/// These files are the user's: `.mcp.json` can define other MCP servers,
+/// `.codex/config.toml` holds their `model` and `approval_policy`. Replacing one
+/// with a spyc-only document because a trailing comma made it unparseable is
+/// silent data loss, and the caller's `Err` arm already flashes and lets the
+/// pane launch — so refusing costs spyc's tools in that repo, not their config.
+///
+/// `InvalidData` rather than `Other`: the file exists and is readable, its
+/// contents are the problem.
+fn refuse(msg: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, msg.to_string())
 }
 
 /// Given the `SPYC_MCP_SOCK` value parsed out of an existing client config,
@@ -236,34 +252,53 @@ fn ensure_spyc_in_mcp_json(
         }
     });
 
-    // Default content when there's no existing file or we can't safely
-    // splice into it (parse error, top-level not an object, mcpServers
-    // present but not an object). In all those cases we overwrite with
-    // a clean shape rather than panicking on `.as_object_mut().unwrap()`.
+    // Default content, for an absent or blank file only — there's nothing to
+    // lose in either case.
     let fresh = || {
         serde_json::to_string_pretty(&json!({ "mcpServers": { "spyc": spyc_entry } }))
             .expect("serializing a serde_json::Value cannot fail")
     };
     let content = match std::fs::read_to_string(path) {
-        Ok(text) => match serde_json::from_str::<Value>(&text) {
-            Ok(mut parsed) => {
-                let top = parsed.as_object_mut();
-                let servers = top.and_then(|t| {
-                    let entry = t.entry("mcpServers").or_insert_with(|| json!({}));
-                    entry.as_object_mut()
-                });
-                match servers {
-                    Some(map) => {
-                        map.insert("spyc".to_string(), spyc_entry);
-                        serde_json::to_string_pretty(&parsed)
-                            .expect("serializing a serde_json::Value cannot fail")
-                    }
-                    None => fresh(),
+        // An existing file is the user's data — it can hold other MCP servers,
+        // and rewriting it from scratch drops every one. Refuse instead: the
+        // caller flashes the error and the pane still launches, so the cost is
+        // spyc's tools being unavailable in this repo until they fix the file.
+        Ok(text) if !text.trim().is_empty() => {
+            let mut parsed: Value = serde_json::from_str(&text).map_err(|e| {
+                refuse(&format!(
+                    "{}: refusing to overwrite — exists but isn't valid JSON ({e}); \
+                     fix or delete it",
+                    path.display()
+                ))
+            })?;
+            let servers = parsed.as_object_mut().and_then(|t| {
+                let entry = t.entry("mcpServers").or_insert_with(|| json!({}));
+                entry.as_object_mut()
+            });
+            match servers {
+                Some(map) => {
+                    map.insert("spyc".to_string(), spyc_entry);
+                    serde_json::to_string_pretty(&parsed)
+                        .expect("serializing a serde_json::Value cannot fail")
+                }
+                None => {
+                    return Err(refuse(&format!(
+                        "{}: refusing to overwrite — top level or `mcpServers` is not an object",
+                        path.display()
+                    )));
                 }
             }
-            Err(_) => fresh(),
-        },
-        Err(_) => fresh(),
+        }
+        Ok(_) => fresh(),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => fresh(),
+        // Anything else (permissions, a directory in the way) is not "no file";
+        // writing over it would be a guess.
+        Err(e) => {
+            return Err(io::Error::new(
+                e.kind(),
+                format!("reading {}: {e}", path.display()),
+            ));
+        }
     };
 
     // agy's file sits one level down (`.agents/`); claude's parent is `dir`
@@ -373,30 +408,60 @@ pub fn ensure_codex_config_toml(
         servers.insert("spyc".into(), toml::Value::Table(build_entry()));
         let mut root = toml::Table::new();
         root.insert("mcp_servers".into(), toml::Value::Table(servers));
-        toml::to_string_pretty(&toml::Value::Table(root)).unwrap_or_default()
+        // A root holding one table and no bare values always serializes (TOML
+        // requires values before tables, which a single key trivially satisfies).
+        toml::to_string_pretty(&toml::Value::Table(root))
+            .expect("a single-table root always serializes")
     };
 
     let content = match std::fs::read_to_string(&path) {
-        Ok(text) => match toml::from_str::<toml::Value>(&text) {
-            Ok(mut parsed) => {
-                let top = parsed.as_table_mut();
-                let servers_ok = top.and_then(|t| {
-                    let entry = t
-                        .entry("mcp_servers")
-                        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
-                    entry.as_table_mut()
-                });
-                match servers_ok {
-                    Some(map) => {
-                        map.insert("spyc".to_string(), toml::Value::Table(build_entry()));
-                        toml::to_string_pretty(&parsed).unwrap_or_else(|_| fresh())
-                    }
-                    None => fresh(),
+        // This file is the user's codex config — `model`, `approval_policy`,
+        // their own hooks. Rewriting it from scratch because we couldn't parse
+        // it (one trailing comma, a half-finished edit) destroys all of it.
+        Ok(text) if !text.trim().is_empty() => {
+            let mut parsed: toml::Value = toml::from_str(&text).map_err(|e| {
+                refuse(&format!(
+                    "{}: refusing to overwrite — exists but isn't valid TOML ({e}); \
+                     fix or delete it",
+                    path.display()
+                ))
+            })?;
+            let servers_ok = parsed.as_table_mut().and_then(|t| {
+                let entry = t
+                    .entry("mcp_servers")
+                    .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+                entry.as_table_mut()
+            });
+            match servers_ok {
+                Some(map) => {
+                    map.insert("spyc".to_string(), toml::Value::Table(build_entry()));
+                    // Re-serializing a table we only inserted into can still
+                    // fail on TOML's values-before-tables rule. Refuse rather
+                    // than fall back to `fresh()` — that would be the clobber.
+                    toml::to_string_pretty(&parsed).map_err(|e| {
+                        refuse(&format!(
+                            "{}: refusing to overwrite — merged config won't \
+                             re-serialize ({e})",
+                            path.display()
+                        ))
+                    })?
+                }
+                None => {
+                    return Err(refuse(&format!(
+                        "{}: refusing to overwrite — top level or `mcp_servers` is not a table",
+                        path.display()
+                    )));
                 }
             }
-            Err(_) => fresh(),
-        },
-        Err(_) => fresh(),
+        }
+        Ok(_) => fresh(),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => fresh(),
+        Err(e) => {
+            return Err(io::Error::new(
+                e.kind(),
+                format!("reading {}: {e}", path.display()),
+            ));
+        }
     };
 
     // Create the `.codex/` parent directory if missing.
