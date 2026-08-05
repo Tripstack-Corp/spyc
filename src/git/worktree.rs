@@ -314,9 +314,10 @@ fn write_index_with_lock_retry(index: &mut gix::index::File) -> std::io::Result<
             }
             Err(e) => {
                 return Err(std::io::Error::other(format!(
-                    "write index ({} attempt(s)): {}",
+                    "write index ({} attempt(s)): {}{}",
                     attempt,
-                    error_chain(&e)
+                    error_chain(&e),
+                    describe_index_parent(index.path())
                 )));
             }
         }
@@ -324,6 +325,52 @@ fn write_index_with_lock_retry(index: &mut gix::index::File) -> std::io::Result<
     // The `attempt < ATTEMPTS` guard routes the final attempt's errors to the
     // catch-all above, so every path through the loop has already returned.
     unreachable!("write_index_with_lock_retry loop always returns")
+}
+
+/// Describe the state of the directory the index lock lives in, for a failure
+/// message. Empty string when the directory is present and readable (the boring
+/// case needs no words).
+///
+/// This exists to settle one specific recurring CI failure. `write index (1
+/// attempt(s)): Could not acquire lock … -> No such file or directory … at
+/// "<admin>/index.lock"` means nobody is holding the lock — the lock file's
+/// PARENT is missing. That should be impossible: `materialize_worktree` calls
+/// `create_dir_all(admin_dir)` before `checkout_and_write`, and the only thing
+/// between them is a checkout into a disjoint directory. Three rounds of
+/// retry-widening were spent on this while it was still being read as lock
+/// contention, so the next occurrence should answer the question instead of
+/// prompting a fourth guess: did the directory never get created, did it vanish,
+/// or did an ancestor vanish (a tempdir cleaned early)?
+///
+/// Walks ancestors so a missing grandparent is distinguishable from a missing
+/// admin dir — the two implicate completely different culprits.
+fn describe_index_parent(index_path: &Path) -> String {
+    let Some(parent) = index_path.parent() else {
+        return format!(" [index path {} has no parent]", index_path.display());
+    };
+    match std::fs::read_dir(parent) {
+        // Present and readable: not the directory's fault, say nothing.
+        Ok(entries) => {
+            let n = entries.count();
+            if n == 0 {
+                format!(" [{} exists but is empty]", parent.display())
+            } else {
+                String::new()
+            }
+        }
+        Err(e) => {
+            // Find the nearest ancestor that DOES exist — that boundary is the
+            // useful fact.
+            let existing = parent
+                .ancestors()
+                .find(|a| a.exists())
+                .map_or_else(|| "(none)".to_string(), |a| a.display().to_string());
+            format!(
+                " [{} unreadable: {e}; nearest existing ancestor: {existing}]",
+                parent.display()
+            )
+        }
+    }
 }
 
 /// Whether a failed index write is worth another attempt.
@@ -1124,6 +1171,55 @@ mod tests {
         assert!(
             !index_path.exists(),
             "index must not be written out under a held lock"
+        );
+        // Contention is not a missing-directory fault, so the parent note stays
+        // out of the message — it would be noise on the common failure.
+        assert!(
+            !err.to_string().contains("nearest existing ancestor"),
+            "a held lock must not be reported as a directory problem: {err}"
+        );
+    }
+
+    /// A write whose target directory is MISSING must say so.
+    ///
+    /// This reproduces the CI failure's shape deliberately: the outer error is
+    /// `Could not acquire lock`, but nothing holds the lock — the parent is gone.
+    /// Three rounds of retry-widening were spent while that read as contention, so
+    /// the message now has to distinguish them, and it has to name the nearest
+    /// ancestor that does exist (a missing grandparent implicates a different
+    /// culprit than a missing admin dir).
+    #[test]
+    fn a_missing_parent_directory_is_reported_as_such_not_as_contention() {
+        let (_tmp, main) = init_repo();
+        let repo = gix::open(&main).expect("open repo");
+        let tree = repo
+            .head_commit()
+            .expect("head commit")
+            .tree_id()
+            .expect("tree id")
+            .detach();
+        let mut index = repo.index_from_tree(&tree).expect("index from tree");
+
+        // Two levels of missing directory, so the "nearest existing ancestor"
+        // report has something non-trivial to find.
+        let missing = main.join(".git").join("gone").join("deeper");
+        index.set_path(missing.join("index"));
+
+        let err = super::write_index_with_lock_retry(&mut index)
+            .expect_err("writing into a missing directory must fail");
+        let msg = err.to_string();
+        // Failed fast — this is deterministic, not contention.
+        assert!(
+            msg.contains("1 attempt(s)"),
+            "a missing directory must not burn the retry budget: {msg}"
+        );
+        assert!(
+            msg.contains("nearest existing ancestor"),
+            "must report the directory state, not just the lock error: {msg}"
+        );
+        assert!(
+            msg.contains(".git"),
+            "the nearest existing ancestor should be named: {msg}"
         );
     }
 
