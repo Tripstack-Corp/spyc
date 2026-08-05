@@ -448,7 +448,20 @@ impl App {
     /// on the file-list path — when a top-overlay owns the screen the list
     /// isn't drawn and its derived state isn't consulted, matching
     /// `render_inner`'s overlay early-return.
-    fn prepare_frame(&mut self, area: ratatui::layout::Rect) -> FrameLayout {
+    /// The frame's geometry for `area` — **the single source of truth**.
+    ///
+    /// `&self` and side-effect-free, so anything that needs to know where a rect
+    /// is can ask, rather than reassembling the pipeline and getting a subtly
+    /// different answer. `prepare_frame` calls this and then settles render state;
+    /// `App::handle_mouse` calls it to hit-test the pointer.
+    ///
+    /// It exists because the mouse *did* reassemble it, and got three things
+    /// wrong: it omitted `pane_hidden`, used the raw `pane_height_pct` instead of
+    /// `effective_pane_pct()` (so `^a z` zoom was invisible), and never called
+    /// `carve_vsplit` — which meant `layout.right`/`vdivider` were permanently
+    /// `None` there and the whole right column hit-tested as the left one. Any
+    /// future consumer would have had the same three chances to diverge.
+    pub(crate) fn frame_layout(&self, area: ratatui::layout::Rect) -> FrameLayout {
         // Layout:
         //   - No pane: status (top row), list (middle), prompt (bottom row).
         //   - With pane: status (top row of the top *pane*), list (rest of
@@ -476,6 +489,11 @@ impl App {
         // Grow the prompt upward to fit a long, wrapped command line (runs after
         // the carve so it uses the final, possibly column-scoped, prompt width).
         self.grow_prompt_for_wrap(&mut layout, area);
+        layout
+    }
+
+    fn prepare_frame(&mut self, area: ratatui::layout::Rect) -> FrameLayout {
+        let layout = self.frame_layout(area);
         if self.runtime.top_overlay.is_none() {
             self.settle_list_grid(&layout);
         }

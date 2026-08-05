@@ -854,6 +854,16 @@ pub struct ViewState {
     tab_state: Option<TabState>,
     /// Scroll throttle: timestamp + direction of last processed arrow key.
     pub scroll_last: Option<(std::time::Instant, KeyCode)>,
+    /// A forwarded mouse press is awaiting its release.
+    ///
+    /// Set when a button press is delivered to the pane's child, cleared when the
+    /// matching release is. Keyed on "did the press go to the child" rather than on
+    /// where the pointer is now, which is what makes the pairing exact: a press
+    /// that moved the file-list focus must not produce a release for the child, and
+    /// a press the child DID receive must get its release even if the pointer left
+    /// the pane first. Children track button state — claude fires its click on the
+    /// release — so both an unpaired and a missing release misbehave.
+    pub mouse_press_forwarded: bool,
     /// Whether an agent-transcript scrollback (`^a v`) renders the agent's
     /// tool-use / tool-result lines. `t` toggles it; the transcript is
     /// re-rendered with the new value. Session-scoped (persists across
@@ -946,6 +956,7 @@ impl ViewState {
             // turns it on at the first loop bottom if config asks for it.
             tab_state: None,
             scroll_last: None,
+            mouse_press_forwarded: false,
             transcript_show_tool_calls: true,
             term_size: crossterm::terminal::size().unwrap_or((80, 24)),
         }
