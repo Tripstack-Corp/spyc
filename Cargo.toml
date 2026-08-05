@@ -80,6 +80,10 @@ pretty-hex = "0.4"
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
 unicode-width = "0.2"
+# Grapheme-cluster segmentation. `unicode-width` scores a cluster (e.g. a
+# base char + U+FE0F) wider than the sum of its chars, so anything that
+# measures text incrementally has to advance by cluster to agree with it.
+unicode-segmentation = "1"
 libc = "0.2"
 ignore = "0.4"
 # Git plumbing — the gitoxide crate. Pure-Rust (zlib-rs is the default

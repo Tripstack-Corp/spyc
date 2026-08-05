@@ -4385,6 +4385,7 @@ dependencies = [
  "toml",
  "trash",
  "two-face",
+ "unicode-segmentation",
  "unicode-width",
  "uuid",
  "uzers",
