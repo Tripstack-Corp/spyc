@@ -41,12 +41,28 @@ with **coordinates**, which is what makes correct routing possible.
 > **Loss of native click-drag text selection.** Any mouse capture takes selection
 > away from the terminal emulator; the user must hold a bypass modifier
 > (Shift on most, Option or Fn on iTerm2, Shift on Ghostty/WezTerm/kitty).
-> Therefore: **opt-in, default off**, plus a `:mouse on|off` runtime toggle so
-> selection can be reclaimed without editing the rc file and restarting.
-> Mitigation to document alongside it: `^a u` quick-select already yanks
-> URLs/paths/SHAs without the mouse, and `y` yanks in the scrollback pager.
-
-One decision remains — see **Open decisions** at the bottom.
+>
+> **Decision: ship `capture = true` — default ON.** Owner call: wheel-scrolling
+> the thing under the pointer is the behaviour spyc should have, and `-CURRENT` is
+> where a default of this size belongs. The cost is real but bounded, and it has
+> three outs: the bypass modifier, `:mouse off` at runtime, and `capture = false`
+> in the rc file.
+>
+> Because it's default-on, **discoverability of the out is now part of the work,
+> not a nicety.** The predictable support report is "spyc broke text selection in
+> my terminal", from a user who has no reason to connect it to a scroll feature.
+> Required, not optional:
+> - `?` help (`src/ui/help.rs`) and `FEATURES.md` name `:mouse off` next to the
+>   selection caveat.
+> - `CONFIGURATION.md` carries the per-terminal bypass-modifier table.
+> - The `CHANGELOG.md` entry leads with the selection change, not the scroll
+>   feature — this is the line someone greps after their muscle memory breaks.
+> - `^a u` quick-select (URLs/paths/SHAs) and `y` in the pager are the
+>   mouse-free yank paths to point at.
+>
+> spyc has daily users (internal engineers), so expect this to generate feedback
+> quickly — which is the point of landing it on `-CURRENT` rather than in a
+> release.
 
 ## Scope: forward to the child, don't reimplement scrolling
 
@@ -263,9 +279,12 @@ existing per-feature shape (`layout`, `pane`, `yank`, `pager`, `markdown`,
 
 ```toml
 [mouse]
-# Real mouse reporting (wheel + click). Breaks native click-drag selection —
-# hold Shift (most terminals) or Option/Fn (iTerm2) to bypass. Default off.
-capture = false
+# Real mouse reporting (wheel + click): scroll whatever is under the pointer.
+# Breaks native click-drag selection — hold Shift (most terminals) or
+# Option/Fn (iTerm2) to bypass, or `:mouse off` to reclaim it for this session.
+# TARGET DEFAULT: true. Ships `false` through PR 1 (which has no mouse handling
+# yet) and flips in PR 2's last commit, once forwarding works — see PR split.
+capture = true
 # Lines per wheel tick, for the surfaces spyc scrolls itself (list, pager).
 # It does NOT apply to a pane forwarding to its child — the child receives one
 # event per tick and decides its own step.
@@ -367,16 +386,28 @@ well-typed commit subject — the commit *is* the changelog entry).
 
 Two PRs. The first is inert by design, so it can land and sit safely.
 
-1. **Terminal plumbing + pure routing** — wheel-reporting commands, `MouseConfig`,
-   `Effect::SetMouseMode`, `settle_mouse_mode` and all five lifecycle sites,
-   `:mouse on|off`, plus `src/app/mouse.rs` (snapshot, hit-test, `route_mouse`,
-   unit tests). No `Event::Mouse` arm yet, so with `capture = false` — the default
-   — behaviour is **identical to today**, and the routing logic lands fully tested
-   before anything depends on it.
-2. **Wire it up** — the `Event::Mouse` arm, `encode_mouse` (coords + child's
-   encoding), `pane_wants_mouse` gating, and the list/pager sinks. This is where
-   it starts working: wheel over an agent pane scrolls the agent, wheel over the
-   list moves the cursor, wheel over a pager scrolls it.
+> [!IMPORTANT]
+> **`capture` must ship `false` in PR 1 and flip to `true` at the END of PR 2.**
+> Default-on and "PR 1 is inert" are mutually exclusive: PR 1 has no
+> `Event::Mouse` arm, and enabling capture also emits `DisableAlternateScroll`
+> (Tier 1). So a default-on PR 1 would land a `main` where selection is broken,
+> 1007 wheel→arrow is off, and mouse events are dropped on the floor
+> (`run.rs:211`) — the wheel would do *nothing at all*, strictly worse than today
+> on every axis. Same destination, no broken intermediate: flip the default in the
+> last commit of PR 2, once forwarding actually works.
+
+1. **Terminal plumbing + pure routing** — wheel-reporting commands, `MouseConfig`
+   (**`capture = false` for now**), `Effect::SetMouseMode`, `settle_mouse_mode` and
+   all five lifecycle sites, `:mouse on|off`, plus `src/app/mouse.rs` (snapshot,
+   hit-test, `route_mouse`, unit tests). No `Event::Mouse` arm yet, so behaviour is
+   **identical to today**, and the routing logic lands fully tested before anything
+   depends on it.
+2. **Wire it up, then flip the default** — the `Event::Mouse` arm, `encode_mouse`
+   (coords + child's encoding), `pane_wants_mouse` gating, and the list/pager
+   sinks. This is where it starts working: wheel over an agent pane scrolls the
+   agent, wheel over the list moves the cursor, wheel over a pager scrolls it.
+   Final commit: `capture` default → `true`, plus the discoverability docs the
+   warning above makes mandatory.
 
 If PR 2 wants splitting further, the seam is pane-forwarding vs the
 list/pager sinks — but they share the `Event::Mouse` arm, so landing them together
@@ -433,6 +464,12 @@ silently dies over another.
     scrollback.
 13. Idle with `capture = true` and wave the pointer over the terminal: `A`
     activity overlay must show **no** draws.
+14. Default-on sanity, on a machine with **no** `.spycrc.toml`: wheel scrolls the
+    thing under the pointer out of the box, and `:mouse off` restores selection
+    without a restart.
+15. Confirm PR 1 in isolation (before the flip) leaves `capture = false` and
+    behaves exactly like today — the guard against landing the broken
+    intermediate the PR-split note describes.
 
 ## Open decisions
 
@@ -440,8 +477,11 @@ silently dies over another.
    **Resolved: neither, in v1.** Mounting is rejected outright (loop stalls,
    transcript hijack); reverse-scroll is deferred. Wheel over a non-mouse pane is
    a no-op — see *Deferred*.
-2. **Ship `capture` default-off permanently, or flip it once forwarding lands?**
-   Once agent panes forward natively, capture-on is a large win for the primary
-   workflow and the only cost is click-drag selection (which has a modifier
-   bypass and a `^a u` alternative). Proposal: ship off, flip in a later minor
-   after dog-fooding.
+2. ~~**Ship `capture` default-off permanently, or flip it once forwarding lands?**~~
+   **Resolved: default ON**, flipped once the feature is ready rather than in a
+   later minor — `-CURRENT` is the right place for a default this size. Mechanics
+   in the PR split: `false` through PR 1, `true` in PR 2's final commit. The
+   discoverability work in *User review required* is part of that commit, not a
+   follow-up.
+
+**No open decisions remain — the plan is ready to implement.**
