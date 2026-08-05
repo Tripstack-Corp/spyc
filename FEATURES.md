@@ -540,8 +540,9 @@ end).
 - **`:marks`** — show all marks in a pager popup
 - **`:set key=value`** — runtime settings (e.g. `:set sort=mtime`)
 - **`:bprev`** / **`:bnext`** — navigate pager buffer history (also `[b`/`]b` in pager)
-- **`:mouse on|off`** — real mouse reporting, so the wheel scrolls whatever is
-  under the pointer instead of sending arrow keys. **Costs native click-drag text
+- **`:mouse on|off`** — real mouse reporting: the wheel scrolls whatever is under
+  the pointer, left-click focuses that region (and clicks through to a mouse-aware
+  agent), middle-click pastes, right-click opens the leader menu. **Costs native click-drag text
   selection while on** (hold Shift to select anyway — Option/Fn on iTerm2);
   `:mouse off` gives it back immediately, no restart. Default off (`[mouse]
   capture`). `^a u` quick-select and `y` in the pager are the mouse-free yank

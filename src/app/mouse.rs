@@ -64,6 +64,26 @@ pub(super) enum MouseSink {
     Pager(Mount),
     /// Encode and forward to the pane's child (which requested mouse reporting).
     PaneForward,
+    /// Give the keyboard to the region under the pointer.
+    FocusRegion,
+    /// Paste the system clipboard wherever a paste would land.
+    Paste,
+    /// Open the leader menu (right-click, from anywhere).
+    LeaderMenu,
+}
+
+/// What the user did, reduced to the axis routing cares about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Gesture {
+    /// A wheel tick. Direction is the caller's business — routing is the same
+    /// either way.
+    Wheel,
+    /// Left button pressed.
+    Left,
+    /// Middle button pressed.
+    Middle,
+    /// Right button pressed.
+    Right,
 }
 
 /// The App-state bits the mouse decision reads. `Copy` so tests build one
@@ -87,7 +107,7 @@ pub(super) struct MouseSnapshot {
 /// Order matters and mirrors `route_input`'s: a modal wins over everything, then
 /// the region decides. A pager mounted as an overlay covers the list, so it takes
 /// events aimed at the list region.
-pub(super) const fn route_mouse(snap: MouseSnapshot) -> MouseSink {
+pub(super) const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
     // A modal owns the whole screen; the pointer's region is irrelevant.
     if snap.modal.is_some() {
         return MouseSink::Swallow;
@@ -95,6 +115,28 @@ pub(super) const fn route_mouse(snap: MouseSnapshot) -> MouseSink {
     let Some(region) = snap.region else {
         return MouseSink::Swallow;
     };
+
+    // Middle and right are spyc's everywhere, never forwarded — otherwise the
+    // gesture would be unavailable in exactly the region where the pane has
+    // focus, which is where you'd reach for it. Documented alongside the
+    // selection caveat, since `:mouse off` is the way to get the child's own
+    // right-click menu back.
+    match gesture {
+        Gesture::Middle => return MouseSink::Paste,
+        Gesture::Right => return MouseSink::LeaderMenu,
+        Gesture::Left => {
+            // Left is click-THROUGH: focus the region, and (for a mouse-aware
+            // child) let the event reach it too. The pane is live and visible, so
+            // swallowing the first click just to focus would read as broken.
+            return if matches!(region, Region::Pane) && snap.pane_wants_mouse {
+                MouseSink::PaneForward
+            } else {
+                MouseSink::FocusRegion
+            };
+        }
+        Gesture::Wheel => {}
+    }
+
     match region {
         // An `Overlay`/`TopPane` pager is painted over the list, so a pointer in
         // the list region is really over the pager.
@@ -165,7 +207,7 @@ pub(super) const fn region_at(layout: &FrameLayout, col: u16, row: u16) -> Optio
 
 // ── wiring: the impure half ───────────────────────────────────────────────
 
-use crossterm::event::{MouseEvent, MouseEventKind};
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 impl super::App {
     /// Handle one mouse event: hit-test the pointer, route it, dispatch the sink.
@@ -177,13 +219,19 @@ impl super::App {
         // deliberately reached through one `MouseEventKind` match so adding them
         // is contained.
         let lines = self.state.config.mouse.scroll_lines.max(1);
-        let delta: i32 = match ev.kind {
-            MouseEventKind::ScrollUp => -i32::try_from(lines).unwrap_or(i32::MAX),
-            MouseEventKind::ScrollDown => i32::try_from(lines).unwrap_or(i32::MAX),
-            // Buttons/motion/horizontal: no behaviour yet. Matching explicitly
-            // (rather than `_ => return`) keeps the addition a visible decision.
-            MouseEventKind::Down(_)
-            | MouseEventKind::Up(_)
+        // `delta` is only meaningful for a wheel gesture; buttons ignore it.
+        let (gesture, delta): (Gesture, i32) = match ev.kind {
+            MouseEventKind::ScrollUp => (Gesture::Wheel, -i32::try_from(lines).unwrap_or(i32::MAX)),
+            MouseEventKind::ScrollDown => {
+                (Gesture::Wheel, i32::try_from(lines).unwrap_or(i32::MAX))
+            }
+            MouseEventKind::Down(MouseButton::Left) => (Gesture::Left, 0),
+            MouseEventKind::Down(MouseButton::Middle) => (Gesture::Middle, 0),
+            MouseEventKind::Down(MouseButton::Right) => (Gesture::Right, 0),
+            // Releases, drags, motion, horizontal wheel: no behaviour. Matched
+            // explicitly (rather than `_ => return`) so adding one is a visible
+            // decision here, not a silent fallthrough.
+            MouseEventKind::Up(_)
             | MouseEventKind::Drag(_)
             | MouseEventKind::Moved
             | MouseEventKind::ScrollLeft
@@ -218,7 +266,7 @@ impl super::App {
                 .is_some_and(|t| t.active().wants_mouse()),
         };
 
-        match route_mouse(snap) {
+        match route_mouse(snap, gesture) {
             MouseSink::Swallow => Vec::new(),
             MouseSink::ListCursor => {
                 // Reuse the cursor Actions rather than poking the cursor: they
@@ -240,6 +288,21 @@ impl super::App {
                 self.scroll_active_pager_by(delta);
                 Vec::new()
             }
+            MouseSink::FocusRegion => {
+                self.focus_region(region);
+                Vec::new()
+            }
+            MouseSink::Paste => vec![Effect::PasteFromClipboard],
+            MouseSink::LeaderMenu => {
+                self.state.resolver.enter_leader();
+                // Show the which-key popup NOW rather than after
+                // `chord_hint_delay_ms`: that debounce exists so a keyboard user
+                // mid-chord isn't startled by a popup, and a deliberate
+                // right-click has no such problem. Due-in-the-past makes the
+                // existing `settle_chord_hint` build it on this same iteration.
+                self.view.chord_hint_due = Some(std::time::Instant::now());
+                Vec::new()
+            }
             MouseSink::PaneForward => {
                 let report = wheel_report(ev, delta < 0, &layout);
                 if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
@@ -254,6 +317,31 @@ impl super::App {
                 }
                 Vec::new()
             }
+        }
+    }
+}
+
+impl super::App {
+    /// Give the keyboard to `region`, reusing the same entry points `^a j`/`^a k`
+    /// and `^a a`/`^a b` use.
+    ///
+    /// `set_pane_focus` is doing real work here, not just being tidy: it declines
+    /// while `^a z`-zoomed (the target region is collapsed off-screen) and, coming
+    /// back from the pane, restores whichever split column the user left from.
+    /// Assigning `state.focus` directly would lose both.
+    fn focus_region(&mut self, region: Option<Region>) {
+        match region {
+            Some(Region::Pane) => self.set_pane_focus(true),
+            Some(Region::List) => {
+                self.set_pane_focus(false);
+                self.vsplit_focus(crate::app::state::Side::Left);
+            }
+            Some(Region::RightColumn) => {
+                self.set_pane_focus(false);
+                self.vsplit_focus(crate::app::state::Side::Right);
+            }
+            // Chrome and off-frame: nothing owns the keyboard there.
+            Some(Region::Divider | Region::Prompt | Region::Status | Region::VDivider) | None => {}
         }
     }
 }
@@ -288,7 +376,7 @@ fn wheel_report(
 
 #[cfg(test)]
 mod tests {
-    use super::{MouseSink, MouseSnapshot, Region, region_at, route_mouse};
+    use super::{Gesture, MouseSink, MouseSnapshot, Region, region_at, route_mouse};
     use crate::app::App;
     use crate::config::StatusPosition;
     use crate::ui::pager::Mount;
@@ -324,7 +412,7 @@ mod tests {
                     ..snap(Some(region))
                 };
                 assert_eq!(
-                    route_mouse(s),
+                    route_mouse(s, Gesture::Wheel),
                     MouseSink::Swallow,
                     "{modal:?} over {region:?} must swallow"
                 );
@@ -341,7 +429,7 @@ mod tests {
             pane_wants_mouse: true,
             ..snap(Some(Region::Pane))
         };
-        assert_eq!(route_mouse(s), MouseSink::PaneForward);
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::PaneForward);
     }
 
     #[test]
@@ -350,14 +438,17 @@ mod tests {
         // types `\e[<64;20;5M` into its prompt. Silence is the correct v1 answer.
         let s = snap(Some(Region::Pane));
         assert!(!s.pane_wants_mouse);
-        assert_eq!(route_mouse(s), MouseSink::Swallow);
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
     }
 
     #[test]
     fn list_routes_to_the_cursor_or_to_a_pager_covering_it() {
-        assert_eq!(route_mouse(snap(Some(Region::List))), MouseSink::ListCursor);
         assert_eq!(
-            route_mouse(snap(Some(Region::RightColumn))),
+            route_mouse(snap(Some(Region::List)), Gesture::Wheel),
+            MouseSink::ListCursor
+        );
+        assert_eq!(
+            route_mouse(snap(Some(Region::RightColumn)), Gesture::Wheel),
             MouseSink::ListCursor
         );
         // A mounted pager is painted over the list, so it takes those events.
@@ -366,7 +457,7 @@ mod tests {
                 pager_mount: Some(mount),
                 ..snap(Some(Region::List))
             };
-            assert_eq!(route_mouse(s), MouseSink::Pager(mount));
+            assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Pager(mount));
         }
     }
 
@@ -379,12 +470,12 @@ mod tests {
             Region::VDivider,
         ] {
             assert_eq!(
-                route_mouse(snap(Some(region))),
+                route_mouse(snap(Some(region)), Gesture::Wheel),
                 MouseSink::Swallow,
                 "{region:?}"
             );
         }
-        assert_eq!(route_mouse(snap(None)), MouseSink::Swallow);
+        assert_eq!(route_mouse(snap(None), Gesture::Wheel), MouseSink::Swallow);
     }
 
     /// Hit-testing against the real `compute_layout`, for both status positions.
@@ -434,6 +525,97 @@ mod tests {
         for row in 0..24 {
             assert_ne!(region_at(&layout, 0, row), Some(Region::Pane), "row {row}");
         }
+    }
+
+    /// Middle and right are spyc's from EVERY region, including over a
+    /// mouse-aware child. Forwarding them would make the gesture unavailable in
+    /// exactly the region where the pane holds focus — which is where a user
+    /// would reach for it.
+    #[test]
+    fn middle_and_right_are_never_forwarded_even_to_a_mouse_aware_child() {
+        for region in [Region::List, Region::Pane, Region::RightColumn] {
+            let s = MouseSnapshot {
+                pane_wants_mouse: true,
+                ..snap(Some(region))
+            };
+            assert_eq!(
+                route_mouse(s, Gesture::Middle),
+                MouseSink::Paste,
+                "{region:?}: middle-click pastes"
+            );
+            assert_eq!(
+                route_mouse(s, Gesture::Right),
+                MouseSink::LeaderMenu,
+                "{region:?}: right-click opens the leader menu"
+            );
+        }
+    }
+
+    /// Left is click-through: over a mouse-aware child the event reaches the
+    /// child; everywhere else it moves the keyboard.
+    #[test]
+    fn left_click_focuses_but_forwards_into_a_mouse_aware_pane() {
+        let aware = MouseSnapshot {
+            pane_wants_mouse: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(aware, Gesture::Left), MouseSink::PaneForward);
+
+        // A child that never asked for mouse still gets focused, not forwarded —
+        // the #170 gate applies to buttons exactly as it does to the wheel.
+        let unaware = snap(Some(Region::Pane));
+        assert_eq!(route_mouse(unaware, Gesture::Left), MouseSink::FocusRegion);
+
+        for region in [Region::List, Region::RightColumn] {
+            assert_eq!(
+                route_mouse(snap(Some(region)), Gesture::Left),
+                MouseSink::FocusRegion,
+                "{region:?}"
+            );
+        }
+    }
+
+    /// A modal still wins over every button, not just the wheel.
+    #[test]
+    fn a_modal_swallows_buttons_too() {
+        use crate::app::modal::Modal;
+        let s = MouseSnapshot {
+            modal: Some(Modal::FindPicker),
+            pane_wants_mouse: true,
+            ..snap(Some(Region::Pane))
+        };
+        for gesture in [
+            Gesture::Left,
+            Gesture::Middle,
+            Gesture::Right,
+            Gesture::Wheel,
+        ] {
+            assert_eq!(
+                route_mouse(s, gesture),
+                MouseSink::Swallow,
+                "{gesture:?} must not bypass a modal"
+            );
+        }
+    }
+
+    /// Clicking chrome or off-frame moves nothing — but middle/right still act,
+    /// since they aren't about the region.
+    #[test]
+    fn chrome_focuses_nothing_but_still_pastes_and_opens_the_menu() {
+        for region in [Region::Divider, Region::Status, Region::Prompt] {
+            assert_eq!(
+                route_mouse(snap(Some(region)), Gesture::Left),
+                MouseSink::FocusRegion,
+                "{region:?}: routed, then `focus_region` no-ops on chrome"
+            );
+            assert_eq!(
+                route_mouse(snap(Some(region)), Gesture::Middle),
+                MouseSink::Paste
+            );
+        }
+        // Off-frame is the one case where even middle/right do nothing: there is
+        // no region, so the early return fires before the gesture match.
+        assert_eq!(route_mouse(snap(None), Gesture::Middle), MouseSink::Swallow);
     }
 
     /// Coordinate translation, for both `status_position` values — the trap
