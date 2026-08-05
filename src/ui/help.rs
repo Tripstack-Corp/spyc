@@ -266,7 +266,7 @@ const SECTIONS: &[Section] = &[
                 "claude/codex/agy auto-status hooks (asked once on launch); on! restarts+resumes a claude pane",
             ),
             (
-                ":mouse on|off",
+                ":mouse on|off|auto",
                 "real mouse reporting (scroll what's under the pointer); off restores terminal text selection",
             ),
             (

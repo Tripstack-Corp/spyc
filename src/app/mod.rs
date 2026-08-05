@@ -849,13 +849,6 @@ pub struct ViewState {
     /// P3-1 `desktop_via = "auto"` routing — OSC-9 (client-side) over SSH, the OS
     /// notifier locally — so the pure `notification_for_transition` never reads env.
     pub is_ssh: bool,
-    /// What mouse mode the TERMINAL is currently in — not what the user asked
-    /// for (that's `state.config.mouse.capture`). `App::settle_mouse_mode`
-    /// reconciles the two at loop bottom, so this is the "actual" half of the
-    /// pair and the reason the reconcile can be idempotent. Reset to `false` by
-    /// the `ForegroundExec` executor, since `suspend_tui` hands reporting to the
-    /// child.
-    pub mouse_capture_on: bool,
     /// Tab-completion / cycle state.
     // Module-private (type `TabState` is module-private).
     tab_state: Option<TabState>,
@@ -951,7 +944,6 @@ impl ViewState {
             // `setup_terminal` starts us in 1007 alternate-scroll, so the
             // terminal is NOT in real mouse reporting yet. `settle_mouse_mode`
             // turns it on at the first loop bottom if config asks for it.
-            mouse_capture_on: false,
             tab_state: None,
             scroll_last: None,
             transcript_show_tool_calls: true,
