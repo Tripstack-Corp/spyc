@@ -64,6 +64,11 @@ pub(super) enum MouseSink {
     Pager(Mount),
     /// Encode and forward to the pane's child (which requested mouse reporting).
     PaneForward,
+    /// Give the keyboard to the pane AND forward the event to its child — the
+    /// left-click-through contract. Both halves, in one variant, because a sink
+    /// that only forwarded was how the focus half came to be silently missing
+    /// while a test asserting the sink still passed.
+    FocusAndForward,
     /// Give the keyboard to the region under the pointer.
     FocusRegion,
     /// Paste the system clipboard wherever a paste would land.
@@ -129,7 +134,7 @@ pub(super) const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseS
             // child) let the event reach it too. The pane is live and visible, so
             // swallowing the first click just to focus would read as broken.
             return if matches!(region, Region::Pane) && snap.pane_wants_mouse {
-                MouseSink::PaneForward
+                MouseSink::FocusAndForward
             } else {
                 MouseSink::FocusRegion
             };
@@ -215,9 +220,19 @@ impl super::App {
     /// Only reachable while `[mouse] capture` is on — with it off the terminal
     /// sends DEC 1007 arrow keys instead and this never fires.
     pub(super) fn handle_mouse(&mut self, ev: MouseEvent) -> Vec<Effect> {
-        // Wheel only for now; buttons are a later change and `route_mouse` is
-        // deliberately reached through one `MouseEventKind` match so adding them
-        // is contained.
+        let (cols, rows) = self.view.term_size;
+        let frame = ratatui::layout::Rect::new(0, 0, cols, rows);
+
+        // A release is not a routing decision — it belongs to whoever received the
+        // press, and forwarding it is an obligation rather than a choice. A child
+        // that gets a press with no matching release believes the button is still
+        // held: claude's own handler starts a selection on press and fires the
+        // actual click on RELEASE, so a press-only click leaves it drag-selecting
+        // forever and never clicks anything.
+        if let MouseEventKind::Up(button) = ev.kind {
+            return self.forward_release(ev, button, &frame);
+        }
+
         let lines = self.state.config.mouse.scroll_lines.max(1);
         // `delta` is only meaningful for a wheel gesture; buttons ignore it.
         let (gesture, delta): (Gesture, i32) = match ev.kind {
@@ -228,9 +243,13 @@ impl super::App {
             MouseEventKind::Down(MouseButton::Left) => (Gesture::Left, 0),
             MouseEventKind::Down(MouseButton::Middle) => (Gesture::Middle, 0),
             MouseEventKind::Down(MouseButton::Right) => (Gesture::Right, 0),
-            // Releases, drags, motion, horizontal wheel: no behaviour. Matched
-            // explicitly (rather than `_ => return`) so adding one is a visible
-            // decision here, not a silent fallthrough.
+            // Drags, motion, horizontal wheel: no behaviour. spyc asks the terminal
+            // only for 1000 (press/release), so `Moved`/`Drag` shouldn't arrive at
+            // all — `proc.rs` filters them for the terminals that send them anyway.
+            // Consequence, deliberate: click-drag selection INSIDE a child doesn't
+            // work. That needs 1002 (motion only while a button is held), which
+            // unlike 1003 wouldn't cost the idle-redraw invariant — a later change.
+            // Matched explicitly so adding one is a visible decision here.
             MouseEventKind::Up(_)
             | MouseEventKind::Drag(_)
             | MouseEventKind::Moved
@@ -238,13 +257,10 @@ impl super::App {
             | MouseEventKind::ScrollRight => return Vec::new(),
         };
 
-        let (cols, rows) = self.view.term_size;
-        let layout = Self::compute_layout(
-            ratatui::layout::Rect::new(0, 0, cols, rows),
-            self.runtime.pane_tabs.is_some(),
-            self.state.pane.pane_height_pct,
-            self.state.config.layout.status_position,
-        );
+        // The renderer's own layout — including the vsplit carve, `^a z` zoom and
+        // `pane_hidden`. Reassembling it here is what made zoomed clicks land on
+        // an off-screen list and the right column hit-test as the left.
+        let layout = self.frame_layout(frame);
         let region = region_at(&layout, ev.column, ev.row);
 
         let snap = MouseSnapshot {
