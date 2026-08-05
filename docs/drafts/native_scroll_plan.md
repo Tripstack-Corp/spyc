@@ -4,7 +4,9 @@
 
 Wheel/trackpad scrolling that means "scroll the thing under my pointer" — most of
 all **scrollback in the agent / process panes**, which is where the current
-approach fails hardest.
+approach fails hardest — plus the three button gestures a captured mouse owes the
+user back: left-click focus, middle-click paste, right-click leader menu
+(Tier 3b), each rebindable (see *Mouse bindings*).
 
 Today spyc enables DEC private mode 1007 (`EnableAlternateScroll`, `src/lib.rs:441`),
 asking the terminal to translate wheel motion into `Up`/`Down` arrow keys. That
@@ -380,7 +382,7 @@ existing per-feature shape (`layout`, `pane`, `yank`, `pager`, `markdown`,
 # Breaks native click-drag selection — hold Shift (most terminals) or
 # Option/Fn (iTerm2) to bypass, or `:mouse off` to reclaim it for this session.
 # TARGET DEFAULT: true. Ships `false` through PR 1 (which has no mouse handling
-# yet) and flips in PR 2's last commit, once forwarding works — see PR split.
+# yet) and flips in PR 3's last commit, once wheel AND buttons work — see PR split.
 capture = true
 # Lines per wheel tick, for the surfaces spyc scrolls itself (list, pager).
 # It does NOT apply to a pane forwarding to its child — the child receives one
@@ -392,6 +394,69 @@ Plus `:mouse` (`app("mouse", …)` in `COMMAND_TABLE`, alongside `hooks` and `lu
 at `command_table.rs:110,113`) for `on` / `off` / bare-status. Runtime toggle
 matters here more than usual — it's the escape hatch when a user needs selection
 back *now*.
+
+#### Mouse bindings — customizable, including Lua
+
+Users must be able to rebind the buttons (and hang a Lua script off one). The
+cheap way to get this is to add **no new binding surface at all**: teach the
+existing chord representation to name a mouse button, and `map` / `unmap` /
+`BoundAction` / the trust gate / `spyc.map` all work unchanged.
+
+```toml
+keymap = [
+  "map <RightClick> command graveyard",   # instead of the leader menu
+  "map <MiddleClick> lua paste_and_fmt",  # $HOME config only — see below
+  "unmap <RightClick>",                   # disable the leader-menu default
+]
+```
+
+Everything downstream already exists and needs no new concepts:
+
+- **`BoundAction`** (`keymap/user.rs:112`) is already the full vocabulary —
+  `Plain(Action)` / `UnixCmd` / `PatternPick` / `Jump` / `ToggleMaskFixed` /
+  `Command` / `Lua`. A mouse binding is a *new key shape for the same values*, not
+  a new kind of action. (This is the inverse of the rejection in *Why not add
+  `Action` variants* below: that says don't invent mouse-flavoured `Action`s; this
+  says do let a mouse gesture invoke the actions that already exist.)
+- **`spyc.map(key, fn)`** already carries a DSL key string (`RegKind::Map(String)`,
+  `lua/bridge.rs:58`), so `spyc.map("<MiddleClick>", fn)` needs zero Lua-side work.
+- **`describe()`** (`user.rs:134`) already renders these for the `?` overlay.
+- **`<Angle>` tokens** are established DSL syntax (`<F2>`), so `<LeftClick>` /
+  `<MiddleClick>` / `<RightClick>` fit the existing grammar.
+
+> [!WARNING]
+> **The `$HOME`-only gate is load-bearing here, and it's the same RCE vector.**
+> `config/mod.rs:735` drops any `is_executing()` binding — `UnixCmd` / `Jump` /
+> `Command` / `Lua` — from a `Trust::Project` config, *silently*, and its comment
+> names it "the `.spycrc` keypress-RCE vector". A repo-local `.spycrc.toml` binding
+> `<RightClick>` to `unix rm -rf ~` must be dropped by exactly that check. Since
+> mouse chords reuse `UserBinding`, this is free — but it must be **tested**, not
+> assumed, because the failure is silent and the payload is now reachable by a
+> gesture a user makes casually rather than a key they chose to press.
+
+Three scope calls:
+
+**Buttons are bindable; the wheel is not.** `<WheelUp>`/`<WheelDown>` stay
+reserved and unbound. Wheel routing is *structural* — hit-test, then either
+forward to the child or scroll the surface — and "scroll" isn't one action but a
+different one per surface. A binding that intercepted it would break the plan's
+core promise for the sake of an unlikely customization.
+
+**A binding beats forwarding.** If a user binds `<LeftClick>`, it wins over
+click-through to a mouse-aware child. The alternative — forwarding first — means
+their binding silently does nothing over the agent pane, which is the worst
+outcome. Document the trade: binding left-click costs you click-through.
+
+**No region scoping in v1.** `map <RightClick>@pane` is tempting and cheap to add
+later (`route_mouse` already knows the region), but it doubles the grammar, and
+with right-click now always-leader there's no demand for it yet.
+
+> [!NOTE]
+> **Don't build on Shift.** `MouseEvent` carries modifiers, so `<S-RightClick>`
+> looks bindable — but Shift is the *selection-bypass* modifier on most terminals
+> (see the warning at the top), so a shift-click is frequently consumed by the
+> emulator and never reaches spyc. If modified mouse chords are ever supported,
+> Ctrl/Alt are the usable ones.
 
 ### Why not add `Action` variants
 
@@ -472,6 +537,11 @@ existing `view.scroll_last` arrow throttle (`run.rs:183`).
 | `src/app/commands.rs` + `command_table.rs` | `:mouse on\|off` |
 | `src/pane/input.rs` | `encode_mouse(ev, mode, encoding)` — pane-relative coords, child's encoding |
 | `src/pane/mod.rs` | expose the child's `mouse_protocol_mode`/`encoding`, mirroring `bracketed_paste_enabled` |
+| `src/clipboard.rs` | **new** clipboard *read* (`pbpaste` / `xclip -o` / `wl-paste`, or `arboard::get_text`) — write-only today |
+| `src/app/effect.rs` | `Effect::PasteFromClipboard` beside `CopyToClipboard`, for middle-click |
+| `src/keymap/resolver/` | enter `PendingSeq::Leader` from a right-click, hint shown with no delay |
+| `src/keymap/user.rs` | let a chord name a mouse button, reusing `UserBinding`/`BoundAction`/`describe` |
+| `src/config/dsl.rs` | `<LeftClick>`/`<MiddleClick>`/`<RightClick>` tokens for `map`/`unmap` |
 
 Docs, same commit (AGENTS.md "Keep docs in sync"): `AGENTS.md` (module index —
 guarded by `every_app_module_is_in_the_agents_index`), `FEATURES.md`,
@@ -481,17 +551,18 @@ well-typed commit subject — the commit *is* the changelog entry).
 
 ## Suggested PR split
 
-Two PRs. The first is inert by design, so it can land and sit safely.
+Three PRs. The first is inert by design, so it can land and sit safely; the
+default flip is the very last commit of the third.
 
 > [!IMPORTANT]
-> **`capture` must ship `false` in PR 1 and flip to `true` at the END of PR 2.**
+> **`capture` must ship `false` until the LAST commit of the last feature PR (PR 3).**
 > Default-on and "PR 1 is inert" are mutually exclusive: PR 1 has no
 > `Event::Mouse` arm, and enabling capture also emits `DisableAlternateScroll`
 > (Tier 1). So a default-on PR 1 would land a `main` where selection is broken,
 > 1007 wheel→arrow is off, and mouse events are dropped on the floor
 > (`run.rs:211`) — the wheel would do *nothing at all*, strictly worse than today
 > on every axis. Same destination, no broken intermediate: flip the default in the
-> last commit of PR 2, once forwarding actually works.
+> last commit of PR 3, once both the wheel and the buttons work.
 
 1. **Terminal plumbing + pure routing** — wheel-reporting commands, `MouseConfig`
    (**`capture = false` for now**), `Effect::SetMouseMode`, `settle_mouse_mode` and
@@ -499,17 +570,27 @@ Two PRs. The first is inert by design, so it can land and sit safely.
    hit-test, `route_mouse`, unit tests). No `Event::Mouse` arm yet, so behaviour is
    **identical to today**, and the routing logic lands fully tested before anything
    depends on it.
-2. **Wire it up, then flip the default** — the `Event::Mouse` arm, `encode_mouse`
+2. **Wire up the wheel** — the `Event::Mouse` arm, `encode_mouse`
    (coords + child's encoding), `pane_wants_mouse` gating, and the list/pager
    sinks. This is where it starts working: wheel over an agent pane scrolls the
    agent, wheel over the list moves the cursor, wheel over a pager scrolls it.
-   Final commit: `capture` default → `true`, plus the discoverability docs the
-   warning above makes mandatory.
+   Leaves `capture = false` — the flip waits for buttons (PR 3), since a
+   default-on spyc where clicking does nothing is its own bad first impression.
 
 If PR 2 wants splitting further, the seam is pane-forwarding vs the
 list/pager sinks — but they share the `Event::Mouse` arm, so landing them together
 avoids a half-wired intermediate state where the wheel works over one surface and
 silently dies over another.
+
+3. **Buttons + bindings, then flip** — Tier 3b: click-to-focus, middle-click
+   paste, right-click leader, and the `<…Click>` binding tokens. Genuinely
+   separable (different `MouseEventKind`s, no shared state with the wheel sinks),
+   and it carries the plan's only new dependency (a clipboard read) plus its only
+   security-sensitive surface (the `Trust::Project` gate on executing mouse
+   bindings). **Final commit: `capture` → `true`**, with the discoverability docs
+   the top-of-file warning makes mandatory. The flip goes here rather than in PR 2
+   because a default-on spyc where clicking does nothing is its own bad first
+   impression.
 
 ## Verification
 
@@ -589,9 +670,9 @@ silently dies over another.
 2. ~~**Ship `capture` default-off permanently, or flip it once forwarding lands?**~~
    **Resolved: default ON**, flipped once the feature is ready rather than in a
    later minor — `-CURRENT` is the right place for a default this size. Mechanics
-   in the PR split: `false` through PR 1, `true` in PR 2's final commit. The
-   discoverability work in *User review required* is part of that commit, not a
-   follow-up.
+   in the PR split: `false` until the final commit of PR 3, once both the wheel
+   and the buttons work. The discoverability work in *User review required* is part
+   of that commit, not a follow-up.
 
 3. ~~**Right-click prefix: taxonomy-aware, or always leader?**~~
    **Resolved: always leader.** One gesture, one menu; the taxonomy-aware split
