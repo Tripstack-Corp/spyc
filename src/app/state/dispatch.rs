@@ -165,10 +165,7 @@ impl AppState {
 
         // :version
         if input == "version" {
-            self.flash_info(format!(
-                "\u{1f336}\u{fe0f} spyc {}",
-                env!("CARGO_PKG_VERSION")
-            ));
+            self.flash_info(format!("\u{1f336}\u{fe0f} spyc {}", crate::VERSION));
             return CommandResult::Handled;
         }
 
