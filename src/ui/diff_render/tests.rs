@@ -540,7 +540,7 @@ fn wrap_spans_splits_at_width_boundary() {
     use ratatui::text::Span;
     let spans = vec![Span::raw("hello world")];
     // Width 5: "hello" | " worl" | "d"
-    let rows = super::wrap_spans(&spans, 5);
+    let rows = super::wrap_spans(&spans, 5, 4);
     assert_eq!(rows.len(), 3, "expected 3 rows, got {rows:?}");
     assert_eq!(rows[0][0].content.as_ref(), "hello");
     assert_eq!(rows[1][0].content.as_ref(), " worl");
@@ -592,7 +592,7 @@ fn cached_highlight_render_matches_inline_render() {
     for layout in [DiffLayout::Unified, DiffLayout::SideBySide] {
         for width in [40usize, 80, 137] {
             let inline = render_diff(&model, &theme, layout, width);
-            let cached = super::render_diff_highlighted(&model, &hl, &theme, layout, width);
+            let cached = super::render_diff_highlighted(&model, &hl, &theme, layout, width, 4);
             assert_eq!(
                 styled_fingerprint(&inline),
                 styled_fingerprint(&cached),
@@ -633,8 +633,8 @@ fn cached_highlight_relayout_reflows_at_new_width() {
             .max()
             .unwrap_or(0)
     };
-    let narrow = super::render_diff_highlighted(&model, &hl, &theme, DiffLayout::SideBySide, 80);
-    let wide = super::render_diff_highlighted(&model, &hl, &theme, DiffLayout::SideBySide, 160);
+    let narrow = super::render_diff_highlighted(&model, &hl, &theme, DiffLayout::SideBySide, 80, 4);
+    let wide = super::render_diff_highlighted(&model, &hl, &theme, DiffLayout::SideBySide, 160, 4);
     // Rows are sized to the body width, so a wider render produces wider rows…
     assert!(
         widest(&wide) > widest(&narrow),
@@ -649,4 +649,131 @@ fn cached_highlight_relayout_reflows_at_new_width() {
         narrow.len(),
         wide.len()
     );
+}
+
+// ── side-by-side column alignment ──────────────────────────────────
+
+/// Separator column of every row that has one, measured as the user finally
+/// sees it — i.e. after the pager has expanded tabs to `tab_width`
+/// (`pager::render::expand_tabs`, which runs on this renderer's output).
+fn separator_columns(lines: &[Line], tab_width: usize) -> Vec<(usize, usize, String)> {
+    lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, line)| {
+            let flat: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let expanded = flat.replace('\t', &" ".repeat(tab_width));
+            let byte_idx = expanded.find('│')?;
+            Some((i, crate::ui::display_width(&expanded[..byte_idx]), expanded))
+        })
+        .collect()
+}
+
+/// Every side-by-side row must put `│` at the SAME display column. That's the
+/// entire contract of the layout — a separator that wanders line to line makes
+/// the two columns un-scannable, and the diff reads as untrustworthy even when
+/// the pairing underneath is correct.
+///
+/// Tab-indented source is what broke it, and it's not niche: gofmt uses tabs,
+/// so does every Makefile and a lot of C. `unicode_width` scores `\t` as ONE
+/// column, but the pager expands it to `tab_width` before drawing — so a cell
+/// padded on the raw measurement rendered `tab_width - 1` columns too wide per
+/// tab, shoving the separator right by an amount that varied with each line's
+/// indent depth. Note the assertion is on the POST-expansion column: the raw
+/// text is now deliberately narrower per tab, which is what makes it land flush.
+#[test]
+fn split_separator_column_is_identical_on_every_row() {
+    let tabbed = DiffKind::Text(vec![Hunk {
+        old_start: 1,
+        old_lines: 8,
+        new_start: 1,
+        new_lines: 8,
+        lines: vec![
+            ctx("func f() {"),
+            ctx("\tif ok {"),
+            ctx("\t\tfor i := range xs {"),
+            rem("\t\t\tkn.CPU = q.String()"),
+            add("\t\t\tkn.CPUMilli = q.MilliValue()"),
+            ctx("\t\t}"),
+            ctx("\t}"),
+            ctx("}"),
+        ],
+    }]);
+    let model = single_file(FileStatus::Modified, tabbed, Some("k8s.go"), Some("k8s.go"));
+
+    // Every tab_width a user can configure, at two widths — the bug scaled with
+    // tab_width, so a fix that only works for the default isn't a fix.
+    for tab_width in [1, 2, 4, 8] {
+        for width in [100, 120] {
+            let out = super::render_diff_tw(
+                &model,
+                &Theme::default(),
+                DiffLayout::SideBySide,
+                width,
+                tab_width,
+            );
+            let cols = separator_columns(&out, tab_width);
+            // 6 context rows + one paired remove|add row, plus any wrap
+            // continuation rows (a large tab_width can push a line over the
+            // column width) — those carry a separator too and must align just
+            // the same, so they're deliberately included.
+            assert!(
+                cols.len() >= 7,
+                "expected >=7 split rows, got {}",
+                cols.len()
+            );
+            let first = cols[0].1;
+            let bad: Vec<_> = cols.iter().filter(|(_, c, _)| *c != first).collect();
+            assert!(
+                bad.is_empty(),
+                "tab_width={tab_width} width={width}: separator wanders — rows {:?} differ from column {first}.\n{}",
+                bad.iter().map(|(i, c, _)| (*i, *c)).collect::<Vec<_>>(),
+                cols.iter()
+                    .map(|(i, c, f)| format!("  row {i:>2} sep@{c:>3}  {f:?}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+        }
+    }
+}
+
+/// Space-indented content was never affected, so it must stay byte-identical —
+/// the tab accounting has to be a no-op when there are no tabs.
+#[test]
+fn split_layout_unchanged_for_space_indented_content() {
+    let spaced = DiffKind::Text(vec![Hunk {
+        old_start: 1,
+        old_lines: 4,
+        new_start: 1,
+        new_lines: 4,
+        lines: vec![
+            ctx("fn f() {"),
+            ctx("    if ok {"),
+            rem("        let x = old();"),
+            add("        let x = new();"),
+            ctx("    }"),
+        ],
+    }]);
+    let model = single_file(FileStatus::Modified, spaced, Some("a.rs"), Some("a.rs"));
+    let theme = Theme::default();
+    let baseline = text(&super::render_diff_tw(
+        &model,
+        &theme,
+        DiffLayout::SideBySide,
+        100,
+        1,
+    ));
+    for tab_width in [2, 4, 8] {
+        assert_eq!(
+            text(&super::render_diff_tw(
+                &model,
+                &theme,
+                DiffLayout::SideBySide,
+                100,
+                tab_width
+            )),
+            baseline,
+            "tab_width must not affect tab-free content (tab_width={tab_width})"
+        );
+    }
 }

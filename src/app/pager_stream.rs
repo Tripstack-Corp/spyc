@@ -59,6 +59,11 @@ pub struct RenderCtx {
     pub theme: Theme,
     /// Whether the backing pager is full-width — affects diff body width.
     pub full_width: bool,
+    /// Columns a `\t` occupies once the pager expands it (`[pager] tab_width`).
+    /// The side-by-side diff builds fixed-width cells, so it has to measure tabs
+    /// the way the pager will finally *render* them — see
+    /// [`crate::ui::diff_render::render_diff_highlighted`].
+    pub tab_width: usize,
 }
 
 /// An in-pager command routed to a retained stream (via
@@ -272,6 +277,7 @@ impl App {
         let ctx = RenderCtx {
             theme: self.view.theme.clone(),
             full_width,
+            tab_width: self.state.config.pager.tab_width,
         };
         // Field-level `&mut` on one view slot + the disjoint `runtime` borrow
         // both end when `drain` returns the owned DrainOutcome.
@@ -367,6 +373,7 @@ impl App {
         let ctx = RenderCtx {
             theme: self.view.theme.clone(),
             full_width,
+            tab_width: self.state.config.pager.tab_width,
         };
         let view = if in_scroll {
             self.view.scroll_pager.as_mut()
