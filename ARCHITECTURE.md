@@ -87,6 +87,37 @@ this went unnoticed until a WSL user hit it. `Access(Close(Write))` (a real
 write completion) and every Create / Modify / Remove event still pass
 through. Removing the filter silently reintroduces the storm on Linux/WSL.
 
+## Scrape fallback: the scan ignores a live report
+
+<!-- SPYC-TRAP: scrape-scan-ignores-live-report -->
+`settle_scrape_quiet` (`app/agent_status.rs`) must not skip a dirty tab's
+screen scan on the grounds that `info.reported` is `Some`. It reads like a
+free optimization — a live report outranks the scrape result in
+`effective_activity`, so why pay for the screen read — and it is not, because
+of *when* the two settles run. Both fire pre-recv in the same iteration:
+`drain_pane_output` stamps `last_output_at` and sets `scrape_dirty`, then
+`settle_scrape_quiet`, then `settle_agent_activity` — which drops that very
+report through `report_superseded_by_output` (any output newer than a
+non-`Blocked` report supersedes it). So consuming the dirty flag on the
+report's behalf discarded the scan for a report that no longer existed by the
+end of the tick.
+
+The flag is only re-set by fresh output, which is what makes the failure
+permanent rather than merely late: an agent whose *last* output is the prompt
+it is now blocked on never emits again, so the scan never runs. That is
+exactly agy's tool-approval prompt (`PreInvocation` → `working`, draw the
+prompt, go silent), and the scrape is agy's only source of `Blocked` — agy
+has no hook event for "asking the user". The tier was therefore dead for the
+single case it exists to serve, and the symptom is a dot that quietly decays
+to Idle instead of going red, which nobody reports as a bug.
+
+`scrape_step` takes `has_rules` rather than a report precisely so the pure
+decision cannot express the skip. Scanning behind a genuinely live report is
+harmless: `settle_agent_activity` clears `scrape_status` while a report is
+still authoritative (so a stale guess can't resurface when the report later
+expires), and a tab with no detection rules — claude, codex, zot, whose hooks
+report every state they have — returns `Skip` before any screen read.
+
 ## Update model: Elm-architecture (MVU)
 
 spyc follows the Elm/Model-View-Update pattern. The structural migration

@@ -31,10 +31,13 @@ const AGENT_ACTIVE_WINDOW: Duration = Duration::from_secs(2);
 /// tab with detection rules stops producing output for this long.
 const SCRAPE_QUIET_WINDOW: Duration = Duration::from_millis(250);
 
-/// What [`App::scrape_step`] decided for one dirty tab: scan its screen now, or
-/// re-check once its quiet window expires.
+/// What [`App::scrape_step`] decided for one dirty tab: nothing to do, scan its
+/// screen now, or re-check once its quiet window expires.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScrapeStep {
+    /// The tab can never produce a scrape result (no detection rules), so drop
+    /// its dirty flag and arm nothing.
+    Skip,
     Scan,
     WaitUntil(Instant),
 }
@@ -438,15 +441,21 @@ impl App {
         Self::activity_for(is_agent, last_output_at, now)
     }
 
-    /// P1-2 pure debounce step for one dirty tab: scan its screen now, or wait
-    /// until its quiet window expires.
+    /// P1-2 pure debounce step for one dirty tab: skip it, scan its screen now,
+    /// or wait until its quiet window expires.
     ///
     /// A prompt renders over several output events, so scanning mid-draw reads a
     /// half-written screen. Waiting for `SCRAPE_QUIET_WINDOW` of silence means
     /// the one scan we do run sees a settled frame. `None` last-output can't
     /// happen for a dirty tab (the same drain stamps both), but reads as due so
     /// the function is total.
-    fn scrape_step(last_output_at: Option<Instant>, now: Instant) -> ScrapeStep {
+    ///
+    /// Deliberately blind to whether a report is live: a report that is about to
+    /// be superseded must not cancel the scan. See [`Self::settle_scrape_quiet`].
+    fn scrape_step(has_rules: bool, last_output_at: Option<Instant>, now: Instant) -> ScrapeStep {
+        if !has_rules {
+            return ScrapeStep::Skip;
+        }
         let Some(at) = last_output_at else {
             return ScrapeStep::Scan;
         };
@@ -461,6 +470,19 @@ impl App {
     /// P1-2 scrape-fallback settle: after `SCRAPE_QUIET_WINDOW` of silence from a
     /// dirty agent tab with detection rules, fire a single screen scan. Consumes
     /// the dirty flag.
+    ///
+    /// **A live report does not cancel the scan**, even though it outranks the
+    /// scrape result in [`Self::effective_activity`]. Skipping the scan behind one
+    /// looks like a free optimization and is not: this runs before
+    /// `settle_agent_activity`, which in the *same* iteration drops that report
+    /// via `report_superseded_by_output`. Consuming the dirty flag on its behalf
+    /// therefore discarded the scan for a report that no longer existed by the end
+    /// of the tick — and since the flag is only re-set by fresh output, an agent
+    /// whose last output *is* the prompt it's now blocked on never got scanned at
+    /// all. That is precisely agy's approval prompt, and the scrape is agy's only
+    /// source of `Blocked`, so the tier was dead for the case it exists to serve.
+    /// Scanning behind a live report costs one screen read and cannot change the
+    /// displayed status.
     ///
     /// `&mut` settle point, PRE-recv. Returns `true` if any tab's status changed.
     pub(crate) fn settle_scrape_quiet(
@@ -478,23 +500,20 @@ impl App {
             if !entry.info.scrape_dirty {
                 continue;
             }
-            // A live self-report is authoritative and `settle_agent_activity`
-            // clears any scrape guess behind one, so don't pay for the screen
-            // read. Drop the flag: the next output event re-sets it.
-            if entry.info.reported.is_some() {
-                entry.info.scrape_dirty = false;
-                continue;
-            }
-            match Self::scrape_step(entry.info.last_output_at, now) {
+            // SPYC-TRAP(scrape-scan-ignores-live-report): do not skip the scan
+            // because `entry.info.reported.is_some()` — that report is dropped
+            // later in this same iteration.
+            let rules = crate::agent::detect(&entry.info.command).detection_rules();
+            match Self::scrape_step(!rules.is_empty(), entry.info.last_output_at, now) {
+                // No rules — claude/codex/zot, whose hooks report every state
+                // they have. They can never produce a scrape result, so they pay
+                // neither the debounce nor the screen read.
+                ScrapeStep::Skip => entry.info.scrape_dirty = false,
                 ScrapeStep::WaitUntil(fire_at) => {
                     earliest_fire = Some(earliest_fire.map_or(fire_at, |m| m.min(fire_at)));
                 }
                 ScrapeStep::Scan => {
                     entry.info.scrape_dirty = false;
-                    let rules = crate::agent::detect(&entry.info.command).detection_rules();
-                    if rules.is_empty() {
-                        continue;
-                    }
                     let lines = entry.pane.visible_lines();
                     let scanned = crate::agent::detect_rules::scan(&lines, rules);
                     changed |= entry.info.scrape_status != scanned;
@@ -928,7 +947,7 @@ mod tests {
 
         // Output just landed → not due; wait until exactly one window later.
         assert_eq!(
-            App::scrape_step(Some(base), base),
+            App::scrape_step(true, Some(base), base),
             ScrapeStep::WaitUntil(base + SCRAPE_QUIET_WINDOW)
         );
         // A hair short of the window still waits (no early scan).
@@ -936,21 +955,95 @@ mod tests {
             .checked_sub(Duration::from_millis(1))
             .expect("the quiet window is longer than 1ms");
         assert_eq!(
-            App::scrape_step(Some(base), base + almost),
+            App::scrape_step(true, Some(base), base + almost),
             ScrapeStep::WaitUntil(base + SCRAPE_QUIET_WINDOW)
         );
         // Exactly at the boundary is due — the deadline we armed must fire, not
         // re-arm itself for the same instant and spin.
         assert_eq!(
-            App::scrape_step(Some(base), base + SCRAPE_QUIET_WINDOW),
+            App::scrape_step(true, Some(base), base + SCRAPE_QUIET_WINDOW),
             ScrapeStep::Scan
         );
         assert_eq!(
-            App::scrape_step(Some(base), base + Duration::from_secs(5)),
+            App::scrape_step(true, Some(base), base + Duration::from_secs(5)),
             ScrapeStep::Scan
         );
         // Total for the unreachable case (dirty implies an output stamp).
-        assert_eq!(App::scrape_step(None, base), ScrapeStep::Scan);
+        assert_eq!(App::scrape_step(true, None, base), ScrapeStep::Scan);
+
+        // No detection rules → nothing to scan, and nothing armed. This is the
+        // whole cost story for claude/codex/zot, whose hooks report every state
+        // they have.
+        for (last, now) in [
+            (Some(base), base),
+            (Some(base), base + SCRAPE_QUIET_WINDOW),
+            (None, base),
+        ] {
+            assert_eq!(App::scrape_step(false, last, now), ScrapeStep::Skip);
+        }
+    }
+
+    /// The scan must not be cancelled by a live report. `settle_scrape_quiet`
+    /// runs BEFORE `settle_agent_activity`, which in the same iteration drops a
+    /// non-`Blocked` report via `report_superseded_by_output` — so a decision
+    /// that consumed the dirty flag "because a report exists" threw the scan away
+    /// on behalf of a report that was gone by the end of the tick. The flag is
+    /// only re-set by fresh output, so an agent whose last output IS the prompt
+    /// it's blocked on never got scanned, and the scrape is agy's only source of
+    /// `Blocked`.
+    ///
+    /// Encoded as a type-level fact rather than a behavioural assertion: the pure
+    /// step takes no report argument at all, so it cannot regress. This test
+    /// pins the two halves of the reasoning that make that safe.
+    #[test]
+    fn a_live_report_neither_cancels_the_scan_nor_loses_to_it() {
+        use super::{SCRAPE_QUIET_WINDOW, ScrapeStep};
+        use crate::pane::{AgentActivity, ReportedStatus};
+        use std::time::{Duration, Instant};
+        let base = Instant::now();
+
+        // 1. A tab with rules is still scanned at the boundary — the step has no
+        //    way to know a report is live, which is the point.
+        assert_eq!(
+            App::scrape_step(true, Some(base), base + SCRAPE_QUIET_WINDOW),
+            ScrapeStep::Scan
+        );
+
+        // 2. Scanning behind a live report is therefore harmless: an unexpired,
+        //    un-superseded report outranks the scrape result.
+        let report = ReportedStatus {
+            status: AgentActivity::Working,
+            at: base + Duration::from_millis(10),
+            expiry: base + Duration::from_secs(60),
+        };
+        assert_eq!(
+            App::effective_activity(
+                Some(report),
+                Some(AgentActivity::Blocked),
+                true,
+                None,
+                base + Duration::from_millis(20)
+            ),
+            AgentActivity::Working,
+            "a live report must outrank the scrape result"
+        );
+
+        // 3. …and once output supersedes that report, the scrape result is what
+        //    surfaces. This is the agy approval-prompt case: `PreInvocation` said
+        //    working, the prompt draw superseded it, and only the scrape knows the
+        //    agent is now waiting on the user.
+        let output_after = base + Duration::from_millis(50);
+        assert_eq!(
+            App::effective_activity(
+                Some(report),
+                Some(AgentActivity::Blocked),
+                true,
+                Some(output_after),
+                output_after + Duration::from_millis(1)
+            ),
+            AgentActivity::Blocked,
+            "superseded report must yield to the scrape result, not to timing"
+        );
     }
 
     // A `blocked` report is LATCHED: neither output NOR its TTL supersedes it —
