@@ -693,6 +693,15 @@ impl App {
             // idle.
             self.settle_lua_events();
 
+            // Reconcile the terminal's mouse mode against `[mouse] capture`. One
+            // bool compare — emits nothing when they agree, so idle stays 0 dps
+            // and this covers startup / `:mouse` / config reload /
+            // return-from-foreground through a single path.
+            let mouse_fx = self.settle_mouse_mode();
+            if !mouse_fx.is_empty() {
+                self.run_effects(mouse_fx, terminal, &foreground_exec);
+            }
+
             // Execute writable MCP commands buffered into `ctx.mcp_pending` (see
             // `drain_mcp_pending` — kept at this early loop position for the
             // 5s read-after-write timeout contract).

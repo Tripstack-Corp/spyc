@@ -112,6 +112,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     app("longlist", commands::cmd_longlist),
     app("lua", lua::cmd_lua),
     pure("marks"),
+    app("mouse", commands::cmd_mouse),
     pure("name"),
     app("notify", commands::cmd_notify),
     app("pane-to-task", commands::cmd_pane_to_task),

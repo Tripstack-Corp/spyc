@@ -175,6 +175,36 @@ without waiting for a real agent transition.
 
 ---
 
+## Mouse — `[mouse]`
+
+```toml
+[mouse]
+capture = false      # real mouse reporting (wheel + buttons). Default off.
+scroll_lines = 3     # lines per wheel tick, for surfaces spyc scrolls itself
+```
+
+`capture` asks the terminal for real mouse reporting so spyc can scroll whatever
+is under the pointer, instead of DEC 1007's trick of translating the wheel into
+arrow keys (which a focused pane receives as history navigation).
+
+> [!WARNING]
+> **Capture takes native click-drag text selection away from your terminal.**
+> That is inherent to mouse reporting, not a spyc choice. Three ways to get it
+> back:
+>
+> | | |
+> |---|---|
+> | **Bypass modifier** (per-drag) | Hold **Shift** — Ghostty, WezTerm, kitty, Alacritty, most others. **Option** or **Fn** on iTerm2. |
+> | **`:mouse off`** (per-session) | Immediate, no restart, no file edit. `:mouse on` to re-enable. |
+> | **`capture = false`** (permanent) | The default. |
+>
+> spyc's mouse-free yank paths: **`^a u`** quick-select (URLs / paths / SHAs) and
+> **`y`** in the pager.
+
+`scroll_lines` applies to the surfaces spyc scrolls itself. A pane forwarding to a
+mouse-aware child is unaffected — the child receives one event per tick and picks
+its own step. Clamped to at least 1.
+
 ## Colors — `[colors]`
 
 Hex (`"#aabbcc"`) or named (`"red"`). Anything unset falls back to the built-in

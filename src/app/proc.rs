@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, Event, KeyEventKind, MouseEventKind};
 
 use crate::spyc_debug;
 use crate::{Tui, resume_tui, suspend_tui};
@@ -101,6 +101,18 @@ pub(super) fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> Reader
                                         k.kind == KeyEventKind::Press
                                             || k.kind == KeyEventKind::Repeat
                                     }
+                                    // Motion reporting is never requested (spyc
+                                    // emits 1000+1006, not 1002/1003), but a few
+                                    // terminals report it anyway. Drop it here:
+                                    // `run.rs` marks a redraw for every
+                                    // `Message::Input` and `coalesce_pending`
+                                    // surfaces one per loop iteration, so idle
+                                    // pointer movement would otherwise become a
+                                    // redraw-per-motion storm.
+                                    Event::Mouse(m) => !matches!(
+                                        m.kind,
+                                        MouseEventKind::Moved | MouseEventKind::Drag(_)
+                                    ),
                                     _ => true,
                                 };
                                 if forward && tx.send(Message::Input(ev)).is_err() {
