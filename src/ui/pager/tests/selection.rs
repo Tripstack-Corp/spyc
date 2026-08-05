@@ -469,3 +469,116 @@ fn block_range_stays_inclusive_when_anchor_higher_than_cursor() {
     assert_eq!(sel.range(), (2, 5));
     assert_eq!(sel.col_range(), (3, 7));
 }
+
+// ── charwise (`VisualKind::Char`) ─────────────────────────────────────
+
+/// Build a view with known, non-uniform content for charwise slicing.
+fn charwise_view() -> PagerView {
+    PagerView::new_plain(
+        "c",
+        vec![
+            "first line".to_string(),
+            "second".to_string(),
+            "third line here".to_string(),
+        ],
+    )
+}
+
+fn char_sel(view: &mut PagerView, anchor: (usize, usize), cursor: (usize, usize)) {
+    view.visual = Some(VisualSelection {
+        anchor: anchor.0,
+        anchor_col: anchor.1,
+        cursor: cursor.0,
+        cursor_col: cursor.1,
+        kind: VisualKind::Char,
+    });
+}
+
+/// The headline: a charwise selection takes the first line from its start
+/// column, whole lines between, and the last line up to its end column.
+#[test]
+fn charwise_yank_spans_partial_first_and_last_lines() {
+    let mut view = charwise_view();
+    // "first line" from col 6 ("line") through "third" on line 2 (col 4).
+    char_sel(&mut view, (0, 6), (2, 4));
+    let (text, count, block) = view.visual_yank_text(false).expect("charwise yanks");
+    assert_eq!(text, "line\nsecond\nthird");
+    assert_eq!(count, 3);
+    assert!(!block, "charwise is not block mode");
+}
+
+/// A single-line charwise selection is the intersection of both column bounds,
+/// not "col..end of line".
+#[test]
+fn charwise_yank_within_one_line_is_bounded_both_ends() {
+    let mut view = charwise_view();
+    char_sel(&mut view, (2, 6), (2, 9));
+    let (text, ..) = view.visual_yank_text(false).expect("charwise yanks");
+    assert_eq!(text, "line");
+}
+
+/// A backwards drag must keep each column attached to its own line.
+///
+/// This is what `range()` + `col_range()` get wrong: ordering the axes
+/// independently would start at col 4 on line 0, selecting "st line…" — text the
+/// pointer never crossed. Dragging up-and-right is the case that exposes it,
+/// because the low line carries the HIGH column.
+#[test]
+fn charwise_backwards_drag_orders_by_line_col_pair_not_per_axis() {
+    let mut view = charwise_view();
+    // Anchor late on line 2, drag back to col 4 of line 0 → same selection as
+    // anchoring at (0,4) and dragging to (2,4).
+    char_sel(&mut view, (2, 4), (0, 4));
+    let (backwards, ..) = view.visual_yank_text(false).expect("charwise yanks");
+
+    let mut fwd = charwise_view();
+    char_sel(&mut fwd, (0, 4), (2, 4));
+    let (forwards, ..) = fwd.visual_yank_text(false).expect("charwise yanks");
+
+    assert_eq!(
+        backwards, forwards,
+        "drag direction must not change the text"
+    );
+    assert_eq!(backwards, "t line\nsecond\nthird");
+}
+
+/// Line numbers and whitespace markers are added in `render.rs`, never stored in
+/// `lines`, so toggling them cannot change what a selection copies. The spec's
+/// "the content and nothing else" depends on this staying true.
+#[test]
+fn charwise_yank_ignores_gutter_and_whitespace_decoration() {
+    let mut view = charwise_view();
+    char_sel(&mut view, (0, 0), (0, 4));
+    let plain = view.visual_yank_text(false).expect("charwise yanks").0;
+
+    let mut decorated = charwise_view();
+    decorated.show_line_numbers = true;
+    decorated.show_whitespace = true;
+    char_sel(&mut decorated, (0, 0), (0, 4));
+    let with_chrome = decorated.visual_yank_text(false).expect("charwise yanks").0;
+
+    assert_eq!(plain, "first");
+    assert_eq!(
+        with_chrome, plain,
+        "decoration must not reach the clipboard"
+    );
+}
+
+/// Grid-padded content would otherwise paste a ragged block of spaces.
+#[test]
+fn charwise_yank_trims_trailing_whitespace_per_line() {
+    let mut view = PagerView::new_plain("c", vec!["padded   ".to_string(), "b".to_string()]);
+    char_sel(&mut view, (0, 0), (1, 0));
+    let (text, ..) = view.visual_yank_text(false).expect("charwise yanks");
+    assert_eq!(text, "padded\nb");
+}
+
+/// Out-of-range rows are clamped rather than panicking — same contract the
+/// Line/Block arms have, and reachable when a streaming view front-trims.
+#[test]
+fn charwise_yank_clamps_rows_past_the_end() {
+    let mut view = charwise_view();
+    char_sel(&mut view, (0, 0), (99, 3));
+    let (text, ..) = view.visual_yank_text(false).expect("charwise yanks");
+    assert!(text.starts_with("first line"), "got {text:?}");
+}

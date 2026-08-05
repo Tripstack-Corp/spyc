@@ -76,6 +76,15 @@ pub enum Mount {
 pub enum VisualKind {
     Line,
     Block,
+    /// Charwise (vim `v`): starts mid-line and ends mid-line, taking everything
+    /// between. What a mouse drag means, and expressible as neither `Line` (whole
+    /// lines only) nor `Block` (a rectangle).
+    ///
+    /// Unlike `Block`, the two columns are **not** an independent range: the
+    /// endpoints are ordered as `(line, col)` pairs, so a backwards drag keeps
+    /// the columns attached to their own lines. See
+    /// [`VisualSelection::char_endpoints`].
+    Char,
 }
 
 /// vi-style visual selection inside the pager. Active when
@@ -120,6 +129,25 @@ impl VisualSelection {
             (self.anchor_col, self.cursor_col)
         } else {
             (self.cursor_col, self.anchor_col)
+        }
+    }
+
+    /// The `Char`-mode endpoints as `((start_line, start_col), (end_line, end_col))`,
+    /// ordered by the `(line, col)` pair.
+    ///
+    /// **Not** `range()` + `col_range()`. Those order the two axes independently,
+    /// which is right for a `Block` rectangle and wrong for charwise: dragging
+    /// from `(3, 10)` up-right to `(5, 2)` would yield start col 2 on line 3,
+    /// selecting text the pointer never crossed. Ordering the pairs keeps each
+    /// column attached to the line it was taken on.
+    pub const fn char_endpoints(&self) -> ((usize, usize), (usize, usize)) {
+        let a = (self.anchor, self.anchor_col);
+        let c = (self.cursor, self.cursor_col);
+        // Tuple comparison isn't const-friendly, so compare the pair by hand.
+        if a.0 < c.0 || (a.0 == c.0 && a.1 <= c.1) {
+            (a, c)
+        } else {
+            (c, a)
         }
     }
 }
