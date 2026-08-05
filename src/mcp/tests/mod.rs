@@ -1008,20 +1008,97 @@ fn codex_config_fresh_rewrite_on_malformed_input() {
     assert!(parsed["mcp_servers"]["spyc"].is_table());
 }
 
+/// An unparseable MCP json config is REFUSED, not rewritten — the
+/// multi-server case.
+///
+/// An `.mcp.json`-shaped file is the standard place a project declares *all* its
+/// MCP servers, so replacing it with a spyc-only document doesn't just lose
+/// formatting, it disconnects every other tool the user had wired up.
+///
+/// Driven through `ensure_agy_mcp_config` rather than `ensure_mcp_json`: both
+/// call the same `ensure_spyc_in_mcp_json` helper, but claude's entry point
+/// checks enterprise policy first by reading absolute system paths
+/// (`/Library/Application Support/ClaudeCode/managed-mcp.json`). A machine whose
+/// org config defines spyc returns `ManagedByEnterprise` and never reaches the
+/// file logic, so testing through it would pass or fail based on the host.
 #[test]
-fn codex_config_rewrites_completely_invalid_toml() {
-    // Non-TOML content (e.g. corrupted file) falls back to a fresh
-    // rewrite rather than failing.
+fn mcp_json_refuses_to_overwrite_invalid_json() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join(".agents/mcp_config.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    // A real-looking config with one trailing comma — the classic hand-edit slip.
+    let original = r#"{
+  "mcpServers": {
+    "postgres": { "command": "mcp-postgres", "args": ["--dsn", "…"] },
+  }
+}"#;
+    std::fs::write(&path, original).unwrap();
+
+    let err = ensure_agy_mcp_config(tmp.path(), true)
+        .expect_err("an unparseable existing config must not be overwritten");
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    assert!(
+        err.to_string().contains("refusing to overwrite"),
+        "error should say what it declined to do: {err}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        original,
+        "the user's other MCP servers must survive byte-for-byte"
+    );
+}
+
+/// An unparseable `.codex/config.toml` is REFUSED, not rewritten.
+///
+/// This test previously asserted the opposite — "falls back to a fresh rewrite
+/// rather than failing" — which codified data loss as intended behavior. That
+/// file holds the user's `model` and `approval_policy`; a trailing comma or a
+/// half-finished hand-edit was enough to have spyc replace all of it with a
+/// spyc-only document on the next pane launch, with no backup and no warning.
+/// Failing is the correct outcome: the caller flashes it and the pane still
+/// launches, so the cost is spyc's MCP tools in that repo until it's fixed.
+#[test]
+fn codex_config_refuses_to_overwrite_invalid_toml() {
     let tmp = tempfile::tempdir().unwrap();
     let codex_dir = tmp.path().join(".codex");
     std::fs::create_dir_all(&codex_dir).unwrap();
     let path = codex_dir.join("config.toml");
-    std::fs::write(&path, "}}}}{{{ this is not toml").unwrap();
-    let status = ensure_codex_config_toml(tmp.path(), true).unwrap();
-    assert!(matches!(status, McpConfigStatus::Configured));
-    let written = std::fs::read_to_string(&path).unwrap();
-    let parsed: toml::Value = toml::from_str(&written).unwrap();
-    assert!(parsed["mcp_servers"]["spyc"].is_table());
+    let original = "model = \"o3\"\napproval_policy = \"never\"\n}}}}{{{ not toml";
+    std::fs::write(&path, original).unwrap();
+
+    let err = ensure_codex_config_toml(tmp.path(), true)
+        .expect_err("an unparseable existing config must not be overwritten");
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    assert!(
+        err.to_string().contains("refusing to overwrite"),
+        "error should say what it declined to do: {err}"
+    );
+    // The point of the whole change: the user's bytes are still there.
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        original,
+        "the file must be byte-identical after a refusal"
+    );
+}
+
+/// A blank (or absent) file is NOT a refusal — there's nothing to lose, so the
+/// fresh-write path still applies. The distinction between "absent" and
+/// "present but unparseable" is the whole fix; this pins the benign half so the
+/// refusal doesn't over-trigger and break first-launch in a fresh repo.
+#[test]
+fn codex_config_writes_fresh_over_a_blank_file() {
+    for content in ["", "   \n\t\n"] {
+        let tmp = tempfile::tempdir().unwrap();
+        let codex_dir = tmp.path().join(".codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        let path = codex_dir.join("config.toml");
+        std::fs::write(&path, content).unwrap();
+        let status = ensure_codex_config_toml(tmp.path(), true)
+            .expect("a blank file carries no user data to lose");
+        assert!(matches!(status, McpConfigStatus::Configured));
+        let parsed: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(parsed["mcp_servers"]["spyc"].is_table());
+    }
 }
 
 // ── socket-bind diagnostics (testing campaign, cluster 7) ──
