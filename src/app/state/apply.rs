@@ -445,10 +445,7 @@ impl AppState {
             // -- Info --
             Action::Date => self.flash_info(crate::sysinfo::format_now()),
             Action::Version => {
-                self.flash_info(format!(
-                    "\u{1f336}\u{fe0f} spyc {}",
-                    env!("CARGO_PKG_VERSION")
-                ));
+                self.flash_info(format!("\u{1f336}\u{fe0f} spyc {}", crate::VERSION));
             }
             Action::SetEnvPrompt => {
                 self.mode =

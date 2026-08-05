@@ -355,9 +355,8 @@ impl App {
         let term = &self.view.hud_term;
         let truecolor = self.view.hud_truecolor;
         let l4 = format!(
-            " spyc v{} ({})  {term}{}  {}\u{00d7}{} ",
-            env!("CARGO_PKG_VERSION"),
-            env!("SPYC_GIT_SHA"),
+            " spyc v{}  {term}{}  {}\u{00d7}{} ",
+            crate::VERSION,
             if truecolor { " truecolor" } else { "" },
             frame_area.width,
             frame_area.height,
