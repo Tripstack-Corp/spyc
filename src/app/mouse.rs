@@ -104,6 +104,47 @@ pub(super) struct MouseSnapshot {
     /// When false, forwarding would type escape bytes into a prompt that never
     /// asked for them — the bracketed-paste bug (#170) in a new costume.
     pub pane_wants_mouse: bool,
+    /// A prompt is open (`Mode::Prompting`) — the `:` line, search, a rename, or
+    /// any single-key confirm.
+    ///
+    /// Not covered by `modal`: no prompt is a [`Modal`], they are all
+    /// `Mode::Prompting`, which is exactly why omitting this was dangerous rather
+    /// than merely untidy. See [`route_mouse`]'s prompt arm.
+    pub is_prompting: bool,
+    /// A `^a v` scrollback pager owns the pane's rect, hiding the live child
+    /// behind it.
+    pub has_scroll_pager: bool,
+    /// The active tab's child has exited — there is nothing to forward to.
+    pub pane_closed: bool,
+}
+
+impl MouseSnapshot {
+    /// Whether an event over the pane may be handed to the child.
+    ///
+    /// Three conditions, each guarding a distinct way forwarding misbehaves:
+    /// the child must have asked for mouse reporting (else the bytes land in its
+    /// prompt as literal text — the #170 class), it must still be alive, and it
+    /// must not be hidden behind a `^a v` scrollback pager, which owns the pane's
+    /// rect and would otherwise have the wheel poke a child the user can't see.
+    const fn can_forward_to_child(self) -> bool {
+        self.pane_wants_mouse && !self.pane_closed && !self.has_scroll_pager
+    }
+
+    /// Whether a pending chord set now would ever be seen by the resolver.
+    ///
+    /// A leader chord is only safe to arm if the NEXT key reaches
+    /// `Resolver::feed`. Two states break that, and in both the chord latches
+    /// instead: a prompt (`handle_prompt_key` never feeds the resolver) and a
+    /// focused **`Mount::Overlay`** pager, which `route_input` resolves to
+    /// `PagerKey` for every key *including meta chords* — unlike `Mount::TopPane`,
+    /// where meta deliberately escapes, so the leader works there.
+    ///
+    /// A latch is not merely cosmetic: the popup stays on screen, and the first
+    /// key that eventually reaches the resolver is consumed as a continuation —
+    /// in the leader menu `p` is a chdir and `P` overwrites PROJECT_HOME.
+    const fn resolver_will_see_the_next_key(self) -> bool {
+        !self.is_prompting && !matches!(self.pager_mount, Some(Mount::Overlay))
+    }
 }
 
 /// Route one mouse event to a sink. Pure and total.
@@ -120,6 +161,25 @@ pub(super) const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseS
         return MouseSink::Swallow;
     };
 
+    // A prompt owns the keyboard, so the only gesture that can mean anything is a
+    // paste — which `handle_paste` already routes into the prompt buffer.
+    //
+    // Right-click especially must not act here. `enter_leader()` sets a pending
+    // chord, but while prompting the next key goes to `handle_prompt_key`, which
+    // never feeds the resolver and never calls `clear_chord_hint` — so `pending`
+    // latches, the which-key popup sits on screen for the whole prompt, and the
+    // first key after the prompt closes is eaten as a leader continuation. In that
+    // menu `p` is a chdir and `P` overwrites PROJECT_HOME, so a stray right-click
+    // could move the user's project root. The same latch is reachable with no
+    // prompt at all, via a focused full-frame pager, which is why this is a
+    // snapshot field rather than a check on `Mode` at one call site.
+    if snap.is_prompting {
+        return match gesture {
+            Gesture::Middle => MouseSink::Paste,
+            Gesture::Left | Gesture::Right | Gesture::Wheel => MouseSink::Swallow,
+        };
+    }
+
     // Middle and right are spyc's everywhere, never forwarded — otherwise the
     // gesture would be unavailable in exactly the region where the pane has
     // focus, which is where you'd reach for it. Documented alongside the
@@ -127,12 +187,20 @@ pub(super) const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseS
     // right-click menu back.
     match gesture {
         Gesture::Middle => return MouseSink::Paste,
-        Gesture::Right => return MouseSink::LeaderMenu,
+        Gesture::Right => {
+            return if snap.resolver_will_see_the_next_key() {
+                MouseSink::LeaderMenu
+            } else {
+                // Arming a chord nothing will consume latches it — see
+                // `resolver_will_see_the_next_key`.
+                MouseSink::Swallow
+            };
+        }
         Gesture::Left => {
             // Left is click-THROUGH: focus the region, and (for a mouse-aware
             // child) let the event reach it too. The pane is live and visible, so
             // swallowing the first click just to focus would read as broken.
-            return if matches!(region, Region::Pane) && snap.pane_wants_mouse {
+            return if matches!(region, Region::Pane) && snap.can_forward_to_child() {
                 MouseSink::FocusAndForward
             } else {
                 MouseSink::FocusRegion
@@ -149,7 +217,7 @@ pub(super) const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseS
             None => MouseSink::ListCursor,
         },
         Region::Pane => {
-            if snap.pane_wants_mouse {
+            if snap.can_forward_to_child() {
                 MouseSink::PaneForward
             } else {
                 // No spyc-owned pane scrollback in v1 (see the plan's Deferred
@@ -290,6 +358,11 @@ impl super::App {
                 .pane_tabs
                 .as_ref()
                 .is_some_and(|t| t.active().wants_mouse()),
+            // Same sources `route_input`'s snapshot uses (`route.rs`), so the
+            // mouse and the keyboard can't disagree about what owns the screen.
+            is_prompting: matches!(self.state.mode, super::Mode::Prompting(_)),
+            has_scroll_pager: self.view.scroll_pager.is_some(),
+            pane_closed: self.state.pane.pane_snapshot.is_closed,
         };
 
         match route_mouse(snap, gesture) {
@@ -491,6 +564,9 @@ mod tests {
             region,
             pager_mount: None,
             pane_wants_mouse: false,
+            is_prompting: false,
+            has_scroll_pager: false,
+            pane_closed: false,
         }
     }
 
@@ -683,6 +759,106 @@ mod tests {
                 "{region:?}"
             );
         }
+    }
+
+    /// **A right-click during a prompt must not latch a leader chord.**
+    ///
+    /// No prompt is a `Modal` — they are all `Mode::Prompting` — so without
+    /// `is_prompting` on the snapshot this fell through to `LeaderMenu`.
+    /// `enter_leader()` sets a pending chord, but while prompting the next key
+    /// goes to `handle_prompt_key`, which never feeds the resolver and never
+    /// calls `clear_chord_hint`. So `pending` latched: the which-key popup sat on
+    /// screen for the whole prompt, and the first key after it closed was eaten as
+    /// a leader continuation — where `p` is a chdir and `P` overwrites
+    /// PROJECT_HOME. A stray right-click could move the user's project root.
+    #[test]
+    fn a_prompt_swallows_every_gesture_except_paste() {
+        for region in [Region::List, Region::Pane, Region::RightColumn] {
+            let prompting = MouseSnapshot {
+                is_prompting: true,
+                // Even over a mouse-aware child, and even with a pager mounted.
+                pane_wants_mouse: true,
+                ..snap(Some(region))
+            };
+            for gesture in [Gesture::Right, Gesture::Left, Gesture::Wheel] {
+                assert_eq!(
+                    route_mouse(prompting, gesture),
+                    MouseSink::Swallow,
+                    "{gesture:?} over {region:?} must not act while a prompt is open"
+                );
+            }
+            // Paste is the one gesture that means something mid-prompt:
+            // `handle_paste` routes it into the prompt buffer, newlines stripped.
+            assert_eq!(
+                route_mouse(prompting, Gesture::Middle),
+                MouseSink::Paste,
+                "{region:?}: middle-click still pastes into the prompt"
+            );
+        }
+    }
+
+    /// The leader latch is reachable with **no prompt at all**: a focused
+    /// `Mount::Overlay` pager (`:grep` results, `?` help, a git view, `:graveyard`)
+    /// resolves every key to `PagerKey` — meta chords included — so a chord armed
+    /// by a right-click sits pending until the pager closes, then eats the next key.
+    ///
+    /// `Mount::TopPane` is deliberately NOT gated: `route_input` lets meta escape
+    /// to the resolver there, so the leader menu works as intended.
+    #[test]
+    fn right_click_over_a_modal_pager_does_not_arm_a_chord_nothing_will_consume() {
+        let overlay = MouseSnapshot {
+            pager_mount: Some(Mount::Overlay),
+            ..snap(Some(Region::List))
+        };
+        assert_eq!(
+            route_mouse(overlay, Gesture::Right),
+            MouseSink::Swallow,
+            "an Overlay pager swallows every key, so the chord would latch"
+        );
+
+        let top = MouseSnapshot {
+            pager_mount: Some(Mount::TopPane),
+            ..snap(Some(Region::List))
+        };
+        assert_eq!(
+            route_mouse(top, Gesture::Right),
+            MouseSink::LeaderMenu,
+            "meta escapes a TopPane pager, so the leader is safe to arm"
+        );
+
+        // With no pager and no prompt it arms normally.
+        assert_eq!(
+            route_mouse(snap(Some(Region::List)), Gesture::Right),
+            MouseSink::LeaderMenu
+        );
+    }
+
+    /// A `^a v` scrollback owns the pane's rect, so the live child is hidden
+    /// behind it — forwarding there sends input to something the user cannot see.
+    #[test]
+    fn an_open_scrollback_stops_forwarding_to_the_hidden_child() {
+        let s = MouseSnapshot {
+            pane_wants_mouse: true,
+            has_scroll_pager: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
+        // Left-click still moves focus — it just doesn't reach the child.
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusRegion);
+    }
+
+    /// An exited child has nothing to receive the event. `pane_wants_mouse` may
+    /// still read true if vt100 retains the mode after the child dies, so the
+    /// closed check has to be its own condition rather than relying on that.
+    #[test]
+    fn a_closed_pane_is_never_forwarded_to() {
+        let s = MouseSnapshot {
+            pane_wants_mouse: true,
+            pane_closed: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusRegion);
     }
 
     /// A modal still wins over every button, not just the wheel.
