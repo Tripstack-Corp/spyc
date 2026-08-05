@@ -37,6 +37,12 @@ use super::{
 /// `None` variant) — see `From<PostAction>`.
 #[derive(Debug)]
 pub enum Effect {
+    /// Read the system clipboard and route it as a paste (middle-click).
+    ///
+    /// A paste, not raw bytes: it goes through the same `handle_paste` path as a
+    /// terminal-delivered `Event::Paste`, so it lands wherever pastes land and
+    /// inherits the bracketed-paste gating (#170) rather than re-deriving it.
+    PasteFromClipboard,
     /// Put the terminal into (or out of) real mouse reporting. Emitted only by
     /// [`App::settle_mouse_mode`], which reconciles `[mouse] capture` against
     /// what the terminal is actually in — so this is idempotent by construction
@@ -634,6 +640,19 @@ impl App {
                 // text all happened in the producer (`settle_agent_activity`);
                 // here we just fire the OS notification (off-thread, best-effort)
                 // and ring the bell if requested (inline stdout write).
+                Effect::PasteFromClipboard => match crate::clipboard::paste() {
+                    Ok(text) if text.is_empty() => {
+                        self.state.flash_info("paste: clipboard is empty");
+                    }
+                    Ok(text) => {
+                        // Reuse the paste path rather than sending bytes: routing,
+                        // bracketed-paste wrapping, and prompt handling are all
+                        // already decided there.
+                        let fx = self.handle_paste(text);
+                        self.run_effects(fx, terminal, fg);
+                    }
+                    Err(e) => self.state.flash_error(format!("paste: {e:#}")),
+                },
                 Effect::SetMouseMode { capture } => {
                     // Mutually exclusive with 1007 alternate-scroll: a terminal
                     // honoring both could deliver one wheel tick twice.

@@ -100,6 +100,16 @@ impl Resolver {
 
     /// Display string for the current pending sequence, or `None` when idle.
     /// Shown in the prompt line so the user knows spyc is waiting for more input.
+    /// Enter the leader chord directly, without a key having been pressed.
+    ///
+    /// The mouse entry point: a right-click is a spyc gesture, so it doesn't need
+    /// the `^a` wake-up a keyboard leader requires from a focused pane (`Space` is
+    /// literal text to the child; a right-click never is). Idempotent — a second
+    /// right-click while already pending leaves it pending rather than nesting.
+    pub const fn enter_leader(&mut self) {
+        self.pending = PendingSeq::Leader;
+    }
+
     pub fn pending_display(&self) -> Option<String> {
         let prefix = self.count.map(|n| n.to_string()).unwrap_or_default();
         let seq = match self.pending {

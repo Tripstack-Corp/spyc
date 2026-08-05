@@ -201,6 +201,23 @@ arrow keys (which a focused pane receives as history navigation).
 > spyc's mouse-free yank paths: **`^a u`** quick-select (URLs / paths / SHAs) and
 > **`y`** in the pager.
 
+### What the buttons do
+
+| Button | Action |
+|---|---|
+| **Left** | Focus the region under the pointer. Over a mouse-aware child (claude, vim, htop) the click also reaches it — the pane is live, so swallowing the first click just to focus would read as broken. |
+| **Middle** | Paste the system clipboard wherever a paste would land (pane, `:` line, shell prompt). |
+| **Right** | Open the leader menu, from any region, with no chord-hint delay. |
+
+Middle and right are **always spyc's** — never forwarded, even over a mouse-aware
+child, since otherwise the gesture would be unavailable in exactly the region where
+the pane holds focus. If you need a child's own right-click menu, `:mouse off`.
+
+Clicking a *row* in the file list is deliberately not a thing: clicking a region is
+coarse and hard to get wrong, while aiming at a one-cell-tall line invites
+near-misses that silently move the cursor. `j`/`k`, `F`, and frecency jumps are all
+faster and more precise.
+
 `scroll_lines` applies to the surfaces spyc scrolls itself. A pane forwarding to a
 mouse-aware child is unaffected — the child receives one event per tick and picks
 its own step. Clamped to at least 1.

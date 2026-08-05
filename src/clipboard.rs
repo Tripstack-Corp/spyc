@@ -1,7 +1,7 @@
 //! Cross-platform clipboard helper for spyc's yank features.
 //!
-//! Exposes one public function: `copy(text)` writes `text` to the
-//! system clipboard, fanning out to a platform-appropriate helper:
+//! `copy(text)` writes to the system clipboard and `paste()` reads back from it,
+//! each fanning out to a platform-appropriate helper:
 //!
 //! - macOS → `pbcopy` (built-in).
 //! - Linux → `wl-copy` if `$WAYLAND_DISPLAY` is set, then
@@ -26,6 +26,30 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Test-only override: when set, `paste` returns this text instead of
+    /// spawning a helper. Mirrors `CLIPBOARD_OVERRIDE`, but a value rather than a
+    /// binary — the read has nothing to pipe *into*, so a stub script would only
+    /// be testing `capture`.
+    static PASTE_OVERRIDE: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Test-only: run `body` with [`paste`] returning `text`.
+#[cfg(test)]
+pub fn with_paste_override<R>(text: &str, body: impl FnOnce() -> R) -> R {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            PASTE_OVERRIDE.with(|c| *c.borrow_mut() = None);
+        }
+    }
+    PASTE_OVERRIDE.with(|c| *c.borrow_mut() = Some(text.to_string()));
+    let _g = Guard;
+    body()
+}
+
 /// Test-only: run `body` with the clipboard helper pinned to `bin`.
 /// The override is unwound when `body` returns *or panics* (RAII).
 #[cfg(test)]
@@ -39,6 +63,88 @@ pub fn with_clipboard_override<R>(bin: &std::path::Path, body: impl FnOnce() -> 
     CLIPBOARD_OVERRIDE.with(|c| *c.borrow_mut() = Some(bin.to_path_buf()));
     let _g = Guard;
     body()
+}
+
+/// Read the system clipboard as text — the middle-click paste source.
+///
+/// Shell-based for the same reason [`copy`] is (no crate dependency, mirroring
+/// the in-tree fork-exec pattern), and the helper list is `copy`'s in reverse:
+/// `pbpaste` on macOS; `wl-paste`/`xclip -o`/`xsel -ob` on Linux, tried in the
+/// same order so a session that copies with one tool pastes with it too.
+///
+/// A spawn that reports `NotFound` falls through to the next candidate; any other
+/// error from a helper that *did* run is returned, so the user sees the real
+/// problem rather than a generic "no clipboard helper".
+pub fn paste() -> io::Result<String> {
+    #[cfg(test)]
+    {
+        if let Some(text) = PASTE_OVERRIDE.with(|c| c.borrow().clone()) {
+            return Ok(text);
+        }
+    }
+    paste_impl()
+}
+
+#[cfg(target_os = "macos")]
+fn paste_impl() -> io::Result<String> {
+    capture("pbpaste", &[])
+}
+
+#[cfg(target_os = "linux")]
+fn paste_impl() -> io::Result<String> {
+    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let mut candidates: Vec<(&str, &[&str])> = Vec::new();
+    if wayland {
+        // `-n` so wl-paste doesn't append a newline the user never copied.
+        candidates.push(("wl-paste", &["-n"]));
+    }
+    candidates.push(("xclip", &["-selection", "clipboard", "-o"]));
+    candidates.push(("xsel", &["-ob"]));
+
+    let mut last: Option<io::Error> = None;
+    for (prog, args) in candidates {
+        match capture(prog, args) {
+            Ok(text) => return Ok(text),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => last = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "no clipboard helper found (install wl-clipboard, xclip, or xsel)",
+        )
+    }))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn paste_impl() -> io::Result<String> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "clipboard paste is not supported on this platform",
+    ))
+}
+
+/// Run `prog args` and return its stdout as a lossy `String`. A non-zero exit is
+/// an error carrying the helper's stderr, so a broken `$DISPLAY` reads as itself
+/// rather than as an empty paste.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn capture(prog: &str, args: &[&str]) -> io::Result<String> {
+    let out = Command::new(prog)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()?;
+    if out.status.success() {
+        return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
+    }
+    let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    Err(io::Error::other(if msg.is_empty() {
+        format!("{prog} failed")
+    } else {
+        format!("{prog}: {msg}")
+    }))
 }
 
 /// Copy a PNG image to the system clipboard (the image-pager `y` verb).
@@ -173,6 +279,24 @@ fn spawn_and_pipe(prog: &str, args: &[&str], text: &str) -> io::Result<()> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn paste_via_override_returns_the_injected_text() {
+        with_paste_override("hello \u{1f336}", || {
+            assert_eq!(paste().expect("override never fails"), "hello \u{1f336}");
+        });
+    }
+
+    /// The override unwinds even on panic (RAII), so one test can't leak clipboard
+    /// state into the next — the reason `with_clipboard_override` is shaped this
+    /// way too.
+    #[test]
+    fn paste_override_unwinds_after_the_body() {
+        with_paste_override("x", || {});
+        // Outside the override the real helper runs; we only assert the override
+        // is gone, not what the host clipboard holds (that's the user's).
+        PASTE_OVERRIDE.with(|c| assert!(c.borrow().is_none()));
+    }
 
     #[cfg(unix)]
     #[test]
