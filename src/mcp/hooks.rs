@@ -186,17 +186,47 @@ pub fn ensure_claude_status_hooks(dir: &Path) -> bool {
     crate::fs::write_atomic(&path, out.as_bytes()).is_ok()
 }
 
+/// The root value a status-hook merge splices into, or `None` to refuse.
+///
+/// The distinction that matters is **absent vs. unparseable**, and conflating
+/// them is a data-loss bug: an existing file we can't parse still holds the
+/// user's content — permissions in claude's `settings.json`, `model` and
+/// `approval_policy` in codex's `config.toml`, their own named sets in agy's
+/// `hooks.json` — and starting from an empty document silently deletes all of
+/// it on the next write. A trailing comma or a half-finished hand-edit is
+/// enough to trigger it. Absent or blank is not a refusal: there is nothing to
+/// lose, so an empty root is correct.
+///
+/// Refusing costs the activity dots for that repo, which is recoverable and
+/// visible; clobbering the file is neither.
+fn merge_root_json(existing: Option<&str>) -> Option<Value> {
+    match existing {
+        Some(t) if !t.trim().is_empty() => serde_json::from_str::<Value>(t)
+            .ok()
+            .filter(Value::is_object),
+        _ => Some(json!({})),
+    }
+}
+
+/// [`merge_root_json`] for codex's TOML config. Same rule, same reasoning.
+fn merge_root_toml(existing: Option<&str>) -> Option<toml::Value> {
+    match existing {
+        Some(t) if !t.trim().is_empty() => toml::from_str::<toml::Value>(t)
+            .ok()
+            .filter(toml::Value::is_table),
+        _ => Some(toml::Value::Table(toml::Table::new())),
+    }
+}
+
 /// Merge spyc's status hooks into `existing` settings.json content (or a fresh
-/// `{}` when absent/unparseable), returning the serialized result with a
-/// trailing newline. `None` when the existing `hooks` value is a non-object we
-/// refuse to clobber, or on a serialization failure. Pure (no I/O) so the merge
+/// `{}` when absent), returning the serialized result with a
+/// trailing newline. `None` when we refuse: an unparseable existing file, a
+/// non-object root or `hooks` value, or a serialization failure — see
+/// [`merge_root_json`]. Pure (no I/O) so the merge
 /// — and its byte-level idempotency, which is what makes the write skippable —
 /// is unit-testable.
 fn merged_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) -> Option<String> {
-    let mut root = existing
-        .and_then(|t| serde_json::from_str::<Value>(t).ok())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| json!({}));
+    let mut root = merge_root_json(existing)?;
     let obj = root.as_object_mut()?;
     let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
     let hooks_obj = hooks.as_object_mut()?;
@@ -348,18 +378,16 @@ pub fn ensure_codex_status_hooks(dir: &Path) -> bool {
 /// Pure merge for codex's `config.toml`: add a `[[hooks.<Event>]]` group for
 /// each [`CODEX_STATUS_HOOKS`] entry into `existing` (or a fresh table),
 /// dropping a stale spyc group from a prior launch and preserving the user's
-/// own config (including our `[mcp_servers.spyc]`). `None` on a non-table
-/// existing value or a serialization failure. Pure (no I/O) so the merge — and
+/// own config (including our `[mcp_servers.spyc]`). `None` when we refuse: an
+/// unparseable existing file, a non-table root or `hooks` value, or a
+/// serialization failure — see [`merge_root_toml`]. Pure (no I/O) so the merge — and
 /// its byte-level idempotency, which lets the write be skipped — is testable.
 fn merged_codex_status_hooks_toml(
     existing: Option<&str>,
     exe: &str,
     trace: bool,
 ) -> Option<String> {
-    let mut root = existing
-        .and_then(|t| toml::from_str::<toml::Value>(t).ok())
-        .filter(toml::Value::is_table)
-        .unwrap_or_else(|| toml::Value::Table(toml::Table::new()));
+    let mut root = merge_root_toml(existing)?;
     let obj = root.as_table_mut()?;
     let hooks = obj
         .entry("hooks")
@@ -525,14 +553,12 @@ pub fn ensure_agy_status_hooks(dir: &Path) -> bool {
 }
 
 /// Pure merge for agy's `hooks.json`: own the `spyc-status` named set (replace
-/// any prior ours, preserving the user's other sets). `None` on a non-object
-/// existing value or a serialization failure. Pure → its byte-idempotency,
+/// any prior ours, preserving the user's other sets). `None` when we refuse: an
+/// unparseable existing file, a non-object root, or a serialization failure —
+/// see [`merge_root_json`]. Pure → its byte-idempotency,
 /// which lets the write be skipped, is testable.
 fn merged_agy_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) -> Option<String> {
-    let mut root = existing
-        .and_then(|t| serde_json::from_str::<Value>(t).ok())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| json!({}));
+    let mut root = merge_root_json(existing)?;
     let obj = root.as_object_mut()?;
     let mut set = serde_json::Map::new();
     for (event, state) in AGY_STATUS_HOOKS {
@@ -1070,5 +1096,74 @@ mod tests {
             traced,
             merged_agy_status_hooks_json(Some(&traced), "spyc", true).expect("re-merge traced"),
         );
+    }
+    /// Every status-hook merge REFUSES an existing file it can't parse, rather
+    /// than starting from an empty document and writing the user's content away.
+    ///
+    /// These files are not spyc's: claude's `settings.json` holds permissions,
+    /// codex's `config.toml` holds `model` / `approval_policy`, agy's
+    /// `hooks.json` holds the user's own named hook sets. One trailing comma was
+    /// enough to lose all of it on the next pane launch. A refusal costs the
+    /// activity dots for that repo, which is recoverable; the write was not.
+    #[test]
+    fn every_merge_refuses_an_unparseable_existing_file() {
+        for bad in [
+            r#"{"permissions": {"allow": ["Bash"]},}"#, // trailing comma
+            "{ not json at all",
+            "}}}}{{{",
+        ] {
+            assert!(
+                merged_status_hooks_json(Some(bad), "spyc", false).is_none(),
+                "claude merge must refuse {bad:?}"
+            );
+            assert!(
+                merged_agy_status_hooks_json(Some(bad), "spyc", false).is_none(),
+                "agy merge must refuse {bad:?}"
+            );
+        }
+        for bad in ["}}}}{{{ not toml", "model = \n"] {
+            assert!(
+                merged_codex_status_hooks_toml(Some(bad), "spyc", false).is_none(),
+                "codex merge must refuse {bad:?}"
+            );
+        }
+    }
+
+    /// A root of the wrong shape is also refused — a JSON array or a bare TOML
+    /// scalar is still someone's file, and `merge_root_*` must not treat
+    /// "unexpected shape" as "empty".
+    #[test]
+    fn every_merge_refuses_a_wrong_shaped_root() {
+        for bad in ["[1, 2, 3]", "\"just a string\"", "42"] {
+            assert!(
+                merged_status_hooks_json(Some(bad), "spyc", false).is_none(),
+                "claude merge must refuse root {bad:?}"
+            );
+            assert!(
+                merged_agy_status_hooks_json(Some(bad), "spyc", false).is_none(),
+                "agy merge must refuse root {bad:?}"
+            );
+        }
+    }
+
+    /// The benign half of the same distinction: absent or blank is NOT a
+    /// refusal. Over-triggering would break hook install on first launch in a
+    /// fresh repo, which is the common case.
+    #[test]
+    fn absent_or_blank_still_merges_fresh() {
+        for existing in [None, Some(""), Some("   \n\t\n")] {
+            assert!(
+                merged_status_hooks_json(existing, "spyc", false).is_some(),
+                "claude merge must accept {existing:?}"
+            );
+            assert!(
+                merged_agy_status_hooks_json(existing, "spyc", false).is_some(),
+                "agy merge must accept {existing:?}"
+            );
+            assert!(
+                merged_codex_status_hooks_toml(existing, "spyc", false).is_some(),
+                "codex merge must accept {existing:?}"
+            );
+        }
     }
 }
