@@ -145,6 +145,86 @@ its full width, so an untrimmed selection pastes a rectangle of spaces.
 > OSC payloads and has a test using a hostile `\x1b]52;c;…` string — the escaping
 > hazard is understood in-tree.
 
+## Owner spec (2026-08-05) — three surfaces, and "the content, not the chrome"
+
+Scope is settled, and it is wider than the earlier "pane + pager, skip the list"
+recommendation. All three spyc-owned surfaces are in:
+
+1. **Pager** — must work identically whether it's full-screen (`Mount::Overlay`)
+   or the pop-up (`Mount::TopPane` / `LowerPane`), and regardless of whether
+   line numbers, whitespace/line-break markers, or markdown rendering are on.
+   The copy is **the content and nothing else** — no gutter digits, no `·`/`→`/`$`
+   markers, no border or title.
+2. **File list** — select file names. A modifier gives the **full path**; without
+   it, just the **name**.
+3. **Status bar** — select and copy the whole top/status line text.
+
+### Resolved: how "the content and nothing else" is satisfied
+
+Two facts in the existing pager make this nearly free, and they're the reason this
+does NOT need a screen-buffer scrape:
+
+- **The decoration is render-time only.** `show_line_numbers` builds the gutter in
+  `render.rs` (`gutter_w`, ~line 149) and `expand_tabs` / `apply_whitespace_markers`
+  add the markers there too (~186–188). None of it is in `view.lines`. So
+  extraction that reads `view.lines` is decoration-free *by construction* — there
+  is no filtering step to get wrong, and turning line numbers on cannot change
+  what a copy produces.
+- **The markdown source is retained.** `alt_lines` holds the other side of the
+  rendered↔source pair and `m` toggles which is live (`markdown_rendered`).
+  `source_text()` already prefers `alt_lines` for exactly this reason ("POLA for
+  paste into chat").
+
+So: **a selection always yields the text currently displayed, taken from
+`view.lines`.** In a markdown view, `m` is what chooses rendered prose vs raw
+markdown, and the selection follows it. That satisfies "the underlying actual
+markdown *or* the text being displayed" without inventing a rendered→source line
+map, which is impossible to do faithfully anyway — the two sides have different
+line counts, so a *ranged* selection has no well-defined image in the other. Whole-view
+source copy stays `y` (`source_yank_text`), which is unchanged.
+
+> [!IMPORTANT]
+> Do not implement pager selection by reading the rendered `Buffer`. It is the
+> obvious shortcut and it silently re-introduces every decoration the spec
+> excludes, plus wrap artifacts — and it would make the copy depend on whether
+> the gutter happened to be on.
+
+### Charwise selection has to be added
+
+`VisualKind` today is `Line | Block` only. A mouse drag is neither: it starts
+mid-line and ends mid-line, taking everything between (vim's `v`, and what every
+terminal does). That is a third kind, `Char`.
+
+Adding it is contained — `Line`/`Block` already have arms to extend in the three
+places that matter: `VisualSelection::range`, the highlight arms in
+`render.rs` (~350–410), and `visual_yank_text`. It also lands keyboard `v` for
+free, which the pager currently lacks.
+
+### Wrap is the trap
+
+With `wrap = true` (the scrollback default) one source line occupies N visual
+rows, so a pointer row is not a line index. `layout::visual_rows` already owns
+that math for scrolling and must be the single source of truth for the
+pointer→(line, col) hit-test too. A second, independent mapping here is how the
+highlight and the copied text come to disagree about what was selected.
+
+### Per-surface extraction
+
+| Surface | Selection unit | Copy yields |
+|---|---|---|
+| Pager | charwise (`VisualKind::Char`), from `view.lines` | displayed text, decoration-free; trailing per-line whitespace trimmed |
+| File list | rows | file **names**, or **absolute paths** with the modifier held |
+| Status bar | whole line | the status text as displayed |
+
+For the file-list modifier: **not Shift** (the terminal's own
+selection-bypass, frequently consumed before spyc sees it) — that constraint
+already applies to block-select below. Use Ctrl or Alt, and state it in
+`FEATURES.md` + `docs/KEYBINDINGS.md`.
+
+The list is *not* the pick mechanism. Picks persist and drive operations; a
+selection is transient and only feeds the clipboard. Keeping them separate avoids
+a drag silently changing what the next file operation acts on.
+
 ## Open decisions
 
 These need answers before implementation, and two of them change the shape.
@@ -165,13 +245,12 @@ the whole class of bug impossible rather than handled, and the machinery exists.
 Cost: a drag implicitly freezes the pane, which must be visible (the divider
 already indicates scroll mode) and must auto-exit on release-with-no-selection.
 
-### 2. Which surfaces in v1
+### 2. ~~Which surfaces in v1~~ RESOLVED
 
-Pane-only is a coherent, useful v1 and is where the demand came from. The pager
-is the second-most valuable (`:activity dump`, `:grep` results, diffs) but costs
-more (spans, not cells). The list is the least valuable and overlaps picks.
-
-**Recommendation: pane + pager. Skip the list.**
+Superseded by the owner spec above: pager + file list + status bar, all three.
+The pane is covered for a mouse-aware child by #224 (its own selection) and needs
+spyc-side selection only for a non-mouse child, which is now the *last* piece
+rather than the first.
 
 ### 3. ~~Auto-copy on release, or an explicit copy step?~~ RESOLVED
 
@@ -206,22 +285,26 @@ clipboard rather than shipping alongside a fix for something it didn't break.
 
 **Recommendation: separate PR, landed before Tier 5.**
 
-## Suggested PR split
+## PR split
 
-1. **OSC 52 clipboard routing** — `auto` (client-side over SSH, OS clipboard
-   locally), applied to the existing yank paths. Independently valuable; fixes a
-   live bug for every SSH user.
-2. **1002 + drag plumbing** — enable button-event tracking, stop dropping `Drag`,
-   extend `Gesture`, and forward drags to mouse-aware children. **This alone
-   brings claude's native selection alive inside the pane**, which may satisfy
-   most of the original complaint before spyc-side selection exists at all.
-3. **Pane selection** — the state machine, freeze-on-drag, highlight, and
-   copy-on-release for a non-mouse child.
-4. **Pager selection** — the span-range highlight and range-scoped extraction.
-
-PR 2 is the one to land first and evaluate: if dragging inside claude works, the
-remaining gap is only non-mouse children and the pager, and the priority of 3–4
-should be re-judged against real use rather than assumed.
+1. ~~**1002 + drag plumbing**~~ — **SHIPPED (#224).** Brought claude's own
+   in-pane selection alive, which is what "copy in a claude session works great"
+   refers to.
+2. **`VisualKind::Char`** — charwise selection in the pager, keyboard-first
+   (`v`), with the `range` / highlight / yank arms. No mouse yet, so it is
+   reviewable against the existing `V`/`^v` behaviour it extends.
+3. **Pager mouse selection** — the press→motion→release state machine (Tier 1),
+   the `visual_rows`-based pointer→(line, col) hit-test, and copy-on-release.
+   Delivers the `:activity` / `:grep` / diff case that motivated all of this.
+4. **File list + status bar** — row selection with the name/full-path modifier,
+   and whole-line status copy. Smaller, and independent of 2–3.
+5. **OSC 52 clipboard routing** — `auto`: client-side over SSH, OS clipboard
+   locally. Fixes a live bug for every SSH user on the *existing* yank paths
+   (`y`, `^a u`), so it is independently valuable. Should land before selection
+   makes copy the primary path, but does not block 2–4 locally.
+6. **Pane selection for a non-mouse child** — freeze-on-drag (decision 1) and
+   `contents_between` extraction. Last, because #224 already covers the
+   mouse-aware children and this only serves plain shells.
 
 ## Verification
 
