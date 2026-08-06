@@ -313,7 +313,7 @@ impl Default for MouseConfig {
     fn default() -> Self {
         Self {
             capture: false,
-            scroll_lines: 3,
+            scroll_lines: 1,
         }
     }
 }

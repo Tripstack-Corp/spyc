@@ -53,13 +53,15 @@ pub(super) enum MouseSink {
     /// Drop the event. A modal owns the screen, the region isn't interactive, or
     /// the pane's child can't use it.
     Swallow,
-    /// Move the file-list cursor / scroll the list.
+    /// Move a file-list cursor. Carries the SIDE the pointer is over, because in a
+    /// vsplit the wheel must scroll the column under the pointer without dragging
+    /// keyboard focus to it — `cur()` would move the focused column instead.
     ///
     /// Not optional, and easy to mistake for one: wheel-over-list works today
     /// only because DEC 1007 has the *terminal* translate wheel into arrow keys.
     /// Enabling 1000 stops that translation, so without this sink turning capture
     /// on would trade a pane bug for a list bug.
-    ListCursor,
+    ListCursor(crate::app::state::Side),
     /// Scroll the pager under the pointer. Carries the SLOT rather than the mount:
     /// a mount can't tell `view.pager` from `view.right_pager`, and the wheel must
     /// scroll the pager the pointer is over, not the focused one.
@@ -194,6 +196,22 @@ pub(super) const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseS
         return MouseSink::Swallow;
     };
 
+    // A full-frame **modal pager** is the only interacting surface while it's open,
+    // matching how `route_input` gives it every key including meta chords. Clicking
+    // beside its box used to reach whatever the layout said was underneath —
+    // selecting content in the pane "under" a pager the user is reading, which is
+    // the POLA break reported against #228. Middle-click paste is kept (it targets
+    // the pager's own search/jump prompt), and the wheel/left arms below still route
+    // to it when the pointer is actually over its content.
+    if matches!(snap.pager_mount, Some(Mount::Overlay)) && !matches!(gesture, Gesture::Middle) {
+        return match (gesture, snap.covering_pager) {
+            (Gesture::Wheel, Some(slot)) => MouseSink::Pager(slot),
+            (Gesture::Left, Some(slot)) => MouseSink::FocusAndSelect(slot),
+            // Over the modal's frame but not its content: it still owns the event.
+            _ => MouseSink::Swallow,
+        };
+    }
+
     // A prompt owns the keyboard, so the only gesture that can mean anything is a
     // paste — which `handle_paste` already routes into the prompt buffer.
     //
@@ -256,9 +274,10 @@ pub(super) const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseS
 
     match region {
         // A pager over the list was already claimed by `covering_pager` above. What
-        // reaches here is the list itself — including the area beside a centered
-        // overlay, where the list is genuinely what the user sees.
-        Region::List | Region::RightColumn => MouseSink::ListCursor,
+        // reaches here is the list itself. The region names which column, so the
+        // wheel scrolls the one under the pointer.
+        Region::List => MouseSink::ListCursor(crate::app::state::Side::Left),
+        Region::RightColumn => MouseSink::ListCursor(crate::app::state::Side::Right),
         Region::Pane => {
             if snap.can_forward_to_child() {
                 MouseSink::PaneForward
@@ -471,21 +490,14 @@ impl super::App {
 
         match route_mouse(snap, gesture) {
             MouseSink::Swallow => Vec::new(),
-            MouseSink::ListCursor => {
-                // Reuse the cursor Actions rather than poking the cursor: they
-                // already handle clamping, the vsplit's focused column, and
-                // `list_generation` invalidation.
-                let action = if delta < 0 {
-                    crate::keymap::Action::Up(lines)
-                } else {
-                    crate::keymap::Action::Down(lines)
-                };
-                // A cursor move can't fail, but `apply` is fallible for other
-                // actions; surface rather than swallow if that ever changes.
-                self.apply(&action).unwrap_or_else(|e| {
-                    self.state.flash_error(format!("mouse: {e:#}"));
-                    Vec::new()
-                })
+            MouseSink::ListCursor(side) => {
+                // NOT `Action::Up/Down`: those move `cur()` (the focused column) and
+                // wrap at the ends via `rem_euclid`. The wheel must move the column
+                // under the POINTER, and must stop at the ends — wrapping from the
+                // bottom of the list back to the top is what made scrolling feel
+                // like it was flying out of control.
+                self.state.cursor_scroll_side(side, delta as isize);
+                Vec::new()
             }
             MouseSink::Pager(slot) => {
                 self.scroll_pager_in_slot(slot, delta);
@@ -516,7 +528,12 @@ impl super::App {
             MouseSink::PaneScrollKeys => self.send_scroll_keys(delta),
 
             MouseSink::FocusAndSelect(slot) => {
-                self.focus_region(region);
+                // The pager's OWN region, not the one the layout says is under the
+                // pointer. An Overlay covering the pane made `region` be `Pane`, so
+                // clicking inside the pager focused the pty behind it — the reported
+                // "clicking in the pager also sends a click through to the underlying
+                // pane".
+                self.focus_pager_slot(slot);
                 self.begin_pager_selection(ev, slot)
             }
         }
@@ -601,10 +618,11 @@ impl super::App {
         // — which, since a physically-held drag keeps generating `Drag` events as
         // long as the pointer moves at all, gives a continuous scroll-and-extend
         // for as long as the user holds past the edge and wiggles the pointer.
-        if ev.row < view.last_content_area.get().y {
-            view.scroll_by(-1, view.last_viewport_h.get());
-        } else if ev.row >= view.last_content_area.get().y + view.last_content_area.get().height {
-            view.scroll_by(1, view.last_viewport_h.get());
+        let area = view.last_content_area.get();
+        if ev.row < area.y {
+            view.scroll_by_within_content(-1, view.last_viewport_h.get());
+        } else if ev.row >= area.y.saturating_add(area.height) {
+            view.scroll_by_within_content(1, view.last_viewport_h.get());
         }
         if let Some((line, c)) = view.hit_test(col, row) {
             view.extend_char_selection(line, c);
@@ -731,6 +749,28 @@ impl super::App {
     /// while `^a z`-zoomed (the target region is collapsed off-screen) and, coming
     /// back from the pane, restores whichever split column the user left from.
     /// Assigning `state.focus` directly would lose both.
+    /// Give the keyboard to the region that OWNS `slot`.
+    ///
+    /// Distinct from [`Self::focus_region`], which answers from layout geometry: a
+    /// pager drawn over the pane's rect would otherwise focus the pty behind it.
+    /// A `Modal` needs no move — `recompute_focus` resolves a full-frame Overlay to
+    /// `Focus::Pager(Overlay)` on its own, and touching pane focus here is exactly
+    /// what leaked a click through to the pane.
+    fn focus_pager_slot(&mut self, slot: PagerSlot) {
+        match slot {
+            PagerSlot::Modal => {}
+            PagerSlot::Scrollback => self.set_pane_focus(true),
+            PagerSlot::Top => {
+                self.set_pane_focus(false);
+                self.vsplit_focus(crate::app::state::Side::Left);
+            }
+            PagerSlot::Right => {
+                self.set_pane_focus(false);
+                self.vsplit_focus(crate::app::state::Side::Right);
+            }
+        }
+    }
+
     fn focus_region(&mut self, region: Option<Region>) {
         match region {
             Some(Region::Pane) => self.set_pane_focus(true),
@@ -983,13 +1023,15 @@ mod tests {
 
     #[test]
     fn list_routes_to_the_cursor_or_to_a_pager_covering_it() {
+        // The side comes from the REGION, so the wheel scrolls the column under the
+        // pointer rather than the focused one.
         assert_eq!(
             route_mouse(snap(Some(Region::List)), Gesture::Wheel),
-            MouseSink::ListCursor
+            MouseSink::ListCursor(Side::Left)
         );
         assert_eq!(
             route_mouse(snap(Some(Region::RightColumn)), Gesture::Wheel),
-            MouseSink::ListCursor
+            MouseSink::ListCursor(Side::Right)
         );
         // A pager COVERING the pointer takes those events.
         for slot in [PagerSlot::Modal, PagerSlot::Top] {
@@ -1386,6 +1428,7 @@ mod tests {
 
     use super::PagerSlot;
     use crate::app::Effect;
+    use crate::app::state::Side;
     use crate::ui::pager::{PagerView, VisualKind};
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
@@ -1595,19 +1638,24 @@ mod tests {
         assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusAndForward);
     }
 
-    /// Beside a centered overlay the user genuinely sees the file list, so the
-    /// pointer there drives the list — coverage is per-rect, not "a pager exists".
-    /// The old `pager_mount`-based arm got this wrong: any mounted pager claimed the
-    /// whole list region.
+    /// **Deliberate reversal of what #228 shipped.** That version reasoned that
+    /// beside a centered overlay the user still sees the list, so clicking there
+    /// should reach it. In practice that read as a POLA break: it let a click
+    /// select content in the pane *underneath* a pager the user was reading. An
+    /// open modal pager is now the only interacting surface, matching how
+    /// `route_input` hands it every key.
+    ///
+    /// Scoped to `Overlay` on purpose — see
+    /// `a_non_modal_pager_leaves_the_rest_of_the_frame_alone`.
     #[test]
-    fn the_list_beside_a_centered_overlay_is_still_the_list() {
+    fn a_modal_pager_swallows_input_beside_its_box() {
         let s = MouseSnapshot {
             pager_mount: Some(Mount::Overlay), // mounted...
             covering_pager: None,              // ...but not under THIS point
             ..snap(Some(Region::List))
         };
-        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::ListCursor);
-        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusRegion);
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
     }
 
     /// A prompt still outranks a covering pager, and middle/right stay spyc's
@@ -1626,5 +1674,36 @@ mod tests {
             ..snap(Some(Region::Pane))
         };
         assert_eq!(route_mouse(covered, Gesture::Middle), MouseSink::Paste);
+    }
+    /// **A full-frame modal pager is the only interacting surface while it's open.**
+    ///
+    /// Clicking beside its box used to reach whatever the layout said was
+    /// underneath — starting a selection in the pane "under" a pager the user is
+    /// reading. Matches how `route_input` hands an Overlay every key.
+    #[test]
+    fn a_modal_pager_is_exclusive_even_where_it_does_not_cover() {
+        let s = MouseSnapshot {
+            pager_mount: Some(Mount::Overlay),
+            covering_pager: None, // beside the box, over the pane's rect
+            pane_wants_mouse: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
+        // Middle-click still pastes: it targets the pager's own search / jump prompt.
+        assert_eq!(route_mouse(s, Gesture::Middle), MouseSink::Paste);
+    }
+
+    /// A NON-modal pager stays scoped to its own rect — it must not make the whole
+    /// frame inert the way an Overlay does.
+    #[test]
+    fn a_non_modal_pager_leaves_the_rest_of_the_frame_alone() {
+        let s = MouseSnapshot {
+            pager_mount: Some(Mount::TopPane),
+            covering_pager: None,
+            pane_wants_mouse: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::PaneForward);
     }
 }

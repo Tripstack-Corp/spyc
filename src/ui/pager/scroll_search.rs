@@ -152,6 +152,21 @@ impl PagerView {
         self.clamp_scroll(viewport_height);
     }
 
+    /// Scroll by `delta`, stopping at the last line of *content* rather than at
+    /// [`Self::scroll_max`].
+    ///
+    /// `scroll_max` deliberately reserves one row past the last line so the
+    /// `[EOF]` / `~` end marker is reachable (vim/less parity). That's right for
+    /// ordinary scrolling and wrong while drag-selecting: there is nothing to
+    /// select on the marker row, so a drag held past the bottom scrolled into
+    /// empty space and showed a `~`.
+    pub fn scroll_by_within_content(&mut self, delta: i32, viewport_height: u16) {
+        let max = self.scroll_max_content(viewport_height);
+        let current = self.scroll as i64;
+        let new = (current + i64::from(delta)).clamp(0, max as i64);
+        self.scroll = usize::try_from(new).unwrap_or(0);
+    }
+
     pub const fn scroll_to_top(&mut self) {
         self.scroll = 0;
     }

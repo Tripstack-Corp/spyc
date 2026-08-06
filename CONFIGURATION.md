@@ -180,7 +180,7 @@ without waiting for a real agent transition.
 ```toml
 [mouse]
 capture = false      # real mouse reporting (wheel + buttons). Default off.
-scroll_lines = 3     # lines per wheel tick, for surfaces spyc scrolls itself
+scroll_lines = 1     # lines per wheel tick, for surfaces spyc scrolls itself
 ```
 
 `capture` asks the terminal for real mouse reporting so spyc can scroll whatever
@@ -229,6 +229,10 @@ Clicking a *row* in the file list is deliberately not a thing: clicking a region
 coarse and hard to get wrong, while aiming at a one-cell-tall line invites
 near-misses that silently move the cursor. `j`/`k`, `F`, and frecency jumps are all
 faster and more precise.
+
+`scroll_lines` defaults to **1** because trackpads and most modern terminals
+already emit one wheel event per notional line — a multiplier there makes the list
+fly. Raise it for a detented wheel that sends one event per physical click.
 
 `scroll_lines` applies to the surfaces spyc scrolls itself. A pane forwarding to a
 mouse-aware child is unaffected — the child receives one event per tick and picks
