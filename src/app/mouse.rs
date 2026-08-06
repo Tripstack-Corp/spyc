@@ -18,6 +18,7 @@
 use ratatui::layout::Rect;
 
 use super::modal::{Modal, ModalSnapshot, active_modal};
+use super::pager_handler::PagerSlot;
 use super::{Effect, FrameLayout};
 use crate::ui::pager::Mount;
 
@@ -59,8 +60,10 @@ pub(super) enum MouseSink {
     /// Enabling 1000 stops that translation, so without this sink turning capture
     /// on would trade a pane bug for a list bug.
     ListCursor,
-    /// Scroll the pager under the pointer.
-    Pager(Mount),
+    /// Scroll the pager under the pointer. Carries the SLOT rather than the mount:
+    /// a mount can't tell `view.pager` from `view.right_pager`, and the wheel must
+    /// scroll the pager the pointer is over, not the focused one.
+    Pager(PagerSlot),
     /// Encode and forward to the pane's child (which requested mouse reporting).
     PaneForward,
     /// Send the child's own scroll keys, for an agent that doesn't speak mouse
@@ -85,7 +88,7 @@ pub(super) enum MouseSink {
     /// carries both: #219 shipped a sink that did only the forwarding half while a
     /// test asserting the sink still passed. A press that anchored without focusing
     /// would leave the pager's own keys (`y`, Esc) going somewhere else.
-    FocusAndSelect(Mount),
+    FocusAndSelect(PagerSlot),
     /// Paste the system clipboard wherever a paste would land.
     Paste,
     /// Open the leader menu (right-click, from anywhere).
@@ -114,8 +117,18 @@ pub(super) struct MouseSnapshot {
     pub modal: Option<Modal>,
     /// Where the pointer is — hit-tested via [`region_at`], NOT keyboard focus.
     pub region: Option<Region>,
-    /// A pager mounted in the focused column, and where.
+    /// A pager mounted in the focused column, and where. Still needed for the
+    /// leader-chord latch check, which is about the *modal* Overlay specifically.
     pub pager_mount: Option<Mount>,
+    /// The pager painted under the pointer, if any — from [`App::pager_slot_at`].
+    ///
+    /// Takes precedence over `region` for the wheel and for left-press, because a
+    /// pager is drawn OVER the layout: an `Overlay` covers the whole frame and a
+    /// `^a v` scrollback covers the pane's rect, yet `region_at` reports
+    /// `Region::Pane` for both (it tests `layout.pane` first). Without this the
+    /// wheel scrolled the agent behind a full-screen pager and a left click was
+    /// forwarded into it.
+    pub covering_pager: Option<PagerSlot>,
     /// The pane's child requested mouse reporting (`mouse_protocol_mode != None`).
     /// When false, forwarding would type escape bytes into a prompt that never
     /// asked for them — the bracketed-paste bug (#170) in a new costume.
@@ -217,32 +230,35 @@ pub(super) const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseS
             };
         }
         Gesture::Left => {
+            // An open pager owns the pointer wherever it is painted — checked
+            // BEFORE the pane, which `region_at` would otherwise win for a pager
+            // drawn over the pane's rect (forwarding the press into the agent and
+            // making it start its own selection).
+            if let Some(slot) = snap.covering_pager {
+                return MouseSink::FocusAndSelect(slot);
+            }
             // Left is click-THROUGH: focus the region, and (for a mouse-aware
             // child) let the event reach it too. The pane is live and visible, so
             // swallowing the first click just to focus would read as broken.
             if matches!(region, Region::Pane) && snap.can_forward_to_child() {
                 return MouseSink::FocusAndForward;
             }
-            // A pager is painted over the list, so a press in the list region is
-            // really on the pager and starts a text selection there. Checked before
-            // the plain focus arm, which would otherwise consume the press.
-            if matches!(region, Region::List | Region::RightColumn)
-                && let Some(mount) = snap.pager_mount
-            {
-                return MouseSink::FocusAndSelect(mount);
-            }
             return MouseSink::FocusRegion;
         }
-        Gesture::Wheel => {}
+        Gesture::Wheel => {
+            // Same precedence, same reason: scroll the pager you are looking at,
+            // not the agent behind it.
+            if let Some(slot) = snap.covering_pager {
+                return MouseSink::Pager(slot);
+            }
+        }
     }
 
     match region {
-        // An `Overlay`/`TopPane` pager is painted over the list, so a pointer in
-        // the list region is really over the pager.
-        Region::List | Region::RightColumn => match snap.pager_mount {
-            Some(mount) => MouseSink::Pager(mount),
-            None => MouseSink::ListCursor,
-        },
+        // A pager over the list was already claimed by `covering_pager` above. What
+        // reaches here is the list itself — including the area beside a centered
+        // overlay, where the list is genuinely what the user sees.
+        Region::List | Region::RightColumn => MouseSink::ListCursor,
         Region::Pane => {
             if snap.can_forward_to_child() {
                 MouseSink::PaneForward
@@ -314,6 +330,22 @@ pub(super) const fn region_at(layout: &FrameLayout, col: u16, row: u16) -> Optio
 // ── wiring: the impure half ───────────────────────────────────────────────
 
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+/// Clamp `(col, row)` into `view`'s last-rendered content rect, so a pointer
+/// beyond any edge — including past the top/bottom, which the caller scrolls
+/// toward — still names the nearest character instead of naming none.
+///
+/// `None` only when the view has never rendered (`last_content_area` is
+/// zero-sized) — there is no edge to clamp to.
+fn clamp_to_area(view: &crate::ui::pager::PagerView, col: u16, row: u16) -> Option<(u16, u16)> {
+    let area = view.last_content_area.get();
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+    let col = col.clamp(area.x, area.x + area.width - 1);
+    let row = row.clamp(area.y, area.y + area.height - 1);
+    Some((col, row))
+}
 
 impl super::App {
     /// Handle one mouse event: hit-test the pointer, route it, dispatch the sink.
@@ -423,6 +455,7 @@ impl super::App {
             }),
             region,
             pager_mount: self.focused_top_pager_mount(),
+            covering_pager: self.pager_slot_at(ev.column, ev.row),
             pane_wants_mouse: self
                 .runtime
                 .pane_tabs
@@ -454,8 +487,8 @@ impl super::App {
                     Vec::new()
                 })
             }
-            MouseSink::Pager(_) => {
-                self.scroll_active_pager_by(delta);
+            MouseSink::Pager(slot) => {
+                self.scroll_pager_in_slot(slot, delta);
                 Vec::new()
             }
             MouseSink::FocusRegion => {
@@ -482,9 +515,9 @@ impl super::App {
             MouseSink::PaneForward => self.forward_to_child(ev, &layout),
             MouseSink::PaneScrollKeys => self.send_scroll_keys(delta),
 
-            MouseSink::FocusAndSelect(mount) => {
+            MouseSink::FocusAndSelect(slot) => {
                 self.focus_region(region);
-                self.begin_pager_selection(ev, mount)
+                self.begin_pager_selection(ev, slot)
             }
         }
     }
@@ -532,46 +565,71 @@ impl super::App {
     /// pager and nothing more, so it cannot strand a selection that never had an
     /// anchor — and, because claiming is what diverts drags away from the child,
     /// an unclaimed press leaves forwarding exactly as it was.
-    fn begin_pager_selection(&mut self, ev: MouseEvent, mount: Mount) -> Vec<Effect> {
-        let Some(view) = self.active_pager_matching_mut(mount) else {
+    fn begin_pager_selection(&mut self, ev: MouseEvent, slot: PagerSlot) -> Vec<Effect> {
+        let Some(view) = self.pager_in_slot_mut(slot) else {
             return Vec::new();
         };
         let Some((line, col)) = view.hit_test(ev.column, ev.row) else {
             return Vec::new();
         };
         view.begin_char_selection(line, col);
-        self.view.mouse_selection = Some(mount);
+        self.view.mouse_selection = Some(slot);
         Vec::new()
     }
 
     /// Extend the in-progress selection to the pointer.
     ///
-    /// A pointer that has left the content rect (`hit_test` → `None`) holds the
-    /// selection where it was rather than collapsing it: dragging slightly past the
-    /// edge is normal, and losing the selection there would read as a bug.
+    /// A pointer past the content rect's top/bottom edge scrolls the pager toward
+    /// it and extends to the new edge line — the pager keeps hold of the gesture
+    /// (**"full priority" while it's open**) instead of freezing once the pointer
+    /// leaves its rect, which read as the pager handing the drag off to whatever
+    /// is on screen below it. `clamp_to_area` folds a horizontal miss (left/right
+    /// of the box, or before the first render) into the same treatment: extend to
+    /// the nearest edge rather than doing nothing.
     fn extend_pager_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
-        let Some(mount) = self.view.mouse_selection else {
+        let Some(slot) = self.view.mouse_selection else {
             return Vec::new();
         };
-        if let Some(view) = self.active_pager_matching_mut(mount)
-            && let Some((line, col)) = view.hit_test(ev.column, ev.row)
-        {
-            view.extend_char_selection(line, col);
+        let Some(view) = self.pager_in_slot_mut(slot) else {
+            return Vec::new();
+        };
+        let Some((col, row)) = clamp_to_area(view, ev.column, ev.row) else {
+            return Vec::new(); // never rendered — nothing to scroll or clamp to
+        };
+        // Scroll toward the pointer BEFORE hit-testing the clamped edge row, so the
+        // same on-screen row resolves to a new (further) line each time this fires
+        // — which, since a physically-held drag keeps generating `Drag` events as
+        // long as the pointer moves at all, gives a continuous scroll-and-extend
+        // for as long as the user holds past the edge and wiggles the pointer.
+        if ev.row < view.last_content_area.get().y {
+            view.scroll_by(-1, view.last_viewport_h.get());
+        } else if ev.row >= view.last_content_area.get().y + view.last_content_area.get().height {
+            view.scroll_by(1, view.last_viewport_h.get());
+        }
+        if let Some((line, c)) = view.hit_test(col, row) {
+            view.extend_char_selection(line, c);
         }
         Vec::new()
     }
 
     /// Finish the gesture: copy when it selected something, and treat a press that
     /// never moved as the plain click it was.
+    ///
+    /// The selection is left highlighted rather than cleared. Unlike the keyboard
+    /// `y` key — vim convention: yank exits visual mode, unchanged here — a mouse
+    /// release is the terminal-native "select, then it just sits there" contract,
+    /// and it's what lets a follow-up `y` / `Y` / a fresh drag still find it.
     fn finish_pager_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
-        let Some(mount) = self.view.mouse_selection.take() else {
+        let Some(slot) = self.view.mouse_selection.take() else {
             return Vec::new();
         };
-        let Some(view) = self.active_pager_matching_mut(mount) else {
+        let Some(view) = self.pager_in_slot_mut(slot) else {
             return Vec::new();
         };
-        if let Some((line, col)) = view.hit_test(ev.column, ev.row) {
-            view.extend_char_selection(line, col);
+        if let Some((col, row)) = clamp_to_area(view, ev.column, ev.row)
+            && let Some((line, c)) = view.hit_test(col, row)
+        {
+            view.extend_char_selection(line, c);
         }
         if !view.char_selection_is_nonempty() {
             // A click, not a drag. Drop the zero-width selection so it doesn't
@@ -579,11 +637,13 @@ impl super::App {
             view.visual = None;
             return Vec::new();
         }
-        // `visual_yank_text` consumes the selection (it exits visual mode) — the
-        // same contract the `y` key relies on.
+        // Captured before `visual_yank_text` consumes it (exits visual mode — the
+        // contract the `y` key relies on), so it can be reinstated below.
+        let sel = view.visual;
         let Some((text, lines, _)) = view.visual_yank_text(false) else {
             return Vec::new();
         };
+        view.visual = sel;
         if text.is_empty() {
             return Vec::new();
         }
@@ -763,6 +823,7 @@ mod tests {
             modal: None,
             region,
             pager_mount: None,
+            covering_pager: None,
             pane_wants_mouse: false,
             is_prompting: false,
             has_scroll_pager: false,
@@ -864,30 +925,25 @@ mod tests {
         }
     }
 
-    /// A left press on a pager anchors a text selection there instead of only
-    /// moving focus. Both mounts that paint over the list qualify, and so does the
-    /// right column's pager.
+    /// A left press on a covered pager anchors a text selection in THAT pager's
+    /// slot — whichever region the layout says is underneath.
     #[test]
     fn left_press_on_a_pager_starts_a_selection() {
-        for mount in [Mount::Overlay, Mount::TopPane] {
+        for (slot, region) in [
+            (PagerSlot::Top, Region::List),
+            (PagerSlot::Right, Region::RightColumn),
+            (PagerSlot::Scrollback, Region::Pane),
+        ] {
             let s = MouseSnapshot {
-                pager_mount: Some(mount),
-                ..snap(Some(Region::List))
+                covering_pager: Some(slot),
+                ..snap(Some(region))
             };
             assert_eq!(
                 route_mouse(s, Gesture::Left),
-                MouseSink::FocusAndSelect(mount),
-                "{mount:?} over the list region"
+                MouseSink::FocusAndSelect(slot),
+                "{slot:?} under a pointer over {region:?}"
             );
         }
-        let right = MouseSnapshot {
-            pager_mount: Some(Mount::TopPane),
-            ..snap(Some(Region::RightColumn))
-        };
-        assert_eq!(
-            route_mouse(right, Gesture::Left),
-            MouseSink::FocusAndSelect(Mount::TopPane)
-        );
     }
 
     /// With no pager mounted there is no text to select, so a left press stays a
@@ -935,13 +991,13 @@ mod tests {
             route_mouse(snap(Some(Region::RightColumn)), Gesture::Wheel),
             MouseSink::ListCursor
         );
-        // A mounted pager is painted over the list, so it takes those events.
-        for mount in [Mount::Overlay, Mount::TopPane] {
+        // A pager COVERING the pointer takes those events.
+        for slot in [PagerSlot::Modal, PagerSlot::Top] {
             let s = MouseSnapshot {
-                pager_mount: Some(mount),
+                covering_pager: Some(slot),
                 ..snap(Some(Region::List))
             };
-            assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Pager(mount));
+            assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Pager(slot));
         }
     }
 
@@ -1323,5 +1379,252 @@ mod tests {
         let layout = App::compute_layout(Rect::new(0, 0, 80, 24), true, 40, StatusPosition::Top);
         assert_eq!(region_at(&layout, 200, 5), None, "past the right edge");
         assert_eq!(region_at(&layout, 5, 200), None, "past the bottom");
+    }
+
+    // ── pager selection: begin / extend / finish (App methods, not the pure
+    // `route_mouse` decision) ──────────────────────────────────────────────
+
+    use super::PagerSlot;
+    use crate::app::Effect;
+    use crate::ui::pager::{PagerView, VisualKind};
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+    /// A pager mounted at a known, small content rect — as if it had just
+    /// rendered — with enough lines to scroll. Lines are single chars at a
+    /// known width so column math in the tests is easy to check by hand.
+    fn mounted_pager() -> PagerView {
+        let mut view = PagerView::new_plain("t", (0..10).map(|i| format!("line{i}")).collect());
+        // Small on purpose: a 2-row viewport out of 10 lines guarantees both
+        // "past the bottom" and "past the top" are reachable within a few
+        // Drag events, without wrap complicating the row math.
+        view.wrap = false;
+        view.show_line_numbers = false;
+        view.last_content_area.set(Rect::new(0, 0, 10, 2));
+        view.last_viewport_h.set(2);
+        view
+    }
+
+    fn app_with_pager(view: PagerView) -> App {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // `test_app` reads/writes under the state root; leak the tempdir for
+        // the test's lifetime rather than threading a closure through every
+        // call site below.
+        let path = tmp.keep();
+        crate::state::with_state_root(&path, || {
+            let mut app = App::test_app(path.clone());
+            app.view.pager = Some(view);
+            app
+        })
+    }
+
+    fn left_down(col: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: col,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn left_drag(col: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: col,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn left_up(col: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: col,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    /// The headline fix: a drag held past the BOTTOM edge scrolls the pager
+    /// toward the pointer and keeps extending, rather than freezing once the
+    /// pointer leaves the content rect — which is what made the pager seem to
+    /// hand the gesture off to whatever is on screen below it.
+    #[test]
+    fn drag_past_the_bottom_edge_scrolls_and_keeps_extending() {
+        let mut app = app_with_pager(mounted_pager());
+        app.begin_pager_selection(left_down(0, 0), PagerSlot::Modal);
+        let before = app.view.pager.as_ref().unwrap().scroll;
+
+        // Row 5 is three rows past the 2-row viewport — squarely "in the pane".
+        app.extend_pager_selection(left_drag(0, 5));
+
+        let view = app.view.pager.as_ref().expect("still mounted");
+        assert!(
+            view.scroll > before,
+            "a drag past the bottom edge must scroll the pager, not freeze it"
+        );
+        let sel = view
+            .visual
+            .expect("selection survives a drag past the edge");
+        assert!(
+            sel.cursor > sel.anchor,
+            "the selection must keep growing, not stick at the edge"
+        );
+    }
+
+    /// The symmetric case: past the TOP edge scrolls up. The rect is offset
+    /// from row 0 specifically so there is screen space above it to drag into.
+    #[test]
+    fn drag_past_the_top_edge_scrolls_up() {
+        let mut view = mounted_pager();
+        view.scroll = 5; // start mid-document so there's room to scroll up
+        view.last_content_area.set(Rect::new(0, 3, 10, 2)); // rows 3-4; row 0 is "above"
+        let mut app = app_with_pager(view);
+        app.begin_pager_selection(left_down(0, 3), PagerSlot::Modal);
+
+        app.extend_pager_selection(left_drag(0, 0));
+
+        let view = app.view.pager.as_ref().expect("still mounted");
+        assert!(view.scroll < 5, "a drag past the top edge must scroll up");
+    }
+
+    /// A pointer beside (not above/below) the rect clamps horizontally and
+    /// keeps extending — it must not require the drag to stay inside the box
+    /// pixel-perfectly to keep selecting.
+    #[test]
+    fn drag_beyond_the_right_edge_clamps_without_scrolling() {
+        let mut app = app_with_pager(mounted_pager());
+        app.begin_pager_selection(left_down(0, 0), PagerSlot::Modal);
+        let scroll_before = app.view.pager.as_ref().unwrap().scroll;
+
+        app.extend_pager_selection(left_drag(50, 0)); // same row, way past the right edge
+
+        let view = app.view.pager.as_ref().expect("still mounted");
+        assert_eq!(
+            view.scroll, scroll_before,
+            "a horizontal miss must not scroll"
+        );
+        let sel = view.visual.expect("still selecting");
+        // The rect's right edge (col 9) clamps first, and THEN `hit_test` clamps
+        // again to the line's own length ("line0" is 5 chars, max index 4) — the
+        // same end-of-line behavior `hit_test_clamps_past_end_of_line` pins.
+        assert_eq!(
+            sel.cursor_col, 4,
+            "clamped into the rect, then to end-of-line"
+        );
+    }
+
+    /// The other half of the report: releasing after a real drag must leave
+    /// the selection highlighted (the terminal-native "it just sits there"
+    /// contract), not clear it — while still copying and reporting the count.
+    #[test]
+    fn release_after_a_drag_copies_and_keeps_the_highlight() {
+        let mut app = app_with_pager(mounted_pager());
+        app.begin_pager_selection(left_down(0, 0), PagerSlot::Modal);
+        app.extend_pager_selection(left_drag(3, 1));
+
+        let effects = app.finish_pager_selection(left_up(3, 1));
+
+        assert!(
+            matches!(effects.as_slice(), [Effect::CopyToPagerClipboard { .. }]),
+            "a real drag must copy on release: {effects:?}"
+        );
+        let sel = app
+            .view
+            .pager
+            .as_ref()
+            .and_then(|v| v.visual)
+            .expect("selection must survive the copy, unlike the keyboard `y` contract");
+        assert_eq!(sel.kind, VisualKind::Char);
+    }
+
+    /// A press that never moves is a plain click: no copy, and no stray
+    /// zero-width highlight left behind.
+    #[test]
+    fn release_without_motion_is_a_click_not_a_selection() {
+        let mut app = app_with_pager(mounted_pager());
+        app.begin_pager_selection(left_down(2, 0), PagerSlot::Modal);
+
+        let effects = app.finish_pager_selection(left_up(2, 0));
+
+        assert!(effects.is_empty(), "a plain click must not copy anything");
+        assert!(
+            app.view.pager.as_ref().unwrap().visual.is_none(),
+            "a plain click must not leave a stray highlight"
+        );
+    }
+    // ── an open pager outranks the region painted beneath it ──────────────
+
+    /// **The bug this pins.** An `Overlay` pager renders into `frame.area()` and a
+    /// `^a v` scrollback renders into the pane's rect, but `region_at` tests
+    /// `layout.pane` FIRST — so the pointer over either resolved to `Region::Pane`.
+    /// The wheel then scrolled the agent *behind* a full-screen pager, and a left
+    /// click was forwarded into it, which is what made claude start its own
+    /// selection underneath the pager the user was reading.
+    #[test]
+    fn a_pager_covering_the_pane_outranks_the_pane() {
+        for slot in [PagerSlot::Modal, PagerSlot::Scrollback] {
+            let s = MouseSnapshot {
+                covering_pager: Some(slot),
+                // Everything that made the pane win before: pointer over the pane's
+                // rect, and a live mouse-aware child eager to receive it.
+                pane_wants_mouse: true,
+                ..snap(Some(Region::Pane))
+            };
+            assert_eq!(
+                route_mouse(s, Gesture::Wheel),
+                MouseSink::Pager(slot),
+                "{slot:?}: wheel must scroll the pager, not the agent behind it"
+            );
+            assert_eq!(
+                route_mouse(s, Gesture::Left),
+                MouseSink::FocusAndSelect(slot),
+                "{slot:?}: click must select in the pager, not forward to the agent"
+            );
+        }
+    }
+
+    /// With no pager under the pointer the pane keeps click-through and the wheel —
+    /// the coverage check must not have stolen the live-pane behaviour.
+    #[test]
+    fn an_uncovered_pane_still_forwards() {
+        let s = MouseSnapshot {
+            pane_wants_mouse: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::PaneForward);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusAndForward);
+    }
+
+    /// Beside a centered overlay the user genuinely sees the file list, so the
+    /// pointer there drives the list — coverage is per-rect, not "a pager exists".
+    /// The old `pager_mount`-based arm got this wrong: any mounted pager claimed the
+    /// whole list region.
+    #[test]
+    fn the_list_beside_a_centered_overlay_is_still_the_list() {
+        let s = MouseSnapshot {
+            pager_mount: Some(Mount::Overlay), // mounted...
+            covering_pager: None,              // ...but not under THIS point
+            ..snap(Some(Region::List))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::ListCursor);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusRegion);
+    }
+
+    /// A prompt still outranks a covering pager, and middle/right stay spyc's
+    /// everywhere — the new precedence must sit below the existing ones.
+    #[test]
+    fn a_prompt_and_the_spyc_buttons_still_outrank_a_covering_pager() {
+        let prompting = MouseSnapshot {
+            is_prompting: true,
+            covering_pager: Some(PagerSlot::Modal),
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(prompting, Gesture::Left), MouseSink::Swallow);
+
+        let covered = MouseSnapshot {
+            covering_pager: Some(PagerSlot::Modal),
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(covered, Gesture::Middle), MouseSink::Paste);
     }
 }
