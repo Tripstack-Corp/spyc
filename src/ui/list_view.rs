@@ -98,6 +98,13 @@ pub struct ListView<'a> {
     pub empty_marker: bool,
     pub focused: bool,
     pub theme: &'a Theme,
+    /// Inclusive row-index range of a mouse text selection, if any.
+    ///
+    /// Lives here rather than as a `Row` flag because `Row`s are cached against
+    /// `list_generation`: a per-row flag would need the generation bumped on every
+    /// drag motion, defeating the cache the field exists to protect. `cursor` is
+    /// styled the same way for the same reason.
+    pub selection: Option<(usize, usize)>,
 }
 
 /// Geometry of the rendered grid for the currently visible page.
@@ -161,6 +168,39 @@ const MARKER_W: u16 = 2;
 const MIN_NAME_WIDTH: u16 = 8;
 
 impl ListView<'_> {
+    /// Map a pointer position to the row index under it, or `None` when it names
+    /// no row (past the last entry, or in the gap between columns).
+    ///
+    /// Lives here, next to `grid` / `col_x_offsets` / `COL_GAP`, so the hit-test and
+    /// the renderer derive the grid the same way. The pager learned this the hard
+    /// way: a second, independent geometry derivation is how the highlight and the
+    /// copied text come to disagree about what was selected.
+    pub fn row_at(&self, area: Rect, col: u16, row: u16) -> Option<usize> {
+        if self.rows.is_empty()
+            || col < area.x
+            || row < area.y
+            || col >= area.x.saturating_add(area.width)
+            || row >= area.y.saturating_add(area.height)
+        {
+            return None;
+        }
+        let grid = self.grid(area);
+        let rel_x = col - area.x;
+        let rel_y = usize::from(row - area.y);
+        if rel_y >= usize::from(grid.rows) {
+            return None;
+        }
+        // Which on-screen column the pointer is in. The gap between columns belongs
+        // to neither, so a pointer there selects nothing rather than guessing.
+        let offsets = grid.col_x_offsets(COL_GAP);
+        let which = offsets
+            .iter()
+            .zip(grid.col_widths.iter())
+            .position(|(&x, &w)| rel_x >= x && rel_x < x.saturating_add(w))?;
+        let idx = self.view_top + which * usize::from(grid.rows) + rel_y;
+        (idx < self.rows.len()).then_some(idx)
+    }
+
     /// Compute the grid for the page that starts at `self.view_top`.
     pub fn grid(&self, area: Rect) -> Grid {
         let height = area.height.max(1) as usize;
@@ -293,7 +333,11 @@ impl Widget for ListView<'_> {
             };
 
             let name_style = row_style(row.kind, row.git_status, self.theme);
-            let highlighted = (start + i) == self.cursor;
+            let abs_idx = start + i;
+            let highlighted = abs_idx == self.cursor;
+            let selected = self
+                .selection
+                .is_some_and(|(lo, hi)| abs_idx >= lo && abs_idx <= hi);
 
             // Cursor row — force the bright bar bg + fg over both
             // marker cells and the filename. DIM doesn't apply to the
@@ -306,6 +350,12 @@ impl Widget for ListView<'_> {
             // The warning wins even when the row is also the cursor.
             let (cursor_bg, cursor_bold) = if row.pending_delete {
                 (Some(self.theme.delete_warning), Modifier::BOLD)
+            } else if selected && !highlighted {
+                // A selected row that isn't the cursor. Uses the dim cursor bg so a
+                // selection reads as a contiguous band with the cursor as its bright
+                // end — and so it stays distinct from the delete warning above it in
+                // this ladder, which must keep winning.
+                (Some(self.theme.cursor_bg_dim), Modifier::empty())
             } else if highlighted {
                 let bg = if self.focused {
                     self.theme.cursor_bg
@@ -463,6 +513,7 @@ mod tests {
             empty_marker: false,
             focused: true,
             theme: &theme,
+            selection: None,
         };
         lv.grid(Rect {
             x: 0,
@@ -560,6 +611,7 @@ mod tests {
                     empty_marker: true,
                     focused,
                     theme: &theme,
+                    selection: None,
                 };
                 f.render_widget(lv, area);
             })
@@ -659,6 +711,7 @@ mod tests {
                     empty_marker: true,
                     focused: true,
                     theme: &theme,
+                    selection: None,
                 };
                 f.render_widget(lv, Rect::new(0, 0, 30, 4));
             })
@@ -679,5 +732,99 @@ mod tests {
         for x in 12u16..30 {
             assert!(!crossed(x), "pad cell {x} must not be struck through");
         }
+    }
+}
+
+#[cfg(test)]
+mod row_at_tests {
+    use super::{ListView, Row};
+    use crate::fs::EntryKind;
+    use crate::ui::list_view::GitFileStatus;
+    use crate::ui::theme::Theme;
+    use ratatui::layout::Rect;
+
+    fn rows(n: usize) -> Vec<Row> {
+        (0..n)
+            .map(|i| Row {
+                display: format!("file{i}"),
+                kind: EntryKind::File,
+                picked: false,
+                taken: false,
+                deleted: false,
+                git_status: GitFileStatus::clean(),
+                pending_delete: false,
+            })
+            .collect()
+    }
+
+    fn lv<'a>(rows: &'a [Row], theme: &'a Theme, view_top: usize) -> ListView<'a> {
+        ListView {
+            rows,
+            cursor: 0,
+            view_top,
+            empty_marker: false,
+            focused: true,
+            theme,
+            selection: None,
+        }
+    }
+
+    /// The top-left cell of the area is the first visible row, and each screen row
+    /// down is the next entry.
+    #[test]
+    fn row_at_maps_screen_rows_to_entries() {
+        let (r, t) = (rows(6), Theme::default());
+        let area = Rect::new(0, 0, 40, 6);
+        let v = lv(&r, &t, 0);
+        assert_eq!(v.row_at(area, 0, 0), Some(0));
+        assert_eq!(v.row_at(area, 0, 3), Some(3));
+    }
+
+    /// Offsets follow `view_top`, so a scrolled list doesn't report stale indices.
+    #[test]
+    fn row_at_follows_view_top() {
+        let (r, t) = (rows(20), Theme::default());
+        let area = Rect::new(0, 0, 40, 5);
+        assert_eq!(lv(&r, &t, 5).row_at(area, 0, 0), Some(5));
+        assert_eq!(lv(&r, &t, 5).row_at(area, 0, 2), Some(7));
+    }
+
+    /// Past the last entry names no row, so a press below the listing can't anchor
+    /// a selection on a file the user didn't point at.
+    #[test]
+    fn row_at_returns_none_past_the_last_entry() {
+        let (r, t) = (rows(3), Theme::default());
+        let area = Rect::new(0, 0, 40, 10);
+        let v = lv(&r, &t, 0);
+        assert_eq!(v.row_at(area, 0, 3), None);
+        assert_eq!(v.row_at(area, 0, 9), None);
+    }
+
+    #[test]
+    fn row_at_returns_none_outside_the_area() {
+        let (r, t) = (rows(6), Theme::default());
+        let area = Rect::new(10, 5, 20, 4);
+        let v = lv(&r, &t, 0);
+        for (c, rw) in [(9, 5), (10, 4), (30, 5), (10, 9)] {
+            assert_eq!(v.row_at(area, c, rw), None, "({c},{rw})");
+        }
+        assert_eq!(v.row_at(area, 10, 5), Some(0), "the area's own origin");
+    }
+
+    /// A multi-column grid walks the listing column-major, matching how it's drawn —
+    /// so the second on-screen column continues the listing rather than restarting.
+    #[test]
+    fn row_at_resolves_the_second_column() {
+        let (r, t) = (rows(12), Theme::default());
+        // Wide + short forces more than one column.
+        let area = Rect::new(0, 0, 120, 4);
+        let v = lv(&r, &t, 0);
+        let grid = v.grid(area);
+        assert!(
+            grid.cols > 1,
+            "test needs a multi-column grid, got {grid:?}"
+        );
+        let x = grid.col_x_offsets(2)[1];
+        assert_eq!(v.row_at(area, x, 0), Some(usize::from(grid.rows)));
     }
 }

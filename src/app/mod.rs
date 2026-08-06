@@ -219,6 +219,42 @@ pub struct FrameLayout {
     vdivider: Option<ratatui::layout::Rect>,
 }
 
+/// The surface an in-flight mouse drag belongs to. See
+/// [`ViewState::mouse_selection`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseDragTarget {
+    /// A pager's charwise text selection, in this slot.
+    Pager(crate::app::pager_handler::PagerSlot),
+    /// A file-list row selection, in this column.
+    List(state::Side),
+}
+
+/// A file-list row selection.
+///
+/// `anchor`/`focus` rather than a sorted range so a backwards drag keeps its
+/// direction, and so extending never has to re-derive which end the user started
+/// from. Row *indices*, not paths: the copy resolves paths at release time from the
+/// live listing, so a selection can't outlive a refresh with stale paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListSelection {
+    pub side: state::Side,
+    pub anchor: usize,
+    pub focus: usize,
+    /// Copy absolute paths instead of bare names — the modifier held at press.
+    pub full_path: bool,
+}
+
+impl ListSelection {
+    /// Inclusive `(low, high)` row indices.
+    pub const fn range(&self) -> (usize, usize) {
+        if self.anchor <= self.focus {
+            (self.anchor, self.focus)
+        } else {
+            (self.focus, self.anchor)
+        }
+    }
+}
+
 /// Follow-up side effect a key handler asks the main loop to perform.
 ///
 /// Anything that needs to own the tty (editor, pager, shell-out) goes
@@ -872,11 +908,17 @@ pub struct ViewState {
     /// drag begun on a pager would fall through to the child-forwarding path and
     /// start typing mouse reports into the agent mid-selection.
     ///
-    /// Holds the SLOT so the drag keeps addressing the pager it started in even if
-    /// the pointer wanders over another region — a selection that retargeted
-    /// mid-drag would extend against the wrong buffer's line indices. A slot, not a
-    /// mount, because a mount can't tell `view.pager` from `view.right_pager`.
-    pub mouse_selection: Option<crate::app::pager_handler::PagerSlot>,
+    /// Which surface owns the in-flight drag.
+    ///
+    /// Holds the target so the drag keeps addressing the surface it STARTED in even
+    /// if the pointer wanders elsewhere — a selection that retargeted mid-drag would
+    /// extend against the wrong buffer's indices. For a pager that's the slot, not
+    /// the mount, because a mount can't tell `view.pager` from `view.right_pager`.
+    pub mouse_selection: Option<MouseDragTarget>,
+    /// A file-list row selection, kept after the drag ends so the highlight
+    /// persists and a follow-up yank can still find it (same contract as the
+    /// pager's charwise selection).
+    pub list_selection: Option<ListSelection>,
     /// Whether an agent-transcript scrollback (`^a v`) renders the agent's
     /// tool-use / tool-result lines. `t` toggles it; the transcript is
     /// re-rendered with the new value. Session-scoped (persists across
@@ -971,6 +1013,7 @@ impl ViewState {
             scroll_last: None,
             mouse_press_forwarded: false,
             mouse_selection: None,
+            list_selection: None,
             transcript_show_tool_calls: true,
             term_size: crossterm::terminal::size().unwrap_or((80, 24)),
         }
