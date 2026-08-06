@@ -548,6 +548,11 @@ end).
   reload (`:mouse auto` returns to following the config). Default off (`[mouse]
   capture`). `^a u` quick-select and `y` in the pager are the mouse-free yank
   paths.
+  **Drag in the file list to select rows; release copies their names** — hold
+  **Ctrl** while pressing to copy absolute paths instead. The highlight stays up
+  after the copy. Distinct from picks: a drag never changes what the next file
+  operation acts on. **Click the status line to copy it** (the text, not the
+  powerline separators or the logo).
   **Drag in a pager to select text; release copies it** and the pager title
   reports the line count. Works the same full-screen or popped-up, and copies the
   content only — never the line-number gutter, the whitespace/line-break markers,

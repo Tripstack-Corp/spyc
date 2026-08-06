@@ -741,6 +741,7 @@ fn stabilize_grid(
             empty_marker: commander.view == View::Dir,
             focused,
             theme,
+            selection: None,
         };
         commander.grid_dims = probe.grid(rect).dims();
         let old_vt = commander.cursor.view_top;
@@ -782,6 +783,7 @@ fn stabilize_grid(
                 empty_marker: commander.view == View::Dir,
                 focused,
                 theme,
+                selection: None,
             };
             commander.grid_dims = probe.grid(rect).dims();
             spyc_debug!(

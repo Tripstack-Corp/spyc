@@ -45,6 +45,32 @@ fn push_segment(spans: &mut Vec<Span>, text: &str, fg: Color, bg: Color, next_bg
 }
 
 impl StatusBar<'_> {
+    /// The status line's **content** as plain text, for a mouse copy.
+    ///
+    /// Joins the semantic segments and deliberately omits the powerline separators
+    /// and the logo: those are chrome, and a copy that included them would paste
+    /// Nerd-Font glyphs into a bug report. Same rule the pager's selection follows —
+    /// copy what the line says, not what draws it.
+    ///
+    /// Not derived from the rendered spans, because those are truncated to the
+    /// terminal width; the copy should carry the full path even when the bar
+    /// elided it.
+    pub fn plain_text(&self) -> String {
+        [
+            self.project_home,
+            self.session_name,
+            Some(self.path),
+            self.git_info,
+            self.agent_info,
+            (!self.suffix.is_empty()).then_some(self.suffix),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" | ")
+    }
+
     #[allow(clippy::similar_names)]
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         if self.theme.mono {

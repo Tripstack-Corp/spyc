@@ -19,7 +19,7 @@ use ratatui::layout::Rect;
 
 use super::modal::{Modal, ModalSnapshot, active_modal};
 use super::pager_handler::PagerSlot;
-use super::{Effect, FrameLayout};
+use super::{Effect, FrameLayout, MouseDragTarget};
 use crate::ui::pager::Mount;
 
 /// Which frame region the pointer is over. Resolved from the pointer's
@@ -91,6 +91,11 @@ pub(super) enum MouseSink {
     /// test asserting the sink still passed. A press that anchored without focusing
     /// would leave the pager's own keys (`y`, Esc) going somewhere else.
     FocusAndSelect(PagerSlot),
+    /// Give the keyboard to a file-list column AND anchor a row selection there.
+    /// Both halves in one variant, for the reason [`Self::FocusAndForward`] documents.
+    FocusAndSelectRows(crate::app::state::Side),
+    /// Copy the status line's text.
+    CopyStatus,
     /// Paste the system clipboard wherever a paste would land.
     Paste,
     /// Open the leader menu (right-click, from anywhere).
@@ -261,6 +266,19 @@ pub(super) const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseS
             if matches!(region, Region::Pane) && snap.can_forward_to_child() {
                 return MouseSink::FocusAndForward;
             }
+            // A bare list (no pager over it): focus the column and start a row
+            // selection, so drag-to-copy-filenames works where the names are.
+            if matches!(region, Region::List) {
+                return MouseSink::FocusAndSelectRows(crate::app::state::Side::Left);
+            }
+            if matches!(region, Region::RightColumn) {
+                return MouseSink::FocusAndSelectRows(crate::app::state::Side::Right);
+            }
+            // The status line is one line of text; a click copies all of it. It owns
+            // no keyboard focus, so there is nothing else a click there could mean.
+            if matches!(region, Region::Status) {
+                return MouseSink::CopyStatus;
+            }
             return MouseSink::FocusRegion;
         }
         Gesture::Wheel => {
@@ -396,13 +414,19 @@ impl super::App {
         // spyc's own selection owns the drag and the release — checked BEFORE the
         // forwarding paths below, which would otherwise deliver mouse reports into
         // the agent while the user is selecting text somewhere else entirely.
-        if self.view.mouse_selection.is_some() {
+        if let Some(target) = self.view.mouse_selection {
             match ev.kind {
                 MouseEventKind::Drag(MouseButton::Left) => {
-                    return self.extend_pager_selection(ev);
+                    return match target {
+                        MouseDragTarget::Pager(_) => self.extend_pager_selection(ev),
+                        MouseDragTarget::List(side) => self.extend_row_selection(ev, side),
+                    };
                 }
                 MouseEventKind::Up(MouseButton::Left) => {
-                    return self.finish_pager_selection(ev);
+                    return match target {
+                        MouseDragTarget::Pager(_) => self.finish_pager_selection(ev),
+                        MouseDragTarget::List(_) => self.finish_row_selection(ev),
+                    };
                 }
                 // Any other button mid-drag abandons the selection rather than
                 // interleaving two gestures.
@@ -507,6 +531,20 @@ impl super::App {
                 self.focus_region(region);
                 Vec::new()
             }
+            MouseSink::FocusAndSelectRows(side) => {
+                self.focus_region(region);
+                self.begin_row_selection(ev, side)
+            }
+            MouseSink::CopyStatus => {
+                let text = self.status_bar_plain_text();
+                if text.is_empty() {
+                    return Vec::new();
+                }
+                vec![Effect::CopyToClipboard {
+                    text,
+                    ok: super::effect::ClipMsg::StatusLine,
+                }]
+            }
             MouseSink::Paste => vec![Effect::PasteFromClipboard],
             MouseSink::LeaderMenu => {
                 self.state.resolver.enter_leader();
@@ -590,7 +628,7 @@ impl super::App {
             return Vec::new();
         };
         view.begin_char_selection(line, col);
-        self.view.mouse_selection = Some(slot);
+        self.view.mouse_selection = Some(MouseDragTarget::Pager(slot));
         Vec::new()
     }
 
@@ -604,7 +642,7 @@ impl super::App {
     /// of the box, or before the first render) into the same treatment: extend to
     /// the nearest edge rather than doing nothing.
     fn extend_pager_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
-        let Some(slot) = self.view.mouse_selection else {
+        let Some(MouseDragTarget::Pager(slot)) = self.view.mouse_selection else {
             return Vec::new();
         };
         let Some(view) = self.pager_in_slot_mut(slot) else {
@@ -638,7 +676,7 @@ impl super::App {
     /// release is the terminal-native "select, then it just sits there" contract,
     /// and it's what lets a follow-up `y` / `Y` / a fresh drag still find it.
     fn finish_pager_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
-        let Some(slot) = self.view.mouse_selection.take() else {
+        let Some(MouseDragTarget::Pager(slot)) = self.view.mouse_selection.take() else {
             return Vec::new();
         };
         let Some(view) = self.pager_in_slot_mut(slot) else {
@@ -671,6 +709,131 @@ impl super::App {
         // full-frame mount.
         let ok_msg = format!("copied {lines} line{}", if lines == 1 { "" } else { "s" });
         vec![Effect::CopyToPagerClipboard { text, ok_msg }]
+    }
+
+    /// The rect a column's list is drawn into, and a `ListView` over its cached
+    /// rows — the same pair the renderer builds, so a hit-test can't disagree with
+    /// what's on screen.
+    fn list_row_at(&self, side: crate::app::state::Side, ev: MouseEvent) -> Option<usize> {
+        use crate::app::state::Side;
+        let (cols, rows) = self.view.term_size;
+        let layout = self.frame_layout(Rect::new(0, 0, cols, rows));
+        let (area, cached, commander) = match side {
+            Side::Left => (layout.list, &self.view.cached_rows, &self.state.left),
+            Side::Right => (
+                layout.right?,
+                &self.view.right_cached_rows,
+                self.state.right.as_ref()?,
+            ),
+        };
+        crate::ui::list_view::ListView {
+            rows: cached,
+            cursor: commander.cursor.index,
+            view_top: commander.cursor.view_top,
+            empty_marker: false,
+            focused: true,
+            theme: &self.view.theme,
+            selection: None,
+        }
+        .row_at(area, ev.column, ev.row)
+    }
+
+    /// Anchor a row selection where the pointer pressed, and move the cursor there.
+    ///
+    /// Moving the cursor is deliberate: clicking a file should put the cursor on it,
+    /// which is what makes the click useful on its own rather than only as the start
+    /// of a drag. Claims the drag only if the press landed on a row, so a press in
+    /// the gutter between columns leaves forwarding and focus untouched.
+    ///
+    /// The modifier is read HERE rather than carried in the sink because it selects
+    /// the copy's *content*, not its routing. Ctrl, not Shift — Shift is the
+    /// terminal's own selection-bypass and is frequently consumed before spyc sees
+    /// it.
+    fn begin_row_selection(
+        &mut self,
+        ev: MouseEvent,
+        side: crate::app::state::Side,
+    ) -> Vec<Effect> {
+        let Some(idx) = self.list_row_at(side, ev) else {
+            return Vec::new();
+        };
+        let full_path = ev
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::CONTROL);
+        self.state.col_mut(side).cursor.index = idx;
+        self.view.list_selection = Some(super::ListSelection {
+            side,
+            anchor: idx,
+            focus: idx,
+            full_path,
+        });
+        self.view.mouse_selection = Some(MouseDragTarget::List(side));
+        Vec::new()
+    }
+
+    /// Extend the row selection to the pointer, dragging the cursor with it.
+    ///
+    /// A pointer off the rows holds the selection where it was, matching the pager:
+    /// drifting a few pixels past the last row mid-drag is normal, and collapsing
+    /// there would read as a bug.
+    fn extend_row_selection(
+        &mut self,
+        ev: MouseEvent,
+        side: crate::app::state::Side,
+    ) -> Vec<Effect> {
+        if let Some(idx) = self.list_row_at(side, ev) {
+            if let Some(sel) = self.view.list_selection.as_mut() {
+                sel.focus = idx;
+            }
+            self.state.col_mut(side).cursor.index = idx;
+        }
+
+        Vec::new()
+    }
+
+    /// Copy the selected rows' names (or absolute paths) and keep the highlight.
+    ///
+    /// Paths are resolved from the LIVE listing here rather than captured at press
+    /// time, so a selection can't paste stale paths after a refresh. A single row is
+    /// still a copy — unlike the pager, where a click that never moved is just a
+    /// click, clicking one filename to copy it is the obvious gesture.
+    fn finish_row_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
+        self.view.mouse_selection = None;
+        let Some(sel) = self.view.list_selection else {
+            return Vec::new();
+        };
+        if let Some(idx) = self.list_row_at(sel.side, ev)
+            && let Some(s) = self.view.list_selection.as_mut()
+        {
+            s.focus = idx;
+        }
+        let sel = self.view.list_selection.expect("checked above");
+        let (lo, hi) = sel.range();
+        let commander = self.state.col(sel.side);
+        let picked: Vec<String> = commander
+            .rows
+            .iter()
+            .skip(lo)
+            .take(hi.saturating_sub(lo) + 1)
+            .map(|r| {
+                if sel.full_path {
+                    r.path.display().to_string()
+                } else {
+                    r.display.clone()
+                }
+            })
+            .collect();
+        if picked.is_empty() {
+            return Vec::new();
+        }
+        let count = picked.len();
+        vec![Effect::CopyToClipboard {
+            text: picked.join("\n"),
+            ok: super::effect::ClipMsg::ListNames {
+                count,
+                paths: sel.full_path,
+            },
+        }]
     }
 
     /// Encode `ev` in the child's own protocol and send it to the active pane.
@@ -986,13 +1149,18 @@ mod tests {
         }
     }
 
-    /// With no pager mounted there is no text to select, so a left press stays a
-    /// plain focus click on the file list.
+    /// With no pager over it, a left press on the list focuses the column AND
+    /// anchors a row selection — that's how drag-to-copy-filenames starts. The
+    /// side comes from the region, so `b` never selects in `a`.
     #[test]
-    fn left_press_on_the_bare_list_only_focuses() {
+    fn left_press_on_the_bare_list_selects_rows_in_that_column() {
         assert_eq!(
             route_mouse(snap(Some(Region::List)), Gesture::Left),
-            MouseSink::FocusRegion
+            MouseSink::FocusAndSelectRows(Side::Left)
+        );
+        assert_eq!(
+            route_mouse(snap(Some(Region::RightColumn)), Gesture::Left),
+            MouseSink::FocusAndSelectRows(Side::Right)
         );
     }
 
@@ -1157,10 +1325,15 @@ mod tests {
         let unaware = snap(Some(Region::Pane));
         assert_eq!(route_mouse(unaware, Gesture::Left), MouseSink::FocusRegion);
 
-        for region in [Region::List, Region::RightColumn] {
+        // A list press focuses AND starts a row selection; see
+        // `left_press_on_the_bare_list_selects_rows_in_that_column`.
+        for (region, side) in [
+            (Region::List, Side::Left),
+            (Region::RightColumn, Side::Right),
+        ] {
             assert_eq!(
                 route_mouse(snap(Some(region)), Gesture::Left),
-                MouseSink::FocusRegion,
+                MouseSink::FocusAndSelectRows(side),
                 "{region:?}"
             );
         }
@@ -1291,9 +1464,12 @@ mod tests {
 
     /// Clicking chrome or off-frame moves nothing — but middle/right still act,
     /// since they aren't about the region.
+    ///
+    /// `Status` is excluded: it holds one line of text and no keyboard focus, so a
+    /// left click there copies it (`copying_the_status_line_needs_no_focus`).
     #[test]
     fn chrome_focuses_nothing_but_still_pastes_and_opens_the_menu() {
-        for region in [Region::Divider, Region::Status, Region::Prompt] {
+        for region in [Region::Divider, Region::Prompt] {
             assert_eq!(
                 route_mouse(snap(Some(region)), Gesture::Left),
                 MouseSink::FocusRegion,
@@ -1705,5 +1881,155 @@ mod tests {
             ..snap(Some(Region::Pane))
         };
         assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::PaneForward);
+    }
+    // ── file list + status bar selection ─────────────────────────────────
+
+    /// The status line owns no keyboard focus, so a left click there can only mean
+    /// "copy this". Kept out of the chrome test above for that reason.
+    #[test]
+    fn copying_the_status_line_needs_no_focus() {
+        assert_eq!(
+            route_mouse(snap(Some(Region::Status)), Gesture::Left),
+            MouseSink::CopyStatus
+        );
+    }
+
+    /// A pager over the list still wins: `covering_pager` is checked before the
+    /// row-selection arm, so clicking a pager never selects filenames behind it.
+    #[test]
+    fn a_covering_pager_outranks_row_selection() {
+        let s = MouseSnapshot {
+            covering_pager: Some(PagerSlot::Top),
+            ..snap(Some(Region::List))
+        };
+        assert_eq!(
+            route_mouse(s, Gesture::Left),
+            MouseSink::FocusAndSelect(PagerSlot::Top)
+        );
+    }
+
+    /// The `Row`s the renderer would have cached for `rows`. Built here rather than
+    /// via `build_rows` (scoped to `app::render`) so the test doesn't widen
+    /// production visibility; `row_at` only reads `len` and `display`.
+    fn cached_for(rows: &[crate::app::RowData]) -> Vec<crate::ui::list_view::Row> {
+        rows.iter()
+            .map(|rd| crate::ui::list_view::Row {
+                display: rd.display.clone(),
+                kind: rd.kind,
+                picked: false,
+                taken: false,
+                deleted: false,
+                git_status: crate::ui::list_view::GitFileStatus::clean(),
+                pending_delete: false,
+            })
+            .collect()
+    }
+
+    /// A list drag copies the dragged rows' NAMES, and with Ctrl held their absolute
+    /// PATHS — the modifier is read at press time because it selects the copy's
+    /// content, not its routing.
+    ///
+    /// Ctrl and not Shift: Shift is the terminal's own selection-bypass modifier and
+    /// is frequently consumed before spyc ever sees the event.
+    #[test]
+    fn a_list_drag_copies_names_or_full_paths_with_ctrl() {
+        use crate::app::state::Side;
+        use crossterm::event::KeyModifiers;
+
+        for (mods, want_paths) in [(KeyModifiers::NONE, false), (KeyModifiers::CONTROL, true)] {
+            let tmp = tempfile::tempdir().expect("tempdir").keep();
+            let effects = crate::state::with_state_root(&tmp, || {
+                let mut app = App::test_app(tmp.clone());
+                app.state.left.rows = ["alpha.rs", "beta.rs", "gamma.rs"]
+                    .iter()
+                    .map(|n| crate::app::RowData {
+                        path: tmp.join(n),
+                        display: (*n).to_string(),
+                        kind: crate::fs::EntryKind::File,
+                        deleted: false,
+                    })
+                    .collect();
+                // Geometry the renderer would have settled.
+                app.view.term_size = (80, 24);
+                app.view.cached_rows = cached_for(&app.state.left.rows);
+
+                let at = |kind, row, m| MouseEvent {
+                    kind,
+                    column: 0,
+                    row,
+                    modifiers: m,
+                };
+                app.begin_row_selection(
+                    at(MouseEventKind::Down(MouseButton::Left), 1, mods),
+                    Side::Left,
+                );
+                app.extend_row_selection(
+                    at(MouseEventKind::Drag(MouseButton::Left), 3, mods),
+                    Side::Left,
+                );
+                app.finish_row_selection(at(MouseEventKind::Up(MouseButton::Left), 3, mods))
+            });
+
+            let [Effect::CopyToClipboard { text, .. }] = effects.as_slice() else {
+                panic!("expected one clipboard copy, got {effects:?}");
+            };
+            let lines: Vec<&str> = text.lines().collect();
+            if want_paths {
+                assert!(
+                    lines.iter().all(|l| l.starts_with('/')),
+                    "Ctrl held must copy absolute paths, got {lines:?}"
+                );
+                assert!(lines.iter().any(|l| l.ends_with("alpha.rs")));
+            } else {
+                assert!(
+                    lines.iter().all(|l| !l.contains('/')),
+                    "without Ctrl must copy bare names, got {lines:?}"
+                );
+            }
+            assert!(lines.len() > 1, "a drag across rows selects a range");
+        }
+    }
+
+    /// The highlight survives the copy, so it's visible and a follow-up yank can
+    /// still find it — the same contract the pager's selection has.
+    #[test]
+    fn a_list_selection_persists_after_the_copy() {
+        use crate::app::state::Side;
+        use crossterm::event::KeyModifiers;
+        let tmp = tempfile::tempdir().expect("tempdir").keep();
+        crate::state::with_state_root(&tmp, || {
+            let mut app = App::test_app(tmp.clone());
+            app.state.left.rows = (0..4)
+                .map(|i| crate::app::RowData {
+                    path: tmp.join(format!("f{i}")),
+                    display: format!("f{i}"),
+                    kind: crate::fs::EntryKind::File,
+                    deleted: false,
+                })
+                .collect();
+            app.view.term_size = (80, 24);
+            app.view.cached_rows = cached_for(&app.state.left.rows);
+            let at = |kind, row| MouseEvent {
+                kind,
+                column: 0,
+                row,
+                modifiers: KeyModifiers::NONE,
+            };
+            // Screen row 1 is the list's first row — row 0 is the status bar, which
+            // `row_at` correctly refuses.
+            app.begin_row_selection(at(MouseEventKind::Down(MouseButton::Left), 1), Side::Left);
+            app.extend_row_selection(at(MouseEventKind::Drag(MouseButton::Left), 3), Side::Left);
+            let _ = app.finish_row_selection(at(MouseEventKind::Up(MouseButton::Left), 3));
+
+            let sel = app
+                .view
+                .list_selection
+                .expect("highlight must survive the copy");
+            assert_eq!(sel.range(), (0, 2));
+            assert!(
+                app.view.mouse_selection.is_none(),
+                "the drag itself must end, even though the selection stays"
+            );
+        });
     }
 }

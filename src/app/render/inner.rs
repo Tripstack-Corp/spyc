@@ -345,6 +345,31 @@ impl App {
     /// single top row, per `compute_layout`'s `pane_pct >= 100` branch). Called
     /// by the default draw and — when a vsplit keeps the status row free above a
     /// column-scoped overlay — by the overlay / TopPane-pager branches.
+    /// The status line as plain text — what a click on the status bar copies.
+    ///
+    /// Builds the same `StatusBar` the renderer does, from the same accessors, so
+    /// the copy can't drift from what's on screen.
+    pub(in crate::app) fn status_bar_plain_text(&self) -> String {
+        let (path, suffix) = self.header_parts();
+        let project_label = self
+            .state
+            .project_home
+            .as_deref()
+            .map(path_basename_display);
+        let agent_info = self.active_agent_status();
+        StatusBar {
+            project_home: project_label.as_deref(),
+            session_name: self.state.session_name.as_deref(),
+            path: &path,
+            suffix: &suffix,
+            git_info: self.state.cur().git.info.as_deref(),
+            agent_info: agent_info.as_deref(),
+            theme: &self.view.theme,
+            plain_logo: false,
+        }
+        .plain_text()
+    }
+
     fn render_status_bar(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
         let prompt_row_occupied = matches!(self.state.mode, Mode::Prompting(_))
             || self.state.flash.is_some()
@@ -373,6 +398,16 @@ impl App {
         .render(frame, rect);
     }
 
+    /// The inclusive row range to highlight in `side`'s list, if a mouse row
+    /// selection is active there. `None` for the other column, so a selection in `a`
+    /// never paints in `b`.
+    fn list_selection_for(&self, side: state::Side) -> Option<(usize, usize)> {
+        self.view
+            .list_selection
+            .filter(|s| s.side == side)
+            .map(|s| s.range())
+    }
+
     /// Paint the left column's file list into `rect`. The bright/focused column
     /// only when the file-pane row owns the keyboard and the right column isn't
     /// the active one (the `ListView` fades on `!focused`); always bright with
@@ -392,6 +427,7 @@ impl App {
                 empty_marker: self.state.left.view == View::Dir,
                 focused: list_focused,
                 theme: &self.view.theme,
+                selection: self.list_selection_for(state::Side::Left),
             },
             rect,
         );
@@ -463,6 +499,7 @@ impl App {
                         empty_marker: right.view == View::Dir,
                         focused,
                         theme: &self.view.theme,
+                        selection: self.list_selection_for(state::Side::Right),
                     },
                     rect,
                 );
