@@ -219,74 +219,6 @@ pub struct FrameLayout {
     vdivider: Option<ratatui::layout::Rect>,
 }
 
-/// The surface an in-flight mouse drag belongs to. See
-/// [`ViewState::mouse_selection`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MouseDragTarget {
-    /// A pager's charwise text selection, in this slot.
-    Pager(crate::app::pager_handler::PagerSlot),
-    /// A file-list row selection, in this column.
-    List(state::Side),
-    /// A spyc-side text selection over the pty pane's visible grid.
-    Pane,
-    /// A charwise selection over a single-line chrome surface.
-    Chrome,
-}
-
-/// A file-list row selection.
-///
-/// `anchor`/`focus` rather than a sorted range so a backwards drag keeps its
-/// direction, and so extending never has to re-derive which end the user started
-/// from. Row *indices*, not paths: the copy resolves paths at release time from the
-/// live listing, so a selection can't outlive a refresh with stale paths.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ListSelection {
-    pub side: state::Side,
-    pub anchor: usize,
-    pub focus: usize,
-    /// Copy absolute paths instead of bare names — the modifier held at press.
-    pub full_path: bool,
-}
-
-impl ListSelection {
-    /// Inclusive `(low, high)` row indices.
-    pub const fn range(&self) -> (usize, usize) {
-        if self.anchor <= self.focus {
-            (self.anchor, self.focus)
-        } else {
-            (self.focus, self.anchor)
-        }
-    }
-}
-
-/// A charwise selection over a single-line chrome surface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ChromeSelection {
-    /// Screen row of the chrome line — its identity, since each is one row.
-    pub y: u16,
-    pub anchor_col: u16,
-    pub focus_col: u16,
-}
-
-impl ChromeSelection {
-    /// Inclusive `(low, high)` columns, relative to the row's own left edge.
-    pub const fn range(self) -> (u16, u16) {
-        if self.anchor_col <= self.focus_col {
-            (self.anchor_col, self.focus_col)
-        } else {
-            (self.focus_col, self.anchor_col)
-        }
-    }
-}
-
-/// One chrome line as drawn, recorded by the renderer for a later mouse copy.
-#[derive(Debug, Clone)]
-pub struct ChromeRow {
-    pub y: u16,
-    pub x: u16,
-    pub line: ratatui::text::Line<'static>,
-}
-
 /// Follow-up side effect a key handler asks the main loop to perform.
 ///
 /// Anything that needs to own the tty (editor, pager, shell-out) goes
@@ -946,11 +878,11 @@ pub struct ViewState {
     /// if the pointer wanders elsewhere — a selection that retargeted mid-drag would
     /// extend against the wrong buffer's indices. For a pager that's the slot, not
     /// the mount, because a mount can't tell `view.pager` from `view.right_pager`.
-    pub mouse_selection: Option<MouseDragTarget>,
+    pub mouse_selection: Option<mouse::MouseDragTarget>,
     /// A file-list row selection, kept after the drag ends so the highlight
     /// persists and a follow-up yank can still find it (same contract as the
     /// pager's charwise selection).
-    pub list_selection: Option<ListSelection>,
+    pub list_selection: Option<mouse::ListSelection>,
     /// A spyc-side charwise selection over the pane's visible grid, for a child
     /// that ignores mouse reports — `(anchor, focus)` in SCREEN coordinates,
     /// unordered so a backwards drag keeps its direction.
@@ -964,7 +896,7 @@ pub struct ViewState {
     pub pane_selection: Option<((u16, u16), (u16, u16))>,
     /// A charwise selection over one of the single-line chrome surfaces (the status
     /// bar, the pane divider/tab line) — the row and an unordered column pair.
-    pub chrome_selection: Option<ChromeSelection>,
+    pub chrome_selection: Option<mouse::ChromeSelection>,
     /// What each chrome row actually rendered this frame, for a mouse copy.
     ///
     /// `RefCell` because the draw pass is `&self` and this is the renderer recording
@@ -972,7 +904,18 @@ pub struct ViewState {
     /// `last_content_area` / `last_body_w` `Cell`s. It holds the DRAWN line, not the
     /// semantic segments: a selection maps screen COLUMNS back to characters, and
     /// only the drawn line has the width-driven truncation the user is looking at.
-    pub chrome_rows: std::cell::RefCell<Vec<ChromeRow>>,
+    pub chrome_rows: std::cell::RefCell<Vec<mouse::ChromeRow>>,
+    /// A sustained same-direction wheel-scroll gesture over an agent's own view
+    /// (today: codex's `^T`), tracked so it can escalate to a page-sized step —
+    /// see `App::send_agent_view_scroll_keys`. `None` outside a gesture.
+    pub pane_scroll_streak: Option<mouse::PaneScrollStreak>,
+    /// Set right after spyc sends an agent's `transcript_toggle_key`, so a fast
+    /// follow-up wheel tick — arriving before the child has redrawn — doesn't see
+    /// the OLD (still-closed) screen and send the toggle again, which would close
+    /// what the first tick just opened. Cleared once a scrape confirms the view is
+    /// open, or after `TOGGLE_SETTLE` if it never does (self-healing rather than
+    /// stuck refusing to retry).
+    pub pane_toggle_sent_at: Option<std::time::Instant>,
     /// Whether an agent-transcript scrollback (`^a v`) renders the agent's
     /// tool-use / tool-result lines. `t` toggles it; the transcript is
     /// re-rendered with the new value. Session-scoped (persists across
@@ -1071,6 +1014,8 @@ impl ViewState {
             pane_selection: None,
             chrome_selection: None,
             chrome_rows: std::cell::RefCell::new(Vec::new()),
+            pane_scroll_streak: None,
+            pane_toggle_sent_at: None,
             transcript_show_tool_calls: true,
             term_size: crossterm::terminal::size().unwrap_or((80, 24)),
         }

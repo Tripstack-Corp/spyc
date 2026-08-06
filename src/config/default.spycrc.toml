@@ -116,7 +116,20 @@
 # because it's a different job: the list wants 1:1 with the trackpad, while
 # here spyc is driving somebody else's pager one keypress per line, with no
 # safe way to ask it for a page. Raise it to traverse long histories faster.
+# A sustained wheel gesture (default: past 1s) auto-escalates to a page-sized
+# step where an agent has one verified (codex's `^T`) — `pane_scroll_lines`
+# is the line-scroll floor under that.
 # pane_scroll_lines = 3
+#
+# `pane_scroll_view` (default native): what the wheel does the FIRST time it
+# hits an agent pane whose own scrollback view (today: codex's `^T`) isn't
+# open yet.
+#   native       open the agent's own view and scroll it.
+#   off          leave it closed — only scroll if it happens to already be open.
+#   spyc_history open spyc's OWN `^a v` scrollback pager instead.
+# Doesn't affect an already-open view (always scrolled) or an agent with no
+# such view (agy scrolls its live content directly, with nothing to open).
+# pane_scroll_view = "native"
 
 # ── markdown ──────────────────────────────────────────────────────────
 # Default view for `.md` / `.markdown` files in the pager.

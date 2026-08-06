@@ -569,9 +569,12 @@ end).
   **claude** requests mouse reporting, so the event is forwarded and claude
   scrolls itself; **agy** ignores mouse reports but scrolls on Shift+Arrow, so
   spyc sends those instead; **codex** discards mouse events and its main chat view
-  doesn't scroll, so the wheel sends plain arrows — those scroll its `^T`
-  transcript overlay, and outside it they only move the draft cursor (codex keeps
-  history recall on `^R`, so the wheel can't recall a past prompt).
+  doesn't scroll, so the wheel drives its `^T` transcript overlay instead — opening
+  it on the first tick (`[mouse] pane_scroll_view`, configurable to stay closed or
+  to use spyc's own `^a v` history instead), then scrolling by line, escalating to
+  a page jump under a sustained gesture. Outside the transcript, the same keys only
+  move the draft cursor (codex keeps history recall on `^R`, so the wheel can't
+  recall a past prompt).
 - **`:limit <glob>`** — temporary filter (e.g. `:limit *.rs`)
 - **`:limit !`** — show only picked files
 - **`:limit git`** / **`:limit g`** — show only files in `git status`

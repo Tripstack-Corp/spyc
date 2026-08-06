@@ -204,7 +204,22 @@ without waiting for a real agent transition.
 capture = false      # real mouse reporting (wheel + buttons). Default off.
 scroll_lines = 1     # lines per wheel tick, for surfaces spyc scrolls itself
 pane_scroll_lines = 3 # lines per tick for a pane spyc drives with synthesized keys
+pane_scroll_view = "native" # native | off | spyc_history
 ```
+
+`pane_scroll_view` decides what a wheel tick does the FIRST time it hits an agent
+pane whose own scrollback view spyc can drive but that view isn't open yet — today,
+codex's `^T` transcript. `native` (default) opens it and scrolls; `off` leaves it
+closed and only scrolls if it happens to already be open; `spyc_history` opens
+spyc's own `^a v` scrollback pager instead. Doesn't affect an already-open view
+(always scrolled) or an agent with no such view (agy scrolls its live content
+directly via Shift+Arrow, with nothing to open).
+
+A sustained same-direction wheel gesture — past ~1 second — escalates from the
+per-line step to a page-sized one, for an agent with a verified fast key (codex's
+`^T` documents `pgup/pgdn to page` in its own footer). `pane_scroll_lines` is the
+line-scroll floor under that escalation, and the only knob agy uses (it has no
+page-sized equivalent).
 
 `capture` asks the terminal for real mouse reporting so spyc can scroll whatever
 is under the pointer, instead of DEC 1007's trick of translating the wheel into

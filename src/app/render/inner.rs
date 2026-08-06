@@ -398,7 +398,7 @@ impl App {
         self.view
             .chrome_rows
             .borrow_mut()
-            .push(crate::app::ChromeRow {
+            .push(crate::app::mouse::ChromeRow {
                 y: area.y,
                 x: area.x,
                 line: line.clone(),

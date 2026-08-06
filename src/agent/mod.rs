@@ -222,11 +222,46 @@ pub trait AgentProfile: Sync {
     fn wheel_scroll(&self) -> Option<WheelScroll> {
         None
     }
+
+    /// Screen-scrape marker confirming this agent's OWN scrollback view is
+    /// currently open — checked against [`crate::pane::Pane::visible_lines`]
+    /// before deciding to auto-open it or escalate to [`Self::fast_wheel_scroll`].
+    /// `None` for an agent with no such view (agy's Shift+Arrow scrolls the live
+    /// content directly; there's nothing to open).
+    ///
+    /// A plain substring, not the `Region`/`Matcher` machinery in
+    /// `detect_rules` — that module's rules are specifically about
+    /// self-report-fallback semantics (`AgentActivity`), a different question
+    /// ("is this agent blocked?") from this one ("is this VIEW open?").
+    fn transcript_open_marker(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// The key that OPENS this agent's own scrollback view — sent once, only
+    /// while [`Self::transcript_open_marker`] confirms it's closed. `None` when
+    /// there's nothing for spyc to toggle. Not necessarily the same key that
+    /// CLOSES it, though today it is (codex's `^T` is a genuine toggle).
+    fn transcript_toggle_key(
+        &self,
+    ) -> Option<(crossterm::event::KeyCode, crossterm::event::KeyModifiers)> {
+        None
+    }
+
+    /// The keys that PAGE (rather than line-scroll) this agent's own view —
+    /// substituted for [`Self::wheel_scroll`]'s keys once a sustained same-
+    /// direction wheel gesture has run long enough to justify a bigger jump.
+    /// `None` when unverified: an agent's own line-scroll and page keys can
+    /// differ in which contexts they're safe (see `CodexProfile`'s doc), so
+    /// this is a distinct, separately-verified opt-in rather than assumed from
+    /// `wheel_scroll` existing.
+    fn fast_wheel_scroll(&self) -> Option<WheelScroll> {
+        None
+    }
 }
 
 /// The keys that scroll a non-mouse agent's own view one line, sent by spyc in
 /// place of a wheel event it cannot forward. See
-/// [`AgentProfile::wheel_scroll`].
+/// [`AgentProfile::wheel_scroll`] / [`AgentProfile::fast_wheel_scroll`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WheelScroll {
     pub up: (crossterm::event::KeyCode, crossterm::event::KeyModifiers),
@@ -356,6 +391,45 @@ impl AgentProfile for CodexProfile {
         Some(WheelScroll {
             up: (KeyCode::Up, M::NONE),
             down: (KeyCode::Down, M::NONE),
+        })
+    }
+
+    /// Confirmed by a live pty capture: codex's `^T` transcript renders a
+    /// tiled banner reading `T R A N S C R I P T` across its top row (a
+    /// letter-spaced watermark, not a plain title), which does not appear
+    /// anywhere in the composer/chat view. Checked as a plain substring — the
+    /// banner repeats across the full row width, so even a narrow terminal
+    /// shows an occurrence.
+    fn transcript_open_marker(&self) -> Option<&'static str> {
+        Some("T R A N S C R I P T")
+    }
+
+    /// `^T`: bound to BOTH `global.open_transcript` and, inside the pager,
+    /// `pager.close_transcript` — a genuine same-key toggle, confirmed in
+    /// `codex-rs/tui/src/keymap.rs`.
+    fn transcript_toggle_key(
+        &self,
+    ) -> Option<(crossterm::event::KeyCode, crossterm::event::KeyModifiers)> {
+        use crossterm::event::{KeyCode, KeyModifiers as M};
+        Some((KeyCode::Char('t'), M::CONTROL))
+    }
+
+    /// codex's own footer, visible while the transcript is open, spells out
+    /// `pgup/pgdn to page` — these are the agent's OWN documented fast-scroll
+    /// keys for this exact view (`pager.page_up` / `pager.page_down` in
+    /// `codex-rs/tui/src/keymap.rs`), not a guess at what might work faster.
+    ///
+    /// Confirmed harmless outside the transcript too: a live probe typed a
+    /// two-line draft, sent PageUp/PageDown four times, and the draft was
+    /// still sitting there untouched — codex's `list` keymap namespace also
+    /// binds PageUp/PageDown (for slash-command / picker menus), but that
+    /// namespace isn't active in the plain composer, and `transcript_open_marker`
+    /// gates this to the transcript specifically regardless.
+    fn fast_wheel_scroll(&self) -> Option<WheelScroll> {
+        use crossterm::event::{KeyCode, KeyModifiers as M};
+        Some(WheelScroll {
+            up: (KeyCode::PageUp, M::NONE),
+            down: (KeyCode::PageDown, M::NONE),
         })
     }
     fn resolve_resume_target(
@@ -690,6 +764,38 @@ mod tests {
 
         // A plain process is not an agent: its scrollback belongs to spyc.
         assert!(detect("bash -lc 'make'").wheel_scroll().is_none());
+    }
+
+    /// codex's toggleable `^T` view — the marker, the toggle, and the fast key —
+    /// measured against a live pty capture, not assumed.
+    #[test]
+    fn codex_transcript_view_is_fully_specified() {
+        let enc = |(code, mods)| {
+            crate::pane::input::encode_key(crossterm::event::KeyEvent::new(code, mods))
+        };
+        let codex = detect("codex");
+
+        // The tiled banner a live capture showed across row 0 of the open `^T`
+        // view. Doesn't appear anywhere in the composer/chat view.
+        assert_eq!(codex.transcript_open_marker(), Some("T R A N S C R I P T"));
+
+        // ^T: bound to BOTH global.open_transcript and pager.close_transcript in
+        // codex's own keymap.rs — a genuine same-key toggle.
+        let (code, mods) = codex.transcript_toggle_key().expect("codex has a toggle");
+        assert_eq!(enc((code, mods)), b"\x14"); // Ctrl+T
+
+        // codex's own footer, visible only while `^T` is open, spells out
+        // "pgup/pgdn to page" — its own documented fast-scroll keys for this view.
+        let fast = codex.fast_wheel_scroll().expect("codex has a fast scroll");
+        assert_eq!(enc(fast.up), b"\x1b[5~"); // PageUp
+        assert_eq!(enc(fast.down), b"\x1b[6~"); // PageDown
+
+        // agy has no dedicated toggleable view — its Shift+Arrow scrolls the live
+        // content directly, with nothing to open or page through.
+        let agy = detect("agy");
+        assert!(agy.transcript_open_marker().is_none());
+        assert!(agy.transcript_toggle_key().is_none());
+        assert!(agy.fast_wheel_scroll().is_none());
     }
 
     #[test]

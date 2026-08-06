@@ -19,7 +19,7 @@ use ratatui::layout::Rect;
 
 use super::modal::{Modal, ModalSnapshot, active_modal};
 use super::pager_handler::PagerSlot;
-use super::{Effect, FrameLayout, MouseDragTarget};
+use super::{Effect, FrameLayout};
 use crate::ui::pager::Mount;
 
 /// Which frame region the pointer is over. Resolved from the pointer's
@@ -42,6 +42,87 @@ pub(super) enum Region {
     Status,
     /// The 1-column vertical separator between split columns.
     VDivider,
+}
+
+/// The surface an in-flight mouse drag belongs to. See
+/// [`super::ViewState::mouse_selection`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseDragTarget {
+    /// A pager's charwise text selection, in this slot.
+    Pager(crate::app::pager_handler::PagerSlot),
+    /// A file-list row selection, in this column.
+    List(super::state::Side),
+    /// A spyc-side text selection over the pty pane's visible grid.
+    Pane,
+    /// A charwise selection over a single-line chrome surface.
+    Chrome,
+}
+
+/// A file-list row selection.
+///
+/// `anchor`/`focus` rather than a sorted range so a backwards drag keeps its
+/// direction, and so extending never has to re-derive which end the user started
+/// from. Row *indices*, not paths: the copy resolves paths at release time from the
+/// live listing, so a selection can't outlive a refresh with stale paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListSelection {
+    pub side: super::state::Side,
+    pub anchor: usize,
+    pub focus: usize,
+    /// Copy absolute paths instead of bare names — the modifier held at press.
+    pub full_path: bool,
+}
+
+impl ListSelection {
+    /// Inclusive `(low, high)` row indices.
+    pub const fn range(&self) -> (usize, usize) {
+        if self.anchor <= self.focus {
+            (self.anchor, self.focus)
+        } else {
+            (self.focus, self.anchor)
+        }
+    }
+}
+
+/// A charwise selection over a single-line chrome surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChromeSelection {
+    /// Screen row of the chrome line — its identity, since each is one row.
+    pub y: u16,
+    pub anchor_col: u16,
+    pub focus_col: u16,
+}
+
+impl ChromeSelection {
+    /// Inclusive `(low, high)` columns, relative to the row's own left edge.
+    pub const fn range(self) -> (u16, u16) {
+        if self.anchor_col <= self.focus_col {
+            (self.anchor_col, self.focus_col)
+        } else {
+            (self.focus_col, self.anchor_col)
+        }
+    }
+}
+
+/// A sustained same-direction wheel-scroll gesture over an agent's own view. See
+/// [`super::ViewState::pane_scroll_streak`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaneScrollStreak {
+    /// The tab this streak belongs to — switching tabs starts a fresh streak
+    /// rather than inheriting the old one's elapsed time.
+    pub tab_index: usize,
+    /// -1 up, +1 down.
+    pub dir: i8,
+    pub started_at: std::time::Instant,
+    pub last_at: std::time::Instant,
+}
+
+/// One chrome line as drawn, recorded by the renderer for a later mouse copy.
+#[derive(Debug, Clone)]
+pub struct ChromeRow {
+    pub y: u16,
+    pub x: u16,
+    pub line: ratatui::text::Line<'static>,
 }
 
 /// Where a mouse event is dispatched.
@@ -204,6 +285,102 @@ impl MouseSnapshot {
     const fn resolver_will_see_the_next_key(self) -> bool {
         !self.is_prompting && !matches!(self.pager_mount, Some(Mount::Overlay))
     }
+}
+
+/// How long spyc waits, after sending an agent's `transcript_toggle_key`, before
+/// it's willing to send it again — see [`ViewState::pane_toggle_sent_at`].
+/// Comfortably longer than one local pty round trip, short enough to recover
+/// quickly if the scrape genuinely never confirms.
+const TOGGLE_SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// A gap between wheel ticks longer than this ends the current scroll streak — a
+/// paused-then-resumed scroll is a new gesture, not a continuation of the old
+/// speed. Comfortably longer than the inter-tick gap during a continuous flick.
+const STREAK_GAP: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// How long a same-direction streak must run before it escalates to a page-sized
+/// step. Owner-specified ("say past 1 second").
+const ESCALATE_AFTER: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Advance a wheel-scroll streak by one tick, and decide whether it has run long
+/// enough to escalate. Pure (the `route.rs`/`focus.rs` template): takes `now` as a
+/// parameter rather than reading the clock, so it's testable with synthetic
+/// `Instant`s built via `checked_add`/`checked_sub` off a real `Instant::now()`
+/// baseline (the same trick `codex_pin`'s tests use).
+///
+/// Restarts (rather than extending) the streak on a tab switch, a direction
+/// change, or a gap longer than [`STREAK_GAP`] — each of those means "a new
+/// gesture", not "the same one continuing", so none should inherit the old
+/// streak's elapsed time.
+fn scroll_streak_step(
+    prev: Option<PaneScrollStreak>,
+    tab_index: usize,
+    dir: i8,
+    now: std::time::Instant,
+) -> (PaneScrollStreak, bool) {
+    let restart = match prev {
+        Some(s) => {
+            s.tab_index != tab_index
+                || s.dir != dir
+                || now.duration_since(s.last_at).as_millis() > STREAK_GAP.as_millis()
+        }
+        None => true,
+    };
+    let started_at = if restart {
+        now
+    } else {
+        match prev {
+            Some(s) => s.started_at,
+            None => now, // unreachable: `prev.is_none()` implies `restart`
+        }
+    };
+    let streak = PaneScrollStreak {
+        tab_index,
+        dir,
+        started_at,
+        last_at: now,
+    };
+    let escalate = now.duration_since(started_at).as_millis() >= ESCALATE_AFTER.as_millis();
+    (streak, escalate)
+}
+
+/// What a wheel tick over an agent's own toggleable view should do — decided
+/// PURELY from whether the view is open, the configured mode, and whether this
+/// tick's streak has escalated. The impure half ([`App::send_agent_view_scroll_keys`])
+/// is a thin wrapper: scrape for `is_open`, call this, translate the answer into
+/// an effect + state mutation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentViewAction {
+    /// Send the toggle key once, and start the settle guard.
+    Toggle,
+    /// Nothing this tick — `Off` mode while closed, or a toggle already sent and
+    /// still settling.
+    Nothing,
+    /// Mount spyc's own `^a v` scrollback pager instead.
+    UseSpycHistory,
+    /// Send the agent's per-line scroll key, or its page key if `fast`.
+    Scroll { fast: bool },
+}
+
+/// Pure. `toggle_pending` is `pane_toggle_sent_at`'s guard already resolved to a
+/// bool (elapsed vs. [`TOGGLE_SETTLE`]) — kept out of this function so it stays
+/// clock-free and trivially testable.
+const fn decide_agent_view_action(
+    is_open: bool,
+    mode: crate::config::PaneScrollView,
+    toggle_pending: bool,
+    escalate: bool,
+) -> AgentViewAction {
+    use crate::config::PaneScrollView as V;
+    if !is_open {
+        return match mode {
+            V::Off => AgentViewAction::Nothing,
+            V::SpycHistory => AgentViewAction::UseSpycHistory,
+            V::Native if toggle_pending => AgentViewAction::Nothing,
+            V::Native => AgentViewAction::Toggle,
+        };
+    }
+    AgentViewAction::Scroll { fast: escalate }
 }
 
 /// Route one mouse event to a sink. Pure and total.
@@ -609,39 +786,144 @@ impl super::App {
         crate::agent::detect(&tabs.active_info().command).wheel_scroll()
     }
 
-    /// Translate a wheel tick into the child's own scroll keys, one press per
-    /// line, and send them as a single batch.
+    /// Translate a wheel tick into the child's own scroll keys.
     ///
-    /// One `SendToPane` rather than N: the executor writes to the pty once, so a
-    /// three-line tick can't interleave with the child's own output mid-burst.
-    fn send_scroll_keys(&self, delta: i32) -> Vec<Effect> {
-        let Some(scroll) = self.active_pane_wheel_scroll() else {
+    /// Agents with no dedicated, toggleable view (today: agy — its
+    /// `transcript_open_marker` is `None`) keep the exact behaviour verified
+    /// working: `wheel_scroll()`'s key, repeated `pane_scroll_lines` times, no
+    /// screen-scraping at all. An agent that opts into
+    /// `transcript_open_marker` (codex) gets the fuller machinery in
+    /// `send_agent_view_scroll_keys` — auto-open, and escalation to a page key
+    /// under a sustained gesture.
+    fn send_scroll_keys(&mut self, delta: i32) -> Vec<Effect> {
+        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+            return Vec::new();
+        };
+        let profile = crate::agent::detect(&tabs.active_info().command);
+        if let Some(marker) = profile.transcript_open_marker() {
+            let dir: i8 = if delta < 0 { -1 } else { 1 };
+            return self.send_agent_view_scroll_keys(profile, marker, dir);
+        }
+        let Some(scroll) = profile.wheel_scroll() else {
             return Vec::new();
         };
         let (code, mods) = if delta < 0 { scroll.up } else { scroll.down };
-        let key = crossterm::event::KeyEvent::new(code, mods);
-        let per_press = crate::pane::input::encode_key(key);
-        if per_press.is_empty() {
-            return Vec::new();
-        }
         // The PANE's own step, not `scroll_lines`. Those are different jobs: the list
         // and pagers want 1 line per wheel event, because a trackpad already emits
         // one event per notional line (owner-confirmed: "the file list speed is
         // great"). But here spyc is driving somebody ELSE's pager by synthesizing
         // arrows, and that pager moves one line per key with no safe way to ask it
-        // for a page — so at 1 the wheel couldn't traverse a long `^T` history.
-        // Only `delta`'s SIGN is used here (resolved into `code` above).
-        let repeats = self.state.config.mouse.pane_scroll_lines.max(1);
-        let mut bytes = Vec::with_capacity(per_press.len() * repeats);
-        for _ in 0..repeats {
+        // for a page — so at 1 the wheel couldn't traverse a long history.
+        Self::repeat_key_effect(code, mods, self.state.config.mouse.pane_scroll_lines.max(1))
+    }
+
+    /// The fuller wheel-to-keys machinery for an agent with its OWN toggleable
+    /// scrollback view (today: codex's `^T`), gated on `marker` — see
+    /// `AgentProfile::transcript_open_marker`.
+    ///
+    /// First decides whether the view is open by scraping the pane's CURRENT
+    /// visible screen (`Pane::visible_lines` — the viewport, not scrollback:
+    /// codex's own vt100 scrollback is confirmed empty, per #230's
+    /// investigation, so scrollback has nothing to scrape). Cheap enough to run
+    /// every tick — a plain substring search over one screen's worth of text —
+    /// so no debounce is needed for the scrape itself; only the toggle-send
+    /// needs one (see `pane_toggle_sent_at`'s doc).
+    fn send_agent_view_scroll_keys(
+        &mut self,
+        profile: &'static dyn crate::agent::AgentProfile,
+        marker: &str,
+        dir: i8,
+    ) -> Vec<Effect> {
+        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+            return Vec::new();
+        };
+        let tab_index = tabs.active_index();
+        let is_open = tabs
+            .active()
+            .visible_lines()
+            .iter()
+            .any(|l| l.contains(marker));
+        let toggle_pending = self
+            .view
+            .pane_toggle_sent_at
+            .is_some_and(|sent| sent.elapsed() < TOGGLE_SETTLE);
+
+        let now = std::time::Instant::now();
+        let (escalate, streak) = if is_open {
+            let (streak, escalate) =
+                scroll_streak_step(self.view.pane_scroll_streak, tab_index, dir, now);
+            (escalate, Some(streak))
+        } else {
+            (false, self.view.pane_scroll_streak) // no tick to record while closed
+        };
+
+        let action = decide_agent_view_action(
+            is_open,
+            self.state.config.mouse.pane_scroll_view,
+            toggle_pending,
+            escalate,
+        );
+
+        // State mutation lives here, once, keyed to the decision — not scattered
+        // across the branches that produce it.
+        self.view.pane_scroll_streak = streak;
+        if is_open {
+            self.view.pane_toggle_sent_at = None; // confirmed open; drop the guard
+        }
+
+        match action {
+            AgentViewAction::Nothing => Vec::new(),
+            AgentViewAction::UseSpycHistory => {
+                self.open_pane_scroll_pager();
+                Vec::new()
+            }
+            AgentViewAction::Toggle => {
+                let Some((code, mods)) = profile.transcript_toggle_key() else {
+                    return Vec::new();
+                };
+                self.view.pane_toggle_sent_at = Some(now);
+                Self::repeat_key_effect(code, mods, 1)
+            }
+            AgentViewAction::Scroll { fast } => {
+                if fast && let Some(f) = profile.fast_wheel_scroll() {
+                    let (code, mods) = if dir < 0 { f.up } else { f.down };
+                    return Self::repeat_key_effect(code, mods, 1);
+                }
+                let Some(scroll) = profile.wheel_scroll() else {
+                    return Vec::new();
+                };
+                let (code, mods) = if dir < 0 { scroll.up } else { scroll.down };
+                Self::repeat_key_effect(
+                    code,
+                    mods,
+                    self.state.config.mouse.pane_scroll_lines.max(1),
+                )
+            }
+        }
+    }
+
+    /// Encode `key` and repeat it `n` times as ONE `SendToPane` batch — the
+    /// executor writes to the pty once, so a multi-line tick can't interleave
+    /// with the child's own output mid-burst.
+    fn repeat_key_effect(
+        code: crossterm::event::KeyCode,
+        mods: crossterm::event::KeyModifiers,
+        n: usize,
+    ) -> Vec<Effect> {
+        let per_press = crate::pane::input::encode_key(crossterm::event::KeyEvent::new(code, mods));
+        if per_press.is_empty() {
+            return Vec::new();
+        }
+        let mut bytes = Vec::with_capacity(per_press.len() * n.max(1));
+        for _ in 0..n.max(1) {
             bytes.extend_from_slice(&per_press);
         }
         vec![Effect::SendToPane {
             target: super::effect::PaneTarget::Active,
             input: super::effect::PaneInput::Bytes(bytes),
             on_ok: None,
-            // Same reasoning as `forward_to_child`: no per-tick flash, or a dead
-            // pty buries its real exit message under one repeat per wheel line.
+            // No per-tick flash, and no early return on a dead pty: either would
+            // bury the real exit message under one repeat per wheel line.
             err_prefix: None,
         }]
     }
@@ -760,7 +1042,7 @@ impl super::App {
         let Some((y, col)) = self.chrome_col_at(ev) else {
             return Vec::new();
         };
-        self.view.chrome_selection = Some(super::ChromeSelection {
+        self.view.chrome_selection = Some(ChromeSelection {
             y,
             anchor_col: col,
             focus_col: col,
@@ -951,7 +1233,7 @@ impl super::App {
             .modifiers
             .contains(crossterm::event::KeyModifiers::CONTROL);
         self.state.col_mut(side).cursor.index = idx;
-        self.view.list_selection = Some(super::ListSelection {
+        self.view.list_selection = Some(ListSelection {
             side,
             anchor: idx,
             focus: idx,
@@ -1203,7 +1485,10 @@ fn mouse_report(
 
 #[cfg(test)]
 mod tests {
-    use super::{Gesture, MouseSink, MouseSnapshot, Region, region_at, route_mouse};
+    use super::{
+        Gesture, MouseSink, MouseSnapshot, Region, decide_agent_view_action, region_at,
+        route_mouse, scroll_streak_step,
+    };
     use crate::app::App;
     use crate::config::StatusPosition;
     use crate::ui::pager::Mount;
@@ -2281,14 +2566,14 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir").keep();
         crate::state::with_state_root(&tmp, || {
             let mut app = App::test_app(tmp.clone());
-            app.view.list_selection = Some(crate::app::ListSelection {
+            app.view.list_selection = Some(super::ListSelection {
                 side: Side::Left,
                 anchor: 1,
                 focus: 3,
                 full_path: false,
             });
             app.view.pane_selection = Some(((0, 0), (2, 4)));
-            app.view.chrome_selection = Some(crate::app::ChromeSelection {
+            app.view.chrome_selection = Some(super::ChromeSelection {
                 y: 0,
                 anchor_col: 2,
                 focus_col: 8,
@@ -2334,18 +2619,15 @@ mod tests {
         crate::state::with_state_root(&tmp, || {
             let mut app = App::test_app(tmp.clone());
             // Stand in for what the renderer records: one chrome row at y=0, x=0.
-            app.view
-                .chrome_rows
-                .borrow_mut()
-                .push(crate::app::ChromeRow {
-                    y: 0,
-                    x: 0,
-                    line: ratatui::text::Line::from(vec![
-                        ratatui::text::Span::raw("spyc"),
-                        ratatui::text::Span::raw("|"),
-                        ratatui::text::Span::raw("main*"),
-                    ]),
-                });
+            app.view.chrome_rows.borrow_mut().push(super::ChromeRow {
+                y: 0,
+                x: 0,
+                line: ratatui::text::Line::from(vec![
+                    ratatui::text::Span::raw("spyc"),
+                    ratatui::text::Span::raw("|"),
+                    ratatui::text::Span::raw("main*"),
+                ]),
+            });
             let at = |kind, col| MouseEvent {
                 kind,
                 column: col,
@@ -2378,14 +2660,11 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir").keep();
         crate::state::with_state_root(&tmp, || {
             let mut app = App::test_app(tmp.clone());
-            app.view
-                .chrome_rows
-                .borrow_mut()
-                .push(crate::app::ChromeRow {
-                    y: 0,
-                    x: 0,
-                    line: ratatui::text::Line::from(vec![ratatui::text::Span::raw("spyc|main*")]),
-                });
+            app.view.chrome_rows.borrow_mut().push(super::ChromeRow {
+                y: 0,
+                x: 0,
+                line: ratatui::text::Line::from(vec![ratatui::text::Span::raw("spyc|main*")]),
+            });
             let at = |kind| MouseEvent {
                 kind,
                 column: 3,
@@ -2400,5 +2679,174 @@ mod tests {
                 "and leaves no highlight"
             );
         });
+    }
+    // ── scroll_streak_step: the sustained-scroll escalation timer ──────────
+
+    fn later(base: std::time::Instant, ms: u64) -> std::time::Instant {
+        base.checked_add(std::time::Duration::from_millis(ms))
+            .expect("small offset from now")
+    }
+
+    /// The headline: a same-direction gesture escalates once it's run past
+    /// `ESCALATE_AFTER` — this is the fix for "scrolling is too slow in ^t mode".
+    #[test]
+    fn a_sustained_same_direction_streak_escalates_after_the_threshold() {
+        let t0 = std::time::Instant::now();
+        let (s1, esc1) = scroll_streak_step(None, 0, 1, t0);
+        assert!(!esc1, "the very first tick must not already be escalated");
+
+        // Each successive gap stays under STREAK_GAP (500ms) so this is one
+        // continuous streak, not a series of restarts.
+        let (s2, esc2) = scroll_streak_step(Some(s1), 0, 1, later(t0, 400));
+        assert!(!esc2, "under the threshold yet");
+
+        let (s3, esc3) = scroll_streak_step(Some(s2), 0, 1, later(t0, 800));
+        assert!(!esc3, "still under the threshold");
+
+        let (_, esc4) = scroll_streak_step(Some(s3), 0, 1, later(t0, 1_100));
+        assert!(esc4, "past ESCALATE_AFTER in the same direction");
+    }
+
+    /// A direction change is a new gesture — it must not inherit the old
+    /// streak's elapsed time and escalate immediately.
+    #[test]
+    fn a_direction_change_restarts_the_streak() {
+        let t0 = std::time::Instant::now();
+        let (s1, _) = scroll_streak_step(None, 0, 1, t0);
+        let (_, escalated_immediately) = scroll_streak_step(Some(s1), 0, -1, later(t0, 1_200));
+        assert!(
+            !escalated_immediately,
+            "reversing direction must restart at the slow speed"
+        );
+    }
+
+    /// A pause longer than STREAK_GAP is a new gesture too — resuming a scroll
+    /// after glancing away shouldn't inherit the old speed either.
+    #[test]
+    fn a_long_pause_restarts_the_streak() {
+        let t0 = std::time::Instant::now();
+        let (s1, _) = scroll_streak_step(None, 0, 1, t0);
+        // Long enough overall to be past ESCALATE_AFTER, but the GAP since the
+        // last tick is what should matter here.
+        let gap_tick_at = later(t0, 1_600);
+        let (_, escalated) = scroll_streak_step(Some(s1), 0, 1, gap_tick_at);
+        assert!(
+            !escalated,
+            "a stale streak with a big gap must restart, not escalate"
+        );
+    }
+
+    /// Switching tabs must not hand a fast-scrolled codex tab's escalation to a
+    /// DIFFERENT tab the user just switched to.
+    #[test]
+    fn switching_tabs_restarts_the_streak() {
+        let t0 = std::time::Instant::now();
+        let (s1, _) = scroll_streak_step(None, 0, 1, t0);
+        let (_, escalated) = scroll_streak_step(Some(s1), 1, 1, later(t0, 1_200));
+        assert!(
+            !escalated,
+            "a different tab index must not inherit the streak"
+        );
+    }
+
+    /// Consecutive fast ticks within the gap keep extending the SAME streak
+    /// (not restarting each time) — otherwise a real flick, whose ticks are only
+    /// tens of ms apart, would never accumulate enough elapsed time to escalate.
+    #[test]
+    fn consecutive_fast_ticks_accumulate_toward_escalation() {
+        let t0 = std::time::Instant::now();
+        let mut streak = None;
+        let mut escalated_at = None;
+        for i in 0..40 {
+            let t = later(t0, i * 30); // a tick every 30ms, like a real flick
+            let (s, esc) = scroll_streak_step(streak, 0, 1, t);
+            streak = Some(s);
+            if esc && escalated_at.is_none() {
+                escalated_at = Some(i);
+            }
+        }
+        assert!(
+            escalated_at.is_some(),
+            "40 ticks at 30ms (1.2s) must cross ESCALATE_AFTER"
+        );
+    }
+
+    // ── decide_agent_view_action: the codex ^T auto-open + escalation policy ──
+
+    use super::AgentViewAction;
+    use crate::config::PaneScrollView;
+
+    /// The DEFAULT behaviour, and the owner's stated preference: closed +
+    /// `Native` opens it. Exactly one toggle send, never also a scroll this tick
+    /// — see the doc on `send_agent_view_scroll_keys` for why not both.
+    #[test]
+    fn closed_and_native_opens_it() {
+        assert_eq!(
+            decide_agent_view_action(false, PaneScrollView::Native, false, false),
+            AgentViewAction::Toggle
+        );
+    }
+
+    /// A toggle already in flight (within TOGGLE_SETTLE) must NOT be re-sent —
+    /// this is the guard against the open/close flicker a fast multi-tick flick
+    /// would otherwise cause, since `^T` is a genuine toggle, not idempotent-open.
+    #[test]
+    fn closed_with_a_pending_toggle_does_nothing() {
+        assert_eq!(
+            decide_agent_view_action(false, PaneScrollView::Native, true, false),
+            AgentViewAction::Nothing
+        );
+    }
+
+    /// `Off` never opens anything, pending or not — the second of the owner's
+    /// three configurable choices ("have it do nothing").
+    #[test]
+    fn closed_and_off_does_nothing() {
+        for pending in [false, true] {
+            assert_eq!(
+                decide_agent_view_action(false, PaneScrollView::Off, pending, false),
+                AgentViewAction::Nothing,
+                "pending={pending}"
+            );
+        }
+    }
+
+    /// `SpycHistory` — the owner's stated personal preference — mounts spyc's OWN
+    /// view instead of touching the agent's, regardless of any pending toggle
+    /// (there is none to guard: this mode never sends one).
+    #[test]
+    fn closed_and_spyc_history_uses_spycs_own_view() {
+        assert_eq!(
+            decide_agent_view_action(false, PaneScrollView::SpycHistory, false, false),
+            AgentViewAction::UseSpycHistory
+        );
+    }
+
+    /// Once open, the MODE stops mattering — all three converge on scrolling.
+    /// Whatever opened it (auto or the user's own keyboard `^T`), the wheel must
+    /// scroll it.
+    #[test]
+    fn open_always_scrolls_regardless_of_mode() {
+        for mode in [
+            PaneScrollView::Native,
+            PaneScrollView::Off,
+            PaneScrollView::SpycHistory,
+        ] {
+            assert_eq!(
+                decide_agent_view_action(true, mode, false, false),
+                AgentViewAction::Scroll { fast: false },
+                "{mode:?}"
+            );
+        }
+    }
+
+    /// The other headline: open + escalated sends the FAST (page) key — this is
+    /// the fix for "scrolling is too slow in ^t mode".
+    #[test]
+    fn open_and_escalated_scrolls_fast() {
+        assert_eq!(
+            decide_agent_view_action(true, PaneScrollView::Native, false, true),
+            AgentViewAction::Scroll { fast: true }
+        );
     }
 }

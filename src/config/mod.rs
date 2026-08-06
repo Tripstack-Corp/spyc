@@ -297,6 +297,25 @@ impl Default for PagerConfig {
     }
 }
 
+/// `[mouse] pane_scroll_view` — what a wheel tick does the first time it hits an
+/// agent pane whose own scrollback view (today: codex's `^T`) isn't open yet.
+///
+/// Doesn't affect an already-open view (always scrolled) or an agent with no such
+/// view at all (agy scrolls its live content directly via `wheel_scroll`, with
+/// nothing to open).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PaneScrollView {
+    /// Open the agent's own view (its `transcript_toggle_key`) and scroll it.
+    #[default]
+    Native,
+    /// Leave it closed — only scroll if it happens to already be open.
+    Off,
+    /// Open spyc's OWN `^a v` scrollback pager instead of the agent's view.
+    #[serde(rename = "spyc_history")]
+    SpycHistory,
+}
+
 /// Mouse-reporting knobs (`[mouse]`).
 #[derive(Debug, Clone)]
 pub struct MouseConfig {
@@ -310,6 +329,9 @@ pub struct MouseConfig {
     /// per tick and picks its own step. Clamped to at least 1 on load.
     pub scroll_lines: usize,
     pub pane_scroll_lines: usize,
+    /// What a wheel tick over an agent pane whose OWN scrollback view spyc can
+    /// drive (today: codex's `^T`) does when that view isn't already open.
+    pub pane_scroll_view: PaneScrollView,
 }
 
 impl Default for MouseConfig {
@@ -318,6 +340,7 @@ impl Default for MouseConfig {
             capture: false,
             scroll_lines: 1,
             pane_scroll_lines: 3,
+            pane_scroll_view: PaneScrollView::default(),
         }
     }
 }
@@ -341,6 +364,8 @@ struct FileMouse {
     #[serde(default)]
     scroll_lines: Option<usize>,
     pane_scroll_lines: Option<usize>,
+    #[serde(default)]
+    pane_scroll_view: Option<PaneScrollView>,
 }
 
 /// Markdown viewer knobs.
@@ -747,6 +772,9 @@ impl Config {
         if let Some(n) = file.mouse.pane_scroll_lines {
             self.mouse.pane_scroll_lines = n.max(1);
         }
+        if let Some(v) = file.mouse.pane_scroll_view {
+            self.mouse.pane_scroll_view = v;
+        }
         if let Some(n) = file.mouse.scroll_lines {
             self.mouse.scroll_lines = n.max(1);
         }
@@ -856,6 +884,26 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::tempdir;
+
+    /// The template documents `pane_scroll_view = "native" | "off" | "spyc_history"`
+    /// as the accepted strings. This is the test that would have caught it when
+    /// the doc initially said `spyc_history` while the enum's `rename_all =
+    /// "lowercase"` actually produced `spychistory` — `default_template_round_trips`
+    /// only parses the fully-commented template, so it never exercises a
+    /// documented VALUE string, only that the file parses at all.
+    #[test]
+    fn pane_scroll_view_accepts_every_string_the_template_documents() {
+        for (toml_value, want) in [
+            ("native", PaneScrollView::Native),
+            ("off", PaneScrollView::Off),
+            ("spyc_history", PaneScrollView::SpycHistory),
+        ] {
+            let doc = format!("[mouse]\npane_scroll_view = \"{toml_value}\"\n");
+            let file: FileConfig =
+                toml::from_str(&doc).unwrap_or_else(|e| panic!("{toml_value:?} must parse: {e}"));
+            assert_eq!(file.mouse.pane_scroll_view, Some(want), "{toml_value:?}");
+        }
+    }
 
     #[test]
     fn default_template_round_trips() {

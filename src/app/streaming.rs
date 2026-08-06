@@ -421,7 +421,7 @@ impl App {
             // unrelated repaint.
             if !matches!(
                 self.view.mouse_selection,
-                Some(super::MouseDragTarget::Pane)
+                Some(super::mouse::MouseDragTarget::Pane)
             ) {
                 self.view.pane_selection = None;
             }
