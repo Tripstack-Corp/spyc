@@ -63,6 +63,14 @@ pub(super) enum MouseSink {
     Pager(Mount),
     /// Encode and forward to the pane's child (which requested mouse reporting).
     PaneForward,
+    /// Send the child's own scroll keys, for an agent that doesn't speak mouse
+    /// but does scroll on a keypress ([`crate::agent::AgentProfile::wheel_scroll`]).
+    ///
+    /// Distinct from [`Self::PaneForward`] because the wheel is being *translated*
+    /// rather than delivered: only an agent with a hand-verified binding gets this,
+    /// so the translation can't degenerate into the wheel-to-arrows history
+    /// cycling that `[mouse] capture` exists to avoid.
+    PaneScrollKeys,
     /// Give the keyboard to the pane AND forward the event to its child — the
     /// left-click-through contract. Both halves, in one variant, because a sink
     /// that only forwarded was how the focus half came to be silently missing
@@ -116,6 +124,10 @@ pub(super) struct MouseSnapshot {
     pub has_scroll_pager: bool,
     /// The active tab's child has exited — there is nothing to forward to.
     pub pane_closed: bool,
+    /// The pane's agent has a verified scroll keybinding
+    /// ([`crate::agent::AgentProfile::wheel_scroll`]). Only consulted when the
+    /// child does NOT want mouse — forwarding a real mouse report always wins.
+    pub pane_scroll_keys: bool,
 }
 
 impl MouseSnapshot {
@@ -219,9 +231,16 @@ pub(super) const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseS
         Region::Pane => {
             if snap.can_forward_to_child() {
                 MouseSink::PaneForward
+            } else if snap.pane_scroll_keys && !snap.pane_closed && !snap.has_scroll_pager {
+                // The child ignores mouse reports but scrolls on a keypress
+                // (agy). Same two guards forwarding uses: a dead child has
+                // nothing to scroll, and a `^a v` pager owns the pane's rect, so
+                // keys would scroll a child the user can't see.
+                MouseSink::PaneScrollKeys
             } else {
-                // No spyc-owned pane scrollback in v1 (see the plan's Deferred
-                // section): silence beats typing `\e[<64;20;5M` at a shell.
+                // No verified scroll key and nothing to forward (codex): silence
+                // beats typing `\e[<64;20;5M` — or a history-recalling Up — into
+                // a child that never asked for either.
                 MouseSink::Swallow
             }
         }
@@ -378,6 +397,7 @@ impl super::App {
             is_prompting: matches!(self.state.mode, super::Mode::Prompting(_)),
             has_scroll_pager: self.view.scroll_pager.is_some(),
             pane_closed: self.state.pane.pane_snapshot.is_closed,
+            pane_scroll_keys: self.active_pane_wheel_scroll().is_some(),
         };
 
         match route_mouse(snap, gesture) {
@@ -424,7 +444,44 @@ impl super::App {
                 self.forward_to_child(ev, &layout)
             }
             MouseSink::PaneForward => self.forward_to_child(ev, &layout),
+            MouseSink::PaneScrollKeys => self.send_scroll_keys(delta),
         }
+    }
+
+    /// The active pane agent's verified scroll keybinding, if it has one.
+    fn active_pane_wheel_scroll(&self) -> Option<crate::agent::WheelScroll> {
+        let tabs = self.runtime.pane_tabs.as_ref()?;
+        crate::agent::detect(&tabs.active_info().command).wheel_scroll()
+    }
+
+    /// Translate a wheel tick into the child's own scroll keys, one press per
+    /// line, and send them as a single batch.
+    ///
+    /// One `SendToPane` rather than N: the executor writes to the pty once, so a
+    /// three-line tick can't interleave with the child's own output mid-burst.
+    fn send_scroll_keys(&self, delta: i32) -> Vec<Effect> {
+        let Some(scroll) = self.active_pane_wheel_scroll() else {
+            return Vec::new();
+        };
+        let (code, mods) = if delta < 0 { scroll.up } else { scroll.down };
+        let key = crossterm::event::KeyEvent::new(code, mods);
+        let per_press = crate::pane::input::encode_key(key);
+        if per_press.is_empty() {
+            return Vec::new();
+        }
+        let repeats = delta.unsigned_abs().max(1) as usize;
+        let mut bytes = Vec::with_capacity(per_press.len() * repeats);
+        for _ in 0..repeats {
+            bytes.extend_from_slice(&per_press);
+        }
+        vec![Effect::SendToPane {
+            target: super::effect::PaneTarget::Active,
+            input: super::effect::PaneInput::Bytes(bytes),
+            on_ok: None,
+            // Same reasoning as `forward_to_child`: no per-tick flash, or a dead
+            // pty buries its real exit message under one repeat per wheel line.
+            err_prefix: None,
+        }]
     }
 
     /// Encode `ev` in the child's own protocol and send it to the active pane.
@@ -599,6 +656,7 @@ mod tests {
             is_prompting: false,
             has_scroll_pager: false,
             pane_closed: false,
+            pane_scroll_keys: false,
         }
     }
 
@@ -644,10 +702,55 @@ mod tests {
     #[test]
     fn pane_child_without_mouse_mode_swallows_never_forwards() {
         // The #170 class: forwarding to a child that never enabled mouse mode
-        // types `\e[<64;20;5M` into its prompt. Silence is the correct v1 answer.
+        // types `\e[<64;20;5M` into its prompt. Silence is the correct answer for
+        // a child with no verified scroll key either (codex).
         let s = snap(Some(Region::Pane));
-        assert!(!s.pane_wants_mouse);
+        assert!(!s.pane_wants_mouse && !s.pane_scroll_keys);
         assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
+    }
+
+    /// An agent that ignores mouse reports but scrolls on a keypress (agy) gets
+    /// its keys instead of silence — the regression `[mouse] capture` introduced
+    /// by turning DEC 1007's wheel-to-arrows translation off.
+    #[test]
+    fn non_mouse_child_with_a_verified_scroll_key_gets_keys() {
+        let s = MouseSnapshot {
+            pane_scroll_keys: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::PaneScrollKeys);
+    }
+
+    /// Forwarding a real mouse report always beats synthesizing keys: a child that
+    /// speaks mouse gets exact coordinates, which keys cannot express.
+    #[test]
+    fn forwarding_wins_over_scroll_keys_when_the_child_speaks_mouse() {
+        let s = MouseSnapshot {
+            pane_wants_mouse: true,
+            pane_scroll_keys: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::PaneForward);
+    }
+
+    /// Same two guards forwarding uses. A dead child has nothing to scroll, and a
+    /// `^a v` pager owns the pane's rect — scrolling the child behind it would move
+    /// something the user cannot see.
+    #[test]
+    fn scroll_keys_are_suppressed_for_a_dead_or_covered_child() {
+        for (closed, covered) in [(true, false), (false, true)] {
+            let s = MouseSnapshot {
+                pane_scroll_keys: true,
+                pane_closed: closed,
+                has_scroll_pager: covered,
+                ..snap(Some(Region::Pane))
+            };
+            assert_eq!(
+                route_mouse(s, Gesture::Wheel),
+                MouseSink::Swallow,
+                "closed={closed} covered={covered}"
+            );
+        }
     }
 
     #[test]

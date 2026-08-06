@@ -203,6 +203,34 @@ pub trait AgentProfile: Sync {
     fn detection_rules(&self) -> &'static [DetectionRule] {
         &[]
     }
+
+    /// Which keypresses scroll this agent's own view, for an agent that does
+    /// **not** speak mouse.
+    ///
+    /// Consulted only when [`crate::pane::Pane::wants_mouse`] is false: an agent
+    /// that requested mouse reporting gets the wheel forwarded verbatim (claude),
+    /// which is always better than synthesizing keys. `None` means spyc has no
+    /// verified scroll key for this agent and the wheel does nothing over its
+    /// pane — deliberately, because the wrong key is worse than no key here. Up
+    /// in a composer usually recalls prompt history, which is the exact bug DEC
+    /// 1007's wheel-to-arrows translation caused and that `[mouse] capture` was
+    /// turned on to fix.
+    ///
+    /// Only fill this in for a binding **observed** to scroll, not one that looks
+    /// plausible from a keymap file — several of these agents bind the same key to
+    /// history recall in their input box.
+    fn wheel_scroll(&self) -> Option<WheelScroll> {
+        None
+    }
+}
+
+/// The keys that scroll a non-mouse agent's own view one line, sent by spyc in
+/// place of a wheel event it cannot forward. See
+/// [`AgentProfile::wheel_scroll`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WheelScroll {
+    pub up: (crossterm::event::KeyCode, crossterm::event::KeyModifiers),
+    pub down: (crossterm::event::KeyCode, crossterm::event::KeyModifiers),
 }
 
 /// Shared helper: pick the session whose start time is closest to the
@@ -476,6 +504,17 @@ impl AgentProfile for AgyProfile {
     fn detection_rules(&self) -> &'static [DetectionRule] {
         AGY_DETECTION_RULES
     }
+
+    /// Shift+Up / Shift+Down, verified by hand in agy's default `native terminal
+    /// (inline)` rendering mode. agy discards mouse reports, so the wheel has
+    /// nothing to forward to and these are the only scroll affordance it offers.
+    fn wheel_scroll(&self) -> Option<WheelScroll> {
+        use crossterm::event::{KeyCode, KeyModifiers as M};
+        Some(WheelScroll {
+            up: (KeyCode::Up, M::SHIFT),
+            down: (KeyCode::Down, M::SHIFT),
+        })
+    }
 }
 
 /// Strip zot's resume flags so a saved baseline restores cleanly:
@@ -594,6 +633,40 @@ pub fn detect(cmd: &str) -> &'static dyn AgentProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Which agents claim a wheel scroll key, and what it encodes to on the wire.
+    ///
+    /// Asserting the BYTES, not just the `KeyCode`: the whole failure mode here is
+    /// silent — a binding that encodes to something the agent ignores looks
+    /// identical to no binding at all from the outside, which is how this bug
+    /// reached a user in the first place.
+    #[test]
+    fn wheel_scroll_is_claimed_only_where_it_was_verified() {
+        // agy: ignores mouse reports, scrolls on Shift+Arrow in its default
+        // inline rendering mode. `\e[1;2A` / `\e[1;2B` are xterm Shift+Up/Down.
+        let agy = detect("agy")
+            .wheel_scroll()
+            .expect("agy scrolls on Shift+Arrow");
+        let enc = |(code, mods)| {
+            crate::pane::input::encode_key(crossterm::event::KeyEvent::new(code, mods))
+        };
+        assert_eq!(enc(agy.up), b"\x1b[1;2A");
+        assert_eq!(enc(agy.down), b"\x1b[1;2B");
+
+        // claude requests mouse reporting (?1000h/?1002h/?1003h + SGR), so the
+        // wheel is forwarded verbatim and a synthesized key would be strictly
+        // worse — it cannot carry coordinates.
+        assert!(detect("claude").wheel_scroll().is_none());
+
+        // codex discards mouse events outright (`map_crossterm_event` maps only
+        // Key/Resize/Paste/Focus) AND has no binding that scrolls its main view —
+        // scrolling lives behind its `^T` transcript overlay. So there is nothing
+        // correct to send, and `Up` would recall prompt history instead.
+        assert!(detect("codex").wheel_scroll().is_none());
+
+        // A plain process is not an agent: its scrollback belongs to spyc.
+        assert!(detect("bash -lc 'make'").wheel_scroll().is_none());
+    }
 
     #[test]
     fn detects_known_agents_and_other() {
