@@ -582,3 +582,130 @@ fn charwise_yank_clamps_rows_past_the_end() {
     let (text, ..) = view.visual_yank_text(false).expect("charwise yanks");
     assert!(text.starts_with("first line"), "got {text:?}");
 }
+
+// ── pointer hit-test ──────────────────────────────────────────────────
+
+/// Put the view in the state a render would have left it: content at `area`,
+/// wrap width recorded, and the gutter explicitly OFF.
+///
+/// `show_line_numbers` defaults to `true`, so without turning it off a press at
+/// the content rect's left edge lands on the gutter and correctly selects
+/// nothing. Stating it here keeps each test's column arithmetic obvious;
+/// `hit_test_excludes_the_gutter_and_offsets_columns_past_it` turns it back on.
+fn drawn(view: &mut PagerView, x: u16, y: u16, w: u16, h: u16) {
+    view.show_line_numbers = false;
+    view.last_content_area
+        .set(ratatui::layout::Rect::new(x, y, w, h));
+    view.last_body_w.set(w);
+}
+
+#[test]
+fn hit_test_maps_absolute_screen_position_to_line_and_col() {
+    let mut view = charwise_view();
+    view.wrap = false;
+    drawn(&mut view, 10, 5, 40, 3);
+    // Top-left of the content rect is line 0, col 0.
+    assert_eq!(view.hit_test(10, 5), Some((0, 0)));
+    // Third row down, four cells in.
+    assert_eq!(view.hit_test(14, 7), Some((2, 4)));
+}
+
+/// A never-rendered view has no geometry, so no position names a character.
+#[test]
+fn hit_test_returns_none_before_the_first_render() {
+    let view = charwise_view();
+    assert_eq!(view.hit_test(0, 0), None);
+}
+
+#[test]
+fn hit_test_rejects_positions_outside_the_content_rect() {
+    let mut view = charwise_view();
+    drawn(&mut view, 10, 5, 40, 3);
+    for (col, row) in [(9, 5), (10, 4), (50, 5), (10, 8)] {
+        assert_eq!(view.hit_test(col, row), None, "({col},{row}) is outside");
+    }
+}
+
+/// The gutter is chrome, not content — a press on the digits selects nothing.
+/// Also pins that the gutter shifts the column origin, so col 0 of the *text*
+/// is `gutter_w` cells in.
+#[test]
+fn hit_test_excludes_the_gutter_and_offsets_columns_past_it() {
+    let mut view = charwise_view();
+    view.wrap = false;
+    drawn(&mut view, 0, 0, 40, 3);
+    view.show_line_numbers = true;
+    // 3 lines → ilog10(3) == 0 → gutter is 2 cells.
+    assert_eq!(view.hit_test(0, 0), None, "col 0 is gutter");
+    assert_eq!(view.hit_test(1, 0), None, "col 1 is gutter");
+    assert_eq!(
+        view.hit_test(2, 0),
+        Some((0, 0)),
+        "text starts after gutter"
+    );
+}
+
+/// Scroll offsets which line the top row is.
+#[test]
+fn hit_test_follows_the_scroll_position() {
+    let mut view = charwise_view();
+    view.wrap = false;
+    view.scroll = 2;
+    drawn(&mut view, 0, 0, 40, 3);
+    assert_eq!(view.hit_test(0, 0), Some((2, 0)));
+    assert_eq!(view.hit_test(0, 1), None, "nothing below the last line");
+}
+
+/// Under wrap one logical line owns several screen rows, so a row is NOT a line
+/// index — and the column continues across the wrap rather than restarting.
+/// Getting this wrong is how the highlight and the copied text come to disagree.
+#[test]
+fn hit_test_accounts_for_wrapped_rows() {
+    let mut view = PagerView::new_plain("w", vec!["0123456789".to_string(), "second".to_string()]);
+    view.wrap = true;
+    // Body width 5 → line 0 occupies screen rows 0 and 1.
+    drawn(&mut view, 0, 0, 5, 4);
+    assert_eq!(view.hit_test(0, 0), Some((0, 0)));
+    assert_eq!(
+        view.hit_test(1, 1),
+        Some((0, 6)),
+        "second wrapped row of line 0"
+    );
+    assert_eq!(view.hit_test(0, 2), Some((1, 0)), "line 1 starts on row 2");
+}
+
+/// Clicking past end-of-line selects to the end, as every editor does, instead of
+/// returning nothing.
+#[test]
+fn hit_test_clamps_past_end_of_line() {
+    let mut view = charwise_view();
+    view.wrap = false;
+    drawn(&mut view, 0, 0, 40, 3);
+    // "second" is 6 chars; col 30 is well past it.
+    assert_eq!(view.hit_test(30, 1), Some((1, 5)));
+}
+
+/// A press that never moves must not leave a selection behind, and a moved one
+/// must report as selecting.
+#[test]
+fn char_selection_is_nonempty_only_after_the_pointer_moves() {
+    let mut view = charwise_view();
+    view.begin_char_selection(1, 2);
+    assert!(
+        !view.char_selection_is_nonempty(),
+        "a click selects nothing"
+    );
+    view.extend_char_selection(1, 3);
+    assert!(view.char_selection_is_nonempty());
+}
+
+/// Extending must not hijack a keyboard `V` / `^v` selection into charwise.
+#[test]
+fn extend_char_selection_ignores_a_line_or_block_selection() {
+    let mut view = charwise_view();
+    view.enter_visual(); // Line mode
+    view.extend_char_selection(2, 4);
+    let sel = view.visual.expect("still visual");
+    assert_eq!(sel.kind, VisualKind::Line);
+    assert_eq!(sel.cursor, 0, "cursor untouched by a charwise extend");
+}

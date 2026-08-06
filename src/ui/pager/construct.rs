@@ -46,6 +46,9 @@ impl PagerView {
             flash: None,
             last_viewport_h: std::cell::Cell::new(0),
             last_body_w: std::cell::Cell::new(0),
+            // Zero-sized until the first render, which `hit_test` reads as "this
+            // view has never been drawn, so no pointer position names a character".
+            last_content_area: std::cell::Cell::new(ratatui::layout::Rect::ZERO),
             visual: None,
             placement: None,
             mount: Mount::Overlay,

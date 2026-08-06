@@ -311,6 +311,16 @@ pub struct PagerView {
     /// lines that wrap to multiple rows don't cause the trailing
     /// logical lines to fall off the viewport at "Bot".
     pub last_body_w: std::cell::Cell<u16>,
+    /// Last screen rect the renderer drew this view's *content* into — borders,
+    /// title and search row already excluded. Zero-sized until the first render.
+    ///
+    /// Exists so the mouse hit-test can work in absolute screen coordinates
+    /// without re-deriving where the pager landed. Re-deriving means duplicating
+    /// the mount→rect choice, `full_width`, the border inset and the search-row
+    /// split; each is a place the highlight and the copied text could disagree
+    /// about which character the pointer was on. Same reason (and same shape) as
+    /// `last_body_w` / `last_viewport_h`.
+    pub last_content_area: std::cell::Cell<ratatui::layout::Rect>,
     /// vi-style visual line selection. `None` outside the mode;
     /// `Some({ anchor, cursor })` while the user is selecting a
     /// range with `V` + `j`/`k`/`G`/etc. `y` yanks the inclusive

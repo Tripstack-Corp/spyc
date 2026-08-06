@@ -120,6 +120,7 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     // showing only the top half of the pager filled with content
     // and the rest with `~` until the user manually scrolled).
     view.last_viewport_h.set(content_area.height);
+    view.last_content_area.set(content_area);
 
     if let Some(chunks) = multi_col_chunks {
         render_multi_column(frame, content_area, view, theme, ncols, &chunks);

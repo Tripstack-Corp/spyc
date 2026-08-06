@@ -443,24 +443,33 @@ impl PagerView {
         Some((self.with_title_header(text, include_title), count, in_block))
     }
 
-    /// Map a pointer position inside the pager's **content rect** to
-    /// `(line_index, char_col)`.
+    /// Map an **absolute screen position** to `(line_index, char_col)` in this
+    /// view, or `None` when it names no character.
     ///
-    /// `row_off` / `col_off` are 0-based offsets within the rect
-    /// [`super::layout::pager_inner_area`] returns, so borders and title are
-    /// already accounted for by the caller.
+    /// Everything it needs comes from what the renderer recorded on the last
+    /// frame — `last_content_area` for where the content landed and `last_body_w`
+    /// for the wrap width. Nothing is re-derived, because every re-derivation
+    /// (mount→rect, borders, `full_width`, the gutter formula) is a chance for the
+    /// highlight and the copied text to disagree about which character the pointer
+    /// was on. `visual_rows` stays the sole owner of the wrap math for the same
+    /// reason.
     ///
-    /// Reads `last_body_w` — the body width the renderer *actually* used on the
-    /// last frame — rather than recomputing it. Recomputing means duplicating the
-    /// gutter formula, and any drift between the two shows up as the highlight and
-    /// the copied text disagreeing about what was selected. `visual_rows` is the
-    /// same wrap math the scroll bound uses, for the same reason.
-    ///
-    /// `None` when the pointer is over the gutter or past the last line — neither
-    /// names a character position.
-    pub fn hit_test(&self, row_off: u16, col_off: u16) -> Option<(usize, usize)> {
+    /// `None` for: a pointer outside the content rect, over the line-number
+    /// gutter, or past the last line. None of those is a character position.
+    pub fn hit_test(&self, col: u16, row: u16) -> Option<(usize, usize)> {
+        let area = self.last_content_area.get();
+        if area.width == 0
+            || area.height == 0
+            || col < area.x
+            || row < area.y
+            || col >= area.x.saturating_add(area.width)
+            || row >= area.y.saturating_add(area.height)
+        {
+            return None;
+        }
+        let row_off = row - area.y;
         let gutter_w = self.gutter_width();
-        let col_off = usize::from(col_off);
+        let col_off = usize::from(col - area.x);
         if col_off < gutter_w {
             return None; // over the line-number gutter
         }
