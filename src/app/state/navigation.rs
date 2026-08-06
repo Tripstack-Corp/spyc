@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 
 use crate::app::{Effect, Matcher};
 
-use super::{AppState, Commander};
+use super::{AppState, Commander, Side};
 
 impl Commander {
     /// Snap `view_top` to the page containing the cursor, given the last
@@ -42,6 +42,35 @@ impl AppState {
         let new_row = (row_in_col as isize + delta).rem_euclid(col_len as isize) as usize;
         self.cur_mut().cursor.index = col_start + new_row;
         true
+    }
+
+    /// Move a *specific* column's cursor by `delta`, **clamped** to the list — the
+    /// mouse-wheel entry point.
+    ///
+    /// Two deliberate differences from [`Self::cursor_move_vertical`], which the
+    /// keyboard uses:
+    ///
+    /// - **Targets `side`, not `cur()`.** The wheel scrolls the column under the
+    ///   pointer, so in a vsplit it must move the pointed column's cursor without
+    ///   moving keyboard focus there. `cur()` would move the *focused* column
+    ///   instead, i.e. the one the user isn't pointing at.
+    /// - **Clamps instead of wrapping.** `cursor_move_vertical` wraps with
+    ///   `rem_euclid` (correct for `j`/`k`), but a wheel that teleports from the end
+    ///   of the list back to the top reads as the list flying out of control — one
+    ///   of the two causes of the "uncontrollably fast" report, alongside the
+    ///   `scroll_lines` default.
+    ///
+    /// Scrolls the whole list, not the on-screen column: with a multi-column grid
+    /// the wheel should walk the listing in order rather than stop dead at the
+    /// bottom of the first column.
+    pub fn cursor_scroll_side(&mut self, side: Side, delta: isize) {
+        let len = self.col(side).rows.len();
+        if len == 0 {
+            return;
+        }
+        let cur = self.col(side).cursor.index as isize;
+        let last = len as isize - 1;
+        self.col_mut(side).cursor.index = (cur + delta).clamp(0, last) as usize;
     }
 
     /// Move across the entire list (PageUp/PageDown). Wraps globally.
@@ -236,5 +265,57 @@ impl AppState {
             self.focus_on_path(&canonical);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod scroll_side_tests {
+    use crate::app::state::{AppState, Side};
+
+    fn state_with(rows: usize) -> AppState {
+        let tmp = tempfile::tempdir().expect("tempdir").keep();
+        let mut s = AppState::test_default(tmp);
+        s.left.rows = (0..rows)
+            .map(|i| crate::app::RowData {
+                path: std::path::PathBuf::from(format!("f{i}")),
+                display: format!("f{i}"),
+                kind: crate::fs::EntryKind::File,
+                deleted: false,
+            })
+            .collect();
+        s
+    }
+
+    /// The wheel must STOP at the ends. `cursor_move_vertical` wraps via
+    /// `rem_euclid` — correct for `j`/`k`, but a wheel that teleports from the
+    /// bottom of the list back to the top is what made scrolling feel out of
+    /// control.
+    #[test]
+    fn cursor_scroll_side_clamps_instead_of_wrapping() {
+        let mut s = state_with(5);
+        s.left.cursor.index = 4; // last row
+        s.cursor_scroll_side(Side::Left, 3);
+        assert_eq!(s.left.cursor.index, 4, "must not wrap past the end");
+
+        s.left.cursor.index = 0;
+        s.cursor_scroll_side(Side::Left, -3);
+        assert_eq!(s.left.cursor.index, 0, "must not wrap past the start");
+    }
+
+    #[test]
+    fn cursor_scroll_side_moves_by_delta() {
+        let mut s = state_with(10);
+        s.cursor_scroll_side(Side::Left, 3);
+        assert_eq!(s.left.cursor.index, 3);
+        s.cursor_scroll_side(Side::Left, -1);
+        assert_eq!(s.left.cursor.index, 2);
+    }
+
+    /// An empty listing is a no-op rather than a panic.
+    #[test]
+    fn cursor_scroll_side_on_an_empty_list_is_a_noop() {
+        let mut s = state_with(0);
+        s.cursor_scroll_side(Side::Left, 5);
+        assert_eq!(s.left.cursor.index, 0);
     }
 }

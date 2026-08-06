@@ -100,12 +100,15 @@
 # restarting; `:mouse on` puts it back. spyc's mouse-free yank paths are
 # `^a u` (quick-select URLs / paths / SHAs) and `y` in the pager.
 #
-# `scroll_lines` (default 3): lines per wheel tick, for the surfaces spyc
-# scrolls itself. A pane forwarding to a mouse-aware child is unaffected —
-# the child gets one event per tick and picks its own step. Clamped to >= 1.
+# `scroll_lines` (default 1): lines per wheel tick, for the surfaces spyc
+# scrolls itself. 1, because trackpads and most modern terminals already send
+# one event per notional line — a multiplier there makes the list fly. Raise it
+# for a detented wheel that sends one event per physical click. A pane
+# forwarding to a mouse-aware child is unaffected — the child gets one event
+# per tick and picks its own step. Clamped to >= 1.
 [mouse]
 # capture = false
-# scroll_lines = 3
+# scroll_lines = 1
 
 # ── markdown ──────────────────────────────────────────────────────────
 # Default view for `.md` / `.markdown` files in the pager.
