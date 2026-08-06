@@ -872,10 +872,11 @@ pub struct ViewState {
     /// drag begun on a pager would fall through to the child-forwarding path and
     /// start typing mouse reports into the agent mid-selection.
     ///
-    /// Holds the mount so the drag keeps addressing the pager it started in even
-    /// if the pointer wanders over another region — a selection that retargeted
-    /// mid-drag would extend against the wrong buffer's line indices.
-    pub mouse_selection: Option<crate::ui::pager::Mount>,
+    /// Holds the SLOT so the drag keeps addressing the pager it started in even if
+    /// the pointer wanders over another region — a selection that retargeted
+    /// mid-drag would extend against the wrong buffer's line indices. A slot, not a
+    /// mount, because a mount can't tell `view.pager` from `view.right_pager`.
+    pub mouse_selection: Option<crate::app::pager_handler::PagerSlot>,
     /// Whether an agent-transcript scrollback (`^a v`) renders the agent's
     /// tool-use / tool-result lines. `t` toggles it; the transcript is
     /// re-rendered with the new value. Session-scoped (persists across

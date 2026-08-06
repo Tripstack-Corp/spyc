@@ -55,7 +55,7 @@ mod pickers;
 /// [`App::active_pager_slot`]; [`App::active_pager_ref`] and the
 /// `active_pager_mut!` macro each just map it to the backing field, so the
 /// (ref vs mut) pair can't drift.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PagerSlot {
     /// A full-frame modal — grep / git-view / help / `;cmd` output → `view.pager`.
     Modal,
@@ -124,16 +124,6 @@ impl App {
     /// The pager's content viewport height (body rows). Prefers the
     /// renderer's cached `last_viewport_h`; falls back to the centered-
     /// overlay heuristic only before the first frame has run.
-    /// Scroll the active pager by `delta` rows, clamped to its content. The
-    /// mouse-wheel entry point; keyboard motion goes through
-    /// `handle_pager_motion`, which already holds a `&mut PagerView`.
-    pub(super) fn scroll_active_pager_by(&mut self, delta: i32) {
-        let viewport = self.pager_viewport();
-        if let Some(view) = active_pager_mut!(self) {
-            view.scroll_by(delta, viewport);
-        }
-    }
-
     fn pager_viewport(&self) -> u16 {
         let Some(view) = self.active_pager_ref() else {
             return 2;
@@ -356,19 +346,16 @@ impl App {
         }
     }
 
-    /// The pager that owns input, mutably, resolved through the same slot ladder
-    /// as [`Self::active_pager_ref`].
+    /// The pager in `slot`, mutably — a direct field lookup, with no reference to
+    /// which region has focus.
     ///
-    /// `mount` is a guard, not a lookup key: it must match the pager currently in
-    /// the slot, so a gesture that began on one pager can't keep mutating a
-    /// *different* one that replaced it mid-drag (a stream landing its content, a
-    /// tab switch restoring a stashed scrollback). Returns `None` on a mismatch,
-    /// which callers treat as "the selection's target is gone".
-    pub(super) fn active_pager_matching_mut(
-        &mut self,
-        mount: crate::ui::pager::Mount,
-    ) -> Option<&mut PagerView> {
-        let view = match self.active_pager_slot() {
+    /// That independence is the point. Resolving a *pointer*-derived gesture
+    /// through the focus-derived [`Self::active_pager_slot`] ladder made the result
+    /// depend on `focus_region` having already succeeded, which it declines to do
+    /// while `^a z`-zoomed — so a click could land on one pager and mutate another,
+    /// or silently nothing.
+    pub(super) fn pager_in_slot_mut(&mut self, slot: PagerSlot) -> Option<&mut PagerView> {
+        match slot {
             PagerSlot::Modal | PagerSlot::Top => self.view.pager.as_mut(),
             PagerSlot::Scrollback => self.view.scroll_pager.as_mut(),
             PagerSlot::Right => self
@@ -376,8 +363,79 @@ impl App {
                 .pager_right
                 .as_mut()
                 .or(self.view.right_pager.as_mut()),
-        }?;
-        (view.mount == mount).then_some(view)
+        }
+    }
+
+    /// Which pager, if any, is painted under `(col, row)`.
+    ///
+    /// **This is what gives an open pager priority over the layout region beneath
+    /// it.** `region_at` answers from `compute_layout` geometry, but a pager is
+    /// drawn *over* that geometry: an `Overlay` renders into `frame.area()` and a
+    /// `^a v` scrollback renders into the pane's own rect. Since `region_at` tests
+    /// `layout.pane` first, both used to resolve as `Region::Pane` — so the wheel
+    /// scrolled the agent *behind* a full-screen pager, and a click was forwarded
+    /// to it (which is what made claude start its own selection under the pager).
+    ///
+    /// Answered from each pager's `last_content_area`, the rect the renderer
+    /// actually drew it into — the same source of truth `PagerView::hit_test` uses,
+    /// so "which pager did I click" and "which character did I click" can't
+    /// disagree. Content rect, not the whole box: beside a centered overlay the
+    /// user genuinely sees the list, and clicking there should reach the list.
+    ///
+    /// Checked in paint order (topmost first). A slot holding a pager that is not
+    /// currently drawn would carry a stale rect; in practice a pager is `take`n out
+    /// of its slot when it stops being drawn (closed, stashed on tab switch, split
+    /// closed), so an occupied slot is a drawn slot.
+    pub(super) fn pager_slot_at(&self, col: u16, row: u16) -> Option<PagerSlot> {
+        let covers = |v: &PagerView| {
+            let a = v.last_content_area.get();
+            a.width > 0
+                && a.height > 0
+                && col >= a.x
+                && row >= a.y
+                && col < a.x.saturating_add(a.width)
+                && row < a.y.saturating_add(a.height)
+        };
+        // A full-frame modal paints last, so it wins wherever it covers.
+        if let Some(v) = self.view.pager.as_ref()
+            && matches!(v.mount, crate::ui::pager::Mount::Overlay)
+            && covers(v)
+        {
+            return Some(PagerSlot::Modal);
+        }
+        if let Some(v) = self.view.scroll_pager.as_ref().filter(|v| covers(v)) {
+            let _ = v;
+            return Some(PagerSlot::Scrollback);
+        }
+        if let Some(v) = self
+            .view
+            .pager_right
+            .as_ref()
+            .or(self.view.right_pager.as_ref())
+            .filter(|v| covers(v))
+        {
+            let _ = v;
+            return Some(PagerSlot::Right);
+        }
+        if let Some(v) = self.view.pager.as_ref().filter(|v| covers(v)) {
+            let _ = v;
+            return Some(PagerSlot::Top);
+        }
+        None
+    }
+
+    /// Scroll the pager in `slot` by `delta` lines. Targets the slot the pointer is
+    /// over, not the focused one, so the wheel scrolls what you are looking at.
+    pub(super) fn scroll_pager_in_slot(&mut self, slot: PagerSlot, delta: i32) {
+        let viewport = self.pager_viewport();
+        if let Some(view) = self.pager_in_slot_mut(slot) {
+            // Prefer the height the renderer recorded for THIS pager; `pager_viewport`
+            // reports the focused one, which is a different box when the pointer is
+            // over the other column.
+            let h = view.last_viewport_h.get();
+            let h = if h >= 2 { h } else { viewport };
+            view.scroll_by(delta, h);
+        }
     }
 
     /// Decide which pager slot owns input — the single source of truth shared by
