@@ -352,8 +352,9 @@ pub enum ClipMsg {
     /// `"yanked prompt: {preview}{…}"` — preview = `text.chars().take(60)`,
     /// `…` iff `text.len() > 60` (byte length).
     Prompt,
-    /// `"copied the status line"` — a click on the status bar. Carries no count:
-    /// it is always exactly one line, so a number would be noise.
+    /// `"copied: {preview}{…}"` — a drag-selected substring of a single-line chrome
+    /// surface (status bar, pane divider). Echoes what was taken, because the whole
+    /// point is picking one item out of the line and the user should see which.
     StatusLine,
     /// `"copied {count} name(s)"` / `"copied {count} path(s)"` — a file-list row
     /// selection. `count` is carried because a name may contain a newline, so it
@@ -374,7 +375,11 @@ impl ClipMsg {
                 format!("yanked path: {preview}{ellipsis}")
             }
             Self::MultiPath { count } => format!("yanked {count} paths"),
-            Self::StatusLine => "copied the status line".to_string(),
+            Self::StatusLine => {
+                let preview: String = text.chars().take(60).collect();
+                let ellipsis = if text.chars().count() > 60 { "…" } else { "" };
+                format!("copied: {preview}{ellipsis}")
+            }
             Self::ListNames { count, paths } => {
                 let unit = if *paths { "path" } else { "name" };
                 format!(

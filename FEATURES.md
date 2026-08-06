@@ -555,8 +555,11 @@ end).
   **Drag in the file list to select rows; release copies their names** — hold
   **Ctrl** while pressing to copy absolute paths instead. The highlight stays up
   after the copy. Distinct from picks: a drag never changes what the next file
-  operation acts on. **Click the status line to copy it** (the text, not the
-  powerline separators or the logo).
+  operation acts on.
+  **Drag across the status line or the divider/tab line to select part of it** —
+  release copies exactly those columns, so you can take just a branch name, an
+  agent session id, or a custom tab name without the rest of the line. A click
+  that doesn't move copies nothing.
   **Drag in a pager to select text; release copies it** and the pager title
   reports the line count. Works the same full-screen or popped-up, and copies the
   content only — never the line-number gutter, the whitespace/line-break markers,

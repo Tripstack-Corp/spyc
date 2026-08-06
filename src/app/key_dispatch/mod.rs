@@ -123,6 +123,7 @@ impl App {
         // modal by request (vim-consistent), so `j`/`k` extend it and `Esc` cancels.
         self.view.list_selection = None;
         self.view.pane_selection = None;
+        self.view.chrome_selection = None;
 
         // Per-key dispatch trace, opt-in via `--key-trace` / SPYC_KEY_TRACE.
         // Captures the input as it arrives so a user reproducing an

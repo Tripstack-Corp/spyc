@@ -94,8 +94,13 @@ pub(super) enum MouseSink {
     /// Give the keyboard to a file-list column AND anchor a row selection there.
     /// Both halves in one variant, for the reason [`Self::FocusAndForward`] documents.
     FocusAndSelectRows(crate::app::state::Side),
-    /// Copy the status line's text.
-    CopyStatus,
+    /// Anchor a charwise selection on the single-line chrome surface under the
+    /// pointer (status bar, pane divider/tab line).
+    ///
+    /// Replaces an earlier click-copies-the-whole-line: a bare click that silently
+    /// took the entire line was surprising, and it couldn't copy just the one thing
+    /// you wanted out of it — a session id, a branch name.
+    SelectChrome,
     /// Give the keyboard to the pane AND anchor a spyc-side text selection over its
     /// visible grid — for a child that ignores mouse reports, so nothing else can
     /// do the selecting (codex's `^T` transcript, a plain shell).
@@ -295,10 +300,11 @@ pub(super) const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseS
             if matches!(region, Region::RightColumn) {
                 return MouseSink::FocusAndSelectRows(crate::app::state::Side::Right);
             }
-            // The status line is one line of text; a click copies all of it. It owns
-            // no keyboard focus, so there is nothing else a click there could mean.
-            if matches!(region, Region::Status) {
-                return MouseSink::CopyStatus;
+            // The single-line chrome surfaces hold text and no keyboard focus, so a
+            // press there can only mean "select this". The divider carries the tab
+            // bar, where a custom session name is the thing worth copying.
+            if matches!(region, Region::Status | Region::Divider) {
+                return MouseSink::SelectChrome;
             }
             return MouseSink::FocusRegion;
         }
@@ -442,6 +448,7 @@ impl super::App {
                         MouseDragTarget::Pager(_) => self.extend_pager_selection(ev),
                         MouseDragTarget::List(side) => self.extend_row_selection(ev, side),
                         MouseDragTarget::Pane => self.extend_pane_selection(ev),
+                        MouseDragTarget::Chrome => self.extend_chrome_selection(ev),
                     };
                 }
                 MouseEventKind::Up(MouseButton::Left) => {
@@ -449,6 +456,7 @@ impl super::App {
                         MouseDragTarget::Pager(_) => self.finish_pager_selection(ev),
                         MouseDragTarget::List(_) => self.finish_row_selection(ev),
                         MouseDragTarget::Pane => self.finish_pane_selection(ev),
+                        MouseDragTarget::Chrome => self.finish_chrome_selection(ev),
                     };
                 }
                 // Any other button mid-drag abandons the selection rather than
@@ -562,16 +570,7 @@ impl super::App {
                 self.focus_region(region);
                 self.begin_pane_selection(ev)
             }
-            MouseSink::CopyStatus => {
-                let text = self.status_bar_plain_text();
-                if text.is_empty() {
-                    return Vec::new();
-                }
-                vec![Effect::CopyToClipboard {
-                    text,
-                    ok: super::effect::ClipMsg::StatusLine,
-                }]
-            }
+            MouseSink::SelectChrome => self.begin_chrome_selection(ev),
             MouseSink::Paste => vec![Effect::PasteFromClipboard],
             MouseSink::LeaderMenu => {
                 self.state.resolver.enter_leader();
@@ -743,6 +742,89 @@ impl super::App {
         // full-frame mount.
         let ok_msg = format!("copied {lines} line{}", if lines == 1 { "" } else { "s" });
         vec![Effect::CopyToPagerClipboard { text, ok_msg }]
+    }
+
+    /// The chrome row under the pointer, and the pointer's column within it.
+    ///
+    /// Matched on the recorded row's `y`, which is its identity — each chrome
+    /// surface is exactly one screen row. Reads what the renderer actually drew, so
+    /// the column the user pressed maps to the character they saw.
+    fn chrome_col_at(&self, ev: MouseEvent) -> Option<(u16, u16)> {
+        let rows = self.view.chrome_rows.borrow();
+        let row = rows.iter().find(|r| r.y == ev.row && ev.column >= r.x)?;
+        Some((row.y, ev.column - row.x))
+    }
+
+    /// Anchor a chrome-line selection where the pointer pressed.
+    fn begin_chrome_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
+        let Some((y, col)) = self.chrome_col_at(ev) else {
+            return Vec::new();
+        };
+        self.view.chrome_selection = Some(super::ChromeSelection {
+            y,
+            anchor_col: col,
+            focus_col: col,
+        });
+        self.view.mouse_selection = Some(MouseDragTarget::Chrome);
+        Vec::new()
+    }
+
+    /// Extend it. The pointer is clamped to the row it started on: these surfaces
+    /// are one row each, so drifting vertically mid-drag should widen the selection
+    /// rather than abandon it.
+    fn extend_chrome_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
+        let Some(sel) = self.view.chrome_selection else {
+            return Vec::new();
+        };
+        let col = {
+            let rows = self.view.chrome_rows.borrow();
+            let Some(row) = rows.iter().find(|r| r.y == sel.y) else {
+                return Vec::new();
+            };
+            ev.column.saturating_sub(row.x)
+        };
+        if let Some(s) = self.view.chrome_selection.as_mut() {
+            s.focus_col = col;
+        }
+        Vec::new()
+    }
+
+    /// Copy the selected columns, keeping the highlight up.
+    ///
+    /// A press that never moved is a click, not a selection — the highlight is
+    /// dropped and the clipboard left alone, matching every other surface. That is
+    /// also why this replaced click-copies-everything: a click now does nothing
+    /// surprising.
+    fn finish_chrome_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
+        self.view.mouse_selection = None;
+        self.extend_chrome_selection(ev);
+        let Some(sel) = self.view.chrome_selection else {
+            return Vec::new();
+        };
+        if sel.anchor_col == sel.focus_col {
+            self.view.chrome_selection = None;
+            return Vec::new();
+        }
+        let (lo, hi) = sel.range();
+        let text = {
+            let rows = self.view.chrome_rows.borrow();
+            let Some(row) = rows.iter().find(|r| r.y == sel.y) else {
+                return Vec::new();
+            };
+            crate::ui::line_select::text_between_columns(
+                &row.line,
+                usize::from(lo),
+                usize::from(hi),
+            )
+        };
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            return Vec::new();
+        }
+        vec![Effect::CopyToClipboard {
+            text,
+            ok: super::effect::ClipMsg::StatusLine,
+        }]
     }
 
     /// Translate the pointer into the pane's own grid coordinates, clamped into it.
@@ -1578,24 +1660,20 @@ mod tests {
     /// Clicking chrome or off-frame moves nothing — but middle/right still act,
     /// since they aren't about the region.
     ///
-    /// `Status` is excluded: it holds one line of text and no keyboard focus, so a
-    /// left click there copies it (`copying_the_status_line_needs_no_focus`).
+    /// `Status` and `Divider` are excluded: they hold text and no keyboard focus, so
+    /// a press there starts a selection — see
+    /// `chrome_lines_start_a_selection_rather_than_taking_focus`.
     #[test]
     fn chrome_focuses_nothing_but_still_pastes_and_opens_the_menu() {
-        for region in [Region::Divider, Region::Prompt] {
-            assert_eq!(
-                route_mouse(snap(Some(region)), Gesture::Left),
-                MouseSink::FocusRegion,
-                "{region:?}: routed, then `focus_region` no-ops on chrome"
-            );
-            assert_eq!(
-                route_mouse(snap(Some(region)), Gesture::Middle),
-                MouseSink::Paste
-            );
-        }
-        // Off-frame is the one case where even middle/right do nothing: there is
-        // no region, so the early return fires before the gesture match.
-        assert_eq!(route_mouse(snap(None), Gesture::Middle), MouseSink::Swallow);
+        // Only the prompt row is left: `Status` and `Divider` now start selections.
+        let prompt = snap(Some(Region::Prompt));
+        assert_eq!(
+            route_mouse(prompt, Gesture::Left),
+            MouseSink::FocusRegion,
+            "routed, then `focus_region` no-ops on chrome"
+        );
+        assert_eq!(route_mouse(prompt, Gesture::Middle), MouseSink::Paste);
+        assert_eq!(route_mouse(prompt, Gesture::Right), MouseSink::LeaderMenu);
     }
 
     /// Coordinate translation, for both `status_position` values — the trap
@@ -1997,14 +2075,18 @@ mod tests {
     }
     // ── file list + status bar selection ─────────────────────────────────
 
-    /// The status line owns no keyboard focus, so a left click there can only mean
-    /// "copy this". Kept out of the chrome test above for that reason.
+    /// The single-line chrome surfaces hold text and no keyboard focus, so a press
+    /// there can only mean "select this". Both of them: the divider carries the tab
+    /// bar, where a custom session name is the thing worth copying.
     #[test]
-    fn copying_the_status_line_needs_no_focus() {
-        assert_eq!(
-            route_mouse(snap(Some(Region::Status)), Gesture::Left),
-            MouseSink::CopyStatus
-        );
+    fn chrome_lines_start_a_selection_rather_than_taking_focus() {
+        for region in [Region::Status, Region::Divider] {
+            assert_eq!(
+                route_mouse(snap(Some(region)), Gesture::Left),
+                MouseSink::SelectChrome,
+                "{region:?}"
+            );
+        }
     }
 
     /// A pager over the list still wins: `covering_pager` is checked before the
@@ -2206,6 +2288,11 @@ mod tests {
                 full_path: false,
             });
             app.view.pane_selection = Some(((0, 0), (2, 4)));
+            app.view.chrome_selection = Some(crate::app::ChromeSelection {
+                y: 0,
+                anchor_col: 2,
+                focus_col: 8,
+            });
 
             let mut pager = PagerView::new_plain("p", vec!["a".into(), "b".into()]);
             pager.visual = Some(crate::ui::pager::VisualSelection {
@@ -2228,8 +2315,89 @@ mod tests {
                 "a keypress must retire the pane selection"
             );
             assert!(
+                app.view.chrome_selection.is_none(),
+                "a keypress must retire the chrome selection"
+            );
+            assert!(
                 app.view.pager.as_ref().and_then(|v| v.visual).is_some(),
                 "the pager's visual mode is modal and must survive"
+            );
+        });
+    }
+    /// End-to-end: a drag across part of a chrome line copies exactly those columns
+    /// — the point of the feature being substring selection rather than
+    /// copy-the-whole-line (so you can take just a session id or a branch name).
+    #[test]
+    fn a_chrome_drag_copies_only_the_dragged_columns() {
+        use crossterm::event::KeyModifiers;
+        let tmp = tempfile::tempdir().expect("tempdir").keep();
+        crate::state::with_state_root(&tmp, || {
+            let mut app = App::test_app(tmp.clone());
+            // Stand in for what the renderer records: one chrome row at y=0, x=0.
+            app.view
+                .chrome_rows
+                .borrow_mut()
+                .push(crate::app::ChromeRow {
+                    y: 0,
+                    x: 0,
+                    line: ratatui::text::Line::from(vec![
+                        ratatui::text::Span::raw("spyc"),
+                        ratatui::text::Span::raw("|"),
+                        ratatui::text::Span::raw("main*"),
+                    ]),
+                });
+            let at = |kind, col| MouseEvent {
+                kind,
+                column: col,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            };
+            // Drag columns 5..9 — "main*", crossing no segment seam of its own but
+            // starting past two.
+            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 5));
+            app.extend_chrome_selection(at(MouseEventKind::Drag(MouseButton::Left), 9));
+            let effects = app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left), 9));
+
+            let [Effect::CopyToClipboard { text, .. }] = effects.as_slice() else {
+                panic!("expected one clipboard copy, got {effects:?}");
+            };
+            assert_eq!(text, "main*");
+            assert!(
+                app.view.chrome_selection.is_some(),
+                "the highlight stays up after the copy, like the other surfaces"
+            );
+        });
+    }
+
+    /// A click that never moved is a click: no copy, no lingering highlight. This is
+    /// what makes replacing click-copies-the-whole-line safe — a stray click on the
+    /// status bar no longer silently overwrites the clipboard.
+    #[test]
+    fn a_chrome_click_without_motion_copies_nothing() {
+        use crossterm::event::KeyModifiers;
+        let tmp = tempfile::tempdir().expect("tempdir").keep();
+        crate::state::with_state_root(&tmp, || {
+            let mut app = App::test_app(tmp.clone());
+            app.view
+                .chrome_rows
+                .borrow_mut()
+                .push(crate::app::ChromeRow {
+                    y: 0,
+                    x: 0,
+                    line: ratatui::text::Line::from(vec![ratatui::text::Span::raw("spyc|main*")]),
+                });
+            let at = |kind| MouseEvent {
+                kind,
+                column: 3,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            };
+            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left)));
+            let effects = app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left)));
+            assert!(effects.is_empty(), "a click must not copy: {effects:?}");
+            assert!(
+                app.view.chrome_selection.is_none(),
+                "and leaves no highlight"
             );
         });
     }

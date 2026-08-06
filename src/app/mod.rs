@@ -229,6 +229,8 @@ pub enum MouseDragTarget {
     List(state::Side),
     /// A spyc-side text selection over the pty pane's visible grid.
     Pane,
+    /// A charwise selection over a single-line chrome surface.
+    Chrome,
 }
 
 /// A file-list row selection.
@@ -255,6 +257,34 @@ impl ListSelection {
             (self.focus, self.anchor)
         }
     }
+}
+
+/// A charwise selection over a single-line chrome surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChromeSelection {
+    /// Screen row of the chrome line — its identity, since each is one row.
+    pub y: u16,
+    pub anchor_col: u16,
+    pub focus_col: u16,
+}
+
+impl ChromeSelection {
+    /// Inclusive `(low, high)` columns, relative to the row's own left edge.
+    pub const fn range(self) -> (u16, u16) {
+        if self.anchor_col <= self.focus_col {
+            (self.anchor_col, self.focus_col)
+        } else {
+            (self.focus_col, self.anchor_col)
+        }
+    }
+}
+
+/// One chrome line as drawn, recorded by the renderer for a later mouse copy.
+#[derive(Debug, Clone)]
+pub struct ChromeRow {
+    pub y: u16,
+    pub x: u16,
+    pub line: ratatui::text::Line<'static>,
 }
 
 /// Follow-up side effect a key handler asks the main loop to perform.
@@ -932,6 +962,17 @@ pub struct ViewState {
     /// simple half of the tradeoff recorded in
     /// `docs/drafts/mouse_selection_plan.md`.
     pub pane_selection: Option<((u16, u16), (u16, u16))>,
+    /// A charwise selection over one of the single-line chrome surfaces (the status
+    /// bar, the pane divider/tab line) — the row and an unordered column pair.
+    pub chrome_selection: Option<ChromeSelection>,
+    /// What each chrome row actually rendered this frame, for a mouse copy.
+    ///
+    /// `RefCell` because the draw pass is `&self` and this is the renderer recording
+    /// what it drew — the same role (and the same reason) as `PagerView`'s
+    /// `last_content_area` / `last_body_w` `Cell`s. It holds the DRAWN line, not the
+    /// semantic segments: a selection maps screen COLUMNS back to characters, and
+    /// only the drawn line has the width-driven truncation the user is looking at.
+    pub chrome_rows: std::cell::RefCell<Vec<ChromeRow>>,
     /// Whether an agent-transcript scrollback (`^a v`) renders the agent's
     /// tool-use / tool-result lines. `t` toggles it; the transcript is
     /// re-rendered with the new value. Session-scoped (persists across
@@ -1028,6 +1069,8 @@ impl ViewState {
             mouse_selection: None,
             list_selection: None,
             pane_selection: None,
+            chrome_selection: None,
+            chrome_rows: std::cell::RefCell::new(Vec::new()),
             transcript_show_tool_calls: true,
             term_size: crossterm::terminal::size().unwrap_or((80, 24)),
         }

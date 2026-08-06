@@ -416,6 +416,12 @@ impl App {
         // rows/grid) BEFORE drawing, so the draw path itself performs no
         // domain/view transitions.
         let layout = self.prepare_frame(frame.area());
+        // Chrome rows are re-recorded every frame by `draw_chrome_line`. Clearing
+        // here (not on read) means a row that stops being drawn — the status bar
+        // yields its row to the prompt when the pane is zoomed, the divider vanishes
+        // with the pane — leaves no stale rect behind for the mouse to hit-test
+        // against, which is the trap `pager_slot_at` documents for pager rects.
+        self.view.chrome_rows.borrow_mut().clear();
         // The two structural rules a centered popup border could land on (and so
         // visually merge with): the horizontal pane divider and the vertical
         // split separator. Captured before `layout` is consumed by render_inner.

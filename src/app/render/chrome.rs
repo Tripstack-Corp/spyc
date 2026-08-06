@@ -18,7 +18,6 @@ impl App {
         use ratatui::{
             style::{Modifier, Style},
             text::{Line, Span},
-            widgets::Paragraph,
         };
         let width = area.width as usize;
         // Tinting the rule + active tab in scroll mode is deliberate
@@ -291,7 +290,7 @@ impl App {
         // If anything's left (shouldn't be), pad.
         let _ = used;
 
-        frame.render_widget(Paragraph::new(Line::from(spans)), area);
+        self.draw_chrome_line(frame, area, Line::from(spans));
     }
 
     /// The per-tab agent-activity dot span: a spicy heat-pulse `●` while

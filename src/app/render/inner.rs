@@ -353,31 +353,6 @@ impl App {
     /// single top row, per `compute_layout`'s `pane_pct >= 100` branch). Called
     /// by the default draw and — when a vsplit keeps the status row free above a
     /// column-scoped overlay — by the overlay / TopPane-pager branches.
-    /// The status line as plain text — what a click on the status bar copies.
-    ///
-    /// Builds the same `StatusBar` the renderer does, from the same accessors, so
-    /// the copy can't drift from what's on screen.
-    pub(in crate::app) fn status_bar_plain_text(&self) -> String {
-        let (path, suffix) = self.header_parts();
-        let project_label = self
-            .state
-            .project_home
-            .as_deref()
-            .map(path_basename_display);
-        let agent_info = self.active_agent_status();
-        StatusBar {
-            project_home: project_label.as_deref(),
-            session_name: self.state.session_name.as_deref(),
-            path: &path,
-            suffix: &suffix,
-            git_info: self.state.cur().git.info.as_deref(),
-            agent_info: agent_info.as_deref(),
-            theme: &self.view.theme,
-            plain_logo: false,
-        }
-        .plain_text()
-    }
-
     fn render_status_bar(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
         let prompt_row_occupied = matches!(self.state.mode, Mode::Prompting(_))
             || self.state.flash.is_some()
@@ -392,7 +367,7 @@ impl App {
             .as_deref()
             .map(path_basename_display);
         let agent_info = self.active_agent_status();
-        StatusBar {
+        let line = StatusBar {
             project_home: project_label.as_deref(),
             session_name: self.state.session_name.as_deref(),
             path: &path,
@@ -403,7 +378,39 @@ impl App {
             // Non-truecolor terminals (GNU screen) mangle the 🌶️ glyph → red block.
             plain_logo: self.view.color_depth != crate::ui::color_depth::ColorDepth::TrueColor,
         }
-        .render(frame, rect);
+        .build_line(rect);
+        self.draw_chrome_line(frame, rect, line);
+    }
+
+    /// Draw a single-line chrome surface, recording what was drawn and painting any
+    /// mouse selection on it.
+    ///
+    /// The single funnel for the status bar and the divider, so "what got drawn" and
+    /// "what a selection copies" cannot diverge — the copy reads exactly the line
+    /// recorded here, including its width-driven truncation.
+    pub(in crate::app) fn draw_chrome_line(
+        &self,
+        frame: &mut Frame,
+        area: ratatui::layout::Rect,
+        line: ratatui::text::Line<'static>,
+    ) {
+        use ratatui::widgets::Paragraph;
+        self.view
+            .chrome_rows
+            .borrow_mut()
+            .push(crate::app::ChromeRow {
+                y: area.y,
+                x: area.x,
+                line: line.clone(),
+            });
+        let painted = match self.view.chrome_selection {
+            Some(sel) if sel.y == area.y => {
+                let (lo, hi) = sel.range();
+                crate::ui::line_select::highlight_columns(&line, usize::from(lo), usize::from(hi))
+            }
+            _ => line,
+        };
+        frame.render_widget(Paragraph::new(painted), area);
     }
 
     /// The pane selection as ordered screen coordinates, for the widget.
