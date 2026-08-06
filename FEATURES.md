@@ -548,6 +548,10 @@ end).
   reload (`:mouse auto` returns to following the config). Default off (`[mouse]
   capture`). `^a u` quick-select and `y` in the pager are the mouse-free yank
   paths.
+  **Drag in a pane whose agent ignores the mouse to select its text** (codex —
+  including inside its `^T` transcript — and plain shells); release copies it. A
+  child that speaks mouse (claude, vim) keeps doing its own selection instead. The
+  highlight clears when the child paints, since it's anchored to the visible grid.
   **Drag in the file list to select rows; release copies their names** — hold
   **Ctrl** while pressing to copy absolute paths instead. The highlight stays up
   after the copy. Distinct from picks: a drag never changes what the next file

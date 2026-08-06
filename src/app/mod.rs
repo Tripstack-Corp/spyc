@@ -227,6 +227,8 @@ pub enum MouseDragTarget {
     Pager(crate::app::pager_handler::PagerSlot),
     /// A file-list row selection, in this column.
     List(state::Side),
+    /// A spyc-side text selection over the pty pane's visible grid.
+    Pane,
 }
 
 /// A file-list row selection.
@@ -919,6 +921,17 @@ pub struct ViewState {
     /// persists and a follow-up yank can still find it (same contract as the
     /// pager's charwise selection).
     pub list_selection: Option<ListSelection>,
+    /// A spyc-side charwise selection over the pane's visible grid, for a child
+    /// that ignores mouse reports — `(anchor, focus)` in SCREEN coordinates,
+    /// unordered so a backwards drag keeps its direction.
+    ///
+    /// Screen coordinates, so it is only meaningful for the frame it was made in:
+    /// [`App::drain_pane_output`] clears it when the child paints, because the grid
+    /// scrolls out from under a selection anchored this way. That is fine for the
+    /// case it exists to serve — reading a static transcript overlay — and is the
+    /// simple half of the tradeoff recorded in
+    /// `docs/drafts/mouse_selection_plan.md`.
+    pub pane_selection: Option<((u16, u16), (u16, u16))>,
     /// Whether an agent-transcript scrollback (`^a v`) renders the agent's
     /// tool-use / tool-result lines. `t` toggles it; the transcript is
     /// re-rendered with the new value. Session-scoped (persists across
@@ -1014,6 +1027,7 @@ impl ViewState {
             mouse_press_forwarded: false,
             mouse_selection: None,
             list_selection: None,
+            pane_selection: None,
             transcript_show_tool_calls: true,
             term_size: crossterm::terminal::size().unwrap_or((80, 24)),
         }

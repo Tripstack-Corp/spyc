@@ -49,6 +49,7 @@ impl App {
                     PaneWidget {
                         screen,
                         focused: overlay_focused,
+                        selection: self.pane_selection_screen_coords(),
                     },
                     overlay_area,
                 );
@@ -285,7 +286,14 @@ impl App {
         } else if let Some(tabs) = self.runtime.pane_tabs.as_ref() {
             let focused = self.state.pane_focused();
             tabs.active().with_screen(|screen| {
-                frame.render_widget(PaneWidget { screen, focused }, rect);
+                frame.render_widget(
+                    PaneWidget {
+                        screen,
+                        focused,
+                        selection: self.pane_selection_screen_coords(),
+                    },
+                    rect,
+                );
                 if focused && !suppress_cursor {
                     place_pty_cursor_from_screen(frame, screen, rect);
                 }
@@ -398,6 +406,22 @@ impl App {
         .render(frame, rect);
     }
 
+    /// The pane selection as ordered screen coordinates, for the widget.
+    ///
+    /// Ordered here rather than at drag time so the stored `(anchor, focus)` can
+    /// keep its direction — the renderer only ever wants start-before-end. Ordered
+    /// as `(row, col)` PAIRS, not per-axis: a backwards drag up-and-right must keep
+    /// each column attached to its own row, the same trap `char_endpoints` documents
+    /// for the pager.
+    fn pane_selection_screen_coords(&self) -> Option<((u16, u16), (u16, u16))> {
+        let (a, b) = self.view.pane_selection?;
+        Some(if a.0 < b.0 || (a.0 == b.0 && a.1 <= b.1) {
+            (a, b)
+        } else {
+            (b, a)
+        })
+    }
+
     /// The inclusive row range to highlight in `side`'s list, if a mouse row
     /// selection is active there. `None` for the other column, so a selection in `a`
     /// never paints in `b`.
@@ -473,6 +497,7 @@ impl App {
                         PaneWidget {
                             screen,
                             focused: right_focused,
+                            selection: self.pane_selection_screen_coords(),
                         },
                         rect,
                     );

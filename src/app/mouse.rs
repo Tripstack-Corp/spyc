@@ -96,6 +96,10 @@ pub(super) enum MouseSink {
     FocusAndSelectRows(crate::app::state::Side),
     /// Copy the status line's text.
     CopyStatus,
+    /// Give the keyboard to the pane AND anchor a spyc-side text selection over its
+    /// visible grid — for a child that ignores mouse reports, so nothing else can
+    /// do the selecting (codex's `^T` transcript, a plain shell).
+    FocusAndSelectPane,
     /// Paste the system clipboard wherever a paste would land.
     Paste,
     /// Open the leader menu (right-click, from anywhere).
@@ -182,6 +186,16 @@ impl MouseSnapshot {
     /// A latch is not merely cosmetic: the popup stays on screen, and the first
     /// key that eventually reaches the resolver is consumed as a continuation —
     /// in the leader menu `p` is a chdir and `P` overwrites PROJECT_HOME.
+    /// Whether spyc should do the selecting over the pane itself.
+    ///
+    /// The complement of [`Self::can_forward_to_child`] on the mouse axis: a child
+    /// that speaks mouse draws its OWN selection (#224), and painting ours on top
+    /// would double it up. What's left — codex, a plain shell — has no other way to
+    /// be selected. Still requires a live, visible grid.
+    const fn pane_is_selectable(self) -> bool {
+        !self.pane_wants_mouse && !self.pane_closed && !self.has_scroll_pager
+    }
+
     const fn resolver_will_see_the_next_key(self) -> bool {
         !self.is_prompting && !matches!(self.pager_mount, Some(Mount::Overlay))
     }
@@ -265,6 +279,13 @@ pub(super) const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseS
             // swallowing the first click just to focus would read as broken.
             if matches!(region, Region::Pane) && snap.can_forward_to_child() {
                 return MouseSink::FocusAndForward;
+            }
+            // A live child that ignores mouse reports: nothing else can do the
+            // selecting, so spyc does it over the visible grid. Gated on the child
+            // being alive and not hidden behind a `^a v` pager, for the same reasons
+            // forwarding is — selecting text off a dead or invisible grid is noise.
+            if matches!(region, Region::Pane) && snap.pane_is_selectable() {
+                return MouseSink::FocusAndSelectPane;
             }
             // A bare list (no pager over it): focus the column and start a row
             // selection, so drag-to-copy-filenames works where the names are.
@@ -420,12 +441,14 @@ impl super::App {
                     return match target {
                         MouseDragTarget::Pager(_) => self.extend_pager_selection(ev),
                         MouseDragTarget::List(side) => self.extend_row_selection(ev, side),
+                        MouseDragTarget::Pane => self.extend_pane_selection(ev),
                     };
                 }
                 MouseEventKind::Up(MouseButton::Left) => {
                     return match target {
                         MouseDragTarget::Pager(_) => self.finish_pager_selection(ev),
                         MouseDragTarget::List(_) => self.finish_row_selection(ev),
+                        MouseDragTarget::Pane => self.finish_pane_selection(ev),
                     };
                 }
                 // Any other button mid-drag abandons the selection rather than
@@ -534,6 +557,10 @@ impl super::App {
             MouseSink::FocusAndSelectRows(side) => {
                 self.focus_region(region);
                 self.begin_row_selection(ev, side)
+            }
+            MouseSink::FocusAndSelectPane => {
+                self.focus_region(region);
+                self.begin_pane_selection(ev)
             }
             MouseSink::CopyStatus => {
                 let text = self.status_bar_plain_text();
@@ -709,6 +736,80 @@ impl super::App {
         // full-frame mount.
         let ok_msg = format!("copied {lines} line{}", if lines == 1 { "" } else { "s" });
         vec![Effect::CopyToPagerClipboard { text, ok_msg }]
+    }
+
+    /// Translate the pointer into the pane's own grid coordinates, clamped into it.
+    ///
+    /// Clamped rather than rejected outside the rect: dragging a little past the
+    /// pane's edge is normal, and it should extend to the edge cell instead of
+    /// stalling. `None` only when there is no pane rect at all.
+    fn pane_cell_at(&self, ev: MouseEvent) -> Option<(u16, u16)> {
+        let (cols, rows) = self.view.term_size;
+        let pane = self.frame_layout(Rect::new(0, 0, cols, rows)).pane?;
+        if pane.width == 0 || pane.height == 0 {
+            return None;
+        }
+        let col = ev.column.clamp(pane.x, pane.x + pane.width - 1) - pane.x;
+        let row = ev.row.clamp(pane.y, pane.y + pane.height - 1) - pane.y;
+        Some((row, col))
+    }
+
+    /// Anchor a pane text selection where the pointer pressed.
+    fn begin_pane_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
+        let Some(cell) = self.pane_cell_at(ev) else {
+            return Vec::new();
+        };
+        self.view.pane_selection = Some((cell, cell));
+        self.view.mouse_selection = Some(MouseDragTarget::Pane);
+        Vec::new()
+    }
+
+    /// Extend it to the pointer.
+    fn extend_pane_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
+        if let Some(cell) = self.pane_cell_at(ev)
+            && let Some((_, focus)) = self.view.pane_selection.as_mut()
+        {
+            *focus = cell;
+        }
+        Vec::new()
+    }
+
+    /// Copy the selected grid text, keeping the highlight up.
+    ///
+    /// A press that never moved is a click, not a selection: the highlight is
+    /// dropped and the clipboard left alone, matching the pager. Ordering happens
+    /// here (`(row, col)` pairs, not per-axis) so a backwards drag copies the same
+    /// text as the forward one.
+    fn finish_pane_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
+        self.view.mouse_selection = None;
+        if let Some(cell) = self.pane_cell_at(ev)
+            && let Some((_, focus)) = self.view.pane_selection.as_mut()
+        {
+            *focus = cell;
+        }
+        let Some((a, b)) = self.view.pane_selection else {
+            return Vec::new();
+        };
+        if a == b {
+            self.view.pane_selection = None;
+            return Vec::new();
+        }
+        let (start, end) = if a.0 < b.0 || (a.0 == b.0 && a.1 <= b.1) {
+            (a, b)
+        } else {
+            (b, a)
+        };
+        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+            return Vec::new();
+        };
+        let text = tabs.active().selection_text(start, end);
+        if text.trim().is_empty() {
+            return Vec::new();
+        }
+        vec![Effect::CopyToClipboard {
+            text,
+            ok: super::effect::ClipMsg::PaneLines,
+        }]
     }
 
     /// The rect a column's list is drawn into, and a `ListView` over its cached
@@ -1320,10 +1421,15 @@ mod tests {
             "must do both, not just forward"
         );
 
-        // A child that never asked for mouse still gets focused, not forwarded —
-        // the #170 gate applies to buttons exactly as it does to the wheel.
+        // A child that never asked for mouse is never FORWARDED to — the #170 gate
+        // applies to buttons exactly as it does to the wheel. It now gets a
+        // spyc-side selection instead of a bare focus; see
+        // `a_non_mouse_pane_selects_instead_of_merely_focusing`.
         let unaware = snap(Some(Region::Pane));
-        assert_eq!(route_mouse(unaware, Gesture::Left), MouseSink::FocusRegion);
+        assert_eq!(
+            route_mouse(unaware, Gesture::Left),
+            MouseSink::FocusAndSelectPane
+        );
 
         // A list press focuses AND starts a row selection; see
         // `left_press_on_the_bare_list_selects_rows_in_that_column`.
@@ -2031,5 +2137,45 @@ mod tests {
                 "the drag itself must end, even though the selection stays"
             );
         });
+    }
+    // ── pane text selection (a child that ignores mouse) ──────────────────
+
+    /// The complement of forwarding: a child that ignores mouse reports gets a
+    /// spyc-side selection, because nothing else can select its text. This is what
+    /// makes copy work inside codex's `^T` transcript overlay.
+    #[test]
+    fn a_non_mouse_pane_selects_instead_of_merely_focusing() {
+        let s = snap(Some(Region::Pane));
+        assert!(!s.pane_wants_mouse);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusAndSelectPane);
+    }
+
+    /// A child that speaks mouse draws its OWN selection (#224); painting ours on
+    /// top would double it up, so forwarding still wins.
+    #[test]
+    fn a_mouse_aware_pane_still_forwards_rather_than_selecting() {
+        let s = MouseSnapshot {
+            pane_wants_mouse: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusAndForward);
+    }
+
+    /// No selecting text off a dead or hidden grid — the same two guards forwarding
+    /// uses, for the same reasons.
+    #[test]
+    fn a_dead_or_covered_pane_is_not_selectable() {
+        for (closed, covered) in [(true, false), (false, true)] {
+            let s = MouseSnapshot {
+                pane_closed: closed,
+                has_scroll_pager: covered,
+                ..snap(Some(Region::Pane))
+            };
+            assert_eq!(
+                route_mouse(s, Gesture::Left),
+                MouseSink::FocusRegion,
+                "closed={closed} covered={covered}"
+            );
+        }
     }
 }

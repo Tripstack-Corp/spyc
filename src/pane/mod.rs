@@ -404,6 +404,29 @@ impl Pane {
     /// parser is mutex-protected (the worker thread owns the write
     /// path); this acquires the lock for the duration of `f`, so
     /// keep the closure body short. Returns whatever `f` returns.
+    /// The visible-grid text between two screen positions, for a clipboard copy.
+    ///
+    /// Delegates to `vt100::Screen::contents_between`, which is purpose-built for
+    /// this ("useful for things like determining the contents of a clipboard
+    /// selection"). Two properties make it the right primitive rather than merely a
+    /// convenient one, and are why this isn't a hand-rolled cell walk:
+    ///
+    /// - it reads `grid().visible_rows()`, so it follows the pane's CURRENT scroll
+    ///   position — the same rows the widget drew, with no coordinate translation;
+    /// - it honors `row.wrapped()`, emitting a newline only at a HARD line end. A
+    ///   cell walk inserts a spurious `\n` in the middle of every soft-wrapped
+    ///   line, which is the most irritating bug a terminal selection can have.
+    ///
+    /// Trailing whitespace is trimmed per line: the grid is space-padded to its full
+    /// width, so an untrimmed copy pastes a ragged block of spaces.
+    pub fn selection_text(&self, start: (u16, u16), end: (u16, u16)) -> String {
+        let raw = self.with_screen(|s| s.contents_between(start.0, start.1, end.0, end.1));
+        raw.lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     pub fn with_screen<R, F: FnOnce(&vt100::Screen) -> R>(&self, f: F) -> R {
         let guard = self.lock_parser();
         f(guard.screen())
