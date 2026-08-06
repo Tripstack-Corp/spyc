@@ -339,6 +339,25 @@ impl AgentProfile for CodexProfile {
     fn binary(&self) -> &'static str {
         "codex"
     }
+
+    /// Plain `Up` / `Down`, which scroll codex's `^T` transcript overlay — the only
+    /// scrollable view it has. Its main chat view doesn't scroll at all, and its
+    /// vt100 scrollback is empty (it confines the transcript to a DECSTBM scroll
+    /// region), so this is the only surface either side can move.
+    ///
+    /// Safe outside the overlay, which is why it's plain arrows and not PageUp:
+    /// codex binds `plain(Up)` to `editor.move_up` — move the cursor within the
+    /// draft — so on an empty or single-line composer it's a no-op. History recall
+    /// is on `Ctrl+R` / `Alt+Up`, so this can't reproduce the wheel-recalls-history
+    /// bug that DEC 1007 caused for claude. Worst case, with a multi-line draft in
+    /// progress, the draft cursor moves; nothing is submitted or lost.
+    fn wheel_scroll(&self) -> Option<WheelScroll> {
+        use crossterm::event::{KeyCode, KeyModifiers as M};
+        Some(WheelScroll {
+            up: (KeyCode::Up, M::NONE),
+            down: (KeyCode::Down, M::NONE),
+        })
+    }
     fn resolve_resume_target(
         &self,
         pane: &Pane,
@@ -659,10 +678,15 @@ mod tests {
         assert!(detect("claude").wheel_scroll().is_none());
 
         // codex discards mouse events outright (`map_crossterm_event` maps only
-        // Key/Resize/Paste/Focus) AND has no binding that scrolls its main view —
-        // scrolling lives behind its `^T` transcript overlay. So there is nothing
-        // correct to send, and `Up` would recall prompt history instead.
-        assert!(detect("codex").wheel_scroll().is_none());
+        // Key/Resize/Paste/Focus), so forwarding can never work — but plain arrows
+        // scroll its `^T` transcript overlay (`tui.keymap.pager.scroll_up`), and
+        // outside that overlay `plain(Up)` is `editor.move_up` (draft cursor), NOT
+        // history recall. `\e[A` / `\e[B` are bare xterm Up/Down.
+        let codex = detect("codex")
+            .wheel_scroll()
+            .expect("codex scrolls on arrows");
+        assert_eq!(enc(codex.up), b"\x1b[A");
+        assert_eq!(enc(codex.down), b"\x1b[B");
 
         // A plain process is not an agent: its scrollback belongs to spyc.
         assert!(detect("bash -lc 'make'").wheel_scroll().is_none());
