@@ -50,6 +50,8 @@ pub struct Config {
 
     /// Agent-status notification knobs (`[notify]`).
     pub notify: NotifyConfig,
+    /// `[clipboard]` — OSC 52 vs the local helper.
+    pub clipboard: ClipboardConfig,
 
     /// Mouse reporting knobs (`[mouse]`).
     pub mouse: MouseConfig,
@@ -385,6 +387,37 @@ struct FileDelete {
     confirm: Option<bool>,
 }
 
+/// How a clipboard copy is delivered (`[clipboard].via`).
+///
+/// `Auto` routes to an OSC-52 terminal escape over SSH — so a yank reaches the
+/// clipboard of the machine you're typing at rather than the remote box spyc runs on
+/// — and the local helper (`pbcopy`/`wl-copy`/`xclip`) otherwise. Same shape and
+/// same reasoning as [`DesktopVia`].
+///
+/// Local stays helper-first on purpose: OSC 52 is write-only with no reply, so spyc
+/// can never confirm the terminal honored it, and some terminals disable it
+/// deliberately (a remote host silently writing your clipboard is a real risk). With
+/// no SSH session there's nothing to trade that uncertainty for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClipboardVia {
+    #[default]
+    Auto,
+    /// Local helper only (`pbcopy` / `wl-copy` / `xclip` — the machine spyc runs on).
+    System,
+    /// OSC-52 terminal escape only (your client terminal).
+    Osc52,
+    /// Try OSC 52 and the local helper. Useful when you paste on both ends.
+    Both,
+}
+
+/// `[clipboard]` — where a yank actually lands.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct ClipboardConfig {
+    pub via: ClipboardVia,
+}
+
 /// How a desktop notification is delivered (`[notify].desktop_via`). `Auto`
 /// routes to an OSC-9 terminal escape over SSH (so the ping reaches your *client*
 /// terminal, not the remote box spyc runs on) and the OS notifier locally.
@@ -466,6 +499,13 @@ impl Default for NotifyConfig {
 /// On-disk shape of `[notify]`. `Option` per field for "didn't set" disambig,
 /// so a project file with a bare `[notify]` doesn't clobber user defaults.
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileClipboard {
+    #[serde(default)]
+    via: Option<ClipboardVia>,
+}
+
+#[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct FileNotify {
     #[serde(default)]
@@ -563,6 +603,8 @@ struct FileConfig {
     delete: FileDelete,
     #[serde(default)]
     notify: FileNotify,
+    #[serde(default)]
+    clipboard: FileClipboard,
     #[serde(default)]
     ignore_masks: Vec<IgnoreMask>,
     #[serde(default)]
@@ -720,6 +762,9 @@ impl Config {
         }
 
         // Notify: per-field merge.
+        if let Some(v) = file.clipboard.via {
+            self.clipboard.via = v;
+        }
         if let Some(b) = file.notify.desktop {
             self.notify.desktop = b;
         }

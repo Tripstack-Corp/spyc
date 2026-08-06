@@ -96,6 +96,28 @@ looking intentional rather than broken.
 
 ---
 
+## `[clipboard]`
+
+```toml
+[clipboard]
+via = "auto"   # auto | system | osc52 | both
+```
+
+Where a yank lands. `auto` uses an **OSC-52 terminal escape when spyc is over SSH**
+and the local helper (`pbcopy` / `wl-copy` / `xclip`) otherwise.
+
+This matters more than it sounds: the local helpers set the clipboard of the machine
+spyc *runs on*. Over SSH that's the server, so a yank silently succeeds somewhere you
+can never paste from. OSC 52 travels back up the same connection the UI is drawn on,
+so it reaches the terminal you're typing at.
+
+Locally it stays helper-first deliberately — OSC 52 is write-only with no reply, so
+spyc can't confirm the terminal honored it, and some terminals disable it on purpose
+(a remote host writing your clipboard is a real risk). Inside tmux it needs
+`set -g set-clipboard on`; spyc DCS-wraps the escape so tmux forwards it to the outer
+terminal. A selection too large for the escape falls back to the helper rather than
+risk a terminal truncating it silently.
+
 ## Notifications — `[notify]`
 
 The "which agent needs me" signal. When an agent pane changes status, spyc fires

@@ -472,8 +472,12 @@ impl App {
                 // and the loop survives (unlike the former inline sites,
                 // which were not in `?` scope, this arm must not abort the
                 // run loop on a transient backend failure).
-                Effect::CopyToClipboard { text, ok } => match crate::clipboard::copy(&text) {
+                Effect::CopyToClipboard { text, ok } => match self.deliver_clipboard(&text) {
                     Ok(()) => self.state.flash_info(ok.success(&text)),
+                    // `{e:#}` even though `deliver_clipboard` returns a String: it is
+                    // a no-op for Display, and the guard that requires it here is
+                    // worth more than the one saved character. `deliver_clipboard`
+                    // has already rendered each backend's own chain with `{e:#}`.
                     Err(e) => self.state.flash_error(format!("yank failed: {e:#}")),
                 },
                 // A-class: copy + flash the ACTIVE PAGER's title (not the status
@@ -481,7 +485,7 @@ impl App {
                 // looking — the former inline `view.flash` behavior, now after a
                 // copy that runs in the executor.
                 Effect::CopyToPagerClipboard { text, ok_msg } => {
-                    let msg = match crate::clipboard::copy(&text) {
+                    let msg = match self.deliver_clipboard(&text) {
                         Ok(()) => ok_msg,
                         Err(e) => format!("yank failed: {e}"),
                     };

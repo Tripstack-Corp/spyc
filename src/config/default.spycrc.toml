@@ -165,6 +165,28 @@
 #                                you're usually in another app while it works.
 # The intrusive channels (bell + flash) fire on Blocked only by default; the
 # quiet desktop ping fires on Done too. Flip *_done to change that per channel.
+# ── [clipboard] ── where a yank actually lands ────────────────────────────
+#
+# `via` (default auto):
+#   auto    OSC-52 terminal escape when spyc is over SSH, the local helper
+#           otherwise. The distinction matters: `pbcopy` / `wl-copy` / `xclip`
+#           set the clipboard of the machine spyc RUNS on, so over SSH they
+#           succeed on the server and the text is somewhere you can never
+#           paste from. OSC 52 travels back up the connection to the terminal
+#           you're actually typing at.
+#   system  local helper only.
+#   osc52   terminal escape only.
+#   both    try both (useful if you paste on either end).
+#
+# Local stays helper-first on purpose: OSC 52 is write-only with no reply, so
+# spyc can't confirm the terminal honored it, and some terminals disable it
+# deliberately (a remote host writing your clipboard is a real risk). Inside
+# tmux it needs `set -g set-clipboard on`; spyc DCS-wraps the escape so tmux
+# forwards it. Oversized selections fall back rather than risk a terminal
+# silently truncating them.
+[clipboard]
+# via = "auto"
+
 [notify]
 # desktop = true
 # desktop_via = "auto"
