@@ -120,6 +120,7 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     // showing only the top half of the pager filled with content
     // and the rest with `~` until the user manually scrolled).
     view.last_viewport_h.set(content_area.height);
+    view.last_content_area.set(content_area);
 
     if let Some(chunks) = multi_col_chunks {
         render_multi_column(frame, content_area, view, theme, ncols, &chunks);
@@ -383,6 +384,29 @@ fn apply_row_styling(
                         theme.cursor_bg,
                     );
                 }
+                // Charwise: same painter as Block, but the column bounds are
+                // per-row rather than a shared rectangle — first row from its
+                // start column to end-of-line, interior rows whole, last row up
+                // to its end column.
+                VisualKind::Char => {
+                    let ((s_line, s_col), (e_line, e_col)) = sel.char_endpoints();
+                    let eol = line_plain_text(&styled).chars().count().saturating_sub(1);
+                    let from = if abs_idx == s_line { s_col } else { 0 };
+                    let to = if abs_idx == e_line { e_col } else { eol };
+                    let cursor_col = if abs_idx == sel.cursor {
+                        Some(sel.cursor_col)
+                    } else {
+                        None
+                    };
+                    styled = paint_block_selection(
+                        &styled,
+                        from,
+                        to,
+                        cursor_col,
+                        theme.cursor_bg_dim,
+                        theme.cursor_bg,
+                    );
+                }
             }
         }
     }
@@ -405,7 +429,10 @@ fn apply_row_styling(
                         .collect::<Vec<_>>(),
                 );
             }
-            VisualKind::Block => {
+            // `Char` never reaches placement — it is produced by a mouse drag,
+            // which anchors on the press instead of pre-positioning. Grouped with
+            // Block so the match stays exhaustive without an unreachable arm.
+            VisualKind::Block | VisualKind::Char => {
                 // Re-style only the cursor cell so the rest of the row keeps
                 // its syntax-highlight / search styling while the user
                 // positions the placement anchor.

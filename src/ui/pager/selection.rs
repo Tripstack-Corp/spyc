@@ -407,10 +407,138 @@ impl PagerView {
                     .collect::<Vec<_>>()
                     .join("\n")
             }
+            // Charwise: the first line from its start column to the end, whole
+            // lines between, the last line up to its end column. A single-line
+            // selection is the intersection of both bounds.
+            //
+            // Trailing whitespace is trimmed per line, not globally: `lines`
+            // carries render-padded content, and an untrimmed multi-line copy
+            // pastes a ragged block of spaces.
+            crate::ui::pager::VisualKind::Char => {
+                let ((s_line, s_col), (e_line, e_col)) = sel.char_endpoints();
+                let (s_line, e_line) = (s_line.min(max), e_line.min(max));
+                let mut out: Vec<String> = Vec::with_capacity(e_line - s_line + 1);
+                for (offset, line) in self.lines[s_line..=e_line].iter().enumerate() {
+                    let idx = s_line + offset;
+                    let plain = line_plain_text(line);
+                    let from = if idx == s_line { s_col } else { 0 };
+                    // `e_col` is inclusive; `None` means "to end of line".
+                    let to = if idx == e_line {
+                        Some(e_col.saturating_add(1))
+                    } else {
+                        None
+                    };
+                    let mut chars = plain.chars().skip(from);
+                    let piece: String = match to {
+                        Some(end) => chars.by_ref().take(end.saturating_sub(from)).collect(),
+                        None => chars.by_ref().collect(),
+                    };
+                    out.push(piece.trim_end().to_string());
+                }
+                out.join("\n")
+            }
         };
         let count = hi - lo + 1;
         self.visual = None;
         Some((self.with_title_header(text, include_title), count, in_block))
+    }
+
+    /// Map an **absolute screen position** to `(line_index, char_col)` in this
+    /// view, or `None` when it names no character.
+    ///
+    /// Everything it needs comes from what the renderer recorded on the last
+    /// frame — `last_content_area` for where the content landed and `last_body_w`
+    /// for the wrap width. Nothing is re-derived, because every re-derivation
+    /// (mount→rect, borders, `full_width`, the gutter formula) is a chance for the
+    /// highlight and the copied text to disagree about which character the pointer
+    /// was on. `visual_rows` stays the sole owner of the wrap math for the same
+    /// reason.
+    ///
+    /// `None` for: a pointer outside the content rect, over the line-number
+    /// gutter, or past the last line. None of those is a character position.
+    pub fn hit_test(&self, col: u16, row: u16) -> Option<(usize, usize)> {
+        let area = self.last_content_area.get();
+        if area.width == 0
+            || area.height == 0
+            || col < area.x
+            || row < area.y
+            || col >= area.x.saturating_add(area.width)
+            || row >= area.y.saturating_add(area.height)
+        {
+            return None;
+        }
+        let row_off = row - area.y;
+        let gutter_w = self.gutter_width();
+        let col_off = usize::from(col - area.x);
+        if col_off < gutter_w {
+            return None; // over the line-number gutter
+        }
+        let body_w = usize::from(self.last_body_w.get()).max(1);
+        let target = usize::from(row_off);
+
+        // Walk forward from the scroll position, spending each line's visual rows,
+        // until `target` lands inside one. With wrap off every line is one row, so
+        // this degenerates to `scroll + target`.
+        let mut consumed = 0usize;
+        for (offset, line) in self.lines.iter().enumerate().skip(self.scroll) {
+            let rows = if self.wrap {
+                visual_rows(line, body_w, self.tab_width).max(1)
+            } else {
+                1
+            };
+            if target < consumed + rows {
+                let wrapped_row = target - consumed;
+                let col = col_off - gutter_w + wrapped_row * body_w;
+                // Clamp into the line: clicking past end-of-line selects to the
+                // end rather than nothing, which is what every editor does.
+                let len = line_plain_text(line).chars().count();
+                return Some((offset, col.min(len.saturating_sub(1))));
+            }
+            consumed += rows;
+        }
+        None // past the last line
+    }
+
+    /// The line-number gutter width in cells, mirroring `render.rs`.
+    fn gutter_width(&self) -> usize {
+        if !self.show_line_numbers {
+            return 0;
+        }
+        let basis = self.lines.len().max(self.line_count_hint.unwrap_or(0));
+        basis.max(1).ilog10() as usize + 2
+    }
+
+    /// Begin a charwise selection at `(line, col)` — the mouse-press half of a
+    /// drag. Anchor and cursor coincide until the pointer moves.
+    pub const fn begin_char_selection(&mut self, line: usize, col: usize) {
+        self.visual = Some(VisualSelection {
+            anchor: line,
+            anchor_col: col,
+            cursor: line,
+            cursor_col: col,
+            kind: VisualKind::Char,
+        });
+    }
+
+    /// Extend an in-progress charwise selection to `(line, col)`. Ignored unless a
+    /// charwise selection is active, so a `V`/`^v` selection can't be hijacked
+    /// mid-drag.
+    pub const fn extend_char_selection(&mut self, line: usize, col: usize) {
+        if let Some(sel) = self.visual.as_mut()
+            && matches!(sel.kind, VisualKind::Char)
+        {
+            sel.cursor = line;
+            sel.cursor_col = col;
+        }
+    }
+
+    /// Whether a charwise selection is active and actually spans something — the
+    /// release-time test for "was this a drag or just a click?".
+    pub fn char_selection_is_nonempty(&self) -> bool {
+        self.visual.is_some_and(|s| {
+            matches!(s.kind, VisualKind::Char)
+                && (s.anchor != s.cursor || s.anchor_col != s.cursor_col)
+        })
     }
 
     /// Clamp any state holding line indices into the buffer after `lines`

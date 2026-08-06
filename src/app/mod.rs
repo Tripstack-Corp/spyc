@@ -864,6 +864,18 @@ pub struct ViewState {
     /// the pane first. Children track button state — claude fires its click on the
     /// release — so both an unpaired and a missing release misbehave.
     pub mouse_press_forwarded: bool,
+    /// A left press landed on a pager and a spyc-side text selection owns the
+    /// drag until the button comes up.
+    ///
+    /// The exact counterpart of `mouse_press_forwarded`, and mutually exclusive
+    /// with it: a gesture belongs to whoever received its press. Without this, a
+    /// drag begun on a pager would fall through to the child-forwarding path and
+    /// start typing mouse reports into the agent mid-selection.
+    ///
+    /// Holds the mount so the drag keeps addressing the pager it started in even
+    /// if the pointer wanders over another region — a selection that retargeted
+    /// mid-drag would extend against the wrong buffer's line indices.
+    pub mouse_selection: Option<crate::ui::pager::Mount>,
     /// Whether an agent-transcript scrollback (`^a v`) renders the agent's
     /// tool-use / tool-result lines. `t` toggles it; the transcript is
     /// re-rendered with the new value. Session-scoped (persists across
@@ -957,6 +969,7 @@ impl ViewState {
             tab_state: None,
             scroll_last: None,
             mouse_press_forwarded: false,
+            mouse_selection: None,
             transcript_show_tool_calls: true,
             term_size: crossterm::terminal::size().unwrap_or((80, 24)),
         }

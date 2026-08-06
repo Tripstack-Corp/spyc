@@ -76,6 +76,15 @@ pub enum Mount {
 pub enum VisualKind {
     Line,
     Block,
+    /// Charwise (vim `v`): starts mid-line and ends mid-line, taking everything
+    /// between. What a mouse drag means, and expressible as neither `Line` (whole
+    /// lines only) nor `Block` (a rectangle).
+    ///
+    /// Unlike `Block`, the two columns are **not** an independent range: the
+    /// endpoints are ordered as `(line, col)` pairs, so a backwards drag keeps
+    /// the columns attached to their own lines. See
+    /// [`VisualSelection::char_endpoints`].
+    Char,
 }
 
 /// vi-style visual selection inside the pager. Active when
@@ -120,6 +129,25 @@ impl VisualSelection {
             (self.anchor_col, self.cursor_col)
         } else {
             (self.cursor_col, self.anchor_col)
+        }
+    }
+
+    /// The `Char`-mode endpoints as `((start_line, start_col), (end_line, end_col))`,
+    /// ordered by the `(line, col)` pair.
+    ///
+    /// **Not** `range()` + `col_range()`. Those order the two axes independently,
+    /// which is right for a `Block` rectangle and wrong for charwise: dragging
+    /// from `(3, 10)` up-right to `(5, 2)` would yield start col 2 on line 3,
+    /// selecting text the pointer never crossed. Ordering the pairs keeps each
+    /// column attached to the line it was taken on.
+    pub const fn char_endpoints(&self) -> ((usize, usize), (usize, usize)) {
+        let a = (self.anchor, self.anchor_col);
+        let c = (self.cursor, self.cursor_col);
+        // Tuple comparison isn't const-friendly, so compare the pair by hand.
+        if a.0 < c.0 || (a.0 == c.0 && a.1 <= c.1) {
+            (a, c)
+        } else {
+            (c, a)
         }
     }
 }
@@ -283,6 +311,16 @@ pub struct PagerView {
     /// lines that wrap to multiple rows don't cause the trailing
     /// logical lines to fall off the viewport at "Bot".
     pub last_body_w: std::cell::Cell<u16>,
+    /// Last screen rect the renderer drew this view's *content* into — borders,
+    /// title and search row already excluded. Zero-sized until the first render.
+    ///
+    /// Exists so the mouse hit-test can work in absolute screen coordinates
+    /// without re-deriving where the pager landed. Re-deriving means duplicating
+    /// the mount→rect choice, `full_width`, the border inset and the search-row
+    /// split; each is a place the highlight and the copied text could disagree
+    /// about which character the pointer was on. Same reason (and same shape) as
+    /// `last_body_w` / `last_viewport_h`.
+    pub last_content_area: std::cell::Cell<ratatui::layout::Rect>,
     /// vi-style visual line selection. `None` outside the mode;
     /// `Some({ anchor, cursor })` while the user is selecting a
     /// range with `V` + `j`/`k`/`G`/etc. `y` yanks the inclusive

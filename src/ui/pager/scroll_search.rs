@@ -470,6 +470,17 @@ impl PagerView {
                     hi + 1,
                     if count == 1 { "" } else { "s" },
                 ),
+                VisualKind::Char => {
+                    let ((s_line, s_col), (e_line, e_col)) = sel.char_endpoints();
+                    format!(
+                        "-- VISUAL --  L{}C{}-L{}C{}  ({count} line{})",
+                        s_line + 1,
+                        s_col + 1,
+                        e_line + 1,
+                        e_col + 1,
+                        if count == 1 { "" } else { "s" },
+                    )
+                }
                 VisualKind::Block => {
                     let (lo_col, hi_col) = sel.col_range();
                     let cols = hi_col - lo_col + 1;

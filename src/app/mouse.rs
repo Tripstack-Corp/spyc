@@ -78,6 +78,14 @@ pub(super) enum MouseSink {
     FocusAndForward,
     /// Give the keyboard to the region under the pointer.
     FocusRegion,
+    /// Give the keyboard to the pager under the pointer AND anchor a text
+    /// selection there.
+    ///
+    /// Both halves in one variant for the same reason [`Self::FocusAndForward`]
+    /// carries both: #219 shipped a sink that did only the forwarding half while a
+    /// test asserting the sink still passed. A press that anchored without focusing
+    /// would leave the pager's own keys (`y`, Esc) going somewhere else.
+    FocusAndSelect(Mount),
     /// Paste the system clipboard wherever a paste would land.
     Paste,
     /// Open the leader menu (right-click, from anywhere).
@@ -212,11 +220,18 @@ pub(super) const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseS
             // Left is click-THROUGH: focus the region, and (for a mouse-aware
             // child) let the event reach it too. The pane is live and visible, so
             // swallowing the first click just to focus would read as broken.
-            return if matches!(region, Region::Pane) && snap.can_forward_to_child() {
-                MouseSink::FocusAndForward
-            } else {
-                MouseSink::FocusRegion
-            };
+            if matches!(region, Region::Pane) && snap.can_forward_to_child() {
+                return MouseSink::FocusAndForward;
+            }
+            // A pager is painted over the list, so a press in the list region is
+            // really on the pager and starts a text selection there. Checked before
+            // the plain focus arm, which would otherwise consume the press.
+            if matches!(region, Region::List | Region::RightColumn)
+                && let Some(mount) = snap.pager_mount
+            {
+                return MouseSink::FocusAndSelect(mount);
+            }
+            return MouseSink::FocusRegion;
         }
         Gesture::Wheel => {}
     }
@@ -326,6 +341,27 @@ impl super::App {
         // held: claude's own handler starts a selection on press and fires the
         // actual click on RELEASE, so a press-only click leaves it drag-selecting
         // forever and never clicks anything.
+        // A gesture belongs to whoever received its press. When that was a pager,
+        // spyc's own selection owns the drag and the release — checked BEFORE the
+        // forwarding paths below, which would otherwise deliver mouse reports into
+        // the agent while the user is selecting text somewhere else entirely.
+        if self.view.mouse_selection.is_some() {
+            match ev.kind {
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    return self.extend_pager_selection(ev);
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    return self.finish_pager_selection(ev);
+                }
+                // Any other button mid-drag abandons the selection rather than
+                // interleaving two gestures.
+                MouseEventKind::Down(_) | MouseEventKind::Up(_) => {
+                    self.view.mouse_selection = None;
+                }
+                _ => {}
+            }
+        }
+
         if let MouseEventKind::Up(button) = ev.kind {
             return self.forward_release(ev, button, frame);
         }
@@ -445,6 +481,11 @@ impl super::App {
             }
             MouseSink::PaneForward => self.forward_to_child(ev, &layout),
             MouseSink::PaneScrollKeys => self.send_scroll_keys(delta),
+
+            MouseSink::FocusAndSelect(mount) => {
+                self.focus_region(region);
+                self.begin_pager_selection(ev, mount)
+            }
         }
     }
 
@@ -482,6 +523,76 @@ impl super::App {
             // pty buries its real exit message under one repeat per wheel line.
             err_prefix: None,
         }]
+    }
+
+    /// Anchor a charwise selection where the pointer pressed.
+    ///
+    /// Claims the drag (`view.mouse_selection`) only if the press actually landed
+    /// on a character. A press on the gutter or below the last line focuses the
+    /// pager and nothing more, so it cannot strand a selection that never had an
+    /// anchor — and, because claiming is what diverts drags away from the child,
+    /// an unclaimed press leaves forwarding exactly as it was.
+    fn begin_pager_selection(&mut self, ev: MouseEvent, mount: Mount) -> Vec<Effect> {
+        let Some(view) = self.active_pager_matching_mut(mount) else {
+            return Vec::new();
+        };
+        let Some((line, col)) = view.hit_test(ev.column, ev.row) else {
+            return Vec::new();
+        };
+        view.begin_char_selection(line, col);
+        self.view.mouse_selection = Some(mount);
+        Vec::new()
+    }
+
+    /// Extend the in-progress selection to the pointer.
+    ///
+    /// A pointer that has left the content rect (`hit_test` → `None`) holds the
+    /// selection where it was rather than collapsing it: dragging slightly past the
+    /// edge is normal, and losing the selection there would read as a bug.
+    fn extend_pager_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
+        let Some(mount) = self.view.mouse_selection else {
+            return Vec::new();
+        };
+        if let Some(view) = self.active_pager_matching_mut(mount)
+            && let Some((line, col)) = view.hit_test(ev.column, ev.row)
+        {
+            view.extend_char_selection(line, col);
+        }
+        Vec::new()
+    }
+
+    /// Finish the gesture: copy when it selected something, and treat a press that
+    /// never moved as the plain click it was.
+    fn finish_pager_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
+        let Some(mount) = self.view.mouse_selection.take() else {
+            return Vec::new();
+        };
+        let Some(view) = self.active_pager_matching_mut(mount) else {
+            return Vec::new();
+        };
+        if let Some((line, col)) = view.hit_test(ev.column, ev.row) {
+            view.extend_char_selection(line, col);
+        }
+        if !view.char_selection_is_nonempty() {
+            // A click, not a drag. Drop the zero-width selection so it doesn't
+            // linger as a stray highlight, and leave the clipboard alone.
+            view.visual = None;
+            return Vec::new();
+        }
+        // `visual_yank_text` consumes the selection (it exits visual mode) — the
+        // same contract the `y` key relies on.
+        let Some((text, lines, _)) = view.visual_yank_text(false) else {
+            return Vec::new();
+        };
+        if text.is_empty() {
+            return Vec::new();
+        }
+        // `CopyToPagerClipboard`, not `CopyToClipboard`: it lands the confirmation
+        // in the pager title where the user is already looking, which is the same
+        // place the `y` key reports to. A status-bar flash would be behind the
+        // full-frame mount.
+        let ok_msg = format!("copied {lines} line{}", if lines == 1 { "" } else { "s" });
+        vec![Effect::CopyToPagerClipboard { text, ok_msg }]
     }
 
     /// Encode `ev` in the child's own protocol and send it to the active pane.
@@ -751,6 +862,67 @@ mod tests {
                 "closed={closed} covered={covered}"
             );
         }
+    }
+
+    /// A left press on a pager anchors a text selection there instead of only
+    /// moving focus. Both mounts that paint over the list qualify, and so does the
+    /// right column's pager.
+    #[test]
+    fn left_press_on_a_pager_starts_a_selection() {
+        for mount in [Mount::Overlay, Mount::TopPane] {
+            let s = MouseSnapshot {
+                pager_mount: Some(mount),
+                ..snap(Some(Region::List))
+            };
+            assert_eq!(
+                route_mouse(s, Gesture::Left),
+                MouseSink::FocusAndSelect(mount),
+                "{mount:?} over the list region"
+            );
+        }
+        let right = MouseSnapshot {
+            pager_mount: Some(Mount::TopPane),
+            ..snap(Some(Region::RightColumn))
+        };
+        assert_eq!(
+            route_mouse(right, Gesture::Left),
+            MouseSink::FocusAndSelect(Mount::TopPane)
+        );
+    }
+
+    /// With no pager mounted there is no text to select, so a left press stays a
+    /// plain focus click on the file list.
+    #[test]
+    fn left_press_on_the_bare_list_only_focuses() {
+        assert_eq!(
+            route_mouse(snap(Some(Region::List)), Gesture::Left),
+            MouseSink::FocusRegion
+        );
+    }
+
+    /// Selection must not steal the click-through contract: a press over a
+    /// mouse-aware child still focuses AND forwards, even with a pager mounted up
+    /// top (the `D` + pane coexistence case).
+    #[test]
+    fn left_press_on_a_mouse_aware_pane_still_forwards_with_a_pager_mounted() {
+        let s = MouseSnapshot {
+            pane_wants_mouse: true,
+            pager_mount: Some(Mount::TopPane),
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusAndForward);
+    }
+
+    /// A prompt still wins over starting a selection — the arm that keeps a
+    /// right-click from latching a chord also covers left.
+    #[test]
+    fn a_prompt_suppresses_selection() {
+        let s = MouseSnapshot {
+            is_prompting: true,
+            pager_mount: Some(Mount::Overlay),
+            ..snap(Some(Region::List))
+        };
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
     }
 
     #[test]

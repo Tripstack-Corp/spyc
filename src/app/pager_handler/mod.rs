@@ -356,6 +356,30 @@ impl App {
         }
     }
 
+    /// The pager that owns input, mutably, resolved through the same slot ladder
+    /// as [`Self::active_pager_ref`].
+    ///
+    /// `mount` is a guard, not a lookup key: it must match the pager currently in
+    /// the slot, so a gesture that began on one pager can't keep mutating a
+    /// *different* one that replaced it mid-drag (a stream landing its content, a
+    /// tab switch restoring a stashed scrollback). Returns `None` on a mismatch,
+    /// which callers treat as "the selection's target is gone".
+    pub(super) fn active_pager_matching_mut(
+        &mut self,
+        mount: crate::ui::pager::Mount,
+    ) -> Option<&mut PagerView> {
+        let view = match self.active_pager_slot() {
+            PagerSlot::Modal | PagerSlot::Top => self.view.pager.as_mut(),
+            PagerSlot::Scrollback => self.view.scroll_pager.as_mut(),
+            PagerSlot::Right => self
+                .view
+                .pager_right
+                .as_mut()
+                .or(self.view.right_pager.as_mut()),
+        }?;
+        (view.mount == mount).then_some(view)
+    }
+
     /// Decide which pager slot owns input — the single source of truth shared by
     /// [`Self::active_pager_ref`] and the `active_pager_mut!` macro. A flat
     /// priority ladder: a full-frame modal first, then the focused region (right

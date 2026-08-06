@@ -548,6 +548,11 @@ end).
   reload (`:mouse auto` returns to following the config). Default off (`[mouse]
   capture`). `^a u` quick-select and `y` in the pager are the mouse-free yank
   paths.
+  **Drag in a pager to select text; release copies it** and the pager title
+  reports the line count. Works the same full-screen or popped-up, and copies the
+  content only — never the line-number gutter, the whitespace/line-break markers,
+  or the border. In a Markdown view `m` chooses what you get: rendered prose, or
+  the raw source. A click that doesn't move stays a click.
   Over an agent pane the wheel does whatever that agent can actually receive:
   **claude** requests mouse reporting, so the event is forwarded and claude
   scrolls itself; **agy** ignores mouse reports but scrolls on Shift+Arrow, so
