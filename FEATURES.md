@@ -545,9 +545,9 @@ end).
   agent), middle-click pastes, right-click opens the leader menu. **Costs native click-drag text
   selection while on** (hold Shift to select anyway — Option/Fn on iTerm2);
   `:mouse off` gives it back immediately, no restart, and survives a config
-  reload (`:mouse auto` returns to following the config). Default off (`[mouse]
-  capture`). `^a u` quick-select and `y` in the pager are the mouse-free yank
-  paths.
+  reload (`:mouse auto` returns to following the config). Default **on**
+  (`[mouse] capture`; `capture = false` turns it off permanently). `^a u`
+  quick-select and `y` in the pager are the mouse-free yank paths.
   **Drag in a pane whose agent ignores the mouse to select its text** (codex —
   including inside its `^T` transcript — and plain shells); release copies it. A
   child that speaks mouse (claude, vim) keeps doing its own selection instead. The
@@ -572,9 +572,10 @@ end).
   doesn't scroll, so the wheel drives its `^T` transcript overlay instead — opening
   it on the first tick (`[mouse] pane_scroll_view`, configurable to stay closed or
   to use spyc's own `^a v` history instead), then scrolling by line, escalating to
-  a page jump under a sustained gesture. Outside the transcript, the same keys only
-  move the draft cursor (codex keeps history recall on `^R`, so the wheel can't
-  recall a past prompt).
+  a page jump under a sustained gesture. Scrolling down while already at the
+  bottom exits the transcript (`q`) instead of no-op'ing. Outside the transcript,
+  the same keys only move the draft cursor (codex keeps history recall on `^R`,
+  so the wheel can't recall a past prompt).
 - **`:limit <glob>`** — temporary filter (e.g. `:limit *.rs`)
 - **`:limit !`** — show only picked files
 - **`:limit git`** / **`:limit g`** — show only files in `git status`

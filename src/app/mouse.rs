@@ -353,34 +353,59 @@ fn scroll_streak_step(
 enum AgentViewAction {
     /// Send the toggle key once, and start the settle guard.
     Toggle,
-    /// Nothing this tick — `Off` mode while closed, or a toggle already sent and
-    /// still settling.
+    /// Nothing this tick — `Off` mode while closed, or a toggle/close already
+    /// sent and still settling.
     Nothing,
     /// Mount spyc's own `^a v` scrollback pager instead.
     UseSpycHistory,
     /// Send the agent's per-line scroll key, or its page key if `fast`.
     Scroll { fast: bool },
+    /// Send the dedicated close key: already at the bottom, and still
+    /// scrolling down has nowhere left to go — get out rather than no-op.
+    Close,
 }
 
-/// Pure. `toggle_pending` is `pane_toggle_sent_at`'s guard already resolved to a
-/// bool (elapsed vs. [`TOGGLE_SETTLE`]) — kept out of this function so it stays
-/// clock-free and trivially testable.
-const fn decide_agent_view_action(
+/// Inputs to [`decide_agent_view_action`], bundled rather than four positional
+/// `bool`s — each has a distinct meaning, and four bare bools at a call site is
+/// exactly the shape that gets two of them silently transposed.
+#[derive(Debug, Clone, Copy)]
+struct AgentViewInputs {
     is_open: bool,
-    mode: crate::config::PaneScrollView,
+    /// `pane_toggle_sent_at`'s guard already resolved to a bool (elapsed vs.
+    /// [`TOGGLE_SETTLE`]) — kept out of this function so it stays clock-free
+    /// and trivially testable. Reused for BOTH directions of the open/close
+    /// transition (see `send_agent_view_scroll_keys`'s doc): the same debounce
+    /// that stops a fast-flick reopen also stops a re-close mid-settle.
     toggle_pending: bool,
     escalate: bool,
+    at_bottom: bool,
+}
+
+/// Pure.
+///
+/// `dir`: -1 up, +1 down. Only consulted once already open, to decide whether
+/// "at the bottom" should mean "close" rather than "scroll" — scrolling UP at
+/// the bottom is just normal scrolling.
+const fn decide_agent_view_action(
+    in_: AgentViewInputs,
+    mode: crate::config::PaneScrollView,
+    dir: i8,
 ) -> AgentViewAction {
     use crate::config::PaneScrollView as V;
-    if !is_open {
+    if !in_.is_open {
         return match mode {
             V::Off => AgentViewAction::Nothing,
             V::SpycHistory => AgentViewAction::UseSpycHistory,
-            V::Native if toggle_pending => AgentViewAction::Nothing,
+            V::Native if in_.toggle_pending => AgentViewAction::Nothing,
             V::Native => AgentViewAction::Toggle,
         };
     }
-    AgentViewAction::Scroll { fast: escalate }
+    // Mode-independent: once open — however it got that way — "at the bottom,
+    // still scrolling down" means the same thing regardless of how it opened.
+    if dir > 0 && in_.at_bottom && !in_.toggle_pending {
+        return AgentViewAction::Close;
+    }
+    AgentViewAction::Scroll { fast: in_.escalate }
 }
 
 /// Route one mouse event to a sink. Pure and total.
@@ -838,11 +863,13 @@ impl super::App {
             return Vec::new();
         };
         let tab_index = tabs.active_index();
-        let is_open = tabs
-            .active()
-            .visible_lines()
-            .iter()
-            .any(|l| l.contains(marker));
+        // One scrape, reused for both checks below — codex's own vt100
+        // scrollback is confirmed empty (#230), so this reads the viewport, not
+        // scrollback, and there is no cheaper way to ask "is X still true" than
+        // reading the same lines twice.
+        let visible = tabs.active().visible_lines();
+        let is_open = visible.iter().any(|l| l.contains(marker));
+        let at_bottom = is_open && profile.transcript_at_bottom(&visible);
         let toggle_pending = self
             .view
             .pane_toggle_sent_at
@@ -858,10 +885,14 @@ impl super::App {
         };
 
         let action = decide_agent_view_action(
-            is_open,
+            AgentViewInputs {
+                is_open,
+                toggle_pending,
+                escalate,
+                at_bottom,
+            },
             self.state.config.mouse.pane_scroll_view,
-            toggle_pending,
-            escalate,
+            dir,
         );
 
         // State mutation lives here, once, keyed to the decision — not scattered
@@ -879,6 +910,18 @@ impl super::App {
             }
             AgentViewAction::Toggle => {
                 let Some((code, mods)) = profile.transcript_toggle_key() else {
+                    return Vec::new();
+                };
+                self.view.pane_toggle_sent_at = Some(now);
+                Self::repeat_key_effect(code, mods, 1)
+            }
+            // Reuses the SAME debounce field `Toggle` sets: the next tick or two
+            // will still read `is_open == true` (codex hasn't redrawn the
+            // composer yet), and without this a fast flick continuing past the
+            // bottom would send `q` again into what may already be the
+            // composer's own text input.
+            AgentViewAction::Close => {
+                let Some((code, mods)) = profile.transcript_close_key() else {
                     return Vec::new();
                 };
                 self.view.pane_toggle_sent_at = Some(now);
@@ -2773,7 +2816,7 @@ mod tests {
 
     // ── decide_agent_view_action: the codex ^T auto-open + escalation policy ──
 
-    use super::AgentViewAction;
+    use super::{AgentViewAction, AgentViewInputs};
     use crate::config::PaneScrollView;
 
     /// The DEFAULT behaviour, and the owner's stated preference: closed +
@@ -2782,7 +2825,16 @@ mod tests {
     #[test]
     fn closed_and_native_opens_it() {
         assert_eq!(
-            decide_agent_view_action(false, PaneScrollView::Native, false, false),
+            decide_agent_view_action(
+                AgentViewInputs {
+                    is_open: false,
+                    toggle_pending: false,
+                    escalate: false,
+                    at_bottom: false
+                },
+                PaneScrollView::Native,
+                1,
+            ),
             AgentViewAction::Toggle
         );
     }
@@ -2793,7 +2845,16 @@ mod tests {
     #[test]
     fn closed_with_a_pending_toggle_does_nothing() {
         assert_eq!(
-            decide_agent_view_action(false, PaneScrollView::Native, true, false),
+            decide_agent_view_action(
+                AgentViewInputs {
+                    is_open: false,
+                    toggle_pending: true,
+                    escalate: false,
+                    at_bottom: false
+                },
+                PaneScrollView::Native,
+                1,
+            ),
             AgentViewAction::Nothing
         );
     }
@@ -2804,7 +2865,16 @@ mod tests {
     fn closed_and_off_does_nothing() {
         for pending in [false, true] {
             assert_eq!(
-                decide_agent_view_action(false, PaneScrollView::Off, pending, false),
+                decide_agent_view_action(
+                    AgentViewInputs {
+                        is_open: false,
+                        toggle_pending: pending,
+                        escalate: false,
+                        at_bottom: false
+                    },
+                    PaneScrollView::Off,
+                    1,
+                ),
                 AgentViewAction::Nothing,
                 "pending={pending}"
             );
@@ -2817,7 +2887,16 @@ mod tests {
     #[test]
     fn closed_and_spyc_history_uses_spycs_own_view() {
         assert_eq!(
-            decide_agent_view_action(false, PaneScrollView::SpycHistory, false, false),
+            decide_agent_view_action(
+                AgentViewInputs {
+                    is_open: false,
+                    toggle_pending: false,
+                    escalate: false,
+                    at_bottom: false
+                },
+                PaneScrollView::SpycHistory,
+                1,
+            ),
             AgentViewAction::UseSpycHistory
         );
     }
@@ -2833,7 +2912,16 @@ mod tests {
             PaneScrollView::SpycHistory,
         ] {
             assert_eq!(
-                decide_agent_view_action(true, mode, false, false),
+                decide_agent_view_action(
+                    AgentViewInputs {
+                        is_open: true,
+                        toggle_pending: false,
+                        escalate: false,
+                        at_bottom: false
+                    },
+                    mode,
+                    1,
+                ),
                 AgentViewAction::Scroll { fast: false },
                 "{mode:?}"
             );
@@ -2845,8 +2933,106 @@ mod tests {
     #[test]
     fn open_and_escalated_scrolls_fast() {
         assert_eq!(
-            decide_agent_view_action(true, PaneScrollView::Native, false, true),
+            decide_agent_view_action(
+                AgentViewInputs {
+                    is_open: true,
+                    toggle_pending: false,
+                    escalate: true,
+                    at_bottom: false
+                },
+                PaneScrollView::Native,
+                1,
+            ),
             AgentViewAction::Scroll { fast: true }
+        );
+    }
+    /// The headline: open, scrolling DOWN, already at the bottom -> close
+    /// rather than a no-op scroll. Mode-independent, matching how `Scroll`
+    /// already ignores mode once open.
+    #[test]
+    fn open_at_bottom_scrolling_down_closes() {
+        for mode in [
+            PaneScrollView::Native,
+            PaneScrollView::Off,
+            PaneScrollView::SpycHistory,
+        ] {
+            assert_eq!(
+                decide_agent_view_action(
+                    AgentViewInputs {
+                        is_open: true,
+                        toggle_pending: false,
+                        escalate: false,
+                        at_bottom: true
+                    },
+                    mode,
+                    1,
+                ),
+                AgentViewAction::Close,
+                "{mode:?}"
+            );
+        }
+    }
+
+    /// Scrolling UP while at the bottom is just... scrolling up. `at_bottom`
+    /// only means something for a DOWN gesture.
+    #[test]
+    fn at_bottom_scrolling_up_still_scrolls() {
+        assert_eq!(
+            decide_agent_view_action(
+                AgentViewInputs {
+                    is_open: true,
+                    toggle_pending: false,
+                    escalate: false,
+                    at_bottom: true
+                },
+                PaneScrollView::Native,
+                -1,
+            ),
+            AgentViewAction::Scroll { fast: false }
+        );
+    }
+
+    /// Not at the bottom: scrolling down is just... scrolling down, regardless
+    /// of escalation.
+    #[test]
+    fn not_at_bottom_scrolling_down_still_scrolls() {
+        for escalate in [false, true] {
+            assert_eq!(
+                decide_agent_view_action(
+                    AgentViewInputs {
+                        is_open: true,
+                        toggle_pending: false,
+                        escalate,
+                        at_bottom: false
+                    },
+                    PaneScrollView::Native,
+                    1,
+                ),
+                AgentViewAction::Scroll { fast: escalate },
+                "escalate={escalate}"
+            );
+        }
+    }
+
+    /// A close was just sent (still settling): a further down tick that still
+    /// reads "open, at bottom" must NOT re-send close — this is the guard
+    /// against sending `q` twice while codex's redraw is in flight, mirroring
+    /// the open-side toggle-storm guard.
+    #[test]
+    fn a_pending_settle_suppresses_a_second_close() {
+        assert_eq!(
+            decide_agent_view_action(
+                AgentViewInputs {
+                    is_open: true,
+                    toggle_pending: true,
+                    escalate: false,
+                    at_bottom: true
+                },
+                PaneScrollView::Native,
+                1,
+            ),
+            AgentViewAction::Scroll { fast: false },
+            "must fall through to a harmless scroll key, not re-close"
         );
     }
 }

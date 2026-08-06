@@ -257,6 +257,32 @@ pub trait AgentProfile: Sync {
     fn fast_wheel_scroll(&self) -> Option<WheelScroll> {
         None
     }
+
+    /// Whether this agent's own scrollback view, if open, is confirmed at (or
+    /// past) its bottom — checked before closing it on a further "scroll down"
+    /// tick that has nowhere left to go. `visible_lines` is the pane's CURRENT
+    /// viewport (same source `transcript_open_marker` is checked against).
+    ///
+    /// Default `false` — never confirmed, so spyc never closes speculatively.
+    /// Each agent's "nothing more to scroll" indicator (if it has one at all)
+    /// is specific enough to need its own verified reading rather than a
+    /// shared "look for 100%" heuristic that might not mean the same thing
+    /// elsewhere.
+    fn transcript_at_bottom(&self, visible_lines: &[String]) -> bool {
+        let _ = visible_lines;
+        false
+    }
+
+    /// The key that CLOSES this agent's own scrollback view — distinct from
+    /// [`Self::transcript_toggle_key`] (which also OPENS it): closing via a
+    /// dedicated key rather than the toggle means a stale "still open" read
+    /// during the close settle window sends the *same* safe key again, rather
+    /// than the toggle risking a reopen. `None` when there's nothing to close.
+    fn transcript_close_key(
+        &self,
+    ) -> Option<(crossterm::event::KeyCode, crossterm::event::KeyModifiers)> {
+        None
+    }
 }
 
 /// The keys that scroll a non-mouse agent's own view one line, sent by spyc in
@@ -431,6 +457,45 @@ impl AgentProfile for CodexProfile {
             up: (KeyCode::PageUp, M::NONE),
             down: (KeyCode::PageDown, M::NONE),
         })
+    }
+
+    /// Confirmed against `codex-rs/tui/src/pager_overlay.rs`: `percent` is
+    /// computed directly from `scroll_offset` clamped to `max_scroll`
+    /// (`total_len - viewport_height`), so 100% means the view is genuinely AT
+    /// its bottom, not merely close to it — a further scroll-down tick has
+    /// nowhere left to go. The percentage is rendered as ` NNN% ` (both
+    /// spaces literal) right-aligned on the dash-filled separator row directly
+    /// above the footer hints.
+    ///
+    /// Anchored to that row specifically — the LAST visible line containing
+    /// `─` — rather than a blind whole-screen substring search: bare "100%"
+    /// could appear as ordinary transcript prose (a coding assistant's reply
+    /// mentioning test coverage, say), but " 100% " embedded in a row that's
+    /// otherwise almost entirely dashes is not a coincidence.
+    ///
+    /// Also correctly reads "unknown" (via no line matching): codex hides this
+    /// indicator entirely while more history remains unloaded
+    /// (`scroll_percentage_visible = !state.has_unloaded_history()`), which is
+    /// exactly the case where "100%" would be misleading — there's more below
+    /// what's loaded. No matching row falls through to `false` (never close),
+    /// which is the same safe default this method's whole design commits to.
+    fn transcript_at_bottom(&self, visible_lines: &[String]) -> bool {
+        visible_lines
+            .iter()
+            .rev()
+            .find(|l| l.contains('─'))
+            .is_some_and(|l| l.contains(" 100% "))
+    }
+
+    /// `q`: codex's OWN footer hint reads "q to quit" — the dedicated close
+    /// action (`pager.close`), distinct from the `^T` toggle used to open. See
+    /// `AgentProfile::transcript_close_key`'s doc for why closing via a
+    /// dedicated key rather than re-sending the toggle matters here.
+    fn transcript_close_key(
+        &self,
+    ) -> Option<(crossterm::event::KeyCode, crossterm::event::KeyModifiers)> {
+        use crossterm::event::{KeyCode, KeyModifiers as M};
+        Some((KeyCode::Char('q'), M::NONE))
     }
     fn resolve_resume_target(
         &self,
@@ -796,6 +861,54 @@ mod tests {
         assert!(agy.transcript_open_marker().is_none());
         assert!(agy.transcript_toggle_key().is_none());
         assert!(agy.fast_wheel_scroll().is_none());
+        assert!(agy.transcript_close_key().is_none());
+        assert!(!agy.transcript_at_bottom(&["100%".to_string()]));
+    }
+
+    /// `transcript_at_bottom`: anchored to the dash-filled separator row, not a
+    /// blind whole-screen search — measured against `pager_overlay.rs`'s
+    /// literal `format!(" {percent}% ")`.
+    #[test]
+    fn codex_at_bottom_is_anchored_to_the_separator_row() {
+        let codex = detect("codex");
+
+        let open_at_bottom = vec![
+            "some reply text".to_string(),
+            "─────────────────────────────────────────── 100% ─".to_string(),
+            " ↑/↓ to scroll   pgup/pgdn to page   home/end to jump".to_string(),
+            " q to quit   esc to edit prev".to_string(),
+        ];
+        assert!(codex.transcript_at_bottom(&open_at_bottom));
+
+        let open_not_at_bottom = vec![
+            "some reply text".to_string(),
+            "─────────────────────────────────────────────── 42% ─".to_string(),
+            " ↑/↓ to scroll   pgup/pgdn to page   home/end to jump".to_string(),
+            " q to quit   esc to edit prev".to_string(),
+        ];
+        assert!(!codex.transcript_at_bottom(&open_not_at_bottom));
+
+        // codex hides the indicator entirely while more history is unloaded —
+        // no matching row must read as "unknown", never as "at bottom".
+        let indicator_hidden = vec![
+            "some reply text".to_string(),
+            "───────────────────────────────────────────────────".to_string(),
+            " ↑/↓ to scroll   pgup/pgdn to page   home/end to jump".to_string(),
+        ];
+        assert!(!codex.transcript_at_bottom(&indicator_hidden));
+
+        // Ordinary transcript prose that happens to mention a percentage must
+        // NOT be mistaken for the indicator — it isn't on a dash-filled row.
+        let prose_mentions_percent = vec![
+            "test coverage is now 100% across the module".to_string(),
+            "─────────────────────────────────────────────── 42% ─".to_string(),
+        ];
+        assert!(!codex.transcript_at_bottom(&prose_mentions_percent));
+
+        assert_eq!(
+            codex.transcript_close_key().unwrap().0,
+            crossterm::event::KeyCode::Char('q')
+        );
     }
 
     #[test]

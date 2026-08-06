@@ -201,7 +201,7 @@ without waiting for a real agent transition.
 
 ```toml
 [mouse]
-capture = false      # real mouse reporting (wheel + buttons). Default off.
+capture = true       # real mouse reporting (wheel + buttons). Default ON.
 scroll_lines = 1     # lines per wheel tick, for surfaces spyc scrolls itself
 pane_scroll_lines = 3 # lines per tick for a pane spyc drives with synthesized keys
 pane_scroll_view = "native" # native | off | spyc_history
@@ -234,7 +234,7 @@ arrow keys (which a focused pane receives as history navigation).
 > |---|---|
 > | **Bypass modifier** (per-drag) | Hold **Shift** — Ghostty, WezTerm, kitty, Alacritty, most others. **Option** or **Fn** on iTerm2. |
 > | **`:mouse off`** (per-session) | Immediate, no restart, no file edit. `:mouse on` to re-enable, `:mouse auto` to follow the config again. Survives a config reload — it is scoped to the session, not written to a file. |
-> | **`capture = false`** (permanent) | The default. |
+> | **`capture = false`** (permanent) | Turn it off entirely — the pre-#226 behavior. |
 >
 > spyc's mouse-free yank paths: **`^a u`** quick-select (URLs / paths / SHAs) and
 > **`y`** in the pager.

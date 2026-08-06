@@ -320,9 +320,11 @@ pub enum PaneScrollView {
 #[derive(Debug, Clone)]
 pub struct MouseConfig {
     /// Ask the terminal for real mouse reporting (wheel + buttons) so spyc can
-    /// scroll whatever is under the pointer. Costs native click-drag selection
-    /// while on — the terminal's bypass modifier (Shift on most, Option/Fn on
-    /// iTerm2) or `:mouse off` reclaims it.
+    /// scroll whatever is under the pointer. Default ON as of the #226–#234
+    /// campaign (wheel routing, drag-select in the pager/list/chrome/pane,
+    /// per-agent scroll keys). Costs native click-drag selection while on —
+    /// the terminal's bypass modifier (Shift on most, Option/Fn on iTerm2) or
+    /// `:mouse off` reclaims it.
     pub capture: bool,
     /// Lines per wheel tick for the surfaces spyc scrolls itself. A pane
     /// forwarding to a mouse-aware child is unaffected: the child gets one event
@@ -337,7 +339,7 @@ pub struct MouseConfig {
 impl Default for MouseConfig {
     fn default() -> Self {
         Self {
-            capture: false,
+            capture: true,
             scroll_lines: 1,
             pane_scroll_lines: 3,
             pane_scroll_view: PaneScrollView::default(),

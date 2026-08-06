@@ -75,8 +75,10 @@ mod tests {
         let mut app = App::test_app(std::env::temp_dir());
         crate::set_mouse_capture_for_test(false);
 
-        // Agreement (both off, the default) → nothing.
-        assert!(!app.state.config.mouse.capture);
+        // Agreement (both off) → nothing. `capture` now defaults to true, so this
+        // starting condition is set explicitly rather than assumed from the struct
+        // default.
+        app.state.config.mouse.capture = false;
         assert!(app.settle_mouse_mode().is_empty(), "off/off must be silent");
 
         // User asks for capture → one enable.

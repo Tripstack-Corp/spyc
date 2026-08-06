@@ -89,7 +89,7 @@
 # tab_width = 4
 
 # ── mouse ─────────────────────────────────────────────────────────────
-# `capture` (default false): ask the terminal for real mouse reporting
+# `capture` (default true): ask the terminal for real mouse reporting
 # (wheel + buttons) so spyc can scroll whatever is under the pointer.
 #
 # TRADE-OFF, read before enabling: any mouse capture takes native
@@ -107,7 +107,7 @@
 # forwarding to a mouse-aware child is unaffected — the child gets one event
 # per tick and picks its own step. Clamped to >= 1.
 [mouse]
-# capture = false
+# capture = true
 # scroll_lines = 1
 #
 # `pane_scroll_lines` (default 3): lines per wheel tick for an agent PANE whose
