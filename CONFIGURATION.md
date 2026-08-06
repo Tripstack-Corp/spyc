@@ -181,6 +181,7 @@ without waiting for a real agent transition.
 [mouse]
 capture = false      # real mouse reporting (wheel + buttons). Default off.
 scroll_lines = 1     # lines per wheel tick, for surfaces spyc scrolls itself
+pane_scroll_lines = 3 # lines per tick for a pane spyc drives with synthesized keys
 ```
 
 `capture` asks the terminal for real mouse reporting so spyc can scroll whatever

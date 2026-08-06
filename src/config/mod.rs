@@ -307,6 +307,7 @@ pub struct MouseConfig {
     /// forwarding to a mouse-aware child is unaffected: the child gets one event
     /// per tick and picks its own step. Clamped to at least 1 on load.
     pub scroll_lines: usize,
+    pub pane_scroll_lines: usize,
 }
 
 impl Default for MouseConfig {
@@ -314,6 +315,7 @@ impl Default for MouseConfig {
         Self {
             capture: false,
             scroll_lines: 1,
+            pane_scroll_lines: 3,
         }
     }
 }
@@ -336,6 +338,7 @@ struct FileMouse {
     capture: Option<bool>,
     #[serde(default)]
     scroll_lines: Option<usize>,
+    pane_scroll_lines: Option<usize>,
 }
 
 /// Markdown viewer knobs.
@@ -698,6 +701,9 @@ impl Config {
         // the wheel a no-op on spyc-owned surfaces.
         if let Some(b) = file.mouse.capture {
             self.mouse.capture = b;
+        }
+        if let Some(n) = file.mouse.pane_scroll_lines {
+            self.mouse.pane_scroll_lines = n.max(1);
         }
         if let Some(n) = file.mouse.scroll_lines {
             self.mouse.scroll_lines = n.max(1);

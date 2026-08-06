@@ -109,6 +109,14 @@
 [mouse]
 # capture = false
 # scroll_lines = 1
+#
+# `pane_scroll_lines` (default 3): lines per wheel tick for an agent PANE whose
+# child ignores mouse reports, where spyc synthesizes that agent's own scroll
+# keys (codex's `^T` transcript, agy inline). Separate from `scroll_lines`
+# because it's a different job: the list wants 1:1 with the trackpad, while
+# here spyc is driving somebody else's pager one keypress per line, with no
+# safe way to ask it for a page. Raise it to traverse long histories faster.
+# pane_scroll_lines = 3
 
 # ── markdown ──────────────────────────────────────────────────────────
 # Default view for `.md` / `.markdown` files in the pager.

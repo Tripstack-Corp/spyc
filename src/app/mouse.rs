@@ -625,7 +625,14 @@ impl super::App {
         if per_press.is_empty() {
             return Vec::new();
         }
-        let repeats = delta.unsigned_abs().max(1) as usize;
+        // The PANE's own step, not `scroll_lines`. Those are different jobs: the list
+        // and pagers want 1 line per wheel event, because a trackpad already emits
+        // one event per notional line (owner-confirmed: "the file list speed is
+        // great"). But here spyc is driving somebody ELSE's pager by synthesizing
+        // arrows, and that pager moves one line per key with no safe way to ask it
+        // for a page — so at 1 the wheel couldn't traverse a long `^T` history.
+        // Only `delta`'s SIGN is used here (resolved into `code` above).
+        let repeats = self.state.config.mouse.pane_scroll_lines.max(1);
         let mut bytes = Vec::with_capacity(per_press.len() * repeats);
         for _ in 0..repeats {
             bytes.extend_from_slice(&per_press);
@@ -2177,5 +2184,53 @@ mod tests {
                 "closed={closed} covered={covered}"
             );
         }
+    }
+    /// A mouse selection holds POSITIONS, not content, so the next keyboard action
+    /// must retire it — otherwise navigating away leaves a highlight band sitting on
+    /// whatever file now occupies those row indices, which is how this was reported.
+    ///
+    /// The pager's `visual` selection is exempt: it's modal by request, so `j`/`k`
+    /// extend it and `Esc` cancels.
+    #[test]
+    fn a_key_retires_a_mouse_selection_but_not_the_pagers_visual_mode() {
+        use crate::app::state::Side;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let tmp = tempfile::tempdir().expect("tempdir").keep();
+        crate::state::with_state_root(&tmp, || {
+            let mut app = App::test_app(tmp.clone());
+            app.view.list_selection = Some(crate::app::ListSelection {
+                side: Side::Left,
+                anchor: 1,
+                focus: 3,
+                full_path: false,
+            });
+            app.view.pane_selection = Some(((0, 0), (2, 4)));
+
+            let mut pager = PagerView::new_plain("p", vec!["a".into(), "b".into()]);
+            pager.visual = Some(crate::ui::pager::VisualSelection {
+                anchor: 0,
+                cursor: 1,
+                anchor_col: 0,
+                cursor_col: 0,
+                kind: VisualKind::Char,
+            });
+            app.view.pager = Some(pager);
+
+            let _ = app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+
+            assert!(
+                app.view.list_selection.is_none(),
+                "a keypress must retire the list selection"
+            );
+            assert!(
+                app.view.pane_selection.is_none(),
+                "a keypress must retire the pane selection"
+            );
+            assert!(
+                app.view.pager.as_ref().and_then(|v| v.visual).is_some(),
+                "the pager's visual mode is modal and must survive"
+            );
+        });
     }
 }
