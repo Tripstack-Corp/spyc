@@ -16,19 +16,19 @@
 //! below acts on that decision.
 
 use super::modal::{ModalSnapshot, active_modal};
-use super::pager_handler::PagerSlot;
 use super::{Effect, FrameLayout};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
+mod forward;
 mod route;
+mod scroll;
 mod selection;
 
 // Re-exported so the impure half and its callers keep referring to
 // `mouse::route_mouse` / `mouse::Region` exactly as before this split.
-use route::{
-    AgentViewAction, AgentViewInputs, TOGGLE_SETTLE, decide_agent_view_action, scroll_streak_step,
-};
-pub(super) use route::{Gesture, MouseSink, MouseSnapshot, Region, region_at, route_mouse};
+#[cfg(test)]
+use route::Region;
+pub(super) use route::{Gesture, MouseSink, MouseSnapshot, region_at, route_mouse};
 
 /// The surface an in-flight mouse drag belongs to. See
 /// [`super::ViewState::mouse_selection`].
@@ -302,354 +302,12 @@ impl super::App {
             }
         }
     }
-
-    /// The active pane agent's verified scroll keybinding, if it has one.
-    fn active_pane_wheel_scroll(&self) -> Option<crate::agent::WheelScroll> {
-        let tabs = self.runtime.pane_tabs.as_ref()?;
-        crate::agent::detect(&tabs.active_info().command).wheel_scroll()
-    }
-
-    /// Translate a wheel tick into the child's own scroll keys.
-    ///
-    /// Agents with no dedicated, toggleable view (today: agy — its
-    /// `transcript_open_marker` is `None`) keep the exact behaviour verified
-    /// working: `wheel_scroll()`'s key, repeated `pane_scroll_lines` times, no
-    /// screen-scraping at all. An agent that opts into
-    /// `transcript_open_marker` (codex) gets the fuller machinery in
-    /// `send_agent_view_scroll_keys` — auto-open, and escalation to a page key
-    /// under a sustained gesture.
-    fn send_scroll_keys(&mut self, delta: i32) -> Vec<Effect> {
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
-            return Vec::new();
-        };
-        let profile = crate::agent::detect(&tabs.active_info().command);
-        if let Some(marker) = profile.transcript_open_marker() {
-            let dir: i8 = if delta < 0 { -1 } else { 1 };
-            return self.send_agent_view_scroll_keys(profile, marker, dir);
-        }
-        let Some(scroll) = profile.wheel_scroll() else {
-            return Vec::new();
-        };
-        let (code, mods) = if delta < 0 { scroll.up } else { scroll.down };
-        // The PANE's own step, not `scroll_lines`. Those are different jobs: the list
-        // and pagers want 1 line per wheel event, because a trackpad already emits
-        // one event per notional line (owner-confirmed: "the file list speed is
-        // great"). But here spyc is driving somebody ELSE's pager by synthesizing
-        // arrows, and that pager moves one line per key with no safe way to ask it
-        // for a page — so at 1 the wheel couldn't traverse a long history.
-        Self::repeat_key_effect(code, mods, self.state.config.mouse.pane_scroll_lines.max(1))
-    }
-
-    /// The fuller wheel-to-keys machinery for an agent with its OWN toggleable
-    /// scrollback view (today: codex's `^T`), gated on `marker` — see
-    /// `AgentProfile::transcript_open_marker`.
-    ///
-    /// First decides whether the view is open by scraping the pane's CURRENT
-    /// visible screen (`Pane::visible_lines` — the viewport, not scrollback:
-    /// codex's own vt100 scrollback is confirmed empty, per #230's
-    /// investigation, so scrollback has nothing to scrape). Cheap enough to run
-    /// every tick — a plain substring search over one screen's worth of text —
-    /// so no debounce is needed for the scrape itself; only the toggle-send
-    /// needs one (see `pane_toggle_sent_at`'s doc).
-    fn send_agent_view_scroll_keys(
-        &mut self,
-        profile: &'static dyn crate::agent::AgentProfile,
-        marker: &str,
-        dir: i8,
-    ) -> Vec<Effect> {
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
-            return Vec::new();
-        };
-        let tab_index = tabs.active_index();
-        // One scrape, reused for both checks below — codex's own vt100
-        // scrollback is confirmed empty (#230), so this reads the viewport, not
-        // scrollback, and there is no cheaper way to ask "is X still true" than
-        // reading the same lines twice.
-        let visible = tabs.active().visible_lines();
-        let is_open = visible.iter().any(|l| l.contains(marker));
-        let at_bottom = is_open && profile.transcript_at_bottom(&visible);
-        let toggle_pending = self
-            .view
-            .pane_toggle_sent_at
-            .is_some_and(|sent| sent.elapsed() < TOGGLE_SETTLE);
-
-        let now = std::time::Instant::now();
-        let (escalate, streak) = if is_open {
-            let (streak, escalate) =
-                scroll_streak_step(self.view.pane_scroll_streak, tab_index, dir, now);
-            (escalate, Some(streak))
-        } else {
-            (false, self.view.pane_scroll_streak) // no tick to record while closed
-        };
-
-        let action = decide_agent_view_action(
-            AgentViewInputs {
-                is_open,
-                toggle_pending,
-                escalate,
-                at_bottom,
-            },
-            self.state.config.mouse.pane_scroll_view,
-            dir,
-        );
-
-        // State mutation lives here, once, keyed to the decision — not scattered
-        // across the branches that produce it.
-        self.view.pane_scroll_streak = streak;
-        if is_open {
-            self.view.pane_toggle_sent_at = None; // confirmed open; drop the guard
-        }
-
-        match action {
-            AgentViewAction::Nothing => Vec::new(),
-            AgentViewAction::UseSpycHistory => {
-                self.open_pane_scroll_pager();
-                Vec::new()
-            }
-            AgentViewAction::Toggle => {
-                let Some((code, mods)) = profile.transcript_toggle_key() else {
-                    return Vec::new();
-                };
-                self.view.pane_toggle_sent_at = Some(now);
-                Self::repeat_key_effect(code, mods, 1)
-            }
-            // Reuses the SAME debounce field `Toggle` sets: the next tick or two
-            // will still read `is_open == true` (codex hasn't redrawn the
-            // composer yet), and without this a fast flick continuing past the
-            // bottom would send `q` again into what may already be the
-            // composer's own text input.
-            AgentViewAction::Close => {
-                let Some((code, mods)) = profile.transcript_close_key() else {
-                    return Vec::new();
-                };
-                self.view.pane_toggle_sent_at = Some(now);
-                Self::repeat_key_effect(code, mods, 1)
-            }
-            AgentViewAction::Scroll { fast } => {
-                if fast && let Some(f) = profile.fast_wheel_scroll() {
-                    let (code, mods) = if dir < 0 { f.up } else { f.down };
-                    return Self::repeat_key_effect(code, mods, 1);
-                }
-                let Some(scroll) = profile.wheel_scroll() else {
-                    return Vec::new();
-                };
-                let (code, mods) = if dir < 0 { scroll.up } else { scroll.down };
-                Self::repeat_key_effect(
-                    code,
-                    mods,
-                    self.state.config.mouse.pane_scroll_lines.max(1),
-                )
-            }
-        }
-    }
-
-    /// Encode `key` and repeat it `n` times as ONE `SendToPane` batch — the
-    /// executor writes to the pty once, so a multi-line tick can't interleave
-    /// with the child's own output mid-burst.
-    fn repeat_key_effect(
-        code: crossterm::event::KeyCode,
-        mods: crossterm::event::KeyModifiers,
-        n: usize,
-    ) -> Vec<Effect> {
-        let per_press = crate::pane::input::encode_key(crossterm::event::KeyEvent::new(code, mods));
-        if per_press.is_empty() {
-            return Vec::new();
-        }
-        let mut bytes = Vec::with_capacity(per_press.len() * n.max(1));
-        for _ in 0..n.max(1) {
-            bytes.extend_from_slice(&per_press);
-        }
-        vec![Effect::SendToPane {
-            target: super::effect::PaneTarget::Active,
-            input: super::effect::PaneInput::Bytes(bytes),
-            on_ok: None,
-            // No per-tick flash, and no early return on a dead pty: either would
-            // bury the real exit message under one repeat per wheel line.
-            err_prefix: None,
-        }]
-    }
-
-    /// Encode `ev` in the child's own protocol and send it to the active pane.
-    ///
-    /// Records whether the press was forwarded, so [`Self::forward_release`] can
-    /// pair the matching release to the same child.
-    fn forward_to_child(&mut self, ev: MouseEvent, layout: &FrameLayout) -> Vec<Effect> {
-        let Some(report) = mouse_report(ev, layout) else {
-            return Vec::new();
-        };
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
-            return Vec::new();
-        };
-        let (mode, encoding) = tabs.active().mouse_protocol();
-        let bytes = crate::pane::input::encode_mouse(report, mode, encoding);
-        if bytes.is_empty() {
-            return Vec::new();
-        }
-        // A press we forwarded owes the child a release. Wheel ticks don't (they
-        // have no release half), so only a real button arms the obligation.
-        if matches!(ev.kind, MouseEventKind::Down(_)) {
-            self.view.mouse_press_forwarded = true;
-        }
-        // `Effect::SendToPane`, not a direct `send_bytes`: the executor is the only
-        // thing that touches the OS.
-        vec![Effect::SendToPane {
-            target: super::effect::PaneTarget::Active,
-            input: super::effect::PaneInput::Bytes(bytes),
-            on_ok: None,
-            // No flash on failure: a dead pty surfaces through the exit path, and
-            // one per wheel tick would bury the real message under repeats.
-            err_prefix: None,
-        }]
-    }
-
-    /// Deliver a drag to the child that received the press, if any.
-    ///
-    /// Unlike a release this does NOT consume the pairing flag — a drag is the
-    /// middle of the gesture and more will follow, so the flag has to survive
-    /// until the release actually arrives.
-    fn forward_drag(&mut self, ev: MouseEvent, frame: ratatui::layout::Rect) -> Vec<Effect> {
-        if !self.view.mouse_press_forwarded {
-            return Vec::new();
-        }
-        let layout = self.frame_layout(frame);
-        self.forward_to_child(ev, &layout)
-    }
-
-    /// Deliver a button release to the child that received the press.
-    ///
-    /// Keyed on the press having been forwarded rather than on where the pointer
-    /// is now, which is what makes the pairing exact: a press that went to the list
-    /// never produces a release for the child, and a press delivered to the child
-    /// always gets its release even if the pointer left the pane before the button
-    /// came up. An unpaired release is as bad as a missing one — the child would
-    /// see a button it never saw pressed.
-    fn forward_release(
-        &mut self,
-        ev: MouseEvent,
-        _button: MouseButton,
-        frame: ratatui::layout::Rect,
-    ) -> Vec<Effect> {
-        if !std::mem::take(&mut self.view.mouse_press_forwarded) {
-            return Vec::new();
-        }
-        let layout = self.frame_layout(frame);
-        self.forward_to_child(ev, &layout)
-    }
-}
-
-impl super::App {
-    /// Give the keyboard to `region`, reusing the same entry points `^a j`/`^a k`
-    /// and `^a a`/`^a b` use.
-    ///
-    /// `set_pane_focus` is doing real work here, not just being tidy: it declines
-    /// while `^a z`-zoomed (the target region is collapsed off-screen) and, coming
-    /// back from the pane, restores whichever split column the user left from.
-    /// Assigning `state.focus` directly would lose both.
-    /// Give the keyboard to the region that OWNS `slot`.
-    ///
-    /// Distinct from [`Self::focus_region`], which answers from layout geometry: a
-    /// pager drawn over the pane's rect would otherwise focus the pty behind it.
-    /// A `Modal` needs no move — `recompute_focus` resolves a full-frame Overlay to
-    /// `Focus::Pager(Overlay)` on its own, and touching pane focus here is exactly
-    /// what leaked a click through to the pane.
-    fn focus_pager_slot(&mut self, slot: PagerSlot) {
-        match slot {
-            PagerSlot::Modal => {}
-            PagerSlot::Scrollback => self.set_pane_focus(true),
-            PagerSlot::Top => {
-                self.set_pane_focus(false);
-                self.vsplit_focus(crate::app::state::Side::Left);
-            }
-            PagerSlot::Right => {
-                self.set_pane_focus(false);
-                self.vsplit_focus(crate::app::state::Side::Right);
-            }
-        }
-    }
-
-    fn focus_region(&mut self, region: Option<Region>) {
-        match region {
-            Some(Region::Pane) => self.set_pane_focus(true),
-            Some(Region::List) => {
-                self.set_pane_focus(false);
-                self.vsplit_focus(crate::app::state::Side::Left);
-            }
-            Some(Region::RightColumn) => {
-                self.set_pane_focus(false);
-                self.vsplit_focus(crate::app::state::Side::Right);
-            }
-            // Chrome and off-frame: nothing owns the keyboard there.
-            Some(Region::Divider | Region::Prompt | Region::Status | Region::VDivider) | None => {}
-        }
-    }
-}
-
-/// Build the child-facing report for any forwardable mouse event, translating the
-/// pointer into the pane's own coordinate space. `None` for kinds spyc doesn't
-/// forward.
-///
-/// Takes the whole event rather than a direction flag, which is the shape error
-/// this replaces: the previous `wheel_report(ev, up, layout)` hardcoded
-/// `if up { 64 } else { 65 }`, so when buttons started routing here they were
-/// handed `up = false` and every click went out as **xterm wheel-down (65)**.
-/// Claude's own decoder reads 65 as a wheel tick and its button decoder rejects
-/// anything with bit 64 set, so a left-click scrolled the agent and never clicked.
-/// A function that maps the kind to its button can't express that mistake.
-///
-/// The coordinate translation is the other easy-to-skip half, and it produces a
-/// *worse than broken* result: frame-absolute coordinates make the child think the
-/// pointer is `pane.y` rows above where it is, which reads as the child's bug.
-fn mouse_report(
-    ev: MouseEvent,
-    layout: &super::FrameLayout,
-) -> Option<crate::pane::input::MouseReport> {
-    use crossterm::event::KeyModifiers as K;
-    use crossterm::event::MouseButton as B;
-
-    // xterm button encoding: 0/1/2 = left/middle/right, 64/65 = wheel up/down;
-    // a drag is the held button with the motion bit set (added by `encode_mouse`).
-    let (button, release, motion) = match ev.kind {
-        MouseEventKind::ScrollUp => (64, false, false),
-        MouseEventKind::ScrollDown => (65, false, false),
-        MouseEventKind::Down(B::Left) => (0, false, false),
-        MouseEventKind::Down(B::Middle) => (1, false, false),
-        MouseEventKind::Down(B::Right) => (2, false, false),
-        MouseEventKind::Up(B::Left) => (0, true, false),
-        MouseEventKind::Up(B::Middle) => (1, true, false),
-        MouseEventKind::Up(B::Right) => (2, true, false),
-        MouseEventKind::Drag(B::Left) => (0, false, true),
-        MouseEventKind::Drag(B::Middle) => (1, false, true),
-        MouseEventKind::Drag(B::Right) => (2, false, true),
-        // Not forwarded. `Moved` is buttonless motion, which spyc never asks for
-        // (1002 reports only while a button is held) and `proc.rs` filters;
-        // horizontal wheel has no spyc behaviour. Listed exhaustively so a new
-        // `MouseEventKind` is a compile error here rather than a silent no-op.
-        MouseEventKind::Moved | MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
-            return None;
-        }
-    };
-
-    let origin = layout
-        .pane
-        .unwrap_or(ratatui::layout::Rect::new(0, 0, 0, 0));
-    Some(crate::pane::input::MouseReport {
-        button,
-        release,
-        motion,
-        col: ev.column.saturating_sub(origin.x),
-        row: ev.row.saturating_sub(origin.y),
-        shift: ev.modifiers.contains(K::SHIFT),
-        alt: ev.modifiers.contains(K::ALT),
-        ctrl: ev.modifiers.contains(K::CONTROL),
-    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Gesture, MouseSink, MouseSnapshot, Region, decide_agent_view_action, region_at,
-        route_mouse, scroll_streak_step,
-    };
+    use super::route::{decide_agent_view_action, scroll_streak_step};
+    use super::{Gesture, MouseSink, MouseSnapshot, Region, region_at, route_mouse};
     use crate::app::App;
     use crate::config::StatusPosition;
     use crate::ui::pager::Mount;
@@ -1146,7 +804,7 @@ mod tests {
                 row: pane.y + 2,
                 modifiers: KeyModifiers::NONE,
             };
-            let report = super::mouse_report(ev, &layout).expect("wheel is forwardable");
+            let report = super::forward::mouse_report(ev, &layout).expect("wheel is forwardable");
             assert_eq!(report.row, 2, "{pos:?}: row must be pane-relative");
             assert_eq!(report.col, 5, "{pos:?}: col must be pane-relative");
             assert_eq!(report.button, 64, "wheel up");
@@ -1159,7 +817,8 @@ mod tests {
                 row: pane.y,
                 modifiers: KeyModifiers::NONE,
             };
-            let report = super::mouse_report(at_origin, &layout).expect("wheel is forwardable");
+            let report =
+                super::forward::mouse_report(at_origin, &layout).expect("wheel is forwardable");
             assert_eq!((report.col, report.row), (0, 0), "{pos:?}: pane origin");
             assert_eq!(report.button, 65, "wheel down");
         }
@@ -1202,7 +861,7 @@ mod tests {
             (MouseEventKind::ScrollUp, 64, false, false),
             (MouseEventKind::ScrollDown, 65, false, false),
         ] {
-            let r = super::mouse_report(at(kind), &layout).expect("forwardable");
+            let r = super::forward::mouse_report(at(kind), &layout).expect("forwardable");
             assert_eq!(r.button, button, "{kind:?} must encode button {button}");
             assert_eq!(r.release, release, "{kind:?} release flag");
             assert_eq!(r.motion, motion, "{kind:?} motion flag");
@@ -1223,7 +882,7 @@ mod tests {
             MouseEventKind::ScrollRight,
         ] {
             assert!(
-                super::mouse_report(at(kind), &layout).is_none(),
+                super::forward::mouse_report(at(kind), &layout).is_none(),
                 "{kind:?} must not be forwarded"
             );
         }
@@ -1239,8 +898,8 @@ mod tests {
     // ── pager selection: begin / extend / finish (App methods, not the pure
     // `route_mouse` decision) ──────────────────────────────────────────────
 
-    use super::PagerSlot;
     use crate::app::Effect;
+    use crate::app::pager_handler::PagerSlot;
     use crate::app::state::Side;
     use crate::ui::pager::{PagerView, VisualKind};
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -1934,7 +1593,7 @@ mod tests {
 
     // ── decide_agent_view_action: the codex ^T auto-open + escalation policy ──
 
-    use super::{AgentViewAction, AgentViewInputs};
+    use crate::app::mouse::route::{AgentViewAction, AgentViewInputs};
     use crate::config::PaneScrollView;
 
     /// The DEFAULT behaviour, and the owner's stated preference: closed +
