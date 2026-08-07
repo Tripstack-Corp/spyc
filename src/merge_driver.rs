@@ -286,6 +286,11 @@ mod tests {
         let ok = std::process::Command::new("git")
             .args(["init", "-q"])
             .current_dir(tmp.path())
+            // `GIT_DIR` overrides the cwd, so a hook-launched test run would
+            // init/redirect at the real repo — see git::test_support.
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
             .status()
             .expect("git init")
             .success();

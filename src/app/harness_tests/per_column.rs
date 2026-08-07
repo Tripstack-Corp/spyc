@@ -214,6 +214,11 @@ fn dual_git_each_column_shows_its_own_repo() {
             .env("GIT_COMMITTER_EMAIL", "t@x")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            // `GIT_DIR` overrides `-C`/cwd, so a hook-launched test run would
+            // retarget this at the real repo — see git::test_support.
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
             .status()
             .expect("spawn git")
             .success();
@@ -284,6 +289,11 @@ fn worktree_column_markers_clear_after_a_commit() {
             .env("GIT_COMMITTER_EMAIL", "t@x")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            // `GIT_DIR` overrides `-C`/cwd, so a hook-launched test run would
+            // retarget this at the real repo — see git::test_support.
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
             .status()
             .expect("spawn git")
             .success();
@@ -370,6 +380,11 @@ fn why_git_dumps_per_column_refresh_state() {
             .env("GIT_COMMITTER_EMAIL", "t@x")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            // `GIT_DIR` overrides `-C`/cwd, so a hook-launched test run would
+            // retarget this at the real repo — see git::test_support.
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
             .status()
             .expect("spawn git");
     };
