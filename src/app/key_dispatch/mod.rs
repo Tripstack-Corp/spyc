@@ -676,6 +676,10 @@ impl App {
         if self.help_is_open() {
             self.open_help();
         }
+        // Same for about: its markdown wrap points are baked at render time.
+        if self.about_is_open() {
+            self.open_about();
+        }
         // The split preview's markdown was wrapped to the old column width;
         // re-render it off-thread at the new width (no-op when no preview is
         // open). The in-flight guard collapses a resize-drag's event burst to a

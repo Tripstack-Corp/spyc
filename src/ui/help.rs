@@ -46,6 +46,7 @@ const SECTIONS: &[Section] = &[
             ("Space P", "set PROJECT_HOME to current directory"),
             ("Space s", "session info"),
             ("Space ?", "this help"),
+            ("Space a", "about spyc (:about)"),
         ],
     },
     Section {

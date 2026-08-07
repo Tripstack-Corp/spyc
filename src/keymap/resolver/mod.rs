@@ -47,7 +47,7 @@ enum PendingSeq {
     CtrlS,
     /// Seen the leader (`Space` in list focus, or `^a Space` from pane focus),
     /// waiting for a global/workspace sub-command: `w` worktree submenu,
-    /// `p`/`P` project-home jump/set, `s` session info, `?` help.
+    /// `p`/`P` project-home jump/set, `s` session info, `?` help, `a` about.
     Leader,
 }
 
@@ -160,6 +160,7 @@ impl Resolver {
                 Act("P", A::SetProjectHomeHere),
                 Act("s", A::ShowMemory),
                 Act("?", A::Help),
+                Act("a", A::About),
             ],
             PendingSeq::G => vec![
                 Act("g", A::GotoFirst),
@@ -359,6 +360,7 @@ impl Resolver {
                 KeyCode::Char('P') => ResolverOutcome::Action(Action::SetProjectHomeHere),
                 KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::ShowMemory),
                 KeyCode::Char('?') => ResolverOutcome::Action(Action::Help),
+                KeyCode::Char('a') => ResolverOutcome::Action(Action::About),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();
