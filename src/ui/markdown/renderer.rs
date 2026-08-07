@@ -48,6 +48,25 @@ impl<'t> Renderer<'t> {
         if !self.current.is_empty() {
             self.flush_line();
         }
+        // Every block end emits its separator blank unconditionally (two for a
+        // blockquote), leaving trailing rows with nothing after them to separate.
+        // The pager reads `lines.len()` as the document length, so those rows
+        // inflated its `(N lines)` and put `[EOF]` below the last line of content.
+        // Safe to drop: code/table/mermaid blocks close on a fence row, so only a
+        // separator can be last.
+        while self
+            .lines
+            .last()
+            .is_some_and(|l| l.spans.iter().all(|s| s.content.is_empty()))
+        {
+            self.lines.pop();
+        }
+        // A mermaid block's range spans its placeholder *through* that separator,
+        // so a diagram ending the document is left pointing one row past the end.
+        let len = self.lines.len();
+        for block in &mut self.mermaid_blocks {
+            block.line_range.end = block.line_range.end.min(len);
+        }
         MarkdownDoc {
             lines: self.lines,
             mermaid_blocks: self.mermaid_blocks,
