@@ -131,7 +131,10 @@ Two levels of selection for flexible file management.
   *Clipboard backend:* macOS uses built-in `pbcopy`; Linux uses
   `wl-copy` (Wayland) or `xclip` / `xsel` (X11) — see INSTALL.md
   for setup. With no helper on PATH, yanks flash an actionable
-  install hint.
+  install hint. `[clipboard] via` (`.spycrc.toml`) routes to an
+  OSC-52 terminal escape over SSH instead; `[clipboard] command` /
+  `$SPYC_CLIPBOARD` overrides the backend entirely with a
+  user-supplied command — see CONFIGURATION.md.
 
 - **Y** remove cursor file from inventory
 - **p** put all inventory files to the current directory

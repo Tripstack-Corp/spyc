@@ -428,7 +428,17 @@ impl super::App {
     /// OSC 52 is attempted first under `Both`: it can fail *knowably* (payload over
     /// the size limit), and a real error beats the local helper's silent
     /// success-on-the-wrong-machine.
+    ///
+    /// `[clipboard].command` / `$SPYC_CLIPBOARD` is an exclusive top-priority tier,
+    /// not one more mechanism to also try: when set, it's the ONLY thing run —
+    /// `via`/OSC-52 are skipped entirely rather than layered underneath.
     pub(super) fn deliver_clipboard(&self, text: &str) -> Result<(), String> {
+        if let Some(cmd) =
+            crate::clipboard::resolve_override(self.state.config.clipboard.command.as_deref())
+        {
+            return crate::clipboard::copy_via_user_command(&cmd, text)
+                .map_err(|e| format!("{e:#}"));
+        }
         let (local, osc52) = clipboard_delivery(self.state.config.clipboard.via, self.view.is_ssh);
         let mut errs: Vec<String> = Vec::new();
         let mut ok = false;
