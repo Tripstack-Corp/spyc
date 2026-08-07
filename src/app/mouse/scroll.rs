@@ -41,13 +41,19 @@ impl super::super::App {
             return Vec::new();
         };
         let (code, mods) = if delta < 0 { scroll.up } else { scroll.down };
+        let app_cursor = tabs.active().application_cursor();
         // The PANE's own step, not `scroll_lines`. Those are different jobs: the list
         // and pagers want 1 line per wheel event, because a trackpad already emits
         // one event per notional line (owner-confirmed: "the file list speed is
         // great"). But here spyc is driving somebody ELSE's pager by synthesizing
         // arrows, and that pager moves one line per key with no safe way to ask it
         // for a page — so at 1 the wheel couldn't traverse a long history.
-        Self::repeat_key_effect(code, mods, self.state.config.mouse.pane_scroll_lines.max(1))
+        Self::repeat_key_effect(
+            code,
+            mods,
+            self.state.config.mouse.pane_scroll_lines.max(1),
+            app_cursor,
+        )
     }
 
     /// The fuller wheel-to-keys machinery for an agent with its OWN toggleable
@@ -76,6 +82,7 @@ impl super::super::App {
         // scrollback, and there is no cheaper way to ask "is X still true" than
         // reading the same lines twice.
         let visible = tabs.active().visible_lines();
+        let app_cursor = tabs.active().application_cursor();
         let is_open = visible.iter().any(|l| l.contains(marker));
         let at_bottom = is_open && profile.transcript_at_bottom(&visible);
         let toggle_pending = self
@@ -121,7 +128,7 @@ impl super::super::App {
                     return Vec::new();
                 };
                 self.view.pane_toggle_sent_at = Some(now);
-                Self::repeat_key_effect(code, mods, 1)
+                Self::repeat_key_effect(code, mods, 1, app_cursor)
             }
             // Reuses the SAME debounce field `Toggle` sets: the next tick or two
             // will still read `is_open == true` (codex hasn't redrawn the
@@ -133,12 +140,12 @@ impl super::super::App {
                     return Vec::new();
                 };
                 self.view.pane_toggle_sent_at = Some(now);
-                Self::repeat_key_effect(code, mods, 1)
+                Self::repeat_key_effect(code, mods, 1, app_cursor)
             }
             AgentViewAction::Scroll { fast } => {
                 if fast && let Some(f) = profile.fast_wheel_scroll() {
                     let (code, mods) = if dir < 0 { f.up } else { f.down };
-                    return Self::repeat_key_effect(code, mods, 1);
+                    return Self::repeat_key_effect(code, mods, 1, app_cursor);
                 }
                 let Some(scroll) = profile.wheel_scroll() else {
                     return Vec::new();
@@ -148,6 +155,7 @@ impl super::super::App {
                     code,
                     mods,
                     self.state.config.mouse.pane_scroll_lines.max(1),
+                    app_cursor,
                 )
             }
         }
@@ -156,12 +164,19 @@ impl super::super::App {
     /// Encode `key` and repeat it `n` times as ONE `SendToPane` batch — the
     /// executor writes to the pty once, so a multi-line tick can't interleave
     /// with the child's own output mid-burst.
+    ///
+    /// `app_cursor` is the target pane's DECCKM state: these are synthesized
+    /// presses of the child's OWN scroll binding, so they need the same arrow
+    /// form its typed keys get (`Pane::send_key`'s path) or the pager they drive
+    /// ignores them.
     fn repeat_key_effect(
         code: crossterm::event::KeyCode,
         mods: crossterm::event::KeyModifiers,
         n: usize,
+        app_cursor: bool,
     ) -> Vec<Effect> {
-        let per_press = crate::pane::input::encode_key(crossterm::event::KeyEvent::new(code, mods));
+        let per_press =
+            crate::pane::input::encode_key(crossterm::event::KeyEvent::new(code, mods), app_cursor);
         if per_press.is_empty() {
             return Vec::new();
         }

@@ -313,14 +313,13 @@ impl Pane {
 
     /// Forward a crossterm key to the child as ANSI bytes.
     pub fn send_key(&mut self, key: crossterm::event::KeyEvent) -> anyhow::Result<()> {
-        let bytes = input::encode_key(key);
+        // One read, shared by the encoding and the trace below — a trace field
+        // disagreeing with the bytes it annotates would misdirect the next
+        // investigation rather than settle it.
+        let app_cursor = self.application_cursor();
+        let bytes = input::encode_key(key, app_cursor);
         if !bytes.is_empty() {
             if crate::key_trace::is_enabled() {
-                // `app_cursor` is the child's DECCKM state. spyc always encodes
-                // the CSI form, so a child in application-cursor mode is waiting
-                // for `ESC O A` and gets `ESC [ A` — logged here because it is
-                // invisible from the byte stream alone.
-                let app_cursor = self.lock_parser().screen().application_cursor();
                 crate::key_trace::log_tx(&format!(
                     "send_key code={:?} mods={:?} bytes={} app_cursor={app_cursor}",
                     key.code,
@@ -487,6 +486,14 @@ impl Pane {
     /// True when the child requested any mouse reporting.
     pub fn wants_mouse(&self) -> bool {
         self.with_screen(|s| s.mouse_protocol_mode() != vt100::MouseProtocolMode::None)
+    }
+
+    /// Has the child switched its cursor keys to application mode (DECCKM,
+    /// `\e[?1h`)? Selects the SS3 arrow form in [`input::encode_key`] — a strict
+    /// child in this mode drops the CSI form, which presents as a pane whose
+    /// arrows do nothing while bare control bytes (`^C`) still land.
+    pub fn application_cursor(&self) -> bool {
+        self.with_screen(vt100::Screen::application_cursor)
     }
 
     /// Return visible screen content as individual lines (plain text,
