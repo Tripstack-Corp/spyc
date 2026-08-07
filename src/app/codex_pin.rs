@@ -38,25 +38,61 @@ const START_SKEW_SECS: u64 = 5;
 /// earlier rollout; `already_claimed` holds uuids pinned to other tabs. For each
 /// tab, take the earliest-started cwd-matching rollout that began at/after its
 /// spawn and isn't yet claimed. Returns `(tab index, uuid)` to apply.
+/// One unpinned codex tab, as the pure assignment sees it.
+#[derive(Debug, Clone)]
+pub(super) struct UnpinnedTab {
+    pub idx: usize,
+    /// Canonicalized by the caller so this stays a plain string compare.
+    pub cwd: String,
+    pub spawn: u64,
+    /// `resume` with no uuid on the command line. Such a tab appends to a
+    /// rollout that *predates* it, so the start-time filter can never match —
+    /// it needs the liveness fallback instead.
+    pub resuming: bool,
+}
+
 fn assign_codex_sessions(
-    unpinned: &[(usize, String, u64)],
+    unpinned: &[UnpinnedTab],
     already_claimed: &HashSet<String>,
     snapshot: &[RolloutMeta],
 ) -> Vec<(usize, String)> {
     let mut claimed = already_claimed.clone();
     let mut out = Vec::new();
-    for (idx, cwd, spawn) in unpinned {
+    for tab in unpinned {
+        // A fresh session writes a rollout that starts after the pane did.
         let best = snapshot
             .iter()
             .filter(|r| {
                 !claimed.contains(&r.uuid)
-                    && r.started_secs + START_SKEW_SECS >= *spawn
-                    && cwd_eq(&r.cwd, cwd)
+                    && r.started_secs + START_SKEW_SECS >= tab.spawn
+                    && cwd_eq(&r.cwd, &tab.cwd)
             })
-            .min_by_key(|r| r.started_secs);
+            .min_by_key(|r| r.started_secs)
+            // A resumed session does not: codex appends to the ORIGINAL rollout
+            // with a frozen `session_meta`, so its `started_secs` can predate
+            // the pane by weeks and the filter above can never match. What does
+            // hold is that the file is being written *now* — so fall back to
+            // the most recently touched matching rollout that has grown since
+            // this pane spawned.
+            //
+            // Gated on `resuming`: a fresh pane whose rollout has not appeared
+            // yet must stay unpinned and retry, never adopt an old one.
+            .or_else(|| {
+                if !tab.resuming {
+                    return None;
+                }
+                snapshot
+                    .iter()
+                    .filter(|r| {
+                        !claimed.contains(&r.uuid)
+                            && r.mtime_secs >= tab.spawn
+                            && cwd_eq(&r.cwd, &tab.cwd)
+                    })
+                    .max_by_key(|r| r.mtime_secs)
+            });
         if let Some(r) = best {
             claimed.insert(r.uuid.clone());
-            out.push((*idx, r.uuid.clone()));
+            out.push((tab.idx, r.uuid.clone()));
         }
     }
     out
@@ -162,7 +198,7 @@ impl App {
             .iter()
             .filter_map(|e| e.info.codex_session_id.clone())
             .collect();
-        let mut unpinned: Vec<(usize, String, u64)> = tabs
+        let mut unpinned: Vec<UnpinnedTab> = tabs
             .tabs()
             .iter()
             .enumerate()
@@ -178,10 +214,15 @@ impl App {
                     |_| e.info.cwd.to_string_lossy().into_owned(),
                     |c| c.to_string_lossy().into_owned(),
                 );
-                (i, cwd, e.info.spawn_epoch_secs)
+                UnpinnedTab {
+                    idx: i,
+                    cwd,
+                    spawn: e.info.spawn_epoch_secs,
+                    resuming: crate::state::codex_transcript::is_resume_without_id(&e.info.command),
+                }
             })
             .collect();
-        unpinned.sort_by_key(|(_, _, spawn)| *spawn);
+        unpinned.sort_by_key(|t| t.spawn);
         for (idx, uuid) in assign_codex_sessions(&unpinned, &claimed, &snapshot) {
             if let Some(entry) = tabs.tabs_mut().get_mut(idx) {
                 entry.info.codex_session_id = Some(uuid);
@@ -195,8 +236,11 @@ impl App {
 mod tests {
     use super::*;
 
+    /// A rollout whose file was last written at `started` — the fresh-session
+    /// shape, where start and last-write coincide closely enough.
     fn meta(uuid: &str, cwd: &str, started: u64) -> RolloutMeta {
         RolloutMeta {
+            mtime_secs: started,
             uuid: uuid.to_string(),
             cwd: cwd.to_string(),
             started_secs: started,
@@ -210,7 +254,12 @@ mod tests {
             meta("mine", "/repo", 1005), // just after spawn
             meta("later", "/repo", 2000),
         ];
-        let unpinned = vec![(0usize, "/repo".to_string(), 1000u64)];
+        let unpinned = vec![UnpinnedTab {
+            idx: 0,
+            cwd: "/repo".to_string(),
+            spawn: 1000,
+            resuming: false,
+        }];
         let out = assign_codex_sessions(&unpinned, &HashSet::new(), &snap);
         assert_eq!(out, vec![(0, "mine".to_string())]);
     }
@@ -221,8 +270,18 @@ mod tests {
         // rollout. Spawn-ordered assignment must give A the earlier, B the later.
         let snap = vec![meta("sessB", "/repo", 1010), meta("sessA", "/repo", 1000)];
         let unpinned = vec![
-            (0usize, "/repo".to_string(), 1000u64), // A
-            (1usize, "/repo".to_string(), 1010u64), // B
+            UnpinnedTab {
+                idx: 0,
+                cwd: "/repo".to_string(),
+                spawn: 1000,
+                resuming: false,
+            }, // A
+            UnpinnedTab {
+                idx: 1,
+                cwd: "/repo".to_string(),
+                spawn: 1010,
+                resuming: false,
+            }, // B
         ];
         let out = assign_codex_sessions(&unpinned, &HashSet::new(), &snap);
         assert_eq!(
@@ -236,19 +295,125 @@ mod tests {
         let snap = vec![meta("taken", "/repo", 1001), meta("free", "/repo", 1002)];
         let mut claimed = HashSet::new();
         claimed.insert("taken".to_string());
-        let unpinned = vec![(0usize, "/repo".to_string(), 1000u64)];
+        let unpinned = vec![UnpinnedTab {
+            idx: 0,
+            cwd: "/repo".to_string(),
+            spawn: 1000,
+            resuming: false,
+        }];
         let out = assign_codex_sessions(&unpinned, &claimed, &snap);
         assert_eq!(out, vec![(0, "free".to_string())]);
 
         // Wrong cwd → nothing to pin.
-        let other = vec![(0usize, "/elsewhere".to_string(), 1000u64)];
+        let other = vec![UnpinnedTab {
+            idx: 0,
+            cwd: "/elsewhere".to_string(),
+            spawn: 1000,
+            resuming: false,
+        }];
         assert!(assign_codex_sessions(&other, &HashSet::new(), &snap).is_empty());
+    }
+
+    /// A rollout whose `session_meta` is frozen far in the past but which is
+    /// being appended to right now — the resumed-session shape.
+    fn resumed_meta(uuid: &str, cwd: &str, started: u64, mtime: u64) -> RolloutMeta {
+        RolloutMeta {
+            uuid: uuid.to_string(),
+            cwd: cwd.to_string(),
+            started_secs: started,
+            mtime_secs: mtime,
+        }
+    }
+
+    #[test]
+    fn a_resumed_session_pins_despite_a_frozen_start_time() {
+        // `codex resume --last` appends to the ORIGINAL rollout, so its
+        // `started_secs` predates the pane by weeks and the start-time filter
+        // can never match. Liveness is the only usable signal.
+        let snap = vec![resumed_meta("resumed", "/repo", 1, 2_000)];
+        let tab = UnpinnedTab {
+            idx: 0,
+            cwd: "/repo".to_string(),
+            spawn: 1_000,
+            resuming: true,
+        };
+        assert_eq!(
+            assign_codex_sessions(&[tab], &HashSet::new(), &snap),
+            vec![(0, "resumed".to_string())],
+            "a resumed tab must pin to the rollout it is actively writing"
+        );
+    }
+
+    #[test]
+    fn a_fresh_tab_never_adopts_a_live_old_rollout() {
+        // The gate on `resuming`. A fresh `codex` whose own rollout has not
+        // appeared yet must stay unpinned and retry — adopting the old one
+        // (kept live by some other codex) is exactly the wrong-transcript bug.
+        let snap = vec![resumed_meta("someone-elses", "/repo", 1, 2_000)];
+        let tab = UnpinnedTab {
+            idx: 0,
+            cwd: "/repo".to_string(),
+            spawn: 1_000,
+            resuming: false,
+        };
+        assert!(
+            assign_codex_sessions(&[tab], &HashSet::new(), &snap).is_empty(),
+            "only a resuming tab may fall back to liveness"
+        );
+    }
+
+    #[test]
+    fn two_resuming_panes_do_not_share_one_rollout() {
+        // The claimed-set must still hold on the fallback path.
+        let snap = vec![
+            resumed_meta("older", "/repo", 1, 2_000),
+            resumed_meta("newer", "/repo", 2, 2_500),
+        ];
+        let tabs = vec![
+            UnpinnedTab {
+                idx: 0,
+                cwd: "/repo".to_string(),
+                spawn: 1_000,
+                resuming: true,
+            },
+            UnpinnedTab {
+                idx: 1,
+                cwd: "/repo".to_string(),
+                spawn: 1_000,
+                resuming: true,
+            },
+        ];
+        let out = assign_codex_sessions(&tabs, &HashSet::new(), &snap);
+        assert_eq!(out.len(), 2, "both panes pin");
+        assert_ne!(out[0].1, out[1].1, "and to different rollouts");
+    }
+
+    #[test]
+    fn a_stale_rollout_is_not_adopted_even_when_resuming() {
+        // Liveness means "grown since this pane spawned". A rollout last
+        // touched before the pane existed is somebody else's history.
+        let snap = vec![resumed_meta("stale", "/repo", 1, 500)];
+        let tab = UnpinnedTab {
+            idx: 0,
+            cwd: "/repo".to_string(),
+            spawn: 1_000,
+            resuming: true,
+        };
+        assert!(
+            assign_codex_sessions(&[tab], &HashSet::new(), &snap).is_empty(),
+            "a rollout that has not grown since spawn is not this pane's"
+        );
     }
 
     #[test]
     fn no_rollout_after_spawn_leaves_unpinned() {
         let snap = vec![meta("stale", "/repo", 500)]; // all predate spawn
-        let unpinned = vec![(0usize, "/repo".to_string(), 1000u64)];
+        let unpinned = vec![UnpinnedTab {
+            idx: 0,
+            cwd: "/repo".to_string(),
+            spawn: 1000,
+            resuming: false,
+        }];
         assert!(assign_codex_sessions(&unpinned, &HashSet::new(), &snap).is_empty());
     }
 

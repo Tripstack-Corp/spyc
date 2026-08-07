@@ -195,6 +195,14 @@ pub fn resume_uuid_from_command(command: &str) -> Option<String> {
     None
 }
 
+/// True when `command` resumes a codex session without naming it — `resume
+/// --last`, or a spyc restore whose session id was never captured. These are
+/// the only codex tabs Signal 1 cannot pin: `codex resume <UUID>` carries its
+/// identity, and a fresh `codex` writes a rollout that postdates the pane.
+pub fn is_resume_without_id(command: &str) -> bool {
+    command.split_whitespace().any(|t| t == "resume") && resume_uuid_from_command(command).is_none()
+}
+
 /// Find the rollout whose filename embeds `uuid` (codex names files
 /// `rollout-<ts>-<uuid>.jsonl`, and the uuid is unique).
 fn find_rollout_by_uuid(sessions_dir: &Path, uuid: &str) -> Option<PathBuf> {
@@ -212,6 +220,10 @@ pub struct RolloutMeta {
     pub uuid: String,
     pub cwd: String,
     pub started_secs: u64,
+    /// Last-write time. A *resumed* session appends to its original rollout
+    /// with a frozen `session_meta`, so `started_secs` can predate the pane by
+    /// weeks — this is the only field that shows the file is live.
+    pub mtime_secs: u64,
 }
 
 /// The trailing uuid of a `rollout-<ts>-<uuid>.jsonl` filename (the codex
@@ -235,10 +247,16 @@ pub fn scan_rollout_metas() -> Vec<RolloutMeta> {
             continue;
         };
         if let Some((cwd, started_secs)) = read_session_meta(&path) {
+            let mtime_secs = std::fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_secs());
             out.push(RolloutMeta {
                 uuid,
                 cwd,
                 started_secs,
+                mtime_secs,
             });
         }
     }
