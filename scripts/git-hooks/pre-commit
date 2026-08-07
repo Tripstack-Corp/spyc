@@ -7,4 +7,18 @@
 # Skip occasionally with `git commit --no-verify` (don't make a habit).
 
 set -e
+# Git exports GIT_DIR (and friends) into every hook's environment so the hook
+# operates on the repo it was invoked for — and GIT_DIR overrides `-C`, so a
+# third-party tool `make check` shells out to, that targets a DIFFERENT repo
+# via its own `-C <dir>`, still gets silently redirected here instead. C9
+# (#248) hit this for the test suite's own scratch-repo git spawns, fixed via
+# src/git/test_support.rs::git_command / GIT_REDIRECT_ENV. The same leak also
+# hit cargo-deny's advisory-db self-update (`git -C ~/.cargo/advisory-dbs/*
+# fetch && git reset --hard FETCH_HEAD`, run by the `deny` target): it
+# silently reset spyc's own checked-out branch to whatever the advisory-db
+# fetch left in FETCH_HEAD. Same var list as GIT_REDIRECT_ENV — keep the two
+# in sync.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_NAMESPACE \
+      GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX \
+      GIT_CEILING_DIRECTORIES
 exec make check
