@@ -9,6 +9,11 @@ use serde_json::{Value, json};
 use super::server::{notify_disconnect, pid_from_sock_path};
 use super::{mcp_log, socket_path};
 
+/// Why an agent config wasn't written. With neither `$XDG_STATE_HOME` nor
+/// `$HOME` set there is no socket path, so registering one would point the
+/// agent at an address nothing listens on — worse than no registration.
+const NO_STATE_DIR: &str = "no state directory ($XDG_STATE_HOME / $HOME unset) — MCP disabled";
+
 /// Status of MCP configuration for this directory.
 #[derive(Debug)]
 pub enum McpConfigStatus {
@@ -107,7 +112,7 @@ fn decide_takeover(
 /// is reachable, else None. Used by the startup takeover prompt so we
 /// can ask the user before clobbering another instance's registration.
 pub fn detect_existing_spyc(dir: &Path) -> Option<u32> {
-    let our_sock = socket_path();
+    let our_sock = socket_path()?;
     let path = dir.join(".mcp.json");
     let text = std::fs::read_to_string(&path).ok()?;
     let parsed: Value = serde_json::from_str(&text).ok()?;
@@ -223,7 +228,9 @@ fn ensure_spyc_in_mcp_json(
     path: &Path,
     takeover_allowed: bool,
 ) -> Result<McpConfigStatus, io::Error> {
-    let our_sock = socket_path();
+    let Some(our_sock) = socket_path() else {
+        return Err(io::Error::other(NO_STATE_DIR));
+    };
     let our_pid = std::process::id();
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
 
@@ -349,7 +356,9 @@ pub fn ensure_codex_config_toml(
     dir: &Path,
     takeover_allowed: bool,
 ) -> Result<McpConfigStatus, io::Error> {
-    let our_sock = socket_path();
+    let Some(our_sock) = socket_path() else {
+        return Err(io::Error::other(NO_STATE_DIR));
+    };
     let our_pid = std::process::id();
     let path = dir.join(".codex").join("config.toml");
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
@@ -486,7 +495,7 @@ pub fn ensure_codex_config_toml(
 /// `detect_existing_spyc` for the codex side; used by startup so a
 /// single takeover prompt covers both claude and codex.
 pub fn detect_existing_spyc_codex(dir: &Path) -> Option<u32> {
-    let our_sock = socket_path();
+    let our_sock = socket_path()?;
     let path = dir.join(".codex").join("config.toml");
     let text = std::fs::read_to_string(&path).ok()?;
     let parsed: toml::Value = toml::from_str(&text).ok()?;
@@ -521,7 +530,8 @@ pub enum ConfigCleanup {
 /// written by this running spyc, not a different (possibly successor) instance.
 /// Our socket path embeds our pid, so this is a sound "did we write it" proxy.
 fn sock_is_ours(sock_str: &str) -> bool {
-    socket_path().to_string_lossy() == sock_str
+    // No state dir → we never wrote a socket, so no entry can be ours.
+    socket_path().is_some_and(|p| p.to_string_lossy() == sock_str)
 }
 
 /// Shared core for `.mcp.json` spyc-entry removal. `should_remove` is given the
@@ -722,7 +732,7 @@ pub fn detect_existing_spyc_agy(dir: &Path) -> Option<u32> {
     let old_sock_str = parsed
         .pointer("/mcpServers/spyc/env/SPYC_MCP_SOCK")
         .and_then(|v| v.as_str())?;
-    live_owner_pid(old_sock_str, &socket_path())
+    live_owner_pid(old_sock_str, &socket_path()?)
 }
 
 /// Agy's counterpart to [`ensure_mcp_json`]. No enterprise-policy gate: that's a
@@ -793,7 +803,10 @@ mod tests {
     };
 
     fn our_sock() -> String {
-        crate::mcp::socket_path().to_string_lossy().into_owned()
+        crate::mcp::socket_path()
+            .expect("tests run with HOME set")
+            .to_string_lossy()
+            .into_owned()
     }
 
     /// A `.codex/config.toml` whose spyc entry points at `sock`, written into a

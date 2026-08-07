@@ -46,7 +46,9 @@ pub(super) fn discover_live_socket(caller_cwd: &Path) -> Option<UnixStream> {
         caller_cwd.display(),
     ));
     for pid in candidates {
-        let sock = socket_path_for(pid);
+        let Some(sock) = socket_path_for(pid) else {
+            continue;
+        };
         mcp_log(&format!("stdio: discover trying {}", sock.display()));
         match UnixStream::connect(&sock) {
             Ok(stream) => {
@@ -85,7 +87,12 @@ pub(super) fn discover_live_socket(caller_cwd: &Path) -> Option<UnixStream> {
 /// `.spyc-context-<pid>.json` markers. Returns the PIDs from the
 /// first ancestor that has any *trusted* matches; empty Vec otherwise.
 pub(super) fn collect_project_pids(start: &Path) -> Vec<u32> {
-    collect_project_pids_in(start, &state_dir())
+    // Without a state dir there are no trusted-root sidecars, and a marker
+    // with no sidecar is untrusted by definition — so nothing can match.
+    let Some(dir) = state_dir() else {
+        return Vec::new();
+    };
+    collect_project_pids_in(start, &dir)
 }
 
 /// As [`collect_project_pids`], but with the state dir injected so tests
@@ -371,7 +378,13 @@ pub fn start_socket_server(
     ctx_path: PathBuf,
     cmd_tx: std::sync::mpsc::Sender<McpRequest>,
 ) -> anyhow::Result<()> {
-    let sock = socket_path();
+    // Refuse rather than fall back: the pre-unification code bound into a
+    // world-readable bare `/tmp`, where a predictable socket name invites
+    // squatting. No MCP beats MCP on a path we don't trust.
+    let Some(sock) = socket_path() else {
+        mcp_log("socket: no state directory ($XDG_STATE_HOME / $HOME unset) — not serving");
+        anyhow::bail!("no state directory ($XDG_STATE_HOME / $HOME unset) — MCP server disabled");
+    };
 
     // Ensure the parent directory exists.
     if let Some(parent) = sock.parent() {
@@ -392,7 +405,9 @@ pub fn start_socket_server(
     // stdio discovery can verify a `.spyc-context-<pid>.json` marker
     // really belongs to a spyc rooted there — not a planted decoy. Done
     // before any connection is served.
-    write_root_marker(&state_dir(), &ctx_path);
+    if let Some(dir) = state_dir() {
+        write_root_marker(&dir, &ctx_path);
+    }
 
     let ctx_path = Arc::new(ctx_path);
     let cmd_tx = Arc::new(cmd_tx);
@@ -431,8 +446,12 @@ pub fn start_socket_server(
 
 /// Clean up the socket file and trusted-root sidecar on shutdown.
 pub fn cleanup_socket() {
-    let _ = std::fs::remove_file(socket_path());
-    let _ = std::fs::remove_file(root_marker_path_in(&state_dir(), std::process::id()));
+    if let Some(sock) = socket_path() {
+        let _ = std::fs::remove_file(sock);
+    }
+    if let Some(dir) = state_dir() {
+        let _ = std::fs::remove_file(root_marker_path_in(&dir, std::process::id()));
+    }
 }
 
 /// Extract the PID from a socket path like `mcp-12345.sock`.
