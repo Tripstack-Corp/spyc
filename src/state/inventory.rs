@@ -106,7 +106,8 @@ impl Inventory {
         let json_path = dir.join(format!("{id}.json"));
         std::fs::copy(path, &dat_path).map_err(|e| format!("copy failed: {e}"))?;
         let json = serde_json::to_string_pretty(&item).map_err(|e| format!("json: {e}"))?;
-        std::fs::write(&json_path, json).map_err(|e| format!("write meta: {e}"))?;
+        crate::fs::write_atomic(&json_path, json.as_bytes())
+            .map_err(|e| format!("write meta: {e}"))?;
         self.items.insert(id, item);
         Ok(())
     }
