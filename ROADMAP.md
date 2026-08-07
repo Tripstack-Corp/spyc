@@ -29,12 +29,21 @@ integration is the defining work track, not the trailing milestone.
 
 The structural foundation has been **done** for a while: the full MVU/Elm
 migration (Model/Runtime/ViewState split, effects-as-data, single message
-channel, pure render), the `app/mod.rs` decomposition (12.4k → ~1k lines,
-ceiling-guard-enforced), the 800-LoC file rule, the complete git→gix migration
+channel, pure render), the `app/mod.rs` decomposition (12.4k → ~1.4k lines,
+ceiling-guard-enforced at 1,500), the complete git→gix migration
 (100% in-process, guard-enforced, with in-house side-by-side diff/show/blame
 views), off-thread PagerStream (grep / git-view / agent transcripts on one
 seam), and unified input routing (`route_input`/`InputSink`, `Focus` as the
 routing authority).
+
+The **800-LoC file rule is a convention, not a guard** — AGENTS.md states it
+with an explicit escape hatch ("without a solid reason"), and the only ceiling
+guard in the tree is `mod_rs_stays_decomposed`, which caps `src/app/mod.rs`
+alone. Listing it above as a finished foundation read as compliance; roughly a
+dozen and a half files exceed 800 *production* lines (counting lines outside
+`#[cfg(test)]` modules — a raw `wc -l` badly overstates it, since the house
+convention keeps tests in the same file). `src/app/mouse.rs` is the outlier
+worth acting on.
 
 Since then the **thesis work has largely shipped** — the differentiators the
 competitive review ([`docs/COMPETITIVE_REVIEW.md`](docs/COMPETITIVE_REVIEW.md))
