@@ -378,7 +378,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                             },
                             "root": {
                                 "type": "string",
-                                "description": "Optional absolute path to resolve relative paths against instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root."
+                                "description": "Optional absolute path to resolve relative paths against instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root. Must be inside one of this spyc session's roots — anything else is rejected, and the error names the allowed set."
                             }
                         },
                         "required": ["path"]
@@ -401,7 +401,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                             },
                             "root": {
                                 "type": "string",
-                                "description": "Optional absolute path to walk instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root."
+                                "description": "Optional absolute path to walk instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root. Must be inside one of this spyc session's roots — anything else is rejected, and the error names the allowed set."
                             }
                         },
                         "required": ["query"]
@@ -424,7 +424,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                             },
                             "root": {
                                 "type": "string",
-                                "description": "Optional absolute path to search instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root."
+                                "description": "Optional absolute path to search instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root. Must be inside one of this spyc session's roots — anything else is rejected, and the error names the allowed set."
                             }
                         },
                         "required": ["pattern"]
@@ -507,7 +507,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                         "properties": {
                             "root": {
                                 "type": "string",
-                                "description": "Optional absolute path of the worktree to inspect instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root."
+                                "description": "Optional absolute path of the worktree to inspect instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root. Must be inside one of this spyc session's roots — anything else is rejected, and the error names the allowed set."
                             }
                         }
                     }
@@ -521,7 +521,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                             "limit": { "type": "integer", "description": "Max commits to return (default 20, capped at 500)." },
                             "root": {
                                 "type": "string",
-                                "description": "Optional absolute path of the worktree whose history to read instead of the user's focused column — e.g. a sibling worktree you're working in. Defaults to the focused column's worktree root."
+                                "description": "Optional absolute path of the worktree whose history to read instead of the user's focused column — e.g. a sibling worktree you're working in. Defaults to the focused column's worktree root. Must be inside one of this spyc session's roots — anything else is rejected, and the error names the allowed set."
                             }
                         }
                     }
@@ -547,7 +547,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                             },
                             "root": {
                                 "type": "string",
-                                "description": "Optional absolute path of the worktree to diff instead of the user's focused column — e.g. a sibling worktree you're working in. Defaults to the focused column's worktree root."
+                                "description": "Optional absolute path of the worktree to diff instead of the user's focused column — e.g. a sibling worktree you're working in. Defaults to the focused column's worktree root. Must be inside one of this spyc session's roots — anything else is rejected, and the error names the allowed set."
                             }
                         }
                     }
