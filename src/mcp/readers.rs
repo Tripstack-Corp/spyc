@@ -11,10 +11,10 @@ use crate::git::model::{DiffKind, DiffModel, FileStatus, Hunk, LineOrigin};
 /// agent passes one (it's working in a different worktree than the user's
 /// focused column — the scoping gap that otherwise forces a Bash fallback),
 /// else the focused column's [`search_root`]. The override must be an existing
-/// directory; it is **not** confined to the repo (the agent already has shell
-/// reach, so this grants no new capability — it just lets the structured tools
-/// follow the agent's actual working tree). Returns the reason string on a bad
-/// override so the handler can surface it.
+/// directory **inside one of [`allowed_roots`]**; `get_file_content`'s
+/// traversal check anchors on whatever this returns, so an unvalidated
+/// override would make that check decorative. Returns the reason string on a
+/// bad override so the handler can surface it.
 pub(super) fn effective_root(args: &Value, ctx_path: &Path) -> Result<PathBuf, String> {
     if let Some(root) = args["root"].as_str()
         && !root.is_empty()
@@ -23,9 +23,84 @@ pub(super) fn effective_root(args: &Value, ctx_path: &Path) -> Result<PathBuf, S
         if !p.is_dir() {
             return Err(format!("root: not a directory: {root}"));
         }
+        let allowed = allowed_roots(ctx_path);
+        if !is_within_allowed(&p, &allowed) {
+            let list = allowed
+                .iter()
+                .map(|r| r.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(format!(
+                "root: {root} is outside this spyc session's roots. Allowed (or any \
+                 directory inside them): {list}"
+            ));
+        }
         return Ok(p);
     }
     Ok(search_root(ctx_path))
+}
+
+/// The roots an MCP read tool may be pointed at. Deliberately
+/// **cursor-independent**: the agent's own worktree must stay reachable when
+/// the user browses the focused column elsewhere, or a rejected call just
+/// sends the agent to unscoped `Bash rg` — bypass, not safety
+/// (ROADMAP.md decisions log).
+///
+/// Anchored on the directory holding the context file, which is the same
+/// trusted root `write_root_marker` records for marker discovery — one root
+/// concept, not two.
+fn allowed_roots(ctx_path: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    let mut push = |p: PathBuf| {
+        if !p.as_os_str().is_empty() && !out.contains(&p) {
+            out.push(p);
+        }
+    };
+
+    // The trusted root: where this spyc writes its context marker.
+    let trusted = ctx_path.parent().map(Path::to_path_buf);
+    if let Some(t) = trusted.clone() {
+        push(t);
+    }
+
+    // Every worktree of the repo at that root — a sibling worktree the agent
+    // was handed by `create_worktree` is a legitimate target.
+    if let Some(t) = trusted
+        && let Some(wts) = crate::git::worktree::list(&t)
+    {
+        for wt in wts {
+            push(wt.path);
+        }
+    }
+
+    // The focused column's chain. Included, but never the whole set: these
+    // move with the user's cursor.
+    if let Ok(text) = std::fs::read_to_string(ctx_path)
+        && let Ok(v) = serde_json::from_str::<Value>(&text)
+    {
+        for key in ["search_root", "project_home", "cwd"] {
+            if let Some(s) = v[key].as_str()
+                && !s.is_empty()
+            {
+                push(PathBuf::from(s));
+            }
+        }
+    }
+
+    out
+}
+
+/// True when `candidate` is one of `allowed` or sits inside one. Compared in
+/// canonical form so a symlinked worktree path doesn't false-reject; falls
+/// back to a literal compare when either side can't be canonicalized, mirroring
+/// [`crate::mcp::server::root_matches`]. Narrowing to a subdirectory of an
+/// allowed root stays legal — it scopes down, never out.
+fn is_within_allowed(candidate: &Path, allowed: &[PathBuf]) -> bool {
+    let cand = std::fs::canonicalize(candidate).unwrap_or_else(|_| candidate.to_path_buf());
+    allowed.iter().any(|root| {
+        let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
+        cand == root || cand.starts_with(&root)
+    })
 }
 
 /// Pick the search root: prefer `search_root` from the context file (the
@@ -684,6 +759,94 @@ mod tests {
         let err =
             effective_root(&json!({ "root": bogus.display().to_string() }), &ctx).unwrap_err();
         assert!(err.contains("not a directory"), "got {err}");
+    }
+
+    #[test]
+    fn effective_root_rejects_an_override_outside_the_session_roots() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
+        let ctx = dir.join("ctx.json");
+        std::fs::write(
+            &ctx,
+            json!({ "cwd": dir.display().to_string() }).to_string(),
+        )
+        .unwrap();
+
+        // `/` is the whole point of the finding: it made get_file_content's
+        // canonicalize + starts_with check decorative.
+        let err = effective_root(&json!({ "root": "/" }), &ctx).unwrap_err();
+        assert!(err.contains("outside this spyc session's roots"), "got {err}");
+        // The error names the allowed set so the agent can self-correct
+        // instead of silently falling back to unscoped shell tools.
+        assert!(err.contains(&dir.display().to_string()), "got {err}");
+
+        // A real directory that simply isn't ours is refused the same way.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let err = effective_root(
+            &json!({ "root": elsewhere.path().display().to_string() }),
+            &ctx,
+        )
+        .unwrap_err();
+        assert!(err.contains("outside this spyc session's roots"), "got {err}");
+    }
+
+    #[test]
+    fn allowed_root_survives_the_user_browsing_elsewhere() {
+        // The cursor-independence invariant (ROADMAP decisions log): the
+        // agent's own working root must stay reachable when the focused
+        // column wanders. Anchoring validation on search_root alone would
+        // reject the agent mid-task, and a rejected call sends it to
+        // unscoped `Bash rg` — bypass, not safety.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let agent_dir = dir.join("agent-worktree");
+        std::fs::create_dir(&agent_dir).unwrap();
+        let far_away = tempfile::tempdir().unwrap();
+
+        // Context marker lives in `dir` (the trusted root), but every
+        // cursor-tracking field points at an unrelated project.
+        let ctx = dir.join("ctx.json");
+        std::fs::write(
+            &ctx,
+            json!({
+                "cwd": far_away.path().display().to_string(),
+                "project_home": far_away.path().display().to_string(),
+                "search_root": far_away.path().display().to_string(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        // Still accepted: it's inside the trusted root, which doesn't move.
+        assert_eq!(
+            effective_root(&json!({ "root": agent_dir.display().to_string() }), &ctx).unwrap(),
+            agent_dir
+        );
+    }
+
+    #[test]
+    fn allowed_root_accepts_a_symlinked_path_to_the_same_place() {
+        // Worktrees are commonly reached through a symlink (/tmp on macOS is
+        // itself one). A literal compare would false-reject and push the agent
+        // to the shell.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let real = dir.join("real");
+        std::fs::create_dir(&real).unwrap();
+        let ctx = dir.join("ctx.json");
+        std::fs::write(
+            &ctx,
+            json!({ "cwd": dir.display().to_string() }).to_string(),
+        )
+        .unwrap();
+
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        assert!(
+            effective_root(&json!({ "root": link.display().to_string() }), &ctx).is_ok(),
+            "a symlink to an allowed root must not be rejected"
+        );
     }
 
     #[test]
