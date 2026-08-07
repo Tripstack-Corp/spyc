@@ -775,7 +775,10 @@ mod tests {
         // `/` is the whole point of the finding: it made get_file_content's
         // canonicalize + starts_with check decorative.
         let err = effective_root(&json!({ "root": "/" }), &ctx).unwrap_err();
-        assert!(err.contains("outside this spyc session's roots"), "got {err}");
+        assert!(
+            err.contains("outside this spyc session's roots"),
+            "got {err}"
+        );
         // The error names the allowed set so the agent can self-correct
         // instead of silently falling back to unscoped shell tools.
         assert!(err.contains(&dir.display().to_string()), "got {err}");
@@ -787,7 +790,10 @@ mod tests {
             &ctx,
         )
         .unwrap_err();
-        assert!(err.contains("outside this spyc session's roots"), "got {err}");
+        assert!(
+            err.contains("outside this spyc session's roots"),
+            "got {err}"
+        );
     }
 
     #[test]
