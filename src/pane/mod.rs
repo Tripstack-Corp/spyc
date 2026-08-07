@@ -316,8 +316,13 @@ impl Pane {
         let bytes = input::encode_key(key);
         if !bytes.is_empty() {
             if crate::key_trace::is_enabled() {
+                // `app_cursor` is the child's DECCKM state. spyc always encodes
+                // the CSI form, so a child in application-cursor mode is waiting
+                // for `ESC O A` and gets `ESC [ A` — logged here because it is
+                // invisible from the byte stream alone.
+                let app_cursor = self.lock_parser().screen().application_cursor();
                 crate::key_trace::log_tx(&format!(
-                    "send_key code={:?} mods={:?} bytes={}",
+                    "send_key code={:?} mods={:?} bytes={} app_cursor={app_cursor}",
                     key.code,
                     key.modifiers,
                     preview_bytes(&bytes),
