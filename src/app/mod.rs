@@ -907,8 +907,9 @@ pub struct ViewState {
     /// only the drawn line has the width-driven truncation the user is looking at.
     pub chrome_rows: std::cell::RefCell<Vec<mouse::ChromeRow>>,
     /// A sustained same-direction wheel-scroll gesture over an agent's own view
-    /// (today: codex's `^T`), tracked so it can escalate to a page-sized step —
-    /// see `App::send_agent_view_scroll_keys`. `None` outside a gesture.
+    /// (today: codex's `^T`), tracked so a long one can escalate to a page-sized
+    /// step and so a short one can't open the view by accident — see
+    /// `App::send_agent_view_scroll_keys`. `None` outside a gesture.
     pub pane_scroll_streak: Option<mouse::PaneScrollStreak>,
     /// Set right after spyc sends an agent's `transcript_toggle_key`, so a fast
     /// follow-up wheel tick — arriving before the child has redrawn — doesn't see
