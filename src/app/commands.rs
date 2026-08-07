@@ -182,6 +182,13 @@ pub(super) fn cmd_date(app: &mut App, _args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
+/// `:about` — open the about page (`docs/ABOUT.md`, bundled) in the pager.
+/// Same target as the `Space a` binding.
+pub(super) fn cmd_about(app: &mut App, _args: &str) -> Vec<Effect> {
+    let _ = app.apply(&Action::About);
+    Vec::new()
+}
+
 /// `:why-status` — explain the active tab's agent-activity classification
 /// (debug aid, `docs/archive/AGENT_AWARENESS_PLAN.md`): the current state, its **source**
 /// (a semantic `report_status` self-report vs the output-timing fallback), and
