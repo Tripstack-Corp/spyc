@@ -115,7 +115,8 @@ use `terminal.clear()` per frame.
 
 ### Pane I/O
 
-- Keys go through `input::encode_key()`.
+- Keys go through `input::encode_key()`, which takes the child's DECCKM state
+  (`Pane::application_cursor`) so cursor keys use the form that child asked for.
 - Raw bytes use `pane.send_bytes()`.
 - Paste uses bracketed paste: `\x1b[200~`...`\x1b[201~`.
 - Resize checks `last_size` to avoid redundant ioctl/SIGWINCH.

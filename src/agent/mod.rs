@@ -805,8 +805,9 @@ mod tests {
         let agy = detect("agy")
             .wheel_scroll()
             .expect("agy scrolls on Shift+Arrow");
+        // Normal cursor-key mode — the bytes these bindings were verified against.
         let enc = |(code, mods)| {
-            crate::pane::input::encode_key(crossterm::event::KeyEvent::new(code, mods))
+            crate::pane::input::encode_key(crossterm::event::KeyEvent::new(code, mods), false)
         };
         assert_eq!(enc(agy.up), b"\x1b[1;2A");
         assert_eq!(enc(agy.down), b"\x1b[1;2B");
@@ -836,7 +837,7 @@ mod tests {
     #[test]
     fn codex_transcript_view_is_fully_specified() {
         let enc = |(code, mods)| {
-            crate::pane::input::encode_key(crossterm::event::KeyEvent::new(code, mods))
+            crate::pane::input::encode_key(crossterm::event::KeyEvent::new(code, mods), false)
         };
         let codex = detect("codex");
 

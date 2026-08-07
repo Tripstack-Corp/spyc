@@ -252,6 +252,96 @@ mod wake_tests {
 }
 
 #[cfg(test)]
+mod app_cursor_tests {
+    //! DECCKM through the real output path: the child's `ESC[?1h` arrives as pty
+    //! bytes on the reader channel, the parser worker parses it, and the mode the
+    //! encoder is handed is the one the worker recorded. `Pane::send_key` reads it
+    //! through `Pane::application_cursor` — the same `screen()` accessor asserted
+    //! here (a pty spawn in a unit test is what `pty_host`'s own tests document as
+    //! flaky, so the worker is the deepest deterministic seam).
+    use super::super::{PtyEvent, RxReturn, Wake, parser_worker};
+    use crate::pane::input::encode_key;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_childs_decckm_output_reaches_the_key_encoder() {
+        let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
+        let parser = Arc::new(Mutex::new(vt100::Parser::new(24, 80, 100)));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (rx_home_tx, _rx_home_rx) = std::sync::mpsc::channel();
+        let worker = {
+            let parser = Arc::clone(&parser);
+            let stop = Arc::clone(&stop);
+            let guard = RxReturn {
+                rx: Some(rx),
+                home: rx_home_tx,
+            };
+            let wake = Wake {
+                pending: Arc::new(AtomicBool::new(false)),
+                fire: Arc::new(|| {}),
+            };
+            std::thread::spawn(move || {
+                parser_worker(
+                    guard,
+                    stop,
+                    parser,
+                    Arc::new(AtomicU64::new(0)),
+                    false,
+                    wake,
+                );
+            })
+        };
+
+        let app_cursor = || {
+            parser
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .screen()
+                .application_cursor()
+        };
+        let up = |app_cursor| {
+            encode_key(
+                KeyEvent::new(KeyCode::Up, KeyModifiers::empty()),
+                app_cursor,
+            )
+        };
+        let settle = |label: &str, want: bool| {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline {
+                if app_cursor() == want {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            panic!("timed out waiting for {label}");
+        };
+
+        assert_eq!(
+            up(app_cursor()),
+            b"\x1b[A",
+            "before the child says anything"
+        );
+
+        tx.send(PtyEvent::Bytes(b"\x1b[?1h".to_vec()))
+            .expect("worker alive");
+        settle("the worker to record DECCKM", true);
+        assert_eq!(up(app_cursor()), b"\x1bOA", "child asked for SS3 arrows");
+
+        tx.send(PtyEvent::Bytes(b"\x1b[?1l".to_vec()))
+            .expect("worker alive");
+        settle("the worker to record the DECCKM reset", false);
+        assert_eq!(up(app_cursor()), b"\x1b[A", "child went back to normal");
+
+        stop.store(true, Ordering::Release);
+        drop(tx);
+        let _ = worker.join();
+    }
+}
+
+#[cfg(test)]
 mod recovery_tests {
     use super::super::rebuild_parser_preserving_size;
 

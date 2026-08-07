@@ -8,7 +8,14 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-pub fn encode_key(ev: KeyEvent) -> Vec<u8> {
+/// Encode `ev` for a child whose DECCKM (cursor-key) state is `app_cursor`
+/// (`vt100::Screen::application_cursor` — set by the child's `ESC[?1h`).
+///
+/// A child in application-cursor mode waits for the SS3 arrow form (`ESC O A`)
+/// and a strict one silently drops the CSI form, which presents as a pane that
+/// ignores the arrow keys. Pass `false` for a pty spyc doesn't emulate: no mode
+/// is tracked, and CSI is what an un-negotiated terminal sends.
+pub fn encode_key(ev: KeyEvent, app_cursor: bool) -> Vec<u8> {
     use KeyCode as K;
     let ctrl = ev.modifiers.contains(KeyModifiers::CONTROL);
     let alt = ev.modifiers.contains(KeyModifiers::ALT);
@@ -68,12 +75,12 @@ pub fn encode_key(ev: KeyEvent) -> Vec<u8> {
         // Cursor + edit keys carry their Ctrl/Alt/Shift modifiers through the
         // standard xterm encoding (Ctrl+Right = word-motion, Shift+Arrow =
         // selection, etc.); unmodified, each emits its bare sequence verbatim.
-        K::Up => push_csi_final(&mut out, ev.modifiers, b'A'),
-        K::Down => push_csi_final(&mut out, ev.modifiers, b'B'),
-        K::Right => push_csi_final(&mut out, ev.modifiers, b'C'),
-        K::Left => push_csi_final(&mut out, ev.modifiers, b'D'),
-        K::Home => push_csi_final(&mut out, ev.modifiers, b'H'),
-        K::End => push_csi_final(&mut out, ev.modifiers, b'F'),
+        K::Up => push_cursor_key(&mut out, ev.modifiers, app_cursor, b'A'),
+        K::Down => push_cursor_key(&mut out, ev.modifiers, app_cursor, b'B'),
+        K::Right => push_cursor_key(&mut out, ev.modifiers, app_cursor, b'C'),
+        K::Left => push_cursor_key(&mut out, ev.modifiers, app_cursor, b'D'),
+        K::Home => push_cursor_key(&mut out, ev.modifiers, app_cursor, b'H'),
+        K::End => push_cursor_key(&mut out, ev.modifiers, app_cursor, b'F'),
         K::PageUp => push_csi_tilde(&mut out, ev.modifiers, 5),
         K::PageDown => push_csi_tilde(&mut out, ev.modifiers, 6),
         K::Delete => push_csi_tilde(&mut out, ev.modifiers, 3),
@@ -121,14 +128,20 @@ fn push_dec(out: &mut Vec<u8>, n: u8) {
     out.push(b'0' + n % 10);
 }
 
-/// Cursor/edit keys on the `CSI [1;<mod>] <final>` form (arrows, Home, End):
-/// bare when unmodified (`ESC [ A`), parameterized when modified
-/// (`ESC [ 1 ; 5 C` = Ctrl+Right).
-fn push_csi_final(out: &mut Vec<u8>, m: KeyModifiers, final_byte: u8) {
-    out.extend_from_slice(b"\x1b[");
+/// Cursor keys (arrows, Home, End) — the set DECCKM governs.
+///
+/// Unmodified: `ESC [ A` normally, `ESC O A` when the child set application
+/// cursor mode. Modified: always the parameterized CSI form
+/// (`ESC [ 1 ; 5 C` = Ctrl+Right) — xterm switches only the *unmodified* keys,
+/// so ctrl/shift/alt-arrow navigation is mode-independent.
+fn push_cursor_key(out: &mut Vec<u8>, m: KeyModifiers, app_cursor: bool, final_byte: u8) {
     if let Some(p) = modifier_param(m) {
-        out.extend_from_slice(b"1;");
+        out.extend_from_slice(b"\x1b[1;");
         push_dec(out, p);
+    } else if app_cursor {
+        out.extend_from_slice(b"\x1bO");
+    } else {
+        out.extend_from_slice(b"\x1b[");
     }
     out.push(final_byte);
 }
@@ -503,87 +516,256 @@ mod tests {
     fn k_mod(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, mods)
     }
+    /// Encode for a child in NORMAL cursor-key mode — every child that never
+    /// touches DECCKM, which is the overwhelming majority.
+    fn enc(ev: KeyEvent) -> Vec<u8> {
+        encode_key(ev, false)
+    }
+    /// The six keys DECCKM governs, with the final byte each carries.
+    const CURSOR_KEYS: [(KeyCode, u8); 6] = [
+        (KeyCode::Up, b'A'),
+        (KeyCode::Down, b'B'),
+        (KeyCode::Right, b'C'),
+        (KeyCode::Left, b'D'),
+        (KeyCode::Home, b'H'),
+        (KeyCode::End, b'F'),
+    ];
+    /// A parser fed `escapes`, standing in for the child's declared state.
+    fn child_mode(escapes: &[u8]) -> bool {
+        let mut p = vt100::Parser::new(24, 80, 100);
+        p.process(escapes);
+        p.screen().application_cursor()
+    }
 
     #[test]
     fn plain_char() {
-        assert_eq!(encode_key(k(KeyCode::Char('a'))), b"a");
+        assert_eq!(enc(k(KeyCode::Char('a'))), b"a");
     }
 
     #[test]
     fn ctrl_letter() {
-        assert_eq!(encode_key(k_ctrl(KeyCode::Char('c'))), vec![0x03]);
-        assert_eq!(encode_key(k_ctrl(KeyCode::Char('a'))), vec![0x01]);
+        assert_eq!(enc(k_ctrl(KeyCode::Char('c'))), vec![0x03]);
+        assert_eq!(enc(k_ctrl(KeyCode::Char('a'))), vec![0x01]);
     }
 
     #[test]
     fn enter_is_cr() {
-        assert_eq!(encode_key(k(KeyCode::Enter)), b"\r");
+        assert_eq!(enc(k(KeyCode::Enter)), b"\r");
     }
 
     #[test]
     fn arrow_up() {
-        assert_eq!(encode_key(k(KeyCode::Up)), b"\x1b[A");
+        assert_eq!(enc(k(KeyCode::Up)), b"\x1b[A");
+    }
+
+    /// The contract: cursor keys follow the CHILD's declared mode, and the mode
+    /// comes from the child's own escape bytes (driven through a real parser
+    /// here, exactly as `Pane::application_cursor` reads it).
+    ///
+    /// A child that set DECCKM and parses strictly drops the CSI form — arrows
+    /// dead, bare control bytes (`^C`) still live, which is the asymmetry that
+    /// made this look like an unresponsive pane rather than an encoding bug.
+    #[test]
+    fn cursor_keys_follow_the_childs_declared_mode() {
+        for (code, final_byte) in CURSOR_KEYS {
+            // Untouched: no child has spoken, so the normal CSI form.
+            assert!(!child_mode(b""), "a fresh parser is in normal mode");
+            assert_eq!(
+                encode_key(k(code), child_mode(b"")),
+                [b"\x1b[".as_slice(), &[final_byte]].concat(),
+                "{code:?} before any DECCKM"
+            );
+
+            // `ESC[?1h` — application cursor keys ⇒ SS3.
+            assert!(child_mode(b"\x1b[?1h"), "`ESC[?1h` sets DECCKM");
+            assert_eq!(
+                encode_key(k(code), child_mode(b"\x1b[?1h")),
+                [b"\x1bO".as_slice(), &[final_byte]].concat(),
+                "{code:?} in application-cursor mode"
+            );
+
+            // `ESC[?1l` — back to normal, and so is the encoding.
+            assert!(!child_mode(b"\x1b[?1h\x1b[?1l"), "`ESC[?1l` resets DECCKM");
+            assert_eq!(
+                encode_key(k(code), child_mode(b"\x1b[?1h\x1b[?1l")),
+                [b"\x1b[".as_slice(), &[final_byte]].concat(),
+                "{code:?} after DECCKM reset"
+            );
+        }
+    }
+
+    /// Modified cursor keys keep the CSI form in BOTH modes — xterm switches only
+    /// the unmodified keys, so ctrl/shift/alt-arrow navigation inside a child
+    /// must be byte-identical either way.
+    #[test]
+    fn modified_cursor_keys_ignore_decckm() {
+        let mod_sets = [
+            KeyModifiers::CONTROL,
+            KeyModifiers::SHIFT,
+            KeyModifiers::ALT,
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT,
+        ];
+        for (code, _) in CURSOR_KEYS {
+            for mods in mod_sets {
+                let normal = encode_key(k_mod(code, mods), false);
+                let application = encode_key(k_mod(code, mods), true);
+                assert_eq!(
+                    normal, application,
+                    "{code:?}+{mods:?} must not change with DECCKM"
+                );
+                assert!(
+                    normal.starts_with(b"\x1b[1;"),
+                    "{code:?}+{mods:?} stays on the parameterized CSI form: {normal:?}"
+                );
+            }
+        }
+    }
+
+    /// Everything the encoder handles that DECCKM does NOT govern: identical
+    /// bytes in both modes. The guard that this fix reaches only the six cursor
+    /// keys — a child in application mode still gets today's Enter, Tab, tilde
+    /// keys and function keys.
+    #[test]
+    fn only_cursor_keys_respond_to_decckm() {
+        let untouched = [
+            k(KeyCode::Char('a')),
+            k_ctrl(KeyCode::Char('c')),
+            k_mod(KeyCode::Char('x'), KeyModifiers::ALT),
+            k(KeyCode::Enter),
+            k_mod(KeyCode::Enter, KeyModifiers::ALT),
+            k(KeyCode::Tab),
+            k(KeyCode::BackTab),
+            k(KeyCode::Backspace),
+            k(KeyCode::Esc),
+            k(KeyCode::PageUp),
+            k(KeyCode::PageDown),
+            k(KeyCode::Delete),
+            k(KeyCode::Insert),
+            k(KeyCode::F(1)),
+            k(KeyCode::F(5)),
+            k(KeyCode::F(12)),
+        ];
+        for ev in untouched {
+            assert_eq!(
+                encode_key(ev, false),
+                encode_key(ev, true),
+                "{:?} is not a cursor key — DECCKM must not touch it",
+                ev.code
+            );
+        }
+    }
+
+    /// Regression table for a child that never touches DECCKM (the common case):
+    /// every key the encoder handles, byte-for-byte as it was before the mode
+    /// argument existed. If this table changes, somebody's pane input changed.
+    #[test]
+    fn normal_mode_encoding_is_unchanged() {
+        let ctrl = KeyModifiers::CONTROL;
+        let shift = KeyModifiers::SHIFT;
+        let alt = KeyModifiers::ALT;
+        let table: [(KeyEvent, &[u8]); 32] = [
+            (k(KeyCode::Char('a')), b"a"),
+            (k_mod(KeyCode::Char('x'), alt), b"\x1bx"),
+            (k_ctrl(KeyCode::Char('c')), &[0x03]),
+            (k_ctrl(KeyCode::Char(' ')), &[0x00]),
+            (k_ctrl(KeyCode::Char('\\')), &[0x1c]),
+            (k_ctrl(KeyCode::Char('?')), &[0x1f]),
+            (k(KeyCode::Enter), b"\r"),
+            (k_mod(KeyCode::Enter, shift), b"\n"),
+            (k(KeyCode::Tab), b"\t"),
+            (k(KeyCode::BackTab), b"\x1b[Z"),
+            (k(KeyCode::Backspace), &[0x7f]),
+            (k(KeyCode::Esc), &[0x1b]),
+            (k(KeyCode::Up), b"\x1b[A"),
+            (k(KeyCode::Down), b"\x1b[B"),
+            (k(KeyCode::Right), b"\x1b[C"),
+            (k(KeyCode::Left), b"\x1b[D"),
+            (k(KeyCode::Home), b"\x1b[H"),
+            (k(KeyCode::End), b"\x1b[F"),
+            (k_mod(KeyCode::Up, ctrl), b"\x1b[1;5A"),
+            (k_mod(KeyCode::Home, shift), b"\x1b[1;2H"),
+            (k_mod(KeyCode::Up, KeyModifiers::SUPER), b"\x1b[A"),
+            (k(KeyCode::PageUp), b"\x1b[5~"),
+            (k(KeyCode::PageDown), b"\x1b[6~"),
+            (k(KeyCode::Delete), b"\x1b[3~"),
+            (k(KeyCode::Insert), b"\x1b[2~"),
+            (k_mod(KeyCode::Delete, ctrl), b"\x1b[3;5~"),
+            (k(KeyCode::F(1)), b"\x1bOP"),
+            (k(KeyCode::F(4)), b"\x1bOS"),
+            (k_mod(KeyCode::F(1), shift), b"\x1b[1;2P"),
+            (k(KeyCode::F(5)), b"\x1b[15~"),
+            (k(KeyCode::F(12)), b"\x1b[24~"),
+            (k(KeyCode::F(13)), b""), // beyond F12 ⇒ nothing happened
+        ];
+        for (ev, expected) in table {
+            assert_eq!(
+                enc(ev),
+                expected,
+                "{:?}+{:?} normal-mode bytes",
+                ev.code,
+                ev.modifiers
+            );
+        }
+    }
+
+    /// A restored pane gets a fresh emulator, so it starts in normal mode
+    /// whatever the child had declared before the save — no cursor-key state is
+    /// persisted (nor could be: the mode belongs to the process, and a restored
+    /// pane spawns a new one, which re-declares as it draws).
+    #[test]
+    fn a_restored_pane_starts_in_normal_cursor_mode() {
+        assert!(!child_mode(b""), "a fresh parser reports normal mode");
+        assert_eq!(encode_key(k(KeyCode::Up), child_mode(b"")), b"\x1b[A");
     }
 
     #[test]
     fn f1_through_f12() {
-        assert_eq!(encode_key(k(KeyCode::F(1))), b"\x1bOP");
-        assert_eq!(encode_key(k(KeyCode::F(5))), b"\x1b[15~");
-        assert_eq!(encode_key(k(KeyCode::F(12))), b"\x1b[24~");
+        assert_eq!(enc(k(KeyCode::F(1))), b"\x1bOP");
+        assert_eq!(enc(k(KeyCode::F(5))), b"\x1b[15~");
+        assert_eq!(enc(k(KeyCode::F(12))), b"\x1b[24~");
     }
 
     /// Unmodified edit/nav keys must stay byte-identical to the pre-modifier
     /// encoding (no regression for the common case).
     #[test]
     fn unmodified_special_keys_unchanged() {
-        assert_eq!(encode_key(k(KeyCode::Home)), b"\x1b[H");
-        assert_eq!(encode_key(k(KeyCode::End)), b"\x1b[F");
-        assert_eq!(encode_key(k(KeyCode::Delete)), b"\x1b[3~");
-        assert_eq!(encode_key(k(KeyCode::Insert)), b"\x1b[2~");
-        assert_eq!(encode_key(k(KeyCode::PageUp)), b"\x1b[5~");
-        assert_eq!(encode_key(k(KeyCode::PageDown)), b"\x1b[6~");
+        assert_eq!(enc(k(KeyCode::Home)), b"\x1b[H");
+        assert_eq!(enc(k(KeyCode::End)), b"\x1b[F");
+        assert_eq!(enc(k(KeyCode::Delete)), b"\x1b[3~");
+        assert_eq!(enc(k(KeyCode::Insert)), b"\x1b[2~");
+        assert_eq!(enc(k(KeyCode::PageUp)), b"\x1b[5~");
+        assert_eq!(enc(k(KeyCode::PageDown)), b"\x1b[6~");
     }
 
     /// Ctrl+Arrow (word motion in readline/editors) → `CSI 1 ; 5 <final>`.
     #[test]
     fn ctrl_arrows_encode_word_motion() {
         let c = KeyModifiers::CONTROL;
-        assert_eq!(encode_key(k_mod(KeyCode::Right, c)), b"\x1b[1;5C");
-        assert_eq!(encode_key(k_mod(KeyCode::Left, c)), b"\x1b[1;5D");
-        assert_eq!(encode_key(k_mod(KeyCode::Up, c)), b"\x1b[1;5A");
-        assert_eq!(encode_key(k_mod(KeyCode::Down, c)), b"\x1b[1;5B");
+        assert_eq!(enc(k_mod(KeyCode::Right, c)), b"\x1b[1;5C");
+        assert_eq!(enc(k_mod(KeyCode::Left, c)), b"\x1b[1;5D");
+        assert_eq!(enc(k_mod(KeyCode::Up, c)), b"\x1b[1;5A");
+        assert_eq!(enc(k_mod(KeyCode::Down, c)), b"\x1b[1;5B");
     }
 
     /// Shift/Alt arrows + Home/End use the same form with their own param.
     #[test]
     fn shift_and_alt_modifiers() {
-        assert_eq!(
-            encode_key(k_mod(KeyCode::Up, KeyModifiers::SHIFT)),
-            b"\x1b[1;2A"
-        );
-        assert_eq!(
-            encode_key(k_mod(KeyCode::Left, KeyModifiers::ALT)),
-            b"\x1b[1;3D"
-        );
-        assert_eq!(
-            encode_key(k_mod(KeyCode::Home, KeyModifiers::SHIFT)),
-            b"\x1b[1;2H"
-        );
-        assert_eq!(
-            encode_key(k_mod(KeyCode::End, KeyModifiers::SHIFT)),
-            b"\x1b[1;2F"
-        );
+        assert_eq!(enc(k_mod(KeyCode::Up, KeyModifiers::SHIFT)), b"\x1b[1;2A");
+        assert_eq!(enc(k_mod(KeyCode::Left, KeyModifiers::ALT)), b"\x1b[1;3D");
+        assert_eq!(enc(k_mod(KeyCode::Home, KeyModifiers::SHIFT)), b"\x1b[1;2H");
+        assert_eq!(enc(k_mod(KeyCode::End, KeyModifiers::SHIFT)), b"\x1b[1;2F");
     }
 
     /// Tilde keys (Delete, PageUp) carry the modifier param before the `~`.
     #[test]
     fn modified_tilde_keys() {
         assert_eq!(
-            encode_key(k_mod(KeyCode::Delete, KeyModifiers::CONTROL)),
+            enc(k_mod(KeyCode::Delete, KeyModifiers::CONTROL)),
             b"\x1b[3;5~"
         );
         assert_eq!(
-            encode_key(k_mod(KeyCode::PageUp, KeyModifiers::SHIFT)),
+            enc(k_mod(KeyCode::PageUp, KeyModifiers::SHIFT)),
             b"\x1b[5;2~"
         );
     }
@@ -591,12 +773,9 @@ mod tests {
     /// F1–F4 flip from SS3 to CSI when modified; F5+ stay tilde-form.
     #[test]
     fn modified_function_keys() {
+        assert_eq!(enc(k_mod(KeyCode::F(1), KeyModifiers::SHIFT)), b"\x1b[1;2P");
         assert_eq!(
-            encode_key(k_mod(KeyCode::F(1), KeyModifiers::SHIFT)),
-            b"\x1b[1;2P"
-        );
-        assert_eq!(
-            encode_key(k_mod(KeyCode::F(5), KeyModifiers::CONTROL)),
+            enc(k_mod(KeyCode::F(5), KeyModifiers::CONTROL)),
             b"\x1b[15;5~"
         );
     }
@@ -605,7 +784,7 @@ mod tests {
     #[test]
     fn combined_modifiers_sum() {
         assert_eq!(
-            encode_key(k_mod(
+            enc(k_mod(
                 KeyCode::Right,
                 KeyModifiers::CONTROL | KeyModifiers::SHIFT
             )),
@@ -617,10 +796,7 @@ mod tests {
     /// sequence (no regression vs. today, and no sequence apps can't parse).
     #[test]
     fn super_only_falls_back_to_bare() {
-        assert_eq!(
-            encode_key(k_mod(KeyCode::Up, KeyModifiers::SUPER)),
-            b"\x1b[A"
-        );
+        assert_eq!(enc(k_mod(KeyCode::Up, KeyModifiers::SUPER)), b"\x1b[A");
     }
 
     #[test]
