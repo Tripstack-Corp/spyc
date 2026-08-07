@@ -119,6 +119,13 @@ spyc is Model-View-Update. Keep these — they're what make it reason-about-able
 
 - **Commit subject = actual scope, not its caption.** A commit touching a feature + a version bump says both (`feat: agy agent + bump cargo-deny`). The body holds the long form. **It must be a conventional `type(scope): subject`** — `filter_unconventional` drops anything else, so an untyped subject silently vanishes from the CHANGELOG and can't be fixed after a squash-merge (see `cliff.toml`'s retro-typing preprocessors for the cleanup that costs).
 - **Squash on merge** (`bkt pr merge <N> --strategy squash`) — `main`'s log becomes one commit per shipped shape.
+- **Merging straight after `gh pr update-branch` races the checks.** The update pushes a new head, which re-triggers CI; merge before GitHub has registered the new runs and it refuses with `2 of 2 required status checks are expected`. Branch protection requires up-to-date *and* green, so a sequence of PRs hits this on every one after the first. Wait for the checks to leave `pending`, then merge, and retry a few times — the second attempt usually lands:
+
+  ```sh
+  gh pr update-branch <N>
+  until [ "$(gh pr checks <N> --json bucket --jq 'all(.[]; .bucket!="pending")')" = "true" ]; do sleep 20; done
+  for i in 1 2 3; do gh pr merge <N> --squash && break; gh pr update-branch <N>; sleep 25; done
+  ```
 - **Version-line conflicts are extinct on CURRENT.** A static `N.M.0-CURRENT` means no PR touches the version line, so concurrent PRs can't collide on it. The `spyc-semver` merge driver (`src/merge_driver.rs`, installed into git config on spyc launch via `.gitattributes`) therefore sits dormant here; it still earns its keep on release branches, where patch bumps resume. It parses plain `MAJOR.MINOR.PATCH` only — a conflict against a `-CURRENT` line is declined and reported as a real conflict, which is correct, since a version-line conflict on CURRENT means something unexpected happened. `Cargo.lock` keeps `merge=ours` + a `cargo` regen.
 - **`CHANGELOG.md` is git-cliff-generated from v1.57.0** (config `cliff.toml`): the section comes from the commit *type*, the line from `scope: subject` — so **the commit message _is_ the changelog entry** (a category-spanning PR wants multiple well-typed commits). v1.56.0 and earlier are frozen hand-written history, left verbatim. Preview with `make changelog`; release in two steps — `make release-prep VERSION=x.y.z` on a release branch, then `make release-tag VERSION=x.y.z` on `main` once that PR merged.
 
