@@ -144,7 +144,7 @@ impl History {
             std::fs::create_dir_all(parent)?;
         }
         let text: String = self.entries.join("\n") + "\n";
-        std::fs::write(&path, text)
+        crate::fs::write_atomic(&path, text.as_bytes())
     }
 }
 

@@ -199,7 +199,7 @@ impl Graveyard {
         // orphan tarball (cleaned up by health check) rather than
         // an entry with no payload.
         let json = serde_json::to_string_pretty(&entry).map_err(std::io::Error::other)?;
-        std::fs::write(&json_path, json)?;
+        crate::fs::write_atomic(&json_path, json.as_bytes())?;
         Ok(entry)
     }
 
