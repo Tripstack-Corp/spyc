@@ -60,6 +60,26 @@ with **`:hooks on|on!|off`**.
 **Debug:** **`:why-status`** flashes the active tab's state + source; **`:activity
 dump`** opens a pager with every pane's derivation.
 
+### How the hooks get written
+
+Each agent's hook writer/cleaner pair (`mcp::{ensure,cleanup}_{codex,agy}_status_hooks`)
+mirrors the claude pair, and all three share the same three properties:
+
+- **Byte-idempotent merge** — spyc splices its entry into the user's existing
+  config rather than rewriting the file. Re-running produces identical bytes,
+  so a repeated launch never churns the file.
+- **Git-tracked guard** — spyc refuses to modify a config the repo tracks.
+  These files are the user's (`.codex/config.toml` carries their `model` and
+  `approval_policy`), and silently rewriting a committed one is data loss.
+- **`--report-status` is the "ours" marker** — cleanup removes only entries
+  invoking spyc's own reporter, so a hand-written hook of the user's survives
+  teardown.
+
+They all ride the same `mcp_config_dirs` teardown path. Non-live-reload agents
+(codex, agy) additionally get their hooks written *pre-spawn* for an
+already-consented repo via `maybe_preinstall_startup_hooks`, because they read
+their config once at startup and would otherwise miss them until next launch.
+
 ---
 
 ## 2. Notifications — the ping when an agent needs you
