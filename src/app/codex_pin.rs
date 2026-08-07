@@ -62,6 +62,19 @@ fn assign_codex_sessions(
     out
 }
 
+/// Whether a codex tab is recent enough to keep trying to pin: within
+/// [`PIN_WINDOW`] of its last output, or of its spawn if it hasn't emitted yet.
+///
+/// Pure so the spawn-vs-output distinction is testable without a live pane — it is
+/// the fix for the wrong-transcript bug and deserves to be pinned by a test rather
+/// than inferred from a timer.
+fn codex_pin_window_open(
+    last_output_at: Option<std::time::Instant>,
+    spawn_at: std::time::Instant,
+) -> bool {
+    last_output_at.unwrap_or(spawn_at).elapsed() < PIN_WINDOW
+}
+
 /// Same-directory check tolerating the macOS `/private` symlink, in either
 /// direction (the rollout's `session_meta` cwd vs the tab's canonicalized cwd).
 fn cwd_eq(session_cwd: &str, tab_cwd: &str) -> bool {
@@ -71,14 +84,27 @@ fn cwd_eq(session_cwd: &str, tab_cwd: &str) -> bool {
 }
 
 impl App {
-    /// Whether any codex tab is still unpinned and recently spawned — i.e. worth
-    /// a scan. Past [`PIN_WINDOW`] we stop (the resolver heuristic takes over),
-    /// so the scan loop naturally quiesces once codex has written its rollout.
+    /// Whether any codex tab is still unpinned and recently ACTIVE — i.e. worth a
+    /// scan.
+    ///
+    /// The window runs from the pane's last output, not its spawn, and that
+    /// distinction is the whole bug it fixes. codex writes its rollout when it first
+    /// does something, not when it starts; a spawn-anchored window closed 30s after
+    /// launch, so a tab you opened and read for a minute before typing was never
+    /// pinned — permanently. `^a v` then fell through to the mtime heuristic, which
+    /// hands every pane in a cwd to whichever codex session is *busiest*, including
+    /// another spyc instance's. That is exactly how it came to show the wrong
+    /// conversation.
+    ///
+    /// Still quiesces, on two independent conditions: a pinned tab drops out
+    /// immediately (`codex_session_id` is set), and an idle one drops out
+    /// [`PIN_WINDOW`] after it stops emitting. So a codex that never writes a
+    /// rollout costs one scan per output burst while it is active, not forever.
     fn needs_codex_pin(&self) -> bool {
         self.runtime.pane_tabs.as_ref().is_some_and(|tabs| {
             tabs.tabs().iter().any(|e| {
                 e.info.codex_session_id.is_none()
-                    && e.info.spawn_at.elapsed() < PIN_WINDOW
+                    && codex_pin_window_open(e.info.last_output_at, e.info.spawn_at)
                     && crate::agent::detect(&e.info.command).kind() == AgentKind::Codex
             })
         })
@@ -232,5 +258,48 @@ mod tests {
         assert!(cwd_eq("/private/var/x", "/var/x"));
         assert!(cwd_eq("/var/x", "/private/var/x"));
         assert!(!cwd_eq("/a", "/b"));
+    }
+    /// **The wrong-transcript bug (#230).** codex writes its rollout when it first
+    /// does something, not at spawn. A window anchored to spawn therefore closed on
+    /// a tab you opened and read for a while before typing — leaving it permanently
+    /// unpinned, so `^a v` fell through to the mtime heuristic and showed whichever
+    /// codex session was busiest (possibly another spyc instance's).
+    #[test]
+    fn the_pin_window_follows_output_not_spawn() {
+        use std::time::{Duration, Instant};
+        // `checked_sub`: an `Instant` can sit near the monotonic clock's origin on a
+        // freshly booted machine, where subtracting would underflow.
+        let long_ago = Instant::now()
+            .checked_sub(PIN_WINDOW + Duration::from_secs(5))
+            .expect("monotonic clock is past PIN_WINDOW in any real run");
+
+        // Spawned well outside the window and never emitted: nothing to pin against
+        // yet, and no reason to keep scanning.
+        assert!(
+            !codex_pin_window_open(None, long_ago),
+            "an idle, never-active tab should not hold the scan open"
+        );
+
+        // Same old spawn, but it just emitted — its rollout exists NOW, which is
+        // precisely when a pin becomes possible. The old spawn-anchored check gave
+        // up here, which is the bug.
+        assert!(
+            codex_pin_window_open(Some(Instant::now()), long_ago),
+            "recent output must re-open the window regardless of spawn age"
+        );
+
+        // Output that has itself gone stale closes it again, so the scan quiesces
+        // instead of running forever against a codex that never writes a rollout.
+        let a_window_ago = Instant::now()
+            .checked_sub(PIN_WINDOW)
+            .expect("monotonic clock is past PIN_WINDOW in any real run");
+        assert!(!codex_pin_window_open(Some(long_ago), a_window_ago));
+    }
+
+    /// A freshly spawned tab that hasn't emitted yet is still worth scanning — the
+    /// common case, and the one the original window was written for.
+    #[test]
+    fn a_fresh_tab_is_scannable_before_any_output() {
+        assert!(codex_pin_window_open(None, std::time::Instant::now()));
     }
 }

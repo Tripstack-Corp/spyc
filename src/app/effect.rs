@@ -352,8 +352,9 @@ pub enum ClipMsg {
     /// `"yanked prompt: {preview}{…}"` — preview = `text.chars().take(60)`,
     /// `…` iff `text.len() > 60` (byte length).
     Prompt,
-    /// `"copied the status line"` — a click on the status bar. Carries no count:
-    /// it is always exactly one line, so a number would be noise.
+    /// `"copied: {preview}{…}"` — a drag-selected substring of a single-line chrome
+    /// surface (status bar, pane divider). Echoes what was taken, because the whole
+    /// point is picking one item out of the line and the user should see which.
     StatusLine,
     /// `"copied {count} name(s)"` / `"copied {count} path(s)"` — a file-list row
     /// selection. `count` is carried because a name may contain a newline, so it
@@ -374,7 +375,11 @@ impl ClipMsg {
                 format!("yanked path: {preview}{ellipsis}")
             }
             Self::MultiPath { count } => format!("yanked {count} paths"),
-            Self::StatusLine => "copied the status line".to_string(),
+            Self::StatusLine => {
+                let preview: String = text.chars().take(60).collect();
+                let ellipsis = if text.chars().count() > 60 { "…" } else { "" };
+                format!("copied: {preview}{ellipsis}")
+            }
             Self::ListNames { count, paths } => {
                 let unit = if *paths { "path" } else { "name" };
                 format!(
@@ -467,8 +472,12 @@ impl App {
                 // and the loop survives (unlike the former inline sites,
                 // which were not in `?` scope, this arm must not abort the
                 // run loop on a transient backend failure).
-                Effect::CopyToClipboard { text, ok } => match crate::clipboard::copy(&text) {
+                Effect::CopyToClipboard { text, ok } => match self.deliver_clipboard(&text) {
                     Ok(()) => self.state.flash_info(ok.success(&text)),
+                    // `{e:#}` even though `deliver_clipboard` returns a String: it is
+                    // a no-op for Display, and the guard that requires it here is
+                    // worth more than the one saved character. `deliver_clipboard`
+                    // has already rendered each backend's own chain with `{e:#}`.
                     Err(e) => self.state.flash_error(format!("yank failed: {e:#}")),
                 },
                 // A-class: copy + flash the ACTIVE PAGER's title (not the status
@@ -476,7 +485,7 @@ impl App {
                 // looking — the former inline `view.flash` behavior, now after a
                 // copy that runs in the executor.
                 Effect::CopyToPagerClipboard { text, ok_msg } => {
-                    let msg = match crate::clipboard::copy(&text) {
+                    let msg = match self.deliver_clipboard(&text) {
                         Ok(()) => ok_msg,
                         Err(e) => format!("yank failed: {e}"),
                     };

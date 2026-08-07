@@ -14,6 +14,12 @@ use ratatui::{
 pub struct PaneWidget<'a> {
     pub screen: &'a vt100::Screen,
     pub focused: bool,
+    /// A spyc-side text selection over the visible grid, as ordered
+    /// `((start_row, start_col), (end_row, end_col))` in SCREEN coordinates.
+    ///
+    /// Only ever set for a child that ignores mouse reports — one that speaks mouse
+    /// draws its own selection, and painting ours on top would double it up.
+    pub selection: Option<((u16, u16), (u16, u16))>,
 }
 
 impl Widget for PaneWidget<'_> {
@@ -41,7 +47,14 @@ impl Widget for PaneWidget<'_> {
                 };
                 let contents = cell.contents();
                 let ch: &str = if contents.is_empty() { " " } else { contents };
-                let style = cell_style(cell).add_modifier(dim);
+                let mut style = cell_style(cell).add_modifier(dim);
+                if selected(self.selection, row, col) {
+                    // Reverse rather than a theme bg: the pane's cells carry the
+                    // CHILD's colors, which can be anything, so a fixed background
+                    // would vanish against a child that happens to use it. Reverse
+                    // is relative to whatever the cell already is.
+                    style = style.add_modifier(Modifier::REVERSED);
+                }
                 let x = area.x + col;
                 let y = area.y + row;
                 buf.set_string(x, y, ch, style);
@@ -105,5 +118,62 @@ pub const fn convert_color(c: vt100::Color) -> Color {
         vt100::Color::Default => Color::Reset,
         vt100::Color::Idx(i) => Color::Indexed(i),
         vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+    }
+}
+
+/// Whether `(row, col)` falls inside a charwise selection.
+///
+/// Charwise, not rectangular: the first row runs from its start column to the end
+/// of the line, interior rows are whole, and the last row stops at its end column.
+/// A rectangle would be wrong for prose — selecting three lines of a paragraph
+/// would clip them all to the same columns.
+const fn selected(sel: Option<((u16, u16), (u16, u16))>, row: u16, col: u16) -> bool {
+    let Some(((sr, sc), (er, ec))) = sel else {
+        return false;
+    };
+    if row < sr || row > er {
+        return false;
+    }
+    let after_start = row > sr || col >= sc;
+    let before_end = row < er || col <= ec;
+    after_start && before_end
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::selected;
+
+    /// A multi-row selection takes the tail of the first row, all of the middle, and
+    /// the head of the last — not a rectangle.
+    #[test]
+    fn charwise_spans_rows_without_clipping_to_a_column_box() {
+        let sel = Some(((1, 5), (3, 2)));
+        assert!(
+            !selected(sel, 1, 4),
+            "before the start column on the first row"
+        );
+        assert!(selected(sel, 1, 5), "the start cell");
+        assert!(selected(sel, 1, 99), "to end of the first row");
+        assert!(selected(sel, 2, 0), "a whole interior row");
+        assert!(selected(sel, 2, 99), "…including its tail");
+        assert!(selected(sel, 3, 2), "up to the end column");
+        assert!(!selected(sel, 3, 3), "past the end column on the last row");
+        assert!(!selected(sel, 0, 5), "above the selection");
+        assert!(!selected(sel, 4, 0), "below the selection");
+    }
+
+    /// A single-row selection is bounded at BOTH ends.
+    #[test]
+    fn charwise_within_one_row_is_bounded_both_ends() {
+        let sel = Some(((2, 3), (2, 6)));
+        assert!(!selected(sel, 2, 2));
+        assert!(selected(sel, 2, 3));
+        assert!(selected(sel, 2, 6));
+        assert!(!selected(sel, 2, 7));
+    }
+
+    #[test]
+    fn no_selection_selects_nothing() {
+        assert!(!selected(None, 0, 0));
     }
 }

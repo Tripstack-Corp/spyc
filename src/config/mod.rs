@@ -50,6 +50,8 @@ pub struct Config {
 
     /// Agent-status notification knobs (`[notify]`).
     pub notify: NotifyConfig,
+    /// `[clipboard]` — OSC 52 vs the local helper.
+    pub clipboard: ClipboardConfig,
 
     /// Mouse reporting knobs (`[mouse]`).
     pub mouse: MouseConfig,
@@ -295,25 +297,52 @@ impl Default for PagerConfig {
     }
 }
 
+/// `[mouse] pane_scroll_view` — what a wheel tick does the first time it hits an
+/// agent pane whose own scrollback view (today: codex's `^T`) isn't open yet.
+///
+/// Doesn't affect an already-open view (always scrolled) or an agent with no such
+/// view at all (agy scrolls its live content directly via `wheel_scroll`, with
+/// nothing to open).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PaneScrollView {
+    /// Open the agent's own view (its `transcript_toggle_key`) and scroll it.
+    #[default]
+    Native,
+    /// Leave it closed — only scroll if it happens to already be open.
+    Off,
+    /// Open spyc's OWN `^a v` scrollback pager instead of the agent's view.
+    #[serde(rename = "spyc_history")]
+    SpycHistory,
+}
+
 /// Mouse-reporting knobs (`[mouse]`).
 #[derive(Debug, Clone)]
 pub struct MouseConfig {
     /// Ask the terminal for real mouse reporting (wheel + buttons) so spyc can
-    /// scroll whatever is under the pointer. Costs native click-drag selection
-    /// while on — the terminal's bypass modifier (Shift on most, Option/Fn on
-    /// iTerm2) or `:mouse off` reclaims it.
+    /// scroll whatever is under the pointer. Default ON as of the #226–#234
+    /// campaign (wheel routing, drag-select in the pager/list/chrome/pane,
+    /// per-agent scroll keys). Costs native click-drag selection while on —
+    /// the terminal's bypass modifier (Shift on most, Option/Fn on iTerm2) or
+    /// `:mouse off` reclaims it.
     pub capture: bool,
     /// Lines per wheel tick for the surfaces spyc scrolls itself. A pane
     /// forwarding to a mouse-aware child is unaffected: the child gets one event
     /// per tick and picks its own step. Clamped to at least 1 on load.
     pub scroll_lines: usize,
+    pub pane_scroll_lines: usize,
+    /// What a wheel tick over an agent pane whose OWN scrollback view spyc can
+    /// drive (today: codex's `^T`) does when that view isn't already open.
+    pub pane_scroll_view: PaneScrollView,
 }
 
 impl Default for MouseConfig {
     fn default() -> Self {
         Self {
-            capture: false,
+            capture: true,
             scroll_lines: 1,
+            pane_scroll_lines: 3,
+            pane_scroll_view: PaneScrollView::default(),
         }
     }
 }
@@ -336,6 +365,9 @@ struct FileMouse {
     capture: Option<bool>,
     #[serde(default)]
     scroll_lines: Option<usize>,
+    pane_scroll_lines: Option<usize>,
+    #[serde(default)]
+    pane_scroll_view: Option<PaneScrollView>,
 }
 
 /// Markdown viewer knobs.
@@ -380,6 +412,37 @@ impl Default for DeleteConfig {
 #[serde(deny_unknown_fields)]
 struct FileDelete {
     confirm: Option<bool>,
+}
+
+/// How a clipboard copy is delivered (`[clipboard].via`).
+///
+/// `Auto` routes to an OSC-52 terminal escape over SSH — so a yank reaches the
+/// clipboard of the machine you're typing at rather than the remote box spyc runs on
+/// — and the local helper (`pbcopy`/`wl-copy`/`xclip`) otherwise. Same shape and
+/// same reasoning as [`DesktopVia`].
+///
+/// Local stays helper-first on purpose: OSC 52 is write-only with no reply, so spyc
+/// can never confirm the terminal honored it, and some terminals disable it
+/// deliberately (a remote host silently writing your clipboard is a real risk). With
+/// no SSH session there's nothing to trade that uncertainty for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClipboardVia {
+    #[default]
+    Auto,
+    /// Local helper only (`pbcopy` / `wl-copy` / `xclip` — the machine spyc runs on).
+    System,
+    /// OSC-52 terminal escape only (your client terminal).
+    Osc52,
+    /// Try OSC 52 and the local helper. Useful when you paste on both ends.
+    Both,
+}
+
+/// `[clipboard]` — where a yank actually lands.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct ClipboardConfig {
+    pub via: ClipboardVia,
 }
 
 /// How a desktop notification is delivered (`[notify].desktop_via`). `Auto`
@@ -463,6 +526,13 @@ impl Default for NotifyConfig {
 /// On-disk shape of `[notify]`. `Option` per field for "didn't set" disambig,
 /// so a project file with a bare `[notify]` doesn't clobber user defaults.
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileClipboard {
+    #[serde(default)]
+    via: Option<ClipboardVia>,
+}
+
+#[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct FileNotify {
     #[serde(default)]
@@ -560,6 +630,8 @@ struct FileConfig {
     delete: FileDelete,
     #[serde(default)]
     notify: FileNotify,
+    #[serde(default)]
+    clipboard: FileClipboard,
     #[serde(default)]
     ignore_masks: Vec<IgnoreMask>,
     #[serde(default)]
@@ -699,6 +771,12 @@ impl Config {
         if let Some(b) = file.mouse.capture {
             self.mouse.capture = b;
         }
+        if let Some(n) = file.mouse.pane_scroll_lines {
+            self.mouse.pane_scroll_lines = n.max(1);
+        }
+        if let Some(v) = file.mouse.pane_scroll_view {
+            self.mouse.pane_scroll_view = v;
+        }
         if let Some(n) = file.mouse.scroll_lines {
             self.mouse.scroll_lines = n.max(1);
         }
@@ -714,6 +792,9 @@ impl Config {
         }
 
         // Notify: per-field merge.
+        if let Some(v) = file.clipboard.via {
+            self.clipboard.via = v;
+        }
         if let Some(b) = file.notify.desktop {
             self.notify.desktop = b;
         }
@@ -805,6 +886,26 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::tempdir;
+
+    /// The template documents `pane_scroll_view = "native" | "off" | "spyc_history"`
+    /// as the accepted strings. This is the test that would have caught it when
+    /// the doc initially said `spyc_history` while the enum's `rename_all =
+    /// "lowercase"` actually produced `spychistory` — `default_template_round_trips`
+    /// only parses the fully-commented template, so it never exercises a
+    /// documented VALUE string, only that the file parses at all.
+    #[test]
+    fn pane_scroll_view_accepts_every_string_the_template_documents() {
+        for (toml_value, want) in [
+            ("native", PaneScrollView::Native),
+            ("off", PaneScrollView::Off),
+            ("spyc_history", PaneScrollView::SpycHistory),
+        ] {
+            let doc = format!("[mouse]\npane_scroll_view = \"{toml_value}\"\n");
+            let file: FileConfig =
+                toml::from_str(&doc).unwrap_or_else(|e| panic!("{toml_value:?} must parse: {e}"));
+            assert_eq!(file.mouse.pane_scroll_view, Some(want), "{toml_value:?}");
+        }
+    }
 
     #[test]
     fn default_template_round_trips() {

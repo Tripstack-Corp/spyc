@@ -1,9 +1,7 @@
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
 };
 
 use crate::ui::theme::Theme;
@@ -45,39 +43,19 @@ fn push_segment(spans: &mut Vec<Span>, text: &str, fg: Color, bg: Color, next_bg
 }
 
 impl StatusBar<'_> {
-    /// The status line's **content** as plain text, for a mouse copy.
-    ///
-    /// Joins the semantic segments and deliberately omits the powerline separators
-    /// and the logo: those are chrome, and a copy that included them would paste
-    /// Nerd-Font glyphs into a bug report. Same rule the pager's selection follows —
-    /// copy what the line says, not what draws it.
-    ///
-    /// Not derived from the rendered spans, because those are truncated to the
-    /// terminal width; the copy should carry the full path even when the bar
-    /// elided it.
-    pub fn plain_text(&self) -> String {
-        [
-            self.project_home,
-            self.session_name,
-            Some(self.path),
-            self.git_info,
-            self.agent_info,
-            (!self.suffix.is_empty()).then_some(self.suffix),
-        ]
-        .into_iter()
-        .flatten()
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(" | ")
+    /// The bar as a styled [`Line`], exactly as it will be drawn — including the
+    /// width-driven truncation. Split out so the app layer can record what was
+    /// actually rendered: a mouse selection maps screen COLUMNS back to characters,
+    /// which only works against the drawn line, not the semantic segments.
+    pub fn build_line(&self, area: Rect) -> Line<'static> {
+        if self.theme.mono {
+            return self.plain_line(area);
+        }
+        self.powerline(area)
     }
 
     #[allow(clippy::similar_names)]
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
-        if self.theme.mono {
-            self.render_plain(frame, area);
-            return;
-        }
-
+    fn powerline(&self, area: Rect) -> Line<'static> {
         let avail = area.width as usize;
 
         // Segment background/foreground colors.
@@ -168,7 +146,7 @@ impl StatusBar<'_> {
 
         // Path (always present).
         spans.push(Span::styled(
-            &path_text,
+            path_text.clone(),
             Style::default().fg(path_fg).bg(path_bg),
         ));
         spans.push(Span::styled(
@@ -204,11 +182,11 @@ impl StatusBar<'_> {
             ));
         }
 
-        frame.render_widget(Paragraph::new(Line::from(spans)), area);
+        Line::from(spans)
     }
 
     /// Fallback plain rendering for mono mode.
-    fn render_plain(&self, frame: &mut Frame, area: Rect) {
+    fn plain_line(&self, area: Rect) -> Line<'static> {
         let avail = area.width as usize;
 
         let parts: Vec<&str> = [self.project_home, self.session_name]
@@ -249,7 +227,7 @@ impl StatusBar<'_> {
                 Style::default().add_modifier(Modifier::DIM),
             ));
         }
-        frame.render_widget(Paragraph::new(Line::from(spans)), area);
+        Line::from(spans)
     }
 }
 
@@ -294,6 +272,7 @@ fn dw(s: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::widgets::Paragraph;
 
     #[test]
     fn short_path_unchanged() {
@@ -379,7 +358,7 @@ mod tests {
                     theme: &theme,
                     plain_logo,
                 };
-                bar.render(f, area);
+                f.render_widget(Paragraph::new(bar.build_line(area)), area);
             })
             .unwrap();
         let buf = terminal.backend().buffer().clone();

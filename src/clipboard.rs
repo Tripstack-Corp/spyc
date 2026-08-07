@@ -168,6 +168,67 @@ pub fn copy_image(png: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("clipboard: {e}"))
 }
 
+/// The largest payload spyc will hand to OSC 52.
+///
+/// xterm's own limit is ~74 994 bytes of base64 and several terminals inherit it;
+/// tmux caps at 1 MB only with `set-clipboard on`. A payload over the limit is
+/// silently *truncated* by some terminals and dropped entirely by others, and a
+/// half-pasted selection is worse than a clear failure — so past this we fall back
+/// to the local helper rather than gamble.
+const OSC52_MAX_BASE64: usize = 74_994;
+
+/// Ask the TERMINAL to set the clipboard, via OSC 52.
+///
+/// This is the half that works over SSH: the escape travels back up the same
+/// connection the UI is drawn on, so the text lands on the clipboard of the machine
+/// the user is actually typing at. `pbcopy`/`xclip` set the clipboard of whatever
+/// host spyc runs on, which over SSH is the *server* — text the user can never
+/// paste.
+///
+/// `Err` when the payload is too large to send safely; the caller falls back.
+/// Success here means "the sequence was written", not "the terminal honored it":
+/// OSC 52 is write-only with no reply, and support varies (kitty/WezTerm/iTerm2/
+/// Ghostty/Alacritty yes; tmux needs `set -g set-clipboard on`; some terminals gate
+/// it deliberately, since a remote host writing your clipboard is a real risk).
+/// That unverifiability is exactly why `Auto` still prefers the local helper when
+/// there's no SSH session to justify the trade.
+pub fn copy_osc52(text: &str) -> Result<(), String> {
+    let seq = osc52_sequence(text, std::env::var_os("TMUX").is_some())?;
+    let mut out = io::stdout();
+    out.write_all(seq.as_bytes())
+        .and_then(|()| out.flush())
+        .map_err(|e| format!("osc52: {e}"))
+}
+
+/// Build the OSC 52 byte sequence for `text`. Pure — `in_tmux` is passed so tests
+/// exercise both modes without touching the process-global `TMUX`, the
+/// `term_title::wrap` / `notifications::osc9_sequence` template.
+///
+/// No sanitizing step is needed, unlike OSC 9's message: the payload is base64, so
+/// it cannot contain an `\x1b` or `\x07` to close the sequence early and inject
+/// escapes. Encoding *is* the escaping — which is why the raw text is never written
+/// through.
+fn osc52_sequence(text: &str, in_tmux: bool) -> Result<String, String> {
+    use base64::Engine as _;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+    if encoded.len() > OSC52_MAX_BASE64 {
+        return Err(format!(
+            "selection too large for OSC 52 ({} bytes base64, limit {OSC52_MAX_BASE64})",
+            encoded.len()
+        ));
+    }
+    // `c` = the CLIPBOARD selection (not the X11 primary). BEL-terminated, which
+    // more terminals accept than ST.
+    let inner = format!("\x1b]52;c;{encoded}\x07");
+    Ok(if in_tmux {
+        // tmux eats escapes aimed at itself; DCS passthrough forwards them to the
+        // outer terminal, with inner ESCs doubled.
+        format!("\x1bPtmux;{}\x1b\\", inner.replace('\x1b', "\x1b\x1b"))
+    } else {
+        inner
+    })
+}
+
 /// Write `text` to the system clipboard.
 pub fn copy(text: &str) -> io::Result<()> {
     #[cfg(test)]
@@ -369,5 +430,88 @@ mod tests {
         let err = with_clipboard_override(&stub, || copy(&big))
             .expect_err("a helper that ignores a large stdin should surface a write error");
         assert_eq!(err.kind(), io::ErrorKind::BrokenPipe, "got {err:?}");
+    }
+}
+
+#[cfg(test)]
+mod osc52_tests {
+    use super::{OSC52_MAX_BASE64, osc52_sequence};
+
+    #[test]
+    fn plain_sequence_is_osc52_clipboard_base64_bel() {
+        let seq = osc52_sequence("hi", false).expect("small payload");
+        // "hi" -> aGk=
+        assert_eq!(seq, "\x1b]52;c;aGk=\x07");
+    }
+
+    /// Inside tmux the sequence must be DCS-wrapped with inner ESCs doubled, or tmux
+    /// consumes it instead of forwarding to the outer terminal.
+    #[test]
+    fn tmux_wraps_in_dcs_passthrough_with_doubled_escapes() {
+        let seq = osc52_sequence("hi", true).expect("small payload");
+        assert!(seq.starts_with("\x1bPtmux;"), "got {seq:?}");
+        assert!(seq.ends_with("\x1b\\"), "got {seq:?}");
+        assert!(
+            seq.contains("\x1b\x1b]52;c;aGk="),
+            "inner ESC must be doubled: {seq:?}"
+        );
+    }
+
+    /// **Encoding is the escaping.** Text containing the OSC terminators — the
+    /// injection vector that forces `notifications::osc9_sequence` to strip control
+    /// chars — cannot break out here, because everything between `52;c;` and the
+    /// terminator is base64 and its alphabet excludes ESC and BEL.
+    #[test]
+    fn control_chars_in_the_text_cannot_terminate_the_sequence() {
+        let hostile = "\x1b]52;c;evil\x07 and \x1b\\ more";
+        let seq = osc52_sequence(hostile, false).expect("small payload");
+        let body = seq
+            .strip_prefix("\x1b]52;c;")
+            .and_then(|r| r.strip_suffix('\x07'))
+            .expect("well-formed wrapper");
+        assert!(
+            body.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+/=".contains(c)),
+            "payload must be pure base64, got {body:?}"
+        );
+        // Exactly one terminator: the one we wrote.
+        assert_eq!(seq.matches('\x07').count(), 1);
+    }
+
+    /// Round-trips, so the terminal receives what the user selected.
+    #[test]
+    fn payload_decodes_back_to_the_original_text() {
+        use base64::Engine as _;
+        let text = "multi\nline\tselection — ünïcode 中";
+        let seq = osc52_sequence(text, false).expect("small payload");
+        let body = seq
+            .strip_prefix("\x1b]52;c;")
+            .and_then(|r| r.strip_suffix('\x07'))
+            .expect("well-formed");
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(body)
+            .expect("valid base64");
+        assert_eq!(String::from_utf8(decoded).expect("utf8"), text);
+    }
+
+    /// Over-limit payloads must ERROR rather than be sent: several terminals
+    /// silently truncate an oversized OSC 52, and half a selection on the clipboard
+    /// is worse than a reported failure (the caller falls back to the local helper).
+    #[test]
+    fn an_oversized_payload_is_refused_not_truncated() {
+        // 3 bytes -> 4 base64 chars, so this comfortably exceeds the cap.
+        let big = "x".repeat(OSC52_MAX_BASE64);
+        let err = osc52_sequence(&big, false).expect_err("must refuse");
+        assert!(err.contains("too large"), "got {err:?}");
+    }
+
+    /// And a payload just under the cap still goes out — the guard must not be so
+    /// conservative that ordinary selections start failing.
+    #[test]
+    fn a_payload_just_under_the_cap_is_sent() {
+        // 3 raw bytes encode to exactly 4 base64 chars, no padding growth.
+        let raw = (OSC52_MAX_BASE64 / 4) * 3;
+        let text = "y".repeat(raw);
+        assert!(osc52_sequence(&text, false).is_ok());
     }
 }

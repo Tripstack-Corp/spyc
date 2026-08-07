@@ -385,3 +385,111 @@ mod tests {
         }
     }
 }
+
+/// Which delivery mechanisms a copy should use, given `[clipboard] via` and whether
+/// spyc is running over SSH. Returns `(local_helper, osc52)`.
+///
+/// Pure, and the exact counterpart of `agent_status::desktop_delivery` — the same
+/// question ("does this belong on the client or the host?") with the same answer
+/// shape, so the two can be reasoned about together.
+///
+/// `Auto` is the whole point: `pbcopy`/`xclip` set the clipboard of the machine spyc
+/// runs on, which over SSH is the *server* — text the user can never paste. OSC 52
+/// travels back up the connection to the terminal they're actually typing at.
+pub(super) const fn clipboard_delivery(
+    via: crate::config::ClipboardVia,
+    is_ssh: bool,
+) -> (bool, bool) {
+    use crate::config::ClipboardVia as V;
+    match via {
+        // Over SSH the local helper is worse than useless (it silently succeeds on
+        // the wrong machine), so Auto swaps to the escape rather than adding it.
+        V::Auto => {
+            if is_ssh {
+                (false, true)
+            } else {
+                (true, false)
+            }
+        }
+        V::System => (true, false),
+        V::Osc52 => (false, true),
+        V::Both => (true, true),
+    }
+}
+
+impl super::App {
+    /// Deliver `text` to the clipboard per `[clipboard] via`.
+    ///
+    /// Succeeds if ANY enabled mechanism succeeded — with `Both`, a terminal that
+    /// ignores OSC 52 shouldn't make a working local copy look like a failure. The
+    /// error carries every attempt's reason, since "yank failed" with no cause is
+    /// the report that wastes an afternoon.
+    ///
+    /// OSC 52 is attempted first under `Both`: it can fail *knowably* (payload over
+    /// the size limit), and a real error beats the local helper's silent
+    /// success-on-the-wrong-machine.
+    pub(super) fn deliver_clipboard(&self, text: &str) -> Result<(), String> {
+        let (local, osc52) = clipboard_delivery(self.state.config.clipboard.via, self.view.is_ssh);
+        let mut errs: Vec<String> = Vec::new();
+        let mut ok = false;
+        if osc52 {
+            match crate::clipboard::copy_osc52(text) {
+                Ok(()) => ok = true,
+                Err(e) => errs.push(e),
+            }
+        }
+        if local {
+            match crate::clipboard::copy(text) {
+                Ok(()) => ok = true,
+                Err(e) => errs.push(format!("{e:#}")),
+            }
+        }
+        if ok {
+            return Ok(());
+        }
+        Err(if errs.is_empty() {
+            "no clipboard mechanism enabled ([clipboard] via)".to_string()
+        } else {
+            errs.join("; ")
+        })
+    }
+}
+
+#[cfg(test)]
+mod delivery_tests {
+    use super::clipboard_delivery;
+    use crate::config::ClipboardVia as V;
+
+    /// The headline: over SSH, `Auto` must NOT use the local helper. `pbcopy` on the
+    /// server succeeds and puts the text somewhere the user can never paste from,
+    /// which is worse than an error.
+    #[test]
+    fn auto_routes_to_the_client_terminal_over_ssh() {
+        assert_eq!(clipboard_delivery(V::Auto, true), (false, true));
+    }
+
+    /// Locally, `Auto` stays on the helper: OSC 52 is unverifiable (no reply) and
+    /// some terminals disable it, and there's no SSH problem to trade that for.
+    #[test]
+    fn auto_stays_local_without_ssh() {
+        assert_eq!(clipboard_delivery(V::Auto, false), (true, false));
+    }
+
+    /// The explicit modes ignore SSH entirely — that's what makes them an override.
+    #[test]
+    fn explicit_modes_do_not_depend_on_ssh() {
+        for ssh in [false, true] {
+            assert_eq!(
+                clipboard_delivery(V::System, ssh),
+                (true, false),
+                "ssh={ssh}"
+            );
+            assert_eq!(
+                clipboard_delivery(V::Osc52, ssh),
+                (false, true),
+                "ssh={ssh}"
+            );
+            assert_eq!(clipboard_delivery(V::Both, ssh), (true, true), "ssh={ssh}");
+        }
+    }
+}

@@ -96,6 +96,28 @@ looking intentional rather than broken.
 
 ---
 
+## `[clipboard]`
+
+```toml
+[clipboard]
+via = "auto"   # auto | system | osc52 | both
+```
+
+Where a yank lands. `auto` uses an **OSC-52 terminal escape when spyc is over SSH**
+and the local helper (`pbcopy` / `wl-copy` / `xclip`) otherwise.
+
+This matters more than it sounds: the local helpers set the clipboard of the machine
+spyc *runs on*. Over SSH that's the server, so a yank silently succeeds somewhere you
+can never paste from. OSC 52 travels back up the same connection the UI is drawn on,
+so it reaches the terminal you're typing at.
+
+Locally it stays helper-first deliberately — OSC 52 is write-only with no reply, so
+spyc can't confirm the terminal honored it, and some terminals disable it on purpose
+(a remote host writing your clipboard is a real risk). Inside tmux it needs
+`set -g set-clipboard on`; spyc DCS-wraps the escape so tmux forwards it to the outer
+terminal. A selection too large for the escape falls back to the helper rather than
+risk a terminal truncating it silently.
+
 ## Notifications — `[notify]`
 
 The "which agent needs me" signal. When an agent pane changes status, spyc fires
@@ -179,9 +201,25 @@ without waiting for a real agent transition.
 
 ```toml
 [mouse]
-capture = false      # real mouse reporting (wheel + buttons). Default off.
+capture = true       # real mouse reporting (wheel + buttons). Default ON.
 scroll_lines = 1     # lines per wheel tick, for surfaces spyc scrolls itself
+pane_scroll_lines = 3 # lines per tick for a pane spyc drives with synthesized keys
+pane_scroll_view = "native" # native | off | spyc_history
 ```
+
+`pane_scroll_view` decides what a wheel tick does the FIRST time it hits an agent
+pane whose own scrollback view spyc can drive but that view isn't open yet — today,
+codex's `^T` transcript. `native` (default) opens it and scrolls; `off` leaves it
+closed and only scrolls if it happens to already be open; `spyc_history` opens
+spyc's own `^a v` scrollback pager instead. Doesn't affect an already-open view
+(always scrolled) or an agent with no such view (agy scrolls its live content
+directly via Shift+Arrow, with nothing to open).
+
+A sustained same-direction wheel gesture — past ~1 second — escalates from the
+per-line step to a page-sized one, for an agent with a verified fast key (codex's
+`^T` documents `pgup/pgdn to page` in its own footer). `pane_scroll_lines` is the
+line-scroll floor under that escalation, and the only knob agy uses (it has no
+page-sized equivalent).
 
 `capture` asks the terminal for real mouse reporting so spyc can scroll whatever
 is under the pointer, instead of DEC 1007's trick of translating the wheel into
@@ -196,7 +234,7 @@ arrow keys (which a focused pane receives as history navigation).
 > |---|---|
 > | **Bypass modifier** (per-drag) | Hold **Shift** — Ghostty, WezTerm, kitty, Alacritty, most others. **Option** or **Fn** on iTerm2. |
 > | **`:mouse off`** (per-session) | Immediate, no restart, no file edit. `:mouse on` to re-enable, `:mouse auto` to follow the config again. Survives a config reload — it is scoped to the session, not written to a file. |
-> | **`capture = false`** (permanent) | The default. |
+> | **`capture = false`** (permanent) | Turn it off entirely — the pre-#226 behavior. |
 >
 > spyc's mouse-free yank paths: **`^a u`** quick-select (URLs / paths / SHAs) and
 > **`y`** in the pager.

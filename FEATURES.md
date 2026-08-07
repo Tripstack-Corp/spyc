@@ -545,14 +545,21 @@ end).
   agent), middle-click pastes, right-click opens the leader menu. **Costs native click-drag text
   selection while on** (hold Shift to select anyway — Option/Fn on iTerm2);
   `:mouse off` gives it back immediately, no restart, and survives a config
-  reload (`:mouse auto` returns to following the config). Default off (`[mouse]
-  capture`). `^a u` quick-select and `y` in the pager are the mouse-free yank
-  paths.
+  reload (`:mouse auto` returns to following the config). Default **on**
+  (`[mouse] capture`; `capture = false` turns it off permanently). `^a u`
+  quick-select and `y` in the pager are the mouse-free yank paths.
+  **Drag in a pane whose agent ignores the mouse to select its text** (codex —
+  including inside its `^T` transcript — and plain shells); release copies it. A
+  child that speaks mouse (claude, vim) keeps doing its own selection instead. The
+  highlight clears when the child paints, since it's anchored to the visible grid.
   **Drag in the file list to select rows; release copies their names** — hold
   **Ctrl** while pressing to copy absolute paths instead. The highlight stays up
   after the copy. Distinct from picks: a drag never changes what the next file
-  operation acts on. **Click the status line to copy it** (the text, not the
-  powerline separators or the logo).
+  operation acts on.
+  **Drag across the status line or the divider/tab line to select part of it** —
+  release copies exactly those columns, so you can take just a branch name, an
+  agent session id, or a custom tab name without the rest of the line. A click
+  that doesn't move copies nothing.
   **Drag in a pager to select text; release copies it** and the pager title
   reports the line count. Works the same full-screen or popped-up, and copies the
   content only — never the line-number gutter, the whitespace/line-break markers,
@@ -562,9 +569,13 @@ end).
   **claude** requests mouse reporting, so the event is forwarded and claude
   scrolls itself; **agy** ignores mouse reports but scrolls on Shift+Arrow, so
   spyc sends those instead; **codex** discards mouse events and its main chat view
-  doesn't scroll, so the wheel sends plain arrows — those scroll its `^T`
-  transcript overlay, and outside it they only move the draft cursor (codex keeps
-  history recall on `^R`, so the wheel can't recall a past prompt).
+  doesn't scroll, so the wheel drives its `^T` transcript overlay instead — opening
+  it on the first tick (`[mouse] pane_scroll_view`, configurable to stay closed or
+  to use spyc's own `^a v` history instead), then scrolling by line, escalating to
+  a page jump under a sustained gesture. Scrolling down while already at the
+  bottom exits the transcript (`q`) instead of no-op'ing. Outside the transcript,
+  the same keys only move the draft cursor (codex keeps history recall on `^R`,
+  so the wheel can't recall a past prompt).
 - **`:limit <glob>`** — temporary filter (e.g. `:limit *.rs`)
 - **`:limit !`** — show only picked files
 - **`:limit git`** / **`:limit g`** — show only files in `git status`

@@ -410,6 +410,21 @@ impl App {
         if pane_had_output {
             needs_draw = true;
             draw_reason = 1;
+            // A pane selection is anchored to SCREEN coordinates, so the moment the
+            // child paints, the grid scrolls out from under it and the highlight
+            // would name different text than the user picked. Dropping it is the
+            // simple half of the tradeoff in `docs/drafts/mouse_selection_plan.md`;
+            // it costs nothing for the case this serves (reading a static transcript
+            // overlay, where no output arrives) and avoids silently copying the
+            // wrong thing. Only while no drag is in flight: a drag over a chatty
+            // child should keep tracking the pointer rather than be cancelled by an
+            // unrelated repaint.
+            if !matches!(
+                self.view.mouse_selection,
+                Some(super::mouse::MouseDragTarget::Pane)
+            ) {
+                self.view.pane_selection = None;
+            }
             // Echo-latency probe (A-monitor only): this active-pane output is
             // the agent's echo of the last forwarded keystroke. Measure
             // forward→echo so we can see the pane round-trip vs render cost.

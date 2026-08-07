@@ -89,7 +89,7 @@
 # tab_width = 4
 
 # ── mouse ─────────────────────────────────────────────────────────────
-# `capture` (default false): ask the terminal for real mouse reporting
+# `capture` (default true): ask the terminal for real mouse reporting
 # (wheel + buttons) so spyc can scroll whatever is under the pointer.
 #
 # TRADE-OFF, read before enabling: any mouse capture takes native
@@ -107,8 +107,29 @@
 # forwarding to a mouse-aware child is unaffected — the child gets one event
 # per tick and picks its own step. Clamped to >= 1.
 [mouse]
-# capture = false
+# capture = true
 # scroll_lines = 1
+#
+# `pane_scroll_lines` (default 3): lines per wheel tick for an agent PANE whose
+# child ignores mouse reports, where spyc synthesizes that agent's own scroll
+# keys (codex's `^T` transcript, agy inline). Separate from `scroll_lines`
+# because it's a different job: the list wants 1:1 with the trackpad, while
+# here spyc is driving somebody else's pager one keypress per line, with no
+# safe way to ask it for a page. Raise it to traverse long histories faster.
+# A sustained wheel gesture (default: past 1s) auto-escalates to a page-sized
+# step where an agent has one verified (codex's `^T`) — `pane_scroll_lines`
+# is the line-scroll floor under that.
+# pane_scroll_lines = 3
+#
+# `pane_scroll_view` (default native): what the wheel does the FIRST time it
+# hits an agent pane whose own scrollback view (today: codex's `^T`) isn't
+# open yet.
+#   native       open the agent's own view and scroll it.
+#   off          leave it closed — only scroll if it happens to already be open.
+#   spyc_history open spyc's OWN `^a v` scrollback pager instead.
+# Doesn't affect an already-open view (always scrolled) or an agent with no
+# such view (agy scrolls its live content directly, with nothing to open).
+# pane_scroll_view = "native"
 
 # ── markdown ──────────────────────────────────────────────────────────
 # Default view for `.md` / `.markdown` files in the pager.
@@ -157,6 +178,28 @@
 #                                you're usually in another app while it works.
 # The intrusive channels (bell + flash) fire on Blocked only by default; the
 # quiet desktop ping fires on Done too. Flip *_done to change that per channel.
+# ── [clipboard] ── where a yank actually lands ────────────────────────────
+#
+# `via` (default auto):
+#   auto    OSC-52 terminal escape when spyc is over SSH, the local helper
+#           otherwise. The distinction matters: `pbcopy` / `wl-copy` / `xclip`
+#           set the clipboard of the machine spyc RUNS on, so over SSH they
+#           succeed on the server and the text is somewhere you can never
+#           paste from. OSC 52 travels back up the connection to the terminal
+#           you're actually typing at.
+#   system  local helper only.
+#   osc52   terminal escape only.
+#   both    try both (useful if you paste on either end).
+#
+# Local stays helper-first on purpose: OSC 52 is write-only with no reply, so
+# spyc can't confirm the terminal honored it, and some terminals disable it
+# deliberately (a remote host writing your clipboard is a real risk). Inside
+# tmux it needs `set -g set-clipboard on`; spyc DCS-wraps the escape so tmux
+# forwards it. Oversized selections fall back rather than risk a terminal
+# silently truncating them.
+[clipboard]
+# via = "auto"
+
 [notify]
 # desktop = true
 # desktop_via = "auto"

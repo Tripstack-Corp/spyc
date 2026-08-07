@@ -112,6 +112,19 @@ const fn capture_key_action(key: KeyEvent) -> CaptureKeyAction {
 
 impl App {
     pub fn handle_key(&mut self, key: KeyEvent) -> Result<Vec<Effect>> {
+        // A mouse text selection is a transient, pointer-made thing: the next
+        // keyboard action retires it, the way a terminal's own selection clears when
+        // you type. Both of these hold POSITIONS (list row indices, pane screen
+        // cells) rather than content, so leaving one up after the content moves
+        // highlights whatever now occupies those positions — a stale band on an
+        // unrelated file after a chdir, which is how this was reported.
+        //
+        // The pager's `visual` selection is deliberately NOT cleared here: it is
+        // modal by request (vim-consistent), so `j`/`k` extend it and `Esc` cancels.
+        self.view.list_selection = None;
+        self.view.pane_selection = None;
+        self.view.chrome_selection = None;
+
         // Per-key dispatch trace, opt-in via `--key-trace` / SPYC_KEY_TRACE.
         // Captures the input as it arrives so a user reproducing an
         // "input doesn't work" issue can ship a log. We re-trace the
