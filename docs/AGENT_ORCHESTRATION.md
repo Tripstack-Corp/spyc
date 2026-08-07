@@ -46,10 +46,11 @@ three tiers; a higher tier always wins:
 | `💤` | `^z`-suspended |
 
 `blocked` is **latched**: it stays red until you settle the prompt in that pane —
-**Enter** to answer it, **Esc** to decline — or the agent files a newer report.
-No timer or stray output bounces it off. Esc counts because no hook reports a
-decline: Claude Code ends a declined turn as a user interrupt, and `Stop` doesn't
-fire on an interrupt, so the keystroke is the only signal spyc gets.
+**Enter** to answer it, **Esc** or **`^c`** to dismiss it — or the agent files a
+newer report. No timer or stray output bounces it off. The dismissal keys count
+because no hook reports one: Claude Code ends a declined turn as a user
+interrupt, and `Stop` doesn't fire on an interrupt, so the keystroke is the only
+signal spyc gets.
 
 **Auto-reporting.** So it works without the agent choosing to call the tool, spyc
 installs lifecycle hooks that run `spyc --report-status` (prompt-submit→working,
