@@ -289,6 +289,18 @@ fn space_p_jumps_project_home() {
     );
 }
 
+/// The about page sits next to `Space ?` help — both informational pages on the
+/// leader, reachable from pane focus as `^a Space a`.
+#[test]
+fn space_a_opens_about() {
+    let mut r = Resolver::new();
+    feed(&mut r, key(' '));
+    assert_eq!(
+        feed(&mut r, key('a')),
+        ResolverOutcome::Action(Action::About)
+    );
+}
+
 #[test]
 fn space_w_opens_worktree_submenu_then_new() {
     let mut r = Resolver::new();

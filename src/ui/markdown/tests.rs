@@ -334,3 +334,78 @@ fn no_code_block_records_nothing() {
     let d = doc("# just prose\n\nno diagrams here\n");
     assert!(d.mermaid_blocks.is_empty());
 }
+
+// --- the document ends on its last line of content ---
+
+/// The pager reads `lines.len()` as the document's length: it numbers rows from
+/// it, prints it as `(N lines)`, and puts `[EOF]` on the row after the last one.
+/// Every block end emitting its separator blank unconditionally left a trailing
+/// row with no content, so `[EOF]` sat a row below the text it was marking the
+/// end of. One case per block kind that can close on a blank — a blockquote
+/// closes on two (its inner paragraph, then the quote).
+#[test]
+fn rendered_doc_ends_on_content_not_a_separator_blank() {
+    for (kind, src) in [
+        ("paragraph", "hello\n"),
+        ("heading", "# Title\n"),
+        ("list", "- a\n- b\n"),
+        ("nested list", "- a\n  - b\n"),
+        ("code block", "```rust\nfn main() {}\n```\n"),
+        ("table", "|a|b|\n|-|-|\n|1|2|\n"),
+        ("blockquote", "> quoted\n"),
+        ("mermaid", "```mermaid\nflowchart LR\n  A-->B\n```\n"),
+        ("trailing blanks in source", "hello\n\n\n\n"),
+        (
+            "paragraph after block",
+            "```rust\nfn f() {}\n```\n\ntail text\n",
+        ),
+    ] {
+        let lines = render_plain(src);
+        assert!(
+            !lines.is_empty(),
+            "{kind}: rendered to nothing, expected content"
+        );
+        assert!(
+            !lines[lines.len() - 1].is_empty(),
+            "{kind}: last rendered line is blank — [EOF] would land past the \
+             content:\n{lines:#?}"
+        );
+    }
+}
+
+/// An empty (or blank-only) source has no content to end on, and must not
+/// underflow its way to a panic while the trailing blanks are trimmed.
+#[test]
+fn empty_source_renders_no_lines() {
+    for src in ["", "\n", "\n\n\n", "   \n"] {
+        let lines = render_plain(src);
+        assert!(
+            lines.iter().all(|l| l.trim().is_empty()),
+            "blank source rendered content: {lines:#?}"
+        );
+    }
+}
+
+/// A diagram's `line_range` runs from its header row *through* the separator
+/// blank that follows it, so trimming that blank off the end of the document
+/// leaves the range pointing one row past the end — the pager slices `lines`
+/// with it to find the source under the cursor.
+#[test]
+fn mermaid_range_stays_in_bounds_when_the_diagram_ends_the_doc() {
+    let d = doc("intro\n\n```mermaid\nflowchart LR\n  A-->B\n```\n");
+    assert_eq!(d.mermaid_blocks.len(), 1);
+    let b = &d.mermaid_blocks[0];
+    assert!(
+        b.line_range.end <= d.lines.len(),
+        "range {:?} escapes the {} rendered lines",
+        b.line_range,
+        d.lines.len()
+    );
+    // Still a usable slice: the header is its first row and the source is inside.
+    let block_text: String = d.lines[b.line_range.clone()]
+        .iter()
+        .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+        .collect();
+    assert!(block_text.contains("mermaid diagram"));
+    assert!(block_text.contains("flowchart LR"));
+}

@@ -112,7 +112,8 @@ pub enum Action {
     ToggleActivity, // :activity — toggle draws/sec, bytes/sec overlay
 
     // Help.
-    Help, // ? or F1 — key bindings overlay
+    Help,  // ? or F1 — key bindings overlay
+    About, // Space a / :about — the about page (docs/ABOUT.md) in the pager
 
     // Config reload.
     ReloadConfig, // ^R — re-read ~/.spycrc.toml + project config
@@ -279,6 +280,7 @@ impl Action {
             | Self::QuickSelectOpen => Tier::Pane,
             // Meta — cross-cutting / informational.
             Self::Help
+            | Self::About
             | Self::Version
             | Self::Redraw
             | Self::ReloadConfig
@@ -345,6 +347,7 @@ impl Action {
             Self::FileType => "file type",
             Self::SortCycle => "cycle sort (name/size/mtime/ext)",
             Self::Help => "help",
+            Self::About => "about spyc",
             Self::ReloadConfig => "reload config",
             Self::TogglePane => "toggle split pane",
             Self::ResumePane => "open pane with claude --resume",
@@ -507,6 +510,7 @@ impl Action {
             Self::SetEnvPrompt => "set_env_prompt",
             Self::ToggleActivity => "toggle_activity",
             Self::Help => "help",
+            Self::About => "about",
             Self::ReloadConfig => "reload_config",
             // Split pane.
             Self::TogglePane => "toggle_pane",
@@ -665,6 +669,7 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         "set_env_prompt" => Action::SetEnvPrompt,
         "toggle_activity" => Action::ToggleActivity,
         "help" => Action::Help,
+        "about" => Action::About,
         "reload_config" => Action::ReloadConfig,
         // Split pane.
         "toggle_pane" => Action::TogglePane,
