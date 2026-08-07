@@ -66,8 +66,8 @@ const AGENT_ANIM_INTERVAL: Duration = Duration::from_millis(250);
 /// output-based supersede (even behind a grace window) eventually bounces the
 /// dot off red and back to the working pulse. Blocked is cleared only by its
 /// TTL, a newer report, or the user settling the prompt — answering it with
-/// Enter or declining it with Esc (the `SendToPane` handler in `run_effects`
-/// drops it on either keystroke).
+/// Enter or dismissing it with Esc / `^c` (the `SendToPane` handler in
+/// `run_effects` drops it on any of those keystrokes).
 /// Every other status is superseded by any output after it.
 fn report_superseded_by_output(r: ReportedStatus, last_output_at: Option<Instant>) -> bool {
     if r.status == AgentActivity::Blocked {
@@ -1051,7 +1051,7 @@ mod tests {
     // not the prompt's initial render, not the menu's later redraws while it
     // waits, and not the expiry clock (the bug where any of those bounced the
     // dot off red and back to the working pulse). It clears only via a newer
-    // report or the user settling the prompt — Enter or Esc, handled in
+    // report or the user settling the prompt — Enter, Esc or `^c`, handled in
     // `run_effects`. A non-blocked report still hands back to timing on output.
     #[test]
     fn blocked_report_is_latched_against_output() {

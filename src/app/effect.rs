@@ -307,24 +307,29 @@ impl PaneInput {
     }
 
     /// Whether this input settles a prompt the agent is blocked on — the signal
-    /// that clears a latched `Blocked` dot. Enter answers it; **Esc declines it**,
-    /// which ends the block just as decisively (the agent's question is gone
-    /// either way, and nothing needs the user any more).
+    /// that clears a latched `Blocked` dot. Enter answers it; **Esc and `^c`
+    /// dismiss it**, which ends the block just as decisively (the agent's
+    /// question is gone either way, and nothing needs the user any more).
     ///
-    /// Declining has to be handled here because no hook reports it: Claude Code
+    /// Dismissal has to be handled here because no hook reports it: Claude Code
     /// ends a declined turn as a user interrupt, and `Stop` — the event that
     /// would report `done` — does not fire on an interrupt. Left to the hooks
     /// alone the dot stays red until the next prompt or the idle-notification
     /// backstop, long after the question left the screen.
     ///
-    /// Exact matches only. A bare Esc byte is the key; `\x1b[A` and friends are
-    /// arrows, and typing, menu navigation, or a paste that merely *contains* a
-    /// newline still leaves the dot red until the user actually commits.
+    /// Exact matches only. A bare Esc / `\x03` byte is the key; `\x1b[A` and
+    /// friends are arrows, and typing, menu navigation, or a paste that merely
+    /// *contains* one of these leaves the dot red until the user commits.
     fn settles_prompt(&self) -> bool {
-        use crossterm::event::KeyCode;
+        use crossterm::event::{KeyCode, KeyModifiers};
         match self {
-            Self::Key(k) => matches!(k.code, KeyCode::Enter | KeyCode::Esc),
-            Self::Bytes(b) => matches!(b.as_slice(), b"\r" | b"\n" | b"\r\n" | b"\x1b"),
+            Self::Key(k) => match k.code {
+                KeyCode::Enter | KeyCode::Esc => true,
+                // `^c` arrives as the letter plus the modifier, either case.
+                KeyCode::Char('c' | 'C') => k.modifiers.contains(KeyModifiers::CONTROL),
+                _ => false,
+            },
+            Self::Bytes(b) => matches!(b.as_slice(), b"\r" | b"\n" | b"\r\n" | b"\x1b" | b"\x03"),
         }
     }
 }
@@ -596,7 +601,7 @@ impl App {
                         self.view.pane_send_at = Some(std::time::Instant::now());
                     }
                     // Only settling the prompt answers the pane — Enter to commit,
-                    // Esc to decline. A latched `blocked` dot stays red through
+                    // Esc / `^c` to dismiss. A latched `blocked` dot stays red through
                     // navigation / typing / pastes and clears only on one of those
                     // (or a newer report).
                     let clears_blocked = input.settles_prompt();
@@ -1075,17 +1080,31 @@ mod tests {
         assert!(PaneInput::Bytes(b"\r".to_vec()).settles_prompt());
         assert!(PaneInput::Bytes(b"\n".to_vec()).settles_prompt());
         assert!(PaneInput::Bytes(b"\r\n".to_vec()).settles_prompt());
-        // Declining settles it too — the question is off the screen either way,
-        // and no hook reports the decline (a declined turn ends as an interrupt,
+        // Dismissing settles it too — the question is off the screen either way,
+        // and no hook reports the dismissal (a declined turn ends as an interrupt,
         // which doesn't fire `Stop`), so this is the only signal spyc gets.
+        let ctrl = |c| PaneInput::Key(KeyEvent::new(c, KeyModifiers::CONTROL));
         assert!(key(KeyCode::Esc).settles_prompt());
         assert!(PaneInput::Bytes(b"\x1b".to_vec()).settles_prompt());
+        assert!(ctrl(KeyCode::Char('c')).settles_prompt());
+        assert!(ctrl(KeyCode::Char('C')).settles_prompt());
+        assert!(PaneInput::Bytes(b"\x03".to_vec()).settles_prompt());
         // Everything else leaves a latched blocked dot stuck: navigation, typing,
         // and pastes that merely *contain* a newline.
         assert!(!key(KeyCode::Char('y')).settles_prompt());
         assert!(!key(KeyCode::Down).settles_prompt());
         assert!(!PaneInput::Bytes(b"line1\nline2".to_vec()).settles_prompt());
         assert!(!PaneInput::Bytes(b"1".to_vec()).settles_prompt());
+        // A bare `c` is a letter, not an interrupt — only the modifier makes it one.
+        assert!(!key(KeyCode::Char('c')).settles_prompt());
+        assert!(!PaneInput::Bytes(b"c".to_vec()).settles_prompt());
+        // And other ctrl chords are ordinary keystrokes to the child.
+        for c in ['a', 'd', 'z', 'r'] {
+            assert!(
+                !ctrl(KeyCode::Char(c)).settles_prompt(),
+                "^{c} must not settle the prompt"
+            );
+        }
         // An escape *sequence* is a keypress, not a decline — the arrow keys the
         // user presses to move through the very question this would clear.
         for seq in [&b"\x1b[A"[..], b"\x1b[B", b"\x1b[C", b"\x1b[D", b"\x1bOA"] {
