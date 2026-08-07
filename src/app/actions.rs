@@ -274,6 +274,8 @@ impl App {
 
             Action::Help => self.open_help(),
 
+            Action::About => self.open_about(),
+
             Action::SortCycle => {
                 let next = self.state.cur().sort_order.cycle_next();
                 self.state.cur_mut().sort_order = next;

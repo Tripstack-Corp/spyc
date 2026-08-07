@@ -95,6 +95,7 @@ const fn app(name: &'static str, handler: fn(&mut App, &str) -> Vec<Effect>) -> 
 /// The command registry. Sorted by `name` for deterministic completion
 /// output (enforced by `command_table_is_sorted_and_unique`).
 pub const COMMAND_TABLE: &[CommandSpec] = &[
+    app("about", commands::cmd_about),
     app("activity", commands::cmd_activity),
     app("agent", commands::cmd_agent),
     app("bnext", commands::cmd_bnext),

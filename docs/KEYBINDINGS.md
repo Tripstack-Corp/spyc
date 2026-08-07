@@ -208,8 +208,8 @@ on the top bar and persist across `spyc -r`.
 
 The **leader** (`Space`, or `^a Space` from the agent pane) opens a
 global/workspace menu: `Space w l\|n\|d` (worktree list/new/delete),
-`Space p` (project home), `Space s` (session info). Hold it to see the
-which-key popup.
+`Space p` (project home), `Space s` (session info), `Space ?` (help),
+`Space a` (about). Hold it to see the which-key popup.
 
 `PROJECT_HOME` is auto-set on startup if the launch directory contains
 `.git`. New pane tabs default their cwd to the focused column's
