@@ -196,7 +196,7 @@ impl Harpoon {
             std::fs::create_dir_all(parent)?;
         }
         let text = toml::to_string(self).unwrap_or_default();
-        std::fs::write(&path, text)
+        crate::fs::write_atomic(&path, text.as_bytes())
     }
 }
 

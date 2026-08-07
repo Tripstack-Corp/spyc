@@ -304,6 +304,87 @@ pub fn with_config_root<R>(root: &std::path::Path, body: impl FnOnce() -> R) -> 
 }
 
 #[cfg(test)]
+mod state_writes_are_atomic {
+    //! Persistent state must be replaced via [`crate::fs::write_atomic`], not
+    //! `std::fs::write`: a crash mid-write truncates the real file, and the
+    //! startup health check's only recourse is to discard it. Losing marks or
+    //! a session snapshot to a power cut is exactly what the temp-file+rename
+    //! dance prevents.
+    //!
+    //! A one-time grep proves today is clean and nothing else; this scan is
+    //! what stops the next straggler. It found three on the day it was written
+    //! (`inventory`, `harpoon`, `skill_prompt`) that a hand-audit had missed.
+    //!
+    //! Scoped to `src/state/`, where the writers of the XDG state root live.
+    //! Test fixtures legitimately use `fs::write` to build scratch files, so —
+    //! following `no_subprocess_git_in_production` — only the portion of each
+    //! file before its first `#[cfg(test)]` is scanned, and whole-file test
+    //! modules are skipped.
+    use std::path::Path;
+
+    /// Deliberate exceptions: relative paths under `src/`, each with the
+    /// reason it writes non-atomically. Empty is the healthy state.
+    const ALLOWED: &[(&str, &str)] = &[];
+
+    // Split so this literal can't trip its own scan.
+    const RAW_WRITE: &str = concat!("fs::write", "(");
+
+    fn is_test_file(path: &Path) -> bool {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let in_tests_dir = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n == "tests" || n.ends_with("_tests"));
+        name == "tests.rs"
+            || name == "test_support.rs"
+            || name.ends_with("_tests.rs")
+            || in_tests_dir
+    }
+
+    fn scan(dir: &Path, src_root: &Path, offenders: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).expect("read state dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                scan(&path, src_root, offenders);
+                continue;
+            }
+            if path.extension().is_none_or(|e| e != "rs") || is_test_file(&path) {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(src_root)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            if ALLOWED.iter().any(|(p, _)| *p == rel) {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("read .rs");
+            let production = text.split("#[cfg(test)]").next().unwrap_or("");
+            if production.contains(RAW_WRITE) {
+                offenders.push(rel);
+            }
+        }
+    }
+
+    #[test]
+    fn persistent_state_is_written_atomically() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut offenders = Vec::new();
+        scan(&src.join("state"), &src, &mut offenders);
+        offenders.sort();
+        assert!(
+            offenders.is_empty(),
+            "persistent state must go through crate::fs::write_atomic — a torn \
+             write costs the user their marks/session. Offenders: {offenders:?}. \
+             If a site genuinely must write non-atomically, add it to ALLOWED \
+             with a reason."
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::{push_transcript_prompt, read_tail_lossy};
     use std::io::Write;

@@ -39,7 +39,7 @@ pub fn decline(fingerprint: &str) {
     }
     let body = serde_json::json!({ "declined_fingerprint": fingerprint });
     if let Ok(text) = serde_json::to_string(&body) {
-        let _ = std::fs::write(&path, text);
+        let _ = crate::fs::write_atomic(&path, text.as_bytes());
     }
 }
 

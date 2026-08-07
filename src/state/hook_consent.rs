@@ -44,7 +44,7 @@ pub fn set_consent(root: &Path, allow: bool) {
         let _ = std::fs::create_dir_all(parent);
     }
     if let Ok(text) = serde_json::to_string(&map) {
-        let _ = std::fs::write(&path, text);
+        let _ = crate::fs::write_atomic(&path, text.as_bytes());
     }
 }
 
