@@ -101,18 +101,38 @@ fn log_bodies() -> bool {
 
 // ── Shared JSON-RPC dispatch ────────────────────────────────────
 
-/// spyc's per-user state directory: `~/.local/state/spyc` (falling back
-/// to `/tmp` when `$HOME` is unset). Holds the MCP socket and the
-/// trusted-root sidecars — all owner-private; an attacker who can only
-/// plant files in a *cloned repo* cannot write here.
-pub fn state_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    PathBuf::from(home).join(".local/state/spyc")
+/// spyc's per-user state directory, holding the MCP socket and the
+/// trusted-root sidecars — all owner-private; an attacker who can only plant
+/// files in a *cloned repo* cannot write here.
+///
+/// Delegates to [`crate::state::state_root`] so there is exactly ONE resolver.
+/// This used to read `$HOME` directly and ignore `$XDG_STATE_HOME`, which split
+/// state across two directories for anyone who sets it: the socket and sidecars
+/// landed in `~/.local/state/spyc` while marks, harpoon, and frecency went to
+/// `$XDG_STATE_HOME/spyc` — and the sidecar's "owner-private, attacker can't
+/// forge it" argument was being made about a path the rest of the program
+/// wasn't using.
+///
+/// `None` when neither `$XDG_STATE_HOME` nor `$HOME` is set. Callers **decline
+/// the feature** rather than inventing a fallback: the old code fell back to a
+/// world-readable bare `/tmp`, where predictable socket and sidecar names invite
+/// squatting. No MCP is a better failure than MCP on an untrustworthy path.
+pub fn state_dir() -> Option<PathBuf> {
+    crate::state::state_root()
 }
 
-/// Socket path for a given PID: `~/.local/state/spyc/mcp-<pid>.sock`.
-pub fn socket_path_for(pid: u32) -> PathBuf {
-    state_dir().join(format!("mcp-{pid}.sock"))
+/// Socket path for a given PID: `<state_dir>/mcp-<pid>.sock`.
+/// `None` when [`state_dir`] is — see there.
+pub fn socket_path_for(pid: u32) -> Option<PathBuf> {
+    socket_path_in(state_dir(), pid)
+}
+
+/// [`socket_path_for`] with the state dir injected, so the absent-state-dir
+/// branch is testable without mutating the environment (the same trick
+/// [`root_marker_path_in`] uses). `None` in, `None` out — the caller declines
+/// the feature rather than inventing a location.
+fn socket_path_in(state_dir: Option<PathBuf>, pid: u32) -> Option<PathBuf> {
+    Some(state_dir?.join(format!("mcp-{pid}.sock")))
 }
 
 /// Trusted-root sidecar path for a PID, in the given state dir:
@@ -126,8 +146,8 @@ pub fn root_marker_path_in(state_dir: &Path, pid: u32) -> PathBuf {
     state_dir.join(format!("mcp-{pid}.root"))
 }
 
-/// Socket path for the current process.
-pub fn socket_path() -> PathBuf {
+/// Socket path for the current process. `None` when [`state_dir`] is.
+pub fn socket_path() -> Option<PathBuf> {
     socket_path_for(std::process::id())
 }
 
