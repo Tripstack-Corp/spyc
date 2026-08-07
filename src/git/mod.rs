@@ -86,4 +86,64 @@ mod no_subprocess_git_in_production {
             "production code must use gix, not the `git` subprocess — offenders: {offenders:?}"
         );
     }
+
+    /// A test-side git spawn must not be redirectable by the ambient
+    /// environment. `GIT_DIR` overrides `-C`, so a `cargo test` launched from
+    /// the pre-commit hook otherwise retargets every scratch-repo command at
+    /// the developer's real repository — which is exactly what happened on
+    /// 2026-08-07 (`core.bare = true` written into the checkout, the worktree
+    /// index corrupted, 99 tests failed). Scans ALL source, tests included:
+    /// unlike the guard above, test code is precisely the subject here.
+    ///
+    /// A site satisfies this by stripping `GIT_DIR` in its own chain, or by
+    /// carrying `GIT-ENV-EXEMPT` with a reason.
+    fn spawn_sites_missing_env_hygiene(src_root: &Path) -> Vec<String> {
+        const WINDOW: usize = 900;
+        const BEHIND: usize = 300;
+        const EXEMPT: &str = concat!("GIT-ENV", "-EXEMPT");
+        let strip = concat!("env_remove(", "\"GIT_DIR\")");
+        let mut offenders = Vec::new();
+        let mut stack = vec![src_root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).expect("read src dir") {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().is_none_or(|e| e != "rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).expect("read .rs");
+                let mut from = 0;
+                while let Some(rel) = text[from..].find(GIT_SPAWN) {
+                    let at = from + rel;
+                    // Look behind as well as ahead: an exemption is naturally
+                    // written as a comment above the spawn, and the stripping
+                    // calls come after it.
+                    let start = at.saturating_sub(BEHIND);
+                    let window = &text[start..text.len().min(at + WINDOW)];
+                    if !window.contains(strip) && !window.contains(EXEMPT) {
+                        let line = text[..at].matches('\n').count() + 1;
+                        offenders.push(format!("{}:{line}", path.display()));
+                    }
+                    from = at + GIT_SPAWN.len();
+                }
+            }
+        }
+        offenders.sort();
+        offenders
+    }
+
+    #[test]
+    fn every_test_git_spawn_resists_an_ambient_git_dir() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let offenders = spawn_sites_missing_env_hygiene(&src);
+        assert!(
+            offenders.is_empty(),
+            "these git spawns can be retargeted by an inherited GIT_DIR — build them \
+             with `git::test_support::git_command`, add `.env_remove(\"GIT_DIR\")`, or \
+             mark the site GIT-ENV-EXEMPT with a reason. Offenders: {offenders:?}"
+        );
+    }
 }
