@@ -1089,6 +1089,11 @@ mod tests {
                 .env("GIT_COMMITTER_EMAIL", "t@x")
                 .env("GIT_CONFIG_GLOBAL", "/dev/null")
                 .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                // `GIT_DIR` overrides `-C`/cwd, so a hook-launched test run would
+                // retarget this at the real repo — see git::test_support.
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
                 .status()
                 .expect("spawn git")
                 .success();
