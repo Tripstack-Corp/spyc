@@ -28,6 +28,41 @@ mod selection;
 // `mouse::route_mouse` / `mouse::Region` exactly as before this split.
 pub(super) use route::{Gesture, MouseSink, MouseSnapshot, region_at, route_mouse};
 
+/// Resolve a raw mouse event kind to the gesture + wheel delta every downstream
+/// consumer (`ListCursor`, `Pager`, `PaneScrollKeys`) shares. `None` for a kind
+/// with no behaviour (drags, motion, horizontal wheel — see the caller).
+///
+/// `invert_scroll` (`[mouse] invert_scroll`) flips the sign here, in this ONE
+/// place, so the file list, the pager, and an agent pane's synthesized scroll
+/// keys always agree with each other under either setting — none of them
+/// re-check the config themselves.
+fn gesture_and_delta(
+    kind: MouseEventKind,
+    lines: usize,
+    invert_scroll: bool,
+) -> Option<(Gesture, i32)> {
+    let magnitude = i32::try_from(lines).unwrap_or(i32::MAX);
+    let (gesture, delta) = match kind {
+        MouseEventKind::ScrollUp => (Gesture::Wheel, -magnitude),
+        MouseEventKind::ScrollDown => (Gesture::Wheel, magnitude),
+        MouseEventKind::Down(MouseButton::Left) => (Gesture::Left, 0),
+        MouseEventKind::Down(MouseButton::Middle) => (Gesture::Middle, 0),
+        MouseEventKind::Down(MouseButton::Right) => (Gesture::Right, 0),
+        // spyc asks the terminal only for 1000 (press/release), so `Moved`/`Drag`
+        // shouldn't arrive at all — `proc.rs` filters them for the terminals that
+        // send them anyway. Consequence, deliberate: click-drag selection INSIDE a
+        // child doesn't work. That needs 1002 (motion only while a button is
+        // held), which unlike 1003 wouldn't cost the idle-redraw invariant — a
+        // later change. Matched explicitly so adding one is a visible decision.
+        MouseEventKind::Up(_)
+        | MouseEventKind::Drag(_)
+        | MouseEventKind::Moved
+        | MouseEventKind::ScrollLeft
+        | MouseEventKind::ScrollRight => return None,
+    };
+    Some((gesture, if invert_scroll { -delta } else { delta }))
+}
+
 /// The surface an in-flight mouse drag belongs to. See
 /// [`super::ViewState::mouse_selection`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,27 +221,16 @@ impl super::App {
         }
 
         let lines = self.state.config.mouse.scroll_lines.max(1);
+        let invert_scroll = self.state.config.mouse.invert_scroll;
         // `delta` is only meaningful for a wheel gesture; buttons ignore it.
-        let (gesture, delta): (Gesture, i32) = match ev.kind {
-            MouseEventKind::ScrollUp => (Gesture::Wheel, -i32::try_from(lines).unwrap_or(i32::MAX)),
-            MouseEventKind::ScrollDown => {
-                (Gesture::Wheel, i32::try_from(lines).unwrap_or(i32::MAX))
-            }
-            MouseEventKind::Down(MouseButton::Left) => (Gesture::Left, 0),
-            MouseEventKind::Down(MouseButton::Middle) => (Gesture::Middle, 0),
-            MouseEventKind::Down(MouseButton::Right) => (Gesture::Right, 0),
+        let Some((gesture, delta)) = gesture_and_delta(ev.kind, lines, invert_scroll) else {
             // Drags, motion, horizontal wheel: no behaviour. spyc asks the terminal
             // only for 1000 (press/release), so `Moved`/`Drag` shouldn't arrive at
             // all — `proc.rs` filters them for the terminals that send them anyway.
             // Consequence, deliberate: click-drag selection INSIDE a child doesn't
             // work. That needs 1002 (motion only while a button is held), which
             // unlike 1003 wouldn't cost the idle-redraw invariant — a later change.
-            // Matched explicitly so adding one is a visible decision here.
-            MouseEventKind::Up(_)
-            | MouseEventKind::Drag(_)
-            | MouseEventKind::Moved
-            | MouseEventKind::ScrollLeft
-            | MouseEventKind::ScrollRight => return Vec::new(),
+            return Vec::new();
         };
 
         // The renderer's own layout — including the vsplit carve, `^a z` zoom and
@@ -299,5 +323,92 @@ impl super::App {
                 self.begin_pager_selection(ev, slot)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The default (uninverted): a downward tick is positive, an upward tick is
+    /// negative — "scroll down = toward the end", matching the pager and an
+    /// agent pane's synthesized scroll keys, which read this exact sign with no
+    /// flip of their own.
+    #[test]
+    fn uninverted_keeps_the_documented_sign() {
+        assert_eq!(
+            gesture_and_delta(MouseEventKind::ScrollDown, 3, false),
+            Some((Gesture::Wheel, 3))
+        );
+        assert_eq!(
+            gesture_and_delta(MouseEventKind::ScrollUp, 3, false),
+            Some((Gesture::Wheel, -3))
+        );
+    }
+
+    /// `invert_scroll = true` flips both directions — the escape hatch for a
+    /// terminal/OS combination that reads backwards from spyc's default.
+    #[test]
+    fn invert_scroll_flips_both_directions() {
+        assert_eq!(
+            gesture_and_delta(MouseEventKind::ScrollDown, 3, true),
+            Some((Gesture::Wheel, -3))
+        );
+        assert_eq!(
+            gesture_and_delta(MouseEventKind::ScrollUp, 3, true),
+            Some((Gesture::Wheel, 3))
+        );
+    }
+
+    /// Every consumer (`ListCursor`, `Pager`, `PaneScrollKeys` in `handle_mouse`)
+    /// reads the SAME delta this function returns — the toggle lives here, once,
+    /// specifically so those three can never disagree with each other. This test
+    /// is the guard against a future edit re-introducing a per-consumer flip.
+    #[test]
+    fn the_sign_is_decided_once_for_every_consumer() {
+        for invert in [false, true] {
+            let (_, down) = gesture_and_delta(MouseEventKind::ScrollDown, 1, invert).unwrap();
+            let (_, up) = gesture_and_delta(MouseEventKind::ScrollUp, 1, invert).unwrap();
+            assert_eq!(
+                down, -up,
+                "invert_scroll={invert}: up and down must be exact opposites"
+            );
+        }
+    }
+
+    /// Buttons carry no delta and are unaffected by the toggle.
+    #[test]
+    fn button_presses_carry_no_delta_either_way() {
+        for invert in [false, true] {
+            assert_eq!(
+                gesture_and_delta(MouseEventKind::Down(MouseButton::Left), 5, invert),
+                Some((Gesture::Left, 0))
+            );
+        }
+    }
+
+    /// Drags, motion, and horizontal wheel have no behaviour — matches the
+    /// `handle_mouse` caller's early-return arms.
+    #[test]
+    fn no_behaviour_kinds_return_none() {
+        for kind in [
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Moved,
+            MouseEventKind::ScrollLeft,
+            MouseEventKind::ScrollRight,
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            assert_eq!(gesture_and_delta(kind, 1, false), None, "{kind:?}");
+        }
+    }
+
+    /// `lines` (from `[mouse] scroll_lines`) scales the magnitude, not just a
+    /// fixed step — the config's own documented purpose.
+    #[test]
+    fn lines_scales_the_magnitude() {
+        assert_eq!(
+            gesture_and_delta(MouseEventKind::ScrollDown, 7, false),
+            Some((Gesture::Wheel, 7))
+        );
     }
 }

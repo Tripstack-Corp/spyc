@@ -205,6 +205,7 @@ capture = true       # real mouse reporting (wheel + buttons). Default ON.
 scroll_lines = 1     # lines per wheel tick, for surfaces spyc scrolls itself
 pane_scroll_lines = 3 # lines per tick for a pane spyc drives with synthesized keys
 pane_scroll_view = "native" # native | off | spyc_history
+invert_scroll = false # true flips the wheel direction everywhere
 ```
 
 `pane_scroll_view` decides what a wheel tick does the FIRST time it hits an agent
@@ -224,6 +225,18 @@ page-sized equivalent).
 `capture` asks the terminal for real mouse reporting so spyc can scroll whatever
 is under the pointer, instead of DEC 1007's trick of translating the wheel into
 arrow keys (which a focused pane receives as history navigation).
+
+`invert_scroll` flips the wheel direction. Left at its default (`false`), a
+downward tick moves the file-list cursor to a later row and the pager further
+into the content — the "scroll down = toward the end" mapping shared by browsers
+and `less`. Set it to `true` if that reads backwards for you.
+
+It's named for the mechanism rather than for a convention on purpose: whether
+"down" *should* move the content or the cursor depends on your OS trackpad
+setting and your terminal, so a `natural_scroll`-style flag would be ambiguous
+in precisely the situation you'd reach for it. The flip is applied once, where
+the wheel delta is computed, so the file list, the pager, and an agent pane's
+synthesized scroll keys move together and never disagree with each other.
 
 > [!WARNING]
 > **Capture takes native click-drag text selection away from your terminal.**
