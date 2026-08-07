@@ -84,7 +84,7 @@ deny: ## Supply-chain checks: advisories, licenses, sources, bans (cargo-deny)
 	cargo deny --all-features check
 
 .PHONY: fuzz
-fuzz: ## Coverage-guided fuzz (needs nightly + cargo-fuzz; on-demand, NOT in `check`). TARGET=dsl_parse|render_markdown|highlight|word_wrap|expand_path|expand_percent, FUZZ_SECS=N, FUZZ_TOOLCHAIN=nightly-YYYY-MM-DD.
+fuzz: ## Coverage-guided fuzz (needs nightly + cargo-fuzz; on-demand, NOT in `check`). TARGET=dsl_parse|render_markdown|highlight|word_wrap|expand_path|expand_percent, FUZZ_SECS=N, FUZZ_TOOLCHAIN=nightly-YYYY-MM-DD, FUZZ_TRIPLE=<host triple>.
 	@command -v cargo-fuzz >/dev/null 2>&1 || { \
 		echo "cargo-fuzz not found — install with: cargo install cargo-fuzz"; \
 		exit 1; \
@@ -93,7 +93,8 @@ fuzz: ## Coverage-guided fuzz (needs nightly + cargo-fuzz; on-demand, NOT in `ch
 		echo "nightly toolchain not found — install with: rustup toolchain install nightly"; \
 		exit 1; \
 	}
-	cargo +$(or $(FUZZ_TOOLCHAIN),nightly) fuzz run $(or $(TARGET),dsl_parse) \
+	cargo +$(or $(FUZZ_TOOLCHAIN),nightly) fuzz run \
+		$(if $(FUZZ_TRIPLE),--target $(FUZZ_TRIPLE),) $(or $(TARGET),dsl_parse) \
 		-- -max_total_time=$(or $(FUZZ_SECS),30)
 
 # Advisory AI-slop / code-quality scan. Deliberately NOT part of `check`: its
