@@ -361,7 +361,7 @@ mod state_writes_are_atomic {
                 continue;
             }
             let text = std::fs::read_to_string(&path).expect("read .rs");
-            let production = text.split("#[cfg(test)]").next().unwrap_or("");
+            let production = crate::guard_support::production_half(&text);
             if production.contains(RAW_WRITE) {
                 offenders.push(rel);
             }

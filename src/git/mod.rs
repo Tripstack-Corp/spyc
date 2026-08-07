@@ -64,7 +64,7 @@ mod no_subprocess_git_in_production {
                 }
                 let src = std::fs::read_to_string(&path).expect("read .rs");
                 // Production portion = everything before the first cfg(test).
-                let production = src.split("#[cfg(test)]").next().unwrap_or("");
+                let production = crate::guard_support::production_half(&src);
                 if production.contains(GIT_SPAWN) {
                     offenders.push(path.display().to_string());
                 }

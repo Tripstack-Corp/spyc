@@ -15,6 +15,8 @@ mod debug_log;
 mod envset;
 mod fs;
 mod git;
+#[cfg(test)]
+mod guard_support;
 mod key_trace;
 mod keymap;
 mod lua;

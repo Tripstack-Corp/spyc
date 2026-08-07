@@ -98,7 +98,7 @@ mod guard_tests {
         scan_rs(&app, &mut |path, src| {
             // Production portion only — a `#[cfg(test)]` block may legitimately
             // poke `state.left` to set up a fixture.
-            let production = src.split("#[cfg(test)]").next().unwrap_or("");
+            let production = crate::guard_support::production_half(src);
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if production.contains(&needle) && !ALLOW.contains(&name) {
                 offenders.push(name.to_string());
