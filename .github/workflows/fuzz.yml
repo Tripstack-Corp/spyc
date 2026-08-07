@@ -1,0 +1,106 @@
+# Scheduled coverage-guided fuzzing. Background insurance, NOT a merge gate —
+# deliberately off the PR path (`make check` stays fast; `make fuzz` stays
+# on-demand locally).
+#
+# The targets cover spyc's untrusted-input surface, which is larger than it
+# looks: the pager renders arbitrary files, the pty pane parses ANSI from
+# arbitrary child processes, and markdown/highlighting run over both. See
+# SECURITY.md → threat model.
+#
+# Corpora persist between runs via the cache, so each week resumes from the
+# inputs previous weeks discovered rather than starting cold.
+#
+# The build calls `make fuzz` so local and CI can't drift (RELEASE_ENGINEERING
+# §8), passing FUZZ_TOOLCHAIN so the pin below applies without the Makefile
+# hardcoding a date for local users.
+name: Fuzz
+
+on:
+  schedule:
+    # Mondays 07:00 UTC — an hour after Audit, so a busy runner queue doesn't
+    # make the two contend. Scheduled runs use the default branch.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Seconds to fuzz each target"
+        required: false
+        default: "300"
+
+# Never cancel a run mid-fuzz: a cancelled run loses the corpus it just grew.
+concurrency:
+  group: fuzz
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Pinned, not floating. A moving nightly turns an unrelated compiler
+  # regression into a "fuzz failure" on a Monday morning, and the resulting
+  # noise is how scheduled jobs get muted. Bump deliberately.
+  NIGHTLY: nightly-2026-08-01
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      # One crashing target must not cancel the others — a real crash is
+      # exactly when we want the remaining targets' results too.
+      fail-fast: false
+      matrix:
+        target:
+          - dsl_parse
+          - expand_path
+          - expand_percent
+          - highlight
+          - render_markdown
+          - word_wrap
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Pinned nightly toolchain
+        run: |
+          rustup toolchain install "$NIGHTLY" --profile minimal --no-self-update
+          rustup run "$NIGHTLY" rustc --version
+
+      # `fuzz/` is a standalone workspace (its own [workspace]), so point the
+      # cache at it rather than the parent crate.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+
+      - uses: taiki-e/install-action@v2.85.5
+        with:
+          tool: cargo-fuzz
+
+      # Accumulating cache: each run saves under a unique key and restores the
+      # newest matching prefix, so the corpus grows week over week instead of
+      # being rediscovered from scratch.
+      - name: Restore corpus
+        uses: actions/cache@v6
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+
+      - name: Fuzz ${{ matrix.target }}
+        run: |
+          make fuzz \
+            TARGET="${{ matrix.target }}" \
+            FUZZ_SECS="${{ inputs.seconds || '300' }}" \
+            FUZZ_TOOLCHAIN="$NIGHTLY"
+
+      # cargo-fuzz writes a reproducer into fuzz/artifacts/<target>/ on a
+      # crash. `always()` so it uploads on the failing run — which is the only
+      # run where it matters.
+      - name: Upload crash reproducer
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}/
+          if-no-files-found: ignore
+          retention-days: 30
