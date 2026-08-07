@@ -1,0 +1,181 @@
+//! Wheel scrolling for a pane whose child ignores mouse reports: translate a
+//! wheel tick into the agent's own verified scroll keybinding, escalate a
+//! sustained streak to page-wise keys, and drive codex's `^T` transcript
+//! overlay. Extracted verbatim from `mouse/mod.rs`.
+//!
+//! The escalation exists because the agent, not spyc, is the rate limiter: a
+//! long scroll sending one cursor-key per tick is slower than the user can
+//! flick, so a streak past `ESCALATE_AFTER` switches to page keys.
+
+use super::super::Effect;
+use super::route::{
+    AgentViewAction, AgentViewInputs, TOGGLE_SETTLE, decide_agent_view_action, scroll_streak_step,
+};
+
+impl super::super::App {
+    /// The active pane agent's verified scroll keybinding, if it has one.
+    pub(super) fn active_pane_wheel_scroll(&self) -> Option<crate::agent::WheelScroll> {
+        let tabs = self.runtime.pane_tabs.as_ref()?;
+        crate::agent::detect(&tabs.active_info().command).wheel_scroll()
+    }
+
+    /// Translate a wheel tick into the child's own scroll keys.
+    ///
+    /// Agents with no dedicated, toggleable view (today: agy — its
+    /// `transcript_open_marker` is `None`) keep the exact behaviour verified
+    /// working: `wheel_scroll()`'s key, repeated `pane_scroll_lines` times, no
+    /// screen-scraping at all. An agent that opts into
+    /// `transcript_open_marker` (codex) gets the fuller machinery in
+    /// `send_agent_view_scroll_keys` — auto-open, and escalation to a page key
+    /// under a sustained gesture.
+    pub(super) fn send_scroll_keys(&mut self, delta: i32) -> Vec<Effect> {
+        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+            return Vec::new();
+        };
+        let profile = crate::agent::detect(&tabs.active_info().command);
+        if let Some(marker) = profile.transcript_open_marker() {
+            let dir: i8 = if delta < 0 { -1 } else { 1 };
+            return self.send_agent_view_scroll_keys(profile, marker, dir);
+        }
+        let Some(scroll) = profile.wheel_scroll() else {
+            return Vec::new();
+        };
+        let (code, mods) = if delta < 0 { scroll.up } else { scroll.down };
+        // The PANE's own step, not `scroll_lines`. Those are different jobs: the list
+        // and pagers want 1 line per wheel event, because a trackpad already emits
+        // one event per notional line (owner-confirmed: "the file list speed is
+        // great"). But here spyc is driving somebody ELSE's pager by synthesizing
+        // arrows, and that pager moves one line per key with no safe way to ask it
+        // for a page — so at 1 the wheel couldn't traverse a long history.
+        Self::repeat_key_effect(code, mods, self.state.config.mouse.pane_scroll_lines.max(1))
+    }
+
+    /// The fuller wheel-to-keys machinery for an agent with its OWN toggleable
+    /// scrollback view (today: codex's `^T`), gated on `marker` — see
+    /// `AgentProfile::transcript_open_marker`.
+    ///
+    /// First decides whether the view is open by scraping the pane's CURRENT
+    /// visible screen (`Pane::visible_lines` — the viewport, not scrollback:
+    /// codex's own vt100 scrollback is confirmed empty, per #230's
+    /// investigation, so scrollback has nothing to scrape). Cheap enough to run
+    /// every tick — a plain substring search over one screen's worth of text —
+    /// so no debounce is needed for the scrape itself; only the toggle-send
+    /// needs one (see `pane_toggle_sent_at`'s doc).
+    pub(super) fn send_agent_view_scroll_keys(
+        &mut self,
+        profile: &'static dyn crate::agent::AgentProfile,
+        marker: &str,
+        dir: i8,
+    ) -> Vec<Effect> {
+        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+            return Vec::new();
+        };
+        let tab_index = tabs.active_index();
+        // One scrape, reused for both checks below — codex's own vt100
+        // scrollback is confirmed empty (#230), so this reads the viewport, not
+        // scrollback, and there is no cheaper way to ask "is X still true" than
+        // reading the same lines twice.
+        let visible = tabs.active().visible_lines();
+        let is_open = visible.iter().any(|l| l.contains(marker));
+        let at_bottom = is_open && profile.transcript_at_bottom(&visible);
+        let toggle_pending = self
+            .view
+            .pane_toggle_sent_at
+            .is_some_and(|sent| sent.elapsed() < TOGGLE_SETTLE);
+
+        let now = std::time::Instant::now();
+        let (escalate, streak) = if is_open {
+            let (streak, escalate) =
+                scroll_streak_step(self.view.pane_scroll_streak, tab_index, dir, now);
+            (escalate, Some(streak))
+        } else {
+            (false, self.view.pane_scroll_streak) // no tick to record while closed
+        };
+
+        let action = decide_agent_view_action(
+            AgentViewInputs {
+                is_open,
+                toggle_pending,
+                escalate,
+                at_bottom,
+            },
+            self.state.config.mouse.pane_scroll_view,
+            dir,
+        );
+
+        // State mutation lives here, once, keyed to the decision — not scattered
+        // across the branches that produce it.
+        self.view.pane_scroll_streak = streak;
+        if is_open {
+            self.view.pane_toggle_sent_at = None; // confirmed open; drop the guard
+        }
+
+        match action {
+            AgentViewAction::Nothing => Vec::new(),
+            AgentViewAction::UseSpycHistory => {
+                self.open_pane_scroll_pager();
+                Vec::new()
+            }
+            AgentViewAction::Toggle => {
+                let Some((code, mods)) = profile.transcript_toggle_key() else {
+                    return Vec::new();
+                };
+                self.view.pane_toggle_sent_at = Some(now);
+                Self::repeat_key_effect(code, mods, 1)
+            }
+            // Reuses the SAME debounce field `Toggle` sets: the next tick or two
+            // will still read `is_open == true` (codex hasn't redrawn the
+            // composer yet), and without this a fast flick continuing past the
+            // bottom would send `q` again into what may already be the
+            // composer's own text input.
+            AgentViewAction::Close => {
+                let Some((code, mods)) = profile.transcript_close_key() else {
+                    return Vec::new();
+                };
+                self.view.pane_toggle_sent_at = Some(now);
+                Self::repeat_key_effect(code, mods, 1)
+            }
+            AgentViewAction::Scroll { fast } => {
+                if fast && let Some(f) = profile.fast_wheel_scroll() {
+                    let (code, mods) = if dir < 0 { f.up } else { f.down };
+                    return Self::repeat_key_effect(code, mods, 1);
+                }
+                let Some(scroll) = profile.wheel_scroll() else {
+                    return Vec::new();
+                };
+                let (code, mods) = if dir < 0 { scroll.up } else { scroll.down };
+                Self::repeat_key_effect(
+                    code,
+                    mods,
+                    self.state.config.mouse.pane_scroll_lines.max(1),
+                )
+            }
+        }
+    }
+
+    /// Encode `key` and repeat it `n` times as ONE `SendToPane` batch — the
+    /// executor writes to the pty once, so a multi-line tick can't interleave
+    /// with the child's own output mid-burst.
+    fn repeat_key_effect(
+        code: crossterm::event::KeyCode,
+        mods: crossterm::event::KeyModifiers,
+        n: usize,
+    ) -> Vec<Effect> {
+        let per_press = crate::pane::input::encode_key(crossterm::event::KeyEvent::new(code, mods));
+        if per_press.is_empty() {
+            return Vec::new();
+        }
+        let mut bytes = Vec::with_capacity(per_press.len() * n.max(1));
+        for _ in 0..n.max(1) {
+            bytes.extend_from_slice(&per_press);
+        }
+        vec![Effect::SendToPane {
+            target: super::super::effect::PaneTarget::Active,
+            input: super::super::effect::PaneInput::Bytes(bytes),
+            on_ok: None,
+            // No per-tick flash, and no early return on a dead pty: either would
+            // bury the real exit message under one repeat per wheel line.
+            err_prefix: None,
+        }]
+    }
+}
