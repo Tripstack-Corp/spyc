@@ -29,6 +29,20 @@ pub fn gitdir(repo_root: &Path) -> Option<PathBuf> {
     Some(repo.git_dir().to_path_buf())
 }
 
+/// Path of the repo's **shared** git config. A linked worktree's gitdir has
+/// no `config` of its own — the real one lives in the common dir named by its
+/// `commondir` file, and worktrees share it. Resolved from the gitdir alone so
+/// the 1 Hz poll can stat it without opening the repo.
+pub fn shared_config_path(gitdir: &Path) -> Option<PathBuf> {
+    let own = gitdir.join("config");
+    if own.is_file() {
+        return Some(own);
+    }
+    let commondir = std::fs::read_to_string(gitdir.join("commondir")).ok()?;
+    let common = gitdir.join(commondir.trim());
+    Some(common.join("config"))
+}
+
 /// Branch display string for the repo at `repo_root`: the short branch
 /// name for an attached HEAD (`refs/heads/main` → `main`), or a 7-char
 /// commit prefix for a detached HEAD (matching git's `--short` default and
