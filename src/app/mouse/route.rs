@@ -523,3 +523,1089 @@ pub fn clamp_to_area(view: &crate::ui::pager::PagerView, col: u16, row: u16) -> 
     let row = row.clamp(area.y, area.y + area.height - 1);
     Some((col, row))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AgentViewAction, AgentViewInputs, Gesture, MouseSink, MouseSnapshot, Region,
+        decide_agent_view_action, region_at, route_mouse, scroll_streak_step,
+    };
+    use crate::app::App;
+    use crate::app::pager_handler::PagerSlot;
+    use crate::app::state::Side;
+    use crate::config::StatusPosition;
+    use crate::ui::pager::Mount;
+    use ratatui::layout::Rect;
+    /// Snapshot with nothing going on: no modal, no pager, child doesn't want
+    /// mouse. Tests override the one field they're about.
+    const fn snap(region: Option<Region>) -> MouseSnapshot {
+        MouseSnapshot {
+            modal: None,
+            region,
+            pager_mount: None,
+            covering_pager: None,
+            pane_wants_mouse: false,
+            is_prompting: false,
+            has_scroll_pager: false,
+            pane_closed: false,
+            pane_scroll_keys: false,
+        }
+    }
+
+    #[test]
+    fn every_modal_swallows_the_event() {
+        use crate::app::modal::Modal;
+        // Whatever the pointer is over, a modal owns the screen. Listed
+        // explicitly rather than looped so a new `Modal` variant is a visible
+        // decision here, not a silent default.
+        for modal in [
+            Modal::FindPicker,
+            Modal::Capture,
+            Modal::OverlayDismiss,
+            Modal::QuickSelect,
+            Modal::Harpoon,
+        ] {
+            for region in [Region::List, Region::Pane, Region::RightColumn] {
+                let s = MouseSnapshot {
+                    modal: Some(modal),
+                    ..snap(Some(region))
+                };
+                assert_eq!(
+                    route_mouse(s, Gesture::Wheel),
+                    MouseSink::Swallow,
+                    "{modal:?} over {region:?} must swallow"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pointer_over_the_pane_routes_to_the_pane_even_when_the_list_has_the_keyboard() {
+        // The ergonomics win, and the reason routing hit-tests the pointer: the
+        // snapshot carries no focus field at all, so there is nothing here that
+        // *could* make keyboard focus override the pointer.
+        let s = MouseSnapshot {
+            pane_wants_mouse: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::PaneForward);
+    }
+
+    #[test]
+    fn pane_child_without_mouse_mode_swallows_never_forwards() {
+        // The #170 class: forwarding to a child that never enabled mouse mode
+        // types `\e[<64;20;5M` into its prompt. Silence is the correct answer for
+        // a child with no verified scroll key either (codex).
+        let s = snap(Some(Region::Pane));
+        assert!(!s.pane_wants_mouse && !s.pane_scroll_keys);
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
+    }
+
+    /// An agent that ignores mouse reports but scrolls on a keypress (agy) gets
+    /// its keys instead of silence — the regression `[mouse] capture` introduced
+    /// by turning DEC 1007's wheel-to-arrows translation off.
+    #[test]
+    fn non_mouse_child_with_a_verified_scroll_key_gets_keys() {
+        let s = MouseSnapshot {
+            pane_scroll_keys: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::PaneScrollKeys);
+    }
+
+    /// Forwarding a real mouse report always beats synthesizing keys: a child that
+    /// speaks mouse gets exact coordinates, which keys cannot express.
+    #[test]
+    fn forwarding_wins_over_scroll_keys_when_the_child_speaks_mouse() {
+        let s = MouseSnapshot {
+            pane_wants_mouse: true,
+            pane_scroll_keys: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::PaneForward);
+    }
+
+    /// Same two guards forwarding uses. A dead child has nothing to scroll, and a
+    /// `^a v` pager owns the pane's rect — scrolling the child behind it would move
+    /// something the user cannot see.
+    #[test]
+    fn scroll_keys_are_suppressed_for_a_dead_or_covered_child() {
+        for (closed, covered) in [(true, false), (false, true)] {
+            let s = MouseSnapshot {
+                pane_scroll_keys: true,
+                pane_closed: closed,
+                has_scroll_pager: covered,
+                ..snap(Some(Region::Pane))
+            };
+            assert_eq!(
+                route_mouse(s, Gesture::Wheel),
+                MouseSink::Swallow,
+                "closed={closed} covered={covered}"
+            );
+        }
+    }
+
+    /// A left press on a covered pager anchors a text selection in THAT pager's
+    /// slot — whichever region the layout says is underneath.
+    #[test]
+    fn left_press_on_a_pager_starts_a_selection() {
+        for (slot, region) in [
+            (PagerSlot::Top, Region::List),
+            (PagerSlot::Right, Region::RightColumn),
+            (PagerSlot::Scrollback, Region::Pane),
+        ] {
+            let s = MouseSnapshot {
+                covering_pager: Some(slot),
+                ..snap(Some(region))
+            };
+            assert_eq!(
+                route_mouse(s, Gesture::Left),
+                MouseSink::FocusAndSelect(slot),
+                "{slot:?} under a pointer over {region:?}"
+            );
+        }
+    }
+
+    /// With no pager over it, a left press on the list focuses the column AND
+    /// anchors a row selection — that's how drag-to-copy-filenames starts. The
+    /// side comes from the region, so `b` never selects in `a`.
+    #[test]
+    fn left_press_on_the_bare_list_selects_rows_in_that_column() {
+        assert_eq!(
+            route_mouse(snap(Some(Region::List)), Gesture::Left),
+            MouseSink::FocusAndSelectRows(Side::Left)
+        );
+        assert_eq!(
+            route_mouse(snap(Some(Region::RightColumn)), Gesture::Left),
+            MouseSink::FocusAndSelectRows(Side::Right)
+        );
+    }
+
+    /// Selection must not steal the click-through contract: a press over a
+    /// mouse-aware child still focuses AND forwards, even with a pager mounted up
+    /// top (the `D` + pane coexistence case).
+    #[test]
+    fn left_press_on_a_mouse_aware_pane_still_forwards_with_a_pager_mounted() {
+        let s = MouseSnapshot {
+            pane_wants_mouse: true,
+            pager_mount: Some(Mount::TopPane),
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusAndForward);
+    }
+
+    /// A prompt still wins over starting a selection — the arm that keeps a
+    /// right-click from latching a chord also covers left.
+    #[test]
+    fn a_prompt_suppresses_selection() {
+        let s = MouseSnapshot {
+            is_prompting: true,
+            pager_mount: Some(Mount::Overlay),
+            ..snap(Some(Region::List))
+        };
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
+    }
+
+    #[test]
+    fn list_routes_to_the_cursor_or_to_a_pager_covering_it() {
+        // The side comes from the REGION, so the wheel scrolls the column under the
+        // pointer rather than the focused one.
+        assert_eq!(
+            route_mouse(snap(Some(Region::List)), Gesture::Wheel),
+            MouseSink::ListCursor(Side::Left)
+        );
+        assert_eq!(
+            route_mouse(snap(Some(Region::RightColumn)), Gesture::Wheel),
+            MouseSink::ListCursor(Side::Right)
+        );
+        // A pager COVERING the pointer takes those events.
+        for slot in [PagerSlot::Modal, PagerSlot::Top] {
+            let s = MouseSnapshot {
+                covering_pager: Some(slot),
+                ..snap(Some(Region::List))
+            };
+            assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Pager(slot));
+        }
+    }
+
+    #[test]
+    fn chrome_and_off_frame_swallow() {
+        for region in [
+            Region::Divider,
+            Region::Prompt,
+            Region::Status,
+            Region::VDivider,
+        ] {
+            assert_eq!(
+                route_mouse(snap(Some(region)), Gesture::Wheel),
+                MouseSink::Swallow,
+                "{region:?}"
+            );
+        }
+        assert_eq!(route_mouse(snap(None), Gesture::Wheel), MouseSink::Swallow);
+    }
+
+    /// Hit-testing against the real `compute_layout`, for both status positions.
+    /// `status_position = "bottom"` is the case `FrameLayout.top_unit`'s doc
+    /// calls out as the off-by-one trap, so it's not optional coverage.
+    #[test]
+    fn hit_test_resolves_each_region_for_both_status_positions() {
+        let area = Rect::new(0, 0, 80, 24);
+        for pos in [StatusPosition::Top, StatusPosition::Bottom] {
+            let layout = App::compute_layout(area, true, 40, pos);
+
+            let pane = layout.pane.expect("pane_open = true");
+            assert_eq!(
+                region_at(&layout, pane.x, pane.y),
+                Some(Region::Pane),
+                "{pos:?}: pane origin"
+            );
+            let divider = layout.divider.expect("pane_open = true");
+            assert_eq!(
+                region_at(&layout, divider.x, divider.y),
+                Some(Region::Divider),
+                "{pos:?}: divider"
+            );
+            assert_eq!(
+                region_at(&layout, layout.status.x, layout.status.y),
+                Some(Region::Status),
+                "{pos:?}: status row — the position that moves"
+            );
+            assert_eq!(
+                region_at(&layout, layout.prompt.x, layout.prompt.y),
+                Some(Region::Prompt),
+                "{pos:?}: prompt"
+            );
+            assert_eq!(
+                region_at(&layout, layout.list.x, layout.list.y),
+                Some(Region::List),
+                "{pos:?}: list origin"
+            );
+        }
+    }
+
+    #[test]
+    fn hit_test_with_no_pane_has_no_pane_or_divider_region() {
+        let layout = App::compute_layout(Rect::new(0, 0, 80, 24), false, 40, StatusPosition::Top);
+        assert!(layout.pane.is_none() && layout.divider.is_none());
+        // Every row of a pane-less frame resolves to something other than Pane.
+        for row in 0..24 {
+            assert_ne!(region_at(&layout, 0, row), Some(Region::Pane), "row {row}");
+        }
+    }
+
+    /// Middle and right are spyc's from EVERY region, including over a
+    /// mouse-aware child. Forwarding them would make the gesture unavailable in
+    /// exactly the region where the pane holds focus — which is where a user
+    /// would reach for it.
+    #[test]
+    fn middle_and_right_are_never_forwarded_even_to_a_mouse_aware_child() {
+        for region in [Region::List, Region::Pane, Region::RightColumn] {
+            let s = MouseSnapshot {
+                pane_wants_mouse: true,
+                ..snap(Some(region))
+            };
+            assert_eq!(
+                route_mouse(s, Gesture::Middle),
+                MouseSink::Paste,
+                "{region:?}: middle-click pastes"
+            );
+            assert_eq!(
+                route_mouse(s, Gesture::Right),
+                MouseSink::LeaderMenu,
+                "{region:?}: right-click opens the leader menu"
+            );
+        }
+    }
+
+    /// Left is click-through: over a mouse-aware child it focuses the pane **and**
+    /// the event reaches the child; everywhere else it just moves the keyboard.
+    ///
+    /// The sink carries both halves for a reason. The previous `PaneForward` did
+    /// only the forwarding, so the keyboard stayed in the file list after clicking
+    /// into the agent — and this test still passed, because a sink's name says
+    /// nothing about what the handler does with it.
+    #[test]
+    fn left_click_focuses_but_forwards_into_a_mouse_aware_pane() {
+        let aware = MouseSnapshot {
+            pane_wants_mouse: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(
+            route_mouse(aware, Gesture::Left),
+            MouseSink::FocusAndForward,
+            "must do both, not just forward"
+        );
+
+        // A child that never asked for mouse is never FORWARDED to — the #170 gate
+        // applies to buttons exactly as it does to the wheel. It now gets a
+        // spyc-side selection instead of a bare focus; see
+        // `a_non_mouse_pane_selects_instead_of_merely_focusing`.
+        let unaware = snap(Some(Region::Pane));
+        assert_eq!(
+            route_mouse(unaware, Gesture::Left),
+            MouseSink::FocusAndSelectPane
+        );
+
+        // A list press focuses AND starts a row selection; see
+        // `left_press_on_the_bare_list_selects_rows_in_that_column`.
+        for (region, side) in [
+            (Region::List, Side::Left),
+            (Region::RightColumn, Side::Right),
+        ] {
+            assert_eq!(
+                route_mouse(snap(Some(region)), Gesture::Left),
+                MouseSink::FocusAndSelectRows(side),
+                "{region:?}"
+            );
+        }
+    }
+
+    /// **A right-click during a prompt must not latch a leader chord.**
+    ///
+    /// No prompt is a `Modal` — they are all `Mode::Prompting` — so without
+    /// `is_prompting` on the snapshot this fell through to `LeaderMenu`.
+    /// `enter_leader()` sets a pending chord, but while prompting the next key
+    /// goes to `handle_prompt_key`, which never feeds the resolver and never
+    /// calls `clear_chord_hint`. So `pending` latched: the which-key popup sat on
+    /// screen for the whole prompt, and the first key after it closed was eaten as
+    /// a leader continuation — where `p` is a chdir and `P` overwrites
+    /// PROJECT_HOME. A stray right-click could move the user's project root.
+    #[test]
+    fn a_prompt_swallows_every_gesture_except_paste() {
+        for region in [Region::List, Region::Pane, Region::RightColumn] {
+            let prompting = MouseSnapshot {
+                is_prompting: true,
+                // Even over a mouse-aware child, and even with a pager mounted.
+                pane_wants_mouse: true,
+                ..snap(Some(region))
+            };
+            for gesture in [Gesture::Right, Gesture::Left, Gesture::Wheel] {
+                assert_eq!(
+                    route_mouse(prompting, gesture),
+                    MouseSink::Swallow,
+                    "{gesture:?} over {region:?} must not act while a prompt is open"
+                );
+            }
+            // Paste is the one gesture that means something mid-prompt:
+            // `handle_paste` routes it into the prompt buffer, newlines stripped.
+            assert_eq!(
+                route_mouse(prompting, Gesture::Middle),
+                MouseSink::Paste,
+                "{region:?}: middle-click still pastes into the prompt"
+            );
+        }
+    }
+
+    /// The leader latch is reachable with **no prompt at all**: a focused
+    /// `Mount::Overlay` pager (`:grep` results, `?` help, a git view, `:graveyard`)
+    /// resolves every key to `PagerKey` — meta chords included — so a chord armed
+    /// by a right-click sits pending until the pager closes, then eats the next key.
+    ///
+    /// `Mount::TopPane` is deliberately NOT gated: `route_input` lets meta escape
+    /// to the resolver there, so the leader menu works as intended.
+    #[test]
+    fn right_click_over_a_modal_pager_does_not_arm_a_chord_nothing_will_consume() {
+        let overlay = MouseSnapshot {
+            pager_mount: Some(Mount::Overlay),
+            ..snap(Some(Region::List))
+        };
+        assert_eq!(
+            route_mouse(overlay, Gesture::Right),
+            MouseSink::Swallow,
+            "an Overlay pager swallows every key, so the chord would latch"
+        );
+
+        let top = MouseSnapshot {
+            pager_mount: Some(Mount::TopPane),
+            ..snap(Some(Region::List))
+        };
+        assert_eq!(
+            route_mouse(top, Gesture::Right),
+            MouseSink::LeaderMenu,
+            "meta escapes a TopPane pager, so the leader is safe to arm"
+        );
+
+        // With no pager and no prompt it arms normally.
+        assert_eq!(
+            route_mouse(snap(Some(Region::List)), Gesture::Right),
+            MouseSink::LeaderMenu
+        );
+    }
+
+    /// A `^a v` scrollback owns the pane's rect, so the live child is hidden
+    /// behind it — forwarding there sends input to something the user cannot see.
+    #[test]
+    fn an_open_scrollback_stops_forwarding_to_the_hidden_child() {
+        let s = MouseSnapshot {
+            pane_wants_mouse: true,
+            has_scroll_pager: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
+        // Left-click still moves focus — it just doesn't reach the child.
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusRegion);
+    }
+
+    /// An exited child has nothing to receive the event. `pane_wants_mouse` may
+    /// still read true if vt100 retains the mode after the child dies, so the
+    /// closed check has to be its own condition rather than relying on that.
+    #[test]
+    fn a_closed_pane_is_never_forwarded_to() {
+        let s = MouseSnapshot {
+            pane_wants_mouse: true,
+            pane_closed: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusRegion);
+    }
+
+    /// A modal still wins over every button, not just the wheel.
+    #[test]
+    fn a_modal_swallows_buttons_too() {
+        use crate::app::modal::Modal;
+        let s = MouseSnapshot {
+            modal: Some(Modal::FindPicker),
+            pane_wants_mouse: true,
+            ..snap(Some(Region::Pane))
+        };
+        for gesture in [
+            Gesture::Left,
+            Gesture::Middle,
+            Gesture::Right,
+            Gesture::Wheel,
+        ] {
+            assert_eq!(
+                route_mouse(s, gesture),
+                MouseSink::Swallow,
+                "{gesture:?} must not bypass a modal"
+            );
+        }
+    }
+
+    /// Clicking chrome or off-frame moves nothing — but middle/right still act,
+    /// since they aren't about the region.
+    ///
+    /// `Status` and `Divider` are excluded: they hold text and no keyboard focus, so
+    /// a press there starts a selection — see
+    /// `chrome_lines_start_a_selection_rather_than_taking_focus`.
+    #[test]
+    fn chrome_focuses_nothing_but_still_pastes_and_opens_the_menu() {
+        // Only the prompt row is left: `Status` and `Divider` now start selections.
+        let prompt = snap(Some(Region::Prompt));
+        assert_eq!(
+            route_mouse(prompt, Gesture::Left),
+            MouseSink::FocusRegion,
+            "routed, then `focus_region` no-ops on chrome"
+        );
+        assert_eq!(route_mouse(prompt, Gesture::Middle), MouseSink::Paste);
+        assert_eq!(route_mouse(prompt, Gesture::Right), MouseSink::LeaderMenu);
+    }
+
+    /// Coordinate translation, for both `status_position` values — the trap
+    /// `FrameLayout.top_unit`'s doc calls out, since the pane's row origin moves
+    /// with the status row. Frame row `R` inside a pane starting at row `Y` must
+    /// reach the child as pane row `R - Y`; skipping this makes clicks land
+    /// `pane.y` rows off, which reads as the child's bug rather than ours.
+    #[test]
+    fn mouse_report_translates_into_the_panes_coordinate_space() {
+        use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
+
+        for pos in [StatusPosition::Top, StatusPosition::Bottom] {
+            let layout = App::compute_layout(Rect::new(0, 0, 80, 24), true, 40, pos);
+            let pane = layout.pane.expect("pane_open = true");
+            assert!(
+                pane.y > 0,
+                "{pos:?}: pane must be offset for this to prove anything"
+            );
+
+            // Two rows into the pane, five columns in.
+            let ev = MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: pane.x + 5,
+                row: pane.y + 2,
+                modifiers: KeyModifiers::NONE,
+            };
+            let report = crate::app::mouse::forward::mouse_report(ev, &layout)
+                .expect("wheel is forwardable");
+            assert_eq!(report.row, 2, "{pos:?}: row must be pane-relative");
+            assert_eq!(report.col, 5, "{pos:?}: col must be pane-relative");
+            assert_eq!(report.button, 64, "wheel up");
+            assert!(!report.release, "a wheel tick has no release half");
+
+            // The pane's own origin is the child's 0,0.
+            let at_origin = MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: pane.x,
+                row: pane.y,
+                modifiers: KeyModifiers::NONE,
+            };
+            let report = crate::app::mouse::forward::mouse_report(at_origin, &layout)
+                .expect("wheel is forwardable");
+            assert_eq!((report.col, report.row), (0, 0), "{pos:?}: pane origin");
+            assert_eq!(report.button, 65, "wheel down");
+        }
+    }
+
+    /// **Every gesture must encode as its own xterm button.**
+    ///
+    /// The bug this pins: the encoder used to be wheel-shaped —
+    /// `wheel_report(ev, up, ..)` with `button: if up { 64 } else { 65 }` — so when
+    /// buttons started routing through it they arrived with `up = false` and every
+    /// click went out as **wheel-down**. Claude's decoder reads 65 as a wheel tick
+    /// and its button decoder rejects anything with bit 64 set, so a left-click
+    /// scrolled the agent and never clicked. The old test only ever passed
+    /// `ScrollUp`/`ScrollDown`, so it sailed through.
+    #[test]
+    fn every_button_encodes_as_itself_not_as_a_wheel_tick() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let layout = App::compute_layout(Rect::new(0, 0, 80, 24), true, 40, StatusPosition::Top);
+        let pane = layout.pane.expect("pane_open = true");
+        let at = |kind| MouseEvent {
+            kind,
+            column: pane.x + 3,
+            row: pane.y + 1,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        // xterm: 0/1/2 = left/middle/right; 64/65 = wheel up/down. A drag is the
+        // held button with the motion flag — `encode_mouse` turns that into bit 32.
+        for (kind, button, release, motion) in [
+            (MouseEventKind::Down(MouseButton::Left), 0, false, false),
+            (MouseEventKind::Down(MouseButton::Middle), 1, false, false),
+            (MouseEventKind::Down(MouseButton::Right), 2, false, false),
+            (MouseEventKind::Up(MouseButton::Left), 0, true, false),
+            (MouseEventKind::Up(MouseButton::Middle), 1, true, false),
+            (MouseEventKind::Up(MouseButton::Right), 2, true, false),
+            (MouseEventKind::Drag(MouseButton::Left), 0, false, true),
+            (MouseEventKind::Drag(MouseButton::Middle), 1, false, true),
+            (MouseEventKind::Drag(MouseButton::Right), 2, false, true),
+            (MouseEventKind::ScrollUp, 64, false, false),
+            (MouseEventKind::ScrollDown, 65, false, false),
+        ] {
+            let r =
+                crate::app::mouse::forward::mouse_report(at(kind), &layout).expect("forwardable");
+            assert_eq!(r.button, button, "{kind:?} must encode button {button}");
+            assert_eq!(r.release, release, "{kind:?} release flag");
+            assert_eq!(r.motion, motion, "{kind:?} motion flag");
+            // The wheel bit must not leak onto a real button, and vice versa.
+            assert_eq!(
+                r.button & 64 != 0,
+                matches!(kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown),
+                "{kind:?}: bit 64 marks a wheel tick and nothing else"
+            );
+        }
+
+        // Buttonless motion and horizontal wheel are not forwarded at all.
+        // `Moved` in particular: spyc asks for 1002, which reports motion only
+        // while a button is held, so a `Moved` is motion nobody requested.
+        for kind in [
+            MouseEventKind::Moved,
+            MouseEventKind::ScrollLeft,
+            MouseEventKind::ScrollRight,
+        ] {
+            assert!(
+                crate::app::mouse::forward::mouse_report(at(kind), &layout).is_none(),
+                "{kind:?} must not be forwarded"
+            );
+        }
+    }
+
+    #[test]
+    fn hit_test_returns_none_outside_the_frame() {
+        let layout = App::compute_layout(Rect::new(0, 0, 80, 24), true, 40, StatusPosition::Top);
+        assert_eq!(region_at(&layout, 200, 5), None, "past the right edge");
+        assert_eq!(region_at(&layout, 5, 200), None, "past the bottom");
+    }
+    // ── an open pager outranks the region painted beneath it ──────────────
+
+    /// **The bug this pins.** An `Overlay` pager renders into `frame.area()` and a
+    /// `^a v` scrollback renders into the pane's rect, but `region_at` tests
+    /// `layout.pane` FIRST — so the pointer over either resolved to `Region::Pane`.
+    /// The wheel then scrolled the agent *behind* a full-screen pager, and a left
+    /// click was forwarded into it, which is what made claude start its own
+    /// selection underneath the pager the user was reading.
+    #[test]
+    fn a_pager_covering_the_pane_outranks_the_pane() {
+        for slot in [PagerSlot::Modal, PagerSlot::Scrollback] {
+            let s = MouseSnapshot {
+                covering_pager: Some(slot),
+                // Everything that made the pane win before: pointer over the pane's
+                // rect, and a live mouse-aware child eager to receive it.
+                pane_wants_mouse: true,
+                ..snap(Some(Region::Pane))
+            };
+            assert_eq!(
+                route_mouse(s, Gesture::Wheel),
+                MouseSink::Pager(slot),
+                "{slot:?}: wheel must scroll the pager, not the agent behind it"
+            );
+            assert_eq!(
+                route_mouse(s, Gesture::Left),
+                MouseSink::FocusAndSelect(slot),
+                "{slot:?}: click must select in the pager, not forward to the agent"
+            );
+        }
+    }
+
+    /// With no pager under the pointer the pane keeps click-through and the wheel —
+    /// the coverage check must not have stolen the live-pane behaviour.
+    #[test]
+    fn an_uncovered_pane_still_forwards() {
+        let s = MouseSnapshot {
+            pane_wants_mouse: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::PaneForward);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusAndForward);
+    }
+
+    /// **Deliberate reversal of what #228 shipped.** That version reasoned that
+    /// beside a centered overlay the user still sees the list, so clicking there
+    /// should reach it. In practice that read as a POLA break: it let a click
+    /// select content in the pane *underneath* a pager the user was reading. An
+    /// open modal pager is now the only interacting surface, matching how
+    /// `route_input` hands it every key.
+    ///
+    /// Scoped to `Overlay` on purpose — see
+    /// `a_non_modal_pager_leaves_the_rest_of_the_frame_alone`.
+    #[test]
+    fn a_modal_pager_swallows_input_beside_its_box() {
+        let s = MouseSnapshot {
+            pager_mount: Some(Mount::Overlay), // mounted...
+            covering_pager: None,              // ...but not under THIS point
+            ..snap(Some(Region::List))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
+    }
+
+    /// A prompt still outranks a covering pager, and middle/right stay spyc's
+    /// everywhere — the new precedence must sit below the existing ones.
+    #[test]
+    fn a_prompt_and_the_spyc_buttons_still_outrank_a_covering_pager() {
+        let prompting = MouseSnapshot {
+            is_prompting: true,
+            covering_pager: Some(PagerSlot::Modal),
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(prompting, Gesture::Left), MouseSink::Swallow);
+
+        let covered = MouseSnapshot {
+            covering_pager: Some(PagerSlot::Modal),
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(covered, Gesture::Middle), MouseSink::Paste);
+    }
+    /// **A full-frame modal pager is the only interacting surface while it's open.**
+    ///
+    /// Clicking beside its box used to reach whatever the layout said was
+    /// underneath — starting a selection in the pane "under" a pager the user is
+    /// reading. Matches how `route_input` hands an Overlay every key.
+    #[test]
+    fn a_modal_pager_is_exclusive_even_where_it_does_not_cover() {
+        let s = MouseSnapshot {
+            pager_mount: Some(Mount::Overlay),
+            covering_pager: None, // beside the box, over the pane's rect
+            pane_wants_mouse: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
+        // Middle-click still pastes: it targets the pager's own search / jump prompt.
+        assert_eq!(route_mouse(s, Gesture::Middle), MouseSink::Paste);
+    }
+
+    /// A NON-modal pager stays scoped to its own rect — it must not make the whole
+    /// frame inert the way an Overlay does.
+    #[test]
+    fn a_non_modal_pager_leaves_the_rest_of_the_frame_alone() {
+        let s = MouseSnapshot {
+            pager_mount: Some(Mount::TopPane),
+            covering_pager: None,
+            pane_wants_mouse: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::PaneForward);
+    }
+    // ── scroll_streak_step: the sustained-scroll escalation timer ──────────
+
+    fn later(base: std::time::Instant, ms: u64) -> std::time::Instant {
+        base.checked_add(std::time::Duration::from_millis(ms))
+            .expect("small offset from now")
+    }
+
+    /// The headline: a same-direction gesture escalates once it's run past
+    /// `ESCALATE_AFTER` — this is the fix for "scrolling is too slow in ^t mode".
+    #[test]
+    fn a_sustained_same_direction_streak_escalates_after_the_threshold() {
+        let t0 = std::time::Instant::now();
+        let (s1, esc1) = scroll_streak_step(None, 0, 1, t0);
+        assert!(!esc1, "the very first tick must not already be escalated");
+
+        // Each successive gap stays under STREAK_GAP (500ms) so this is one
+        // continuous streak, not a series of restarts.
+        let (s2, esc2) = scroll_streak_step(Some(s1), 0, 1, later(t0, 400));
+        assert!(!esc2, "under the threshold yet");
+
+        let (s3, esc3) = scroll_streak_step(Some(s2), 0, 1, later(t0, 800));
+        assert!(!esc3, "still under the threshold");
+
+        let (_, esc4) = scroll_streak_step(Some(s3), 0, 1, later(t0, 1_100));
+        assert!(esc4, "past ESCALATE_AFTER in the same direction");
+    }
+
+    /// A direction change is a new gesture — it must not inherit the old
+    /// streak's elapsed time and escalate immediately.
+    #[test]
+    fn a_direction_change_restarts_the_streak() {
+        let t0 = std::time::Instant::now();
+        let (s1, _) = scroll_streak_step(None, 0, 1, t0);
+        let (_, escalated_immediately) = scroll_streak_step(Some(s1), 0, -1, later(t0, 1_200));
+        assert!(
+            !escalated_immediately,
+            "reversing direction must restart at the slow speed"
+        );
+    }
+
+    /// A pause longer than STREAK_GAP is a new gesture too — resuming a scroll
+    /// after glancing away shouldn't inherit the old speed either.
+    #[test]
+    fn a_long_pause_restarts_the_streak() {
+        let t0 = std::time::Instant::now();
+        let (s1, _) = scroll_streak_step(None, 0, 1, t0);
+        // Long enough overall to be past ESCALATE_AFTER, but the GAP since the
+        // last tick is what should matter here.
+        let gap_tick_at = later(t0, 1_600);
+        let (_, escalated) = scroll_streak_step(Some(s1), 0, 1, gap_tick_at);
+        assert!(
+            !escalated,
+            "a stale streak with a big gap must restart, not escalate"
+        );
+    }
+
+    /// Switching tabs must not hand a fast-scrolled codex tab's escalation to a
+    /// DIFFERENT tab the user just switched to.
+    #[test]
+    fn switching_tabs_restarts_the_streak() {
+        let t0 = std::time::Instant::now();
+        let (s1, _) = scroll_streak_step(None, 0, 1, t0);
+        let (_, escalated) = scroll_streak_step(Some(s1), 1, 1, later(t0, 1_200));
+        assert!(
+            !escalated,
+            "a different tab index must not inherit the streak"
+        );
+    }
+
+    /// Consecutive fast ticks within the gap keep extending the SAME streak
+    /// (not restarting each time) — otherwise a real flick, whose ticks are only
+    /// tens of ms apart, would never accumulate enough elapsed time to escalate.
+    #[test]
+    fn consecutive_fast_ticks_accumulate_toward_escalation() {
+        let t0 = std::time::Instant::now();
+        let mut streak = None;
+        let mut escalated_at = None;
+        for i in 0..40 {
+            let t = later(t0, i * 30); // a tick every 30ms, like a real flick
+            let (s, esc) = scroll_streak_step(streak, 0, 1, t);
+            streak = Some(s);
+            if esc && escalated_at.is_none() {
+                escalated_at = Some(i);
+            }
+        }
+        assert!(
+            escalated_at.is_some(),
+            "40 ticks at 30ms (1.2s) must cross ESCALATE_AFTER"
+        );
+    }
+
+    // ── decide_agent_view_action: the codex ^T auto-open + escalation policy ──
+
+    use crate::config::PaneScrollView;
+
+    /// The DEFAULT behaviour, and the owner's stated preference: closed +
+    /// `Native` opens it. Exactly one toggle send, never also a scroll this tick
+    /// — see the doc on `send_agent_view_scroll_keys` for why not both.
+    #[test]
+    fn closed_and_native_opens_it() {
+        assert_eq!(
+            decide_agent_view_action(
+                AgentViewInputs {
+                    is_open: false,
+                    toggle_pending: false,
+                    escalate: false,
+                    at_bottom: false
+                },
+                PaneScrollView::Native,
+                1,
+            ),
+            AgentViewAction::Toggle
+        );
+    }
+
+    /// A toggle already in flight (within TOGGLE_SETTLE) must NOT be re-sent —
+    /// this is the guard against the open/close flicker a fast multi-tick flick
+    /// would otherwise cause, since `^T` is a genuine toggle, not idempotent-open.
+    #[test]
+    fn closed_with_a_pending_toggle_does_nothing() {
+        assert_eq!(
+            decide_agent_view_action(
+                AgentViewInputs {
+                    is_open: false,
+                    toggle_pending: true,
+                    escalate: false,
+                    at_bottom: false
+                },
+                PaneScrollView::Native,
+                1,
+            ),
+            AgentViewAction::Nothing
+        );
+    }
+
+    /// `Off` never opens anything, pending or not — the second of the owner's
+    /// three configurable choices ("have it do nothing").
+    #[test]
+    fn closed_and_off_does_nothing() {
+        for pending in [false, true] {
+            assert_eq!(
+                decide_agent_view_action(
+                    AgentViewInputs {
+                        is_open: false,
+                        toggle_pending: pending,
+                        escalate: false,
+                        at_bottom: false
+                    },
+                    PaneScrollView::Off,
+                    1,
+                ),
+                AgentViewAction::Nothing,
+                "pending={pending}"
+            );
+        }
+    }
+
+    /// `SpycHistory` — the owner's stated personal preference — mounts spyc's OWN
+    /// view instead of touching the agent's, regardless of any pending toggle
+    /// (there is none to guard: this mode never sends one).
+    #[test]
+    fn closed_and_spyc_history_uses_spycs_own_view() {
+        assert_eq!(
+            decide_agent_view_action(
+                AgentViewInputs {
+                    is_open: false,
+                    toggle_pending: false,
+                    escalate: false,
+                    at_bottom: false
+                },
+                PaneScrollView::SpycHistory,
+                1,
+            ),
+            AgentViewAction::UseSpycHistory
+        );
+    }
+
+    /// Once open, the MODE stops mattering — all three converge on scrolling.
+    /// Whatever opened it (auto or the user's own keyboard `^T`), the wheel must
+    /// scroll it.
+    #[test]
+    fn open_always_scrolls_regardless_of_mode() {
+        for mode in [
+            PaneScrollView::Native,
+            PaneScrollView::Off,
+            PaneScrollView::SpycHistory,
+        ] {
+            assert_eq!(
+                decide_agent_view_action(
+                    AgentViewInputs {
+                        is_open: true,
+                        toggle_pending: false,
+                        escalate: false,
+                        at_bottom: false
+                    },
+                    mode,
+                    1,
+                ),
+                AgentViewAction::Scroll { fast: false },
+                "{mode:?}"
+            );
+        }
+    }
+
+    /// The other headline: open + escalated sends the FAST (page) key — this is
+    /// the fix for "scrolling is too slow in ^t mode".
+    #[test]
+    fn open_and_escalated_scrolls_fast() {
+        assert_eq!(
+            decide_agent_view_action(
+                AgentViewInputs {
+                    is_open: true,
+                    toggle_pending: false,
+                    escalate: true,
+                    at_bottom: false
+                },
+                PaneScrollView::Native,
+                1,
+            ),
+            AgentViewAction::Scroll { fast: true }
+        );
+    }
+    /// The headline: open, scrolling DOWN, already at the bottom -> close
+    /// rather than a no-op scroll. Mode-independent, matching how `Scroll`
+    /// already ignores mode once open.
+    #[test]
+    fn open_at_bottom_scrolling_down_closes() {
+        for mode in [
+            PaneScrollView::Native,
+            PaneScrollView::Off,
+            PaneScrollView::SpycHistory,
+        ] {
+            assert_eq!(
+                decide_agent_view_action(
+                    AgentViewInputs {
+                        is_open: true,
+                        toggle_pending: false,
+                        escalate: false,
+                        at_bottom: true
+                    },
+                    mode,
+                    1,
+                ),
+                AgentViewAction::Close,
+                "{mode:?}"
+            );
+        }
+    }
+
+    /// Scrolling UP while at the bottom is just... scrolling up. `at_bottom`
+    /// only means something for a DOWN gesture.
+    #[test]
+    fn at_bottom_scrolling_up_still_scrolls() {
+        assert_eq!(
+            decide_agent_view_action(
+                AgentViewInputs {
+                    is_open: true,
+                    toggle_pending: false,
+                    escalate: false,
+                    at_bottom: true
+                },
+                PaneScrollView::Native,
+                -1,
+            ),
+            AgentViewAction::Scroll { fast: false }
+        );
+    }
+
+    /// Not at the bottom: scrolling down is just... scrolling down, regardless
+    /// of escalation.
+    #[test]
+    fn not_at_bottom_scrolling_down_still_scrolls() {
+        for escalate in [false, true] {
+            assert_eq!(
+                decide_agent_view_action(
+                    AgentViewInputs {
+                        is_open: true,
+                        toggle_pending: false,
+                        escalate,
+                        at_bottom: false
+                    },
+                    PaneScrollView::Native,
+                    1,
+                ),
+                AgentViewAction::Scroll { fast: escalate },
+                "escalate={escalate}"
+            );
+        }
+    }
+
+    /// A close was just sent (still settling): a further down tick that still
+    /// reads "open, at bottom" must NOT re-send close — this is the guard
+    /// against sending `q` twice while codex's redraw is in flight, mirroring
+    /// the open-side toggle-storm guard.
+    #[test]
+    fn a_pending_settle_suppresses_a_second_close() {
+        assert_eq!(
+            decide_agent_view_action(
+                AgentViewInputs {
+                    is_open: true,
+                    toggle_pending: true,
+                    escalate: false,
+                    at_bottom: true
+                },
+                PaneScrollView::Native,
+                1,
+            ),
+            AgentViewAction::Scroll { fast: false },
+            "must fall through to a harmless scroll key, not re-close"
+        );
+    }
+
+    /// The single-line chrome surfaces hold text and no keyboard focus, so a press
+    /// there can only mean "select this". Both of them: the divider carries the tab
+    /// bar, where a custom session name is the thing worth copying.
+    #[test]
+    fn chrome_lines_start_a_selection_rather_than_taking_focus() {
+        for region in [Region::Status, Region::Divider] {
+            assert_eq!(
+                route_mouse(snap(Some(region)), Gesture::Left),
+                MouseSink::SelectChrome,
+                "{region:?}"
+            );
+        }
+    }
+
+    /// A pager over the list still wins: `covering_pager` is checked before the
+    /// row-selection arm, so clicking a pager never selects filenames behind it.
+    #[test]
+    fn a_covering_pager_outranks_row_selection() {
+        let s = MouseSnapshot {
+            covering_pager: Some(PagerSlot::Top),
+            ..snap(Some(Region::List))
+        };
+        assert_eq!(
+            route_mouse(s, Gesture::Left),
+            MouseSink::FocusAndSelect(PagerSlot::Top)
+        );
+    }
+
+    /// The complement of forwarding: a child that ignores mouse reports gets a
+    /// spyc-side selection, because nothing else can select its text. This is what
+    /// makes copy work inside codex's `^T` transcript overlay.
+    #[test]
+    fn a_non_mouse_pane_selects_instead_of_merely_focusing() {
+        let s = snap(Some(Region::Pane));
+        assert!(!s.pane_wants_mouse);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusAndSelectPane);
+    }
+
+    /// A child that speaks mouse draws its OWN selection (#224); painting ours on
+    /// top would double it up, so forwarding still wins.
+    #[test]
+    fn a_mouse_aware_pane_still_forwards_rather_than_selecting() {
+        let s = MouseSnapshot {
+            pane_wants_mouse: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusAndForward);
+    }
+
+    /// No selecting text off a dead or hidden grid — the same two guards forwarding
+    /// uses, for the same reasons.
+    #[test]
+    fn a_dead_or_covered_pane_is_not_selectable() {
+        for (closed, covered) in [(true, false), (false, true)] {
+            let s = MouseSnapshot {
+                pane_closed: closed,
+                has_scroll_pager: covered,
+                ..snap(Some(Region::Pane))
+            };
+            assert_eq!(
+                route_mouse(s, Gesture::Left),
+                MouseSink::FocusRegion,
+                "closed={closed} covered={covered}"
+            );
+        }
+    }
+}

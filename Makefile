@@ -36,6 +36,20 @@ run: ## Debug run
 .PHONY: check
 check: fmt-check lint test deny ## Full quality gate (CI)
 
+# A pipeline's exit status is its LAST command's, so `make check | tail` reports
+# the pager's success and a failed gate reads as green. No target can fix that —
+# the pipe lives in the caller's shell. What a target CAN do is put the verdict
+# in the output, where a tail will see it.
+.PHONY: check-ci
+check-ci: ## `check` ending in an unmissable verdict line — safe to pipe
+	@if $(MAKE) --no-print-directory check; then \
+		echo "=== GATE: PASS ==="; \
+	else \
+		status=$$?; \
+		echo "=== GATE: FAIL (exit $$status) ==="; \
+		exit $$status; \
+	fi
+
 # `--locked` on test/lint/build forbids implicit Cargo.lock changes —
 # CI and dev builds use the committed lockfile or fail loudly.
 .PHONY: test
