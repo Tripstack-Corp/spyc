@@ -71,6 +71,11 @@ jobs:
         with:
           workspaces: fuzz
 
+      # NOTE: this installs the *musl* build of cargo-fuzz, and cargo-fuzz
+      # defaults `--target` to its own compile-time host triple. Left alone it
+      # therefore builds for musl, where ASAN cannot work ("sanitizer is
+      # incompatible with statically linked libc"). Hence the explicit
+      # FUZZ_TRIPLE below — do not drop it.
       - uses: taiki-e/install-action@v2.85.5
         with:
           tool: cargo-fuzz
@@ -91,7 +96,8 @@ jobs:
           make fuzz \
             TARGET="${{ matrix.target }}" \
             FUZZ_SECS="${{ inputs.seconds || '300' }}" \
-            FUZZ_TOOLCHAIN="$NIGHTLY"
+            FUZZ_TOOLCHAIN="$NIGHTLY" \
+            FUZZ_TRIPLE=x86_64-unknown-linux-gnu
 
       # cargo-fuzz writes a reproducer into fuzz/artifacts/<target>/ on a
       # crash. `always()` so it uploads on the failing run — which is the only
