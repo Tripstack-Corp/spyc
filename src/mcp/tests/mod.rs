@@ -660,9 +660,49 @@ fn pid_from_sock_path_parses() {
 
 #[test]
 fn socket_path_contains_pid() {
-    let path = socket_path();
+    let path = socket_path().expect("tests run with HOME set");
     let pid = std::process::id();
     assert!(path.to_string_lossy().contains(&format!("mcp-{pid}.sock")));
+}
+
+#[test]
+fn mcp_state_dir_is_the_one_state_root() {
+    // The defect: `mcp::state_dir` read $HOME directly and ignored
+    // $XDG_STATE_HOME, so with XDG set the socket and trusted-root sidecar
+    // landed in ~/.local/state/spyc while marks/harpoon/frecency went to
+    // $XDG_STATE_HOME/spyc — state split across two directories, and the
+    // sidecar's trust argument made about a path nothing else used.
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mcp_dir = crate::mcp::state_dir().expect("override is Some");
+        assert_eq!(mcp_dir, tmp.path());
+
+        // The socket and the sidecar follow it, so everything shares one root.
+        let sock = socket_path().expect("override is Some");
+        assert!(
+            sock.starts_with(tmp.path()),
+            "socket {sock:?} escaped the state root"
+        );
+        let marker = crate::mcp::root_marker_path_in(&mcp_dir, std::process::id());
+        assert!(marker.starts_with(tmp.path()));
+    });
+}
+
+#[test]
+fn no_state_dir_yields_no_socket_path() {
+    // With neither $XDG_STATE_HOME nor $HOME set there is nowhere trustworthy
+    // to put the socket. The pre-unification code fell back to a
+    // world-readable bare `/tmp`, where a predictable `mcp-<pid>.sock` name
+    // invites squatting; callers now decline the feature instead.
+    //
+    // Injected rather than env-mutated: `std::env::set_var` is unsafe in
+    // edition 2024, and the house rule is to avoid unsafe.
+    assert_eq!(super::socket_path_in(None, 1234), None);
+    let dir = std::path::PathBuf::from("/some/state/root");
+    assert_eq!(
+        super::socket_path_in(Some(dir.clone()), 1234),
+        Some(dir.join("mcp-1234.sock"))
+    );
 }
 
 // ── Project-scoped discovery ──────────────────────────────

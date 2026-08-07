@@ -118,15 +118,14 @@ impl App {
         // reach this spyc instance's socket and target THIS tab by id. Owned
         // locals so the `&str` env slice outlives the spawn call; `info` is then
         // free to move into the `TabEntry`.
-        let sock_str = crate::mcp::socket_path().to_string_lossy().into_owned();
+        // No state dir (neither XDG_STATE_HOME nor HOME) means no socket, so
+        // there is nothing to point the hook at — spawn without it.
+        let sock_str = crate::mcp::socket_path().map(|p| p.to_string_lossy().into_owned());
         let pane_id = info.id.clone();
-        let extra_env: Vec<(&str, &str)> = if is_agent {
-            vec![
-                ("SPYC_MCP_SOCK", sock_str.as_str()),
-                ("SPYC_PANE_ID", pane_id.as_str()),
-            ]
-        } else {
-            Vec::new()
+        let extra_env: Vec<(&str, &str)> = match (is_agent, sock_str.as_deref()) {
+            (true, Some(sock)) => vec![("SPYC_MCP_SOCK", sock), ("SPYC_PANE_ID", pane_id.as_str())],
+            (true, None) => vec![("SPYC_PANE_ID", pane_id.as_str())],
+            (false, _) => Vec::new(),
         };
         match Pane::spawn_with_env(
             cmd,
@@ -350,13 +349,14 @@ impl App {
                 after: std::time::Instant::now() + super::RESTORE_BANNER_SETTLE,
             });
         }
-        // Owned locals so the `&str` env slice outlives the spawn call.
-        let sock_str = crate::mcp::socket_path().to_string_lossy().into_owned();
+        // Owned locals so the `&str` env slice outlives the spawn call. No
+        // state dir means no socket to advertise (see the fresh-spawn path).
+        let sock_str = crate::mcp::socket_path().map(|p| p.to_string_lossy().into_owned());
         let pane_id = info.id.clone();
-        let extra_env = [
-            ("SPYC_MCP_SOCK", sock_str.as_str()),
-            ("SPYC_PANE_ID", pane_id.as_str()),
-        ];
+        let mut extra_env = vec![("SPYC_PANE_ID", pane_id.as_str())];
+        if let Some(sock) = sock_str.as_deref() {
+            extra_env.push(("SPYC_MCP_SOCK", sock));
+        }
         match Pane::spawn_with_env(
             cmd,
             rows,
