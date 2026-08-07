@@ -234,6 +234,7 @@ pub enum PostAction {
     },
 }
 
+mod about;
 mod actions;
 mod activity;
 mod agent_status;

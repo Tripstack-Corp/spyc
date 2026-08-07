@@ -797,6 +797,7 @@ which-key popup lists the options:
 - **`Space P`** — set `PROJECT_HOME` to the current directory.
 - **`Space s`** — session info.
 - **`Space ?`** — open this help.
+- **`Space a`** — open the about page.
 
 This is the line between *global* commands (worktree, project — they make
 sense from any focus) and *frame* commands (git, picks, sort — they act on
@@ -1202,6 +1203,11 @@ jump from Claude's output back to the file list.
 
 ## Info and diagnostics
 
+- **Space a** the about page (also `:about`) — spyc's origin story,
+  implementation notes, and where the name comes from, rendered in the
+  in-app pager's markdown mode (`m` toggles to the source, `/` searches,
+  `y` yanks). The copy is bundled into the binary, so it reads the same
+  from an installed spyc as from a checkout.
 - **:date** show date and time (UTC)
 - **gV** show spyc version (also `:version`)
 - **I** session info: PID, RSS memory usage, entry counts
