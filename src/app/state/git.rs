@@ -259,6 +259,21 @@ impl AppState {
             .and_then(|m| m.modified())
             .ok()?;
         let head_mt = crate::git::status::head_ref_mtime(gitdir)?;
+        // Fold the shared config's mtime into the HEAD half of the key. Config
+        // decides what `status` even reports — a repo flipped to `core.bare`
+        // reports clean with no worktree — and it moves neither `index` nor
+        // `HEAD`, so without this the poll short-circuits on a stale answer
+        // forever. Observed: a stray `core.bare = true` blanked every marker
+        // until the user chdir'd, because nothing else could invalidate it.
+        // Absent config (or an unreadable one) contributes nothing rather than
+        // failing the key — a missing config is not a reason to stop polling.
+        let head_mt = self
+            .col(side)
+            .git_cache
+            .current_config_path
+            .as_ref()
+            .and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+            .map_or(head_mt, |cfg_mt| head_mt.max(cfg_mt));
         Some((index_mt, head_mt))
     }
 
@@ -273,7 +288,11 @@ impl AppState {
         }
         // Resolve the gitdir before borrowing `col_mut` (it doesn't touch self).
         let gitdir = repo_root.as_deref().and_then(crate::git::discovery::gitdir);
+        let config_path = gitdir
+            .as_deref()
+            .and_then(crate::git::discovery::shared_config_path);
         let c = self.col_mut(side);
+        c.git_cache.current_config_path = config_path;
         c.git_cache.current_gitdir = gitdir;
         c.git_cache.current_repo_root = repo_root;
     }
@@ -328,5 +347,54 @@ mod tests {
                 .flag_worktree_rewalk_for_path(Path::new("/nowhere/near/here"))
         );
         assert!(!app.state.col(Side::Left).git_cache.pending_worktree_rewalk);
+    }
+}
+
+#[cfg(test)]
+mod config_key_tests {
+    use crate::app::App;
+    use crate::app::state::Side;
+    use crate::git::test_support::run_git;
+
+    /// A git-config change must invalidate the status cache.
+    ///
+    /// It reports through the *same* mtime key as HEAD, so this asserts the
+    /// key moves at all — which is what makes the 1 Hz poll re-walk instead of
+    /// short-circuiting. Without it a repo flipped to `core.bare` reports
+    /// clean forever: gix sees no worktree, spyc caches "no changes", and
+    /// neither `index` nor `HEAD` ever moves to say otherwise.
+    #[test]
+    fn a_config_change_moves_the_status_cache_key() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = std::fs::canonicalize(tmp.path())
+            .expect("canonical")
+            .join("r");
+        std::fs::create_dir(&repo).expect("mkdir");
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("a.txt"), "one\n").expect("write");
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-q", "-m", "c1"]);
+
+        let mut app = App::test_app(repo.clone());
+        app.state.update_repo_root(Side::Left, &repo);
+        let before = app
+            .state
+            .compute_git_mtime_key_fast(Side::Left)
+            .expect("key resolves in a repo");
+
+        // Filesystem mtime granularity is coarse enough that an immediate
+        // write can land in the same tick; nudge past it.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        run_git(&repo, &["config", "spyc.probe", "changed"]);
+
+        let after = app
+            .state
+            .compute_git_mtime_key_fast(Side::Left)
+            .expect("key still resolves");
+        assert_ne!(
+            before, after,
+            "a config write must move the key — otherwise the poll short-circuits \
+             on a stale status answer and markers never come back"
+        );
     }
 }

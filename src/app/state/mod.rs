@@ -328,6 +328,11 @@ pub struct GitCache {
     /// tree — were never watched and markers went stale until the next
     /// poll.
     pub current_gitdir: Option<std::path::PathBuf>,
+    /// The repo's shared config path, resolved with the gitdir. In the status
+    /// cache key because config *changes what `status` reports* — a repo made
+    /// bare reports clean with no worktree, and nothing about that moves
+    /// `index` or `HEAD`.
+    pub current_config_path: Option<std::path::PathBuf>,
     /// Cached structured repo-status (`Vec<StatusEntry>`). On a huge
     /// working tree the gix status walk traverses every tracked file in
     /// the index — 200-500 ms on a ~110k-file repo. After the first
