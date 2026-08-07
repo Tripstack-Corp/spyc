@@ -143,6 +143,7 @@ pub fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
         "quit" => Ok(BoundAction::Plain(Action::Quit)),
         "redraw" => Ok(BoundAction::Plain(Action::Redraw)),
         "help" | "keys" => Ok(BoundAction::Plain(Action::Help)),
+        "about" => Ok(BoundAction::Plain(Action::About)),
 
         "up" | "previous" => Ok(BoundAction::Plain(Action::Up(1))),
         "down" | "nextfile" => Ok(BoundAction::Plain(Action::Down(1))),
@@ -320,6 +321,17 @@ mod tests {
         let b = parse("map <F1> help").unwrap().unwrap();
         assert_eq!(b.chord, KeyChord::Named(NamedKey::Fn(1)));
         assert!(matches!(b.action, BoundAction::Plain(Action::Help)));
+    }
+
+    /// `about` is bindable from `.spycrc.toml` even though its default home is
+    /// the leader (`Space a`) — the same deal `help`/`keys` gets.
+    #[test]
+    fn binds_about() {
+        let b = parse("map ^A about").unwrap().unwrap();
+        assert!(matches!(b.action, BoundAction::Plain(Action::About)));
+        // Informational page, not a shell/lua escape hatch: bindable from a
+        // project-local rc too.
+        assert!(!b.action.is_executing());
     }
 
     #[test]
