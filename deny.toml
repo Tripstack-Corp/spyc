@@ -116,12 +116,14 @@ unmaintained = "workspace"
 # See https://spdx.org/licenses/ for list of possible licenses
 # [possible values: any SPDX 3.11 short identifier (+ optional exception)].
 allow = [
-    # Permissive licenses present in our actual dep graph as of v1.37.1.
-    # Run `cargo deny check licenses` after adding deps to surface anything
-    # new — don't blanket-add categories, evaluate each.
+    # Permissive licenses present in our actual dep graph. Reconcile with
+    # `cargo deny list` when deps change — don't blanket-add categories,
+    # evaluate each. Some deps are multi-licensed and also offer a copyleft
+    # option (self_cell, r-efi, the Unlicense-OR-MIT BurntSushi crates);
+    # cargo-deny picks an allowed alternative, so none attaches an obligation.
     "0BSD",          # zero-clause BSD; effectively public domain
     "Apache-2.0",
-    "BSD-2-Clause",  # not currently in graph; future-proof for clap-style deps
+    "BSD-2-Clause",
     "BSD-3-Clause",  # spyc itself is BSD-3-Clause
     "BSL-1.0",       # Boost; permissive
     "CC0-1.0",       # public domain dedication (e.g. tiny-keccak)
@@ -129,7 +131,7 @@ allow = [
     "MIT",
     "MPL-2.0",       # weak copyleft (file-level); compliant since we don't modify dep sources
     "Unicode-3.0",   # newer unicode license used by unicode-* crates
-    "Unicode-DFS-2016",
+    "Unicode-DFS-2016", # no longer in the graph (unicode-ident moved to Unicode-3.0); retained
     "Zlib",
 ]
 # The confidence threshold for detecting a license from license text.
