@@ -51,6 +51,8 @@ const GIT_REDIRECT_ENV: &[&str] = &[
 /// and a hermetic config. Every test-side git spawn must go through this —
 /// `-C` alone is not enough (see [`GIT_REDIRECT_ENV`]).
 pub fn git_command(dir: &Path) -> std::process::Command {
+    // GIT-ENV-EXEMPT: this IS the stripping site — it clears GIT_REDIRECT_ENV in a
+    // loop below rather than naming GIT_DIR literally.
     let mut cmd = std::process::Command::new("git");
     cmd.arg("-C")
         .arg(dir)
@@ -133,7 +135,8 @@ mod tests {
             std::fs::create_dir(p).unwrap();
             super::run_git(p, &["init", "-q", "--initial-branch=main"]);
         }
-        // Deliberately NOT via `git_command` — this reproduces the ambient leak.
+        // GIT-ENV-EXEMPT: deliberately unstripped — this reproduces the ambient leak
+        // in order to prove it exists.
         let ok = std::process::Command::new("git")
             .arg("-C")
             .arg(&target)
@@ -148,6 +151,8 @@ mod tests {
             "leaked",
             "GIT_DIR should have captured the write"
         );
+        // GIT-ENV-EXEMPT: the read-back of the probe above; stripping is irrelevant
+        // here and adding it would obscure what the test demonstrates.
         let target_val = std::process::Command::new("git")
             .arg("-C")
             .arg(&target)
