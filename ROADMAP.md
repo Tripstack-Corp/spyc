@@ -301,6 +301,27 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 - **No `unsafe` going forward** — DI / rustix / signal-hook over raw
   libc; unsafe is exceptional and isolated (a future crate split would
   give it a dedicated crate).
+- **The MCP `root` override is validated, not merely documented.**
+  `get_file_content`'s traversal check anchors on a caller-supplied
+  root, so `root: "/"` made it decorative. Enforcement beats a
+  SECURITY.md caveat because harnesses auto-approve MCP tool calls
+  while gating shell execution behind per-command prompts — there,
+  `search_content(root: "/")` bypasses a boundary the *user* believes
+  exists. ("The agent has Bash anyway" only holds where it does.)
+  Three constraints, in order of how easily they're lost:
+  1. The allowed set is **cursor-independent**. Anchoring on
+     `search_root`/`project_home` alone rejects the agent's own
+     worktree the moment the user browses elsewhere — and a rejected
+     call doesn't stop the agent, it sends it to unscoped `Bash rg`.
+     Over-tight scoping produces bypass, not safety.
+  2. It reuses the **trusted-root sidecar** (`write_root_marker`),
+     already spyc's boundary for marker discovery. One root concept,
+     not two — and `root_matches` already does the canonical compare
+     that keeps symlinked worktrees from false-rejecting.
+  3. Per-pane attribution — validating against the *calling* pane's
+     cwd — is the target design, blocked on transport: `SPYC_PANE_ID`
+     reaches the pane's env, but read-tool dispatch resolves through
+     the context file, which carries no pane identity.
 
 ## Doc map
 
