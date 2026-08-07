@@ -306,15 +306,25 @@ impl PaneInput {
         }
     }
 
-    /// Whether this input is an Enter / carriage-return — the explicit "I've
-    /// answered the pane" signal that clears a latched `Blocked` dot. Only a
-    /// real Enter keypress (`Key(Enter)`) or a bare CR/LF byte counts; typing
-    /// other keys, navigating a menu, or pasting (bytes that merely *contain* a
-    /// newline) leaves the dot stuck red until the user actually commits.
-    fn is_enter(&self) -> bool {
+    /// Whether this input settles a prompt the agent is blocked on — the signal
+    /// that clears a latched `Blocked` dot. Enter answers it; **Esc declines it**,
+    /// which ends the block just as decisively (the agent's question is gone
+    /// either way, and nothing needs the user any more).
+    ///
+    /// Declining has to be handled here because no hook reports it: Claude Code
+    /// ends a declined turn as a user interrupt, and `Stop` — the event that
+    /// would report `done` — does not fire on an interrupt. Left to the hooks
+    /// alone the dot stays red until the next prompt or the idle-notification
+    /// backstop, long after the question left the screen.
+    ///
+    /// Exact matches only. A bare Esc byte is the key; `\x1b[A` and friends are
+    /// arrows, and typing, menu navigation, or a paste that merely *contains* a
+    /// newline still leaves the dot red until the user actually commits.
+    fn settles_prompt(&self) -> bool {
+        use crossterm::event::KeyCode;
         match self {
-            Self::Key(k) => matches!(k.code, crossterm::event::KeyCode::Enter),
-            Self::Bytes(b) => b == b"\r" || b == b"\n" || b == b"\r\n",
+            Self::Key(k) => matches!(k.code, KeyCode::Enter | KeyCode::Esc),
+            Self::Bytes(b) => matches!(b.as_slice(), b"\r" | b"\n" | b"\r\n" | b"\x1b"),
         }
     }
 }
@@ -585,11 +595,11 @@ impl App {
                     if self.view.show_activity && matches!(target, PaneTarget::Active) {
                         self.view.pane_send_at = Some(std::time::Instant::now());
                     }
-                    // Only an explicit Enter answers the pane. A latched `blocked`
-                    // dot stays red through navigation / typing / pastes and clears
-                    // ONLY when the user commits with Enter (or a newer report) —
-                    // owner spec: "leave it stuck until the user sends <ENTER>".
-                    let clears_blocked = input.is_enter();
+                    // Only settling the prompt answers the pane — Enter to commit,
+                    // Esc to decline. A latched `blocked` dot stays red through
+                    // navigation / typing / pastes and clears only on one of those
+                    // (or a newer report).
+                    let clears_blocked = input.settles_prompt();
                     let result = match target {
                         PaneTarget::Active => self.runtime.pane_tabs.as_mut().map(|t| {
                             // The user pressed Enter on the active pane (answering a
@@ -1057,20 +1067,33 @@ mod tests {
     use super::{ClipMsg, Effect, PaneInput, PostAction};
 
     #[test]
-    fn pane_input_is_enter_only_for_a_real_enter() {
+    fn pane_input_settles_prompt_on_commit_or_decline() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         let key = |c| PaneInput::Key(KeyEvent::new(c, KeyModifiers::NONE));
-        // The clear-the-blocked-dot trigger: a real Enter keypress or a bare CR/LF.
-        assert!(key(KeyCode::Enter).is_enter());
-        assert!(PaneInput::Bytes(b"\r".to_vec()).is_enter());
-        assert!(PaneInput::Bytes(b"\n".to_vec()).is_enter());
-        assert!(PaneInput::Bytes(b"\r\n".to_vec()).is_enter());
-        // Everything else leaves a latched blocked dot stuck (owner spec):
-        // navigation, typing, and pastes that merely *contain* a newline.
-        assert!(!key(KeyCode::Char('y')).is_enter());
-        assert!(!key(KeyCode::Down).is_enter());
-        assert!(!PaneInput::Bytes(b"line1\nline2".to_vec()).is_enter());
-        assert!(!PaneInput::Bytes(b"1".to_vec()).is_enter());
+        // Answering: a real Enter keypress or a bare CR/LF.
+        assert!(key(KeyCode::Enter).settles_prompt());
+        assert!(PaneInput::Bytes(b"\r".to_vec()).settles_prompt());
+        assert!(PaneInput::Bytes(b"\n".to_vec()).settles_prompt());
+        assert!(PaneInput::Bytes(b"\r\n".to_vec()).settles_prompt());
+        // Declining settles it too — the question is off the screen either way,
+        // and no hook reports the decline (a declined turn ends as an interrupt,
+        // which doesn't fire `Stop`), so this is the only signal spyc gets.
+        assert!(key(KeyCode::Esc).settles_prompt());
+        assert!(PaneInput::Bytes(b"\x1b".to_vec()).settles_prompt());
+        // Everything else leaves a latched blocked dot stuck: navigation, typing,
+        // and pastes that merely *contain* a newline.
+        assert!(!key(KeyCode::Char('y')).settles_prompt());
+        assert!(!key(KeyCode::Down).settles_prompt());
+        assert!(!PaneInput::Bytes(b"line1\nline2".to_vec()).settles_prompt());
+        assert!(!PaneInput::Bytes(b"1".to_vec()).settles_prompt());
+        // An escape *sequence* is a keypress, not a decline — the arrow keys the
+        // user presses to move through the very question this would clear.
+        for seq in [&b"\x1b[A"[..], b"\x1b[B", b"\x1b[C", b"\x1b[D", b"\x1bOA"] {
+            assert!(
+                !PaneInput::Bytes(seq.to_vec()).settles_prompt(),
+                "escape sequence {seq:?} must not read as a decline"
+            );
+        }
     }
 
     #[test]
