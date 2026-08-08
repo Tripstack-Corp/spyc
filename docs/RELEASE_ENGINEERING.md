@@ -228,9 +228,11 @@ are the source of truth — Actions *call them* so local and CI never drift.
   (cargo-deny) moved to `audit.yml` — see §6. Toolchain cached via
   `Swatinem/rust-cache`; `cargo-llvm-cov` is the same sha-pinned prebuilt binary
   as before; `CARGO_INCREMENTAL=0` throughout. Make it a required status check in
-  branch protection — and note the `lint` job's **name is a required context**, so
-  renaming it needs the protection contexts changed in the same motion or every
-  open PR deadlocks on a context that never reports.
+  branch protection. The required contexts are exactly `Lint (fmt, clippy)` and
+  `Tests (cargo test --all-targets)` — a job's **`name` IS its context**, so
+  renaming either one is a three-step operation: drop the old context from
+  protection, merge the rename, add the new context. Renaming without that dance
+  deadlocks every open PR on a context that will never report again.
 - **Follow-ups:** (1) add a `macos-latest` matrix leg to catch OS-gated lints
   both ways (replaces needing `make lint-linux` + zig locally) — the initial
   port is Linux-only, matching the retired pipeline; (2) extend the trigger to
