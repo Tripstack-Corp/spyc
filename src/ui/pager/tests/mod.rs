@@ -634,6 +634,101 @@ fn long_file_shows_eof_marker_at_bottom() {
     );
 }
 
+/// A document whose line count EXACTLY equals the viewport height used to lose
+/// the `[EOF]` marker: `scroll_max` gated its end-marker row on `base > 0`, and
+/// `base` (= `lines - viewport_h`) is 0 both for a document *shorter* than the
+/// viewport (which has a spare row, so the marker renders anyway) and for one
+/// that fills it exactly (which has no spare row and could not scroll to make
+/// one). Reported on a 136-line file in a 136-row pager viewport.
+#[test]
+fn exact_fit_file_can_still_reach_the_eof_marker() {
+    use ratatui::{Terminal, backend::TestBackend};
+    // 20 terminal rows ⇒ a centered 18-row overlay ⇒ a 16-row content viewport.
+    let lines: Vec<String> = (0..16).map(|i| format!("line {i}")).collect();
+    let mut view = PagerView::new_plain("exact.txt", lines);
+    let theme = Theme::default();
+    let mut term = Terminal::new(TestBackend::new(40, 20)).unwrap();
+    term.draw(|f| render(f, f.area(), &view, &theme)).unwrap();
+    assert_eq!(
+        usize::from(view.last_viewport_h.get()),
+        view.lines.len(),
+        "the test's geometry must actually be an exact fit"
+    );
+    view.scroll_to_bottom_auto();
+    term.draw(|f| render(f, f.area(), &view, &theme)).unwrap();
+    let buf = term.backend().buffer().clone();
+    let mut text = String::new();
+    for y in 0..20 {
+        for x in 0..40 {
+            text.push_str(buf.cell((x, y)).unwrap().symbol());
+        }
+        text.push('\n');
+    }
+    assert!(
+        text.contains("[EOF]"),
+        "an exactly-viewport-height file must still signal its end:\n{text}"
+    );
+}
+
+/// The end-marker row reservation must not cost an exact-fit document its "All"
+/// label: every line IS on screen at scroll 0. "All" therefore asks "is the
+/// whole document visible right now?", which the reservation makes a different
+/// question from `scroll_max == 0`.
+#[test]
+fn exact_fit_keeps_the_all_label_until_it_scrolls_to_the_marker() {
+    let mut view = PagerView::new_plain("exact.txt", (0..16).map(|i| i.to_string()).collect());
+    assert_eq!(
+        view.scroll_max(16),
+        1,
+        "one row reserved for the end marker"
+    );
+    assert_eq!(view.position_indicator(16), "All");
+    view.scroll = 1;
+    assert_eq!(
+        view.position_indicator(16),
+        "Bot",
+        "on the marker row the first line is gone — no longer 'All'"
+    );
+
+    // A document shorter than the viewport has a spare row already, so it needs
+    // no reservation and can't scroll at all.
+    let short = PagerView::new_plain("short.txt", (0..10).map(|i| i.to_string()).collect());
+    assert_eq!(short.scroll_max(16), 0);
+    assert_eq!(short.position_indicator(16), "All");
+}
+
+/// The position indicator used to be measured against `inner - 2` (the borders)
+/// while the body ALSO gave up a row to the search/status bar — so a
+/// search-active pager, and every multi-column one (which always reserves that
+/// row), did its scroll math one row too tall and could label the view "All"
+/// with a line still off-screen.
+#[test]
+fn indicator_is_measured_against_the_same_viewport_as_the_body() {
+    use ratatui::{Terminal, backend::TestBackend};
+    let lines: Vec<String> = (0..16).map(|i| format!("line {i}")).collect();
+    let mut view = PagerView::new_plain("jump.txt", lines);
+    view.jump_buf = Some("1".into()); // reserves the status row
+    let theme = Theme::default();
+    let mut term = Terminal::new(TestBackend::new(40, 20)).unwrap();
+    term.draw(|f| render(f, f.area(), &view, &theme)).unwrap();
+    let buf = term.backend().buffer().clone();
+    let mut text = String::new();
+    for y in 0..20 {
+        for x in 0..40 {
+            text.push_str(buf.cell((x, y)).unwrap().symbol());
+        }
+        text.push('\n');
+    }
+    assert!(
+        !text.contains("line 15"),
+        "premise: the status row pushes the last line off-screen at scroll 0:\n{text}"
+    );
+    assert!(
+        !text.contains("All"),
+        "the indicator must not claim the whole document is visible:\n{text}"
+    );
+}
+
 // ---- PR4: scroll math (u16 saturation, wrap-row reachability) -----------
 
 /// Finding `ui/pager/mod.rs:141` / `pager_handler/mod.rs:311`: `scroll` was a
