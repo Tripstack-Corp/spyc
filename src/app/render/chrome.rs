@@ -77,6 +77,7 @@ impl App {
         // `prepare_panes`, #347), so no `&mut` re-borrow is involved.
         let mut active_idx: Option<usize> = None;
         if let Some(tabs) = &self.runtime.pane_tabs {
+            let tab_widths = super::super::mouse::tab_hit::tab_widths(tabs, is_scrolling);
             for (i, entry) in tabs.tabs().iter().enumerate() {
                 let is_active = i == tabs.active_index();
                 if is_active {
@@ -126,22 +127,27 @@ impl App {
                     " " // reserved blank — keeps the width fixed
                 };
                 let label_text = format!(" {label} ");
-                // Measure in display columns, not bytes — `sep` ("─") is 3
-                // bytes but 1 column, and a label can carry multibyte chars;
-                // `used`/`width` are column budgets. Bracket + 1 cell + label is
-                // constant for a given N (`dot_w` is 1 for an agent, and
-                // `shell_cell` is "" then — so the cell is always exactly 1 col).
-                let dot_w = dot
-                    .as_ref()
-                    .map_or(0, |s| crate::ui::display_width(s.content.as_ref()));
-                let tab_len = crate::ui::display_width(sep)
-                    + crate::ui::display_width(&bracket)
-                    + crate::ui::display_width(shell_cell)
-                    + dot_w
-                    + crate::ui::display_width(&label_text);
+                // Width comes from `tab_hit::tab_widths`, NOT recomputed here:
+                // the mouse hit-test lays the bar out from that same list, and
+                // any drift between the two puts clicks on the wrong tab. See
+                // the module doc on `mouse::tab_hit`.
+                let tab_len = tab_widths.get(i).copied().unwrap_or(0) as usize;
                 if used + tab_len > width {
                     break;
                 }
+                // The painted spans must add up to the budgeted width, or the
+                // bar drifts from what the hit-test believes.
+                debug_assert_eq!(
+                    tab_len,
+                    crate::ui::display_width(sep)
+                        + crate::ui::display_width(&bracket)
+                        + dot
+                            .as_ref()
+                            .map_or(0, |s| crate::ui::display_width(s.content.as_ref()))
+                        + crate::ui::display_width(shell_cell)
+                        + crate::ui::display_width(&label_text),
+                    "tab {i} paints a different width than tab_widths budgeted"
+                );
                 spans.push(Span::styled(sep, rule_style));
                 // An agent tab's eye-pull comes from the colored dot, so its
                 // label stays calm (inactive style); a shell tab keeps the teal

@@ -23,6 +23,7 @@ mod forward;
 mod route;
 mod scroll;
 mod selection;
+pub(super) mod tab_hit;
 
 // Re-exported so the impure half and its callers keep referring to
 // `mouse::route_mouse` / `mouse::Region` exactly as before this split.
@@ -266,6 +267,19 @@ impl super::App {
             has_scroll_pager: self.view.scroll_pager.is_some(),
             pane_closed: self.state.pane.pane_snapshot.is_closed,
             pane_scroll_keys: self.active_pane_wheel_scroll().is_some(),
+            // Only resolved over the divider: the width walk allocates, and a
+            // wheel tick over the pane has no use for it.
+            tab_under_pointer: if matches!(region, Some(route::Region::Divider)) {
+                let widths = self
+                    .runtime
+                    .pane_tabs
+                    .as_ref()
+                    .map(|t| tab_hit::tab_widths(t, t.active().is_scrolling()))
+                    .unwrap_or_default();
+                tab_hit::tab_at_point(layout.divider, &widths, ev.column, ev.row)
+            } else {
+                None
+            },
         };
 
         match route_mouse(snap, gesture) {
@@ -296,6 +310,21 @@ impl super::App {
                 self.begin_pane_selection(ev)
             }
             MouseSink::SelectChrome => self.begin_chrome_selection(ev),
+            MouseSink::PaneTab(index) => {
+                // Reuse the keyboard's own tab switch rather than calling
+                // `tabs.switch_to`: it also stashes/restores the per-tab
+                // scrollback pager, pulls focus into the pane, and handles the
+                // `^a z` fullscreen-list case. A hand-rolled switch here would
+                // start out subtly different and drift further.
+                let n = u8::try_from(index.saturating_add(1)).unwrap_or(u8::MAX);
+                match self.apply(&crate::keymap::Action::PaneTabByIndex(n)) {
+                    Ok(effects) => effects,
+                    Err(e) => {
+                        self.state.flash_error(format!("tab switch: {e:#}"));
+                        Vec::new()
+                    }
+                }
+            }
             MouseSink::Paste => vec![Effect::PasteFromClipboard],
             MouseSink::LeaderMenu => {
                 self.state.resolver.enter_leader();
