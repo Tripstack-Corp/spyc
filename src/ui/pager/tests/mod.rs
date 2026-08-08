@@ -10,6 +10,7 @@ use ratatui::style::Style;
 use ratatui::text::Span;
 
 mod selection;
+mod selection_render;
 
 fn plain_text(line: &Line<'_>) -> String {
     line.spans.iter().map(|s| s.content.as_ref()).collect()
