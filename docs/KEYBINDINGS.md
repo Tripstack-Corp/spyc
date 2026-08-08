@@ -13,10 +13,14 @@ keys drive the file view (letters / `g` / `H` / `[`/`]`); **pane** keys use the
 | Key | Action |
 |-----|--------|
 | `h` `j` `k` `l` | Move (counts work: `5j`, `10k`) |
+| `0`-`9` `<motion>` | Count prefix (e.g. `5j`, `10k`, `5G`) |
 | `gg` / `G` | Top / bottom |
+| `^B` / `PageUp` | Previous page |
+| `^F` / `PageDown` | Next page |
 | `Enter` | Descend into dir or view file in pager |
 | `e` / `v` | Descend into dir or open file in `$EDITOR` |
 | `dd` / `Ndd` | Remove cursor entry (+ N-1 below) to the graveyard (confirm with `y`) |
+| `R` | Remove selection (picks, else cursor) to the graveyard |
 | `V` | Open `$EDITOR` in top pane (bottom pane stays visible) |
 | `D` | Open file in the in-app pager in top pane (bottom pane stays visible) |
 | `u` / `-` | Climb to parent |
@@ -25,6 +29,21 @@ keys drive the file view (letters / `g` / `H` / `[`/`]`); **pane** keys use the
 | `J` | Jump to any path |
 | `F` | Project-wide fuzzy filename finder (gitignore-aware) |
 | `:grep <pat>` | Project-wide content search (embedded ripgrep matcher) |
+
+## File operations
+
+`%` expands to the current selection in any prompt (e.g. `M` then `%.bak`).
+
+| Key | Action |
+|-----|--------|
+| `c` | Copy selection to a destination (prompt) |
+| `M` | Move / rename selection (prompt) |
+| `+` | Make a new directory (prompt) |
+| `O` | Create a new file in `$EDITOR` (prompt) |
+| `L` | Long listing — wide aligned table (inode, mode, octal, …) |
+| `S` | Cycle sort: name → size → mtime → ext |
+| `:chmod <mode>` | Change mode on the selection |
+| `:filetype` | Show the cursor file's detected type |
 
 ## Picks & inventory
 
@@ -35,12 +54,20 @@ file cache that survives across sessions.
 |-----|--------|
 | `t` | Toggle pick |
 | `T` | Pick by glob |
+| `^T` | Pick all / clear all |
 | `yy` | Yank to inventory (copies file to cache) |
+| `yf` | Yank cursor file's absolute path (or picks) to clipboard |
 | `yp` | Yank visible pane output to clipboard |
 | `yP` | Yank last typed prompt to clipboard |
+| `ya` | Yank full pane scrollback to clipboard |
 | `Y` | Remove cursor file from inventory |
 | `p` | Put inventory files into cwd |
 | `i` | Toggle inventory view |
+| `z` | Clear inventory (moves entries to the graveyard) |
+
+Inside the inventory view: `t` / `Space` tag-untag for a partial put,
+`p` puts tagged (or all) to cwd, `x` / `d` removes an item (to the
+graveyard), `Esc` / `i` returns to the directory view.
 
 > Yank-to-clipboard uses `pbcopy` on macOS and `wl-copy` / `xclip` /
 > `xsel` on Linux (auto-detected). Install one of those on Linux —
@@ -75,6 +102,8 @@ toggles), word-level intra-line change highlighting.
 | `gD` | Staged-only diff (`git diff --cached`) |
 | `gu` | Unstaged diff (`git diff`) — what changed since you staged |
 | `gb` | Blame the cursor file |
+| `gr` | Restore a deleted (struck-through) file from git |
+| `]g` / `[g` | Cursor to next / prev git-changed entry (wraps) |
 | `\|` (in view) | Toggle side-by-side ⇄ unified layout |
 
 ## Split pane
@@ -92,11 +121,15 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a p` / `^a [` | Prev tab |
 | `^a K` / `^a x` | Close tab (confirms first while its child is still running) |
 | `^a 1`..`9` | Switch to tab N |
+| `^a ^a` | Jump to last-active tab |
 | `^a r` | Rename tab |
 | `^a R` | Restart tab in place, keeping its number (confirms first while its child is still running) |
+| `^z` | Suspend / resume the agent pane (💤); a shell tab's `^z` forwards as usual |
 | `^a s` | Send selection paths to pane |
 | `^a P` | Pipe file contents to pane |
+| `^a i` | Pipe inventory file contents to pane |
 | `^a z` | Zoom the active region — list or bottom pane (fullscreen toggle) |
+| `^a +` / `^a -` | Grow / shrink the focused split (pane height or vsplit width) |
 | `^a \|` | Vertical split — cycle off / top-only / full-height (live-reloading preview of the cursor file) |
 | `^a a` / `^a h` | Focus the left file pane (a) |
 | `^a b` / `^a l` | Focus the right file pane (b) |
@@ -106,6 +139,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a u` | Quick Select — labeled picker for URL/path/SHA/IP |
 | `^a v` | Pane scrollback in the in-app pager (search, jump, visual yank) |
 | `Ctrl+J` | Newline in pane (multi-line input) |
+| `^a ↓` | Send a literal `^a` to the pane (e.g. so Claude receives it) |
 | `gf` | Jump to file path in pane output |
 | `gF` | Jump to file + open at referenced line |
 
@@ -144,6 +178,14 @@ rectangular selection.
 
 `%` in any command expands to the current selection.
 
+While a `!` capture is running in the pager:
+
+| Key | Action |
+|-----|--------|
+| `^C` | Interrupt the running capture (`SIGINT` to the child) |
+| `^\` | Hard-kill the running capture |
+| `^Z` | Send to background; resume later with `:fg` |
+
 ## Background tasks & buffer history
 
 Long captured commands shouldn't lock you out of spyc.
@@ -154,13 +196,15 @@ Long captured commands shouldn't lock you out of spyc.
 | `:fg` / `:fg N` | resume the most-recent (or specific) backgrounded task |
 | `gB` / `:task N` | open the *task viewer* -- a peek view without taking ownership |
 | `[t` / `]t` | (in pager, chord) cycle the task viewer prev/next by id |
+| `S` / `C` | (in task viewer) pause / continue the underlying task |
 | `gp` | reopen the most-recently-closed pager buffer |
 | `:bprev` / `:bnext` | walk pager buffer history back/forward |
 | `[b` / `]b` | (in pager, chord) walk buffer history back/forward |
 
 Backgrounded tasks render in the pane divider as `[N+]` (running, new
-output), `[N●]` (running, quiescent), `[N✓]` (exit 0), `[N✗]`
-(non-zero / killed / crashed), in a distinct color from pane tabs.
+output), `[N●]` (running, quiescent), `[N⏸]` (paused via `S`), `[N✓]`
+(exit 0), `[N✗]` (non-zero / killed / crashed), in a distinct color
+from pane tabs.
 When a viewed task exits, closing the task viewer pushes its
 final rendered view into the buffer-history stack so `[b` walks
 back to it later.
@@ -207,14 +251,33 @@ on the top bar and persist across `spyc -r`.
 | `:startdir [.\|<path>]` | Manage start dir |
 | `:name <NEW>` | Rename the active session |
 | `:whoami` | Show `user@host` in the status line |
+| `Space s` / `I` | Session info (pid, rss, counts) |
+| `Space ?` | This help overlay (same as `?`) |
+| `gV` / `:version` | Show the spyc version |
 
 The **leader** (`Space`, or `^a Space` from the agent pane) opens a
 global/workspace menu: `Space w l\|n\|d` (worktree list/new/delete),
 `Space p` (project home), `Space s` (session info), `Space ?` (help),
-`Space a` (about). Hold it to see the which-key popup.
+`Space a` (about). Hold it to see the which-key popup. `W l` / `W n` /
+`W d` is a list-focus alias for the same worktree list / new / delete.
 
 `PROJECT_HOME` is auto-set on startup if the launch directory contains
 `.git`. New pane tabs default their cwd to the focused column's
 worktree/repo root (`gw`'s target); set `[pane] new_tab_cwd =
 "project_home"` to pin them to `PROJECT_HOME` instead, or `"browse_dir"`
 to open them in the current listing dir.
+
+## Display & config
+
+| Key | Action |
+|-----|--------|
+| `C` | Toggle colors / mono |
+| `^L` | Redraw |
+| `^R` | Reload config (also auto-reloads on save) |
+| `Esc` (×2) | Cancel a prompt (`Esc`→Normal→`Esc`→cancel) |
+| `:activity` | Toggle the activity monitor; `:activity dump` → per-pane why-status report |
+| `:hooks` | Agent status-hook consent (`on` / `on!` / `off`) |
+| `:skill` | Agent skill: `status` / `update` / `remove` / `ask` |
+| `:lua` | Lua engine: `status` / `on` / `off` / `reload` |
+| `:notify test` | Fire every notification channel to verify setup |
+| `:date` | Show date/time (UTC) |
