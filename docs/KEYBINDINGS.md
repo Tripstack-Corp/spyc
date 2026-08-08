@@ -90,8 +90,10 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a c` | New tab |
 | `^a n` / `^a ]` | Next tab |
 | `^a p` / `^a [` | Prev tab |
-| `^a K` / `^a x` | Close tab |
+| `^a K` / `^a x` | Close tab (confirms first while its child is still running) |
 | `^a 1`..`9` | Switch to tab N |
+| `^a r` | Rename tab |
+| `^a R` | Restart tab in place, keeping its number (confirms first while its child is still running) |
 | `^a s` | Send selection paths to pane |
 | `^a P` | Pipe file contents to pane |
 | `^a z` | Zoom the active region — list or bottom pane (fullscreen toggle) |

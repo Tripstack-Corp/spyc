@@ -570,9 +570,14 @@ impl PaneTabs {
 
     /// Replace the tab at `idx` in place. Active index and the order of
     /// remaining tabs are preserved. No-op if `idx` is out of range.
+    ///
+    /// Tears down the replaced tab's child tree the same way [`Self::remove_at`]
+    /// does — dropping the `TabEntry` alone would orphan its grandchildren.
     pub fn replace_at(&mut self, idx: usize, entry: TabEntry) {
         if idx < self.tabs.len() {
-            self.tabs[idx] = entry;
+            let old = std::mem::replace(&mut self.tabs[idx], entry);
+            old.pane
+                .shutdown_detached(std::time::Duration::from_millis(250));
         }
     }
 

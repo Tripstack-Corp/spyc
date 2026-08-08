@@ -385,6 +385,7 @@ impl AppState {
             | PromptKind::HookConsent { .. }
             | PromptKind::SkillUpdate { .. }
             | PromptKind::ClosePane
+            | PromptKind::RestartPane
             | PromptKind::LuaRunaway
             | PromptKind::GraveyardPurgeAllConfirm => PromptResult::Handled,
             // These need terminal/overlay/pager — caller handles them.

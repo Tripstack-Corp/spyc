@@ -726,6 +726,112 @@ fn closing_a_running_tab_confirms_first() {
     });
 }
 
+/// `^a R` on a tab whose child is still running confirms before restarting —
+/// the restart kills the child, losing the session exactly as `^a x` would, and
+/// `R` is one shift away from `r` (rename). `n` keeps it, `y` restarts it.
+#[test]
+fn restarting_a_running_tab_confirms_first() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat"); // cat blocks on stdin → the tab stays live
+        let pane_id = |app: &App| {
+            app.runtime
+                .pane_tabs
+                .as_ref()
+                .expect("a tab exists")
+                .active_info()
+                .id
+                .clone()
+        };
+        let before = pane_id(&app);
+
+        // The running tab opens a confirm — nothing is respawned yet.
+        app.restart_active_tab();
+        assert!(
+            matches!(&app.state.mode, Mode::Prompting(p) if matches!(p.kind, PromptKind::RestartPane)),
+            "restarting a running tab opens the RestartPane confirm"
+        );
+        assert_eq!(pane_id(&app), before, "nothing restarts before confirming");
+
+        // `n` keeps the live child.
+        app.handle_key(key('n')).unwrap();
+        assert!(matches!(app.state.mode, Mode::Normal));
+        assert_eq!(pane_id(&app), before, "n cancels the restart");
+
+        // `y` goes through — a fresh child means a fresh pane id.
+        app.restart_active_tab();
+        app.handle_key(key('y')).unwrap();
+        assert!(matches!(app.state.mode, Mode::Normal));
+        assert_ne!(pane_id(&app), before, "y respawns the child");
+    });
+}
+
+/// Regression (#151): a restart respawns **into the same slot**, so tab numbers
+/// don't shift. The old close-then-append path removed the active tab (sliding
+/// every later tab's number down one) and pushed the replacement last.
+///
+/// Also pins what identity survives: command, cwd, and a `^a r` rename carry
+/// over; the `SPYC_PANE_ID` does not (it's a new process).
+#[test]
+fn restarting_a_tab_keeps_its_number() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        for _ in 0..3 {
+            app.open_pane_tab("cat");
+        }
+        let ids = |app: &App| {
+            app.runtime
+                .pane_tabs
+                .as_ref()
+                .expect("tabs exist")
+                .tabs()
+                .iter()
+                .map(|t| t.info.id.clone())
+                .collect::<Vec<_>>()
+        };
+        let before = ids(&app);
+        assert_eq!(before.len(), 3);
+
+        // Restart the MIDDLE tab (number 2) after renaming it, so a shift left
+        // would be visible in both the order and the surviving label.
+        let tabs = app.runtime.pane_tabs.as_mut().expect("tabs exist");
+        tabs.switch_to(1);
+        tabs.tabs_mut()[1].info.label = "renamed".to_string();
+        app.restart_active_tab_now();
+
+        let after = ids(&app);
+        assert_eq!(after.len(), 3, "restart must not change the tab count");
+        assert_eq!(
+            app.runtime
+                .pane_tabs
+                .as_ref()
+                .expect("tabs exist")
+                .active_index(),
+            1,
+            "the restarted tab keeps its number"
+        );
+        assert_eq!(after[0], before[0], "tab 1 stays put");
+        assert_eq!(after[2], before[2], "tab 3 does NOT shift left");
+        assert_ne!(after[1], before[1], "the restarted tab is a new process");
+
+        let info = app
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .expect("tabs exist")
+            .active_info();
+        assert_eq!(info.command, "cat", "command survives");
+        assert_eq!(info.cwd, dir, "cwd survives");
+        assert_eq!(info.label, "renamed", "a `^a r` rename survives");
+    });
+}
+
 /// Regression: `V`'s top-overlay editor pauses Pane-tier actions (new tab,
 /// rename, etc. would mutate the pane hidden behind the editor) — but the
 /// bottom pane STAYS VISIBLE while `V` is open (only the top file-list area is

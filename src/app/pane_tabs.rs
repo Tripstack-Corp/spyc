@@ -14,7 +14,55 @@ use super::{
     StatusPosition, TabEntry, TabInfo, state,
 };
 
+/// Where a freshly-spawned tab lands. `Replace` keeps the restarted tab's
+/// number: appending after a close is what shifted every later tab left (#151).
+#[derive(Clone, Copy)]
+pub(super) enum TabSlot {
+    Append,
+    Replace(usize),
+}
+
+/// The bits `needs_live_child_confirm` decides on, snapshotted off the tab.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TabConfirmSnapshot {
+    /// The pty reader saw EOF — the tab shows `[exited N]`.
+    pub pane_closed: bool,
+    /// An exit status was reaped, so the child is gone even if EOF was missed.
+    pub exit_reaped: bool,
+    /// `Mode::Normal`. A confirm can only be raised from the base mode; any
+    /// other mode already owns the keyboard, so asking there would strand it.
+    pub mode_normal: bool,
+}
+
+/// Whether a destructive tab-lifecycle action (`^a x` close, `^a R` restart)
+/// must confirm first: only when a live child stands to be lost. An exited tab
+/// prompting is pure friction.
+pub(super) const fn needs_live_child_confirm(s: TabConfirmSnapshot) -> bool {
+    !s.pane_closed && !s.exit_reaped && s.mode_normal
+}
+
 impl App {
+    /// [`needs_live_child_confirm`] over a snapshot of the active tab. False
+    /// when there is no pane at all.
+    fn needs_active_tab_confirm(&self) -> bool {
+        self.runtime.pane_tabs.as_ref().is_some_and(|tabs| {
+            let p = tabs.active();
+            needs_live_child_confirm(TabConfirmSnapshot {
+                pane_closed: p.is_closed(),
+                exit_reaped: p.exit_status().is_some(),
+                mode_normal: matches!(self.state.mode, Mode::Normal),
+            })
+        })
+    }
+
+    /// The active tab's label, so a confirm can name what it is about to kill.
+    fn active_tab_label(&self) -> String {
+        self.runtime
+            .pane_tabs
+            .as_ref()
+            .map_or_else(String::new, |t| t.active_info().label.clone())
+    }
+
     /// `^a-\` / F10 — toggle the bottom pane. Three states:
     ///   1. No tabs yet (`pane_tabs.is_none()`): spawn the default
     ///      command.
@@ -81,6 +129,17 @@ impl App {
     /// injection) MUST gate on this, or they act on the wrong tab when the
     /// spawn fails. On failure this flashes the error and returns `false`.
     pub fn open_pane_tab_in(&mut self, cmd: &str, cwd: &std::path::Path) -> bool {
+        self.open_pane_tab_into(cmd, cwd, TabSlot::Append)
+    }
+
+    /// [`Self::open_pane_tab_in`], with control over which slot the new tab
+    /// takes — `TabSlot::Replace` is the `^a R` restart-in-place path.
+    pub(super) fn open_pane_tab_into(
+        &mut self,
+        cmd: &str,
+        cwd: &std::path::Path,
+        slot: TabSlot,
+    ) -> bool {
         // A new pane is meant to be used — if the file list is zoomed (the
         // pane is collapsed to its tab bar), reveal the split so the pane
         // isn't created behind a fullscreen list and silently lost. The
@@ -141,10 +200,10 @@ impl App {
                 self.state
                     .flash_info(format!("pane: {cmd} (^W k for list)"));
                 let entry = TabEntry::new(p, info);
-                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
-                    tabs.push(entry);
-                } else {
-                    self.runtime.pane_tabs = Some(PaneTabs::new(entry));
+                match (self.runtime.pane_tabs.as_mut(), slot) {
+                    (Some(tabs), TabSlot::Replace(idx)) => tabs.replace_at(idx, entry),
+                    (Some(tabs), TabSlot::Append) => tabs.push(entry),
+                    (None, _) => self.runtime.pane_tabs = Some(PaneTabs::new(entry)),
                 }
                 // Claude status hooks: install (consented), skip (denied), or
                 // raise the first-launch per-project consent popup. After the
@@ -610,13 +669,8 @@ impl App {
     /// claude, a shell mid-task), confirm first — closing it loses that
     /// session. An already-exited tab closes silently.
     pub fn close_active_tab(&mut self) {
-        let running_label = self.runtime.pane_tabs.as_ref().and_then(|tabs| {
-            let p = tabs.active();
-            (!p.is_closed() && p.exit_status().is_none()).then(|| tabs.active_info().label.clone())
-        });
-        if let Some(label) = running_label
-            && matches!(self.state.mode, Mode::Normal)
-        {
+        if self.needs_active_tab_confirm() {
+            let label = self.active_tab_label();
             self.state.mode = Mode::Prompting(Prompt::simple(
                 PromptKind::ClosePane,
                 format!("close running tab '{label}'? [y/N] "),
@@ -655,31 +709,72 @@ impl App {
         self.prune_orphaned_pager_streams();
     }
 
-    /// ^a R — restart the active tab's command. Closes the tab and spawns
-    /// a fresh one with the same command and working directory.
+    /// ^a R — restart the active tab's command. Confirms first when its child is
+    /// still running: a restart kills that session exactly as `^a x` would, and
+    /// `R` sits one shift away from `r` (rename). An exited tab restarts silently.
     pub fn restart_active_tab(&mut self) {
+        if self.runtime.pane_tabs.is_none() {
+            return;
+        }
+        if self.needs_active_tab_confirm() {
+            let label = self.active_tab_label();
+            self.state.mode = Mode::Prompting(Prompt::simple(
+                PromptKind::RestartPane,
+                format!("restart running tab '{label}'? [y/N] "),
+            ));
+            return;
+        }
+        self.restart_active_tab_now();
+    }
+
+    /// Restart the active tab unconditionally — the shared body reached directly
+    /// for an exited tab, or after the running-tab confirm.
+    ///
+    /// Respawns **into the tab's own slot** rather than closing and appending:
+    /// a close shifts every later tab's number down one and lands the
+    /// replacement last, which is the numbering drift users see (#151).
+    pub(crate) fn restart_active_tab_now(&mut self) {
         let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
             return;
         };
-        let cmd = tabs.active_info().command.clone();
-        let cwd = tabs.active_info().cwd.clone();
-        // Close the old tab first.
-        if let Some(tabs) = self.runtime.pane_tabs.as_mut()
-            && !tabs.close_active()
+        let idx = tabs.active_index();
+        let info = tabs.active_info();
+        let cmd = info.command.clone();
+        let cwd = info.cwd.clone();
+        let label = info.label.clone();
+        let owner = info.claim_owner.clone();
+        // Kill the outgoing child before its replacement spawns, so two agents
+        // never briefly share the cwd; `replace_at` reaps the rest of the tree.
+        if let Some(entry) = self
+            .runtime
+            .pane_tabs
+            .as_mut()
+            .and_then(|tabs| tabs.tabs_mut().get_mut(idx))
         {
-            self.runtime.pane_tabs = None;
-            self.state.focus = state::Focus::FileList;
+            entry.pane.try_kill();
         }
-        // The old tab is gone; reclaim its parked scrollback stream (if any)
-        // before spawning the replacement (which starts with no stash).
+        // A failed spawn leaves the existing tab in place — keep
+        // `open_pane_tab_into`'s error flash rather than claiming success.
+        if !self.open_pane_tab_into(&cmd, &cwd, TabSlot::Replace(idx)) {
+            return;
+        }
+        if let Some(entry) = self
+            .runtime
+            .pane_tabs
+            .as_mut()
+            .and_then(|tabs| tabs.tabs_mut().get_mut(idx))
+        {
+            // The fresh `TabInfo` re-derives the label from the command; restore
+            // a `^a r` rename so a restart doesn't silently undo it.
+            entry.info.label = label;
+        }
+        // The replacement carries a fresh `claim_owner`, so the old child's P2
+        // scope claims can never be released by it — drop them now (mirrors
+        // `close_active_tab_now`) instead of orphaning them in the registry.
+        self.state.scope_registry.retain(|c| c.owner != owner);
+        // Reclaim the replaced tab's parked scrollback stream, if it had one.
         self.prune_orphaned_pager_streams();
-        // Spawn a replacement with the same command and cwd. Only claim
-        // "restarted" if it actually spawned — otherwise leave
-        // open_pane_tab_in's "pane spawn failed" flash in place rather than
-        // clobbering it with a false success (the old tab is already gone).
-        if self.open_pane_tab_in(&cmd, &cwd) {
-            self.state.flash_info(format!("pane: restarted {cmd}"));
-        }
+        self.state.flash_info(format!("pane: restarted {cmd}"));
     }
 
     /// ^W j / ^W k — set keyboard focus directionally (no wrap).
@@ -1001,4 +1096,56 @@ fn pane_has_crash_marker(lines: &[String]) -> bool {
     lines
         .iter()
         .any(|line| MARKERS.iter().any(|m| line.contains(m)))
+}
+
+#[cfg(test)]
+mod confirm_tests {
+    use super::{TabConfirmSnapshot, needs_live_child_confirm};
+
+    const LIVE: TabConfirmSnapshot = TabConfirmSnapshot {
+        pane_closed: false,
+        exit_reaped: false,
+        mode_normal: true,
+    };
+
+    /// The live child is the whole reason the confirm exists — `^a x` / `^a R`
+    /// on it destroys a session.
+    #[test]
+    fn a_live_child_needs_confirming() {
+        assert!(needs_live_child_confirm(LIVE));
+    }
+
+    /// An `[exited N]` tab has nothing left to lose, so it must NOT prompt.
+    /// Either liveness signal alone settles it: pty EOF, or a reaped exit
+    /// status when EOF was missed.
+    #[test]
+    fn an_exited_child_skips_the_confirm() {
+        for s in [
+            TabConfirmSnapshot {
+                pane_closed: true,
+                ..LIVE
+            },
+            TabConfirmSnapshot {
+                exit_reaped: true,
+                ..LIVE
+            },
+            TabConfirmSnapshot {
+                pane_closed: true,
+                exit_reaped: true,
+                ..LIVE
+            },
+        ] {
+            assert!(!needs_live_child_confirm(s), "{s:?} must restart silently");
+        }
+    }
+
+    /// Outside `Mode::Normal` another modal owns the keyboard, so the action
+    /// proceeds rather than stranding a prompt nothing can route a key to.
+    #[test]
+    fn a_non_normal_mode_skips_the_confirm() {
+        assert!(!needs_live_child_confirm(TabConfirmSnapshot {
+            mode_normal: false,
+            ..LIVE
+        }));
+    }
 }
