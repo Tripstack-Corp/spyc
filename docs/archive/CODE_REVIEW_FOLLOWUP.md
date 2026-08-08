@@ -1,6 +1,6 @@
 # Code review follow-up — finalizing the June 2026 review
 
-**Status:** ✅ COMPLETE (closed 2026-06-28). Every High/Medium finding the June 2026 deep review ([`docs/archive/CODE_REVIEW_2026-06.md`](archive/CODE_REVIEW_2026-06.md)) left is now at a clean terminal state — fixed, or closed (refuted / by-design / accepted). The last finding (`pty_host.rs:208`) closed in PR #606. Opened 2026-06-21.
+**Status:** ✅ COMPLETE (closed 2026-06-28). Every High/Medium finding the June 2026 deep review ([`docs/archive/CODE_REVIEW_2026-06.md`](CODE_REVIEW_2026-06.md)) left is now at a clean terminal state — fixed, or closed (refuted / by-design / accepted). The last finding (`pty_host.rs:208`) closed in PR #606. Opened 2026-06-21.
 
 **Goal:** drive every remaining finding to a clean terminal state — **fixed** (own cluster PR) or **closed** (refuted / by-design / accepted), keeping an honest ledger.
 

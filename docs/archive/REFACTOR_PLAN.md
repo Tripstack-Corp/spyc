@@ -7,7 +7,7 @@
 > directory. The rendering pass, pager-key router, colon-command
 > dispatch, and keyboard-input cluster are all out. **The MVU rewrite
 > (Phase 3) is now a pre-2.0 / road-to-2.0 track** — see the detailed
-> design in [`docs/MVU_PLAN.md`](docs/MVU_PLAN.md). This **reverses** the
+> design in [`docs/archive/MVU_PLAN.md`](MVU_PLAN.md). This **reverses** the
 > earlier "hold the MVU rewrite until 2.0 + ~2 weeks" gate (decision log,
 > 2026-05-30): 2.0 should ship *on* the cleaner foundation rather than
 > carry a refactor as launch overhang, and the strangler-fig design makes
@@ -67,7 +67,7 @@ Pick up when at least two of these are true:
   some interfaces have to be designed (e.g. the pager-key handler
   surface). Don't context-switch mid-extraction.
 - **Phase 3 (MVU)**: superseded by the strangler-fig design in
-  [`docs/MVU_PLAN.md`](docs/MVU_PLAN.md). The original framing here said
+  [`docs/archive/MVU_PLAN.md`](MVU_PLAN.md). The original framing here said
   "block out a full week; partial conversions are worse than either alone"
   — that assumed a big-bang. The strangler-fig plan instead lands ~8
   phases, **each behavior-equivalent behind green CI and independently
@@ -164,21 +164,21 @@ denies `wildcard_imports`).
 
 ## Phase 3 — MVU rewrite
 
-> **Detailed design: [`docs/MVU_PLAN.md`](docs/MVU_PLAN.md)** — a
+> **Detailed design: [`docs/archive/MVU_PLAN.md`](MVU_PLAN.md)** — a
 > strangler-fig, 8-phase (Phase -1 … 6) migration with Model/Runtime/
 > ViewState split, a single `Message` channel, a four-class `Effect`
 > vocabulary, and a `Focus` value. **Now a pre-2.0 / road-to-2.0 track**
 > (2026-05-30 decision): Phase 0 (Focus-as-one-value) lands first as a
 > daily-driver bug fix; Phases 1–6 land incrementally before launch, after
 > the test-harness de-risking. The sketch in this section is the original
-> high-level target; `docs/MVU_PLAN.md` supersedes it with concrete,
+> high-level target; `docs/archive/MVU_PLAN.md` supersedes it with concrete,
 > adversarially-vetted phases.
 
 The architectural change — but **not** the block-out-a-week big-bang the
 original framing below assumed. The strangler-fig design makes every phase
 behavior-equivalent behind green CI and independently revertable, so it lands
 incrementally pre-2.0 and interleaves with the other road-to-2.0 tracks rather
-than requiring one unbroken multi-day push. Follow `docs/MVU_PLAN.md`.
+than requiring one unbroken multi-day push. Follow `docs/archive/MVU_PLAN.md`.
 
 ### Target shape
 
@@ -300,7 +300,7 @@ the plan changed.)
   (`app::guard_tests::mod_rs_stays_decomposed`, ceiling 8,500) so `mod.rs`
   can't silently creep back toward a monolith — the test directs
   contributors to extract a module rather than raise the ceiling.
-- **2026-05-30**: Drew up the full MVU design ([`docs/MVU_PLAN.md`](docs/MVU_PLAN.md),
+- **2026-05-30**: Drew up the full MVU design ([`docs/archive/MVU_PLAN.md`](MVU_PLAN.md),
   PR #196) via a multi-agent design workflow — strangler-fig won a judge
   panel (46/50) over effect-first (45) and model-first (40); the borrow-
   checker / sync-only / scope-honesty reviewers surfaced the blockers
