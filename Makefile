@@ -34,7 +34,17 @@ run: ## Debug run
 # ---------- Quality gate -----------------------------------------------------
 
 .PHONY: check
-check: fmt-check lint test deny ## Full quality gate (CI)
+check: fmt-check lint test ## Full quality gate (CI)
+
+# `deny` is deliberately NOT in `check`. `check` is what the pre-commit hook
+# runs, and cargo-deny re-fetches the RUSTSEC advisory DB over the network on
+# every invocation — slow on every commit, offline-hostile, and the source of two
+# concrete incidents: the advisory-DB update inherits the hook's `GIT_DIR` and
+# hard-reset the developer's own checked-out branch (see the pre-commit hook and
+# AGENTS.md), and it has segfaulted mid-run on CI's Linux runner, failing a PR
+# that had nothing to do with dependencies. Supply chain is owned by
+# `audit.yml` (weekly + `workflow_dispatch`), which runs this same target.
+# Run it by hand any time with `make deny`.
 
 # A pipeline's exit status is its LAST command's, so `make check | tail` reports
 # the pager's success and a failed gate reads as green. No target can fix that —

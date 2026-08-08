@@ -31,11 +31,14 @@ We use GitHub pull requests. The target branch is `main`.
 
 3. **Run the quality gate** before pushing:
    ```sh
-   make check    # fmt-check + lint + test + deny
+   make check    # fmt-check + lint + test
    ```
-   All four must pass. Clippy runs with `pedantic` and `nursery`
-   lints — warnings are errors in CI. `deny` is cargo-deny
-   (advisories, licenses, sources, bans). If you touched
+   All three must pass. Clippy runs with `pedantic` and `nursery`
+   lints — warnings are errors in CI. Supply-chain checks
+   (`make deny` — cargo-deny advisories/licenses/sources/bans) are
+   **not** in `check`: they re-fetch the RUSTSEC DB over the network,
+   which is the wrong thing to do on every commit. `audit.yml` owns
+   them; run `make deny` by hand if you changed a dependency. If you touched
    `cfg(target_os = "linux")` code, also run `make lint-linux` —
    host clippy compiles that code out. `make aislop` is an advisory
    AI-slop scan (net-new findings vs the baseline).
@@ -219,11 +222,18 @@ happened and wants a human.
 ## CI
 
 GitHub Actions (`.github/workflows/ci.yml`) runs the quality gate on every PR
-(fmt + clippy + deny as one job, tests in parallel) and adds a coverage gate on
-merges to `main`. All jobs must pass before merge. A weekly
-`.github/workflows/audit.yml` re-runs `cargo deny check advisories` against a
-fresh RUSTSEC DB. CI pins the toolchain via `rust-toolchain.toml`, so it matches
-your local `make check`.
+(fmt + clippy as one job, tests in parallel) and adds a coverage gate on
+merges to `main`. All jobs must pass before merge. CI pins the toolchain via
+`rust-toolchain.toml`, so it matches your local `make check`.
+
+**Supply chain lives in `.github/workflows/audit.yml`**, not the PR gate: weekly
+plus `workflow_dispatch`, running the full `make deny` (advisories, bans,
+licenses, sources) against a freshly fetched RUSTSEC DB. It was taken off the PR
+path because cargo-deny's network fetch made every commit online-dependent and
+has segfaulted mid-run on the runner, failing PRs that touched no dependencies.
+The cost of that: a PR adding a banned or wrongly-licensed dependency isn't
+caught until the next scheduled run — so **dispatch `audit.yml` after merging a
+dependency change**, and before cutting a release.
 
 ## Cross-compilation
 

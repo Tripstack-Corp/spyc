@@ -139,7 +139,7 @@ spyc is Model-View-Update. Keep these — they're what make it reason-about-able
 ```sh
 cargo build / cargo build --release   # or: make release
 make install      # release build + copy to ~/.local/bin
-make check        # fmt + clippy + test + deny (CI gate)
+make check        # fmt + clippy + test (CI gate; supply-chain is audit.yml)
 make fuzz         # nightly + cargo-fuzz, on-demand (NOT in check)
 make changelog    # preview the pending CHANGELOG section
 make release-prep VERSION=x.y.z       # step 1, on a release branch: set version + changelog + commit

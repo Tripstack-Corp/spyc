@@ -41,6 +41,11 @@ permissions:
 
 jobs:
   lint:
+    # NOTE: this `name` is a REQUIRED STATUS CHECK in main's branch protection,
+    # so it is deliberately left saying "supply-chain / deny" even though deny
+    # moved to `audit.yml`. Renaming it needs the protection contexts updated in
+    # the same motion — a rename alone deadlocks every open PR, because the old
+    # required context would never report again. See the PR that moved deny.
     name: Lint + supply-chain (fmt, clippy, deny)
     runs-on: ubuntu-latest
     steps:
@@ -48,19 +53,11 @@ jobs:
       - name: Toolchain + C compiler (load-bearing for *-sys crates)
         run: rustc --version && cargo --version && cc --version
       - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-deny (pinned, sha256-verified)
-        run: |
-          CARGO_DENY_VERSION=0.19.4
-          CARGO_DENY_SHA256=3bd58b784e83715b86ddbc9deac591890372ec77fda5741bb0826970b958506f
-          CARGO_DENY_DIR=cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl
-          if ! cargo-deny --version 2>/dev/null | grep -q "${CARGO_DENY_VERSION}"; then
-            curl -sSLo /tmp/cargo-deny.tar.gz "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${CARGO_DENY_DIR}.tar.gz"
-            echo "${CARGO_DENY_SHA256}  /tmp/cargo-deny.tar.gz" | sha256sum -c -
-            tar -xzf /tmp/cargo-deny.tar.gz -C /tmp
-            install -m 0755 "/tmp/${CARGO_DENY_DIR}/cargo-deny" "$HOME/.cargo/bin/cargo-deny"
-          fi
-      # fmt-check + clippy + deny. Tests run in the parallel `test` job.
-      - run: make fmt-check lint deny
+      # fmt-check + clippy. Tests run in the parallel `test` job; supply-chain
+      # (cargo-deny) runs in `audit.yml` — it re-fetches the RUSTSEC DB over the
+      # network on every invocation, which has segfaulted mid-run here and failed
+      # a PR that touched no dependencies.
+      - run: make fmt-check lint
 
   test:
     name: Tests (cargo test --all-targets)

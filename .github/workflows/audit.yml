@@ -1,8 +1,18 @@
-# Weekly dependency-drift + advisory report. Ported from the Bitbucket
+# Weekly dependency-drift + supply-chain report. Ported from the Bitbucket
 # `weekly-deps` custom pipeline (archived under docs/archive/).
 #
-# `cargo deny check advisories` re-fetches the RUSTSEC DB on every run, so it
-# surfaces new advisories against existing deps even on weeks with no commits.
+# **This workflow owns the supply-chain gate.** cargo-deny re-fetches the RUSTSEC
+# DB on every run — good here (it surfaces new advisories against unchanged deps
+# on weeks with no commits) and bad in the per-commit path, where it made the
+# pre-commit hook network-dependent and has segfaulted mid-run on the CI runner,
+# failing PRs that touched no dependencies. So `ci.yml` no longer runs it.
+#
+# The trade that buys: a PR introducing a banned / wrongly-licensed / duplicate
+# dependency is not caught at PR time — it surfaces on the next scheduled run, or
+# whenever someone runs `make deny` locally. Dispatch this workflow manually
+# (`workflow_dispatch`, or `gh workflow run audit.yml`) after merging anything
+# that moves `Cargo.toml` / `Cargo.lock`, and before cutting a release.
+#
 # `cargo outdated` / `cargo tree --duplicates` are soft signals (never fail).
 #
 # NOTE: the Bitbucket version lit up a Bitbucket→Slack integration on failure;
@@ -40,8 +50,14 @@ jobs:
             install -m 0755 "/tmp/${CARGO_DENY_DIR}/cargo-deny" "$HOME/.cargo/bin/cargo-deny"
           fi
       - run: cargo install cargo-outdated --locked
-      - name: Advisories (hard fail)
-        run: cargo deny check advisories
+      # `make deny` = `cargo deny --all-features check` — advisories, bans,
+      # licenses AND sources. Previously only `advisories` ran here and the other
+      # three rode on ci.yml; now that ci.yml doesn't run deny, this has to be the
+      # full check or bans/licenses/sources would go unchecked entirely. Via the
+      # Makefile target so there is one definition of what "the supply-chain
+      # gate" means.
+      - name: Supply chain — advisories, bans, licenses, sources (hard fail)
+        run: make deny
       - name: Outdated direct deps (soft)
         run: cargo outdated --root-deps-only || true
       - name: Duplicate deps (soft)
