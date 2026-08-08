@@ -334,6 +334,18 @@ pub struct MouseConfig {
     /// What a wheel tick over an agent pane whose OWN scrollback view spyc can
     /// drive (today: codex's `^T`) does when that view isn't already open.
     pub pane_scroll_view: PaneScrollView,
+    /// Invert the wheel direction. `false` (default) keeps spyc's own
+    /// convention — a downward tick moves the file-list cursor to a later row
+    /// and the pager further into the content, the same "scroll down = toward
+    /// the end" mapping as a browser or `less`. `true` flips both directions.
+    ///
+    /// Named for the mechanism, not for a convention: which direction counts
+    /// as "natural" depends on the OS trackpad setting and the terminal, so a
+    /// `natural_scroll` flag would be ambiguous in exactly the cases a user
+    /// reaches for it. Applied once, where the wheel delta is computed
+    /// (`src/app/mouse/mod.rs`), so the file list, the pager, and an agent
+    /// pane's synthesized scroll keys always agree with each other.
+    pub invert_scroll: bool,
 }
 
 impl Default for MouseConfig {
@@ -343,6 +355,7 @@ impl Default for MouseConfig {
             scroll_lines: 1,
             pane_scroll_lines: 3,
             pane_scroll_view: PaneScrollView::default(),
+            invert_scroll: false,
         }
     }
 }
@@ -368,6 +381,8 @@ struct FileMouse {
     pane_scroll_lines: Option<usize>,
     #[serde(default)]
     pane_scroll_view: Option<PaneScrollView>,
+    #[serde(default)]
+    invert_scroll: Option<bool>,
 }
 
 /// Markdown viewer knobs.
@@ -787,6 +802,9 @@ impl Config {
         if let Some(n) = file.mouse.scroll_lines {
             self.mouse.scroll_lines = n.max(1);
         }
+        if let Some(b) = file.mouse.invert_scroll {
+            self.mouse.invert_scroll = b;
+        }
 
         // Markdown: per-field merge.
         if let Some(b) = file.markdown.open_as_rendered {
@@ -915,6 +933,21 @@ mod tests {
                 toml::from_str(&doc).unwrap_or_else(|e| panic!("{toml_value:?} must parse: {e}"));
             assert_eq!(file.mouse.pane_scroll_view, Some(want), "{toml_value:?}");
         }
+    }
+
+    /// `invert_scroll` merges like every other `[mouse]` bool: absent keeps the
+    /// built-in default (`false` — spyc's own direction), present overrides it.
+    #[test]
+    fn invert_scroll_merges_from_the_file() {
+        assert!(
+            !Config::default().mouse.invert_scroll,
+            "default must be false (uninverted)"
+        );
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[mouse]\ninvert_scroll = true\n").unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert!(cfg.mouse.invert_scroll);
     }
 
     #[test]
