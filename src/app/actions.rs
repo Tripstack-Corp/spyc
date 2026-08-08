@@ -295,9 +295,11 @@ impl App {
                 if let Some(prev) = self.view.pager_history.pop_back() {
                     self.view.pager = Some(prev);
                     self.view.needs_full_repaint = true;
-                    self.state
-                        .flash_info(format!("buffer ←{}", self.view.pager_history.back_len()));
+                    let msg = format!("buffer ←{}", self.view.pager_history.back_len());
+                    // The reopened pager covers the status bar (#166).
+                    self.set_active_pager_flash(msg);
                 } else {
+                    // Nothing reopened — the user is still on the list.
                     self.state.flash_info("no buffers in history");
                 }
             }

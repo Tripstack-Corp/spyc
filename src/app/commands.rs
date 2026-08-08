@@ -863,51 +863,134 @@ pub(super) fn cmd_resume(app: &mut App, args: &str) -> Vec<Effect> {
 
 /// `:bprev` — step the pager buffer history backward (older).
 pub(super) fn cmd_bprev(app: &mut App, _args: &str) -> Vec<Effect> {
-    if let Some(current) = app.view.pager.take() {
-        match app.view.pager_history.go_back(current) {
+    if let Some(mut current) = app.view.pager.take() {
+        // A flash describes the keypress that set it, so it must not ride into
+        // history and resurface when this view is restored.
+        current.flash = None;
+        let msg = match app.view.pager_history.go_back(current) {
             Ok(prev) => {
                 app.view.pager = Some(prev);
                 app.view.needs_full_repaint = true;
                 let back = app.view.pager_history.back_len();
                 let fwd = app.view.pager_history.forward_len();
-                app.state.flash_info(format!("buffer ←{back} →{fwd}"));
+                format!("buffer ←{back} →{fwd}")
             }
             Err(current) => {
                 // At the start of history -- keep the current pager
                 // visible instead of closing it.
                 app.view.pager = Some(current);
-                app.state.flash_info("no older buffers");
+                "no older buffers".to_string()
             }
-        }
+        };
+        pager_flash(app, msg);
     } else if let Some(prev) = app.view.pager_history.pop_back() {
         app.view.pager = Some(prev);
         app.view.needs_full_repaint = true;
-        app.state
-            .flash_info(format!("buffer ←{}", app.view.pager_history.back_len()));
+        let msg = format!("buffer ←{}", app.view.pager_history.back_len());
+        pager_flash(app, msg);
     } else {
+        // No pager opened, so the user is looking at the list -- status bar.
         app.state.flash_info("no buffers in history");
     }
     Vec::new()
 }
 
+/// Land a buffer-history message on the pager the command just installed, not
+/// the file-list status bar it is drawn over (#166).
+fn pager_flash(app: &mut App, msg: String) {
+    if let Some(view) = app.view.pager.as_mut() {
+        view.flash = Some(msg);
+    }
+}
+
 /// `:bnext` — step the pager buffer history forward (newer).
 pub(super) fn cmd_bnext(app: &mut App, _args: &str) -> Vec<Effect> {
-    if let Some(current) = app.view.pager.take() {
-        match app.view.pager_history.go_forward(current) {
+    if let Some(mut current) = app.view.pager.take() {
+        current.flash = None;
+        let msg = match app.view.pager_history.go_forward(current) {
             Ok(next) => {
                 app.view.pager = Some(next);
                 app.view.needs_full_repaint = true;
                 let back = app.view.pager_history.back_len();
                 let fwd = app.view.pager_history.forward_len();
-                app.state.flash_info(format!("buffer ←{back} →{fwd}"));
+                format!("buffer ←{back} →{fwd}")
             }
             Err(current) => {
                 app.view.pager = Some(current);
-                app.state.flash_info("no newer buffers");
+                "no newer buffers".to_string()
             }
-        }
+        };
+        pager_flash(app, msg);
     } else {
+        // Nothing on screen to flash into -- status bar is the only surface.
         app.state.flash_info("no pager open");
     }
     Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::App;
+    use crate::ui::pager::PagerView;
+
+    fn app_with_pager() -> App {
+        let mut app = App::test_app(std::env::temp_dir());
+        app.view.pager = Some(PagerView::new_plain("t", vec!["line".to_string()]));
+        app
+    }
+
+    /// #166: with a pager on screen the status bar is occluded by it, so the
+    /// end-of-history report has to land in the pager.
+    #[test]
+    fn bprev_bnext_at_the_edges_flash_in_the_pager_not_the_status_bar() {
+        for (cmd, msg) in [("bprev", "no older buffers"), ("bnext", "no newer buffers")] {
+            let mut app = app_with_pager();
+            let fx = app.dispatch_command(cmd);
+            assert!(fx.is_empty(), ":{cmd} effects: {fx:?}");
+            assert_eq!(
+                app.view.pager.as_ref().and_then(|v| v.flash.as_deref()),
+                Some(msg),
+                ":{cmd}"
+            );
+            assert!(
+                app.state.flash.is_none(),
+                ":{cmd} must not flash the occluded status bar: {:?}",
+                app.state.flash
+            );
+        }
+    }
+
+    /// Reopening a buffer from the list reports into the pager it just opened.
+    #[test]
+    fn bprev_reopening_from_the_list_flashes_in_the_reopened_pager() {
+        let mut app = App::test_app(std::env::temp_dir());
+        app.view
+            .pager_history
+            .push(PagerView::new_plain("older", vec!["a".to_string()]));
+        app.dispatch_command("bprev");
+        assert_eq!(
+            app.view.pager.as_ref().and_then(|v| v.flash.as_deref()),
+            Some("buffer ←0")
+        );
+        assert!(app.state.flash.is_none(), "{:?}", app.state.flash);
+    }
+
+    /// The deliberate exception: no pager opens, so the user is looking at the
+    /// list and the status bar is the only surface that can carry the message.
+    #[test]
+    fn buffer_commands_with_no_pager_to_open_stay_on_the_status_bar() {
+        for (cmd, msg) in [
+            ("bprev", "no buffers in history"),
+            ("bnext", "no pager open"),
+        ] {
+            let mut app = App::test_app(std::env::temp_dir());
+            app.dispatch_command(cmd);
+            assert!(app.view.pager.is_none(), ":{cmd} opened nothing");
+            assert_eq!(
+                app.state.flash.as_ref().map(|f| f.text.as_str()),
+                Some(msg),
+                ":{cmd} belongs on the status bar"
+            );
+        }
+    }
 }

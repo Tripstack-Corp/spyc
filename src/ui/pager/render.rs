@@ -4,7 +4,7 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
@@ -14,7 +14,8 @@ use crate::ui::theme::Theme;
 use super::{Mount, PagerView, VisualKind};
 
 use super::layout::{
-    COL_GAP, line_plain_text, pager_inner_area, partition_lines_static, wrap_line_capped,
+    COL_GAP, line_display_width, line_plain_text, pager_inner_area, partition_lines_static,
+    wrap_line_capped,
 };
 
 pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
@@ -207,10 +208,18 @@ fn render_single_column(frame: &mut Frame, content_area: Rect, view: &PagerView,
         } else {
             vec![styled]
         };
+        // Padded per piece (after tab expansion and wrap) so the pad width is
+        // measured against what actually reaches the screen; the gutter is
+        // prepended below and stays outside the highlight, as vim's is.
+        let fill = line_fill_bg(view, abs_idx, theme);
         for (piece_idx, piece) in pieces.into_iter().enumerate() {
             if display_lines.len() >= viewport_h {
                 break;
             }
+            let piece = match fill {
+                Some(bg) => pad_row_to_width(piece, body_w, bg),
+                None => piece,
+            };
             if gutter_w > 0 {
                 let gutter_text = if piece_idx == 0 {
                     format!("{:>width$} ", abs_idx + 1, width = gutter_w - 1)
@@ -330,6 +339,51 @@ fn render_multi_column(
     }
 }
 
+/// A line selection's two tones: brighter on the cursor row, dim on the rest.
+const fn line_sel_bg(cursor: usize, abs_idx: usize, theme: &Theme) -> Color {
+    if abs_idx == cursor {
+        theme.cursor_bg
+    } else {
+        theme.cursor_bg_dim
+    }
+}
+
+/// Background a *whole-line* selection paints across `abs_idx`, or `None` when
+/// the row isn't line-selected. Line visual (`V`) and line placement take whole
+/// rows, so the bg has to reach the full width — charwise and block are
+/// column-bounded and never fill. Placement is painted after visual, so it wins
+/// where both could name the row.
+fn line_fill_bg(view: &PagerView, abs_idx: usize, theme: &Theme) -> Option<Color> {
+    if let Some(p) = view.placement
+        && p.row == abs_idx
+        && p.kind == VisualKind::Line
+    {
+        return Some(theme.cursor_bg);
+    }
+    let sel = view.visual?;
+    if sel.kind != VisualKind::Line {
+        return None;
+    }
+    let (lo, hi) = sel.range();
+    (lo..=hi)
+        .contains(&abs_idx)
+        .then(|| line_sel_bg(sel.cursor, abs_idx, theme))
+}
+
+/// Extend a row with blank cells so a whole-line selection's background spans
+/// the content width. Painting only the existing spans left a blank line with
+/// no highlight at all and a short line highlighted just to its last glyph, so
+/// a `V` range read as a ragged column instead of a block (#120).
+fn pad_row_to_width(line: Line<'static>, width: usize, bg: Color) -> Line<'static> {
+    let pad = width.saturating_sub(line_display_width(&line));
+    if pad == 0 {
+        return line;
+    }
+    let mut spans = line.spans;
+    spans.push(Span::styled(" ".repeat(pad), Style::default().bg(bg)));
+    Line::from(spans)
+}
+
 /// Apply match-highlight + picker-cursor styling to a source line.
 /// Extracted from `render_single_column` so wrap can re-use it
 /// (styling decisions happen before the visual split).
@@ -355,11 +409,9 @@ fn apply_row_styling(
         if (lo..=hi).contains(&abs_idx) {
             match sel.kind {
                 VisualKind::Line => {
-                    let bg = if abs_idx == sel.cursor {
-                        theme.cursor_bg
-                    } else {
-                        theme.cursor_bg_dim
-                    };
+                    // Only the glyphs the row actually has; `render_single_column`
+                    // pads the rest of the width to the same bg.
+                    let bg = line_sel_bg(sel.cursor, abs_idx, theme);
                     styled = Line::from(
                         styled
                             .spans
