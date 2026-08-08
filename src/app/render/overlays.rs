@@ -267,7 +267,6 @@ impl App {
         }
         use ratatui::style::{Color, Style};
         use ratatui::text::{Line as HudLine, Span};
-        use ratatui::widgets::Paragraph as ActivityP;
 
         // Line 1 — throughput + frame timing. `pk` is the whole terminal.draw
         // (build + diff + tty emission); `r` is just the render closure (CPU).
@@ -434,7 +433,12 @@ impl App {
             // `N dps` headline used to be dimmed.
             let normal = Style::default().fg(Color::Black).bg(*bg);
             let line = HudLine::from(Span::styled(format!("{pad}{text}"), normal));
-            frame.render_widget(ActivityP::new(line), rect);
+            // Through the chrome funnel, not a bare `render_widget`: that
+            // records the row so the pointer can hit-test it and a drag can
+            // copy it. The HUD's whole purpose is reporting numbers a human
+            // then quotes — pids, timings, `:why-status` counts — so it being
+            // unselectable meant retyping them from a screenshot.
+            self.draw_chrome_line(frame, rect, line);
         }
     }
 
