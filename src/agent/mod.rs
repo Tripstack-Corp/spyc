@@ -558,16 +558,14 @@ impl AgentProfile for CodexProfile {
 /// state that actually earns the user's attention — comes from this screen
 /// scrape instead.
 ///
-/// All three phrases are required (see [`detect_rules::Matcher::All`]): an
-/// agent discussing permissions prints any one of them readily, and a false
-/// red "needs me" square is worse than no fallback.
+/// Both phrases are required (see [`detect_rules::Matcher::All`]): an agent
+/// discussing permissions prints either one readily, and a false red "needs me"
+/// square is worse than no fallback. Every needle must be a string agy actually
+/// prints — a third one here (`esc to cancel`) that it never does made the
+/// conjunction unsatisfiable, silently killing agy's only `blocked` signal.
 static AGY_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {
     region: detect_rules::Region::BottomNonEmptyLines(15),
-    matcher: detect_rules::Matcher::All(&[
-        "Requesting permission for:",
-        "Do you want to proceed?",
-        "esc to cancel",
-    ]),
+    matcher: detect_rules::Matcher::All(&["Requesting permission for:", "Do you want to proceed?"]),
     state: crate::pane::AgentActivity::Blocked,
     visible_blocker: Some("awaiting tool-execution approval"),
 }];
@@ -652,6 +650,10 @@ impl AgentProfile for AgyProfile {
         // A named hook-set in `.agents/hooks.json`, read at startup → written
         // pre-spawn. Covers `working` + `done` only; `blocked` has no event to
         // hang on and comes from AGY_DETECTION_RULES instead.
+        //
+        // `done` needs agy >= 1.1.10: before it, `Stop` sat unreachable behind
+        // agy's built-in termination checks, so the hook was installed and never
+        // ran. On an older agy that half degrades to output timing.
         Some(StatusHookSupport {
             ensure: crate::mcp::ensure_agy_status_hooks,
             cleanup: crate::mcp::cleanup_agy_status_hooks,
@@ -791,6 +793,37 @@ pub fn detect(cmd: &str) -> &'static dyn AgentProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// agy's approval prompt must scrape as `Blocked` — the state that earns the
+    /// user's attention, and the only one agy fires no hook for.
+    ///
+    /// `detect_rules` tested the `All` conjunction; nothing tested the RULE, which
+    /// is how a needle agy never prints shipped and made it unsatisfiable. The
+    /// prompt lines below are agy 1.1.11's own literals.
+    #[test]
+    fn agy_approval_prompt_scrapes_as_blocked() {
+        let scan = |ls: &[&str]| {
+            let owned: Vec<String> = ls.iter().copied().map(String::from).collect();
+            detect_rules::scan(&owned, detect("agy").detection_rules())
+        };
+        assert_eq!(
+            scan(&[
+                "Requesting permission for:",
+                "  echo hello",
+                "Do you want to proceed?",
+                "> 1. Yes, accept this change",
+            ]),
+            Some((
+                crate::pane::AgentActivity::Blocked,
+                Some("awaiting tool-execution approval")
+            )),
+            "agy's approval prompt left the dot unlit"
+        );
+        // Either phrase ALONE is prose an agent writes readily — a false red
+        // "needs me" square is worse than no fallback.
+        assert_eq!(scan(&["asking: Do you want to proceed?"]), None);
+        assert_eq!(scan(&["Requesting permission for: ls"]), None);
+    }
 
     /// Which agents claim a wheel scroll key, and what it encodes to on the wire.
     ///
