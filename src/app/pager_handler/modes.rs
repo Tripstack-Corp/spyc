@@ -200,27 +200,34 @@ impl App {
             current.streaming = false;
             current.stream_id = None;
         }
+        // A flash describes the keypress that set it, so it must not ride into
+        // history and resurface when this view is restored.
+        current.flash = None;
         let step = if forward {
             self.view.pager_history.go_forward(current)
         } else {
             self.view.pager_history.go_back(current)
         };
-        match step {
+        let msg = match step {
             Ok(next) => {
                 self.view.pager = Some(next);
                 self.view.needs_full_repaint = true;
                 let back = self.view.pager_history.back_len();
                 let fwd = self.view.pager_history.forward_len();
-                self.state.flash_info(format!("buffer ←{back} →{fwd}"));
+                format!("buffer ←{back} →{fwd}")
             }
             Err(current) => {
                 self.view.pager = Some(current);
-                self.state.flash_info(if forward {
-                    "no newer buffers"
+                if forward {
+                    "no newer buffers".to_string()
                 } else {
-                    "no older buffers"
-                });
+                    "no older buffers".to_string()
+                }
             }
+        };
+        // Flash in the pager, not the file-list status bar the pager covers.
+        if let Some(view) = self.view.pager.as_mut() {
+            view.flash = Some(msg);
         }
     }
 
@@ -652,6 +659,128 @@ mod tests {
         assert_eq!(
             pager(&app).flash.as_deref(),
             Some("paste ignored — press `/` to search")
+        );
+    }
+
+    /// #166: the pager is drawn over the file list, so a status-bar flash renders
+    /// half-occluded. Exhausting the buffer history must report in the pager.
+    #[test]
+    fn exhausted_buffer_history_flashes_in_the_pager_not_the_status_bar() {
+        for (bracket, msg) in [('[', "no older buffers"), (']', "no newer buffers")] {
+            let mut app = jump_pager_app();
+            app.handle_pager_key(ch(bracket));
+            app.handle_pager_key(ch('b'));
+            assert_eq!(pager(&app).flash.as_deref(), Some(msg), "{bracket}b");
+            assert!(
+                app.state.flash.is_none(),
+                "{bracket}b must not flash the occluded status bar: {:?}",
+                app.state.flash
+            );
+        }
+    }
+
+    /// The success half: stepping to a real buffer reports its depth in the
+    /// pager too, so the whole action speaks in one place.
+    #[test]
+    fn buffer_history_step_flashes_depth_in_the_pager() {
+        let mut app = jump_pager_app();
+        app.view
+            .pager_history
+            .push(PagerView::new_plain("older", vec!["a".to_string()]));
+        app.handle_pager_key(ch('['));
+        app.handle_pager_key(ch('b'));
+        assert_eq!(pager(&app).title, "older", "stepped back a buffer");
+        assert_eq!(pager(&app).flash.as_deref(), Some("buffer ←0 →1"));
+        assert!(
+            app.state.flash.is_none(),
+            "depth belongs in the pager: {:?}",
+            app.state.flash
+        );
+    }
+
+    /// A pager carrying a flash must not resurrect it when restored from
+    /// history — the message described a keypress that is long gone.
+    #[test]
+    fn buffer_history_does_not_resurrect_a_stale_flash() {
+        let mut app = jump_pager_app();
+        app.view
+            .pager_history
+            .push(PagerView::new_plain("older", vec!["a".to_string()]));
+        for k in [ch('['), ch('b'), ch(']'), ch('b')] {
+            app.handle_pager_key(k);
+        }
+        assert_eq!(pager(&app).title, "t", "back then forward returns us home");
+        assert_eq!(pager(&app).flash.as_deref(), Some("buffer ←1 →0"));
+    }
+
+    /// A scrollback pager sits in its own slot, so the relocation has to follow
+    /// `active_pager_slot()` — not `view.pager`, which is empty here.
+    #[test]
+    fn scrollback_key_message_lands_in_the_scrollback_not_the_status_bar() {
+        use crate::app::state::Focus;
+        use crate::ui::pager::Mount;
+
+        let mut app = App::test_app(std::env::temp_dir());
+        app.state.focus = Focus::Pane;
+        let mut sb = PagerView::new_plain("transcript", vec!["line".to_string()]);
+        sb.pane_scroll = true;
+        sb.mount = Mount::LowerPane;
+        app.view.scroll_pager = Some(sb);
+
+        app.handle_pager_key(ch('t'));
+        assert_eq!(
+            app.view
+                .scroll_pager
+                .as_ref()
+                .and_then(|v| v.flash.as_deref()),
+            Some("tool calls: only in an agent transcript view")
+        );
+        assert!(
+            app.state.flash.is_none(),
+            "status bar is behind the scrollback: {:?}",
+            app.state.flash
+        );
+    }
+
+    /// `S` in the task viewer reaches the shared `pause_task`, which flashes the
+    /// status bar for `:pause`. The pager keypress re-homes it without the shared
+    /// handler needing to know who called it.
+    #[test]
+    fn task_viewer_pause_message_lands_in_the_pager() {
+        let mut app = jump_pager_app();
+        if let Some(v) = app.view.pager.as_mut() {
+            v.task_id = Some(7);
+        }
+        app.handle_pager_key(ch('S'));
+        assert_eq!(pager(&app).flash.as_deref(), Some("no task with id 7"));
+        assert!(
+            app.state.flash.is_none(),
+            "occluded surface: {:?}",
+            app.state.flash
+        );
+    }
+
+    /// The deliberate exception, and why it needs no per-site opt-out: an action
+    /// whose result is on the file list has already closed its pager, so there is
+    /// nothing to relocate into and the message stays on the status bar.
+    #[test]
+    fn a_message_from_an_action_that_closes_the_pager_stays_on_the_status_bar() {
+        use crate::app::state::Focus;
+        use crate::ui::pager::Mount;
+
+        let mut app = App::test_app(std::env::temp_dir());
+        app.state.focus = Focus::Pane;
+        let mut sb = PagerView::new_plain("transcript", vec!["line".to_string()]);
+        sb.pane_scroll = true;
+        sb.mount = Mount::LowerPane;
+        app.view.scroll_pager = Some(sb);
+
+        app.handle_pager_key(ch('q'));
+        assert!(app.view.scroll_pager.is_none(), "q closed the scrollback");
+        assert_eq!(
+            app.state.flash.as_ref().map(|f| f.text.as_str()),
+            Some("scroll: off"),
+            "the pager is gone, so the list's status bar is the right surface"
         );
     }
 }

@@ -172,6 +172,8 @@ impl App {
 
         // Any keypress clears a lingering flash message.
         self.state.flash = None;
+        // Per-turn; the pager sink re-arms it (#166 flash relocation).
+        self.view.input_went_to_pager = false;
 
         // ^C is intentionally a no-op at the spyc-normal level (we
         // don't quit on Ctrl+C, that footgun's too easy with one
