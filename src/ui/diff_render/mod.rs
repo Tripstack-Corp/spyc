@@ -398,7 +398,7 @@ fn render_file_split(
                     lnum_w,
                     tab_width,
                 );
-                push_split_rows(out, left_rows, right_rows, col_w, theme);
+                push_split_rows(out, left_rows, right_rows, None, None, col_w, theme);
                 old_no += 1;
                 new_no += 1;
                 oi += 1;
@@ -424,7 +424,9 @@ fn render_file_split(
             let a_hi = i;
             let pairs = (r_hi - r_lo).max(a_hi - a_lo);
             for k in 0..pairs {
-                let left_rows = if r_lo + k < r_hi {
+                let has_left = r_lo + k < r_hi;
+                let has_right = a_lo + k < a_hi;
+                let left_rows = if has_left {
                     let word = word_hl(intra[r_lo + k].as_ref(), theme.diff_word_bg(false));
                     let content = styled_content(
                         pick(old_ref, oi, &lines[r_lo + k].text, theme, Some(false)),
@@ -446,7 +448,7 @@ fn render_file_split(
                 } else {
                     vec![blank_cell_row(col_w)]
                 };
-                let right_rows = if a_lo + k < a_hi {
+                let right_rows = if has_right {
                     let word = word_hl(intra[a_lo + k].as_ref(), theme.diff_word_bg(true));
                     let content = styled_content(
                         pick(new_ref, ni, &lines[a_lo + k].text, theme, Some(true)),
@@ -468,19 +470,32 @@ fn render_file_split(
                 } else {
                     vec![blank_cell_row(col_w)]
                 };
-                push_split_rows(out, left_rows, right_rows, col_w, theme);
+                let left_bg = has_left.then(|| theme.diff_row_bg(false)).flatten();
+                let right_bg = has_right.then(|| theme.diff_row_bg(true)).flatten();
+                push_split_rows(out, left_rows, right_rows, left_bg, right_bg, col_w, theme);
             }
         }
     }
 }
 
 /// Pair the wrapped visual rows of a left and right cell into `split_row`s,
-/// padding the shorter side with a blank cell so both columns stay aligned.
-/// Consumes both row vecs (no per-row clone).
+/// padding the shorter side so both columns stay aligned. Consumes both row
+/// vecs (no per-row clone).
+///
+/// `left_bg`/`right_bg` are that side's own row wash (`None` for a context
+/// row, or for a side with no line at all this k — the caller already built
+/// that as a bare [`blank_cell_row`]). They're used ONLY for the padding this
+/// fn adds when one side's real wrapped rows run out before the other's: a
+/// long removed line wrapping to 3 rows against a short added replacement's 1
+/// row must not make that pair's bottom 2 rows go uncolored on the add side —
+/// the wash should fill the whole paired block, same as `split_cell_rows`
+/// washes a short row's own trailing columns instead of leaving them bare.
 fn push_split_rows(
     out: &mut Vec<Line<'static>>,
     left_rows: Vec<Vec<Span<'static>>>,
     right_rows: Vec<Vec<Span<'static>>>,
+    left_bg: Option<Color>,
+    right_bg: Option<Color>,
     col_w: usize,
     theme: &Theme,
 ) {
@@ -488,8 +503,12 @@ fn push_split_rows(
     let mut left = left_rows.into_iter();
     let mut right = right_rows.into_iter();
     for _ in 0..n {
-        let l = left.next().unwrap_or_else(|| blank_cell_row(col_w));
-        let r = right.next().unwrap_or_else(|| blank_cell_row(col_w));
+        let l = left
+            .next()
+            .unwrap_or_else(|| washed_blank_row(col_w, left_bg));
+        let r = right
+            .next()
+            .unwrap_or_else(|| washed_blank_row(col_w, right_bg));
         out.push(split_row(l, r, theme));
     }
 }
@@ -552,10 +571,20 @@ fn split_cell_rows(
         .collect()
 }
 
-/// A fully-blank side-by-side cell row (the absent side of an unbalanced
-/// change, or the shorter side when a paired line wraps to more rows).
+/// A fully-blank side-by-side cell row: the absent side of an unbalanced
+/// change region (no line at all for this k — genuinely nothing to wash).
 fn blank_cell_row(col_w: usize) -> Vec<Span<'static>> {
     vec![Span::raw(" ".repeat(col_w))]
+}
+
+/// Like [`blank_cell_row`], but washed with `bg` — the shorter side's
+/// continuation row when its paired line wrapped to fewer visual rows than
+/// the other side's.
+fn washed_blank_row(col_w: usize, bg: Option<Color>) -> Vec<Span<'static>> {
+    vec![Span::styled(
+        " ".repeat(col_w),
+        apply_bg(Style::default(), bg),
+    )]
 }
 
 /// Join a left + right cell with the column separator into one row.
