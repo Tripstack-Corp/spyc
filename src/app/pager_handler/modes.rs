@@ -598,4 +598,60 @@ mod tests {
         );
         assert!(app.view.scroll_pager_help_stash.is_none());
     }
+
+    /// App with a pager whose only `needle` sits on line 3, so a committed
+    /// search that lands there proves the query really holds "needle" (an
+    /// empty query — the leak case — matches line 0 instead).
+    fn search_pager_app() -> App {
+        let mut app = App::test_app(std::env::temp_dir());
+        let lines = ["alpha", "beta", "gamma", "delta needle", "epsilon"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect::<Vec<_>>();
+        let view = PagerView::new_plain("t", lines);
+        view.last_viewport_h.set(5);
+        app.view.pager = Some(view);
+        app
+    }
+
+    /// #16: a paste while typing a `/` search extends the search buffer.
+    /// Drives the production entry (`handle_paste` → `route_input` →
+    /// `handle_pager_paste`), so the routing and the leaf are both covered.
+    #[test]
+    fn paste_while_typing_search_lands_in_the_query_not_the_pane() {
+        let mut app = search_pager_app();
+        app.handle_pager_key(ch('/'));
+        assert!(pager(&app).is_typing_search());
+
+        // Newlines are stripped, so a multi-line clipboard stays one query.
+        let fx = app.handle_paste("nee\ndle".to_string());
+        assert!(
+            fx.is_empty(),
+            "a paste into the search buffer emits no effects — nothing is \
+             forwarded to a pty: {fx:?}"
+        );
+        assert!(
+            pager(&app).is_typing_search(),
+            "a paste extends the query, it does not commit it"
+        );
+
+        // Commit: only a query of "needle" can land on line 3.
+        let view = app.view.pager.as_mut().expect("pager");
+        assert!(view.commit_search(5), "pasted query must match");
+        assert_eq!(view.current_match_line(), Some(3));
+    }
+
+    /// The other half of `handle_pager_paste`: a pager with no search open has
+    /// no text sink, so the paste is swallowed with an in-pager hint — the
+    /// point being it is not forwarded to the pty either.
+    #[test]
+    fn paste_without_a_search_flashes_in_the_pager_and_is_swallowed() {
+        let mut app = search_pager_app();
+        let fx = app.handle_paste("needle".to_string());
+        assert!(fx.is_empty(), "no effects: {fx:?}");
+        assert_eq!(
+            pager(&app).flash.as_deref(),
+            Some("paste ignored — press `/` to search")
+        );
+    }
 }
