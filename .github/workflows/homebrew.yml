@@ -94,17 +94,30 @@ jobs:
           LA=$(sha "spyc-v${V}-linux-aarch64.tar.gz")
           [ -n "$MAC" ] && [ -n "$LX" ] && [ -n "$LA" ] || { echo "missing a checksum for v${V}"; exit 1; }
           f=tap/Formula/spyc.rb
-          # The three sha256 lines are positional: macOS, then linux intel, then
-          # linux arm — the order they appear in the formula.
-          [ "$(grep -c 'sha256 "' "$f")" = 3 ] || { echo "formula sha256 layout changed — bailing"; exit 1; }
-          awk -v v="$V" -v m="$MAC" -v x="$LX" -v a="$LA" '
-            /^  version "/ { sub(/"[^"]*"/, "\"" v "\"") }
-            /sha256 "/ { n++
-              if (n==1) sub(/"[0-9a-f]+"/, "\"" m "\"")
-              else if (n==2) sub(/"[0-9a-f]+"/, "\"" x "\"")
-              else if (n==3) sub(/"[0-9a-f]+"/, "\"" a "\"") }
-            { print }
-          ' "$f" > "$f.new" && mv "$f.new" "$f"
+          # Each sha256 is attributed to the artifact named by the url above it,
+          # so the formula's arch-block shape is free to change — macOS points
+          # both `on_arm` and `on_intel` at the one universal tarball, so its
+          # hash legitimately lands twice. awk writes to `out` so its stdout
+          # stays free for diagnostics; anything it can't attribute is fatal.
+          awk -v v="$V" -v m="$MAC" -v x="$LX" -v a="$LA" -v out="$f.new" '
+            /^  version "/                      { sub(/"[^"]*"/, "\"" v "\""); vseen = 1 }
+            /url ".*-macos-universal\.tar\.gz"/ { want = m; tag = "macos-universal" }
+            /url ".*-linux-x86_64\.tar\.gz"/    { want = x; tag = "linux-x86_64" }
+            /url ".*-linux-aarch64\.tar\.gz"/   { want = a; tag = "linux-aarch64" }
+            /sha256 "/ {
+              if (want == "") { print "line " NR ": sha256 with no artifact url above it"; bad = 1 }
+              else { sub(/"[0-9a-f]+"/, "\"" want "\""); seen[tag] = 1; want = "" }
+            }
+            { print > out }
+            END {
+              if (bad) exit 1
+              if (!vseen) { print "no `version \"...\"` line to bump"; exit 1 }
+              if (want != "") { print "url for " tag " has no sha256 under it"; exit 1 }
+              for (t in seen) n++
+              if (n != 3) { print "expected all 3 artifacts, matched " n; exit 1 }
+            }
+          ' "$f" || { rm -f "$f.new"; echo "formula layout unexpected — bailing"; exit 1; }
+          mv "$f.new" "$f"
           echo "--- updated formula ---"; grep -E 'version "|sha256 "' "$f"
 
       - name: Commit + push to the tap

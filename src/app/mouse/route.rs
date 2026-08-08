@@ -95,6 +95,14 @@ pub enum MouseSink {
     /// took the entire line was surprising, and it couldn't copy just the one thing
     /// you wanted out of it — a session id, a branch name.
     SelectChrome,
+    /// Switch to the 0-based pane tab the pointer is over.
+    ///
+    /// Beats [`Self::SelectChrome`] on the divider: the tab labels are the one
+    /// part of that row that means "go here" rather than "here is some text",
+    /// and a click on a tab reads as activation in every tabbed UI. The rest of
+    /// the divider — the cwd tail, the empty tail past the last tab — stays
+    /// selectable, so copying the path still works.
+    PaneTab(usize),
     /// Give the keyboard to the pane AND anchor a spyc-side text selection over its
     /// visible grid — for a child that ignores mouse reports, so nothing else can
     /// do the selecting (codex's `^T` transcript, a plain shell).
@@ -159,6 +167,15 @@ pub struct MouseSnapshot {
     /// ([`crate::agent::AgentProfile::wheel_scroll`]). Only consulted when the
     /// child does NOT want mouse — forwarding a real mouse report always wins.
     pub pane_scroll_keys: bool,
+    /// The 0-based pane tab whose label the pointer is over, from
+    /// [`super::tab_hit`]. `None` anywhere but the divider's tab bar — including
+    /// the divider's cwd tail and the empty space past the last tab, which stay
+    /// chrome-selectable.
+    ///
+    /// Resolved into the snapshot rather than inside [`route_mouse`] because the
+    /// layout it needs is a `Vec` of spans, and the router is a `const fn` over
+    /// a `Copy` snapshot.
+    pub tab_under_pointer: Option<usize>,
 }
 
 impl MouseSnapshot {
@@ -436,6 +453,11 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
             if matches!(region, Region::RightColumn) {
                 return MouseSink::FocusAndSelectRows(crate::app::state::Side::Right);
             }
+            // A tab label is the one part of the divider that means "activate
+            // me", so it outranks selecting the row's text.
+            if let Some(index) = snap.tab_under_pointer {
+                return MouseSink::PaneTab(index);
+            }
             // The single-line chrome surfaces hold text and no keyboard focus, so a
             // press there can only mean "select this". The divider carries the tab
             // bar, where a custom session name is the thing worth copying.
@@ -570,7 +592,53 @@ mod tests {
             has_scroll_pager: false,
             pane_closed: false,
             pane_scroll_keys: false,
+            tab_under_pointer: None,
         }
+    }
+
+    /// Left-clicking a tab label activates that tab instead of selecting text.
+    #[test]
+    fn a_left_press_on_a_tab_label_switches_to_it() {
+        let mut s = snap(Some(Region::Divider));
+        s.tab_under_pointer = Some(2);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::PaneTab(2));
+    }
+
+    /// The rest of the divider stays selectable — the live cwd printed in its
+    /// tail is the thing worth copying from that row.
+    #[test]
+    fn the_dividers_non_tab_columns_still_select() {
+        let s = snap(Some(Region::Divider));
+        assert_eq!(s.tab_under_pointer, None);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::SelectChrome);
+    }
+
+    /// Tab activation is LEFT only. Middle stays paste and right stays the
+    /// leader menu everywhere — a tab label is not an exception to that, and
+    /// making it one would remove the only way to reach those over the divider.
+    #[test]
+    fn middle_and_right_are_unaffected_over_a_tab() {
+        let mut s = snap(Some(Region::Divider));
+        s.tab_under_pointer = Some(0);
+        assert_eq!(route_mouse(s, Gesture::Middle), MouseSink::Paste);
+        assert_eq!(route_mouse(s, Gesture::Right), MouseSink::LeaderMenu);
+    }
+
+    /// A modal or an open prompt still wins: tab activation must not become a
+    /// hole in the guards that keep a click from reaching past an overlay or
+    /// latching a chord while prompting.
+    #[test]
+    fn a_modal_or_prompt_still_beats_tab_activation() {
+        use crate::app::modal::Modal;
+        let mut s = snap(Some(Region::Divider));
+        s.tab_under_pointer = Some(1);
+        s.is_prompting = true;
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
+
+        let mut s = snap(Some(Region::Divider));
+        s.tab_under_pointer = Some(1);
+        s.modal = Some(Modal::FindPicker);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
     }
 
     #[test]
