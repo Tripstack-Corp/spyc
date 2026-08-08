@@ -26,8 +26,8 @@ impl super::super::App {
     /// working: `wheel_scroll()`'s key, repeated `pane_scroll_lines` times, no
     /// screen-scraping at all. An agent that opts into
     /// `transcript_open_marker` (codex) gets the fuller machinery in
-    /// `send_agent_view_scroll_keys` — auto-open, and escalation to a page key
-    /// under a sustained gesture.
+    /// `send_agent_view_scroll_keys` — gated auto-open, and escalation to a page
+    /// key under a sustained gesture.
     pub(super) fn send_scroll_keys(&mut self, delta: i32) -> Vec<Effect> {
         let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
             return Vec::new();
@@ -67,6 +67,9 @@ impl super::super::App {
     /// every tick — a plain substring search over one screen's worth of text —
     /// so no debounce is needed for the scrape itself; only the toggle-send
     /// needs one (see `pane_toggle_sent_at`'s doc).
+    ///
+    /// Opening it takes a sustained scroll UP (`OPEN_AFTER_UP_TICKS`); a
+    /// downward gesture never opens it, only scrolls or closes one already open.
     pub(super) fn send_agent_view_scroll_keys(
         &mut self,
         profile: &'static dyn crate::agent::AgentProfile,
@@ -91,13 +94,11 @@ impl super::super::App {
             .is_some_and(|sent| sent.elapsed() < TOGGLE_SETTLE);
 
         let now = std::time::Instant::now();
-        let (escalate, streak) = if is_open {
-            let (streak, escalate) =
-                scroll_streak_step(self.view.pane_scroll_streak, tab_index, dir, now);
-            (escalate, Some(streak))
-        } else {
-            (false, self.view.pane_scroll_streak) // no tick to record while closed
-        };
+        // Stepped on every tick, open or closed: while open its elapsed time
+        // drives the page-key escalation, and while closed its tick count is what
+        // separates a deliberate scroll-up-into-history from one stray tick.
+        let (streak, escalate) =
+            scroll_streak_step(self.view.pane_scroll_streak, tab_index, dir, now);
 
         let action = decide_agent_view_action(
             AgentViewInputs {
@@ -105,6 +106,7 @@ impl super::super::App {
                 toggle_pending,
                 escalate,
                 at_bottom,
+                streak_ticks: streak.ticks,
             },
             self.state.config.mouse.pane_scroll_view,
             dir,
@@ -112,7 +114,7 @@ impl super::super::App {
 
         // State mutation lives here, once, keyed to the decision — not scattered
         // across the branches that produce it.
-        self.view.pane_scroll_streak = streak;
+        self.view.pane_scroll_streak = Some(streak);
         if is_open {
             self.view.pane_toggle_sent_at = None; // confirmed open; drop the guard
         }

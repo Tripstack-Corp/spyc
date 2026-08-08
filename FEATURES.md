@@ -573,10 +573,11 @@ end).
   scrolls itself; **agy** ignores mouse reports but scrolls on Shift+Arrow, so
   spyc sends those instead; **codex** discards mouse events and its main chat view
   doesn't scroll, so the wheel drives its `^T` transcript overlay instead — opening
-  it on the first tick (`[mouse] pane_scroll_view`, configurable to stay closed or
-  to use spyc's own `^a v` history instead), then scrolling by line, escalating to
-  a page jump under a sustained gesture. Scrolling down while already at the
-  bottom exits the transcript (`q`) instead of no-op'ing. Outside the transcript,
+  it after a few consecutive ticks UP (`[mouse] pane_scroll_view`, configurable to
+  stay closed or to use spyc's own `^a v` history instead), then scrolling by line,
+  escalating to a page jump under a sustained gesture. Scrolling DOWN never opens
+  it — that gesture is trying to reach the live buffer, not leave it. Scrolling
+  down while already at the bottom exits the transcript (`q`). Outside the transcript,
   the same keys only move the draft cursor (codex keeps history recall on `^R`,
   so the wheel can't recall a past prompt).
 - **`:limit <glob>`** — temporary filter (e.g. `:limit *.rs`)

@@ -743,6 +743,57 @@ mod tests {
         assert_eq!(route_input(snap, InputKind::Paste), InputSink::Harpoon);
     }
 
+    // ── regression: paste into a pager's `/` search (#16) ─────────────
+    //
+    // The reported symptom: pasting while typing a `/` search in the pager
+    // sent the text to the bottom pty instead of the search buffer. Routing
+    // is what decides that, so these pin the sink — `PagerKey`, never
+    // `BottomPane` — with pane tabs alive and reachable in every snapshot.
+    // Where the text goes *inside* the pager is `handle_pager_paste`'s half.
+
+    #[test]
+    fn paste_into_focused_pager_never_reaches_bottom_pane() {
+        // Every top-region mount a `/` search can run in, each focused.
+        for mount in [Mount::Overlay, Mount::TopPane] {
+            let snap = RouteSnapshot {
+                pager_mount: Some(mount),
+                has_pane_tabs: true,
+                focus: Focus::Pager(mount),
+                ..idle()
+            };
+            assert_eq!(
+                route_input(snap, InputKind::Paste),
+                InputSink::PagerKey,
+                "paste with a focused {mount:?} pager must reach the pager"
+            );
+        }
+    }
+
+    #[test]
+    fn paste_into_scrollback_pager_never_reaches_bottom_pane() {
+        // `^a v` scrollback: the sharp case, because `focus` is still `Pane`
+        // (the scrollback replaces the pty's draw, not its focus) — so the
+        // pane-forward arm is one condition away, and the pre-campaign code
+        // took it. Searching that scrollback is the issue's own workflow.
+        let snap = RouteSnapshot {
+            has_scroll_pager: true,
+            has_pane_tabs: true,
+            focus: Focus::Pane,
+            ..idle()
+        };
+        assert_eq!(route_input(snap, InputKind::Paste), InputSink::PagerKey);
+    }
+
+    #[test]
+    fn paste_into_right_preview_pager_never_reaches_bottom_pane() {
+        let snap = RouteSnapshot {
+            right_preview_focused: true,
+            has_pane_tabs: true,
+            ..idle()
+        };
+        assert_eq!(route_input(snap, InputKind::Paste), InputSink::PagerKey);
+    }
+
     /// The unifying invariant: a paste lands wherever a non-meta printable
     /// key would. Sweep a representative snapshot matrix and assert
     /// `route_input(snap, Paste) == route_input(snap, Key(non_meta))` for

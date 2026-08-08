@@ -220,13 +220,18 @@ pane_scroll_lines = 3 # lines per tick for a pane spyc drives with synthesized k
 pane_scroll_view = "native" # native | off | spyc_history
 ```
 
-`pane_scroll_view` decides what a wheel tick does the FIRST time it hits an agent
-pane whose own scrollback view spyc can drive but that view isn't open yet — today,
+`pane_scroll_view` decides what a wheel gesture does when it hits an agent pane
+whose own scrollback view spyc can drive but that view isn't open yet — today,
 codex's `^T` transcript. `native` (default) opens it and scrolls; `off` leaves it
 closed and only scrolls if it happens to already be open; `spyc_history` opens
 spyc's own `^a v` scrollback pager instead. Doesn't affect an already-open view
 (always scrolled) or an agent with no such view (agy scrolls its live content
 directly via Shift+Arrow, with nothing to open).
+
+Only a sustained scroll **up** — three consecutive ticks, reset by a pause, a
+reversal or a tab switch — opens a closed view. A downward gesture never does:
+it's aimed at the live buffer, and opening a transcript there lands at its
+bottom, which the next tick reads as "at the bottom" and closes again.
 
 A sustained same-direction wheel gesture — past ~1 second — escalates from the
 per-line step to a page-sized one, for an agent with a verified fast key (codex's
