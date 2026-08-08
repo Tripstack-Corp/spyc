@@ -215,6 +215,13 @@ pub const STREAK_GAP: std::time::Duration = std::time::Duration::from_millis(500
 /// step. Owner-specified ("say past 1 second").
 pub const ESCALATE_AFTER: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// How many consecutive UP ticks (each within [`STREAK_GAP`] of the last) it takes
+/// before a wheel gesture opens an agent's own scrollback view. Entering history is
+/// a deliberate act, so it takes a deliberate gesture — one stray tick shouldn't
+/// swap the pane out from under the user. Small enough that a real flick clears it
+/// instantly; large enough that a jittery trackpad doesn't.
+pub const OPEN_AFTER_UP_TICKS: u32 = 3;
+
 /// Advance a wheel-scroll streak by one tick, and decide whether it has run long
 /// enough to escalate. Pure (the `route.rs`/`focus.rs` template): takes `now` as a
 /// parameter rather than reading the clock, so it's testable with synthetic
@@ -224,7 +231,7 @@ pub const ESCALATE_AFTER: std::time::Duration = std::time::Duration::from_secs(1
 /// Restarts (rather than extending) the streak on a tab switch, a direction
 /// change, or a gap longer than [`STREAK_GAP`] — each of those means "a new
 /// gesture", not "the same one continuing", so none should inherit the old
-/// streak's elapsed time.
+/// streak's elapsed time or tick count.
 pub fn scroll_streak_step(
     prev: Option<PaneScrollStreak>,
     tab_index: usize,
@@ -239,12 +246,12 @@ pub fn scroll_streak_step(
         }
         None => true,
     };
-    let started_at = if restart {
-        now
+    let (started_at, ticks) = if restart {
+        (now, 1)
     } else {
         match prev {
-            Some(s) => s.started_at,
-            None => now, // unreachable: `prev.is_none()` implies `restart`
+            Some(s) => (s.started_at, s.ticks.saturating_add(1)),
+            None => (now, 1), // unreachable: `prev.is_none()` implies `restart`
         }
     };
     let streak = PaneScrollStreak {
@@ -252,6 +259,7 @@ pub fn scroll_streak_step(
         dir,
         started_at,
         last_at: now,
+        ticks,
     };
     let escalate = now.duration_since(started_at).as_millis() >= ESCALATE_AFTER.as_millis();
     (streak, escalate)
@@ -292,13 +300,18 @@ pub struct AgentViewInputs {
     pub toggle_pending: bool,
     pub escalate: bool,
     pub at_bottom: bool,
+    /// This tick's [`PaneScrollStreak::ticks`] — consecutive same-direction ticks,
+    /// this one included. Only consulted while closed, as the "did the user mean
+    /// it" half of the open gate.
+    pub streak_ticks: u32,
 }
 
 /// Pure.
 ///
-/// `dir`: -1 up, +1 down. Only consulted once already open, to decide whether
-/// "at the bottom" should mean "close" rather than "scroll" — scrolling UP at
-/// the bottom is just normal scrolling.
+/// `dir`: -1 up, +1 down. Consulted twice: while CLOSED, only an up gesture may
+/// open the view; while OPEN, it decides whether "at the bottom" should mean
+/// "close" rather than "scroll" — scrolling UP at the bottom is just normal
+/// scrolling.
 pub const fn decide_agent_view_action(
     in_: AgentViewInputs,
     mode: crate::config::PaneScrollView,
@@ -306,6 +319,14 @@ pub const fn decide_agent_view_action(
 ) -> AgentViewAction {
     use crate::config::PaneScrollView as V;
     if !in_.is_open {
+        // Only a sustained scroll UP opens history. Opening on a DOWN tick put
+        // the pane in a flicker loop: the view opens at its bottom, so the next
+        // down tick reads at-bottom and closes it, and the one after that
+        // reopens — all while the user was only trying to scroll past the end of
+        // the live buffer.
+        if dir >= 0 || in_.streak_ticks < OPEN_AFTER_UP_TICKS {
+            return AgentViewAction::Nothing;
+        }
         return match mode {
             V::Off => AgentViewAction::Nothing,
             V::SpycHistory => AgentViewAction::UseSpycHistory,
@@ -527,8 +548,8 @@ pub fn clamp_to_area(view: &crate::ui::pager::PagerView, col: u16, row: u16) -> 
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentViewAction, AgentViewInputs, Gesture, MouseSink, MouseSnapshot, Region,
-        decide_agent_view_action, region_at, route_mouse, scroll_streak_step,
+        AgentViewAction, AgentViewInputs, Gesture, MouseSink, MouseSnapshot, OPEN_AFTER_UP_TICKS,
+        Region, decide_agent_view_action, region_at, route_mouse, scroll_streak_step,
     };
     use crate::app::App;
     use crate::app::pager_handler::PagerSlot;
@@ -1321,28 +1342,103 @@ mod tests {
         );
     }
 
+    /// The tick count that gates opening a view: it extends within one gesture
+    /// and resets on any of the three restart conditions, so "three ticks" means
+    /// three ticks of the SAME sustained scroll.
+    #[test]
+    fn the_tick_count_extends_within_a_gesture_and_resets_across_them() {
+        let t0 = std::time::Instant::now();
+        let (s1, _) = scroll_streak_step(None, 0, -1, t0);
+        assert_eq!(s1.ticks, 1, "a fresh streak starts at one");
+
+        let (s2, _) = scroll_streak_step(Some(s1), 0, -1, later(t0, 30));
+        let (s3, _) = scroll_streak_step(Some(s2), 0, -1, later(t0, 60));
+        assert_eq!(s3.ticks, 3, "consecutive same-direction ticks accumulate");
+
+        let (reversed, _) = scroll_streak_step(Some(s3), 0, 1, later(t0, 90));
+        assert_eq!(reversed.ticks, 1, "a direction change is a new gesture");
+
+        let (after_gap, _) = scroll_streak_step(Some(s3), 0, -1, later(t0, 1_000));
+        assert_eq!(after_gap.ticks, 1, "a gap past STREAK_GAP is a new gesture");
+
+        let (other_tab, _) = scroll_streak_step(Some(s3), 1, -1, later(t0, 90));
+        assert_eq!(other_tab.ticks, 1, "another tab is a new gesture");
+    }
+
     // ── decide_agent_view_action: the codex ^T auto-open + escalation policy ──
 
     use crate::config::PaneScrollView;
 
     /// The DEFAULT behaviour, and the owner's stated preference: closed +
-    /// `Native` opens it. Exactly one toggle send, never also a scroll this tick
-    /// — see the doc on `send_agent_view_scroll_keys` for why not both.
+    /// `Native` + a sustained scroll UP opens it. Exactly one toggle send, never
+    /// also a scroll this tick — see the doc on `send_agent_view_scroll_keys` for
+    /// why not both.
     #[test]
-    fn closed_and_native_opens_it() {
+    fn closed_and_native_opens_it_on_a_sustained_scroll_up() {
         assert_eq!(
             decide_agent_view_action(
                 AgentViewInputs {
                     is_open: false,
                     toggle_pending: false,
                     escalate: false,
-                    at_bottom: false
+                    at_bottom: false,
+                    streak_ticks: OPEN_AFTER_UP_TICKS
                 },
                 PaneScrollView::Native,
-                1,
+                -1,
             ),
             AgentViewAction::Toggle
         );
+    }
+
+    /// The headline: a DOWN gesture never opens the view, however long it runs.
+    /// Opening on a down tick landed in the transcript at its bottom, which the
+    /// next tick read as at-bottom and closed — an open/close flicker for a
+    /// gesture that was only trying to scroll past the end of the live buffer.
+    #[test]
+    fn closed_and_scrolling_down_never_opens_it() {
+        for mode in [PaneScrollView::Native, PaneScrollView::SpycHistory] {
+            for ticks in [1, OPEN_AFTER_UP_TICKS, 50] {
+                assert_eq!(
+                    decide_agent_view_action(
+                        AgentViewInputs {
+                            is_open: false,
+                            toggle_pending: false,
+                            escalate: false,
+                            at_bottom: false,
+                            streak_ticks: ticks
+                        },
+                        mode,
+                        1,
+                    ),
+                    AgentViewAction::Nothing,
+                    "{mode:?} after {ticks} down ticks"
+                );
+            }
+        }
+    }
+
+    /// The other half of the gate: a stray up tick or two — a trackpad jitter, a
+    /// mis-flick — leaves the pane alone. Only a sustained gesture means it.
+    #[test]
+    fn closed_and_a_brief_scroll_up_does_not_open_it_yet() {
+        for ticks in 1..OPEN_AFTER_UP_TICKS {
+            assert_eq!(
+                decide_agent_view_action(
+                    AgentViewInputs {
+                        is_open: false,
+                        toggle_pending: false,
+                        escalate: false,
+                        at_bottom: false,
+                        streak_ticks: ticks
+                    },
+                    PaneScrollView::Native,
+                    -1,
+                ),
+                AgentViewAction::Nothing,
+                "{ticks} up ticks"
+            );
+        }
     }
 
     /// A toggle already in flight (within TOGGLE_SETTLE) must NOT be re-sent —
@@ -1356,10 +1452,11 @@ mod tests {
                     is_open: false,
                     toggle_pending: true,
                     escalate: false,
-                    at_bottom: false
+                    at_bottom: false,
+                    streak_ticks: OPEN_AFTER_UP_TICKS
                 },
                 PaneScrollView::Native,
-                1,
+                -1,
             ),
             AgentViewAction::Nothing
         );
@@ -1376,10 +1473,11 @@ mod tests {
                         is_open: false,
                         toggle_pending: pending,
                         escalate: false,
-                        at_bottom: false
+                        at_bottom: false,
+                        streak_ticks: OPEN_AFTER_UP_TICKS
                     },
                     PaneScrollView::Off,
-                    1,
+                    -1,
                 ),
                 AgentViewAction::Nothing,
                 "pending={pending}"
@@ -1389,22 +1487,27 @@ mod tests {
 
     /// `SpycHistory` — the owner's stated personal preference — mounts spyc's OWN
     /// view instead of touching the agent's, regardless of any pending toggle
-    /// (there is none to guard: this mode never sends one).
+    /// (there is none to guard: this mode never sends one). Same up-gesture gate:
+    /// mounting a pager over the pane is as disruptive as opening the agent's own.
     #[test]
     fn closed_and_spyc_history_uses_spycs_own_view() {
-        assert_eq!(
-            decide_agent_view_action(
-                AgentViewInputs {
-                    is_open: false,
-                    toggle_pending: false,
-                    escalate: false,
-                    at_bottom: false
-                },
-                PaneScrollView::SpycHistory,
-                1,
-            ),
-            AgentViewAction::UseSpycHistory
-        );
+        for pending in [false, true] {
+            assert_eq!(
+                decide_agent_view_action(
+                    AgentViewInputs {
+                        is_open: false,
+                        toggle_pending: pending,
+                        escalate: false,
+                        at_bottom: false,
+                        streak_ticks: OPEN_AFTER_UP_TICKS
+                    },
+                    PaneScrollView::SpycHistory,
+                    -1,
+                ),
+                AgentViewAction::UseSpycHistory,
+                "pending={pending}"
+            );
+        }
     }
 
     /// Once open, the MODE stops mattering — all three converge on scrolling.
@@ -1423,7 +1526,8 @@ mod tests {
                         is_open: true,
                         toggle_pending: false,
                         escalate: false,
-                        at_bottom: false
+                        at_bottom: false,
+                        streak_ticks: 1
                     },
                     mode,
                     1,
@@ -1444,7 +1548,8 @@ mod tests {
                     is_open: true,
                     toggle_pending: false,
                     escalate: true,
-                    at_bottom: false
+                    at_bottom: false,
+                    streak_ticks: 1
                 },
                 PaneScrollView::Native,
                 1,
@@ -1468,7 +1573,8 @@ mod tests {
                         is_open: true,
                         toggle_pending: false,
                         escalate: false,
-                        at_bottom: true
+                        at_bottom: true,
+                        streak_ticks: 1
                     },
                     mode,
                     1,
@@ -1489,7 +1595,8 @@ mod tests {
                     is_open: true,
                     toggle_pending: false,
                     escalate: false,
-                    at_bottom: true
+                    at_bottom: true,
+                    streak_ticks: 1
                 },
                 PaneScrollView::Native,
                 -1,
@@ -1509,7 +1616,8 @@ mod tests {
                         is_open: true,
                         toggle_pending: false,
                         escalate,
-                        at_bottom: false
+                        at_bottom: false,
+                        streak_ticks: 1
                     },
                     PaneScrollView::Native,
                     1,
@@ -1532,13 +1640,75 @@ mod tests {
                     is_open: true,
                     toggle_pending: true,
                     escalate: false,
-                    at_bottom: true
+                    at_bottom: true,
+                    streak_ticks: 1
                 },
                 PaneScrollView::Native,
                 1,
             ),
             AgentViewAction::Scroll { fast: false },
             "must fall through to a harmless scroll key, not re-close"
+        );
+    }
+
+    /// The regression, end to end over the two halves: a long DOWN flick against
+    /// a closed transcript — the user trying to scroll past the bottom of the
+    /// live buffer — leaves it closed for every tick. Before the gate the first
+    /// tick opened it, the next closed it again, and the pane flashed.
+    #[test]
+    fn a_long_down_flick_never_opens_a_closed_view() {
+        let t0 = std::time::Instant::now();
+        let mut streak = None;
+        for i in 0..20 {
+            let (s, escalate) = scroll_streak_step(streak, 0, 1, later(t0, i * 30));
+            streak = Some(s);
+            assert_eq!(
+                decide_agent_view_action(
+                    AgentViewInputs {
+                        is_open: false,
+                        toggle_pending: false,
+                        escalate,
+                        at_bottom: false,
+                        streak_ticks: s.ticks,
+                    },
+                    PaneScrollView::Native,
+                    1,
+                ),
+                AgentViewAction::Nothing,
+                "down tick {i}"
+            );
+        }
+    }
+
+    /// The complement: an UP flick opens it — but only once the gesture has run
+    /// past the gate, not on its first tick.
+    #[test]
+    fn an_up_flick_opens_a_closed_view_once_past_the_gate() {
+        let t0 = std::time::Instant::now();
+        let mut streak = None;
+        let mut opened_at = None;
+        for i in 0..(u64::from(OPEN_AFTER_UP_TICKS) + 2) {
+            let (s, escalate) = scroll_streak_step(streak, 0, -1, later(t0, i * 30));
+            streak = Some(s);
+            let action = decide_agent_view_action(
+                AgentViewInputs {
+                    is_open: false,
+                    toggle_pending: false,
+                    escalate,
+                    at_bottom: false,
+                    streak_ticks: s.ticks,
+                },
+                PaneScrollView::Native,
+                -1,
+            );
+            if action == AgentViewAction::Toggle && opened_at.is_none() {
+                opened_at = Some(s.ticks);
+            }
+        }
+        assert_eq!(
+            opened_at,
+            Some(OPEN_AFTER_UP_TICKS),
+            "opens on the gate's tick, no earlier and no later"
         );
     }
 
