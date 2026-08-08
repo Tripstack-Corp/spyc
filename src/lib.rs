@@ -131,7 +131,16 @@ use crate::app::App;
 
 /// spyc — vi-keyboard-driven file commander
 #[derive(Parser)]
-#[command(name = "spyc", version, about = "vi-keyboard-driven file commander")]
+// `version = VERSION`, not clap's bare `version`: the bare form prints
+// `CARGO_PKG_VERSION` alone, which on the CURRENT stream is the SAME string for
+// every build of a whole minor cycle. The SHA is the only thing distinguishing
+// them, and it is what RELEASE_ENGINEERING.md offers in place of the retired
+// bump-every-PR rule.
+#[command(
+    name = "spyc",
+    version = VERSION,
+    about = "vi-keyboard-driven file commander"
+)]
 struct Cli {
     /// Open the saved-session restore picker on startup
     #[arg(short, long)]
@@ -166,7 +175,10 @@ struct Cli {
     #[arg(long, value_name = "STATE")]
     report_status: Option<String>,
 
-    /// Show extended build info with --version
+    /// Print extended build info (sha, build time, rustc, TERM, os) and exit.
+    /// Standalone, NOT a modifier for --version: clap handles --version itself
+    /// and exits before this is read, so `--version --verbose` prints the plain
+    /// version line.
     #[arg(long)]
     verbose: bool,
 
@@ -926,6 +938,40 @@ pub fn force_full_repaint(terminal: &mut Tui) -> Result<()> {
     let area = ratatui::layout::Rect::from(terminal.size()?);
     terminal.resize(area)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod version_flag_tests {
+    /// `--version` must carry the git SHA.
+    ///
+    /// RELEASE_ENGINEERING.md offers exact build identity via the SHA as the
+    /// replacement for the retired bump-every-PR rule, and on the CURRENT
+    /// stream `CARGO_PKG_VERSION` is identical for every build of a whole minor
+    /// cycle — so clap's bare `version` leaves two builds months apart
+    /// indistinguishable. This shipped broken once: the SHA reached `VERSION`
+    /// (which MCP reports, so `get_spyc_context` showed it) while `--version`
+    /// kept printing the bare package version, and the docs claimed otherwise.
+    #[test]
+    fn the_version_flag_carries_the_git_sha() {
+        use clap::CommandFactory as _;
+        let rendered = super::Cli::command()
+            .get_version()
+            .expect("clap knows a version")
+            .to_string();
+        assert_eq!(rendered, super::VERSION, "--version must print VERSION");
+        assert!(
+            rendered.contains(env!("CARGO_PKG_VERSION")),
+            "keeps the package version: {rendered}"
+        );
+        assert!(
+            rendered.contains(env!("SPYC_GIT_SHA")),
+            "must name the build's SHA: {rendered}"
+        );
+        assert!(
+            rendered.len() > env!("CARGO_PKG_VERSION").len(),
+            "the bare package version is not enough: {rendered}"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -133,8 +133,11 @@ it's heading for.
 
 ```sh
 $ spyc --version
-spyc 2.1.0-CURRENT
+spyc <x.y.z>-CURRENT (<sha>)
 ```
+
+The trailing SHA is the exact build: the version line is static for a whole
+minor cycle, so it's the only thing that tells two CURRENT builds apart.
 
 That suffix is how you tell a development build from the release of the same
 number — `2.1.0-CURRENT` is *on the way to* 2.1.0, never 2.1.0 itself. The
