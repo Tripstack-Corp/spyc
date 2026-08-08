@@ -41,30 +41,68 @@ fn split_command(raw: &str) -> Vec<String> {
     raw.split_whitespace().map(ToString::to_string).collect()
 }
 
-/// Resolve the user's preferred interactive shell for running
-/// commands that need alias / function / rc-file PATH resolution.
-/// Returns `(shell_path, [args...])` ready to feed to a process
-/// spawner.
+/// How to spawn a pty command: `(shell_path, [args...])`, ready to feed to a
+/// process spawner. Pane tabs, `:!cmd` captures and `;cmd` foreground panes
+/// all come through here.
 ///
-/// `:!cmd` (capture) and `;cmd` (foreground pane) both go through
-/// this. Without `-i`, aliases defined in `.zshrc` / `.bashrc`
-/// aren't loaded — `$- == ""` and the shell skips interactive
-/// startup. With `-i`, rc files fire and the user's aliases /
-/// functions / rc-set PATH all work, matching what they see in a
-/// regular terminal tab.
+/// The command runs under the user's `$SHELL` with `-i` so rc files fire and
+/// their aliases / functions / rc-set PATH work, matching a regular terminal
+/// tab; without it `$- == ""` and the shell skips interactive startup.
 ///
-/// POSIX `sh` and `dash` don't read rc files in `-i` mode anyway
-/// (and dash warns about it), so we only set `-i` for shells that
-/// actually source a startup file interactively.
-pub fn user_shell_invocation(cmd: &str) -> (String, Vec<String>) {
+/// SPYC-TRAP(pane-shell-rc-double-source): an `exec_replace` pane whose
+/// command is itself an rc-sourcing shell must NOT get the wrapper's `-i`.
+pub fn pane_invocation(command: &str, exec_replace: bool) -> (String, Vec<String>) {
     let shell = crate::envset::var("SHELL");
-    user_shell_invocation_for(shell.as_deref(), cmd)
+    pane_invocation_for(shell.as_deref(), command, exec_replace)
 }
 
-/// Pure version of `user_shell_invocation` that takes the SHELL value
-/// as an argument. Tests call this directly so they don't need to
-/// mutate the process-global env var.
-fn user_shell_invocation_for(shell: Option<&str>, cmd: &str) -> (String, Vec<String>) {
+/// Pure half of `pane_invocation`, taking the SHELL value as an argument.
+fn pane_invocation_for(
+    shell: Option<&str>,
+    command: &str,
+    exec_replace: bool,
+) -> (String, Vec<String>) {
+    // `exec` so the rc-sourcing shell replaces itself with the command and no
+    // job-control wrapper survives to fight `^z`. Empty command → bare shell.
+    let exec = exec_replace && !command.trim().is_empty();
+    let cmd = if exec {
+        format!("exec {command}")
+    } else {
+        command.to_string()
+    };
+    // When the target sources its own rc, the wrapper's would be the second
+    // pass under one pid — see the trap rationale on `pane_invocation`.
+    let interactive_rc = !(exec && command_is_interactive_shell(command));
+    user_shell_invocation_for(shell, &cmd, interactive_rc)
+}
+
+/// True when a command is itself a shell that sources an interactive startup
+/// file — `zsh`, `/bin/bash`, `fish -l`. Only the first word counts, so an
+/// env-prefixed or `sudo`-wrapped command doesn't match.
+fn command_is_interactive_shell(command: &str) -> bool {
+    command
+        .split_whitespace()
+        .next()
+        .and_then(|w| Path::new(w).file_name())
+        .and_then(|n| n.to_str())
+        .is_some_and(sources_interactive_rc)
+}
+
+/// Shell basenames that source a startup file when interactive — so `-i`
+/// earns its keep, and so a nested one would source it twice. POSIX `sh` and
+/// `dash` are absent: they read no rc file in `-i` mode.
+fn sources_interactive_rc(basename: &str) -> bool {
+    matches!(basename, "zsh" | "bash" | "fish" | "ksh" | "ksh93" | "mksh")
+}
+
+/// Builds the `$SHELL -i -c <cmd>` invocation, taking the SHELL value as an
+/// argument. Tests call this directly so they don't need to mutate the
+/// process-global env var.
+fn user_shell_invocation_for(
+    shell: Option<&str>,
+    cmd: &str,
+    interactive_rc: bool,
+) -> (String, Vec<String>) {
     let shell = shell
         .filter(|s| !s.is_empty())
         .map_or_else(|| "/bin/sh".to_string(), ToString::to_string);
@@ -72,7 +110,7 @@ fn user_shell_invocation_for(shell: Option<&str>, cmd: &str) -> (String, Vec<Str
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("sh");
-    let interactive = matches!(basename, "zsh" | "bash" | "fish" | "ksh" | "ksh93" | "mksh");
+    let interactive = interactive_rc && sources_interactive_rc(basename);
     let mut args = Vec::with_capacity(3);
     if interactive {
         args.push("-i".to_string());
@@ -101,41 +139,108 @@ mod tests {
 
     #[test]
     fn user_shell_zsh_gets_interactive_flag() {
-        let (sh, args) = user_shell_invocation_for(Some("/bin/zsh"), "echo hi");
+        let (sh, args) = user_shell_invocation_for(Some("/bin/zsh"), "echo hi", true);
         assert_eq!(sh, "/bin/zsh");
         assert_eq!(args, vec!["-i", "-c", "echo hi"]);
     }
 
     #[test]
     fn user_shell_bash_gets_interactive_flag() {
-        let (sh, args) = user_shell_invocation_for(Some("/usr/local/bin/bash"), "ls");
+        let (sh, args) = user_shell_invocation_for(Some("/usr/local/bin/bash"), "ls", true);
         assert_eq!(sh, "/usr/local/bin/bash");
         assert_eq!(args, vec!["-i", "-c", "ls"]);
     }
 
     #[test]
     fn user_shell_posix_sh_skips_interactive() {
-        let (sh, args) = user_shell_invocation_for(Some("/bin/sh"), "ls");
+        let (sh, args) = user_shell_invocation_for(Some("/bin/sh"), "ls", true);
         assert_eq!(sh, "/bin/sh");
         assert_eq!(args, vec!["-c", "ls"]);
     }
 
     #[test]
     fn user_shell_dash_skips_interactive() {
-        let (_, args) = user_shell_invocation_for(Some("/bin/dash"), "ls");
+        let (_, args) = user_shell_invocation_for(Some("/bin/dash"), "ls", true);
         assert_eq!(args, vec!["-c", "ls"]);
     }
 
     #[test]
     fn user_shell_unset_falls_back_to_sh() {
-        let (sh, args) = user_shell_invocation_for(None, "ls");
+        let (sh, args) = user_shell_invocation_for(None, "ls", true);
         assert_eq!(sh, "/bin/sh");
         assert_eq!(args, vec!["-c", "ls"]);
     }
 
     #[test]
     fn user_shell_empty_falls_back_to_sh() {
-        let (sh, _) = user_shell_invocation_for(Some(""), "ls");
+        let (sh, _) = user_shell_invocation_for(Some(""), "ls", true);
         assert_eq!(sh, "/bin/sh");
+    }
+
+    #[test]
+    fn user_shell_rc_minimal_drops_interactive_flag() {
+        let (_, args) = user_shell_invocation_for(Some("/bin/zsh"), "exec zsh", false);
+        assert_eq!(args, vec!["-c", "exec zsh"]);
+    }
+
+    // An agent keeps the interactive wrapper: it needs the rc-file PATH to be
+    // found at all, and it sources no startup file of its own.
+    #[test]
+    fn pane_agent_command_execs_under_interactive_shell() {
+        let (sh, args) = pane_invocation_for(Some("/bin/zsh"), "claude", true);
+        assert_eq!(sh, "/bin/zsh");
+        assert_eq!(args, vec!["-i", "-c", "exec claude"]);
+    }
+
+    // The regression this guards: `^a c` + `zsh` used to source .zshrc twice
+    // under one pid (exec preserves it), colliding p10k/gitstatus lock files.
+    #[test]
+    fn pane_shell_command_drops_the_wrappers_rc_pass() {
+        let (_, args) = pane_invocation_for(Some("/bin/zsh"), "zsh", true);
+        assert_eq!(args, vec!["-c", "exec zsh"]);
+    }
+
+    #[test]
+    fn pane_shell_command_matches_on_basename_and_first_word() {
+        for cmd in ["/bin/bash", "fish -l", "/opt/homebrew/bin/zsh"] {
+            let (_, args) = pane_invocation_for(Some("/bin/zsh"), cmd, true);
+            assert!(!args.contains(&"-i".to_string()), "{cmd} kept the -i pass");
+        }
+    }
+
+    // `sh` and `dash` read no rc file, so the wrapper's pass is the only one
+    // there is — dropping it would strip the user's rc PATH for nothing.
+    #[test]
+    fn pane_non_rc_shell_command_keeps_the_wrapper_pass() {
+        for cmd in ["sh", "/bin/dash"] {
+            let (_, args) = pane_invocation_for(Some("/bin/zsh"), cmd, true);
+            let want = vec!["-i".to_string(), "-c".to_string(), format!("exec {cmd}")];
+            assert_eq!(args, want, "{cmd}");
+        }
+    }
+
+    // Conservative: only the first word is inspected, so anything wrapping a
+    // shell still goes through the normal interactive path.
+    #[test]
+    fn pane_wrapped_shell_command_is_not_treated_as_a_shell() {
+        for cmd in ["sudo zsh", "FOO=1 zsh", "zshx", "myzsh"] {
+            let (_, args) = pane_invocation_for(Some("/bin/zsh"), cmd, true);
+            let want = vec!["-i".to_string(), "-c".to_string(), format!("exec {cmd}")];
+            assert_eq!(args, want, "{cmd}");
+        }
+    }
+
+    // Non-exec_replace panes (captures, background tasks) keep the wrapper —
+    // it owns job control there, so there is nothing to exec away.
+    #[test]
+    fn pane_without_exec_replace_is_left_alone() {
+        let (_, args) = pane_invocation_for(Some("/bin/zsh"), "zsh", false);
+        assert_eq!(args, vec!["-i", "-c", "zsh"]);
+    }
+
+    #[test]
+    fn pane_empty_command_spawns_a_bare_shell() {
+        let (_, args) = pane_invocation_for(Some("/bin/zsh"), "", true);
+        assert_eq!(args, vec!["-i", "-c", ""]);
     }
 }
