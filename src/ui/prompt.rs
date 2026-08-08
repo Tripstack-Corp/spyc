@@ -1,9 +1,6 @@
 use ratatui::{
-    Frame,
-    layout::Rect,
     style::{Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::Paragraph,
+    text::{Line, Span},
 };
 
 use crate::ui::line_edit::Mode as ViMode;
@@ -85,7 +82,7 @@ impl PromptLine<'_> {
     /// Word-wrap the styled runs to `width` columns, slicing each run across
     /// line breaks so styling survives the wrap. The single source of truth for
     /// both the drawn rows and the reserved height ([`Self::line_count`]).
-    fn wrapped_lines(&self, width: u16) -> Vec<Line<'static>> {
+    pub(crate) fn wrapped_lines(&self, width: u16) -> Vec<Line<'static>> {
         let runs = self.runs();
         // Byte spans of each run within the concatenated text.
         let mut full = String::new();
@@ -119,22 +116,12 @@ impl PromptLine<'_> {
             .unwrap_or(u16::MAX)
             .max(1)
     }
-
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
-        // Pre-wrapped to `area.width`, so each line already fits — render them
-        // verbatim (no further ratatui wrapping) into the rows the layout
-        // reserved. A long command line spills downward over the list bottom.
-        frame.render_widget(
-            Paragraph::new(Text::from(self.wrapped_lines(area.width))),
-            area,
-        );
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::{Terminal, backend::TestBackend};
+    use ratatui::{Terminal, backend::TestBackend, layout::Rect, text::Text, widgets::Paragraph};
 
     fn render_prompt_to_string(prompt: &PromptLine<'_>, w: u16) -> String {
         let backend = TestBackend::new(w, 1);
@@ -142,7 +129,7 @@ mod tests {
         terminal
             .draw(|f| {
                 let area = Rect::new(0, 0, w, 1);
-                prompt.render(f, area);
+                f.render_widget(Paragraph::new(Text::from(prompt.wrapped_lines(w))), area);
             })
             .unwrap();
         let buf = terminal.backend().buffer().clone();
@@ -159,7 +146,12 @@ mod tests {
         let backend = TestBackend::new(w, h);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|f| prompt.render(f, Rect::new(0, 0, w, h)))
+            .draw(|f| {
+                f.render_widget(
+                    Paragraph::new(Text::from(prompt.wrapped_lines(w))),
+                    Rect::new(0, 0, w, h),
+                );
+            })
             .unwrap();
         let buf = terminal.backend().buffer().clone();
         (0..h)
