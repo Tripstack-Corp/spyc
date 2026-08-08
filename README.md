@@ -299,6 +299,7 @@ See [INSTALL.md](INSTALL.md) for detailed setup instructions.
 - [INSTALL.md](INSTALL.md) -- install (Homebrew, apt, binary), terminal, font, clipboard, and MCP setup
 - [BUILD.md](BUILD.md) -- build from source: Rust toolchain, `make install`, cross-compilation
 - [ARCHITECTURE.md](ARCHITECTURE.md) -- concurrency model, MVU target shape, persistence, MCP transport
+- [docs/HARNESS.md](docs/HARNESS.md) -- running agents in spyc: recommended settings, per-agent screen modes, where scrollback lives, session-recovery quirks
 - [docs/AGENT_ORCHESTRATION.md](docs/AGENT_ORCHESTRATION.md) -- how the activity dots, notifications, session-resume, and scope registry fit together
 - [DESIGN.md](DESIGN.md) -- UI design language: components, surfaces, palette, extension checklist
 - [CHANGELOG.md](CHANGELOG.md) -- release history
