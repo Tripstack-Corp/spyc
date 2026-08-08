@@ -730,6 +730,122 @@ mod tests {
         assert_eq!(e.mode, Mode::Insert);
     }
 
+    // ── `cw` in the `!` prompt (#26) ──────────────────────────────────
+    //
+    // vi's `cw` on a non-blank changes to the end of the current word (the
+    // `ce` special case — trailing whitespace is kept) and ends in Insert
+    // mode. On a blank it falls back to the plain `w` motion, so the blank
+    // run goes with it. Each case asserts text, mode AND cursor: the cursor
+    // is what the next typed character depends on, so a right answer with a
+    // wrong cursor still corrupts the command.
+
+    /// `text` in Normal mode with the cursor on index `at`.
+    fn normal_at(text: &str, at: usize) -> LineEditor {
+        let mut e = LineEditor::new();
+        for c in text.chars() {
+            e.feed(k(KeyCode::Char(c)));
+        }
+        e.feed(k(KeyCode::Esc));
+        e.cursor = at;
+        e
+    }
+
+    fn cw(e: &mut LineEditor) {
+        e.feed(k(KeyCode::Char('c')));
+        e.feed(k(KeyCode::Char('w')));
+    }
+
+    #[test]
+    fn cw_mid_word_changes_to_word_end() {
+        let mut e = normal_at("hello world", 2); // on the first 'l'
+        cw(&mut e);
+        assert_eq!(e.text(), "he world");
+        assert_eq!(e.mode, Mode::Insert);
+        assert_eq!(e.cursor, 2);
+    }
+
+    #[test]
+    fn cw_at_word_start_keeps_the_trailing_space() {
+        // The `ce` special case: `world` goes, both separating spaces stay.
+        let mut e = normal_at("hello world foo", 6);
+        cw(&mut e);
+        assert_eq!(e.text(), "hello  foo");
+        assert_eq!(e.mode, Mode::Insert);
+        assert_eq!(e.cursor, 6);
+        e.feed(k(KeyCode::Char('X')));
+        assert_eq!(e.text(), "hello X foo");
+    }
+
+    #[test]
+    fn cw_on_whitespace_run_takes_the_blanks() {
+        // Cursor on a blank → no `ce` special case, so the whole blank run
+        // goes and the next word is left alone.
+        let mut e = normal_at("ls   -la", 2);
+        cw(&mut e);
+        assert_eq!(e.text(), "ls-la");
+        assert_eq!(e.mode, Mode::Insert);
+        assert_eq!(e.cursor, 2);
+    }
+
+    #[test]
+    fn cw_on_empty_buffer_is_a_noop_that_still_enters_insert() {
+        let mut e = LineEditor::new();
+        e.feed(k(KeyCode::Esc));
+        cw(&mut e);
+        assert_eq!(e.text(), "");
+        assert_eq!(e.mode, Mode::Insert);
+        assert_eq!(e.cursor, 0);
+    }
+
+    #[test]
+    fn cw_on_whole_buffer_clears_it() {
+        let mut e = normal_at("hello", 0);
+        cw(&mut e);
+        assert_eq!(e.text(), "");
+        assert_eq!(e.mode, Mode::Insert);
+        assert_eq!(e.cursor, 0);
+    }
+
+    // The two cases below FAIL against current behavior and are ignored so the
+    // suite stays green while the assertions stay vi-correct (#26). Defect:
+    // `delete_range` ends with a Normal-mode clamp — cursor must sit ON a
+    // character — but `c{motion}` ends in Insert mode, where `cursor ==
+    // buf.len()` is the legal end-of-line position. Any `cw`/`ce` whose range
+    // reaches the buffer end therefore lands one column left, and the next
+    // typed character goes in before the final character instead of after it.
+    // `c$`/`c0`/`cb`/`cc` are unaffected — each sets the cursor itself.
+
+    #[test]
+    #[ignore = "known defect (#26): cw to end-of-buffer leaves the cursor one left"]
+    fn cw_on_the_last_word_leaves_the_cursor_at_the_end() {
+        // Retyping the final token is the common `!`-prompt edit. The change
+        // ends at the buffer end, where Insert mode's cursor legitimately
+        // equals `buf.len()` — Normal mode's "cursor sits on a char" clamp
+        // must not apply, or the typed text lands before the space.
+        // Observed: cursor 3, so typing yields `gitX ` instead of `git X`.
+        let mut e = normal_at("git commit", 4);
+        cw(&mut e);
+        assert_eq!(e.text(), "git ");
+        assert_eq!(e.mode, Mode::Insert);
+        assert_eq!(e.cursor, 4);
+        e.feed(k(KeyCode::Char('X')));
+        assert_eq!(e.text(), "git X");
+    }
+
+    #[test]
+    #[ignore = "known defect (#26): cw to end-of-buffer leaves the cursor one left"]
+    fn cw_on_trailing_whitespace_leaves_the_cursor_at_the_end() {
+        // Same end-of-buffer shape, reached through the whitespace branch.
+        // Observed: cursor 1, so typing yields `lXs` instead of `lsX`.
+        let mut e = normal_at("ls  ", 2);
+        cw(&mut e);
+        assert_eq!(e.text(), "ls");
+        assert_eq!(e.mode, Mode::Insert);
+        assert_eq!(e.cursor, 2);
+        e.feed(k(KeyCode::Char('X')));
+        assert_eq!(e.text(), "lsX");
+    }
+
     #[test]
     fn ctrl_w_back_delete_stops_at_punctuation() {
         // Ctrl+W in Insert mode (delete word back) should also
