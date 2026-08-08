@@ -310,7 +310,6 @@ impl App {
         use ratatui::{
             style::{Modifier, Style},
             text::{Line, Span},
-            widgets::Paragraph,
         };
         if let Mode::Prompting(p) = &self.state.mode {
             // HookConsent is shown as a centered pop-up (`render_hook_consent_popup`),
@@ -319,14 +318,18 @@ impl App {
             if matches!(p.kind, crate::app::PromptKind::HookConsent { .. }) {
                 return;
             }
-            PromptLine {
+            // Same wrapping PromptLine::render would do, but drawn row-by-row
+            // through the chrome funnel so the text is selectable. A long `:`
+            // command wraps, and each visible row is independently selectable.
+            let lines = PromptLine {
                 prefix: &p.prefix,
                 buffer: &p.buffer,
                 theme: &self.view.theme,
                 cursor_pos: p.editor.as_ref().map(|e| e.cursor),
                 vi_mode: p.editor.as_ref().map(|e| e.mode),
             }
-            .render(frame, rect);
+            .wrapped_lines(rect.width);
+            self.draw_chrome_rows(frame, rect, lines);
         } else if let Some(flash) = &self.state.flash {
             let color = match flash.kind {
                 FlashKind::Info => self.view.theme.take,
@@ -336,7 +339,11 @@ impl App {
                 flash.text.clone(),
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
             ));
-            frame.render_widget(Paragraph::new(line), rect);
+            // A flashed error is the single most copy-worthy string spyc
+            // produces — it carries the whole `source()` chain (see the
+            // `flashed_errors_render_their_whole_chain` guard), and it is
+            // exactly what someone pastes into a bug report.
+            self.draw_chrome_line(frame, rect, line);
         } else if let Some(pending) = self.state.resolver.pending_display() {
             let line = Line::from(Span::styled(
                 pending,
@@ -344,7 +351,32 @@ impl App {
                     .fg(self.view.theme.prompt_prefix)
                     .add_modifier(Modifier::BOLD),
             ));
-            frame.render_widget(Paragraph::new(line), rect);
+            self.draw_chrome_line(frame, rect, line);
+        }
+    }
+
+    /// Draw a multi-row chrome surface: one [`Self::draw_chrome_line`] per row,
+    /// so each row records itself and paints its own selection. Rows past
+    /// `rect.height` are dropped, matching the clipping a single `Paragraph`
+    /// over the same rect would apply.
+    fn draw_chrome_rows(
+        &self,
+        frame: &mut Frame,
+        rect: ratatui::layout::Rect,
+        lines: Vec<ratatui::text::Line<'static>>,
+    ) {
+        for (i, line) in lines.into_iter().enumerate() {
+            let Ok(dy) = u16::try_from(i) else { break };
+            if dy >= rect.height {
+                break;
+            }
+            let row = ratatui::layout::Rect {
+                x: rect.x,
+                y: rect.y.saturating_add(dy),
+                width: rect.width,
+                height: 1,
+            };
+            self.draw_chrome_line(frame, row, line);
         }
     }
 

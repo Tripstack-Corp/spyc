@@ -163,6 +163,15 @@ pub struct MouseSnapshot {
     pub has_scroll_pager: bool,
     /// The active tab's child has exited — there is nothing to forward to.
     pub pane_closed: bool,
+    /// The pointer is over a row the renderer recorded as selectable chrome
+    /// (`view.chrome_rows`, via `draw_chrome_line`).
+    ///
+    /// Region-independent on purpose, because chrome is drawn OVER the layout:
+    /// the activity HUD paints on the list's rect, so `region_at` reports
+    /// `Region::List` for it and a press there used to start a row selection in
+    /// the list *underneath* the overlay. This is the same precedence problem
+    /// `covering_pager` solves for pagers, and the same answer.
+    pub over_chrome_row: bool,
     /// The pane's agent has a verified scroll keybinding
     /// ([`crate::agent::AgentProfile::wheel_scroll`]). Only consulted when the
     /// child does NOT want mouse — forwarding a real mouse report always wins.
@@ -404,6 +413,12 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
     if snap.is_prompting {
         return match gesture {
             Gesture::Middle => MouseSink::Paste,
+            // Selecting the prompt row's own text is the exception, and safe:
+            // the latch this arm guards against is a *chord* one — right-click
+            // arms a pending sequence the prompt's key handler never consumes.
+            // A left drag arms nothing and never reaches the resolver, so
+            // copying the command you just typed costs the guard nothing.
+            Gesture::Left if snap.over_chrome_row => MouseSink::SelectChrome,
             Gesture::Left | Gesture::Right | Gesture::Wheel => MouseSink::Swallow,
         };
     }
@@ -432,6 +447,21 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
             if let Some(slot) = snap.covering_pager {
                 return MouseSink::FocusAndSelect(slot);
             }
+            // A tab label means "activate me", and it has to be tested BEFORE
+            // recorded chrome: the divider is itself drawn through the chrome
+            // funnel, so over a tab both flags are true and chrome-first would
+            // silently turn every tab click back into a text selection.
+            if let Some(index) = snap.tab_under_pointer {
+                return MouseSink::PaneTab(index);
+            }
+            // Recorded chrome outranks the layout beneath it, for the same
+            // reason `covering_pager` does: it is painted on top. This is what
+            // makes the activity HUD selectable instead of selecting list rows
+            // through it, and it covers the prompt row when no prompt is open
+            // (a flash, or an armed chord).
+            if snap.over_chrome_row {
+                return MouseSink::SelectChrome;
+            }
             // Left is click-THROUGH: focus the region, and (for a mouse-aware
             // child) let the event reach it too. The pane is live and visible, so
             // swallowing the first click just to focus would read as broken.
@@ -452,11 +482,6 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
             }
             if matches!(region, Region::RightColumn) {
                 return MouseSink::FocusAndSelectRows(crate::app::state::Side::Right);
-            }
-            // A tab label is the one part of the divider that means "activate
-            // me", so it outranks selecting the row's text.
-            if let Some(index) = snap.tab_under_pointer {
-                return MouseSink::PaneTab(index);
             }
             // The single-line chrome surfaces hold text and no keyboard focus, so a
             // press there can only mean "select this". The divider carries the tab
@@ -593,7 +618,23 @@ mod tests {
             pane_closed: false,
             pane_scroll_keys: false,
             tab_under_pointer: None,
+            over_chrome_row: false,
         }
+    }
+
+    /// The interaction the two features create: the divider is itself a recorded
+    /// chrome row, so over a tab label BOTH flags are true in production. The tab
+    /// must win, or #279's whole point is undone by chrome selection.
+    #[test]
+    fn a_tab_label_beats_chrome_selection_on_the_same_row() {
+        let mut s = snap(Some(Region::Divider));
+        s.tab_under_pointer = Some(1);
+        s.over_chrome_row = true; // the divider is drawn through the chrome funnel
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::PaneTab(1));
+
+        // Off the labels, the same row still selects — the cwd tail stays copyable.
+        s.tab_under_pointer = None;
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::SelectChrome);
     }
 
     /// Left-clicking a tab label activates that tab instead of selecting text.
@@ -639,6 +680,65 @@ mod tests {
         s.tab_under_pointer = Some(1);
         s.modal = Some(Modal::FindPicker);
         assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
+    }
+
+    /// The `:` line is selectable WHILE prompting — the whole point, since the
+    /// command you want to copy only exists while the prompt is open.
+    #[test]
+    fn the_prompt_row_selects_while_prompting() {
+        let mut s = snap(Some(Region::Prompt));
+        s.is_prompting = true;
+        s.over_chrome_row = true;
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::SelectChrome);
+    }
+
+    /// …but only ON the prompt row. Elsewhere the prompt still swallows, so a
+    /// stray click can't act while the keyboard belongs to the prompt.
+    #[test]
+    fn prompting_still_swallows_a_press_off_the_chrome_row() {
+        let mut s = snap(Some(Region::List));
+        s.is_prompting = true;
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
+    }
+
+    /// The chord latch this guard exists for is right-click's, and it must
+    /// survive: arming a leader chord the prompt never consumes leaves the
+    /// which-key popup up and eats the next key, where `Space P` overwrites
+    /// PROJECT_HOME.
+    #[test]
+    fn a_right_click_on_the_prompt_row_still_arms_nothing() {
+        let mut s = snap(Some(Region::Prompt));
+        s.is_prompting = true;
+        s.over_chrome_row = true;
+        assert_eq!(route_mouse(s, Gesture::Right), MouseSink::Swallow);
+        assert_eq!(route_mouse(s, Gesture::Middle), MouseSink::Paste);
+    }
+
+    /// The activity HUD paints over the list, so a press on it must select the
+    /// HUD — not start a row selection in the list underneath.
+    #[test]
+    fn chrome_over_the_list_selects_the_chrome_not_the_rows() {
+        let mut s = snap(Some(Region::List));
+        assert_eq!(
+            route_mouse(s, Gesture::Left),
+            MouseSink::FocusAndSelectRows(Side::Left),
+            "without the overlay, the list still selects rows"
+        );
+        s.over_chrome_row = true;
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::SelectChrome);
+    }
+
+    /// A pager still outranks recorded chrome: it is drawn over everything and
+    /// owns the pointer, which is the precedence #228 established.
+    #[test]
+    fn a_covering_pager_still_beats_recorded_chrome() {
+        let mut s = snap(Some(Region::List));
+        s.over_chrome_row = true;
+        s.covering_pager = Some(PagerSlot::Top);
+        assert_eq!(
+            route_mouse(s, Gesture::Left),
+            MouseSink::FocusAndSelect(PagerSlot::Top)
+        );
     }
 
     #[test]

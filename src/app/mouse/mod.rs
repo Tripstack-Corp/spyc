@@ -280,6 +280,10 @@ impl super::App {
             } else {
                 None
             },
+            // The renderer records every selectable chrome row each frame, so
+            // this is a lookup rather than a second hit-test — one source for
+            // "what got drawn" and "what a click can select".
+            over_chrome_row: self.chrome_col_at(ev).is_some(),
         };
 
         match route_mouse(snap, gesture) {
