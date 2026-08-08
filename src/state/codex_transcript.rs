@@ -61,7 +61,10 @@ const MTIME_SKEW_SECS: u64 = 5;
 ///    the rollout filename.
 /// 2. **Written during this pane's lifetime** — among rollouts whose
 ///    `session_meta.cwd` matches, keep those with mtime at/after spawn (codex
-///    appends every turn) and take the most recent. None if only stale sessions.
+///    appends every turn), then rank by *identity* for a fresh pane (start
+///    closest to spawn) or by *activity* for a resume-without-id (largest mtime,
+///    the only live signal when `session_meta` is frozen weeks back). See
+///    [`pick_best_rollout`]. None if only stale sessions.
 pub fn resolve_active_rollout(q: crate::agent::TranscriptQuery) -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
     let sessions_dir = PathBuf::from(home).join(".codex/sessions");
@@ -112,6 +115,7 @@ pub fn resolve_active_rollout(q: crate::agent::TranscriptQuery) -> Option<PathBu
         &cwd_str,
         canon_str.as_deref(),
         q.spawn_epoch_secs,
+        is_resume_without_id(q.command),
     )
 }
 
@@ -128,14 +132,32 @@ struct RolloutCandidate {
 
 /// Pure ranking for Signal 2 (the `route.rs` / `focus.rs` template): among
 /// candidates whose cwd matches and whose mtime is at/after the pane spawn
-/// (written during this pane's lifetime), return the most-recently-written.
-/// Tie-break on the start time closest to the spawn, which separates two fresh
-/// codex panes sharing a cwd. `None` when nothing qualifies.
+/// (written during this pane's lifetime), pick this pane's session.
+/// `None` when nothing qualifies.
+///
+/// **Which signal ranks depends on `resuming`, because the two cases have
+/// opposite tells.** mtime is *activity*, not identity — whichever codex session
+/// was written most recently anywhere on the machine has the largest mtime, in
+/// any pane, in any spyc instance sharing this cwd.
+///
+/// - **A fresh `codex`** necessarily starts its rollout at ~spawn, so
+///   `|start − spawn|` **is** the identity signal and ranks first. Ranking a
+///   fresh pane by mtime is what let a month-old rollout that happened to be
+///   actively appended win for every codex pane in that cwd.
+/// - **A resume without an id** (`resume --last`, or a restore whose session id
+///   was never captured) appends to the ORIGINAL rollout with a frozen
+///   `session_meta`, so its `started_secs` can predate the pane by weeks and
+///   proximity is worse than useless. mtime is the only thing that shows the
+///   file is live, so it ranks first there — that is deliberate, and it is what
+///   keeps a long resumed session from going stale.
+///
+/// The other signal stays as the tie-break in both directions.
 fn pick_best_rollout(
     candidates: &[RolloutCandidate],
     cwd_str: &str,
     canon_str: Option<&str>,
     spawn_epoch_secs: u64,
+    resuming: bool,
 ) -> Option<PathBuf> {
     let mut best: Option<(u64, u64, &Path)> = None; // (mtime, start_diff, path)
     for c in candidates {
@@ -146,11 +168,14 @@ fn pick_best_rollout(
         if !cwd_matches(&c.session_cwd, cwd_str, canon_str) {
             continue;
         }
-        // Prefer larger mtime; on a tie prefer the smaller |start − spawn|.
         let start_diff = c.started_secs.abs_diff(spawn_epoch_secs);
-        let better = best
-            .as_ref()
-            .is_none_or(|(m, d, _)| c.mtime > *m || (c.mtime == *m && start_diff < *d));
+        let better = best.as_ref().is_none_or(|(m, d, _)| {
+            if resuming {
+                c.mtime > *m || (c.mtime == *m && start_diff < *d)
+            } else {
+                start_diff < *d || (start_diff == *d && c.mtime > *m)
+            }
+        });
         if better {
             best = Some((c.mtime, start_diff, &c.path));
         }
@@ -531,7 +556,10 @@ mod tests {
         // spawned must NOT be matched.
         let spawn = 1_000;
         let prev = cand("prev.jsonl", 500, "/repo", 400); // mtime well before spawn
-        assert_eq!(pick_best_rollout(&[prev], "/repo", None, spawn), None);
+        assert_eq!(
+            pick_best_rollout(&[prev], "/repo", None, spawn, false),
+            None
+        );
     }
 
     #[test]
@@ -543,7 +571,12 @@ mod tests {
         let spawn = 10_000;
         let resumed = cand("resumed.jsonl", 10_900, "/repo", 50); // old start, freshest mtime
         let other = cand("other.jsonl", 10_400, "/repo", 9_999); // start near spawn, older mtime
-        let best = pick_best_rollout(&[other, resumed], "/repo", None, spawn);
+        // `resuming: true` — this pane IS the resumed session (`resume --last` or a
+        // restore), so its own rollout's start is frozen weeks back and mtime is the
+        // only signal that the file is live. Ranking by proximity here would pick
+        // `other` and the long session would go stale, which is the bug this test
+        // was written for.
+        let best = pick_best_rollout(&[other, resumed], "/repo", None, spawn, true);
         assert_eq!(best, Some(PathBuf::from("resumed.jsonl")));
     }
 
@@ -552,7 +585,7 @@ mod tests {
         let spawn = 1_000;
         let wrong = cand("wrong.jsonl", 2_000, "/other", 1_001);
         let right = cand("right.jsonl", 1_500, "/repo", 1_001);
-        let best = pick_best_rollout(&[wrong, right], "/repo", None, spawn);
+        let best = pick_best_rollout(&[wrong, right], "/repo", None, spawn, false);
         assert_eq!(best, Some(PathBuf::from("right.jsonl")));
     }
 
@@ -563,8 +596,75 @@ mod tests {
         let spawn = 5_000;
         let mine = cand("mine.jsonl", 6_000, "/repo", 5_001);
         let theirs = cand("theirs.jsonl", 6_000, "/repo", 5_200);
-        let best = pick_best_rollout(&[theirs, mine], "/repo", None, spawn);
+        let best = pick_best_rollout(&[theirs, mine], "/repo", None, spawn, false);
         assert_eq!(best, Some(PathBuf::from("mine.jsonl")));
+    }
+
+    /// **The #230 bug.** A month-old rollout that happens to be actively appended
+    /// — another pane, another spyc instance, same cwd — had the largest mtime and
+    /// therefore won for EVERY fresh codex pane in that cwd, so `^a v` opened a
+    /// stranger's transcript. A fresh `codex` writes a rollout starting at ~spawn,
+    /// so proximity identifies it even though its mtime is smaller.
+    #[test]
+    fn a_fresh_pane_prefers_its_own_rollout_over_a_busier_old_one() {
+        let spawn = 100_000;
+        let ancient_but_busy = cand("ancient.jsonl", 100_900, "/repo", 1_000); // month-old start, freshest mtime
+        let mine = cand("mine.jsonl", 100_100, "/repo", 100_001); // starts at spawn, quieter
+        let best = pick_best_rollout(&[ancient_but_busy, mine], "/repo", None, spawn, false);
+        assert_eq!(best, Some(PathBuf::from("mine.jsonl")));
+    }
+
+    /// The same inputs with `resuming: true` must go the OTHER way — that pane's own
+    /// session legitimately has the ancient start. Pins the two modes as genuinely
+    /// opposite rather than one being a softened version of the other.
+    #[test]
+    fn the_same_candidates_invert_when_the_pane_is_resuming() {
+        let spawn = 100_000;
+        let ancient_but_busy = cand("ancient.jsonl", 100_900, "/repo", 1_000);
+        let mine = cand("mine.jsonl", 100_100, "/repo", 100_001);
+        let cands = [ancient_but_busy, mine];
+        assert_eq!(
+            pick_best_rollout(&cands, "/repo", None, spawn, true),
+            Some(PathBuf::from("ancient.jsonl")),
+            "resuming: mtime is the only liveness signal"
+        );
+        assert_eq!(
+            pick_best_rollout(&cands, "/repo", None, spawn, false),
+            Some(PathBuf::from("mine.jsonl")),
+            "fresh: start proximity is the identity signal"
+        );
+    }
+
+    /// Two fresh codex panes in one cwd, both live, no mtime tie — each must still
+    /// resolve to its own session. Before the fix this only worked on an exact-second
+    /// mtime tie, which the issue noted effectively never happens.
+    #[test]
+    fn two_fresh_panes_in_one_cwd_each_get_their_own() {
+        let theirs = cand("theirs.jsonl", 5_400, "/repo", 5_000);
+        let mine = cand("mine.jsonl", 5_300, "/repo", 5_200);
+        let cands = [theirs, mine];
+        assert_eq!(
+            pick_best_rollout(&cands, "/repo", None, 5_200, false),
+            Some(PathBuf::from("mine.jsonl"))
+        );
+        assert_eq!(
+            pick_best_rollout(&cands, "/repo", None, 5_000, false),
+            Some(PathBuf::from("theirs.jsonl"))
+        );
+    }
+
+    /// `is_resume_without_id` is what selects the mode, so pin the classification
+    /// the ranking depends on.
+    #[test]
+    fn resume_classification_drives_the_ranking_mode() {
+        assert!(is_resume_without_id("codex resume --last"));
+        assert!(is_resume_without_id("codex resume"));
+        assert!(!is_resume_without_id("codex"));
+        // A named resume carries its identity, so Signal 1 pins it and Signal 2's
+        // mode never matters — but it must not classify as resume-without-id.
+        assert!(!is_resume_without_id(
+            "codex resume 019df582-fc65-7863-b349-f5c6f691f71c"
+        ));
     }
 
     #[test]
@@ -574,7 +674,7 @@ mod tests {
         let spawn = 1_000;
         let c = cand("c.jsonl", 1_000 - (MTIME_SKEW_SECS - 1), "/repo", 999);
         assert_eq!(
-            pick_best_rollout(&[c], "/repo", None, spawn),
+            pick_best_rollout(&[c], "/repo", None, spawn, false),
             Some(PathBuf::from("c.jsonl"))
         );
     }
