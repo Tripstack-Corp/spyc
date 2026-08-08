@@ -99,16 +99,41 @@ impl PagerView {
         }
         let base = self.scroll_max_content(viewport_height);
         // Reserve one extra row at the true bottom so the `[EOF]` / `~` end
-        // marker is reachable for files TALLER than the viewport — short files
-        // (`base == 0`) already show it because there's spare room; this gives
-        // long files the same end-of-file signal (the doc scrolls one row past
-        // the last line, like vim/less). Skipped while streaming (no marker
-        // yet) or when `[EOF]` is already a content line (`eof_in_content`).
-        if base > 0 && !self.streaming && !self.eof_in_content {
+        // marker is reachable when the content leaves no spare row for it (the
+        // doc scrolls one row past the last line, like vim/less). Skipped while
+        // streaming (no marker yet) or when `[EOF]` is already a content line.
+        //
+        // `fills_viewport`, not `base > 0`: `base` is 0 both for a doc shorter
+        // than the viewport (spare row, marker renders unaided) and for one that
+        // fills it exactly (no spare row, and no reservation to make one).
+        if self.fills_viewport(viewport_height) && !self.streaming && !self.eof_in_content {
             base.saturating_add(1)
         } else {
             base
         }
+    }
+
+    /// True when the document occupies the whole viewport at its content-pinned
+    /// bottom — i.e. there is no spare row for the `[EOF]` / `~` end marker.
+    /// Wrap-aware, and walks from the end so it stops at `viewport_height` rows
+    /// instead of measuring the whole document.
+    fn fills_viewport(&self, viewport_height: u16) -> bool {
+        let vh = viewport_height as usize;
+        if vh == 0 {
+            return false;
+        }
+        let body_w = self.last_body_w.get() as usize;
+        if !self.wrap || body_w == 0 {
+            return self.lines.len() >= vh;
+        }
+        let mut acc = 0usize;
+        for line in self.lines.iter().rev() {
+            acc = acc.saturating_add(visual_rows(line, body_w, self.tab_width));
+            if acc >= vh {
+                return true;
+            }
+        }
+        false
     }
 
     /// The greatest scroll that pins the last line to the bottom row (the
@@ -210,10 +235,16 @@ impl PagerView {
         longest.saturating_sub(viewport_height as usize)
     }
 
-    /// The "Top" / "Bot" / "All" / "NN%" label from a scroll position and its
-    /// max. Shared by the single- and multi-column indicator paths.
-    fn indicator_string(scroll: usize, max_scroll: usize) -> String {
-        if max_scroll == 0 {
+    /// The "Top" / "Bot" / "All" / "NN%" label from a scroll position, its max,
+    /// and whether the whole document is on screen. Shared by the single- and
+    /// multi-column indicator paths.
+    ///
+    /// `all_visible` is passed in rather than inferred from `max_scroll == 0`:
+    /// a document that exactly fills the viewport is fully visible *and* has a
+    /// reserved end-marker row to scroll into, so the two are no longer the
+    /// same question.
+    fn indicator_string(scroll: usize, max_scroll: usize, all_visible: bool) -> String {
+        if all_visible {
             return "All".to_string();
         }
         if scroll == 0 {
@@ -226,12 +257,28 @@ impl PagerView {
         format!("{pct}%")
     }
 
+    /// True when every content line is on screen right now — the "All" label.
+    /// Distinct from `scroll_max(vh) == 0`, which the end-marker reservation
+    /// makes non-zero for a document that exactly fills the viewport.
+    fn all_content_visible(&self, viewport_height: u16) -> bool {
+        if self.columns.max(1) as usize > 1 {
+            // Multi-col scrolls each chunk independently; "all visible" is
+            // "the longest chunk fits", which is exactly its scroll_max == 0.
+            return self.scroll_max(viewport_height) == 0;
+        }
+        self.scroll == 0 && self.scroll_max_content(viewport_height) == 0
+    }
+
     /// Position indicator: "Top", "Bot", "All", or "NN%".
     /// Percentage is based on scroll progress through the "effective"
     /// document length — in multi-col that's the longest chunk, not the
     /// total line count, since each column's chunk scrolls independently.
     pub fn position_indicator(&self, viewport_height: u16) -> String {
-        Self::indicator_string(self.scroll, self.scroll_max(viewport_height))
+        Self::indicator_string(
+            self.scroll,
+            self.scroll_max(viewport_height),
+            self.all_content_visible(viewport_height),
+        )
     }
 
     /// Like [`Self::position_indicator`] but for a multi-column layout whose
@@ -243,10 +290,8 @@ impl PagerView {
         chunks: &[(usize, usize)],
         viewport_height: u16,
     ) -> String {
-        Self::indicator_string(
-            self.scroll,
-            Self::multi_col_max_scroll(chunks, viewport_height),
-        )
+        let max = Self::multi_col_max_scroll(chunks, viewport_height);
+        Self::indicator_string(self.scroll, max, max == 0)
     }
 
     // ---- Search ----------------------------------------------------------
