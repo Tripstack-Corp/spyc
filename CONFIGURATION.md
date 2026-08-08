@@ -118,6 +118,19 @@ spyc can't confirm the terminal honored it, and some terminals disable it on pur
 terminal. A selection too large for the escape falls back to the helper rather than
 risk a terminal truncating it silently.
 
+```toml
+[clipboard]
+command = "wl-copy"
+```
+
+`command` overrides everything above: when set, spyc runs this exact command
+verbatim — whitespace-split into argv, same "no shell features" contract as
+`$EDITOR`/`$PAGER` resolution, so wrap it in a script if you need pipes or
+redirection — and pipes the yanked text to its stdin. `via`/OSC-52 are skipped
+entirely, not layered underneath. `$SPYC_CLIPBOARD` is the env-var form and wins
+over the config key if both are set, matching how other spyc envs layer over
+static config.
+
 ## Notifications — `[notify]`
 
 The "which agent needs me" signal. When an agent pane changes status, spyc fires

@@ -458,6 +458,11 @@ pub enum ClipboardVia {
 #[serde(default)]
 pub struct ClipboardConfig {
     pub via: ClipboardVia,
+    /// When set, spyc runs this command verbatim (whitespace-split into
+    /// argv, no shell features — same contract as `$EDITOR`/`$PAGER`
+    /// resolution) and pipes the yanked text to its stdin, bypassing `via`
+    /// and OSC 52 entirely. `$SPYC_CLIPBOARD` overrides this if both are set.
+    pub command: Option<String>,
 }
 
 /// How a desktop notification is delivered (`[notify].desktop_via`). `Auto`
@@ -545,6 +550,8 @@ impl Default for NotifyConfig {
 struct FileClipboard {
     #[serde(default)]
     via: Option<ClipboardVia>,
+    #[serde(default)]
+    command: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -809,9 +816,12 @@ impl Config {
             self.delete.confirm = b;
         }
 
-        // Notify: per-field merge.
+        // Clipboard: per-field merge.
         if let Some(v) = file.clipboard.via {
             self.clipboard.via = v;
+        }
+        if let Some(c) = file.clipboard.command {
+            self.clipboard.command = Some(c);
         }
         if let Some(b) = file.notify.desktop {
             self.notify.desktop = b;
