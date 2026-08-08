@@ -134,6 +134,9 @@ pub struct PaneScrollStreak {
     pub dir: i8,
     pub started_at: std::time::Instant,
     pub last_at: std::time::Instant,
+    /// Ticks in this streak, this one included. Gates opening an agent's own
+    /// view — see `route::OPEN_AFTER_UP_TICKS`.
+    pub ticks: u32,
 }
 
 /// One chrome line as drawn, recorded by the renderer for a later mouse copy.

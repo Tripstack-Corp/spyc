@@ -792,6 +792,187 @@ fn split_separator_holds_for_clusters_wider_than_their_chars() {
     }
 }
 
+// ── word-diff highlight clamping (#179) ─────────────────────────────────
+
+#[test]
+fn word_highlight_never_bleeds_into_same_row_padding() {
+    // A changed word ending mid-line, with a fully-blank cell right after it
+    // on the SAME (unwrapped) row — the padding must carry only the row
+    // wash, never the word-highlight bg.
+    let theme = Theme::default();
+    let model = single_file(
+        FileStatus::Modified,
+        DiffKind::Text(vec![Hunk {
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 1,
+            lines: vec![rem("foo bar"), add("foo baz")],
+        }]),
+        Some("f.txt"),
+        Some("f.txt"),
+    );
+    let out = render_diff(&model, &theme, DiffLayout::SideBySide, 40);
+    let change = out
+        .iter()
+        .find(|l| row_text(l).contains("baz"))
+        .expect("paired change row");
+    // Scope to the right (add) side only — the left (remove) side has its
+    // own, differently-colored padding right next to it across the `│`.
+    let sep_idx = change
+        .spans
+        .iter()
+        .position(|s| s.content.contains('│'))
+        .unwrap();
+    let right = &change.spans[sep_idx + 1..];
+    let word = right
+        .iter()
+        .find(|s| s.content.as_ref() == "z")
+        .expect("changed char carries its own span");
+    assert_eq!(word.style.bg, Some(theme.diff_add_word_bg));
+    let pad = right
+        .iter()
+        .find(|s| s.content.len() > 1 && s.content.chars().all(|c| c == ' '))
+        .expect("trailing padding span on the same row");
+    assert_eq!(pad.style.bg, Some(theme.diff_add_bg));
+}
+
+#[test]
+fn word_highlight_never_reaches_a_textless_continuation_row() {
+    // The remove side wraps to more visual rows than its paired (much
+    // shorter, unrelated) add side. The add side's leftover continuation row
+    // carries no text at all — it must never carry the word-highlight bg,
+    // only the add row's own wash (the actual fix here: it used to render
+    // fully unstyled — see PR body for why that, not a literal bleed, is
+    // what this file's code produced).
+    let theme = Theme::default();
+    let model = single_file(
+        FileStatus::Modified,
+        DiffKind::Text(vec![Hunk {
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 1,
+            lines: vec![
+                rem("and this second line carries far more words than its short replacement below"),
+                add("short tail now"),
+            ],
+        }]),
+        Some("f.txt"),
+        Some("f.txt"),
+    );
+    let out = render_diff(&model, &theme, DiffLayout::SideBySide, 40);
+    let mut found_textless_continuation = false;
+    for line in &out {
+        let Some(sep_idx) = line.spans.iter().position(|s| s.content.contains('│')) else {
+            continue;
+        };
+        let right = &line.spans[sep_idx + 1..];
+        if right.is_empty() || !right.iter().all(|s| s.content.chars().all(|c| c == ' ')) {
+            continue;
+        }
+        found_textless_continuation = true;
+        for s in right {
+            assert_ne!(
+                s.style.bg,
+                Some(theme.diff_add_word_bg),
+                "textless continuation row must never carry the word-highlight bg: {right:?}"
+            );
+            assert_eq!(
+                s.style.bg,
+                Some(theme.diff_add_bg),
+                "textless continuation row should carry the add row's own wash: {right:?}"
+            );
+        }
+    }
+    assert!(
+        found_textless_continuation,
+        "expected the short add side to leave a textless continuation row"
+    );
+}
+
+#[test]
+fn word_highlight_unchanged_for_a_simple_single_row_split_change() {
+    // Regression: the ordinary case — no wrap, no pair-count mismatch — must
+    // render identically to before this fix. `modify_model()`'s `c`→`C`
+    // shares no prefix/suffix (`intra_change_range` returns `None` for it, no
+    // word highlight at all), so use a pair with a real word-level range.
+    let theme = Theme::default();
+    let model = single_file(
+        FileStatus::Modified,
+        DiffKind::Text(vec![Hunk {
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 1,
+            lines: vec![rem("let x = 1;"), add("let x = 2;")],
+        }]),
+        Some("f.rs"),
+        Some("f.rs"),
+    );
+    let out = render_diff(&model, &theme, DiffLayout::SideBySide, 80);
+    let change = out
+        .iter()
+        .find(|l| row_text(l).contains("let x ="))
+        .expect("paired change row");
+    let sep_idx = change
+        .spans
+        .iter()
+        .position(|s| s.content.contains('│'))
+        .unwrap();
+    let left_word = change.spans[..sep_idx]
+        .iter()
+        .find(|s| s.style.bg == Some(theme.diff_del_word_bg))
+        .expect("left side still highlights its changed char");
+    assert_eq!(left_word.content.as_ref(), "1");
+    let right_word = change.spans[sep_idx + 1..]
+        .iter()
+        .find(|s| s.style.bg == Some(theme.diff_add_word_bg))
+        .expect("right side still highlights its changed char");
+    assert_eq!(right_word.content.as_ref(), "2");
+}
+
+proptest::proptest! {
+    #[test]
+    // Across arbitrary line pairs and widths, the total bytes carrying the
+    // word-highlight bg in the rendered output must equal EXACTLY the byte
+    // length of the computed changed range — never more (a bleed into
+    // padding/wrap/blank cells) and never less (a dropped legitimate
+    // highlight). General form of the three cases above.
+    fn word_highlight_byte_count_matches_the_computed_range(
+        old in proptest::string::string_regex(r"[ab \t,.(){}]{1,40}").unwrap(),
+        new in proptest::string::string_regex(r"[ab \t,.(){}]{1,40}").unwrap(),
+        width in 20usize..70,
+    ) {
+        proptest::prop_assume!(old != new);
+        let theme = Theme::default();
+        let model = single_file(
+            FileStatus::Modified,
+            DiffKind::Text(vec![Hunk {
+                old_start: 1,
+                old_lines: 1,
+                new_start: 1,
+                new_lines: 1,
+                lines: vec![rem(&old), add(&new)],
+            }]),
+            Some("f.txt"),
+            Some("f.txt"),
+        );
+        let out = render_diff(&model, &theme, DiffLayout::SideBySide, width);
+        let expected: usize = super::intra_change_range(&old, &new)
+            .map_or(0, |(o, n)| (o.end - o.start) + (n.end - n.start));
+        let add_bg = theme.diff_add_word_bg;
+        let del_bg = theme.diff_del_word_bg;
+        let actual: usize = out
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .filter(|s| s.style.bg == Some(add_bg) || s.style.bg == Some(del_bg))
+            .map(|s| s.content.len())
+            .sum();
+        proptest::prop_assert_eq!(actual, expected);
+    }
+}
+
 /// Space-indented content was never affected, so it must stay byte-identical —
 /// the tab accounting has to be a no-op when there are no tabs.
 #[test]
