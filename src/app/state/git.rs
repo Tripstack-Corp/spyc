@@ -40,7 +40,7 @@ impl AppState {
     /// ([`Self::refresh_git_state_for`]) can't see such a change (no
     /// `.git/index`/`HEAD` mtime moves), and the listing-refresh path only
     /// invalidates the **focused** column — so without this an UNFOCUSED
-    /// column's `~`/` M` markers stay stale after an external edit until a git
+    /// column's `~ `/` ~` markers stay stale after an external edit until a git
     /// op or chdir. Sets the existing `pending_worktree_rewalk` escape hatch,
     /// which the next 1 Hz poll honors (re-walking once, off-thread). Flagging
     /// the focused column too is harmless — its listing refresh clears the flag
@@ -78,7 +78,7 @@ impl AppState {
         // A throttled working-tree change (refresh_listing deferred its
         // invalidation) forces a re-walk: the mtime key can't see an unstaged
         // edit, so honoring this flag is the only thing that converges a stale
-        // ` M`/clean marker without waiting for a chdir.
+        // ` ~`/clean marker without waiting for a chdir.
         let force_rewalk =
             std::mem::take(&mut self.col_mut(side).git_cache.pending_worktree_rewalk);
         if !force_rewalk && key.is_some() && key == self.col(side).git_cache.git_poll_cache {
@@ -115,7 +115,7 @@ impl AppState {
     ///
     /// `force` requests a fresh walk even when the mtime cache would be reused —
     /// a working-tree edit moves no `.git/index`/`HEAD` mtime, so the poll and
-    /// the listing refresh flag it to converge a stale ` M`/clean marker. When a
+    /// the listing refresh flag it to converge a stale ` ~`/clean marker. When a
     /// walk is needed and the worker is live, it runs off-thread and this returns
     /// the CURRENT cache's markers (stale but same-repo), NOT an empty map, and
     /// does not clear the cache — [`Self::apply_git_worker_result`] swaps in the
