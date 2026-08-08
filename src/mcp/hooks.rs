@@ -20,7 +20,8 @@
 //!   they must be written BEFORE the pane spawns (see the codex section).
 //! * **agy** (Antigravity) — a `spyc-status` named set in `.agents/hooks.json`;
 //!   PARTIAL (working/done only — no agy event fires on a user-approval prompt,
-//!   so `blocked` comes from the screen scrape instead). See the agy section.
+//!   so `blocked` comes from the screen scrape instead; `done` needs agy
+//!   >= 1.1.10). See the agy section.
 //!
 //! Event → state (verified against the Claude Code hooks docs):
 //! * `UserPromptSubmit`  → `working` (the agent just got a prompt)
@@ -492,12 +493,23 @@ pub fn cleanup_codex_status_hooks(dir: &Path) -> ConfigCleanup {
 // PARTIAL — `working` + `done` only. No event fires when agy asks the USER to
 // approve a tool call, so there's no hook-based `blocked`; that comes from the
 // screen scrape in `agent::AGY_DETECTION_RULES`.
+//
+// Don't reach for `PreToolUse` to close that gap. It answers with a REQUIRED
+// `decision` (`allow`/`deny`/`ask`/`force_ask`), so every valid reply moves agy's
+// permission behavior — and an invalid one (spyc's reporter prints nothing) makes
+// agy re-drive the tool: an unanswered `PreToolUse` was observed running a turn to
+// 17 invocations until it timed out, never reaching `Stop`. `PreInvocation` and
+// `Stop` are safe with empty output — only `"continue"` holds a `Stop` open.
 
 /// Agy's (event, reported-state).
 ///
 /// `Stop` (execution loop terminated), not `PostInvocation` (after each round of
 /// tool calls): a turn makes many invocations, so `PostInvocation` would report
-/// `done` mid-turn, over and over.
+/// `done` mid-turn, over and over. Confirmed by probe on agy 1.1.11 — a two-tool
+/// turn fired `PostInvocation` twice and `Stop` once.
+///
+/// `Stop` requires agy >= 1.1.10, which moved `hooks.json` ahead of agy's built-in
+/// termination checks; before that it was unreachable and `done` never fired.
 const AGY_STATUS_HOOKS: [(&str, &str); 2] = [("PreInvocation", "working"), ("Stop", "done")];
 
 /// The named hook-set spyc owns in agy's `hooks.json` (our namespace there).
