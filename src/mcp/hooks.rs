@@ -19,9 +19,9 @@
 //!   `.codex/config.toml` we write the MCP entry into; read once at startup, so
 //!   they must be written BEFORE the pane spawns (see the codex section).
 //! * **agy** (Antigravity) — a `spyc-status` named set in `.agents/hooks.json`;
-//!   PARTIAL (working/done only — no agy event fires on a user-approval prompt,
-//!   so `blocked` comes from the screen scrape instead; `done` needs agy
-//!   >= 1.1.10). See the agy section.
+//!   PARTIAL (working/done, plus blocked for its `ask_question` tool — no agy event
+//!   fires on a tool-permission prompt, so that half of `blocked` comes from the
+//!   screen scrape instead; `done` needs agy >= 1.1.10). See the agy section.
 //!
 //! Event → state (verified against the Claude Code hooks docs):
 //! * `UserPromptSubmit`  → `working` (the agent just got a prompt)
@@ -490,16 +490,19 @@ pub fn cleanup_codex_status_hooks(dir: &Path) -> ConfigCleanup {
 // `{hooks,matcher}` group. spyc owns one set, `spyc-status`.
 // Read once at startup (written pre-spawn like codex).
 //
-// PARTIAL — `working` + `done` only. No event fires when agy asks the USER to
-// approve a tool call, so there's no hook-based `blocked`; that comes from the
-// screen scrape in `agent::AGY_DETECTION_RULES`.
+// PARTIAL — `working` + `done`, plus `blocked` for the `ask_question` tool. No
+// event fires when agy asks the USER to approve a *tool call*, so that half of
+// `blocked` comes from the screen scrape in `agent::AGY_DETECTION_RULES`.
 //
-// Don't reach for `PreToolUse` to close that gap. It answers with a REQUIRED
-// `decision` (`allow`/`deny`/`ask`/`force_ask`), so every valid reply moves agy's
-// permission behavior — and an invalid one (spyc's reporter prints nothing) makes
-// agy re-drive the tool: an unanswered `PreToolUse` was observed running a turn to
-// 17 invocations until it timed out, never reaching `Stop`. `PreInvocation` and
-// `Stop` are safe with empty output — only `"continue"` holds a `Stop` open.
+// `PreToolUse` closes that gap for ONE tool only, `ask_question` — the tool whose
+// purpose is to wait for the user, where a decision of `allow` changes nothing that
+// wasn't already going to happen. It is the wrong instrument for anything else: it
+// answers with a REQUIRED `decision` (`allow`/`deny`/`ask`/`force_ask`), so a
+// broader matcher would put spyc in charge of agy's permissions, and omitting the
+// decision makes agy re-drive the tool — an unanswered `PreToolUse` was observed
+// running a turn to 17 invocations until it timed out, never reaching `Stop`.
+// `PreInvocation` and `Stop` are safe with empty output — only `"continue"` holds a
+// `Stop` open.
 
 /// Agy's (event, reported-state).
 ///
@@ -510,7 +513,32 @@ pub fn cleanup_codex_status_hooks(dir: &Path) -> ConfigCleanup {
 ///
 /// `Stop` requires agy >= 1.1.10, which moved `hooks.json` ahead of agy's built-in
 /// termination checks; before that it was unreachable and `done` never fired.
-const AGY_STATUS_HOOKS: [(&str, &str); 2] = [("PreInvocation", "working"), ("Stop", "done")];
+///
+/// `ask_question` is the tool agy calls to put a question to the USER, so it is the
+/// one waiting-on-you state a hook can see. Its tool-permission *prompt* still has
+/// no event and comes from `agent::AGY_DETECTION_RULES`.
+///
+/// An empty matcher marks a lifecycle event (flat handler list); a non-empty one
+/// marks a tool event (the claude/codex `{matcher, hooks}` group).
+const AGY_STATUS_HOOKS: [(&str, &str, &str); 3] = [
+    ("PreInvocation", "", "working"),
+    ("PreToolUse", "ask_question", "blocked"),
+    ("Stop", "", "done"),
+];
+
+/// A tool-event handler for agy. Unlike the lifecycle events, `PreToolUse` REQUIRES
+/// a `decision` on stdout and re-drives the tool without one, so the decision is
+/// printed UNCONDITIONALLY — even when the reporter is missing — and the reporter's
+/// own output is discarded to keep stdout pure JSON. `allow` is a no-op for
+/// `ask_question`, whose whole purpose is to wait for the user: spyc observes the
+/// wait, it never arbitrates it.
+fn agy_tool_reporter_command(exe: &str, state: &str, trace: bool) -> String {
+    let trace = if trace { " --status-trace" } else { "" };
+    let exe = crate::shell::shell_quote(exe);
+    format!(
+        "{exe} --report-status {state}{trace} >/dev/null 2>&1 || true; printf '{{\"decision\":\"allow\"}}'"
+    )
+}
 
 /// The named hook-set spyc owns in agy's `hooks.json` (our namespace there).
 const AGY_HOOK_SET: &str = "spyc-status";
@@ -573,12 +601,21 @@ fn merged_agy_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) 
     let mut root = merge_root_json(existing)?;
     let obj = root.as_object_mut()?;
     let mut set = serde_json::Map::new();
-    for (event, state) in AGY_STATUS_HOOKS {
-        // Flat handler list directly under the event key (no matcher/group) —
-        // that shape is only for the tool events, which spyc doesn't register.
+    for (event, matcher, state) in AGY_STATUS_HOOKS {
+        let handler = if matcher.is_empty() {
+            json!({ "type": "command", "command": reporter_command(exe, state, trace) })
+        } else {
+            json!({ "type": "command", "command": agy_tool_reporter_command(exe, state, trace) })
+        };
+        // Lifecycle events take a flat handler list; tool events wrap it in a
+        // `{matcher, hooks}` group.
         set.insert(
             event.to_string(),
-            json!([{ "type": "command", "command": reporter_command(exe, state, trace) }]),
+            if matcher.is_empty() {
+                json!([handler])
+            } else {
+                json!([{ "matcher": matcher, "hooks": [handler] }])
+            },
         );
     }
     // We own the whole `spyc-status` key, so an insert replaces a prior ours
@@ -998,10 +1035,22 @@ mod tests {
         assert!(ensure_agy_status_hooks(dir));
         let path = dir.join(".agents/hooks.json");
         let v = read(&path);
-        for (event, state) in AGY_STATUS_HOOKS {
-            // Flat handler list directly under the event key (no matcher/group).
+        for (event, matcher, state) in AGY_STATUS_HOOKS {
+            // Lifecycle events sit in a flat handler list; a tool event is wrapped
+            // in a `{matcher, hooks}` group, so its handler is one level deeper.
+            let base = if matcher.is_empty() {
+                format!("/{AGY_HOOK_SET}/{event}/0")
+            } else {
+                assert_eq!(
+                    v.pointer(&format!("/{AGY_HOOK_SET}/{event}/0/matcher"))
+                        .and_then(Value::as_str),
+                    Some(matcher),
+                    "{event} lost its tool matcher"
+                );
+                format!("/{AGY_HOOK_SET}/{event}/0/hooks/0")
+            };
             let cmd = v
-                .pointer(&format!("/{AGY_HOOK_SET}/{event}/0/command"))
+                .pointer(&format!("{base}/command"))
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             assert!(
@@ -1009,8 +1058,7 @@ mod tests {
                 "{event} → {state}: got {cmd:?}"
             );
             assert_eq!(
-                v.pointer(&format!("/{AGY_HOOK_SET}/{event}/0/type"))
-                    .and_then(Value::as_str),
+                v.pointer(&format!("{base}/type")).and_then(Value::as_str),
                 Some("command")
             );
         }
@@ -1059,6 +1107,62 @@ mod tests {
         );
     }
 
+    /// agy re-drives a tool whose `PreToolUse` handler returns no `decision`, so
+    /// the ONLY thing this command must never do is fail to print one. Both
+    /// hazards are structural, which is why they're asserted on the string:
+    /// the reporter is chained with `;` (not `&&`) and has its stdout discarded,
+    /// so a missing or chatty spyc can neither skip the decision nor corrupt it.
+    /// Getting this wrong cost a 17-invocation runaway turn during development.
+    #[test]
+    fn agy_tool_hook_always_answers_with_a_clean_decision() {
+        let cmd = agy_tool_reporter_command("spyc", "blocked", false);
+        assert_eq!(
+            cmd,
+            "'spyc' --report-status blocked >/dev/null 2>&1 || true; printf '{\"decision\":\"allow\"}'"
+        );
+        // The decision is unconditional: sequenced with `;`, never gated on the
+        // reporter succeeding.
+        let (reporter, decision) = cmd.split_once("; ").expect("reporter then decision");
+        assert!(
+            !reporter.contains("&&"),
+            "decision must not depend on the reporter: {cmd:?}"
+        );
+        assert!(decision.starts_with("printf "), "got {decision:?}");
+        // stdout carries the decision and nothing else.
+        assert!(
+            reporter.contains(">/dev/null 2>&1"),
+            "reporter stdout would pollute the JSON: {cmd:?}"
+        );
+        // Trace mode rides along without disturbing either property.
+        let traced = agy_tool_reporter_command("spyc", "blocked", true);
+        assert!(
+            traced.contains(" --status-trace >/dev/null 2>&1 || true; printf "),
+            "{traced:?}"
+        );
+    }
+
+    /// Running the built command through a real shell is the only way to prove the
+    /// quoting survives: agy parses stdout as JSON, and a stray quote or an
+    /// unescaped brace is a runaway turn rather than a visible error.
+    #[test]
+    fn agy_tool_hook_emits_parseable_json_through_a_shell() {
+        // A binary name that cannot exist, so the `|| true` branch is what runs —
+        // the missing-spyc case, where printing the decision matters most.
+        let cmd = agy_tool_reporter_command("/nonexistent/spyc-does-not-exist", "blocked", false);
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&cmd)
+            .output()
+            .expect("run hook command");
+        assert!(out.status.success(), "hook command failed: {cmd:?}");
+        let parsed: Value = serde_json::from_slice(&out.stdout)
+            .expect("hook stdout must be JSON even with no spyc");
+        assert_eq!(
+            parsed.pointer("/decision").and_then(Value::as_str),
+            Some("allow")
+        );
+    }
+
     #[test]
     fn cleanup_agy_hooks_is_a_noop_when_nothing_of_ours() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1079,11 +1183,30 @@ mod tests {
         assert_eq!(once, twice, "re-applying the merge changed a byte");
         assert!(once.contains("--report-status working"));
         assert!(once.contains("--report-status done"));
-        assert!(
-            !once.contains("blocked"),
-            "agy has no user-approval event — `blocked` is the scrape fallback's \
-             job, and a hook claiming to supply it would mask that"
-        );
+        // `blocked` may ride ONE hook and no other: `PreToolUse` matched to
+        // `ask_question`. agy has no event for its tool-permission prompt, and a
+        // live report suppresses the scrape outright (`effective_activity`), so a
+        // broader `blocked` hook would mask the only signal that prompt has. A
+        // `Blocked` report is also latched — output never clears it, only the
+        // user's keypress does — so claiming it where the user isn't actually being
+        // asked would pin the dot red.
+        let parsed: Value = serde_json::from_str(&once).expect("merged config parses");
+        let events = parsed
+            .get(AGY_HOOK_SET)
+            .and_then(Value::as_object)
+            .expect("our set");
+        for (event, handlers) in events {
+            let text = handlers.to_string();
+            if !text.contains("blocked") {
+                continue;
+            }
+            assert_eq!(event, "PreToolUse", "`blocked` escaped onto {event}");
+            assert_eq!(
+                handlers.pointer("/0/matcher").and_then(Value::as_str),
+                Some("ask_question"),
+                "`blocked` must be scoped to the ask_question tool: {text}"
+            );
+        }
         assert!(
             !once.contains("--status-trace"),
             "trace off → no baked flag"

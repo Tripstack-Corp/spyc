@@ -551,18 +551,22 @@ impl AgentProfile for CodexProfile {
 /// P1-2: agy DOES have `status_hooks()`, but its event vocabulary is
 /// `PreToolUse` / `PostToolUse` / `PreInvocation` / `PostInvocation` / `Stop`
 /// (agy's own `agy-customizations/docs/hooks.md`) — none of which fires when
-/// agy asks the *user* to approve a tool call. `PreToolUse` is the nearest
-/// thing and is the wrong instrument: it runs *instead of* the prompt and must
-/// answer with an `allow`/`deny`/`ask` decision, so hanging a status report on
-/// it would make spyc arbitrate agy's permissions. Hence `blocked` — the one
-/// state that actually earns the user's attention — comes from this screen
-/// scrape instead.
+/// agy asks the *user* to approve a tool call. `PreToolUse` covers the OTHER way
+/// agy waits on you, its `ask_question` tool (see `mcp::hooks`), but it can't cover
+/// this one: matching every tool would put spyc in charge of agy's permissions,
+/// since a `PreToolUse` handler must answer with `allow`/`deny`/`ask`. So the
+/// approval prompt is read off the screen instead.
 ///
 /// Both phrases are required (see [`detect_rules::Matcher::All`]): an agent
 /// discussing permissions prints either one readily, and a false red "needs me"
-/// square is worse than no fallback. Every needle must be a string agy actually
-/// prints — a third one here (`esc to cancel`) that it never does made the
-/// conjunction unsatisfiable, silently killing agy's only `blocked` signal.
+/// square is worse than no fallback. They're the dialog's own two lines, which is
+/// why the footer key-hint is deliberately NOT a third needle: agy renders that
+/// from `"%s to cancel"` and gives each dialog a different one, so it discriminates
+/// nothing and rots on any UI change.
+///
+/// Verify a needle against a real pane, not the binary's string table — a
+/// runtime-formatted string is absent from it, which is exactly how `esc to cancel`
+/// got mistaken for a phrase agy never prints.
 static AGY_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {
     region: detect_rules::Region::BottomNonEmptyLines(15),
     matcher: detect_rules::Matcher::All(&["Requesting permission for:", "Do you want to proceed?"]),
@@ -648,8 +652,9 @@ impl AgentProfile for AgyProfile {
     }
     fn status_hooks(&self) -> Option<StatusHookSupport> {
         // A named hook-set in `.agents/hooks.json`, read at startup → written
-        // pre-spawn. Covers `working` + `done` only; `blocked` has no event to
-        // hang on and comes from AGY_DETECTION_RULES instead.
+        // pre-spawn. Covers `working`, `done`, and `blocked` for the `ask_question`
+        // tool; the tool-permission prompt has no event and comes from
+        // AGY_DETECTION_RULES instead.
         //
         // `done` needs agy >= 1.1.10: before it, `Stop` sat unreachable behind
         // agy's built-in termination checks, so the hook was installed and never
@@ -794,12 +799,13 @@ pub fn detect(cmd: &str) -> &'static dyn AgentProfile {
 mod tests {
     use super::*;
 
-    /// agy's approval prompt must scrape as `Blocked` — the state that earns the
-    /// user's attention, and the only one agy fires no hook for.
+    /// agy's tool-permission prompt must scrape as `Blocked` — the one way agy
+    /// waits on the user that fires no hook.
     ///
-    /// `detect_rules` tested the `All` conjunction; nothing tested the RULE, which
-    /// is how a needle agy never prints shipped and made it unsatisfiable. The
-    /// prompt lines below are agy 1.1.11's own literals.
+    /// `detect_rules` covered the `All` matcher; nothing covered the RULE, so a
+    /// needle could go stale against agy's real output and nothing would fail. The
+    /// sample is transcribed from a live agy 1.1.11 pane, footer included, so it
+    /// stays a check on agy's actual dialog rather than on a guess about it.
     #[test]
     fn agy_approval_prompt_scrapes_as_blocked() {
         let scan = |ls: &[&str]| {
@@ -808,10 +814,17 @@ mod tests {
         };
         assert_eq!(
             scan(&[
+                "\u{25cf} Bash(uname -a) (ctrl+o to expand)",
+                "Command",
                 "Requesting permission for:",
-                "  echo hello",
+                "  uname -a",
                 "Do you want to proceed?",
-                "> 1. Yes, accept this change",
+                "> 1. Yes",
+                "  2. Yes, and always allow in this conversation for commands that start with 'uname'",
+                "  3. Yes, and always allow for commands that start with 'uname' (Persist to settings.json)",
+                "  4. No",
+                "\u{2191}/\u{2193} Navigate \u{b7} tab Amend \u{b7} ctrl+g edit/expand command",
+                "esc to cancel                          Gemini 3.1 Pro \u{b7} high",
             ]),
             Some((
                 crate::pane::AgentActivity::Blocked,
