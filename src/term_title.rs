@@ -44,7 +44,16 @@ pub fn push() -> io::Result<()> {
 
 /// xterm CSI 23;0t — pop the previously-pushed title.
 pub fn pop() -> io::Result<()> {
-    emit(&wrap("\x1b[23;0t", in_tmux()))
+    emit(&pop_sequence())
+}
+
+/// The bytes [`pop`] writes, without writing them.
+///
+/// The signal teardown bakes this into its precomputed restore string: a
+/// handler can't call `in_tmux` (an env read is not async-signal-safe), so the
+/// tmux wrapping has to be resolved before the signal arrives.
+pub fn pop_sequence() -> String {
+    wrap("\x1b[23;0t", in_tmux())
 }
 
 /// OSC 2 — set the *window* title only. We deliberately avoid OSC 0

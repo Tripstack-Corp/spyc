@@ -584,6 +584,44 @@ fn mouse_mode_seq(capture: bool) -> String {
     s
 }
 
+/// Everything [`restore_terminal`] writes, precomputed at startup so the
+/// SIGTERM/SIGHUP handler can restore the terminal with one `write`.
+///
+/// SPYC-TRAP(signal-teardown-precomputed): built here, never inside the
+/// handler. A signal handler may only call async-signal-safe functions, and
+/// building this calls into crossterm's formatting and reads `$TMUX` — neither
+/// is safe there. Nothing but `write` + `tcsetattr` + `_exit` may run in the
+/// handler itself.
+static RESTORE_SEQ: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// The pre-raw-mode terminal settings, captured before `enable_raw_mode`.
+///
+/// crossterm keeps its own copy but doesn't expose it, and `disable_raw_mode`
+/// takes an internal lock — not usable from a handler.
+static ORIGINAL_TERMIOS: std::sync::OnceLock<libc::termios> = std::sync::OnceLock::new();
+
+/// The escape sequence that undoes [`setup_terminal`].
+///
+/// Extracted from `restore_terminal`'s `execute!` for the same reason
+/// [`mouse_mode_seq`] was: `restore_terminal` takes `&mut Tui`, which no test
+/// can construct, so the byte-level contract had no test. Order mirrors
+/// `restore_terminal` exactly.
+fn terminal_restore_seq() -> String {
+    use crossterm::Command as _;
+    let mut s = String::new();
+    let _ = PopKeyboardEnhancementFlags.write_ansi(&mut s);
+    let _ = LeaveAlternateScreen.write_ansi(&mut s);
+    let _ = DisableBracketedPaste.write_ansi(&mut s);
+    let _ = DisableAlternateScroll.write_ansi(&mut s);
+    // Unconditional, matching the panic hook: cheap when capture was never on,
+    // and a leaked `?1000h` spams the user's next shell with mouse reports.
+    let _ = DisableWheelReporting.write_ansi(&mut s);
+    let _ = ShowMousePointer.write_ansi(&mut s);
+    let _ = crossterm::cursor::Show.write_ansi(&mut s);
+    s.push_str(&term_title::pop_sequence());
+    s
+}
+
 /// No-op handler for SIGINT / SIGQUIT. Replaces the default
 /// "terminate-the-process" disposition so spyc can survive a stray
 /// `^C` (or `^\`) that arrives while raw mode is off and the kernel
@@ -593,6 +631,40 @@ fn mouse_mode_seq(capture: bool) -> String {
 // since extern "C" fn pointers don't work with const-fn.
 #[allow(clippy::missing_const_for_fn)]
 extern "C" fn signal_noop(_: libc::c_int) {}
+
+/// Restore the terminal, then die, for signals that mean "terminate": SIGTERM
+/// (`pkill spyc`, a service manager, an OOM-adjacent kill) and SIGHUP (the
+/// terminal closed, or a logout).
+///
+/// Without this the default disposition kills spyc with no cleanup, handing the
+/// shell back on the alt screen, in raw mode, and — since `[mouse] capture`
+/// defaults on — with `?1000h` still armed, so every pointer move and click
+/// emits escape garbage into the shell for the rest of the session.
+///
+/// Async-signal-safe by construction: one `write` of a string built at startup,
+/// one `tcsetattr`, then `_exit`. No allocation, no locks, no stdio (`exit`
+/// would run atexit handlers and flush buffers — neither is safe here).
+extern "C" fn signal_terminate(sig: libc::c_int) {
+    // SAFETY: the only calls here are `write`, `tcsetattr` and `_exit`, all
+    // async-signal-safe per POSIX. Both statics are read-only by now; an
+    // uninitialized one (signal before `setup_terminal`) just skips its step.
+    unsafe {
+        if let Some(seq) = RESTORE_SEQ.get() {
+            // Best-effort: a partial or failed write can't be retried safely,
+            // and we're about to exit regardless.
+            libc::write(
+                libc::STDOUT_FILENO,
+                seq.as_ptr().cast::<libc::c_void>(),
+                seq.len(),
+            );
+        }
+        if let Some(termios) = ORIGINAL_TERMIOS.get() {
+            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, termios);
+        }
+        // 128 + signum is the shell's own convention for death by signal.
+        libc::_exit(128 + sig);
+    }
+}
 
 /// Install no-op handlers for SIGINT and SIGQUIT so spyc never dies
 /// from a Ctrl+C / Ctrl+\ that wasn't intended for it, plus SIG_IGN
@@ -648,6 +720,11 @@ fn install_signal_handlers() {
         libc::signal(libc::SIGINT, h);
         libc::signal(libc::SIGQUIT, h);
         libc::signal(libc::SIGTTOU, libc::SIG_IGN);
+        // SIGTERM / SIGHUP mean "terminate" and must not skip the terminal
+        // restore — see `signal_terminate`.
+        let t = signal_terminate as *const () as libc::sighandler_t;
+        libc::signal(libc::SIGTERM, t);
+        libc::signal(libc::SIGHUP, t);
     }
 }
 
@@ -678,6 +755,16 @@ fn detect_image_picker() -> Option<ratatui_image::picker::Picker> {
 }
 
 fn setup_terminal() -> Result<Tui> {
+    // Stash what the signal teardown needs BEFORE the terminal is touched:
+    // the pre-raw termios, and the restore string (built here because the
+    // handler may not build it — see `signal_terminate`).
+    let mut termios = std::mem::MaybeUninit::<libc::termios>::uninit();
+    // SAFETY: `tcgetattr` fills the struct; we only read it on success.
+    if unsafe { libc::tcgetattr(libc::STDIN_FILENO, termios.as_mut_ptr()) } == 0 {
+        let _ = ORIGINAL_TERMIOS.set(unsafe { termios.assume_init() });
+    }
+    let _ = RESTORE_SEQ.set(terminal_restore_seq());
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(
@@ -976,6 +1063,49 @@ mod mouse_reporting_tests {
             !super::mouse_mode_seq(false).contains("1002h"),
             "disabling capture must not enable anything"
         );
+    }
+
+    /// The SIGTERM/SIGHUP restore must undo every mode `setup_terminal` set.
+    ///
+    /// This is the byte-level contract of a path no test can drive end-to-end
+    /// (it ends in `_exit`), and the leak it prevents is invisible until you're
+    /// back in your shell with the mouse spewing escapes.
+    #[test]
+    fn signal_restore_undoes_every_mode_setup_enabled() {
+        let seq = super::terminal_restore_seq();
+        for (mode, why) in [
+            ("\x1b[?1049l", "leave the alt screen"),
+            ("\x1b[?2004l", "disable bracketed paste"),
+            ("\x1b[?1007l", "disable alternate scroll"),
+            ("\x1b[?1000l", "disable mouse reporting"),
+            ("\x1b[?1002l", "disable drag reporting"),
+            ("\x1b[?1006l", "disable SGR coordinates"),
+            ("\x1b[?25h", "show the cursor"),
+            ("\x1b[>0p", "show the mouse pointer"),
+            ("\x1b[23;0t", "pop the window title"),
+        ] {
+            assert!(
+                seq.contains(mode),
+                "restore must {why} ({mode:?} missing): {seq:?}"
+            );
+        }
+    }
+
+    /// The restore must not *enable* anything. `restore_terminal` deliberately
+    /// omits `EnableAlternateScroll` (unlike `mouse_mode_seq(false)`, which is
+    /// re-arming a live session) — spyc is exiting, so leaving 1007 on would
+    /// hand the shell a wheel that still emits arrow keys.
+    #[test]
+    fn signal_restore_enables_nothing() {
+        let seq = super::terminal_restore_seq();
+        for enable in [
+            "1000h", "1002h", "1003h", "1006h", "1007h", "1049h", "2004h",
+        ] {
+            assert!(
+                !seq.contains(enable),
+                "restore must not enable ?{enable}: {seq:?}"
+            );
+        }
     }
 
     /// Source-scan guard: nothing in `src/` may use crossterm's own

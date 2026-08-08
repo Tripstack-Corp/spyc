@@ -361,6 +361,27 @@ in a pane that works fine outside spyc. Restoring `-i` for a shell command
 reintroduces it. The symptom is always third-party (spyc logs nothing), so
 "pane-only rc weirdness + pid-keyed temp files" is the signature.
 
+<!-- SPYC-TRAP: signal-teardown-precomputed -->
+`signal_terminate` (SIGTERM / SIGHUP) restores the terminal from a string built
+in `setup_terminal` — `RESTORE_SEQ` — and from a `termios` captured there before
+`enable_raw_mode`. Neither may be produced inside the handler.
+
+A signal handler may only call async-signal-safe functions. Building the restore
+string runs crossterm's formatting (allocates) and reads `$TMUX` via `getenv`
+(not on POSIX's safe list); `disable_raw_mode` takes a lock inside crossterm,
+and `exit` runs atexit handlers and flushes stdio. Any of those in a handler is
+a latent deadlock or corruption that shows up only when a signal lands at the
+wrong instant — the hardest possible thing to reproduce. So the handler is
+exactly `write` + `tcsetattr` + `_exit`, and everything it needs is computed
+before the signal can arrive.
+
+Load-bearing because the failure is *someone else's* terminal, after spyc is
+gone: without the restore, `pkill spyc` or a closed terminal leaves the shell on
+the alt screen, in raw mode, and — since `[mouse] capture` defaults on — with
+`?1000h` armed, so every pointer move emits escape garbage for the rest of the
+session. The plan that introduced default-on capture listed this teardown as
+its prerequisite; the default shipped first, which is how the gap reached users.
+
 ## Git: 100% in-process gix
 
 Production git is entirely in-process via `gix` (gitoxide) — status,
