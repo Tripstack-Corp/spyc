@@ -316,7 +316,7 @@ fn write_index_with_lock_retry(index: &mut gix::index::File) -> std::io::Result<
                 return Err(std::io::Error::other(format!(
                     "write index ({} attempt(s)): {}{}",
                     attempt,
-                    error_chain(&e),
+                    crate::git::error_chain(&e),
                     describe_index_parent(index.path())
                 )));
             }
@@ -394,19 +394,6 @@ fn lock_contention_is_transient(e: &gix::index::file::write::Error) -> bool {
                 | std::io::ErrorKind::Interrupted
         ),
     }
-}
-
-/// Render an error with every `source()` behind it, so a wrapper whose Display
-/// omits the cause still reports one.
-fn error_chain(e: &dyn std::error::Error) -> String {
-    let mut out = e.to_string();
-    let mut src = e.source();
-    while let Some(cause) = src {
-        out.push_str(" -> ");
-        out.push_str(&cause.to_string());
-        src = cause.source();
-    }
-    out
 }
 
 /// Resolve `full_ref` (`refs/heads/<branch>`) to its commit id. If the branch
@@ -1284,7 +1271,7 @@ mod tests {
         let e = gix::index::file::write::Error::AcquireLock(gix::lock::acquire::Error::Io(
             std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied by fs"),
         ));
-        let rendered = super::error_chain(&e);
+        let rendered = crate::git::error_chain(&e);
         assert!(
             rendered.contains("Could not acquire lock"),
             "keeps the outer message: {rendered}"

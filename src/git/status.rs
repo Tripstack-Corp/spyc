@@ -192,13 +192,26 @@ pub fn make_status_platform(
     repo: &gix::Repository,
     untracked: gix::status::UntrackedFiles,
 ) -> Option<gix::status::Platform<'_, gix::progress::Discard>> {
+    make_status_platform_result(repo, untracked).ok()
+}
+
+/// [`make_status_platform`] keeping the failure cause.
+///
+/// Callers that only paint git markers want the `Option` — a failure just means
+/// "no markers this tick". A caller about to REFUSE a destructive operation
+/// needs to say why, which is what this is for.
+pub fn make_status_platform_result(
+    repo: &gix::Repository,
+    untracked: gix::status::UntrackedFiles,
+) -> std::io::Result<gix::status::Platform<'_, gix::progress::Discard>> {
     use gix::status::tree_index::TrackRenames;
-    Some(
-        repo.status(gix::progress::Discard)
-            .ok()?
-            .untracked_files(untracked)
-            .tree_index_track_renames(TrackRenames::Given(gix::diff::Rewrites::default())),
-    )
+    Ok(repo
+        .status(gix::progress::Discard)
+        .map_err(|e| {
+            std::io::Error::other(format!("build status: {}", crate::git::error_chain(&e)))
+        })?
+        .untracked_files(untracked)
+        .tree_index_track_renames(TrackRenames::Given(gix::diff::Rewrites::default())))
 }
 
 /// The live status backend (run by the background git worker, bootstrap.rs):
@@ -225,18 +238,38 @@ pub fn make_status_platform(
 ///   column.
 #[must_use]
 pub fn repo_status(repo_root: &Path) -> Option<Vec<StatusEntry>> {
+    repo_status_result(repo_root).ok()
+}
+
+/// [`repo_status`] keeping the failure cause.
+///
+/// The `Option` above is right for the marker hot path — a failed tick just
+/// paints nothing and the next poll retries. It is wrong for a caller that
+/// REFUSES work on failure: `safe_remove_worktree` used to collapse every cause
+/// into "not a git worktree, or its status can't be read", which names the
+/// target path as the suspect no matter what actually went wrong. A transient
+/// failure then reads as a structural one, and the operator has nothing to go
+/// on. (That is not hypothetical — it sent one investigation down a wrong path
+/// entirely.)
+pub fn repo_status_result(repo_root: &Path) -> std::io::Result<Vec<StatusEntry>> {
     use gix::bstr::ByteSlice;
     use gix::diff::index::ChangeRef;
     use gix::status::index_worktree::Item as IwItem;
     use gix::status::plumbing::index_as_worktree::{Change, EntryStatus};
     use gix::status::{Item, UntrackedFiles};
 
-    let repo = gix::open(repo_root).ok()?;
+    let repo = gix::open(repo_root).map_err(|e| {
+        std::io::Error::other(format!(
+            "open {}: {}",
+            repo_root.display(),
+            crate::git::error_chain(&e)
+        ))
+    })?;
     // `-unormal`: collapse a fully-untracked dir to one `dir/` entry, but list
     // an untracked file inside a tracked dir individually. See the doc comment
     // above for why this is `Collapsed`, not `Files`. Rename-detection config
     // is shared with `collect_worktree_plan` via `make_status_platform`.
-    let platform = make_status_platform(&repo, UntrackedFiles::Collapsed)?;
+    let platform = make_status_platform_result(&repo, UntrackedFiles::Collapsed)?;
 
     // Accumulate per repo-relative path: the staged column (TreeIndex) and the
     // unstaged/untracked column (IndexWorktree) for the same path merge into
@@ -253,7 +286,9 @@ pub fn repo_status(repo_root: &Path) -> Option<Vec<StatusEntry>> {
         })
     }
 
-    let iter = platform.into_iter(None).ok()?;
+    let iter = platform.into_iter(None).map_err(|e| {
+        std::io::Error::other(format!("walk status: {}", crate::git::error_chain(&e)))
+    })?;
     for item in iter {
         // Tolerate a single bad item: one path that fails to decode (e.g. an
         // unreadable worktree entry) must not blank the *entire* repo's git
@@ -354,7 +389,7 @@ pub fn repo_status(repo_root: &Path) -> Option<Vec<StatusEntry>> {
         }
     }
 
-    Some(by_path.into_values().collect())
+    Ok(by_path.into_values().collect())
 }
 
 /// [`repo_status`] guarded against the racy-snapshot pitfall, returning the

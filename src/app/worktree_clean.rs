@@ -43,8 +43,26 @@ pub struct SafeRemoveReport {
 /// changing nothing — when `path` isn't a readable git worktree, is claimed
 /// (locked), or archiving fails.
 pub fn safe_remove_worktree(path: &Path) -> std::io::Result<SafeRemoveReport> {
-    let statuses = status::repo_status(path)
-        .ok_or_else(|| std::io::Error::other("not a git worktree, or its status can't be read"))?;
+    // Distinguish the three ways this can fail, because they need different
+    // responses from whoever reads the message: a wrong path, a directory that
+    // isn't a worktree, or a status read that failed for a reason of its own
+    // (a lock held by a concurrent git, a permissions problem). The single
+    // collapsed message this replaced blamed the path in all three cases, so a
+    // transient failure looked structural.
+    let statuses = if !path.exists() {
+        return Err(std::io::Error::other(format!(
+            "no such path: {}",
+            path.display()
+        )));
+    } else if !path.join(".git").exists() {
+        return Err(std::io::Error::other(format!(
+            "not a git worktree (no .git): {}",
+            path.display()
+        )));
+    } else {
+        status::repo_status_result(path)
+            .map_err(|e| std::io::Error::other(format!("reading worktree status: {e}")))?
+    };
 
     // Honor a lease BEFORE archiving — don't archive then refuse. A claim is
     // respected even by safe-remove; release it first.
@@ -284,5 +302,50 @@ mod tests {
             );
             assert!(wt.exists(), "leased worktree left intact");
         });
+    }
+
+    /// A refusal must say WHICH failure it hit and name the path.
+    ///
+    /// These three used to share one message — "not a git worktree, or its
+    /// status can't be read" — which blames the target in every case. That is
+    /// how a transient status failure got investigated as a structural bug.
+    #[test]
+    fn safe_remove_refusals_name_their_cause_and_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("nope");
+        let err = safe_remove_worktree(&missing).unwrap_err().to_string();
+        assert!(err.contains("no such path"), "missing path: {err}");
+        assert!(err.contains("nope"), "names the path: {err}");
+
+        // Exists, but isn't a worktree.
+        let plain = tmp.path().join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        let err = safe_remove_worktree(&plain).unwrap_err().to_string();
+        assert!(err.contains("not a git worktree"), "plain dir: {err}");
+        assert!(err.contains("plain"), "names the path: {err}");
+        assert!(
+            !err.contains("no such path"),
+            "must not claim the path is missing: {err}"
+        );
+    }
+
+    /// `repo_status_result` carries the cause the `Option` variant discards,
+    /// and the `Option` variant still answers `None` for the same input — the
+    /// marker hot path keeps its behavior.
+    #[test]
+    fn repo_status_result_reports_why_and_option_still_returns_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plain = tmp.path().join("not-a-repo");
+        std::fs::create_dir(&plain).unwrap();
+
+        let err = crate::git::status::repo_status_result(&plain)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("open"), "names the failing step: {err}");
+        assert!(err.contains("not-a-repo"), "names the path: {err}");
+        assert!(
+            crate::git::status::repo_status(&plain).is_none(),
+            "the Option variant is unchanged for the hot path"
+        );
     }
 }

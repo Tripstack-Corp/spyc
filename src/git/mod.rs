@@ -27,6 +27,25 @@ pub mod worktree;
 #[cfg(test)]
 pub mod test_support;
 
+/// Render an error with every `source()` behind it, so a wrapper whose Display
+/// omits the cause still reports one.
+///
+/// gix's error types nest several layers deep and the outermost Display is
+/// routinely the useless half ("could not open repository"), which is why the
+/// facade formats causes rather than passing `{e}` up. The app-layer equivalent
+/// is anyhow's `{e:#}` (see the `flashed_errors_render_their_whole_chain`
+/// guard); this is the same rule for the non-anyhow half.
+pub fn error_chain(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut src = e.source();
+    while let Some(cause) = src {
+        out.push_str(" -> ");
+        out.push_str(&cause.to_string());
+        src = cause.source();
+    }
+    out
+}
+
 #[cfg(test)]
 mod no_subprocess_git_in_production {
     //! Strangler-fig closing guard: production code must never spawn the `git`
