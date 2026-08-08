@@ -31,9 +31,7 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     //     a border eats two rows of usable content and visually
     //     disrupts the layout the user just had on-screen.
     // The title bar and position indicator only exist on the bordered
-    // block, so build them inside that branch — borderless mode discarded
-    // them before (and fed `position_indicator` an `inner-2` viewport that
-    // doesn't match a border-free body anyway).
+    // block, so build them inside that branch.
     // Multi-column partition is viewport-independent, so compute it ONCE here
     // and share it with the position indicator and the body layout below.
     // Previously each of `position_indicator`, `render_multi_column` (and
@@ -43,15 +41,27 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     let ncols = view.columns.max(1) as usize;
     let multi_col_chunks = (ncols > 1).then(|| partition_lines_static(&view.lines, ncols));
 
+    // Reserve the bottom row for the search/status bar. In multi-column
+    // views (help) the row is always reserved so the viewport height stays
+    // constant when search is activated — otherwise the column layout
+    // would reflow. In single-column views it's only shown when active.
+    // Decided before the block because the position indicator must be measured
+    // against the same viewport the body gets: read off `inner - 2` it ignored
+    // this row and could label a view "All" with a line still off-screen.
+    let show_search_row = view.status_text().is_some() || ncols > 1;
+
     let borderless = view.full_width || matches!(view.mount, Mount::LowerPane);
     let block = if borderless {
         Block::default()
     } else {
+        // The height `content_area` gets below: borders, plus the search row.
+        let content_h = inner_area
+            .height
+            .saturating_sub(2)
+            .saturating_sub(u16::from(show_search_row));
         let pos = match &multi_col_chunks {
-            Some(chunks) => {
-                view.position_indicator_multi(chunks, inner_area.height.saturating_sub(2))
-            }
-            None => view.position_indicator(inner_area.height.saturating_sub(2)),
+            Some(chunks) => view.position_indicator_multi(chunks, content_h),
+            None => view.position_indicator(content_h),
         };
         let title_style = Style::default()
             .fg(theme.prompt_prefix)
@@ -90,11 +100,6 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     let body_area = block.inner(inner_area);
     frame.render_widget(block, inner_area);
 
-    // Reserve the bottom row for the search/status bar. In multi-column
-    // views (help) the row is always reserved so the viewport height stays
-    // constant when search is activated — otherwise the column layout
-    // would reflow. In single-column views it's only shown when active.
-    let show_search_row = view.status_text().is_some() || ncols > 1;
     let (content_area, search_area) = if show_search_row {
         (
             Rect {
