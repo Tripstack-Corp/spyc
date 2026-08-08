@@ -340,6 +340,27 @@ reopens the second commander there.
   is head-truncated at 1 MB (the tail of a `cargo build` is what
   the user wants).
 
+<!-- SPYC-TRAP: pane-shell-rc-double-source -->
+An interactive pane spawns as `$SHELL -i -c 'exec <command>'`
+(`shell::pane_invocation`): `-i` so the wrapper loads the user's rc-file PATH
+and aliases before resolving the command, `exec` so no job-control wrapper
+survives to fight `^z` (see "Pane I/O" in AGENTS.md). When `<command>` is
+*itself* a shell that sources an interactive startup file, `-i` is dropped and
+only the target does an interactive rc pass.
+
+Load-bearing because `exec` **preserves the pid** while resetting every shell
+variable. Two rc passes therefore run under one pid with a fresh variable
+space each time, which silently breaks any rc machinery that keys temp state
+on pid plus a per-process counter. p10k's gitstatus is the live casualty: its
+lock/fifo prefix is `$sysparams[pid].$EPOCHSECONDS.$((++_GITSTATUS_START_COUNTER))`,
+so both passes compute the *same* path; the first pass's orphaned daemon then
+hits its stale-client watchdog (`flock && sleep 5 && [[ -e lock ]]`), deletes
+what is now the *second* instance's live lock, and the second client's
+success-path `zf_rm` fails — surfacing as "gitstatus failed to initialize"
+in a pane that works fine outside spyc. Restoring `-i` for a shell command
+reintroduces it. The symptom is always third-party (spyc logs nothing), so
+"pane-only rc weirdness + pid-keyed temp files" is the signature.
+
 ## Git: 100% in-process gix
 
 Production git is entirely in-process via `gix` (gitoxide) — status,

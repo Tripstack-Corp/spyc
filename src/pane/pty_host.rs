@@ -199,16 +199,7 @@ impl PtyHost {
             pixel_height: 0,
         })?;
 
-        // For interactive panes, `exec` the command so the rc-sourcing shell
-        // replaces itself with the agent (no surviving job-control wrapper —
-        // see `PtySpec::exec_replace`). Empty command → leave it (a bare shell).
-        let invoke_cmd: std::borrow::Cow<'_, str> =
-            if spec.exec_replace && !spec.command.trim().is_empty() {
-                std::borrow::Cow::Owned(format!("exec {}", spec.command))
-            } else {
-                std::borrow::Cow::Borrowed(spec.command)
-            };
-        let (shell, shell_args) = crate::shell::user_shell_invocation(&invoke_cmd);
+        let (shell, shell_args) = crate::shell::pane_invocation(spec.command, spec.exec_replace);
         let mut cmd = CommandBuilder::new(&shell);
         cmd.args(shell_args.iter().map(String::as_str));
         cmd.cwd(spec.cwd);
@@ -641,7 +632,7 @@ mod tests {
     /// of the channel in order, followed by a `Closed` on EOF —
     /// exactly the contract every consumer (Pane,
     /// PendingCapture, BackgroundTask) depends on. No
-    /// `user_shell_invocation`, no rc files, no parallel-load
+    /// `pane_invocation`, no rc files, no parallel-load
     /// timing variance.
     ///
     /// This replaced an earlier `spawn_and_drain_echo` test that
