@@ -58,6 +58,15 @@ needs-permission→blocked, turn-end→done): **claude** (`.claude/settings.json
 **codex** (`.codex/config.toml`), **agy** (`.agents/hooks.json` — working/done only;
 agy has no approval event, so its `blocked` comes from spyc reading the approval
 prompt off the pane).
+
+agy's `done` needs **agy >= 1.1.10**: earlier versions evaluated `hooks.json` after
+their own termination checks, so the `Stop` handler spyc installs was unreachable
+and that half silently degraded to output timing. Its whole event vocabulary is
+`PreToolUse` / `PostToolUse` / `PreInvocation` / `PostInvocation` / `Stop` — none of
+which fires on a user-approval prompt, so the scrape is not a stopgap awaiting a
+better event. `PreToolUse` is not the missing one: it must answer with a `decision`,
+so it arbitrates permissions rather than observing them, and leaving that answer out
+makes agy re-drive the tool instead of finishing the turn.
 It asks first — a `[Y/n]` on the first launch per repo, saved; change it later
 with **`:hooks on|on!|off`**.
 
