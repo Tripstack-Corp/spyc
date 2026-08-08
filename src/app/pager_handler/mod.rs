@@ -69,11 +69,32 @@ pub enum PagerSlot {
 }
 
 impl App {
-    /// Route a key to the pager overlay. Also uses vi-like motion so the
-    /// pager feels native to the rest of the UI. Delegates each input
-    /// context to a sub-handler (returning `Some` when it consumes the key,
-    /// `None` to fall through); the final motion handler always consumes.
+    /// Route a key to the pager overlay, then re-home any status-bar flash the
+    /// handler raised into the pager itself (#166 — see
+    /// [`Self::relocate_flash_into_pager`]). `view.input_went_to_pager` carries
+    /// the same relocation past `run_effects`, for a message an executor emits.
     pub fn handle_pager_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        self.view.input_went_to_pager = true;
+        let effects = self.dispatch_pager_key(key);
+        self.relocate_flash_into_pager();
+        effects
+    }
+
+    /// Move a status-bar flash raised by a pager keypress into the pager that
+    /// still owns the screen: the pager is drawn over the status bar, so the
+    /// message would render half-occluded. A handler whose result lands on the
+    /// file list closed its pager first, leaving nothing to relocate into — so
+    /// those messages stay on the status bar without needing a per-site opt-out.
+    pub(crate) fn relocate_flash_into_pager(&mut self) {
+        if self.active_pager_ref().is_none() {
+            return;
+        }
+        if let Some(msg) = self.state.flash.take() {
+            self.set_active_pager_flash(msg.text);
+        }
+    }
+
+    fn dispatch_pager_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         // The full-screen image overlay sits on top of the pager and is modal:
         // intercept before any pager handler and route to its own verbs.
         if self.view.image_view.is_some() {

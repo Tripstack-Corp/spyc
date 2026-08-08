@@ -202,6 +202,12 @@ impl App {
                         // inline spawn + its after-work).
                         let effects = self.handle_key(key)?;
                         self.run_effects(effects, terminal, foreground_exec);
+                        // An executor's flash (e.g. `SignalGroup`'s "task #N
+                        // paused") lands after the handler, so re-home it here
+                        // too — the pager still covers the status bar (#166).
+                        if std::mem::take(&mut self.view.input_went_to_pager) {
+                            self.relocate_flash_into_pager();
+                        }
                     }
                     Event::Paste(text) => {
                         let effects = self.handle_paste(text);

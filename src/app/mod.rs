@@ -713,6 +713,10 @@ pub struct ViewState {
     pub pager_history: PagerHistory,
     pub pager_pending_bracket: Option<char>,
     pub pager_was_open: bool,
+    /// This turn's input went to a pager, so a status-bar flash raised while
+    /// running its effects belongs in the pager instead (#166). Consumed at
+    /// loop bottom by `relocate_flash_into_pager`.
+    pub input_went_to_pager: bool,
     /// Stash for the pager that was active when `?` opened the
     /// pager-help overlay. Restored verbatim on Esc/q dismissal so
     /// the user lands back in the same view. Separate from
@@ -954,6 +958,7 @@ impl ViewState {
             pager_history: PagerHistory::new(),
             pager_pending_bracket: None,
             pager_was_open: false,
+            input_went_to_pager: false,
             pager_help_stash: None,
             scroll_pager_help_stash: None,
             pager_positions: crate::state::pager_positions::PagerPositions::load(),
