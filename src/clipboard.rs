@@ -15,6 +15,7 @@
 
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[cfg(test)]
 thread_local! {
@@ -48,6 +49,45 @@ pub fn with_paste_override<R>(text: &str, body: impl FnOnce() -> R) -> R {
     PASTE_OVERRIDE.with(|c| *c.borrow_mut() = Some(text.to_string()));
     let _g = Guard;
     body()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test-only override for [`HELPER_REAP_BUDGET`]. Production's budget is
+    /// deliberately far too short to wait out a `/bin/sh` stub's fork+exec,
+    /// which is right for a yank and useless for a test that has to observe the
+    /// helper's exit status or the file it wrote. Third seam in this file's
+    /// existing thread-local pattern.
+    static REAP_BUDGET_OVERRIDE: std::cell::RefCell<Option<std::time::Duration>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Test-only: run `body` with the reap budget pinned to `budget`.
+#[cfg(test)]
+pub fn with_reap_budget<R>(budget: std::time::Duration, body: impl FnOnce() -> R) -> R {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            REAP_BUDGET_OVERRIDE.with(|c| *c.borrow_mut() = None);
+        }
+    }
+    REAP_BUDGET_OVERRIDE.with(|c| *c.borrow_mut() = Some(budget));
+    let _g = Guard;
+    body()
+}
+
+/// The bounded-wait budget [`spawn_and_pipe`] actually uses — the constant in
+/// production, the thread-local override under test.
+#[cfg(not(test))]
+const fn reap_budget() -> Duration {
+    HELPER_REAP_BUDGET
+}
+
+#[cfg(test)]
+fn reap_budget() -> Duration {
+    REAP_BUDGET_OVERRIDE
+        .with(|c| *c.borrow())
+        .unwrap_or(HELPER_REAP_BUDGET)
 }
 
 /// Test-only: run `body` with the clipboard helper pinned to `bin`.
@@ -229,6 +269,42 @@ fn osc52_sequence(text: &str, in_tmux: bool) -> Result<String, String> {
     })
 }
 
+/// Resolve a user clipboard-command override: `$SPYC_CLIPBOARD` if set and
+/// non-empty, else `config_command` if non-empty, else `None`. Env wins over
+/// config, matching how other spyc envs layer over static config.
+///
+/// `copy()` calls this with `config_command: None` — it's a leaf module (see
+/// AGENTS.md's "dependency direction one-way": `app` depends on this module,
+/// never the reverse), so it can honor `$SPYC_CLIPBOARD` but not
+/// `[clipboard].command`. `deliver_clipboard` (which does have config access)
+/// passes the config value through, so both sources are checked exactly once
+/// from there.
+pub fn resolve_override(config_command: Option<&str>) -> Option<String> {
+    crate::envset::var("SPYC_CLIPBOARD")
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            config_command
+                .filter(|s| !s.is_empty())
+                .map(ToString::to_string)
+        })
+}
+
+/// Run a user-supplied clipboard command verbatim and pipe `text` to its
+/// stdin. Whitespace-split into argv — no shell features, same contract as
+/// `$EDITOR`/`$PAGER` resolution in `src/shell/mod.rs` (wrap it in a script if
+/// you need pipes/redirection/etc).
+pub fn copy_via_user_command(cmd: &str, text: &str) -> io::Result<()> {
+    let mut parts = cmd.split_whitespace();
+    let Some(prog) = parts.next() else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "clipboard command is empty",
+        ));
+    };
+    let args: Vec<&str> = parts.collect();
+    spawn_and_pipe(prog, &args, text)
+}
+
 /// Write `text` to the system clipboard.
 pub fn copy(text: &str) -> io::Result<()> {
     #[cfg(test)]
@@ -245,6 +321,9 @@ pub fn copy(text: &str) -> io::Result<()> {
             let path = p.to_string_lossy().into_owned();
             return spawn_and_pipe("/bin/sh", &[path.as_str()], text);
         }
+    }
+    if let Some(cmd) = resolve_override(None) {
+        return copy_via_user_command(&cmd, text);
     }
     copy_impl(text)
 }
@@ -295,6 +374,35 @@ fn copy_impl(_text: &str) -> io::Result<()> {
     ))
 }
 
+/// How long spawn_and_pipe will block waiting for a helper to exit before
+/// treating "still running" as success and detaching a reaper thread.
+/// xclip/xsel legitimately persist after a successful copy to keep serving
+/// the X11 selection until another app claims it — that is NOT a hang, and
+/// `Child::wait()` would block the caller (the event-loop thread, since
+/// Effect::CopyToClipboard runs inline in run_effects) for as long as the
+/// selection goes unclaimed, sometimes indefinitely. A genuine launch
+/// failure (bad $DISPLAY, missing libX11) exits within this window.
+///
+/// Deliberately short, because this budget is paid on the event-loop thread
+/// **every** time an X11 helper persists — i.e. on every single yank under
+/// `xclip`/`xsel`, which is the common case on that platform, not an edge one.
+/// A whole-second stall there would be a worse bug than the one this bounding
+/// exists to fix.
+///
+/// The cost of being short: a helper that launches, then fails *slower* than
+/// this, is reported as success (the user sees "yanked" and gets nothing on
+/// the clipboard). Accepted, because the fast-failure case this does catch —
+/// `xclip` with a bad `$DISPLAY` exits in single-digit ms — is the one that
+/// actually happens, and a broken clipboard announces itself at the next
+/// paste. The real fix for both halves is moving the write off-thread
+/// entirely (AGENTS.md's `graveyard_ops` template), where no budget is needed.
+const HELPER_REAP_BUDGET: Duration = Duration::from_millis(150);
+
+/// Poll granularity for the bounded wait below — small enough that the
+/// common case (helper exits almost immediately) doesn't add perceptible
+/// latency to a yank.
+const HELPER_REAP_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
 fn spawn_and_pipe(prog: &str, args: &[&str], text: &str) -> io::Result<()> {
     // Null out stdout/stderr: spyc runs in raw-mode alternate-screen, so
     // anything a helper prints (xclip usage text, a wl-copy warning) would
@@ -308,23 +416,48 @@ fn spawn_and_pipe(prog: &str, args: &[&str], text: &str) -> io::Result<()> {
         .spawn()?;
     // Write the payload, then drop stdin so the helper sees EOF — but do NOT
     // early-return on a write error: a bare `?` here would drop the child
-    // handle without `wait()`, leaking a zombie (the bug this guards). Capture
-    // the result and reap the child first.
+    // handle without reaping it, leaking a zombie (the bug this guards).
+    // Capture the result and reap below instead.
     let write_result = match child.stdin.take() {
         Some(mut stdin) => stdin.write_all(text.as_bytes()),
         None => Ok(()),
     };
-    // `wait()` reaps the child (no zombie) and only surfaces wait-syscall
-    // failure, not a non-zero exit. xclip/wl-copy/xsel can launch cleanly and
-    // then fail (no compositor, archived display, dbus unreachable…) — treat a
-    // non-zero exit as an error so the user sees the real reason instead of a
-    // phantom "yanked" flash, and so the Linux cascade doesn't get stuck on a
+
+    // Poll with `try_wait()` rather than block on `wait()` — see
+    // HELPER_REAP_BUDGET. A genuine launch failure exits promptly; a helper
+    // still serving the selection past the budget is not our problem to wait
+    // out.
+    let deadline = Instant::now() + reap_budget();
+    let mut exited = None;
+    while Instant::now() < deadline {
+        if let Some(status) = child.try_wait()? {
+            exited = Some(status);
+            break;
+        }
+        std::thread::sleep(HELPER_REAP_POLL_INTERVAL);
+    }
+
+    let Some(status) = exited else {
+        // Still running past the budget: treat as success and detach a
+        // reaper so it's still cleaned up (no zombie) whenever it does
+        // eventually exit. Nobody is waiting on that outcome, so no
+        // Message/feedback is needed.
+        write_result?;
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        return Ok(());
+    };
+
+    // A non-zero exit means xclip/wl-copy/xsel launched cleanly and then
+    // failed (no compositor, archived display, dbus unreachable…) — treat it
+    // as an error so the user sees the real reason instead of a phantom
+    // "yanked" flash, and so the Linux cascade doesn't get stuck on a
     // present-but-broken helper. The exit status is the more informative
     // signal, so it takes precedence over a stdin-write error (e.g. an EPIPE
     // from a helper that bailed before reading). ErrorKind::Other is
     // deliberate: callers only fall through on `NotFound`, so a non-zero exit
     // stops the cascade and surfaces immediately.
-    let status = child.wait()?;
     if !status.success() {
         return Err(io::Error::other(format!(
             "{prog} exited unsuccessfully: {status}"
@@ -340,6 +473,12 @@ fn spawn_and_pipe(prog: &str, args: &[&str], text: &str) -> io::Result<()> {
 mod tests {
     use super::*;
     use std::fs;
+
+    /// Generous budget for tests that must observe the helper's exit status or
+    /// the file it wrote. Production's is deliberately too short for that (see
+    /// `HELPER_REAP_BUDGET`), so those tests say so explicitly rather than
+    /// racing a stub's fork+exec under a loaded parallel run.
+    const TEST_REAP_BUDGET: Duration = Duration::from_secs(10);
 
     #[test]
     fn paste_via_override_returns_the_injected_text() {
@@ -371,8 +510,12 @@ mod tests {
         perms.set_mode(0o755);
         fs::set_permissions(&stub, perms).unwrap();
 
-        with_clipboard_override(&stub, || copy("hello world\n"))
-            .expect("copy via stub should succeed");
+        // Long budget: this test reads the file the stub writes, so it needs
+        // spawn_and_pipe to have actually waited for the child.
+        with_reap_budget(TEST_REAP_BUDGET, || {
+            with_clipboard_override(&stub, || copy("hello world\n"))
+                .expect("copy via stub should succeed");
+        });
 
         let captured = fs::read_to_string(&sidecar).expect("read sidecar");
         assert_eq!(captured, "hello world\n");
@@ -399,8 +542,10 @@ mod tests {
         perms.set_mode(0o755);
         fs::set_permissions(&stub, perms).unwrap();
 
-        let err = with_clipboard_override(&stub, || copy("ignored"))
-            .expect_err("non-zero exit should surface as error");
+        let err = with_reap_budget(TEST_REAP_BUDGET, || {
+            with_clipboard_override(&stub, || copy("ignored"))
+                .expect_err("non-zero exit should surface as error")
+        });
         // Crucially NOT NotFound — the Linux cascade falls through
         // only on NotFound, so a present-but-failing helper must
         // produce a different ErrorKind to halt the cascade.
@@ -430,6 +575,157 @@ mod tests {
         let err = with_clipboard_override(&stub, || copy(&big))
             .expect_err("a helper that ignores a large stdin should surface a write error");
         assert_eq!(err.kind(), io::ErrorKind::BrokenPipe, "got {err:?}");
+    }
+
+    /// `src/envset.rs` has no thread-local test seam (its overrides are a
+    /// process-global `RwLock`, by design — they're meant to layer like the
+    /// real environment). All three precedence cases live in ONE test and run
+    /// in a fixed order, so this is the only place in the suite that ever
+    /// touches `SPYC_CLIPBOARD` and there's no cross-test ordering hazard from
+    /// the lack of an "unset" primitive.
+    #[test]
+    fn resolve_override_prefers_env_over_config_over_none() {
+        assert_eq!(resolve_override(None), None, "nothing set");
+        assert_eq!(
+            resolve_override(Some("cmd-from-config")),
+            Some("cmd-from-config".to_string()),
+            "config used when env absent"
+        );
+        assert_eq!(
+            resolve_override(Some("")),
+            None,
+            "an empty config value doesn't count as set"
+        );
+
+        crate::envset::set("SPYC_CLIPBOARD", "cmd-from-env");
+        assert_eq!(
+            resolve_override(Some("cmd-from-config")),
+            Some("cmd-from-env".to_string()),
+            "env wins over config"
+        );
+        assert_eq!(
+            resolve_override(None),
+            Some("cmd-from-env".to_string()),
+            "env alone is enough"
+        );
+
+        // An empty env override doesn't shadow a real config value — same
+        // "filtered non-empty" rule applies to both sources.
+        crate::envset::set("SPYC_CLIPBOARD", "");
+        assert_eq!(
+            resolve_override(Some("cmd-from-config")),
+            Some("cmd-from-config".to_string()),
+            "empty env falls through to config"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_via_user_command_splits_on_whitespace_and_args_reach_the_child() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let stub = tmp.path().join("stub-args.sh");
+        let sidecar = tmp.path().join("captured.txt");
+        // Echo argv (not stdin) so the test can see the split actually
+        // happened, then drain stdin so the caller's write doesn't EPIPE.
+        fs::write(
+            &stub,
+            format!(
+                "#!/bin/sh\necho \"$1|$2\" > {}\ncat > /dev/null\n",
+                sidecar.display()
+            ),
+        )
+        .expect("write stub");
+        let mut perms = fs::metadata(&stub).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&stub, perms).unwrap();
+
+        let cmd = format!("{} first second", stub.display());
+        with_reap_budget(TEST_REAP_BUDGET, || {
+            copy_via_user_command(&cmd, "hello").expect("stub should succeed");
+        });
+
+        let captured = fs::read_to_string(&sidecar).expect("read sidecar");
+        assert_eq!(captured.trim(), "first|second");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_via_user_command_pipes_text_to_stdin() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let stub = tmp.path().join("stub-stdin.sh");
+        let sidecar = tmp.path().join("captured.txt");
+        fs::write(&stub, format!("#!/bin/sh\ncat > {}\n", sidecar.display())).expect("write stub");
+        let mut perms = fs::metadata(&stub).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&stub, perms).unwrap();
+
+        with_reap_budget(TEST_REAP_BUDGET, || {
+            copy_via_user_command(&stub.display().to_string(), "hello world\n")
+                .expect("stub should succeed");
+        });
+
+        let captured = fs::read_to_string(&sidecar).expect("read sidecar");
+        assert_eq!(captured, "hello world\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_via_user_command_propagates_non_zero_exit() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let stub = tmp.path().join("stub-user-fail.sh");
+        fs::write(&stub, "#!/bin/sh\ncat > /dev/null\nexit 1\n").expect("write stub");
+        let mut perms = fs::metadata(&stub).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&stub, perms).unwrap();
+
+        let err = with_reap_budget(TEST_REAP_BUDGET, || {
+            copy_via_user_command(&stub.display().to_string(), "ignored")
+                .expect_err("non-zero exit should surface as error")
+        });
+        assert!(
+            err.to_string().contains("exited unsuccessfully"),
+            "got: {err}"
+        );
+    }
+
+    /// Pins "detach, don't wait" as the actual executed behavior, not just an
+    /// assertion of intent: a helper that keeps running well past
+    /// HELPER_REAP_BUDGET (mirrors xclip/xsel serving the X11 selection after
+    /// a successful copy) must not make `spawn_and_pipe` block for anywhere
+    /// close to its full lifetime.
+    #[cfg(unix)]
+    #[test]
+    fn spawn_and_pipe_detaches_a_persisting_child_instead_of_blocking() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let stub = tmp.path().join("stub-persist.sh");
+        // Read stdin first so the write doesn't EPIPE, THEN keep running well
+        // past the reap budget — the leftover process is intentionally
+        // abandoned; the test asserts we didn't wait on it, not that it's
+        // gone by the time the test returns.
+        fs::write(&stub, "#!/bin/sh\ncat > /dev/null\nsleep 10\n").expect("write stub");
+        let mut perms = fs::metadata(&stub).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&stub, perms).unwrap();
+
+        // Bounded well above HELPER_REAP_BUDGET + fork/exec + poll-interval
+        // slop, but far below the stub's 10s sleep — proves we detached rather
+        // than waited, without being sensitive to scheduling jitter under a
+        // loaded/parallel test run.
+        let start = Instant::now();
+        with_reap_budget(Duration::from_millis(100), || {
+            with_clipboard_override(&stub, || copy("hello"))
+                .expect("a persisting-but-successful helper must read as Ok, not an error");
+        });
+        assert!(
+            start.elapsed() < Duration::from_secs(4),
+            "spawn_and_pipe blocked for {:?}, should have detached at ~{:?}",
+            start.elapsed(),
+            HELPER_REAP_BUDGET
+        );
     }
 }
 

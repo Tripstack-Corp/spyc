@@ -197,8 +197,14 @@
 # tmux it needs `set -g set-clipboard on`; spyc DCS-wraps the escape so tmux
 # forwards it. Oversized selections fall back rather than risk a terminal
 # silently truncating them.
+#
+# `command` (default unset): when set, spyc runs this exact command
+# (whitespace-split into argv, no shell features — wrap it in a script if you
+# need any) and pipes the yanked text to its stdin, bypassing `via`/OSC-52
+# entirely. `$SPYC_CLIPBOARD` overrides this if both are set.
 [clipboard]
 # via = "auto"
+# command = "wl-copy"
 
 [notify]
 # desktop = true
