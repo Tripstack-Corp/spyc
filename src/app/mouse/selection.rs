@@ -119,7 +119,7 @@ impl super::super::App {
     /// Matched on the recorded row's `y`, which is its identity — each chrome
     /// surface is exactly one screen row. Reads what the renderer actually drew, so
     /// the column the user pressed maps to the character they saw.
-    fn chrome_col_at(&self, ev: MouseEvent) -> Option<(u16, u16)> {
+    pub(super) fn chrome_col_at(&self, ev: MouseEvent) -> Option<(u16, u16)> {
         let rows = self.view.chrome_rows.borrow();
         let row = rows.iter().find(|r| r.y == ev.row && ev.column >= r.x)?;
         Some((row.y, ev.column - row.x))
