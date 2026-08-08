@@ -370,7 +370,7 @@ pub struct GitCache {
     /// `refresh_listing` every 3 s and burn CPU on
     /// back-to-back worker runs. The 1 s / 10 s safety poll still
     /// invalidates on actual `.git/index` mtime changes, so the only
-    /// trade-off is a small lag in working-tree ` M` markers for
+    /// trade-off is a small lag in working-tree ` ~` markers for
     /// edits within the throttle window.
     pub last_git_invalidation: Option<std::time::Instant>,
     /// When the last git worker request was *sent* (after dedup, etc.).
@@ -379,7 +379,7 @@ pub struct GitCache {
     /// (which on huge trees can be 200-500 ms).
     pub last_git_request_at: Option<std::time::Instant>,
     /// A working-tree fs-event arrived but `refresh_listing` *throttled* its
-    /// cache invalidation, so the new ` M`/clean state was never re-walked.
+    /// cache invalidation, so the new ` ~`/clean state was never re-walked.
     /// The 1 Hz poll's own mtime short-circuit can't cover it — an unstaged
     /// edit moves no `.git/index`/`HEAD` mtime — so without this flag a change
     /// landing inside the throttle window (with no trailing event) would stay

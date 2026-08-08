@@ -73,14 +73,24 @@ do from here?", modeled on Neovim's which-key.
   on it; Esc cancels. No persistent index — walks lazily on open.
 - Multi-column layout that adapts to terminal width
 - Color-coded entries: directories, executables, symlinks, files
-- **Git status markers** — two-character left-gutter pair mirroring
-  `git status -s`: column 0 = staged side, column 1 = unstaged side.
-  `M ` ready-to-commit, ` M` working-tree-only, `MM` partially
-  staged + further edits, ` ?` untracked, `R~` staged rename +
-  unstaged tweaks, `!!` conflicted. Each char colored independently
-  (modified=amber, added/untracked=green, deleted=red, renamed=
-  lavender, conflicted=bold red). Directories containing changes
-  are tinted too.
+- **Git status markers** — two-character left-gutter pair whose *positions*
+  mirror `git status -s`: column 0 = staged side, column 1 = unstaged side.
+  The glyphs are spyc's own, not git's letters: `~` modified, `+` added,
+  `-` deleted, `>` renamed, `!` conflicted, `?` untracked. So `~ ` is
+  ready-to-commit, ` ~` working-tree-only, `~~` partially staged with
+  further edits, `>~` a staged rename with unstaged tweaks, ` ?` untracked
+  (the leading space keeps `?` in the unstaged column), and `!!` conflicted
+  — a conflict sets both halves. Each char is colored independently
+  (modified=amber, added/untracked=green, deleted=red, renamed=lavender,
+  conflicted=bold red). Directories containing changes are tinted too.
+
+  > **`!!` here means CONFLICTED, not ignored.** In `git status -s`, `!!` is
+  > an ignored file — the least urgent state there is; in spyc's gutter it's a
+  > merge conflict, the most urgent. Only the two-column *layout* is borrowed
+  > from porcelain, so don't read the pair as git codes. Nothing on screen is
+  > actually ambiguous — ignored files are dropped when status is decoded and
+  > never reach the gutter — but the notation inverts git's urgency, which is
+  > worth knowing before you skim past one.
 - **`]g` / `[g`** jump the cursor to the next / previous file or dir
   with a non-clean git status. Wraps end-to-end so the chord is
   hold-to-cycle. Flashes "no git changes in this directory" when

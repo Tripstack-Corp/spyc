@@ -459,14 +459,19 @@ fn change_glyph(change: GitChange, theme: &Theme) -> (char, Style) {
 }
 
 /// Two-character marker for the left gutter: column 0 = staged side,
-/// column 1 = unstaged side. Mirrors `git status -s`. Untracked files
-/// have no staged side (porcelain `??`) and render as ` ?` so the `?`
-/// lines up with the unstaged column.
+/// column 1 = unstaged side. The *positions* mirror `git status -s`; the
+/// glyphs are [`change_glyph`]'s, not git's letters. Untracked files have no
+/// staged side (porcelain `??`) and render as ` ?` so the `?` lines up with
+/// the unstaged column.
 ///
 /// Each char carries its own style — staged and unstaged colors don't
 /// have to match, which is the whole point: at a glance the user can
-/// tell `M ` (ready to commit) from ` M` (still working) from `MM`
+/// tell `~ ` (ready to commit) from ` ~` (still working) from `~~`
 /// (partially staged + further edits).
+///
+/// Note `!!` (conflicted, both halves) means the OPPOSITE urgency to
+/// porcelain's `!!` (ignored). Ignored files are dropped in
+/// `git::status`, so they never reach this function.
 fn git_marker_pair(git: GitFileStatus, theme: &Theme) -> [(char, Style); 2] {
     if git.is_clean() {
         return [(' ', Style::default()), (' ', Style::default())];

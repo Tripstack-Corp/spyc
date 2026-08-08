@@ -245,7 +245,7 @@ impl AppState {
         // updates when the user changes directories. Event-
         // driven refresh would normally invalidate the raw
         // cache (file mtimes moved but `.git/index` may not
-        // have — and we need fresh content for ` M`
+        // have — and we need fresh content for ` ~`
         // markers).
         //
         // But: an active filesystem (claude writing findings, build
@@ -254,7 +254,7 @@ impl AppState {
         // burst doesn't re-walk `git status` on every event. The 1 Hz
         // safety poll in `refresh_git_state` still catches `.git/index`
         // changes immediately; the only trade-off is up to ~1 s lag in
-        // working-tree ` M` markers for edits within the window.
+        // working-tree ` ~` markers for edits within the window.
         let throttle = std::time::Duration::from_secs(1);
         let should_invalidate = self
             .col(side)
