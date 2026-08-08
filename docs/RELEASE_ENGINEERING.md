@@ -182,9 +182,13 @@ and **Security Advisories**. spyc's equivalents:
   path, announced in the release notes under a dedicated "Errata" heading.
 - **Signing:** release notes + `SHA256SUMS` are signed (§9) so an advisory's
   artifacts are verifiable.
-- **Supply chain:** `audit.yml` runs `cargo deny check advisories` weekly (ported
-  from the retired Bitbucket `weekly-deps` pipeline) so RUSTSEC advisories surface
-  between releases; optionally Dependabot for the Actions themselves.
+- **Supply chain:** `audit.yml` owns it — the full `make deny` (advisories, bans,
+  licenses, sources) weekly *and* on `workflow_dispatch`, against a freshly
+  fetched RUSTSEC DB, so advisories surface between releases even with no commits.
+  Deliberately **not** in `ci.yml`'s PR gate (the fetch made commits
+  network-dependent and segfaulted a runner mid-check). **Dispatch it before
+  cutting a release**, and after merging anything that moves `Cargo.lock`;
+  optionally Dependabot for the Actions themselves.
 
 ## 7. Support & EOL policy
 
@@ -218,12 +222,15 @@ are the source of truth — Actions *call them* so local and CI never drift.
 > `snapshot.yml` (nightly cadence) remains to build.
 
 ### `ci.yml` — quality gate (PR + push to `main`) — **IMPLEMENTED**
-- Direct port of the retired `bitbucket-pipelines.yml`: `lint` (fmt + clippy +
-  deny) ∥ `test` on PRs, plus a `coverage` job (`cargo llvm-cov --locked
-  --all-targets --fail-under-lines 35`) on pushes to `main`. Toolchain cached via
-  `Swatinem/rust-cache`; `cargo-deny` + `cargo-llvm-cov` are the same sha-pinned
-  prebuilt binaries as before; `CARGO_INCREMENTAL=0` throughout. Make it a
-  required status check in branch protection.
+- Direct port of the retired `bitbucket-pipelines.yml`: `lint` (fmt + clippy) ∥
+  `test` on PRs, plus a `coverage` job (`cargo llvm-cov --locked
+  --all-targets --fail-under-lines 35`) on pushes to `main`. Supply-chain
+  (cargo-deny) moved to `audit.yml` — see §6. Toolchain cached via
+  `Swatinem/rust-cache`; `cargo-llvm-cov` is the same sha-pinned prebuilt binary
+  as before; `CARGO_INCREMENTAL=0` throughout. Make it a required status check in
+  branch protection — and note the `lint` job's **name is a required context**, so
+  renaming it needs the protection contexts changed in the same motion or every
+  open PR deadlocks on a context that never reports.
 - **Follow-ups:** (1) add a `macos-latest` matrix leg to catch OS-gated lints
   both ways (replaces needing `make lint-linux` + zig locally) — the initial
   port is Linux-only, matching the retired pipeline; (2) extend the trigger to
