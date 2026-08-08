@@ -10,7 +10,9 @@ A vi-keyboard-driven terminal file manager in Rust, on ratatui/crossterm. In the
 > [`FEATURES.md`](FEATURES.md); the config reference (`.spycrc.toml`, notifications,
 > keymap DSL, Lua) in [`CONFIGURATION.md`](CONFIGURATION.md); how the agent
 > activity-dots / notifications / merge-scope registry fit together in
-> [`docs/AGENT_ORCHESTRATION.md`](docs/AGENT_ORCHESTRATION.md). **Keep this file
+> [`docs/AGENT_ORCHESTRATION.md`](docs/AGENT_ORCHESTRATION.md); the per-agent
+> quirks a user hits (screen modes, where scrollback lives, resume mechanics) in
+> [`docs/HARNESS.md`](docs/HARNESS.md). **Keep this file
 > slim** — it's always in context.
 
 ## What it does

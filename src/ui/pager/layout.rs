@@ -14,6 +14,17 @@ pub(super) fn line_plain_text(line: &Line) -> String {
     line.spans.iter().map(|s| s.content.as_ref()).collect()
 }
 
+/// Terminal columns a rendered row occupies. Per-char `unicode_width` summed
+/// the same way `wrap_line_capped` budgets, so padding and wrap agree on where
+/// a row ends.
+pub(super) fn line_display_width(line: &Line) -> usize {
+    line.spans
+        .iter()
+        .flat_map(|s| s.content.chars())
+        .map(|ch| unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0))
+        .sum()
+}
+
 /// Centered pager occupies this percent of the terminal width.
 /// Exposed so callers (help content generation) can compute the same
 /// column width the pager will actually render at.
