@@ -409,8 +409,12 @@ Multiple tabs, each running an independent pty:
 - **^a n / ^a ]** next tab
 - **^a ^a** jump to the last-active tab (screen/tmux "last window")
 - **^a r** rename the active tab
-- **^a R** restart the active tab — closes it and respawns the same
-  command in the same working directory
+- **^a R** restart the active tab — respawns the same command in the same
+  working directory, **in place**, so the tab keeps its number (and its `^a r`
+  rename). Confirms first (`y`/`N`) when the child is still running, for the
+  same reason `^a x` does; an already-exited tab restarts silently. The new
+  child is a new process, so its `SPYC_PANE_ID`, agent conversation, and
+  scrollback all start fresh
 - Activity indicator (**+**) on background tabs that have new output
 - **Default command** for `^a c` resolves in this order:
   `$SPYC_PANE_CMD` env var → `[pane] default_command` in

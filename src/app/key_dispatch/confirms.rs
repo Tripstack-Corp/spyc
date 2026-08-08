@@ -142,6 +142,21 @@ impl App {
         Vec::new()
     }
 
+    /// Single-key confirmation for `^a R` on a tab whose child is still
+    /// running. `y`/`Y` restarts it; anything else leaves it alone. An exited
+    /// tab never opens this prompt — it restarts straight from
+    /// `restart_active_tab`.
+    pub(super) fn handle_restart_pane_confirm_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        let confirmed = matches!(key.code, KeyCode::Char('y' | 'Y'));
+        self.state.mode = Mode::Normal;
+        if confirmed {
+            self.restart_active_tab_now();
+        } else {
+            self.view.needs_full_repaint = true;
+        }
+        Vec::new()
+    }
+
     /// Single-key confirmation for the auto-fired claude crash recovery
     /// prompt. `y` / `Y` / Enter kills the broken tab and replaces it with
     /// a fresh `claude` (the user can then `/resume` manually); anything

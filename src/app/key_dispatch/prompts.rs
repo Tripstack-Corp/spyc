@@ -51,6 +51,12 @@ impl App {
         }
         if matches!(
             &self.state.mode,
+            Mode::Prompting(p) if matches!(p.kind, PromptKind::RestartPane)
+        ) {
+            return self.handle_restart_pane_confirm_key(key);
+        }
+        if matches!(
+            &self.state.mode,
             Mode::Prompting(p) if matches!(p.kind, PromptKind::LuaRunaway)
         ) {
             return self.handle_lua_runaway_confirm_key(key);

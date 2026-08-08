@@ -257,7 +257,10 @@ const SECTIONS: &[Section] = &[
             ("^a 1..9", "switch to tab N"),
             ("^a ^a", "jump to last-active tab"),
             ("^a r", "rename active tab"),
-            ("^a R", "restart active tab command"),
+            (
+                "^a R",
+                "restart active tab command in place (confirms if its child is still running)",
+            ),
             (
                 "●  ■  ·",
                 "agent tab dot: pulse ● working, red square ■ blocked, teal square ■ done, dim · idle (:why-status)",
