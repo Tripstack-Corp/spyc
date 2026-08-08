@@ -61,12 +61,22 @@ prompt off the pane).
 
 agy's `done` needs **agy >= 1.1.10**: earlier versions evaluated `hooks.json` after
 their own termination checks, so the `Stop` handler spyc installs was unreachable
-and that half silently degraded to output timing. Its whole event vocabulary is
-`PreToolUse` / `PostToolUse` / `PreInvocation` / `PostInvocation` / `Stop` — none of
-which fires on a user-approval prompt, so the scrape is not a stopgap awaiting a
-better event. `PreToolUse` is not the missing one: it must answer with a `decision`,
-so it arbitrates permissions rather than observing them, and leaving that answer out
-makes agy re-drive the tool instead of finishing the turn.
+and that half silently degraded to output timing.
+
+agy waits on the user in **two** different ways, and they need different instruments:
+
+| agy waits via | signal | why |
+|---|---|---|
+| its `ask_question` tool | `PreToolUse` hook, matcher `ask_question` | it's a real tool, so a hook sees it exactly when it's called |
+| its tool-permission prompt (`Requesting permission for:`) | screen scrape | no event fires for it, in any agy version |
+
+`PreToolUse` cannot be widened to cover the second. A handler must answer with a
+`decision` (`allow`/`deny`/`ask`/`force_ask`), so matching every tool would put spyc
+in charge of agy's permissions; scoped to `ask_question` the `allow` is a no-op,
+because that tool was always going to wait for you. Omitting the answer is worse
+than either: agy re-drives the tool, which ran a probe turn to 17 invocations before
+it timed out, never reaching `Stop`. spyc's handler therefore prints its decision
+unconditionally and discards the reporter's own output to keep stdout pure JSON.
 It asks first — a `[Y/n]` on the first launch per repo, saved; change it later
 with **`:hooks on|on!|off`**.
 
