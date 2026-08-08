@@ -41,12 +41,12 @@ permissions:
 
 jobs:
   lint:
-    # NOTE: this `name` is a REQUIRED STATUS CHECK in main's branch protection,
-    # so it is deliberately left saying "supply-chain / deny" even though deny
-    # moved to `audit.yml`. Renaming it needs the protection contexts updated in
-    # the same motion — a rename alone deadlocks every open PR, because the old
-    # required context would never report again. See the PR that moved deny.
-    name: Lint + supply-chain (fmt, clippy, deny)
+    # This `name` is a REQUIRED STATUS CHECK context in main's branch protection.
+    # Changing it is a three-step operation, not an edit: drop the old context
+    # from protection, merge the rename, then add the new one. A rename on its own
+    # deadlocks every open PR — the old required context never reports again, so
+    # the merge button can never go green.
+    name: Lint (fmt, clippy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
