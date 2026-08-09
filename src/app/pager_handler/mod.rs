@@ -517,7 +517,7 @@ impl App {
         }
         // A member has no bytes on disk yet, so it is extracted first and the
         // editor opens on the extracted copy.
-        if self.state.mounts.contains(&path) {
+        if self.state.mounts.holds_member(&path) {
             return self.open_member(
                 &path,
                 crate::app::archive_ops::MaterializeThen::Edit { in_pane: true },

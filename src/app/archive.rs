@@ -18,6 +18,14 @@ impl App {
     /// Kick a mount for `path`. `confirmed` is set on the second pass, after the
     /// user answered a size prompt.
     pub(super) fn request_mount(&mut self, path: &Path, confirmed: bool) -> Vec<Effect> {
+        // Already mounted: step back in rather than reading it again. A re-mount
+        // installs a fresh journal, so it would silently discard changes the user
+        // hasn't written back — and for a compressed tar it would re-stream the
+        // whole archive to learn what it already knows.
+        if self.state.mounts.contains(path) {
+            self.enter_mount(path);
+            return Vec::new();
+        }
         let Some(staging_root) = staging_root_for(path) else {
             self.state
                 .flash_error("archive: no state directory to stage into");
@@ -51,7 +59,7 @@ impl App {
     /// immediately; otherwise the extraction rides a worker and `then` happens
     /// when it lands. Either way the caller doesn't have to know which.
     pub(super) fn open_member(&mut self, path: &Path, then: MaterializeThen) -> Vec<Effect> {
-        let Some((mount, _)) = self.state.mounts.resolve(path) else {
+        let Some((mount, _)) = self.state.mounts.member_of(path) else {
             return Vec::new();
         };
         let Some(entry) = mount.entry_at(path).cloned() else {
@@ -574,6 +582,26 @@ impl App {
             // and the screen stays a rewriter.
             ArchiveSink::Materialize { members, then } => {
                 self.extraction_effect(&members, MaterializeThen::Retry(then))
+            }
+            // The archive file itself is going away. Its mount has to go with it,
+            // but not its unwritten changes: those would vanish with nothing to
+            // put them back into, so say so instead.
+            ArchiveSink::UnmountFirst { archives, effect } => {
+                if let Some(dirty) = archives.iter().find(|a| self.mount_is_dirty(a)) {
+                    self.state.flash_error(format!(
+                        "{}: unwritten changes — :archive write or :archive discard first",
+                        display_name(dirty)
+                    ));
+                    return None;
+                }
+                for archive in &archives {
+                    if let Some(staging) = self.state.mounts.remove(archive) {
+                        // Cleaning it is an effect, and the one effect this
+                        // returns is the user's — teardown collects it.
+                        self.state.mounts.defer_cleanup(staging);
+                    }
+                }
+                Some(*effect)
             }
             ArchiveSink::Record(changes) => {
                 self.record_pending(changes);

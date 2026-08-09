@@ -552,11 +552,16 @@ fn settle(app: &mut App, effects: Vec<Effect>) {
                     let outcome = crate::app::file_ops::run_file_op(op);
                     app.runtime.file_results.lock().unwrap().push(outcome);
                 }
+                Effect::Graveyard(op) => {
+                    let outcome = crate::app::graveyard_ops::run_graveyard_op(op);
+                    app.runtime.graveyard_results.lock().unwrap().push(outcome);
+                }
                 _ => {}
             }
         }
         let (_, fx) = app.apply_archive_outcomes();
         next.extend(fx);
+        app.apply_graveyard_outcomes();
         app.apply_inventory_outcomes();
         let (_, file_fx) = app.apply_file_outcomes();
         next.extend(file_fx);
@@ -1142,5 +1147,362 @@ fn an_external_edit_makes_the_mount_dirty_and_is_written_back() {
         let check = tmp.path().join("check");
         let real = crate::archive::read::materialize(&archive, entry, &check).unwrap();
         assert_eq!(std::fs::read(real).unwrap(), b"edited outside spyc");
+    });
+}
+
+// ── the archive file itself is not a member of itself ─────────────────────
+
+/// The reported bug: leaving an archive and coming back reported
+/// "archive: no such member".
+///
+/// The cursor lands on the archive file, whose path is the live mount's *root* —
+/// so asking "is this path in a mount?" said yes and the member branch asked the
+/// index for the entry named `""`. A container is not a member of itself.
+#[test]
+fn leaving_an_archive_and_coming_back_re_enters_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir.clone());
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let fx = app.apply(&Action::Climb).unwrap();
+        apply_effects(&mut app, fx);
+        assert_eq!(app.state.cur().listing.dir, dir, "out of the archive");
+
+        let fx = app.apply(&Action::EnterOrDisplay).unwrap();
+        settle(&mut app, fx);
+
+        assert_eq!(
+            app.state.cur().listing.dir,
+            archive,
+            "back inside: {:?}",
+            app.state.flash.as_ref().map(|f| f.text.clone())
+        );
+        assert_eq!(row_names(&app), ["src/", "README.md"]);
+    });
+}
+
+/// Re-entering must not re-read the archive: a fresh mount installs a fresh
+/// journal, so a pending delete would vanish — and for a compressed tar it would
+/// re-stream the whole thing to learn what it already knew.
+#[test]
+fn re_entering_keeps_unwritten_changes() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Delete `README.md`, then leave and come back.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::RemovePrompt(None)).unwrap();
+        let fx = if fx.is_empty() {
+            app.handle_remove_confirm_key(crossterm::event::KeyEvent::new(
+                KeyCode::Char('y'),
+                KeyModifiers::empty(),
+            ))
+        } else {
+            fx
+        };
+        settle(&mut app, fx);
+        assert!(app.mount_is_dirty(&archive), "dirty before leaving");
+
+        let fx = app.apply(&Action::Climb).unwrap();
+        apply_effects(&mut app, fx);
+        let fx = app.apply(&Action::EnterOrDisplay).unwrap();
+        settle(&mut app, fx);
+
+        assert!(
+            app.mount_is_dirty(&archive),
+            "the pending delete survived the round trip"
+        );
+        assert!(
+            !app.state
+                .cur()
+                .rows
+                .iter()
+                .any(|r| r.display.contains("README")),
+            "and the listing still reflects it"
+        );
+    });
+}
+
+/// A mounted archive is still an ordinary file where it lives: reading it reads
+/// the container's own bytes, not a member's.
+#[test]
+fn yanking_a_mounted_archive_takes_the_container_itself() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Step out so the cursor is on the archive file, and yank it.
+        let fx = app.apply(&Action::Climb).unwrap();
+        apply_effects(&mut app, fx);
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+
+        let held: Vec<String> = app
+            .state
+            .inventory
+            .items()
+            .map(|i| i.filename.clone())
+            .collect();
+        assert_eq!(held, ["pkg.zip"], "the archive itself is what got yanked");
+    });
+}
+
+/// Deleting the archive drops its mount with it. Left registered, it would claim
+/// the path — so a *new* file created there would be browsed through the old
+/// archive's index.
+#[test]
+fn deleting_a_mounted_archive_drops_the_mount() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let fx = app.apply(&Action::Climb).unwrap();
+        apply_effects(&mut app, fx);
+        let fx = app.apply(&Action::RemovePrompt(None)).unwrap();
+        let fx = if fx.is_empty() {
+            app.handle_remove_confirm_key(crossterm::event::KeyEvent::new(
+                KeyCode::Char('y'),
+                KeyModifiers::empty(),
+            ))
+        } else {
+            fx
+        };
+        settle(&mut app, fx);
+
+        assert!(!archive.exists(), "the archive is gone from disk");
+        assert!(
+            !app.state.mounts.contains(&archive),
+            "and so is its mount: {:?}",
+            app.state.flash.as_ref().map(|f| f.text.clone())
+        );
+    });
+}
+
+/// ...unless it holds changes nobody wrote back. Those would go with it and have
+/// nowhere to be put, so the delete is refused instead.
+#[test]
+fn deleting_a_dirty_mounted_archive_is_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Delete a member, climb out, then try to delete the archive.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::RemovePrompt(None)).unwrap();
+        let fx = if fx.is_empty() {
+            app.handle_remove_confirm_key(crossterm::event::KeyEvent::new(
+                KeyCode::Char('y'),
+                KeyModifiers::empty(),
+            ))
+        } else {
+            fx
+        };
+        settle(&mut app, fx);
+        let fx = app.apply(&Action::Climb).unwrap();
+        apply_effects(&mut app, fx);
+
+        let fx = app.apply(&Action::RemovePrompt(None)).unwrap();
+        let fx = if fx.is_empty() {
+            app.handle_remove_confirm_key(crossterm::event::KeyEvent::new(
+                KeyCode::Char('y'),
+                KeyModifiers::empty(),
+            ))
+        } else {
+            fx
+        };
+        settle(&mut app, fx);
+
+        assert!(archive.exists(), "the archive is still there");
+        assert!(app.state.mounts.contains(&archive), "still mounted");
+        let flash = app.state.flash.as_ref().map(|f| f.text.clone());
+        assert!(
+            flash.as_deref().is_some_and(|t| t.contains("unwritten")),
+            "and the refusal says why: {flash:?}"
+        );
+    });
+}
+
+// ── an extracted member's bytes are in staging, never at its mount path ───
+
+/// Same three members, as a `.tar.gz` — a *streamed* mount, which extracts every
+/// member as it reads because a compressed tar can't be listed any other way.
+fn build_tar_gz(path: &Path) {
+    let enc = flate2::write::GzEncoder::new(
+        std::fs::File::create(path).unwrap(),
+        flate2::Compression::default(),
+    );
+    let mut b = tar::Builder::new(enc);
+    for (name, body) in [
+        ("README.md", "# pkg\n"),
+        ("src/main.rs", "fn main() {}\n"),
+        ("src/deep/mod.rs", "pub fn helper() {}\n"),
+    ] {
+        let mut h = tar::Header::new_gnu();
+        h.set_size(body.len() as u64);
+        h.set_mode(0o644);
+        h.set_mtime(1_000_000);
+        h.set_entry_type(tar::EntryType::Regular);
+        b.append_data(&mut h, name, body.as_bytes()).unwrap();
+    }
+    b.into_inner().unwrap().finish().unwrap();
+}
+
+/// The reported bug: `y` inside a `.tar.gz` failed with
+/// `demo.tar.gz/src/main.rs: Not a directory`.
+///
+/// A streamed mount stages every member up front, so nothing needed extracting —
+/// and the screen took "nothing to extract" to mean "these paths are real", when
+/// a member's bytes are in the staging tree and its mount path is never a file.
+#[test]
+fn yanking_a_member_of_a_streamed_archive_captures_its_contents() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.tar.gz");
+        build_tar_gz(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+
+        let item = app
+            .state
+            .inventory
+            .items()
+            .find(|i| i.filename == "README.md")
+            .unwrap_or_else(|| {
+                panic!(
+                    "the member should be in the inventory; flash: {:?}",
+                    app.state.flash.as_ref().map(|f| f.text.clone())
+                )
+            });
+        assert_eq!(
+            app.state.inventory.read_content(&item.id).as_deref(),
+            Some(b"# pkg\n".as_slice()),
+            "and it carries the member's real bytes"
+        );
+    });
+}
+
+/// The same hole with a seekable archive: reading a member stages it, so the
+/// *second* read is the one that finds nothing to extract.
+#[test]
+fn reading_a_member_twice_still_reads_its_bytes() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        app.apply(&Action::Down(1)).unwrap();
+
+        // First read extracts it; second finds it staged.
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+        app.state.flash = None;
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+
+        // The second yank is the one under test, so its *outcome* is what has to
+        // be clean — an inventory item from the first read would hide a failure.
+        assert!(
+            !matches!(
+                app.state.flash.as_ref().map(|f| f.kind),
+                Some(crate::app::FlashKind::Error)
+            ),
+            "the second yank failed: {:?}",
+            app.state.flash.as_ref().map(|f| f.text.clone())
+        );
+        let held: Vec<_> = app
+            .state
+            .inventory
+            .items()
+            .filter(|i| i.filename == "README.md")
+            .map(|i| app.state.inventory.read_content(&i.id))
+            .collect();
+        assert!(!held.is_empty(), "and the member is in the inventory");
+        for content in held {
+            assert_eq!(
+                content.as_deref(),
+                Some(b"# pkg\n".as_slice()),
+                "every copy carries the member's bytes"
+            );
+        }
+    });
+}
+
+/// A mixed selection is the subtle half: extracting only what's missing means the
+/// worker's own result can't be the whole substitution, so the already-staged
+/// member would keep its mount path.
+#[test]
+fn a_mixed_selection_rewrites_the_staged_member_too() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Stage `README.md` by yanking it, then yank it together with a member
+        // that is still only an index entry.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+
+        let readme = archive.join("README.md");
+        let main = archive.join("src/main.rs");
+        let fx = app.screen_archive_effect(Effect::Inventory(
+            crate::app::inventory_ops::InventoryOp::Yank {
+                paths: vec![readme.clone(), main.clone()],
+            },
+        ));
+        let Some(Effect::Archive(ArchiveOp::MaterializeMany { then, .. })) = fx else {
+            panic!("expected the extraction to be held back, got {fx:?}");
+        };
+        let crate::app::archive_ops::MaterializeThen::Retry(effect) = then else {
+            panic!("a held-back read retries the original effect");
+        };
+        let Effect::Inventory(crate::app::inventory_ops::InventoryOp::Yank { paths }) = *effect
+        else {
+            panic!("shape preserved");
+        };
+        assert!(
+            !paths.contains(&readme),
+            "the staged member is already pointed at staging: {paths:?}"
+        );
+        assert!(
+            paths.contains(&main),
+            "and the unextracted one still waits for the worker: {paths:?}"
+        );
     });
 }
