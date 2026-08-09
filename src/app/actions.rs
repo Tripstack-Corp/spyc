@@ -491,7 +491,7 @@ impl App {
                         .flash_info("graveyard: p restore here · P original · dd/x purge · ? help");
                 }
             }
-            Action::HarpoonJump(n) => self.harpoon_jump(*n),
+            Action::HarpoonJump(n) => return Ok(self.harpoon_jump(*n)),
             Action::HarpoonAppend => self.harpoon_append(),
             Action::HarpoonRemove => self.harpoon_remove(),
             Action::HarpoonOpenMenu => self.harpoon_open_menu(),

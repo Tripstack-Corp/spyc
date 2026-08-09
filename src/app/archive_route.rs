@@ -366,6 +366,38 @@ fn rename_within(paths: &[PathBuf], dest: &Path, mounts: &Mounts) -> Verdict {
     Verdict::Record(changes)
 }
 
+/// The archive an *unmounted* path is inside, if any.
+///
+/// A mount is addressed under the archive's own path, so `…/pkg.zip/src` names a
+/// place inside `pkg.zip` whether or not it happens to be mounted right now. That
+/// is what turns a path saved earlier — a mark, a harpoon slot, a restored session
+/// cwd — back into "mount this, then go there", and it's the same walk that will
+/// find a nested container.
+///
+/// `is_container` is injected because deciding it means asking the filesystem
+/// whether an ancestor is a file; this half stays pure and testable.
+pub fn archive_ancestor(
+    path: &Path,
+    is_container: &dyn Fn(&Path) -> bool,
+) -> Option<(PathBuf, String)> {
+    // Deepest first: with a nested container the inner one owns the path.
+    for ancestor in path.ancestors() {
+        if !is_container(ancestor) {
+            continue;
+        }
+        let rel = path.strip_prefix(ancestor).ok()?;
+        if rel.as_os_str().is_empty() {
+            // The archive itself — mount it and land at its root.
+            return Some((ancestor.to_path_buf(), String::new()));
+        }
+        // Normalized for the same reason a member name is: a `..` between here
+        // and the archive would name somewhere outside it.
+        let inner = crate::archive::index::normalize(&rel.to_string_lossy()).ok()?;
+        return Some((ancestor.to_path_buf(), inner.inner));
+    }
+    None
+}
+
 /// The mounted archive *files* among `paths`, when the op would move or remove
 /// them — a container going away has to take its mount with it.
 ///
@@ -986,5 +1018,67 @@ mod tests {
             &no_names,
         );
         assert!(matches!(sink, ArchiveSink::Refuse(_)), "got {sink:?}");
+    }
+
+    // ── reaching a place inside an unmounted archive ──────────────────────
+
+    /// The predicate the App supplies from the filesystem; here it's a set.
+    fn containers(names: &[&str]) -> impl Fn(&Path) -> bool + use<> {
+        let set: Vec<PathBuf> = names.iter().map(PathBuf::from).collect();
+        move |p: &Path| set.iter().any(|c| c == p)
+    }
+
+    #[test]
+    fn a_path_inside_an_unmounted_archive_names_the_archive_and_the_way_in() {
+        let is_container = containers(&["/src/pkg.zip"]);
+        assert_eq!(
+            archive_ancestor(Path::new("/src/pkg.zip/a/b.txt"), &is_container),
+            Some((PathBuf::from("/src/pkg.zip"), "a/b.txt".to_string()))
+        );
+        // The archive itself: mount it and land at its root.
+        assert_eq!(
+            archive_ancestor(Path::new("/src/pkg.zip"), &is_container),
+            Some((PathBuf::from("/src/pkg.zip"), String::new()))
+        );
+    }
+
+    #[test]
+    fn an_ordinary_path_names_no_archive() {
+        let is_container = containers(&["/src/pkg.zip"]);
+        assert_eq!(
+            archive_ancestor(Path::new("/src/main.rs"), &is_container),
+            None
+        );
+        assert_eq!(archive_ancestor(Path::new("/src"), &is_container), None);
+        // Named like one but not a file on disk — the predicate is what decides.
+        assert_eq!(
+            archive_ancestor(Path::new("/src/other.zip/a"), &is_container),
+            None
+        );
+    }
+
+    /// With one archive inside another, the deepest owns the path — the same rule
+    /// `Mounts::resolve` applies to a live mount.
+    #[test]
+    fn the_innermost_container_wins() {
+        let is_container = containers(&["/src/outer.zip", "/src/outer.zip/inner.zip"]);
+        assert_eq!(
+            archive_ancestor(Path::new("/src/outer.zip/inner.zip/a.txt"), &is_container),
+            Some((
+                PathBuf::from("/src/outer.zip/inner.zip"),
+                "a.txt".to_string()
+            ))
+        );
+    }
+
+    /// A `..` between the archive and the target names somewhere outside it, so
+    /// there is nothing here to mount into.
+    #[test]
+    fn a_traversing_path_reaches_no_archive() {
+        let is_container = containers(&["/src/pkg.zip"]);
+        assert_eq!(
+            archive_ancestor(Path::new("/src/pkg.zip/../escape"), &is_container),
+            None
+        );
     }
 }
