@@ -296,24 +296,10 @@ pub fn chmod_add_bits(_paths: &[&Path], _bits: u32) -> io::Result<()> {
     ))
 }
 
-/// Human-readable size: `512B`, `4.0K`, `1.2M`, `3.4G`, etc. Shared by the
-/// long-listing table (`fs::long_listing`) and the file-type label below.
-pub fn format_size(bytes: u64) -> String {
-    const UNITS: &[&str] = &["B", "K", "M", "G", "T", "P"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{bytes}B")
-    } else if value >= 10.0 {
-        format!("{value:.0}{}", UNITS[unit])
-    } else {
-        format!("{value:.1}{}", UNITS[unit])
-    }
-}
+/// Human-readable size — re-exported from `ui`, where the pure display
+/// helpers live (the render purity guard forbids `crate::fs::` in a draw pass,
+/// and this has no filesystem dependency to justify living here).
+pub use crate::ui::format_size;
 
 // ---- File type detection (`f`) -------------------------------------------
 
@@ -759,17 +745,6 @@ mod tests {
         copy_tree(&src, &dst).unwrap();
         assert_eq!(fs::read(dst.join("a")).unwrap(), b"A");
         assert!(src.join("a").exists());
-    }
-
-    #[test]
-    fn format_size_picks_appropriate_unit() {
-        assert_eq!(format_size(0), "0B");
-        assert_eq!(format_size(512), "512B");
-        assert_eq!(format_size(1024), "1.0K");
-        assert_eq!(format_size(1536), "1.5K");
-        assert_eq!(format_size(10 * 1024), "10K");
-        assert_eq!(format_size(1024 * 1024), "1.0M");
-        assert_eq!(format_size(12 * 1024 * 1024), "12M");
     }
 
     #[test]

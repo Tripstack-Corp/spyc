@@ -61,6 +61,8 @@ pub(super) enum InputSink {
     QuickSelect,
     /// Harpoon menu is open.
     Harpoon,
+    /// Agent image gallery popup is open.
+    ImageGallery,
     // ── content sinks: the focused region owns the input ──
     /// In-app prompt is active (`Mode::Prompting`); the key feeds
     /// the prompt's line editor.
@@ -154,6 +156,7 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
         Some(Modal::OverlayDismiss) => return InputSink::OverlayDismiss,
         Some(Modal::QuickSelect) => return InputSink::QuickSelect,
         Some(Modal::Harpoon) => return InputSink::Harpoon,
+        Some(Modal::ImageGallery) => return InputSink::ImageGallery,
         None => {}
     }
 
@@ -255,6 +258,7 @@ impl App {
                 overlay_awaiting_dismiss: self.view.overlay_awaiting_dismiss,
                 has_quick_select: self.view.quick_select.is_some(),
                 has_harpoon: self.view.harpoon_menu.is_some(),
+                has_image_gallery: self.view.image_gallery.is_some(),
             }),
             is_prompting: matches!(self.state.mode, Mode::Prompting(_)),
             // The authoritative focus, recomputed at the loop top before this

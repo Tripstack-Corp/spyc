@@ -23,7 +23,7 @@ use super::{Effect, FlashKind, FlashMessage, Mode, RowData, View};
 mod apply;
 mod dispatch;
 mod git;
-pub mod listing;
+mod listing;
 mod navigation;
 mod selection;
 
@@ -682,19 +682,6 @@ pub struct AppState {
     /// view; the rebuild_rows path keys off `view` so we don't pay
     /// the disk read except when the user is looking at it.
     pub graveyard: Vec<crate::state::graveyard::Entry>,
-    /// Snapshot of the focused agent tab's received images, built off-thread
-    /// when `View::Images` opens (`^a g`). Metadata only — the bytes are
-    /// re-read from `transcript_images_path` when one is actually opened, so a
-    /// gallery of a dozen screenshots costs kilobytes, not tens of megabytes.
-    pub transcript_images: Vec<crate::state::transcript_images::TranscriptImage>,
-    /// The transcript the snapshot came from. `None` outside the gallery, and
-    /// also when the gallery is showing only uncommitted images (nothing has
-    /// been sent yet, so there is no transcript to read back from).
-    pub transcript_images_path: Option<PathBuf>,
-    /// Which pane tab the open gallery belongs to. Its uncommitted images are
-    /// read from `pane.pending_images` by this id rather than copied into the
-    /// view — they're megabytes each.
-    pub gallery_tab_id: Option<String>,
     /// P2 merge/scope coordination registry (`docs/archive/AGENT_AWARENESS_PLAN.md`):
     /// what each agent tab has declared it's touching, via the `register_scope`
     /// MCP tool. In-memory + session-persisted (rides P3-2's autosave and
@@ -1054,9 +1041,6 @@ impl AppState {
             quit_pending: None,
             pending_delete_preview: None,
             graveyard: Vec::new(),
-            transcript_images: Vec::new(),
-            transcript_images_path: None,
-            gallery_tab_id: None,
             scope_registry: Vec::new(),
             user_host: "test@host".to_string(),
             pending_new_tab_cmd: None,

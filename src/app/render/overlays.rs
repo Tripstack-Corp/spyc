@@ -175,6 +175,159 @@ impl App {
         );
     }
 
+    /// Render the `^a g` image gallery as a centered modal popup.
+    ///
+    /// A popup rather than a view the frame switches into: checking what you
+    /// attached is a glance mid-task, and taking the whole file list away to
+    /// answer it loses the user's place for nothing. Same placement + dodge
+    /// treatment as [`Self::render_harpoon_menu`]. Pure `&self`.
+    pub(super) fn render_image_gallery(
+        &self,
+        frame: &mut Frame,
+        h_divider_row: Option<u16>,
+        v_divider_col: Option<u16>,
+    ) {
+        use ratatui::{
+            layout::Rect,
+            style::{Color, Modifier, Style},
+            text::{Line, Span},
+            widgets::{Block, Borders, Clear, Paragraph},
+        };
+        let Some(g) = self.view.image_gallery.as_ref() else {
+            return;
+        };
+        let pending = self
+            .state
+            .pane
+            .pending_images
+            .get(&g.tab_id)
+            .map_or(&[][..], Vec::as_slice);
+        let total = pending.len() + g.received.len();
+
+        let area = frame.area();
+        let width = area.width.clamp(48, 88);
+        // Cap the body so a long conversation can't outgrow the screen; the
+        // cursor half is what gets shown when it does.
+        let max_body = area.height.saturating_sub(5).max(1);
+        let body_h = u16::try_from(total.max(1))
+            .unwrap_or(u16::MAX)
+            .min(max_body);
+        let height = (2 + body_h + 1).min(area.height);
+        let cx = area.x + (area.width.saturating_sub(width)) / 2;
+        let cy = area.y + (area.height.saturating_sub(height)) / 2;
+        let rect = Rect {
+            x: place_clear_of_line(cx, width, v_divider_col, area.x, area.right()),
+            y: place_clear_of_line(cy, height, h_divider_row, area.y, area.bottom()),
+            width,
+            height,
+        };
+        frame.render_widget(Clear, rect);
+
+        let title = if pending.is_empty() {
+            format!(" agent images — {} received ", g.received.len())
+        } else {
+            format!(
+                " agent images — {} unsent, {} received ",
+                pending.len(),
+                g.received.len()
+            )
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .border_style(Style::default().fg(self.view.theme.popup_border));
+        let inner = block.inner(rect);
+        frame.render_widget(block, rect);
+
+        let footer_h = 1u16;
+        let body_rect = Rect {
+            height: inner.height.saturating_sub(footer_h),
+            ..inner
+        };
+        let footer_rect = Rect {
+            y: inner.y + inner.height.saturating_sub(footer_h),
+            height: footer_h,
+            ..inner
+        };
+
+        let cursor_style = Style::default()
+            .fg(Color::Black)
+            .bg(self.view.theme.prompt_prefix)
+            .add_modifier(Modifier::BOLD);
+        let normal = Style::default().fg(self.view.theme.status_path);
+        let dim = Style::default()
+            .fg(self.view.theme.status_suffix)
+            .add_modifier(Modifier::DIM);
+        let unsent_style = Style::default()
+            .fg(self.view.theme.pick)
+            .add_modifier(Modifier::BOLD);
+
+        let mut rows: Vec<Line> = Vec::with_capacity(total.max(1));
+        if total == 0 {
+            rows.push(Line::from(Span::styled(
+                if g.loading {
+                    "  reading transcript…"
+                } else {
+                    "  (no images in this conversation yet)"
+                },
+                dim,
+            )));
+        }
+        // Unsent first — they're the newest and the reason you're looking.
+        for (i, p) in pending.iter().enumerate() {
+            let (w, h) = p.dims;
+            rows.push(Line::from(vec![
+                Span::styled(if i == g.cursor { " ▸ " } else { "   " }, normal),
+                Span::styled("📎 unsent  ", unsent_style),
+                Span::styled(
+                    format!(
+                        "{w}×{h}  {}  {}",
+                        crate::ui::format_size(p.encoded.len() as u64),
+                        crate::app::state::format_age(p.captured_at),
+                    ),
+                    if i == g.cursor { cursor_style } else { normal },
+                ),
+            ]));
+        }
+        for (i, img) in g.received.iter().enumerate() {
+            let row = pending.len() + i;
+            let on_cursor = row == g.cursor;
+            let label = img
+                .agent_label
+                .as_deref()
+                .map_or_else(|| format!("{}.", img.seq), |l| format!("{l} "));
+            let kind = img
+                .media_type
+                .strip_prefix("image/")
+                .unwrap_or(&img.media_type);
+            rows.push(Line::from(vec![
+                Span::styled(if on_cursor { " ▸ " } else { "   " }, normal),
+                Span::styled(format!("{label:<6}"), dim),
+                Span::styled(
+                    format!(
+                        "{kind:<5} {:>8}  {}",
+                        crate::ui::format_size(img.bytes_len as u64),
+                        img.prompt_excerpt,
+                    ),
+                    if on_cursor { cursor_style } else { normal },
+                ),
+            ]));
+        }
+        // Scroll the body so the cursor stays visible in a long conversation.
+        let body_len = usize::from(body_rect.height);
+        let first = g.cursor.saturating_sub(body_len.saturating_sub(1));
+        let shown: Vec<Line> = rows.into_iter().skip(first).take(body_len).collect();
+        frame.render_widget(Paragraph::new(shown), body_rect);
+
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "   j/k move · Enter/i view · 1-9 jump · q/Esc close",
+                dim,
+            )),
+            footer_rect,
+        );
+    }
+
     /// Render the first-launch status-hooks consent (`PromptKind::HookConsent`)
     /// as a centered modal pop-up. It fires automatically when an agent pane
     /// launches — while the user's eyes are on the pane — so the old one-line

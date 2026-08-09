@@ -475,21 +475,6 @@ impl App {
                     self.state.graveyard.len()
                 ),
             ),
-            View::Images => {
-                let pending = self.state.pending_gallery_images().len();
-                let received = self.state.transcript_images.len();
-                // Name the unsent ones separately — "3 images" when two of them
-                // haven't been sent yet would misreport what the agent has.
-                let counts = if pending > 0 {
-                    format!("[{pending} unsent + {received} received]")
-                } else {
-                    format!("[{received} image(s)]")
-                };
-                (
-                    "<AGENT IMAGES>".to_string(),
-                    format!("{counts}  (Enter/i: view, q/ESC: return)"),
-                )
-            }
         }
     }
 
