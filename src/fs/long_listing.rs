@@ -1,9 +1,9 @@
 //! The `L` long-listing formatter — an `ls -l`-on-steroids table.
 //!
-//! Produces one header row plus one data row per path: inode, symbolic + octal
-//! mode, links, owner/group (resolved via `uzers`), human + raw size, blocks,
-//! and m/a/c/birth times. Column widths are computed once across all rows so
-//! everything aligns. Extracted verbatim from `fs/ops.rs` (800-LoC campaign).
+//! Produces one header row plus one data row per path: name, symbolic + octal
+//! mode, human + raw size, links, owner/group (resolved via `uzers`), blocks,
+//! inode, and m/a/c/birth times — see [`LONG_COLUMNS`] for the order. Column
+//! widths are computed once across all rows so everything aligns.
 
 use std::collections::HashMap;
 use std::fs;
@@ -27,42 +27,57 @@ struct LongRow {
     name: String,
 }
 
-const LONG_HEADERS: [&str; 14] = [
-    "INODE", "MODE", "OCT", "LINKS", "OWNER", "GROUP", "SIZE", "BYTES", "BLOCKS", "MTIME", "ATIME",
-    "CTIME", "BIRTH", "NAME",
-];
-
-/// Per-column alignment. `true` = right-align (numeric), `false` = left.
-const LONG_RIGHT: [bool; 14] = [
-    true, false, false, true, false, false, true, true, true, false, false, false, false, false,
+/// Column order: header text + `true` for right-aligned (numeric) cells.
+///
+/// NAME leads, then what you actually read a listing for (mode, size, mtime,
+/// ownership), then the forensic columns. NAME used to come last, `ls -l`-style
+/// — which puts it past ~160 columns of metadata, so on any real terminal the
+/// one column identifying the row was the one you couldn't see.
+///
+/// Index-parallel with [`LongRow::cells`]; reordering means moving both, which
+/// `long_listing_pairs_each_header_with_its_own_value` pins.
+const LONG_COLUMNS: [(&str, bool); 14] = [
+    ("NAME", false),
+    ("MODE", false),
+    ("SIZE", true),
+    ("MTIME", false),
+    ("OWNER", false),
+    ("GROUP", false),
+    ("LINKS", true),
+    ("OCT", false),
+    ("BYTES", true),
+    ("BLOCKS", true),
+    ("INODE", true),
+    ("ATIME", false),
+    ("CTIME", false),
+    ("BIRTH", false),
 ];
 
 impl LongRow {
     fn cells(&self) -> [&str; 14] {
         [
-            &self.inode,
+            &self.name,
             &self.mode,
-            &self.oct,
-            &self.links,
+            &self.size,
+            &self.mtime,
             &self.owner,
             &self.group,
-            &self.size,
+            &self.links,
+            &self.oct,
             &self.bytes,
             &self.blocks,
-            &self.mtime,
+            &self.inode,
             &self.atime,
             &self.ctime,
             &self.birth,
-            &self.name,
         ]
     }
 }
 
 /// Produce a tabular `ls -l`-on-steroids listing: one header row plus one
-/// data row per path. Columns: inode, mode (symbolic), octal mode, links,
-/// owner and group (resolved via `uzers`), size (human),
-/// bytes, 512B blocks, mtime, atime, ctime, birth, name. Symlinks render
-/// as `name -> target` in the NAME column. Column widths are computed once
+/// data row per path, in [`LONG_COLUMNS`] order (name first, then mode, size,
+/// mtime, ownership, then the forensic columns). Symlinks render as
+/// `name -> target` in the NAME column. Column widths are computed once
 /// across all rows so everything aligns. Unreadable paths render as
 /// `?? <path>: <error>` lines after the table.
 pub fn format_long_listing(paths: &[&Path]) -> Vec<String> {
@@ -99,7 +114,7 @@ pub fn format_long_listing(paths: &[&Path]) -> Vec<String> {
 fn compute_column_widths(rows: &[LongRow]) -> [usize; 14] {
     use unicode_width::UnicodeWidthStr;
     let mut widths = [0usize; 14];
-    for (i, h) in LONG_HEADERS.iter().enumerate() {
+    for (i, (h, _)) in LONG_COLUMNS.iter().enumerate() {
         widths[i] = h.width();
     }
     for row in rows {
@@ -112,11 +127,11 @@ fn compute_column_widths(rows: &[LongRow]) -> [usize; 14] {
 
 fn format_long_header(widths: &[usize; 14]) -> String {
     let mut s = String::new();
-    for (i, h) in LONG_HEADERS.iter().enumerate() {
+    for (i, (h, right)) in LONG_COLUMNS.iter().enumerate() {
         if i > 0 {
             s.push_str("  ");
         }
-        write_cell(&mut s, h, widths[i], LONG_RIGHT[i]);
+        write_cell(&mut s, h, widths[i], *right);
     }
     // Trim trailing whitespace from the last (left-aligned) column
     // so we don't render an oddly long header line.
@@ -130,7 +145,7 @@ fn format_long_row(row: &LongRow, widths: &[usize; 14]) -> String {
         if i > 0 {
             s.push_str("  ");
         }
-        write_cell(&mut s, cell, widths[i], LONG_RIGHT[i]);
+        write_cell(&mut s, cell, widths[i], LONG_COLUMNS[i].1);
     }
     s.truncate(s.trim_end().len());
     s
@@ -405,17 +420,96 @@ mod tests {
         File::create(&b).unwrap();
 
         let lines = format_long_listing(&[&a, &b]);
-        // The MODE column is at the same byte offset on every row, since
-        // the INODE column to its left is right-aligned to a fixed width.
-        let mode_col_offset = lines[0].find("MODE").unwrap();
-        // Both data rows should have a mode glyph (`-` or `d`) at that offset.
+        // The MODE column starts at the same DISPLAY column on every row, since
+        // the NAME column to its left is padded to a fixed width. Measured in
+        // display columns, not bytes: NAME is left of MODE now, so a name with
+        // a multi-byte or wide character moves MODE's byte offset while its
+        // column is unchanged.
+        let mode_col = display_col_of(&lines[0], "MODE").expect("MODE in header");
         for row in &lines[1..] {
-            let ch = row.as_bytes().get(mode_col_offset).copied().unwrap_or(b' ');
+            let ch = char_at_display_col(row, mode_col).unwrap_or(' ');
             assert!(
-                matches!(ch, b'-' | b'd' | b'l' | b'b' | b'c' | b'p' | b's'),
-                "mode column misaligned in row at offset {mode_col_offset}: {row:?}",
+                matches!(ch, '-' | 'd' | 'l' | 'b' | 'c' | 'p' | 's'),
+                "mode column misaligned in row at column {mode_col}: {row:?}",
             );
         }
+    }
+
+    /// A wide (2-cell) character in a filename must not shift the columns to its
+    /// right: padding is computed on display width, so every row's MODE lands in
+    /// the same place regardless of what the names contain. Worth pinning now
+    /// that NAME is the FIRST column — before, everything left of MODE was
+    /// ASCII digits and this could not go wrong.
+    #[cfg(unix)]
+    #[test]
+    fn long_listing_aligns_across_wide_char_names() {
+        let tmp = tempdir().unwrap();
+        let ascii = tmp.path().join("plain.txt");
+        let wide = tmp.path().join("日本語のファイル.txt");
+        File::create(&ascii).unwrap();
+        File::create(&wide).unwrap();
+
+        let lines = format_long_listing(&[&ascii, &wide]);
+        let mode_col = display_col_of(&lines[0], "MODE").expect("MODE in header");
+        for row in &lines[1..] {
+            let ch = char_at_display_col(row, mode_col).unwrap_or(' ');
+            assert!(
+                matches!(ch, '-' | 'd' | 'l' | 'b' | 'c' | 'p' | 's'),
+                "wide-char name shifted the MODE column (expected col {mode_col}): {row:?}",
+            );
+        }
+    }
+
+    /// `LONG_COLUMNS` and [`LongRow::cells`] are index-parallel: reordering one
+    /// without the other pairs every header with the wrong value, which no
+    /// width or alignment assertion would notice. Check the value sitting under
+    /// three unmistakable headers really is that field.
+    #[cfg(unix)]
+    #[test]
+    fn long_listing_pairs_each_header_with_its_own_value() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempdir().unwrap();
+        let f = tmp.path().join("known.txt");
+        File::create(&f).unwrap().write_all(b"1234567").unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let lines = format_long_listing(&[&f]);
+        let (header, row) = (&lines[0], &lines[1]);
+        for (name, expected) in [("NAME", "known.txt"), ("OCT", "0644"), ("BYTES", "7")] {
+            let col = display_col_of(header, name).expect("header present");
+            let width = name.len().max(expected.len());
+            let cell: String = row
+                .chars()
+                .skip(col)
+                .take(width)
+                .collect::<String>()
+                .trim()
+                .to_string();
+            assert_eq!(
+                cell, expected,
+                "the {name} column holds {cell:?}, not {expected:?} — \
+                 LONG_COLUMNS and cells() have drifted out of order\n{header}\n{row}"
+            );
+        }
+    }
+
+    /// Display column where `needle` starts in `haystack`.
+    fn display_col_of(haystack: &str, needle: &str) -> Option<usize> {
+        use unicode_width::UnicodeWidthStr;
+        let byte = haystack.find(needle)?;
+        Some(haystack[..byte].width())
+    }
+
+    fn char_at_display_col(row: &str, col: usize) -> Option<char> {
+        use unicode_width::UnicodeWidthChar;
+        let mut at = 0usize;
+        for ch in row.chars() {
+            if at == col {
+                return Some(ch);
+            }
+            at += ch.width().unwrap_or(0);
+        }
+        None
     }
 
     #[cfg(unix)]
