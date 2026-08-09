@@ -247,34 +247,22 @@ impl AppState {
         Some(branch)
     }
 
-    /// Stat `index` and `HEAD` in `side`'s cached gitdir — the hot-path (1 Hz
-    /// poll) freshness key. Reads the `current_gitdir` resolved once at chdir,
-    /// so this never opens gix; it's pure `lstat` + `modified()`.
+    /// The hot-path (1 Hz poll) freshness key for `side` —
+    /// [`crate::git::status::poll_key`] over the `current_gitdir` /
+    /// `current_config_path` resolved once at chdir, so this never opens gix;
+    /// it's pure `lstat` + `modified()`.
+    ///
+    /// SPYC-TRAP(git-poll-key-single-source): the walk that fills the cache
+    /// stamps its result with the same fn — keep them one function.
     pub(super) fn compute_git_mtime_key_fast(
         &self,
         side: Side,
     ) -> Option<(std::time::SystemTime, std::time::SystemTime)> {
-        let gitdir = self.col(side).git_cache.current_gitdir.as_ref()?;
-        let index_mt = std::fs::metadata(gitdir.join("index"))
-            .and_then(|m| m.modified())
-            .ok()?;
-        let head_mt = crate::git::status::head_ref_mtime(gitdir)?;
-        // Fold the shared config's mtime into the HEAD half of the key. Config
-        // decides what `status` even reports — a repo flipped to `core.bare`
-        // reports clean with no worktree — and it moves neither `index` nor
-        // `HEAD`, so without this the poll short-circuits on a stale answer
-        // forever. Observed: a stray `core.bare = true` blanked every marker
-        // until the user chdir'd, because nothing else could invalidate it.
-        // Absent config (or an unreadable one) contributes nothing rather than
-        // failing the key — a missing config is not a reason to stop polling.
-        let head_mt = self
-            .col(side)
-            .git_cache
-            .current_config_path
-            .as_ref()
-            .and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
-            .map_or(head_mt, |cfg_mt| head_mt.max(cfg_mt));
-        Some((index_mt, head_mt))
+        let gc = &self.col(side).git_cache;
+        crate::git::status::poll_key(
+            gc.current_gitdir.as_deref()?,
+            gc.current_config_path.as_deref(),
+        )
     }
 
     /// Set `side`'s `current_repo_root` and the derived `current_gitdir`

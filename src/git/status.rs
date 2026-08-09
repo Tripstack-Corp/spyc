@@ -422,17 +422,42 @@ pub fn repo_status_stable(
     Option<SystemTime>,
 ) {
     let gitdir = crate::git::discovery::gitdir(repo_root);
+    let config = gitdir
+        .as_deref()
+        .and_then(crate::git::discovery::shared_config_path);
+    // SPYC-TRAP(git-poll-key-single-source): stamp the walk with `poll_key`, the
+    // same fn the poll compares against — never a hand-rolled subset of it.
     let stat = || {
-        gitdir.as_ref().map_or((None, None), |gd| {
-            let index = std::fs::metadata(gd.join("index"))
-                .and_then(|m| m.modified())
-                .ok();
-            let head = head_ref_mtime(gd);
-            (index, head)
-        })
+        gitdir
+            .as_deref()
+            .and_then(|gd| poll_key(gd, config.as_deref()))
     };
-    let (entries, (index_mtime, head_mtime)) = stable_walk(stat, || repo_status(repo_root), 3);
-    (entries, index_mtime, head_mtime)
+    let (entries, key) = stable_walk(stat, || repo_status(repo_root), 3);
+    (entries, key.map(|(i, _)| i), key.map(|(_, h)| h))
+}
+
+/// The marker poll's freshness key for `gitdir`: `index`'s mtime paired with the
+/// latest of [`head_ref_mtime`] and the repo's shared `config` (`None` when
+/// either file can't be stat'd).
+///
+/// Config is folded in because it decides what `status` even reports — a repo
+/// flipped to `core.bare` reports clean with no worktree — while moving neither
+/// `index` nor `HEAD`. Observed: a stray `core.bare = true` blanked every marker
+/// until the user chdir'd, because nothing else could invalidate the key. An
+/// absent or unreadable config contributes nothing rather than failing the key.
+///
+/// SPYC-TRAP(git-poll-key-single-source): every producer and consumer of
+/// `git_poll_cache` computes the key HERE. Two subtly different key functions
+/// never compare equal, and the 1 Hz poll then re-walks the whole repo forever.
+pub fn poll_key(gitdir: &Path, config: Option<&Path>) -> Option<(SystemTime, SystemTime)> {
+    let index = std::fs::metadata(gitdir.join("index"))
+        .and_then(|m| m.modified())
+        .ok()?;
+    let head = head_ref_mtime(gitdir)?;
+    let head = config
+        .and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+        .map_or(head, |cfg| head.max(cfg));
+    Some((index, head))
 }
 
 /// The mtime that moves when the checked-out branch advances (a **commit**) or
