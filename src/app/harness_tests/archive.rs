@@ -247,8 +247,8 @@ fn a_mount_carries_no_git_state() {
     });
 }
 
-/// The refusal gate: an action that needs real files on disk is stopped before
-/// dispatch, with a message rather than a filesystem error.
+/// The refusal gate: an action with no meaning inside an archive is stopped
+/// before dispatch, with a message rather than a filesystem error.
 #[test]
 fn an_unsupported_action_is_refused_inside_a_mount() {
     let tmp = tempfile::tempdir().unwrap();
@@ -259,26 +259,28 @@ fn an_unsupported_action_is_refused_inside_a_mount() {
         let mut app = App::test_app(dir);
         mount_inline(&mut app, &archive, &tmp.path().join("staging"));
 
-        let fx = app.apply(&Action::Take).unwrap();
+        let fx = app.apply(&Action::MakeDirPrompt).unwrap();
         assert!(fx.is_empty(), "nothing is attempted");
         let flash = app.flash_text().unwrap_or_default();
         assert!(flash.contains("archive:"), "{flash}");
     });
 }
 
-/// The same action is untouched outside a mount — the gate is scoped to where the
-/// rows aren't real files.
+/// The gate is scoped to where the rows aren't real files.
 #[test]
 fn the_gate_does_not_leak_outside_a_mount() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let dir = tmp.path().to_path_buf();
-        std::fs::write(dir.join("real.txt"), b"hi").unwrap();
+        std::fs::create_dir(dir.join("sub")).unwrap();
         let mut app = App::test_app(dir);
         app.state.refresh_listing();
 
-        let fx = app.apply(&Action::Take).unwrap();
-        assert!(!fx.is_empty(), "a yank outside an archive still runs");
+        app.apply(&Action::MakeDirPrompt).unwrap();
+        assert!(
+            matches!(app.state.mode, Mode::Prompting(_)),
+            "outside an archive the prompt still opens"
+        );
     });
 }
 
@@ -519,5 +521,224 @@ fn eviction_hands_back_the_staging_tree_to_clean() {
             roots[0].exists(),
             "its bytes are still there for the cleanup op"
         );
+    });
+}
+
+// ── reading members out (the effect screen) ──────────────────────────────
+
+/// Run whatever the screen produced, then whatever the drain produced, until the
+/// effects settle — the loop's behaviour, minus the threads.
+fn settle(app: &mut App, effects: Vec<Effect>) {
+    let mut queue = effects;
+    for _ in 0..4 {
+        if queue.is_empty() {
+            return;
+        }
+        let mut next = Vec::new();
+        for effect in queue {
+            let Some(effect) = app.screen_archive_effect(effect) else {
+                continue;
+            };
+            match effect {
+                Effect::Archive(op) => {
+                    let outcome = run_archive_op(op);
+                    app.runtime.archive_results.lock().unwrap().push(outcome);
+                }
+                Effect::Inventory(op) => {
+                    let outcome = crate::app::inventory_ops::run_inventory_op(op);
+                    app.runtime.inventory_results.lock().unwrap().push(outcome);
+                }
+                Effect::FileOp(op) => {
+                    let outcome = crate::app::file_ops::run_file_op(op);
+                    app.runtime.file_results.lock().unwrap().push(outcome);
+                }
+                _ => {}
+            }
+        }
+        let (_, fx) = app.apply_archive_outcomes();
+        next.extend(fx);
+        app.apply_inventory_outcomes();
+        let (_, file_fx) = app.apply_file_outcomes();
+        next.extend(file_fx);
+        queue = next;
+    }
+}
+
+/// The issue's headline for this PR: `y` on a member puts its *contents* in the
+/// inventory, so `p` outside the archive writes a real file.
+#[test]
+fn yanking_a_member_captures_its_contents() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Cursor onto `README.md` (after the `src/` row), then yank.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        assert!(!fx.is_empty(), "the yank is attempted, not refused: {fx:?}");
+        settle(&mut app, fx);
+
+        let item = app
+            .state
+            .inventory
+            .items()
+            .find(|i| i.filename == "README.md")
+            .expect("the member is in the inventory");
+        assert_eq!(
+            app.state.inventory.read_content(&item.id).as_deref(),
+            Some(b"# pkg\n".as_slice()),
+            "and it carries the member's real bytes"
+        );
+    });
+}
+
+/// The screen has to hold the op back *before* it runs: a yank of an unextracted
+/// member must not reach the inventory worker with a path that doesn't exist.
+#[test]
+fn a_yank_is_held_back_until_the_member_is_extracted() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        app.apply(&Action::Down(1)).unwrap();
+
+        let fx = app.apply(&Action::Take).unwrap();
+        let screened: Vec<Effect> = fx
+            .into_iter()
+            .filter_map(|e| app.screen_archive_effect(e))
+            .collect();
+
+        assert!(
+            !screened.iter().any(|e| matches!(e, Effect::Inventory(_))),
+            "the inventory op must not reach the worker with a path that doesn't \
+             exist yet: {screened:?}"
+        );
+        let carried = screened.iter().find_map(|e| match e {
+            Effect::Archive(crate::app::archive_ops::ArchiveOp::MaterializeMany {
+                then, ..
+            }) => Some(then),
+            _ => None,
+        });
+        assert!(
+            matches!(
+                carried,
+                Some(crate::app::archive_ops::MaterializeThen::Retry(effect))
+                    if matches!(**effect, Effect::Inventory(_))
+            ),
+            "an extraction goes instead, carrying the yank to re-run: {screened:?}"
+        );
+    });
+}
+
+/// Copying a member out lands a real file with the archived contents.
+#[test]
+fn copying_a_member_out_writes_the_real_bytes() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        let dest = tmp.path().join("out");
+        std::fs::create_dir(&dest).unwrap();
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let member = archive.join("src/main.rs");
+        settle(
+            &mut app,
+            vec![Effect::FileOp(crate::app::file_ops::FileOp::Copy {
+                paths: vec![member],
+                dest: dest.clone(),
+            })],
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(dest.join("main.rs")).unwrap(),
+            "fn main() {}\n"
+        );
+    });
+}
+
+/// Copying *into* an archive would rewrite the container, so it is refused —
+/// and the refusal comes from the screen, not from a failed write.
+#[test]
+fn copying_into_an_archive_is_refused_by_the_screen() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        std::fs::write(dir.join("outside.txt"), b"x").unwrap();
+        let mut app = App::test_app(dir.clone());
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let held = app.screen_archive_effect(Effect::FileOp(crate::app::file_ops::FileOp::Copy {
+            paths: vec![dir.join("outside.txt")],
+            dest: archive.join("src"),
+        }));
+        assert!(held.is_none(), "the copy never runs");
+        let flash = app.flash_text().unwrap_or_default();
+        assert!(flash.contains("into an archive"), "{flash}");
+    });
+}
+
+/// A second read of the same member skips the extraction entirely.
+#[test]
+fn an_already_extracted_member_passes_straight_through_the_screen() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        let staging = tmp.path().join("staging");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &staging);
+
+        let entry = app
+            .state
+            .mounts
+            .get(&archive)
+            .unwrap()
+            .index
+            .get("README.md")
+            .unwrap()
+            .clone();
+        crate::archive::read::materialize(&archive, &entry, &staging).unwrap();
+
+        let held = app.screen_archive_effect(Effect::Inventory(
+            crate::app::inventory_ops::InventoryOp::Yank {
+                paths: vec![archive.join("README.md")],
+            },
+        ));
+        assert!(held.is_some(), "no round trip for bytes already on disk");
+    });
+}
+
+/// Effects that have nothing to do with archives are untouched by the screen,
+/// even with a mount open.
+#[test]
+fn the_screen_leaves_unrelated_effects_alone() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        std::fs::write(dir.join("real.txt"), b"hi").unwrap();
+        let mut app = App::test_app(dir.clone());
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let held = app.screen_archive_effect(Effect::Inventory(
+            crate::app::inventory_ops::InventoryOp::Yank {
+                paths: vec![dir.join("real.txt")],
+            },
+        ));
+        assert!(held.is_some(), "a real file's yank runs as normal");
     });
 }

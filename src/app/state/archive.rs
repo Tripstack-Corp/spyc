@@ -3,13 +3,13 @@
 //! A mount is a virtual tree: its rows carry paths that don't exist on disk until
 //! a member is extracted, and its "directory" is a file. Most of spyc doesn't
 //! care — sort, picks, the cursor, the `=` filter and the whole render path work
-//! off rows. The actions that *do* care are the ones that write, that shell out,
-//! or that persist a path for later, and they are named here.
+//! off rows.
 //!
-//! The list is a denylist, not an allowlist, and that's deliberate: an action
-//! nobody thought about fails at the filesystem with a visible error, whereas an
-//! allowlist would quietly break unrelated features (help, quit, every pane key)
-//! the day one is added.
+//! Anything that *reads* a member is no longer refused here: those ops route
+//! through `archive_route`, which holds the effect back, extracts, and re-runs it.
+//! What's left is the two things that can't be papered over — writing into a
+//! container, and running something that has no meaning in here — plus the ops
+//! whose effects never reach the screen because they don't carry a path.
 
 use crate::keymap::Action;
 
@@ -19,18 +19,15 @@ pub const fn refusal(action: &Action) -> Option<&'static str> {
     use Action as A;
     Some(match action {
         // Writing into a container means rewriting it, which is not something
-        // spyc does yet.
-        A::Drop | A::CopyPrompt | A::MovePrompt | A::MakeDirPrompt | A::NewFilePrompt => {
-            "archive: writing into an archive is not supported"
-        }
-        A::RemovePrompt(_) => "archive: deleting from an archive is not supported",
+        // spyc does yet. (`Drop`, `CopyPrompt` and `MovePrompt` reach the effect
+        // screen, which distinguishes copying *out* — allowed — from writing in;
+        // these two never produce a path to screen.)
+        A::MakeDirPrompt | A::NewFilePrompt => "archive: writing into an archive is not supported",
         A::ChmodAdd(_) => "archive: permissions are stored in the archive",
 
-        // These need a member's bytes on disk.
-        A::Take => "archive: yank from an archive is not supported",
-        A::PanePipeContent | A::PanePipeInventory => "archive: piping a member is not supported",
-        A::EditInPane => "archive: editing a member is not supported",
-        A::LongList | A::FileType => "archive: not available inside an archive",
+        // Editing a member would stage a change with nowhere to go: spyc can't
+        // write the container back yet, so the edit would be silently discarded.
+        A::EnterOrEdit | A::EditInPane => "archive: editing a member is not supported",
 
         // A shell inherits the process cwd, which stays *outside* the archive —
         // running one here would silently operate on the archive's directory.
@@ -87,12 +84,8 @@ mod tests {
     }
 
     #[test]
-    fn writes_and_deletes_are_refused() {
+    fn creating_files_and_changing_modes_are_refused() {
         for action in [
-            Action::Drop,
-            Action::CopyPrompt,
-            Action::MovePrompt,
-            Action::RemovePrompt(None),
             Action::MakeDirPrompt,
             Action::NewFilePrompt,
             Action::ChmodAdd('x'),
@@ -101,17 +94,37 @@ mod tests {
         }
     }
 
+    /// Reads are not refused here — they route through the effect screen, which
+    /// extracts first and re-runs the op. Refusing them twice would make the
+    /// screen unreachable.
     #[test]
-    fn actions_needing_a_members_bytes_are_refused() {
+    fn reads_are_left_to_the_effect_screen() {
         for action in [
             Action::Take,
             Action::PanePipeContent,
             Action::PanePipeInventory,
-            Action::EditInPane,
             Action::LongList,
             Action::FileType,
+            Action::CopyPrompt,
+            Action::MovePrompt,
+            Action::Drop,
+            Action::RemovePrompt(None),
         ] {
-            assert!(refusal(&action).is_some(), "{action:?} must be refused");
+            assert_eq!(
+                refusal(&action),
+                None,
+                "{action:?} is the effect screen's call, not this gate's"
+            );
+        }
+    }
+
+    /// An edit has nowhere to go until the container can be written back, so it
+    /// is refused rather than staged into a copy nobody will ever repack.
+    #[test]
+    fn editing_a_member_is_refused() {
+        for action in [Action::EnterOrEdit, Action::EditInPane] {
+            let why = refusal(&action).expect("refused");
+            assert!(why.contains("editing"), "{why}");
         }
     }
 
@@ -149,8 +162,7 @@ mod tests {
     #[test]
     fn every_refusal_message_is_user_facing() {
         for action in [
-            Action::Take,
-            Action::Drop,
+            Action::MakeDirPrompt,
             Action::SetMark('a'),
             Action::GitDiff,
             Action::FindFile,

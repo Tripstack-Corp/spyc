@@ -246,6 +246,7 @@ mod activity;
 mod agent_status;
 mod archive;
 mod archive_ops;
+mod archive_route;
 mod bootstrap;
 mod capture;
 mod clipboard;

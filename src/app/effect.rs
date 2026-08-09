@@ -510,6 +510,13 @@ impl App {
         );
 
         for effect in effects {
+            // Screen for archive members before executing: an op naming one is
+            // held back until its bytes exist, and one that would write into a
+            // container is refused. `run_effects` is the only route to the OS, so
+            // this is the only place that has to know.
+            let Some(effect) = self.screen_archive_effect(effect) else {
+                continue;
+            };
             match effect {
                 // A-class: copy + flash synchronously, same tick. Never
                 // `?`-propagate a clipboard error — a failed copy flashes
