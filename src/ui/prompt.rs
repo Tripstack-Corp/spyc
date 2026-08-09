@@ -51,17 +51,32 @@ impl PromptLine<'_> {
             // underline in Insert); the rest is plain buffer text.
             let chars: Vec<char> = self.buffer.chars().collect();
             let before: String = chars[..pos.min(chars.len())].iter().collect();
-            let cursor_char = chars
-                .get(pos)
-                .map_or_else(|| " ".to_string(), ToString::to_string);
             let after: String = if pos + 1 < chars.len() {
                 chars[pos + 1..].iter().collect()
             } else {
                 String::new()
             };
-            let cursor_style = match self.vi_mode {
-                Some(ViMode::Normal) => text_style.bg(self.theme.cursor_bg),
-                _ => text_style.add_modifier(Modifier::UNDERLINED),
+            let normal = matches!(self.vi_mode, Some(ViMode::Normal));
+            // Past the last character — the ordinary typing position — there is no
+            // glyph to style, and an UNDERLINED blank is only as visible as the
+            // terminal's willingness to underline an empty cell. Insert mode draws a
+            // real `_` there instead. Normal mode keeps its blank: a background
+            // paints an empty cell regardless.
+            let (cursor_char, cursor_style) = if pos >= chars.len() && !normal {
+                (
+                    "_".to_string(),
+                    Style::default().fg(self.theme.status_suffix),
+                )
+            } else {
+                let ch = chars
+                    .get(pos)
+                    .map_or_else(|| " ".to_string(), ToString::to_string);
+                let style = if normal {
+                    text_style.bg(self.theme.cursor_bg)
+                } else {
+                    text_style.add_modifier(Modifier::UNDERLINED)
+                };
+                (ch, style)
             };
             runs.push((before, text_style));
             runs.push((cursor_char, cursor_style));
@@ -220,6 +235,62 @@ mod tests {
         };
         let out = render_prompt_to_string(&prompt, 40);
         insta::assert_snapshot!(out);
+    }
+
+    /// The ordinary typing position must be visible. Past the last character
+    /// there's no glyph to underline, and `render_prompt_to_string` trims the row
+    /// — so an underlined trailing SPACE is not merely faint here, it's absent,
+    /// the same way it was absent on screen for whatever the terminal decides
+    /// about underlining an empty cell. A real `_` survives both.
+    #[test]
+    fn insert_cursor_past_the_last_char_draws_an_underscore() {
+        let theme = Theme::default();
+        let prompt = PromptLine {
+            prefix: "!",
+            buffer: "this is a test",
+            theme: &theme,
+            cursor_pos: Some(14), // one past the final `t`
+            vi_mode: Some(ViMode::Insert),
+        };
+        assert_eq!(render_prompt_to_string(&prompt, 40), "[I] !this is a test_");
+    }
+
+    /// ...and only there. On a character the cursor is styling, not a glyph, so
+    /// nothing may be spliced into the text the user typed.
+    #[test]
+    fn insert_cursor_on_a_char_adds_no_glyph() {
+        let theme = Theme::default();
+        let prompt = PromptLine {
+            prefix: "!",
+            buffer: "this is a test",
+            theme: &theme,
+            cursor_pos: Some(5), // on the `i` of `is`
+            vi_mode: Some(ViMode::Insert),
+        };
+        assert_eq!(render_prompt_to_string(&prompt, 40), "[I] !this is a test");
+    }
+
+    /// Normal mode keeps the blank cell: its cursor is a background block, which
+    /// paints an empty cell fine. An `_` here would be a character the buffer
+    /// doesn't contain, sitting where vi shows a block.
+    #[test]
+    fn normal_cursor_never_draws_an_underscore() {
+        let theme = Theme::default();
+        for (buffer, pos) in [("this is a test", 13), ("", 0)] {
+            let prompt = PromptLine {
+                prefix: "!",
+                buffer,
+                theme: &theme,
+                cursor_pos: Some(pos),
+                vi_mode: Some(ViMode::Normal),
+            };
+            let out = render_prompt_to_string(&prompt, 40);
+            assert!(
+                !out.contains('_'),
+                "Normal mode drew an underscore: {out:?}"
+            );
+            assert_eq!(out, format!("[V] !{buffer}"));
+        }
     }
 
     #[test]
