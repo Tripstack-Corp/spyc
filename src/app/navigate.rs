@@ -236,7 +236,9 @@ impl App {
 
         // A member of a mounted archive: its bytes aren't on disk yet, so read
         // it through the mount rather than opening a path that doesn't exist.
-        if self.state.mounts.contains(&path) {
+        // A *mounted archive* is not a member of itself — it falls through to the
+        // container branch below, so leaving one and coming back re-enters it.
+        if self.state.mounts.holds_member(&path) {
             return match intent {
                 ActivateIntent::Display => self.open_member(
                     &path,

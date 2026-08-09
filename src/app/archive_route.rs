@@ -33,6 +33,14 @@ pub enum ArchiveSink {
     },
     /// Can't be done inside an archive; the string is shown to the user.
     Refuse(&'static str),
+    /// The op takes the archive *file* — deleting, moving or renaming it. Drop
+    /// these mounts first, then run it: a mount keyed on a path that no longer
+    /// holds that archive would resolve a future file's members against a stale
+    /// index.
+    UnmountFirst {
+        archives: Vec<PathBuf>,
+        effect: Box<Effect>,
+    },
     /// The op means something different inside a container: record it as a pending
     /// change rather than touching the filesystem. Deleting or renaming a member
     /// is an index edit, which is why either costs nothing however large it is.
@@ -85,6 +93,10 @@ pub fn route_archive_effect(
             then: Box::new(effect),
         },
         Verdict::Refuse(why) => ArchiveSink::Refuse(why),
+        Verdict::TakesContainer(archives) => ArchiveSink::UnmountFirst {
+            archives,
+            effect: Box::new(effect),
+        },
         Verdict::Record(changes) => ArchiveSink::Record(changes),
         Verdict::RewriteAndRecord { effect, changes } => {
             ArchiveSink::RewriteAndRecord { effect, changes }
@@ -97,6 +109,7 @@ enum Verdict {
     Pass,
     Need(Vec<PathBuf>),
     Refuse(&'static str),
+    TakesContainer(Vec<PathBuf>),
     Record(Vec<PendingChange>),
     RewriteAndRecord {
         effect: Box<Effect>,
@@ -123,7 +136,7 @@ fn classify(
         // container, which is a different feature.
         Effect::FileOp(FileOp::Copy { paths, dest }) => {
             if mounts.contains(dest) {
-                if paths.iter().any(|p| mounts.contains(p)) {
+                if paths.iter().any(|p| mounts.holds_member(p)) {
                     return Verdict::Refuse("archive: copy out first, then in");
                 }
                 return bring_in(paths, dest, mounts);
@@ -139,7 +152,12 @@ fn classify(
         // A move out of an archive removes the member, and a rename inside it
         // rewrites the container.
         Effect::FileOp(FileOp::Move { paths, dest }) => {
-            let sources_in = paths.iter().filter(|p| mounts.contains(p)).count();
+            if !mounts.contains(dest)
+                && let Some(verdict) = takes_container(paths, mounts)
+            {
+                return verdict;
+            }
+            let sources_in = paths.iter().filter(|p| mounts.holds_member(p)).count();
             let dest_in = mounts.contains(dest);
             if sources_in == 0 && !dest_in {
                 return Verdict::Pass;
@@ -153,9 +171,17 @@ fn classify(
             Verdict::Refuse("archive: move in or out isn't a single step — copy, then delete")
         }
         Effect::FileOp(FileOp::RenameEach { pairs, .. }) => {
+            // Renaming the archive file itself is an ordinary rename, once its
+            // mount stops claiming the old name.
+            if !pairs.iter().any(|(_, dst)| mounts.contains(dst)) {
+                let srcs: Vec<PathBuf> = pairs.iter().map(|(src, _)| src.clone()).collect();
+                if let Some(verdict) = takes_container(&srcs, mounts) {
+                    return verdict;
+                }
+            }
             let touching = pairs
                 .iter()
-                .filter(|(src, dst)| mounts.contains(src) || mounts.contains(dst))
+                .filter(|(src, dst)| mounts.holds_member(src) || mounts.contains(dst))
                 .count();
             if touching == 0 {
                 return Verdict::Pass;
@@ -205,8 +231,19 @@ fn classify(
         // different recovery stories (the graveyard vs. the journal).
         Effect::Graveyard(op) => {
             let paths = graveyard_paths(op);
+            // A restore writes a new file, which is a write into the container.
+            if matches!(op, super::graveyard_ops::GraveyardOp::Restore { .. }) {
+                return if paths.iter().any(|p| mounts.contains(p)) {
+                    Verdict::Refuse("archive: restore outside the archive, then copy it in")
+                } else {
+                    Verdict::Pass
+                };
+            }
+            if let Some(verdict) = takes_container(&paths, mounts) {
+                return verdict;
+            }
             let (members, outside): (Vec<&PathBuf>, Vec<&PathBuf>) =
-                paths.iter().partition(|p| mounts.contains(p));
+                paths.iter().partition(|p| mounts.holds_member(p));
             if members.is_empty() {
                 return Verdict::Pass;
             }
@@ -218,7 +255,7 @@ fn classify(
             let changes = members
                 .iter()
                 .filter_map(|p| {
-                    let (mount, _) = mounts.resolve(p)?;
+                    let (mount, _) = mounts.member_of(p)?;
                     let entry = mount.entry_at(p)?;
                     Some(PendingChange::Delete {
                         archive: mount.archive().to_path_buf(),
@@ -298,7 +335,7 @@ fn rename_within(paths: &[PathBuf], dest: &Path, mounts: &Mounts) -> Verdict {
     }
     let mut changes = Vec::new();
     for path in paths {
-        let Some((src_mount, from)) = mounts.resolve(path) else {
+        let Some((src_mount, from)) = mounts.member_of(path) else {
             return Verdict::Refuse("archive: rename members within the archive, not across it");
         };
         if src_mount.archive() != mount.archive() {
@@ -319,10 +356,33 @@ fn rename_within(paths: &[PathBuf], dest: &Path, mounts: &Mounts) -> Verdict {
     Verdict::Record(changes)
 }
 
+/// The mounted archive *files* among `paths`, when the op would move or remove
+/// them — a container going away has to take its mount with it.
+///
+/// `None` when nothing in `paths` is a mount root, which is the common case.
+fn takes_container(paths: &[PathBuf], mounts: &Mounts) -> Option<Verdict> {
+    let archives: Vec<PathBuf> = paths
+        .iter()
+        .filter(|p| mounts.get(p).is_some())
+        .cloned()
+        .collect();
+    if archives.is_empty() {
+        return None;
+    }
+    if paths.iter().any(|p| mounts.holds_member(p)) {
+        // One is a change to a container, the other a change to what's inside
+        // one: different recovery stories, so not in a single step.
+        return Some(Verdict::Refuse(
+            "archive: select members or whole archives, not both",
+        ));
+    }
+    Some(Verdict::TakesContainer(archives))
+}
+
 /// One `(src, dst)` pair as a rename, when both sides are the same container.
 fn rename_change(src: &Path, dst: &Path, mounts: &Mounts) -> Option<PendingChange> {
-    let (src_mount, from) = mounts.resolve(src)?;
-    let (dst_mount, to) = mounts.resolve(dst)?;
+    let (src_mount, from) = mounts.member_of(src)?;
+    let (dst_mount, to) = mounts.member_of(dst)?;
     (src_mount.archive() == dst_mount.archive()).then(|| PendingChange::Rename {
         archive: src_mount.archive().to_path_buf(),
         from,
@@ -339,10 +399,13 @@ fn join_inner(dir: &str, name: &str) -> String {
 }
 
 /// The members among `paths` that aren't extracted yet.
+///
+/// A mounted archive named here is a real file already, so it needs nothing — a
+/// read of `pkg.zip` itself is a read of `pkg.zip`, mounted or not.
 fn need(paths: &[PathBuf], mounts: &Mounts, is_staged: &dyn Fn(&Path) -> bool) -> Verdict {
     let members: Vec<PathBuf> = paths
         .iter()
-        .filter(|p| mounts.contains(p) && !is_staged(p))
+        .filter(|p| mounts.holds_member(p) && !is_staged(p))
         .cloned()
         .collect();
     if members.is_empty() {
@@ -813,5 +876,78 @@ mod tests {
             panic!("shape preserved");
         };
         assert_eq!(path, PathBuf::from("/dev/zero"));
+    }
+
+    // ── the container itself ─────────────────────────────────────────────
+
+    /// The archive file is a real file: reading it is not a member read, so it
+    /// passes straight through however it's named.
+    #[test]
+    fn reading_the_archive_file_itself_passes_through() {
+        let mounts = mounts_with(&["a.txt"]);
+        let container = PathBuf::from("/src/pkg.zip");
+        for effect in [
+            Effect::Inventory(InventoryOp::Yank {
+                paths: vec![container.clone()],
+            }),
+            Effect::FileOp(FileOp::FileType {
+                paths: vec![container.clone()],
+            }),
+            Effect::FileOp(FileOp::Copy {
+                paths: vec![container],
+                dest: PathBuf::from("/elsewhere"),
+            }),
+        ] {
+            assert!(
+                matches!(
+                    route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
+                    ArchiveSink::PassThrough(_)
+                ),
+                "a mounted archive is still an ordinary file to read"
+            );
+        }
+    }
+
+    /// Deleting, moving or renaming the archive takes the mount with it — left
+    /// behind, it would resolve a future file at that path against a stale index.
+    #[test]
+    fn an_op_that_takes_the_container_unmounts_it_first() {
+        let mounts = mounts_with(&["a.txt"]);
+        let container = PathBuf::from("/src/pkg.zip");
+        for effect in [
+            Effect::Graveyard(crate::app::graveyard_ops::GraveyardOp::Archive {
+                paths: vec![container.clone()],
+            }),
+            Effect::FileOp(FileOp::Move {
+                paths: vec![container.clone()],
+                dest: PathBuf::from("/elsewhere"),
+            }),
+            Effect::FileOp(FileOp::RenameEach {
+                pairs: vec![(container.clone(), PathBuf::from("/src/renamed.zip"))],
+                is_move: false,
+            }),
+        ] {
+            let sink = route_archive_effect(effect, &mounts, &nothing_staged, &no_names);
+            let ArchiveSink::UnmountFirst { archives, .. } = sink else {
+                panic!("expected an unmount, got {sink:?}");
+            };
+            assert_eq!(archives, std::slice::from_ref(&container));
+        }
+    }
+
+    /// One is a change to a container, the other a change to what's inside one.
+    /// They recover differently, so they aren't done in a single step.
+    #[test]
+    fn deleting_a_container_and_a_member_together_is_refused() {
+        let mounts = mounts_with(&["a.txt"]);
+        let sink = route_archive_effect(
+            Effect::Graveyard(crate::app::graveyard_ops::GraveyardOp::Archive {
+                paths: vec![PathBuf::from("/src/pkg.zip"), member("a.txt")],
+            }),
+            &mounts,
+            &nothing_staged,
+            &no_names,
+        );
+        assert!(matches!(sink, ArchiveSink::Refuse(_)), "got {sink:?}");
     }
 }
