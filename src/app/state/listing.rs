@@ -224,6 +224,19 @@ impl AppState {
         }
     }
 
+    /// Install a freshly-read `Listing` into `side`, ordered by that column's
+    /// sort mode.
+    ///
+    /// The only place a column's `listing` is assigned. `Listing::read` always
+    /// returns name-sorted entries, so an assignment that skips this silently
+    /// reverts the user's `sort:mtime` to name while `sort_order` — and the
+    /// status bar reading off it — still says mtime.
+    fn install_listing(&mut self, side: Side, new: Listing) {
+        self.col_mut(side).listing = new;
+        let (order, reversed) = (self.col(side).sort_order, self.col(side).sort_reversed);
+        self.col_mut(side).listing.sort(order, reversed);
+    }
+
     /// Install an already-read listing into the focused column and bring its
     /// git markers + rows up to date — the back half of [`refresh_listing`],
     /// shared with the off-thread watcher refresh (`App::spawn_listing_refresh`,
@@ -232,7 +245,7 @@ impl AppState {
     /// is for the focused column's current dir (the sync path reads it inline;
     /// the async path staleness-checks `list_generation` before calling).
     pub fn apply_refreshed_listing(&mut self, new: Listing) {
-        self.cur_mut().listing = new;
+        self.install_listing(self.focused_side(), new);
         // Event-driven refresh touches the FOCUSED column's git. With
         // dual fs-watch (PR D) both columns' trees + gitdirs fire
         // events, so the focused column refreshes here on its own edits;
@@ -328,9 +341,7 @@ impl AppState {
                 crate::fs::listing::MAX_ENTRIES
             ));
         }
-        self.col_mut(side).listing = new_listing;
-        let (order, reversed) = (self.col(side).sort_order, self.col(side).sort_reversed);
-        self.col_mut(side).listing.sort(order, reversed);
+        self.install_listing(side, new_listing);
         // Resolve + cache the repo root for the new dir *before* the git
         // calls below so they see the right root on the first run after chdir.
         self.update_repo_root(side, &canonical);
