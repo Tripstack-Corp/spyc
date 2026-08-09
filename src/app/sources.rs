@@ -65,6 +65,10 @@ pub fn coalesce_pending(
             // the outcome rides `runtime.graveyard_results`, drained
             // unconditionally by `apply_graveyard_outcomes` in the pre-recv scan.
             | Message::GraveyardDone
+            // Archive mount / materialize done — same payloadless wake; the
+            // outcome rides `runtime.archive_results`, drained by
+            // `apply_archive_outcomes` in the pre-recv scan.
+            | Message::ArchiveDone
             // Mermaid render+open done — same payloadless wake; drained by
             // `apply_image_outcomes` in the pre-recv scan.
             | Message::ImageDone
@@ -175,6 +179,8 @@ pub fn coalesce_recv(
             // Tier 5: graveyard-op-done — payloadless, drained by the pre-recv
             // scan's `apply_graveyard_outcomes`, so collapse-to-Timeout here.
             | Message::GraveyardDone
+            // Archive op done — same payloadless-wake shape.
+            | Message::ArchiveDone
             // Mermaid render+open done — same payloadless-wake shape.
             | Message::ImageDone
             // Vsplit preview reload done — payloadless, drained by
@@ -602,6 +608,7 @@ mod tests {
             Message::AgentStatusReady,
             Message::GraveyardDone,
             Message::ImageDone,
+            Message::ArchiveDone,
             Message::PreviewReloadDone,
             Message::WorktreeJobDone,
             Message::CodexSessionReady,

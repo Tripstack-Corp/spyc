@@ -48,6 +48,9 @@ pub struct Config {
     /// Delete-action behavior knobs.
     pub delete: DeleteConfig,
 
+    /// Archive-mount knobs (`[archive]`).
+    pub archive: ArchiveConfig,
+
     /// Agent-status notification knobs (`[notify]`).
     pub notify: NotifyConfig,
     /// `[clipboard]` — OSC 52 vs the local helper.
@@ -438,6 +441,56 @@ struct FileDelete {
     confirm: Option<bool>,
 }
 
+/// `[archive]` — entering a zip/tarball as if it were a directory.
+///
+/// The size knobs are megabytes on disk, since that's the unit the user is
+/// protecting; they're converted to bytes once, at load.
+#[derive(Debug, Clone)]
+pub struct ArchiveConfig {
+    /// When false, `Enter` on an archive pages it as bytes instead of mounting.
+    pub enable: bool,
+    /// Ceiling on what a streamed (compressed-tar) mount may extract. A mount
+    /// past this is refused, naming the knob.
+    pub extract_budget_mb: u64,
+    /// Confirm before a mount that would extract more than this.
+    pub warn_over_mb: u64,
+    /// Cap on indexed members; past it the listing marks itself truncated.
+    pub max_entries: usize,
+}
+
+impl Default for ArchiveConfig {
+    fn default() -> Self {
+        Self {
+            enable: true,
+            extract_budget_mb: 512,
+            warn_over_mb: 128,
+            max_entries: 200_000,
+        }
+    }
+}
+
+impl ArchiveConfig {
+    /// The size ceilings as bytes, for the archive layer's own decisions.
+    pub fn limits(&self) -> crate::archive::budget::BudgetLimits {
+        const MB: u64 = 1024 * 1024;
+        crate::archive::budget::BudgetLimits {
+            extract_budget: self.extract_budget_mb.saturating_mul(MB),
+            warn_over: self.warn_over_mb.saturating_mul(MB),
+            ..crate::archive::budget::BudgetLimits::default()
+        }
+    }
+}
+
+/// On-disk shape of `[archive]`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileArchive {
+    enable: Option<bool>,
+    extract_budget_mb: Option<u64>,
+    warn_over_mb: Option<u64>,
+    max_entries: Option<usize>,
+}
+
 /// How a clipboard copy is delivered (`[clipboard].via`).
 ///
 /// `Auto` routes to an OSC-52 terminal escape over SSH — so a yank reaches the
@@ -660,6 +713,8 @@ struct FileConfig {
     #[serde(default)]
     delete: FileDelete,
     #[serde(default)]
+    archive: FileArchive,
+    #[serde(default)]
     notify: FileNotify,
     #[serde(default)]
     clipboard: FileClipboard,
@@ -826,6 +881,20 @@ impl Config {
         // Delete: per-field merge.
         if let Some(b) = file.delete.confirm {
             self.delete.confirm = b;
+        }
+
+        // Archive: per-field merge.
+        if let Some(b) = file.archive.enable {
+            self.archive.enable = b;
+        }
+        if let Some(v) = file.archive.extract_budget_mb {
+            self.archive.extract_budget_mb = v;
+        }
+        if let Some(v) = file.archive.warn_over_mb {
+            self.archive.warn_over_mb = v;
+        }
+        if let Some(v) = file.archive.max_entries {
+            self.archive.max_entries = v;
         }
 
         // Clipboard: per-field merge.

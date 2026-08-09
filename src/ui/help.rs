@@ -216,6 +216,10 @@ const SECTIONS: &[Section] = &[
             ("I", "session info (pid, rss, counts)"),
             ("C", "toggle colors / mono"),
             (
+                ":archive",
+                "archive mount: info / list / unmount / cancel (Enter on an archive mounts it)",
+            ),
+            (
                 ":activity",
                 "toggle activity monitor; :activity dump → per-pane dot-status (why-status) report in a pager",
             ),

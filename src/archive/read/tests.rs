@@ -138,7 +138,7 @@ fn materializing_a_zip_member_yields_the_original_bytes() {
     let indexed = index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
 
     let entry = indexed.index.get("src/main.rs").unwrap();
-    let dest = materialize(&indexed.index, entry, &staging).unwrap();
+    let dest = materialize(&archive, entry, &staging).unwrap();
     assert_eq!(std::fs::read(&dest).unwrap(), b"fn main() {}");
     assert_eq!(dest, staging.join("src/main.rs"));
 
@@ -155,9 +155,9 @@ fn materializing_twice_is_a_no_op() {
     let indexed = index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
     let entry = indexed.index.get("README.md").unwrap();
 
-    let first = materialize(&indexed.index, entry, &staging).unwrap();
+    let first = materialize(&archive, entry, &staging).unwrap();
     std::fs::write(&first, b"edited by the user").unwrap();
-    let second = materialize(&indexed.index, entry, &staging).unwrap();
+    let second = materialize(&archive, entry, &staging).unwrap();
     assert_eq!(
         std::fs::read(&second).unwrap(),
         b"edited by the user",
@@ -176,7 +176,7 @@ fn a_materialized_member_keeps_its_executable_bit() {
     let indexed = index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
 
     let entry = indexed.index.get("src/run.sh").unwrap();
-    let dest = materialize(&indexed.index, entry, &staging).unwrap();
+    let dest = materialize(&archive, entry, &staging).unwrap();
     let mode = std::fs::metadata(&dest).unwrap().permissions().mode();
     assert!(mode & 0o111 != 0, "mode {mode:o} lost the executable bit");
 }
@@ -198,7 +198,7 @@ fn a_plain_tar_indexes_by_offset_and_materializes_by_seeking() {
     let entry = indexed.index.get("src/main.rs").unwrap();
     assert!(matches!(entry.locator, Locator::TarData { .. }));
 
-    let dest = materialize(&indexed.index, entry, &staging).unwrap();
+    let dest = materialize(&archive, entry, &staging).unwrap();
     assert_eq!(std::fs::read(dest).unwrap(), b"fn main() {}");
 }
 

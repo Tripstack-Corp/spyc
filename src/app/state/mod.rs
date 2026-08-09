@@ -21,6 +21,7 @@ use crate::ui::list_view::GridDims;
 use super::{Effect, FlashKind, FlashMessage, Mode, RowData, View};
 
 mod apply;
+pub mod archive;
 mod dispatch;
 mod git;
 mod listing;
@@ -239,6 +240,11 @@ pub enum Focus {
 /// `git status` snapshot. (The git *caches* — `raw_cache`, `repo_root`,
 /// `generation`, … — stay as `AppState` fields for now; clustering them
 /// is pure relocation, not a bug, and is deferred.)
+/// Archives currently mounted (`docs/drafts/ARCHIVE_BROWSING_PLAN.md`). Pure
+/// data — an index plus the user's pending changes — so it belongs in the Model
+/// even though the bytes it describes live on disk.
+pub type Mounts = crate::archive::Mounts;
+
 #[derive(Default)]
 pub struct GitState {
     pub info: Option<String>,
@@ -623,6 +629,10 @@ impl Commander {
 pub struct AppState {
     pub inventory: Inventory,
     pub marks: Marks,
+    /// Archives mounted this session, keyed by the archive file's own path. A
+    /// column whose `listing.dir` sits under one of them is browsing an index
+    /// rather than a directory (`docs/drafts/ARCHIVE_BROWSING_PLAN.md`).
+    pub mounts: Mounts,
     pub resolver: Resolver,
     pub user_keymap: UserKeymap,
     pub config: Config,
@@ -758,6 +768,18 @@ impl AppState {
     /// back to the browse dir when their target is unresolved. Goes through
     /// `cur()` so a focused second commander is honored — and so a pane
     /// launched from the pane view follows the last-focused column, the one
+    /// Every live column's listing dir — `left`, plus `right` when the split is
+    /// open. Deliberately both columns, not the focused one: callers ask "is any
+    /// column standing here?", which is what makes evicting or unmounting an
+    /// archive safe.
+    pub fn column_dirs(&self) -> Vec<std::path::PathBuf> {
+        let mut out = vec![self.left.listing.dir.clone()];
+        if let Some(right) = self.right.as_ref() {
+            out.push(right.listing.dir.clone());
+        }
+        out
+    }
+
     /// `^a k` returns to (`state_left_listing_dir_uses_are_allowlisted`).
     pub fn default_pane_cwd(&self) -> std::path::PathBuf {
         match self.config.pane.new_tab_cwd {
@@ -995,6 +1017,7 @@ impl AppState {
     /// `crate::state::with_state_root` for an isolated state dir.
     pub(crate) fn test_default(cwd: std::path::PathBuf) -> Self {
         Self {
+            mounts: Mounts::default(),
             left: Commander {
                 listing: Listing::empty(cwd.clone()),
                 picks: Picks::new(),

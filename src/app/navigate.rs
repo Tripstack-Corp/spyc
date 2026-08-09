@@ -234,6 +234,36 @@ impl App {
             return Vec::new();
         }
 
+        // A member of a mounted archive: its bytes aren't on disk yet, so read
+        // it through the mount rather than opening a path that doesn't exist.
+        if self.state.mounts.contains(&path) {
+            return match intent {
+                ActivateIntent::Display => self.open_member(
+                    &path,
+                    crate::app::archive_ops::MaterializeThen::OpenPager(PagerDest::Overlay {
+                        scroll: None,
+                    }),
+                ),
+                ActivateIntent::Edit => {
+                    self.state
+                        .flash_error("archive: editing a member is not supported");
+                    Vec::new()
+                }
+            };
+        }
+
+        // A container: walk into it instead of paging its bytes. The name is only
+        // a pre-filter — the worker sniffs the magic and hands back a plain file
+        // when the extension lied, so `Enter` still opens `notes.zip` if that's
+        // what it really is.
+        if self.state.config.archive.enable
+            && path
+                .file_name()
+                .is_some_and(|n| crate::archive::looks_mountable(&n.to_string_lossy()))
+        {
+            return self.request_mount(&path, false);
+        }
+
         // File: dispatch based on intent.
         match intent {
             ActivateIntent::Display => {

@@ -452,6 +452,37 @@ Multiple tabs, each running an independent pty:
   regardless of the focused worktree; `"browse_dir"` opens it in the
   focused column's current dir.
 
+## Archives
+
+`Enter` on a `.zip` / `.tar` / `.tar.gz` / `.tar.zst` (and the zip-derived
+formats — `.jar`, `.whl`, `.epub`, `.apk`, …) walks *into* it, as if it were a
+directory. `h` / `..` climbs back out to the archive file. The whole zip family
+is browsed by reading its index, so entering even a multi-gigabyte archive
+extracts **nothing** — a member's bytes are read only when you open one, and
+they land in a session-scoped staging dir that is cleaned up on exit.
+
+- **What the rows are** — the archive's own members, with their real sizes,
+  mtimes and permission bits. Sorting, `=` filters, picks, search and the
+  cursor all work as they do in a directory.
+- **Reading a member** — `Enter` extracts just that member and opens it in the
+  pager. `D` on the archive itself still shows the raw bytes, so the hex view
+  is never more than one key away.
+- **A compressed tar is different** — `.tar.gz` / `.tar.zst` can't be listed
+  without decompressing the whole stream, so mounting one extracts as it reads.
+  `[archive] extract_budget_mb` (default 512) is the ceiling; past it the mount
+  is refused rather than filling the disk, and `:archive cancel` abandons one
+  that is taking too long.
+- **It says what's odd** — unsafe member paths (`../…`), symlinks pointing out
+  of the archive, duplicate or case-colliding names, encrypted members and a
+  capped index are all reported when the mount opens, in full under
+  `:archive info`.
+- **Not yet supported inside an archive** — writing, deleting, yanking,
+  `:grep`, `F`, marks, harpoon and shell commands are refused with a message
+  rather than half-working. The status suffix shows the container (`zip`,
+  `tar.gz`) and `ro` when the archive can't be written back.
+- **`:archive`** — `info` (everything about this mount), `list` (every mounted
+  archive), `unmount` (drop it and its staged bytes), `cancel`.
+
 ## In-app pager
 
 A built-in pager for viewing files and command output without leaving

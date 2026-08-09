@@ -132,6 +132,12 @@ enum Message {
     /// shape as `GraveyardDone`. One message for every producer: what the render
     /// *was* rides `ImageOrigin` on the outcome, not the wake.
     ImageDone,
+    /// An off-thread archive op (`Effect::Archive`) finished and pushed its
+    /// outcome onto `runtime.archive_results` — a mount, a materialized member,
+    /// or a staging cleanup. Payloadless wake of the same shape as
+    /// `GraveyardDone`; `apply_archive_outcomes` drains the slot in the pre-recv
+    /// scan.
+    ArchiveDone,
     /// An off-thread file op (`Effect::FileOp`) finished and pushed its outcome.
     FileOpDone,
     /// An off-thread inventory op (`Effect::Inventory`) finished.
@@ -238,6 +244,8 @@ mod about;
 mod actions;
 mod activity;
 mod agent_status;
+mod archive;
+mod archive_ops;
 mod bootstrap;
 mod capture;
 mod clipboard;
@@ -601,6 +609,14 @@ struct Runtime {
     /// `Message::ImageDone`; `apply_image_outcomes` drains it each pre-recv scan
     /// and installs or flashes the result. Same shape as `graveyard_results`.
     image_results: std::sync::Arc<std::sync::Mutex<Vec<image_ops::ImageOutcome>>>,
+    /// Landing slot for off-thread archive ops (`Effect::Archive`): mount,
+    /// materialize, clean. Same shape as `graveyard_results` — the worker pushes
+    /// and wakes with `Message::ArchiveDone`, `apply_archive_outcomes` drains.
+    archive_results: std::sync::Arc<std::sync::Mutex<Vec<archive_ops::ArchiveOutcome>>>,
+    /// Cancel flag handed to the in-flight streamed mount, so a long tarball can
+    /// be abandoned with `:archive cancel`. Replaced per mount, so cancelling one
+    /// can never cancel the next.
+    archive_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Landing slot for off-thread file operations.
     file_results: std::sync::Arc<std::sync::Mutex<Vec<file_ops::FileOutcome>>>,
     /// The watcher-driven listing refresh (`FileOp::RefreshListing`) reads the

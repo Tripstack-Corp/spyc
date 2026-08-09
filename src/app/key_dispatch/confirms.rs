@@ -142,6 +142,32 @@ impl App {
         Vec::new()
     }
 
+    /// Single-key confirmation for a mount that would extract a lot, or whose
+    /// expansion ratio looks like a bomb.
+    ///
+    /// `y` / `Y` / Enter re-issues the mount with `confirmed`, which is what the
+    /// worker needs to skip the same check second time round; anything else
+    /// abandons it. Defaults to yes (`[Y/n]`) because the user just pressed Enter
+    /// on the archive — the prompt is a size warning, not a trap.
+    pub(super) fn handle_archive_mount_confirm_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        let confirmed = matches!(key.code, KeyCode::Char('y' | 'Y') | KeyCode::Enter);
+        let prev = std::mem::replace(&mut self.state.mode, Mode::Normal);
+        self.view.needs_full_repaint = true;
+        let Mode::Prompting(Prompt {
+            kind: PromptKind::ArchiveMountConfirm { path },
+            ..
+        }) = prev
+        else {
+            return Vec::new();
+        };
+        if confirmed {
+            self.request_mount(&path, true)
+        } else {
+            self.state.flash_info("archive: not mounted");
+            Vec::new()
+        }
+    }
+
     /// Single-key confirmation for `^a R` on a tab whose child is still
     /// running. `y`/`Y` restarts it; anything else leaves it alone. An exited
     /// tab never opens this prompt — it restarts straight from

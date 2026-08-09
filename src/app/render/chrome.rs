@@ -422,6 +422,26 @@ impl App {
                             format!(" bg:{running}\u{25cf}{done}\u{2713}")
                         }
                     };
+                    // Inside a mounted archive, say so — the path alone reads
+                    // like an ordinary directory under a file, which is exactly
+                    // what it is, but not obviously deliberate.
+                    let archive_tag = self
+                        .state
+                        .mounts
+                        .resolve(&self.state.left.listing.dir)
+                        .map_or_else(String::new, |(mount, _)| {
+                            let ro = if mount.capability.is_writable() {
+                                ""
+                            } else {
+                                " ro"
+                            };
+                            let pending = if mount.is_dirty() {
+                                format!(" {}", mount.journal.counts().badge())
+                            } else {
+                                String::new()
+                            };
+                            format!(" {}{ro}{pending}", mount.format().label())
+                        });
                     let sort_tag = format!(
                         " sort:{}{}",
                         self.state.left.sort_order,
@@ -432,7 +452,7 @@ impl App {
                         },
                     );
                     let suffix = format!(
-                        "[picks:{} inv:{} m1:{} m2:{}{}{}{}{}]",
+                        "[picks:{} inv:{} m1:{} m2:{}{}{}{}{}{}]",
                         self.state.left.picks.len(),
                         self.state.inventory.len(),
                         on_off(self.state.left.masks.mask1.enabled),
@@ -440,6 +460,7 @@ impl App {
                         filter_tag,
                         hidden_tag,
                         sort_tag,
+                        archive_tag,
                         bg_tag,
                     );
                     // `TopList` zoom collapses the pane (no divider), so its

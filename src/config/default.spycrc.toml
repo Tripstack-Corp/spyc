@@ -166,6 +166,25 @@
 [delete]
 # confirm = true
 
+# ── archive ───────────────────────────────────────────────────────────
+# Entering a zip / tarball as if it were a directory (`Enter` on it; `h`
+# climbs back out). A mount is an *index*, so entering even a huge zip
+# extracts nothing — a member's bytes are read only when you open one.
+#   enable             (default true)   false pages the archive as bytes.
+#   extract_budget_mb  (default 512)    hard ceiling for a `.tar.gz` /
+#                        `.tar.zst` mount, which has to extract as it
+#                        streams (a compressed tar can't be listed
+#                        without decompressing it). Over this, the mount
+#                        is refused rather than filling the disk.
+#   warn_over_mb       (default 128)    confirm before extracting more.
+#   max_entries        (default 200000) cap on indexed members; past it
+#                        the listing shows itself as truncated.
+[archive]
+# enable = true
+# extract_budget_mb = 512
+# warn_over_mb = 128
+# max_entries = 200000
+
 # ── notify ────────────────────────────────────────────────────────────
 # Notifications when an agent pane changes status (P3-1 "which agent needs
 # me"). Fires on the transition itself (0 delay), not a timer.
