@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
-use glob::Pattern;
 use ratatui::Frame;
 
 use crate::Tui;
@@ -262,6 +261,7 @@ mod key_dispatch;
 mod loop_steps;
 mod lua;
 mod lua_events;
+mod matcher;
 mod mcp;
 mod mermaid_ops;
 #[cfg(test)]
@@ -304,6 +304,7 @@ use capture::PendingCapture;
 pub use effect::SigOk;
 pub use effect::{ClipMsg, Effect, PaneInput, PaneTarget, PaneTextKind, PaneTextSink};
 use find_picker::FindPicker;
+pub use matcher::Matcher;
 use pager_history::PagerHistory;
 use pane_wake::SinkId;
 use proc::{ForegroundExec, spawn_input_reader};
@@ -1251,74 +1252,6 @@ impl App {
             .pager
             .as_ref()
             .is_some_and(|v| v.title == Self::HELP_TITLE)
-    }
-}
-
-/// Search / filter matcher: case-insensitive substring for plain
-/// text, glob for anything with `*`, `?`, or `[`. Used by `/`
-/// (search) and `=` (limit filter). Substring (not anchored at the
-/// start) so `/env` finds `.env`, `.envrc`, and `environment.toml`
-/// — anchored prefix mode hid dot-prefixed files behind their
-/// leading `.` and was consistently surprising. Globs are still
-/// available for users who want anchoring (`env*`, `.env*`).
-pub enum Matcher {
-    Substring(String),
-    Glob(Pattern),
-    /// An invalid glob produced by a malformed pattern. Matches nothing.
-    Never,
-}
-
-impl Matcher {
-    pub fn build(query: &str) -> Self {
-        let is_glob = query.contains(['*', '?', '[']);
-        let lower = query.to_lowercase();
-        if is_glob {
-            match Pattern::new(&lower) {
-                Ok(p) => Self::Glob(p),
-                Err(_) => Self::Never,
-            }
-        } else {
-            Self::Substring(lower)
-        }
-    }
-
-    pub fn matches(&self, name: &str) -> bool {
-        match self {
-            Self::Substring(q) => ascii_or_lower_contains(name, q),
-            Self::Glob(p) => {
-                // Glob matching needs an owned &str; skip the lowercasing
-                // allocation for the common case of an already-lowercase ASCII
-                // name. Non-ASCII (or any uppercase) names fall back to
-                // `to_lowercase` to preserve Unicode case-folding semantics.
-                if name.is_ascii() && !name.bytes().any(|b| b.is_ascii_uppercase()) {
-                    p.matches(name)
-                } else {
-                    p.matches(&name.to_lowercase())
-                }
-            }
-            Self::Never => false,
-        }
-    }
-}
-
-/// Case-insensitive substring test that avoids allocating a lowercased copy of
-/// `name` on the filter/search hot path (called once per listing row per
-/// keystroke). `needle` is already lowercased by `Matcher::build`. The ASCII
-/// fast path is allocation-free; non-ASCII names fall back to `to_lowercase`
-/// so Unicode case folding stays identical to the old behavior.
-fn ascii_or_lower_contains(name: &str, needle: &str) -> bool {
-    if name.is_ascii() && needle.is_ascii() {
-        let (h, n) = (name.as_bytes(), needle.as_bytes());
-        if n.is_empty() {
-            return true;
-        }
-        if n.len() > h.len() {
-            return false;
-        }
-        h.windows(n.len())
-            .any(|w| w.iter().zip(n).all(|(&a, &b)| a.to_ascii_lowercase() == b))
-    } else {
-        name.to_lowercase().contains(needle)
     }
 }
 
