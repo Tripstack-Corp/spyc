@@ -34,15 +34,34 @@ pub enum ArchiveSink {
     /// Can't be done inside an archive; the string is shown to the user.
     Refuse(&'static str),
     /// The op means something different inside a container: record it as a pending
-    /// change rather than touching the filesystem. Deleting a member is an index
-    /// edit, which is why a 500 MB member can be dropped without extracting it.
+    /// change rather than touching the filesystem. Deleting or renaming a member
+    /// is an index edit, which is why either costs nothing however large it is.
     Record(Vec<PendingChange>),
+    /// Both: run `effect` — already pointed at the staging tree — and record what
+    /// it will have added. Bringing a file *in* genuinely needs its bytes copied
+    /// somewhere, and staging is where the repack reads them from.
+    RewriteAndRecord {
+        effect: Box<Effect>,
+        changes: Vec<PendingChange>,
+    },
 }
 
 /// A filesystem op reinterpreted as a change to a container.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PendingChange {
-    Delete { archive: PathBuf, inner: String },
+    Delete {
+        archive: PathBuf,
+        inner: String,
+    },
+    Rename {
+        archive: PathBuf,
+        from: String,
+        to: String,
+    },
+    Add {
+        archive: PathBuf,
+        inner: String,
+    },
 }
 
 /// Classify `effect` against the live mounts.
@@ -54,11 +73,12 @@ pub fn route_archive_effect(
     effect: Effect,
     mounts: &Mounts,
     is_staged: &dyn Fn(&Path) -> bool,
+    inventory_names: &dyn Fn(&[String]) -> Vec<String>,
 ) -> ArchiveSink {
     if mounts.is_empty() {
         return ArchiveSink::PassThrough(effect);
     }
-    match classify(&effect, mounts, is_staged) {
+    match classify(&effect, mounts, is_staged, inventory_names) {
         Verdict::Pass => ArchiveSink::PassThrough(effect),
         Verdict::Need(members) => ArchiveSink::Materialize {
             members,
@@ -66,6 +86,9 @@ pub fn route_archive_effect(
         },
         Verdict::Refuse(why) => ArchiveSink::Refuse(why),
         Verdict::Record(changes) => ArchiveSink::Record(changes),
+        Verdict::RewriteAndRecord { effect, changes } => {
+            ArchiveSink::RewriteAndRecord { effect, changes }
+        }
     }
 }
 
@@ -75,9 +98,18 @@ enum Verdict {
     Need(Vec<PathBuf>),
     Refuse(&'static str),
     Record(Vec<PendingChange>),
+    RewriteAndRecord {
+        effect: Box<Effect>,
+        changes: Vec<PendingChange>,
+    },
 }
 
-fn classify(effect: &Effect, mounts: &Mounts, is_staged: &dyn Fn(&Path) -> bool) -> Verdict {
+fn classify(
+    effect: &Effect,
+    mounts: &Mounts,
+    is_staged: &dyn Fn(&Path) -> bool,
+    inventory_names: &dyn Fn(&[String]) -> Vec<String>,
+) -> Verdict {
     match effect {
         // --- reads: extract, then run ---
         Effect::Inventory(InventoryOp::Yank { paths })
@@ -91,7 +123,10 @@ fn classify(effect: &Effect, mounts: &Mounts, is_staged: &dyn Fn(&Path) -> bool)
         // container, which is a different feature.
         Effect::FileOp(FileOp::Copy { paths, dest }) => {
             if mounts.contains(dest) {
-                return Verdict::Refuse("archive: copying into an archive is not supported");
+                if paths.iter().any(|p| mounts.contains(p)) {
+                    return Verdict::Refuse("archive: copy out first, then in");
+                }
+                return bring_in(paths, dest, mounts);
             }
             need(paths, mounts, is_staged)
         }
@@ -104,27 +139,64 @@ fn classify(effect: &Effect, mounts: &Mounts, is_staged: &dyn Fn(&Path) -> bool)
         // A move out of an archive removes the member, and a rename inside it
         // rewrites the container.
         Effect::FileOp(FileOp::Move { paths, dest }) => {
-            if paths.iter().any(|p| mounts.contains(p)) || mounts.contains(dest) {
-                Verdict::Refuse("archive: moving a member is not supported")
-            } else {
-                Verdict::Pass
+            let sources_in = paths.iter().filter(|p| mounts.contains(p)).count();
+            let dest_in = mounts.contains(dest);
+            if sources_in == 0 && !dest_in {
+                return Verdict::Pass;
             }
+            if sources_in == paths.len() && dest_in {
+                return rename_within(paths, dest, mounts);
+            }
+            // Moving across the boundary is a copy plus a delete, in one of two
+            // orders, with two different failure halves. The user can do both
+            // steps deliberately.
+            Verdict::Refuse("archive: move in or out isn't a single step — copy, then delete")
         }
         Effect::FileOp(FileOp::RenameEach { pairs, .. }) => {
-            if pairs
+            let touching = pairs
                 .iter()
-                .any(|(src, dst)| mounts.contains(src) || mounts.contains(dst))
-            {
-                Verdict::Refuse("archive: renaming a member is not supported")
+                .filter(|(src, dst)| mounts.contains(src) || mounts.contains(dst))
+                .count();
+            if touching == 0 {
+                return Verdict::Pass;
+            }
+            let changes: Vec<PendingChange> = pairs
+                .iter()
+                .filter_map(|(src, dst)| rename_change(src, dst, mounts))
+                .collect();
+            if changes.len() == pairs.len() {
+                Verdict::Record(changes)
             } else {
-                Verdict::Pass
+                Verdict::Refuse("archive: rename members within the archive, not across it")
             }
         }
-        Effect::Inventory(InventoryOp::Put { dest_dir, .. }) => {
-            if mounts.contains(dest_dir) {
-                Verdict::Refuse("archive: writing into an archive is not supported")
-            } else {
-                Verdict::Pass
+        Effect::Inventory(InventoryOp::Put { dest_dir, ids }) => {
+            if !mounts.contains(dest_dir) {
+                return Verdict::Pass;
+            }
+            let Some((mount, inner_dir)) = mounts.resolve(dest_dir) else {
+                return Verdict::Pass;
+            };
+            // The inventory worker copies from its own cache into a directory, so
+            // pointing it at the staging tree is all it takes; the names it will
+            // write are the yanked files' own.
+            let names = inventory_names(ids);
+            let changes: Vec<PendingChange> = names
+                .iter()
+                .map(|name| PendingChange::Add {
+                    archive: mount.archive().to_path_buf(),
+                    inner: join_inner(&inner_dir, name),
+                })
+                .collect();
+            if changes.is_empty() {
+                return Verdict::Refuse("archive: nothing to put");
+            }
+            Verdict::RewriteAndRecord {
+                effect: Box::new(Effect::Inventory(InventoryOp::Put {
+                    dest_dir: mount.staging_root.join(&inner_dir),
+                    ids: ids.clone(),
+                })),
+                changes,
             }
         }
         // Deleting a member is an edit to the container's index, not a file
@@ -183,6 +255,86 @@ fn classify(effect: &Effect, mounts: &Mounts, is_staged: &dyn Fn(&Path) -> bool)
         // themselves. `ChangeDir` is deliberately here — navigating *into* a mount
         // is the whole point, and `chdir_into_mount` handles it.
         _ => Verdict::Pass,
+    }
+}
+
+/// Copying real files into a container: point the op at the staging tree and
+/// record what it will have added.
+fn bring_in(paths: &[PathBuf], dest: &Path, mounts: &Mounts) -> Verdict {
+    let Some((mount, inner_dir)) = mounts.resolve(dest) else {
+        return Verdict::Pass;
+    };
+    let changes: Vec<PendingChange> = paths
+        .iter()
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .map(|name| PendingChange::Add {
+            archive: mount.archive().to_path_buf(),
+            inner: join_inner(&inner_dir, &name),
+        })
+        .collect();
+    if changes.is_empty() {
+        return Verdict::Refuse("archive: nothing to copy in");
+    }
+    Verdict::RewriteAndRecord {
+        effect: Box::new(Effect::FileOp(FileOp::Copy {
+            paths: paths.to_vec(),
+            dest: mount.staging_root.join(&inner_dir),
+        })),
+        changes,
+    }
+}
+
+/// Moving members inside one container is a rename — no bytes move, which is why
+/// it costs nothing even for a huge member.
+fn rename_within(paths: &[PathBuf], dest: &Path, mounts: &Mounts) -> Verdict {
+    let Some((mount, dest_inner)) = mounts.resolve(dest) else {
+        return Verdict::Pass;
+    };
+    // A destination the archive already holds as a directory takes each source
+    // under its own name; anything else is a single rename to that exact name.
+    let into_dir = mount.index.is_dir(&dest_inner);
+    if !into_dir && paths.len() > 1 {
+        return Verdict::Refuse("archive: rename one member at a time, or into a directory");
+    }
+    let mut changes = Vec::new();
+    for path in paths {
+        let Some((src_mount, from)) = mounts.resolve(path) else {
+            return Verdict::Refuse("archive: rename members within the archive, not across it");
+        };
+        if src_mount.archive() != mount.archive() {
+            return Verdict::Refuse("archive: rename members within one archive");
+        }
+        let to = if into_dir {
+            let name = from.rsplit_once('/').map_or(from.as_str(), |(_, n)| n);
+            join_inner(&dest_inner, name)
+        } else {
+            dest_inner.clone()
+        };
+        changes.push(PendingChange::Rename {
+            archive: mount.archive().to_path_buf(),
+            from,
+            to,
+        });
+    }
+    Verdict::Record(changes)
+}
+
+/// One `(src, dst)` pair as a rename, when both sides are the same container.
+fn rename_change(src: &Path, dst: &Path, mounts: &Mounts) -> Option<PendingChange> {
+    let (src_mount, from) = mounts.resolve(src)?;
+    let (dst_mount, to) = mounts.resolve(dst)?;
+    (src_mount.archive() == dst_mount.archive()).then(|| PendingChange::Rename {
+        archive: src_mount.archive().to_path_buf(),
+        from,
+        to,
+    })
+}
+
+fn join_inner(dir: &str, name: &str) -> String {
+    if dir.is_empty() {
+        name.to_string()
+    } else {
+        format!("{dir}/{name}")
     }
 }
 
@@ -296,6 +448,11 @@ mod tests {
         false
     }
 
+    /// The inventory lookup the Put arm needs; these tests don't exercise it.
+    fn no_names(_: &[String]) -> Vec<String> {
+        Vec::new()
+    }
+
     fn all_staged(_: &Path) -> bool {
         true
     }
@@ -310,7 +467,7 @@ mod tests {
             paths: vec![PathBuf::from("/real/file.txt")],
         });
         assert!(matches!(
-            route_archive_effect(effect, &Mounts::default(), &nothing_staged),
+            route_archive_effect(effect, &Mounts::default(), &nothing_staged, &no_names),
             ArchiveSink::PassThrough(_)
         ));
     }
@@ -322,7 +479,7 @@ mod tests {
             paths: vec![PathBuf::from("/real/file.txt")],
         });
         assert!(matches!(
-            route_archive_effect(effect, &mounts, &nothing_staged),
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
             ArchiveSink::PassThrough(_)
         ));
     }
@@ -335,7 +492,7 @@ mod tests {
             paths: vec![member("a.txt"), member("d/b.txt")],
         });
         let ArchiveSink::Materialize { members, then } =
-            route_archive_effect(effect, &mounts, &nothing_staged)
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names)
         else {
             panic!("a member yank must be materialized first");
         };
@@ -352,7 +509,7 @@ mod tests {
             paths: vec![member("a.txt")],
         });
         assert!(matches!(
-            route_archive_effect(effect, &mounts, &all_staged),
+            route_archive_effect(effect, &mounts, &all_staged, &no_names),
             ArchiveSink::PassThrough(_)
         ));
     }
@@ -370,7 +527,7 @@ mod tests {
             ],
         });
         let ArchiveSink::Materialize { members, .. } =
-            route_archive_effect(effect, &mounts, &staged)
+            route_archive_effect(effect, &mounts, &staged, &no_names)
         else {
             panic!("expected a materialize");
         };
@@ -385,29 +542,85 @@ mod tests {
             dest: PathBuf::from("/home/me"),
         });
         assert!(matches!(
-            route_archive_effect(effect, &mounts, &nothing_staged),
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
             ArchiveSink::Materialize { .. }
         ));
     }
 
+    /// Copying *into* a container points the op at the staging tree and records
+    /// the addition — the bytes have to exist somewhere for the repack to read.
     #[test]
-    fn copying_into_an_archive_is_refused() {
-        let mounts = mounts_with(&["a.txt"]);
+    fn copying_into_an_archive_stages_the_file_and_records_it() {
+        let mounts = mounts_with(&["a.txt", "d/keep.txt"]);
         let effect = Effect::FileOp(FileOp::Copy {
             paths: vec![PathBuf::from("/real/x.txt")],
             dest: member("d"),
         });
-        let ArchiveSink::Refuse(why) = route_archive_effect(effect, &mounts, &nothing_staged)
+        let ArchiveSink::RewriteAndRecord { effect, changes } =
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names)
         else {
-            panic!("writing into a container must be refused");
+            panic!("a copy in must be staged and recorded");
         };
-        assert!(why.contains("into an archive"), "{why}");
+        let Effect::FileOp(FileOp::Copy { dest, .. }) = *effect else {
+            panic!("still a copy");
+        };
+        assert_eq!(
+            dest,
+            PathBuf::from("/staging/d"),
+            "the copy is redirected into the staging tree"
+        );
+        assert_eq!(
+            changes,
+            [PendingChange::Add {
+                archive: PathBuf::from("/src/pkg.zip"),
+                inner: "d/x.txt".to_string(),
+            }]
+        );
     }
 
-    /// A move out would have to remove the member, which is a rewrite of the
-    /// container — a different thing from copying out.
+    /// Copying a member into the same archive would be a rename dressed as a
+    /// copy, with the source's bytes not yet on disk. Two steps, deliberately.
     #[test]
-    fn moving_a_member_is_refused_in_either_direction() {
+    fn copying_a_member_into_its_own_archive_is_refused() {
+        let mounts = mounts_with(&["a.txt", "d/keep.txt"]);
+        let effect = Effect::FileOp(FileOp::Copy {
+            paths: vec![member("a.txt")],
+            dest: member("d"),
+        });
+        assert!(matches!(
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
+            ArchiveSink::Refuse(_)
+        ));
+    }
+
+    /// Moving members inside one container is a rename: no bytes move, so it is
+    /// recorded rather than performed.
+    #[test]
+    fn moving_members_within_an_archive_is_recorded_as_a_rename() {
+        let mounts = mounts_with(&["a.txt", "d/keep.txt"]);
+        let effect = Effect::FileOp(FileOp::Move {
+            paths: vec![member("a.txt")],
+            dest: member("d"),
+        });
+        let ArchiveSink::Record(changes) =
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names)
+        else {
+            panic!("a move within the archive is a rename");
+        };
+        assert_eq!(
+            changes,
+            [PendingChange::Rename {
+                archive: PathBuf::from("/src/pkg.zip"),
+                from: "a.txt".to_string(),
+                to: "d/a.txt".to_string(),
+            }]
+        );
+    }
+
+    /// Moving across the boundary is a copy plus a delete, with two failure
+    /// halves — the user can do both steps and see each land.
+    #[test]
+    fn moving_across_the_archive_boundary_is_refused() {
         let mounts = mounts_with(&["a.txt"]);
         for effect in [
             Effect::FileOp(FileOp::Move {
@@ -419,10 +632,12 @@ mod tests {
                 dest: member("d"),
             }),
         ] {
-            assert!(matches!(
-                route_archive_effect(effect, &mounts, &nothing_staged),
-                ArchiveSink::Refuse(_)
-            ));
+            let ArchiveSink::Refuse(why) =
+                route_archive_effect(effect, &mounts, &nothing_staged, &no_names)
+            else {
+                panic!("a move across the boundary must be refused");
+            };
+            assert!(why.contains("copy, then delete"), "{why}");
         }
     }
 
@@ -435,7 +650,8 @@ mod tests {
         let effect = Effect::Graveyard(crate::app::graveyard_ops::GraveyardOp::Archive {
             paths: vec![member("a.txt")],
         });
-        let ArchiveSink::Record(changes) = route_archive_effect(effect, &mounts, &nothing_staged)
+        let ArchiveSink::Record(changes) =
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names)
         else {
             panic!("a member delete must be recorded");
         };
@@ -457,7 +673,8 @@ mod tests {
         let effect = Effect::Graveyard(crate::app::graveyard_ops::GraveyardOp::Archive {
             paths: vec![member("a.txt"), PathBuf::from("/real/x.txt")],
         });
-        let ArchiveSink::Refuse(why) = route_archive_effect(effect, &mounts, &nothing_staged)
+        let ArchiveSink::Refuse(why) =
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names)
         else {
             panic!("a mixed selection must be refused");
         };
@@ -472,7 +689,7 @@ mod tests {
             paths: vec![PathBuf::from("/real/x.txt")],
         });
         assert!(matches!(
-            route_archive_effect(effect, &mounts, &nothing_staged),
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
             ArchiveSink::PassThrough(_)
         ));
     }
@@ -488,7 +705,7 @@ mod tests {
             generation: 1,
         });
         assert!(matches!(
-            route_archive_effect(effect, &mounts, &nothing_staged),
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
             ArchiveSink::Refuse(_)
         ));
     }
@@ -504,7 +721,7 @@ mod tests {
             err_prefix: "chdir",
         };
         assert!(matches!(
-            route_archive_effect(effect, &mounts, &nothing_staged),
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
             ArchiveSink::PassThrough(_)
         ));
     }

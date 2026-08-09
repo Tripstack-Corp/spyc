@@ -666,26 +666,36 @@ fn copying_a_member_out_writes_the_real_bytes() {
     });
 }
 
-/// Copying *into* an archive would rewrite the container, so it is refused —
-/// and the refusal comes from the screen, not from a failed write.
+/// Copying a file into an archive stages it and records the addition, so the
+/// next write-back includes it.
 #[test]
-fn copying_into_an_archive_is_refused_by_the_screen() {
+fn copying_a_file_into_an_archive_then_writing_adds_it() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let dir = tmp.path().to_path_buf();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
-        std::fs::write(dir.join("outside.txt"), b"x").unwrap();
+        std::fs::write(dir.join("outside.txt"), b"brought in").unwrap();
         let mut app = App::test_app(dir.clone());
         mount_inline(&mut app, &archive, &tmp.path().join("staging"));
 
-        let held = app.screen_archive_effect(Effect::FileOp(crate::app::file_ops::FileOp::Copy {
-            paths: vec![dir.join("outside.txt")],
-            dest: archive.join("src"),
-        }));
-        assert!(held.is_none(), "the copy never runs");
-        let flash = app.flash_text().unwrap_or_default();
-        assert!(flash.contains("into an archive"), "{flash}");
+        settle(
+            &mut app,
+            vec![Effect::FileOp(crate::app::file_ops::FileOp::Copy {
+                paths: vec![dir.join("outside.txt")],
+                dest: archive.join("src"),
+            })],
+        );
+        assert!(app.mount_is_dirty(&archive), "the addition is pending");
+
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+
+        assert!(
+            member_names(&archive).contains(&"src/outside.txt".to_string()),
+            "{:?}",
+            member_names(&archive)
+        );
     });
 }
 
@@ -947,5 +957,190 @@ fn quitting_with_unwritten_changes_warns_first() {
         assert!(!app.state.should_quit, "the first tap does not quit");
         let flash = app.flash_text().unwrap_or_default();
         assert!(flash.contains("unwritten changes"), "{flash}");
+    });
+}
+
+/// Putting an inventory item into a mount stages its bytes and records the
+/// addition, so the write-back carries the yanked file's contents in.
+#[test]
+fn putting_an_inventory_item_into_an_archive_adds_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let source = dir.join("brought.txt");
+        std::fs::write(&source, b"from the inventory").unwrap();
+        let mut app = App::test_app(dir);
+
+        // Yank a real file first, then mount and put it inside.
+        settle(
+            &mut app,
+            vec![Effect::Inventory(
+                crate::app::inventory_ops::InventoryOp::Yank {
+                    paths: vec![source],
+                },
+            )],
+        );
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        let ids: Vec<String> = app.state.inventory.items().map(|i| i.id.clone()).collect();
+
+        settle(
+            &mut app,
+            vec![Effect::Inventory(
+                crate::app::inventory_ops::InventoryOp::Put {
+                    dest_dir: archive.clone(),
+                    ids,
+                },
+            )],
+        );
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+
+        assert!(
+            member_names(&archive).contains(&"brought.txt".to_string()),
+            "{:?}",
+            member_names(&archive)
+        );
+    });
+}
+
+/// Renaming a member inside an archive moves no bytes — it's an index edit — and
+/// the write-back emits it under the new name.
+#[test]
+fn renaming_a_member_then_writing_moves_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        let staging = tmp.path().join("staging");
+        mount_inline(&mut app, &archive, &staging);
+
+        settle(
+            &mut app,
+            vec![Effect::FileOp(crate::app::file_ops::FileOp::RenameEach {
+                pairs: vec![(archive.join("README.md"), archive.join("READ-ME.md"))],
+                is_move: true,
+            })],
+        );
+        assert!(app.mount_is_dirty(&archive), "the rename is pending");
+        assert!(
+            !staging.exists()
+                || std::fs::read_dir(&staging).map_or(0, std::iter::Iterator::count) == 0,
+            "and nothing was extracted to do it"
+        );
+
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+
+        let names = member_names(&archive);
+        assert!(names.contains(&"READ-ME.md".to_string()), "{names:?}");
+        assert!(!names.contains(&"README.md".to_string()), "{names:?}");
+    });
+}
+
+/// Editing a member extracts it first and points the editor at that copy — the
+/// row's own path has no bytes behind it.
+#[test]
+fn editing_a_member_opens_the_extracted_copy() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        let staging = tmp.path().join("staging");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &staging);
+        app.apply(&Action::Down(1)).unwrap();
+
+        let fx = app.apply(&Action::EnterOrEdit).unwrap();
+        assert!(
+            fx.iter().any(|e| matches!(
+                e,
+                Effect::Archive(crate::app::archive_ops::ArchiveOp::Materialize { .. })
+            )),
+            "the member is extracted first: {fx:?}"
+        );
+
+        // Run the extraction; the follow-up is the editor spawn.
+        let mut spawned: Vec<Effect> = Vec::new();
+        for effect in fx {
+            let Effect::Archive(op) = effect else {
+                continue;
+            };
+            let outcome = run_archive_op(op);
+            app.runtime.archive_results.lock().unwrap().push(outcome);
+        }
+        let (_, follow) = app.apply_archive_outcomes();
+        spawned.extend(follow);
+
+        let target = spawned.iter().find_map(|e| match e {
+            Effect::ForegroundExec { args, .. } => args.last().cloned(),
+            _ => None,
+        });
+        assert_eq!(
+            target.as_deref(),
+            Some(staging.join("README.md").to_string_lossy().as_ref()),
+            "the editor opens the extracted copy, not the member path"
+        );
+    });
+}
+
+/// An edit spyc never performed is still noticed: the staged file no longer
+/// matches what spyc wrote when it extracted it.
+#[test]
+fn an_external_edit_makes_the_mount_dirty_and_is_written_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        let staging = tmp.path().join("staging");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &staging);
+
+        // Extract a member the way a read would, then edit it behind spyc's back.
+        let entry = app
+            .state
+            .mounts
+            .get(&archive)
+            .unwrap()
+            .index
+            .get("README.md")
+            .unwrap()
+            .clone();
+        let real = crate::archive::read::materialize(&archive, &entry, &staging).unwrap();
+        app.state.mounts.get_mut(&archive).unwrap().staged.insert(
+            "README.md".to_string(),
+            crate::archive::journal::StagedStat {
+                size: std::fs::metadata(&real).unwrap().len(),
+                mtime: std::fs::metadata(&real).unwrap().modified().unwrap(),
+                is_dir: false,
+            },
+        );
+        assert!(
+            !app.mount_is_dirty(&archive),
+            "clean right after extraction"
+        );
+
+        std::fs::write(&real, b"edited outside spyc").unwrap();
+        assert!(
+            app.mount_is_dirty(&archive),
+            "the changed staged copy is what makes it dirty"
+        );
+
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+
+        // Read the member back out of the rewritten archive.
+        let after =
+            crate::archive::read::index_seekable(&archive, crate::archive::ArchiveFormat::Zip, 100)
+                .unwrap();
+        let entry = after.index.get("README.md").unwrap();
+        let check = tmp.path().join("check");
+        let real = crate::archive::read::materialize(&archive, entry, &check).unwrap();
+        assert_eq!(std::fs::read(real).unwrap(), b"edited outside spyc");
     });
 }

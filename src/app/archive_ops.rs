@@ -27,6 +27,10 @@ pub enum MaterializeThen {
     /// Re-run the effect that was held back, against the extracted copies. The
     /// op it carries never learns its inputs came out of an archive.
     Retry(Box<super::Effect>),
+    /// Open the extracted copy in `$EDITOR`. Whatever the editor saves is picked
+    /// up by the next write-back, which compares each staged file against what
+    /// spyc wrote when it extracted it.
+    Edit { in_pane: bool },
 }
 
 #[derive(Debug)]

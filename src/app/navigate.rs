@@ -244,11 +244,12 @@ impl App {
                         scroll: None,
                     }),
                 ),
-                ActivateIntent::Edit => {
-                    self.state
-                        .flash_error("archive: editing a member is not supported");
-                    Vec::new()
-                }
+                // Edit the extracted copy; the next write-back notices the
+                // change and puts it back.
+                ActivateIntent::Edit => self.open_member(
+                    &path,
+                    crate::app::archive_ops::MaterializeThen::Edit { in_pane: false },
+                ),
             };
         }
 

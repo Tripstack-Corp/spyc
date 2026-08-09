@@ -156,17 +156,20 @@ impl App {
                     self.record_staged(real);
                 }
                 match then {
-                    MaterializeThen::OpenPager(dest) => {
-                        if let Some((_, real)) = staged.first() {
-                            self.open_staged_in_pager(real, dest);
-                        }
-                        Vec::new()
-                    }
                     MaterializeThen::Retry(effect) => {
                         let map: std::collections::HashMap<PathBuf, PathBuf> =
                             staged.into_iter().collect();
                         vec![super::archive_route::rewrite_paths(*effect, &map)]
                     }
+                    // Opening and editing act on one member, so a batch acts on
+                    // the first — the paths that produce these carry exactly one.
+                    then => match staged.first() {
+                        Some((_, real)) => {
+                            let real = real.clone();
+                            self.do_after_materialize(then, &real)
+                        }
+                        None => Vec::new(),
+                    },
                 }
             }
             ArchiveOutcome::MaterializeFailed { error } => {
@@ -211,6 +214,33 @@ impl App {
             MaterializeThen::OpenPager(dest) => {
                 self.open_staged_in_pager(real, dest);
                 Vec::new()
+            }
+            MaterializeThen::Edit { in_pane } => {
+                let argv = crate::shell::resolve_editor();
+                if argv.is_empty() {
+                    self.state.flash_error("no $VISUAL or $EDITOR set");
+                    return Vec::new();
+                }
+                self.state
+                    .flash_info("editing the extracted copy — :archive write to put it back");
+                if in_pane {
+                    let cmd = format!(
+                        "{} {}",
+                        argv.join(" "),
+                        crate::shell::shell_quote(&real.display().to_string())
+                    );
+                    self.spawn_top_overlay(&cmd);
+                    return Vec::new();
+                }
+                let mut argv = argv;
+                let program = argv.remove(0);
+                argv.push(real.display().to_string());
+                super::PostAction::Spawn {
+                    program,
+                    args: argv,
+                    pause_after: false,
+                }
+                .into()
             }
             // A single-member retry: the effect's own paths are rewritten from
             // this one mapping.
@@ -525,7 +555,15 @@ impl App {
                 .and_then(|(mount, _)| mount.entry_at(p).map(|e| mount.is_materialized(e)))
                 .unwrap_or(false)
         };
-        match route_archive_effect(effect, &self.state.mounts, &staged_check) {
+        let inventory_names = |ids: &[String]| -> Vec<String> {
+            self.state
+                .inventory
+                .items()
+                .filter(|item| ids.contains(&item.id))
+                .map(|item| item.filename.clone())
+                .collect()
+        };
+        match route_archive_effect(effect, &self.state.mounts, &staged_check, &inventory_names) {
             ArchiveSink::PassThrough(effect) => Some(effect),
             ArchiveSink::Refuse(why) => {
                 self.state.flash_error(why);
@@ -540,6 +578,19 @@ impl App {
             ArchiveSink::Record(changes) => {
                 self.record_pending(changes);
                 None
+            }
+            // Bringing a file in needs its bytes somewhere before the repack can
+            // read them, so the rewritten op runs *and* the change is recorded.
+            ArchiveSink::RewriteAndRecord { effect, changes } => {
+                if let Some(dir) = staging_target(&effect)
+                    && let Err(e) = std::fs::create_dir_all(&dir)
+                {
+                    self.state
+                        .flash_error(format!("archive: staging {}: {e:#}", dir.display()));
+                    return None;
+                }
+                self.record_pending(changes);
+                Some(*effect)
             }
         }
     }
@@ -595,6 +646,8 @@ impl App {
     fn record_pending(&mut self, changes: Vec<super::archive_route::PendingChange>) {
         use super::archive_route::PendingChange;
         let mut deleted = 0usize;
+        let mut renamed = 0usize;
+        let mut added = 0usize;
         for change in changes {
             match change {
                 PendingChange::Delete { archive, inner } => {
@@ -603,14 +656,32 @@ impl App {
                         deleted += 1;
                     }
                 }
+                PendingChange::Rename { archive, from, to } => {
+                    if let Some(mount) = self.state.mounts.get_mut(&archive) {
+                        mount.journal.rename(from, to);
+                        renamed += 1;
+                    }
+                }
+                PendingChange::Add { archive, inner } => {
+                    if let Some(mount) = self.state.mounts.get_mut(&archive) {
+                        mount.journal.add(inner);
+                        added += 1;
+                    }
+                }
             }
         }
-        if deleted > 0 {
-            self.state.refresh_listing();
-            self.state.flash_info(format!(
-                "{deleted} member(s) marked for removal — :archive write to apply"
-            ));
+        if deleted + renamed + added == 0 {
+            return;
         }
+        self.state.refresh_listing();
+        let what = [(deleted, "removed"), (renamed, "renamed"), (added, "added")]
+            .iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, verb)| format!("{n} {verb}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.state
+            .flash_info(format!("{what} — :archive write to apply"));
     }
 
     /// The write-back op for a mount, or `None` when there is nothing to write.
@@ -752,6 +823,19 @@ fn display_name(path: &Path) -> String {
         || path.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
     )
+}
+
+/// The directory a rewritten write-in op will put files in, so it can be created
+/// first — the inventory and copy workers write into a directory, they don't make
+/// one.
+fn staging_target(effect: &Effect) -> Option<PathBuf> {
+    match effect {
+        Effect::Inventory(super::inventory_ops::InventoryOp::Put { dest_dir, .. }) => {
+            Some(dest_dir.clone())
+        }
+        Effect::FileOp(super::file_ops::FileOp::Copy { dest, .. }) => Some(dest.clone()),
+        _ => None,
+    }
 }
 
 /// Stat every staged file a mount knows about, keyed the same way the recorded

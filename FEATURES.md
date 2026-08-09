@@ -494,11 +494,17 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   `:undo` can bring the old one back. `:archive discard` throws the pending
   changes away instead; unmounting a changed archive offers to write it first,
   and quitting warns before dropping unwritten changes.
-- **Not yet supported inside an archive** — adding files, renaming, editing a
-  member, `:grep`, `F`, marks, harpoon and shell commands are refused with a
-  message rather than half-working. The status suffix shows the container
-  (`zip`, `tar.gz`), `ro` when the archive can't be written back, and a `+2 ~1 -3`
-  badge while changes are pending.
+- **Changing an archive** — `R` marks a member for removal, `p` puts an
+  inventory item in, `c` copies files in, `M` renames a member (an index edit, so
+  no bytes move however large it is), and `e` / `V` edit a member by extracting it
+  and opening your editor on that copy. Everything stays pending until
+  `:archive write`; the suffix carries a `+2 ~1 -3` badge meanwhile. An edit made
+  outside spyc — by your editor, or by an agent in the pane — is noticed too,
+  because spyc compares each extracted file against what it wrote.
+- **Not yet supported inside an archive** — creating an empty directory or a new
+  file, moving across the archive boundary in one step, `:grep`, `F`, marks,
+  harpoon and shell commands are refused with a message rather than
+  half-working. The suffix shows `ro` when the archive can't be written back.
 - **`:archive`** — `info` (everything about this mount), `list` (every mounted
   archive), `unmount` (drop it and its staged bytes), `cancel`.
 

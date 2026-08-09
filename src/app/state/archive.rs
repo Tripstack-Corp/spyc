@@ -18,16 +18,12 @@ use crate::keymap::Action;
 pub const fn refusal(action: &Action) -> Option<&'static str> {
     use Action as A;
     Some(match action {
-        // Writing into a container means rewriting it, which is not something
-        // spyc does yet. (`Drop`, `CopyPrompt` and `MovePrompt` reach the effect
-        // screen, which distinguishes copying *out* — allowed — from writing in;
-        // these two never produce a path to screen.)
-        A::MakeDirPrompt | A::NewFilePrompt => "archive: writing into an archive is not supported",
+        // An empty directory and a brand-new file have no bytes to stage, and the
+        // journal models changes to members rather than to the tree itself.
+        A::MakeDirPrompt | A::NewFilePrompt => {
+            "archive: creating entries inside an archive is not supported"
+        }
         A::ChmodAdd(_) => "archive: permissions are stored in the archive",
-
-        // Editing a member would stage a change with nowhere to go: spyc can't
-        // write the container back yet, so the edit would be silently discarded.
-        A::EnterOrEdit | A::EditInPane => "archive: editing a member is not supported",
 
         // A shell inherits the process cwd, which stays *outside* the archive —
         // running one here would silently operate on the archive's directory.
@@ -119,13 +115,12 @@ mod tests {
         }
     }
 
-    /// An edit has nowhere to go until the container can be written back, so it
-    /// is refused rather than staged into a copy nobody will ever repack.
+    /// Editing goes through the mount now: the member is extracted, the editor
+    /// opens on that copy, and the next write-back notices the change.
     #[test]
-    fn editing_a_member_is_refused() {
+    fn editing_a_member_is_left_to_the_mount() {
         for action in [Action::EnterOrEdit, Action::EditInPane] {
-            let why = refusal(&action).expect("refused");
-            assert!(why.contains("editing"), "{why}");
+            assert_eq!(refusal(&action), None, "{action:?}");
         }
     }
 
