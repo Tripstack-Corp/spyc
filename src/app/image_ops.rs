@@ -344,6 +344,46 @@ pub fn raster_to_protocol(
         .map_err(|e| format!("protocol: {e}"))
 }
 
+/// Path for a file spyc hands to the OS image viewer, inside a private
+/// per-process scratch directory.
+///
+/// SPYC-TRAP(viewer-temp-symlink): never build this path by joining
+/// `env::temp_dir()` directly. `fs::write` follows symlinks, so a *predictable*
+/// name under a shared `/tmp` (Linux's default; macOS's `$TMPDIR` is per-user
+/// and mode 700) lets any local user pre-create that name as a symlink and turn
+/// the user's keypress into an arbitrary-file overwrite. The scratch dir is
+/// created by `tempfile` with a random name, `O_EXCL` and mode 0700, so there
+/// is nothing to pre-plant and nothing else can read the images either.
+///
+/// The directory is created once and deliberately outlives the process (the
+/// external viewer needs the file after spyc has moved on), which is why
+/// `name` can stay stable per content — re-opening the same diagram reuses its
+/// file instead of littering.
+pub fn viewer_scratch_path(name: &str) -> Result<PathBuf, String> {
+    static DIR: std::sync::OnceLock<Result<PathBuf, String>> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = tempfile::Builder::new()
+            .prefix("spyc-view-")
+            .tempdir()
+            .map(tempfile::TempDir::keep)
+            .map_err(|e| format!("create scratch dir: {e}"))?;
+        // `tempfile` makes the directory with plain `create_dir` — 0777 & ~umask,
+        // so 0755 on a normal setup. The unguessable name is what defeats the
+        // symlink plant; this narrows it further so the images (often the user's
+        // screenshots) aren't readable by other local users while they sit here.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+                .map_err(|e| format!("lock down scratch dir: {e}"))?;
+        }
+        Ok(dir)
+    })
+    .as_ref()
+    .map(|dir| dir.join(name))
+    .map_err(Clone::clone)
+}
+
 /// Why nothing can be shown inline, with the way out. Shared so the mermaid and
 /// file paths give the same answer to the same terminal limitation.
 pub fn no_protocol_reason() -> String {
@@ -577,6 +617,50 @@ mod tests {
             }
             _ => panic!("expected a refusal without a picker"),
         }
+    }
+
+    /// The scratch dir must be private: a symlink pre-planted at a predictable
+    /// name is the whole attack, and 0700 is what makes it unplantable.
+    #[cfg(unix)]
+    #[test]
+    fn the_viewer_scratch_dir_is_private_to_this_user() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = viewer_scratch_path("probe.png").expect("scratch path");
+        let dir = path.parent().expect("scratch path has a parent");
+        let mode = std::fs::metadata(dir)
+            .expect("stat scratch dir")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700, "scratch dir must be user-only, got {mode:o}");
+    }
+
+    /// It must NOT be a predictable path under the shared temp dir — that is
+    /// exactly what made the old code plantable.
+    #[test]
+    fn the_viewer_path_is_not_directly_under_the_shared_temp_dir() {
+        let path = viewer_scratch_path("spyc-agent-image-1.png").expect("scratch path");
+        assert_ne!(
+            path.parent(),
+            Some(std::env::temp_dir().as_path()),
+            "must sit in a private subdir, not directly in the shared temp dir"
+        );
+        assert!(
+            path.starts_with(std::env::temp_dir()),
+            "still under the temp dir"
+        );
+    }
+
+    /// The stable-name-per-content behaviour the mermaid path relies on:
+    /// asking twice for the same name yields the same file, so re-opening a
+    /// diagram reuses it instead of littering.
+    #[test]
+    fn the_same_name_maps_to_the_same_file() {
+        let a = viewer_scratch_path("same.png").expect("scratch path");
+        let b = viewer_scratch_path("same.png").expect("scratch path");
+        assert_eq!(a, b);
+        let c = viewer_scratch_path("other.png").expect("scratch path");
+        assert_ne!(a, c);
     }
 
     /// A missing file reports the path — a bare "No such file or directory"
