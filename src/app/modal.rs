@@ -15,6 +15,9 @@
 /// Which transient modal overlay is swallowing input, if any.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Modal {
+    /// Full-screen image overlay (`view.image_view`). First because it is the
+    /// last surface drawn — nothing is visible beneath it to aim a key at.
+    ImageView,
     /// `F` fuzzy-finder picker (`runtime.find_picker`).
     FindPicker,
     /// A `!` capture child is running (`runtime.pending_capture`).
@@ -34,6 +37,7 @@ pub(super) enum Modal {
 /// inline. Each field is the `is_some()` / bool of a backing modal field.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ModalSnapshot {
+    pub has_image_view: bool,
     pub has_find_picker: bool,
     pub has_capture: bool,
     pub overlay_awaiting_dismiss: bool,
@@ -45,13 +49,15 @@ pub(super) struct ModalSnapshot {
 /// Decide which [`Modal`] (if any) owns input. **Pure** — no mutation, no I/O.
 ///
 /// Branch order is the precedence the historical `handle_key` pre-check ladder
-/// used: finder > capture > overlay-dismiss > quick-select > harpoon >
-/// image-gallery. In
+/// used, with the full-screen image overlay ahead of it: image-view > finder >
+/// capture > overlay-dismiss > quick-select > harpoon > image-gallery. In
 /// practice at most one is ever live at once (a single pager slot + the modal
 /// open/close discipline), but pinning the order keeps the decision total and
 /// the routing deterministic if two were ever set.
 pub(super) const fn active_modal(snap: ModalSnapshot) -> Option<Modal> {
-    if snap.has_find_picker {
+    if snap.has_image_view {
+        Some(Modal::ImageView)
+    } else if snap.has_find_picker {
         Some(Modal::FindPicker)
     } else if snap.has_capture {
         Some(Modal::Capture)
@@ -75,6 +81,7 @@ mod tests {
     /// Snapshot with no modal active.
     const fn none() -> ModalSnapshot {
         ModalSnapshot {
+            has_image_view: false,
             has_find_picker: false,
             has_capture: false,
             overlay_awaiting_dismiss: false,
@@ -133,6 +140,7 @@ mod tests {
     #[test]
     fn precedence_order() {
         let all = ModalSnapshot {
+            has_image_view: true,
             has_image_gallery: true,
             has_find_picker: true,
             has_capture: true,
@@ -140,10 +148,17 @@ mod tests {
             has_quick_select: true,
             has_harpoon: true,
         };
-        assert_eq!(active_modal(all), Some(Modal::FindPicker));
+        // The full-screen image overlay is the last surface drawn, so it takes
+        // the key ahead of everything beneath it.
+        assert_eq!(active_modal(all), Some(Modal::ImageView));
+        let zero = ModalSnapshot {
+            has_image_view: false,
+            ..all
+        };
+        assert_eq!(active_modal(zero), Some(Modal::FindPicker));
         let a = ModalSnapshot {
             has_find_picker: false,
-            ..all
+            ..zero
         };
         assert_eq!(active_modal(a), Some(Modal::Capture));
         let b = ModalSnapshot {

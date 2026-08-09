@@ -22,7 +22,7 @@ impl App {
     /// swallowed so nothing scrolls underneath): `s` save, `y` copy the image,
     /// `Y` copy the source/path, `c` toggle light/dark, `b` flip to a base64
     /// text buffer, `o` open externally, q/Esc/i dismiss.
-    pub(super) fn handle_image_view_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+    pub(crate) fn handle_image_view_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q' | 'i') => {
                 self.view.image_view = None;
