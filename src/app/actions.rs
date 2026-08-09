@@ -258,8 +258,7 @@ impl App {
                 return Ok(post);
             }
             Action::EditInPane => {
-                self.edit_in_pane();
-                return Ok(Vec::new());
+                return Ok(self.edit_in_pane());
             }
             Action::DisplayInPane => {
                 return Ok(self.display_in_pane());

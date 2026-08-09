@@ -501,24 +501,32 @@ impl App {
         )
     }
 
-    pub fn edit_in_pane(&mut self) {
+    pub fn edit_in_pane(&mut self) -> Vec<Effect> {
         // Edit the FOCUSED column's cursor file. From the right commander the
         // editor opens INSIDE `b` (its own `top_overlay_right` slot), so it
         // coexists with a `V`/`D` already open in `a` instead of evicting it.
         let Some(row) = self.state.cur().rows.get(self.state.cur().cursor.index) else {
-            return;
+            return Vec::new();
         };
         let path = row.path.clone();
         if row.kind == EntryKind::Dir
             || (row.kind == EntryKind::Symlink && crate::fs::target_is_dir(&path))
         {
             self.state.flash_error("V: cannot edit a directory");
-            return;
+            return Vec::new();
+        }
+        // A member has no bytes on disk yet, so it is extracted first and the
+        // editor opens on the extracted copy.
+        if self.state.mounts.contains(&path) {
+            return self.open_member(
+                &path,
+                crate::app::archive_ops::MaterializeThen::Edit { in_pane: true },
+            );
         }
         let argv = shell::resolve_editor();
         if argv.is_empty() {
             self.state.flash_error("no $VISUAL or $EDITOR set");
-            return;
+            return Vec::new();
         }
         let cmd = format!(
             "{} {}",
@@ -526,6 +534,7 @@ impl App {
             shell::shell_quote(&path.display().to_string()),
         );
         self.spawn_top_overlay(&cmd);
+        Vec::new()
     }
 
     /// `D` — open the cursor file in spyc's in-app pager mounted in
