@@ -509,6 +509,12 @@ pub(super) fn cmd_images(app: &mut App, _args: &str) -> Vec<Effect> {
 // reachable and re-bindable (`map KEY command <name>`). Each just runs the
 // same `Action` the key fired, returning its effects to the caller.
 
+/// `:archive [info|list|unmount]` — inspect or drop an archive mount. Mounting
+/// itself is `Enter` on the archive; this is the management surface.
+pub fn cmd_archive(app: &mut App, arg: &str) -> Vec<Effect> {
+    app.cmd_archive(arg)
+}
+
 /// `:activity` — toggle the activity monitor overlay (was `A`). `:activity dump`
 /// instead opens a saveable pager with a per-pane breakdown of how every agent
 /// tab's dot is derived (the `:why-status` reasoning for ALL panes at once) —
@@ -838,6 +844,11 @@ pub(super) fn cmd_pane_to_task(app: &mut App, args: &str) -> Vec<Effect> {
 pub(super) fn cmd_grep(app: &mut App, args: &str) -> Vec<Effect> {
     if args.is_empty() {
         app.state.flash_error("grep: pattern required");
+    } else if app.state.mounts.contains(&app.state.cur().listing.dir) {
+        // The searcher walks real directories, and a mount has none — searching
+        // from here would report "no matches" for an archive full of them.
+        app.state
+            .flash_error("archive: grep is not available inside an archive");
     } else {
         app.open_grep_pager(args);
     }

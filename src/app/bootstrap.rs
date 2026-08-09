@@ -123,6 +123,11 @@ impl App {
             Vec::new()
         };
 
+        // Reap staging trees from spyc runs that died without cleaning up. Cheap
+        // (one `read_dir` plus a liveness check per entry) and the only thing that
+        // stops a `SIGKILL`ed session's extracted bytes from living forever.
+        super::archive::sweep_orphan_staging();
+
         let app_state = state::AppState {
             left: state::Commander {
                 listing,
@@ -165,6 +170,7 @@ impl App {
             right: None,
             inventory: Inventory::load(),
             marks: Marks::load(),
+            mounts: state::Mounts::default(),
             resolver: Resolver::new(),
             user_keymap,
             config,
@@ -314,6 +320,8 @@ impl App {
                 )),
                 graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 image_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                archive_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                archive_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 file_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 listing_refresh_inflight: false,
                 listing_refresh_dirty: false,

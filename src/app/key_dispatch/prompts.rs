@@ -57,6 +57,12 @@ impl App {
         }
         if matches!(
             &self.state.mode,
+            Mode::Prompting(p) if matches!(p.kind, PromptKind::ArchiveMountConfirm { .. })
+        ) {
+            return self.handle_archive_mount_confirm_key(key);
+        }
+        if matches!(
+            &self.state.mode,
             Mode::Prompting(p) if matches!(p.kind, PromptKind::LuaRunaway)
         ) {
             return self.handle_lua_runaway_confirm_key(key);

@@ -88,7 +88,7 @@ fn a_zip_indexes_lists_and_materializes_one_member() {
     assert!(!staging.exists());
 
     let entry = indexed.index.get("src/util/mod.rs").unwrap();
-    let dest = read::materialize(&indexed.index, entry, &staging).unwrap();
+    let dest = read::materialize(&archive, entry, &staging).unwrap();
     assert_eq!(
         std::fs::read_to_string(&dest).unwrap(),
         "pub fn helper() {}\n"

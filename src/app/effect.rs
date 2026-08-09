@@ -27,8 +27,8 @@ use crate::pane::Pane;
 use crate::ui::pager::PagerView;
 
 use super::{
-    App, ForegroundExec, Message, PagerReturn, PostAction, file_ops, graveyard_ops, image_ops,
-    inventory_ops, mermaid_ops, worktree_ops,
+    App, ForegroundExec, Message, PagerReturn, PostAction, archive_ops, file_ops, graveyard_ops,
+    image_ops, inventory_ops, mermaid_ops, worktree_ops,
 };
 
 /// A side effect for the run loop to execute. Producers (handlers) return
@@ -217,6 +217,11 @@ pub enum Effect {
     /// scan) does the flash + listing/graveyard refresh. The cheap prep (which
     /// paths, which entry, the in-memory entry list) is done by the producer.
     Graveyard(graveyard_ops::GraveyardOp),
+    /// Run an archive op (mount / materialize / clean staging) on a detached
+    /// worker: indexing a compressed tar decompresses the whole stream, so it can
+    /// never run on the event loop. The outcome lands in `runtime.archive_results`
+    /// and wakes with `Message::ArchiveDone`; `apply_archive_outcomes` applies it.
+    Archive(archive_ops::ArchiveOp),
 
     /// Render a ` ```mermaid ` block to a PNG on a detached worker and open it in
     /// the OS image viewer — parse/layout/raster/font-load is far too heavy for
@@ -937,6 +942,20 @@ impl App {
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
                             let _ = tx.send(Message::GraveyardDone);
+                        }
+                    });
+                }
+                // Archive mount / materialize / staging cleanup — same detached
+                // shape as Graveyard. A streamed mount can run for seconds, so
+                // it also gets the shared cancel flag (`Esc` sets it).
+                Effect::Archive(op) => {
+                    let results = std::sync::Arc::clone(&self.runtime.archive_results);
+                    let wake = self.runtime.pane_wake_tx.clone();
+                    std::thread::spawn(move || {
+                        let outcome = archive_ops::run_archive_op(op);
+                        results.lock().unwrap().push(outcome);
+                        if let Some(tx) = wake {
+                            let _ = tx.send(Message::ArchiveDone);
                         }
                     });
                 }
