@@ -67,3 +67,10 @@ bench = false
 
 # Own workspace so the parent crate's build/gate ignores this entirely.
 [workspace]
+
+[[bin]]
+name = "archive_name"
+path = "fuzz_targets/archive_name.rs"
+test = false
+doc = false
+bench = false
