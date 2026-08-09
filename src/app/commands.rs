@@ -237,7 +237,7 @@ pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
 
 /// `:why-git` — dump per-column git-marker refresh state to a saveable pager:
 /// each column's repo root + resolved gitdir, the cached poll key vs the LIVE
-/// on-disk `index`/`HEAD` mtimes (so you can see whether the 1 Hz poll will
+/// on-disk one (`git::status::poll_key`, so you can see whether the 1 Hz poll will
 /// SHORT-CIRCUIT or re-walk), the displayed `git.files` marker count, and the
 /// worker generation. The diagnostic for "why is this column showing stale
 /// markers": if the poll short-circuits (cache == on-disk) yet the markers
@@ -263,13 +263,6 @@ fn why_git_lines(app: &App) -> Vec<String> {
             Some(d) => format!("{}.{:03}", d.as_secs(), d.subsec_millis()),
             None => "—".to_string(),
         }
-    };
-    let stat_mtime = |dir: Option<&std::path::Path>, file: &str| {
-        dir.and_then(|d| {
-            std::fs::metadata(d.join(file))
-                .and_then(|m| m.modified())
-                .ok()
-        })
     };
     let path_or = |p: Option<&std::path::Path>| {
         p.map_or_else(|| "(none)".to_string(), |p| p.display().to_string())
@@ -317,18 +310,33 @@ fn why_git_lines(app: &App) -> Vec<String> {
             }
         ));
         // The crux: the poll's freshness key (cached) vs the LIVE on-disk key.
+        // Both sides must come from `poll_key` — a plain `stat(<gitdir>/HEAD)`
+        // here reports a different quantity (it misses the resolved branch ref
+        // and the config fold), which reads as an impossible cache-newer-than-
+        // disk line and makes the verdict below lie.
         let cache_key = gc.git_poll_cache;
-        let live_idx = stat_mtime(gc.current_gitdir.as_deref(), "index");
-        let live_head = stat_mtime(gc.current_gitdir.as_deref(), "HEAD");
+        let live = gc
+            .current_gitdir
+            .as_deref()
+            .and_then(|gd| crate::git::status::poll_key(gd, gc.current_config_path.as_deref()));
+        let (live_idx, live_head) = (live.map(|(i, _)| i), live.map(|(_, h)| h));
         out.push(format!(
             "    poll_cache: index={} head={}",
             fmt(cache_key.map(|(i, _)| i)),
             fmt(cache_key.map(|(_, h)| h)),
         ));
         out.push(format!(
-            "    on-disk:    index={} head={}",
+            "    on-disk:    index={} head={}  (head = latest of HEAD/ref + config)",
             fmt(live_idx),
             fmt(live_head)
+        ));
+        out.push(format!(
+            "    config:     {} mtime={}",
+            path_or(gc.current_config_path.as_deref()),
+            fmt(gc
+                .current_config_path
+                .as_deref()
+                .and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())),
         ));
         // Mirrors `refresh_git_state_for`: skip the walk iff a full cached key
         // equals the (both-present) on-disk key and no rewalk is forced.
