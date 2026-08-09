@@ -157,9 +157,10 @@ impl App {
                 });
                 Vec::new()
             }
-            // A transcript image has no file of its own — spill it to a temp
-            // file first. Bounded write on the main thread, like `s` above.
-            ImageOrigin::Transcript { seq, .. } => {
+            // Neither a transcript image nor an uncommitted paste has a file of
+            // its own — spill it to a temp file first. Bounded write on the main
+            // thread, like `s` above.
+            ImageOrigin::Transcript { seq, .. } | ImageOrigin::Pending { seq } => {
                 let path = std::env::temp_dir().join(format!("spyc-agent-image-{seq}.{}", iv.ext));
                 iv.flash = Some(
                     match std::fs::write(&path, &iv.encoded).and_then(|()| {

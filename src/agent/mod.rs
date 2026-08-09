@@ -205,6 +205,20 @@ pub trait AgentProfile: Sync {
         None
     }
 
+    /// The key this agent uses to paste an image from the system clipboard.
+    ///
+    /// The terminal never carries image bytes — bracketed paste is text — so an
+    /// agent reads the system clipboard *itself* when this key arrives. spyc
+    /// sees only the keystroke, which is enough: it can read the same clipboard
+    /// at the same moment and keep its own copy of what the agent just took.
+    ///
+    /// Default `None`, and spyc never guesses: a wrong key would fire a
+    /// clipboard read on a keystroke that means something else entirely (`^v`
+    /// is readline's quoted-insert in a shell).
+    fn image_paste_key(&self) -> Option<crossterm::event::KeyEvent> {
+        None
+    }
+
     /// Activity-status lifecycle hooks, if spyc can auto-install them for this
     /// agent (claude/codex/agy). Default: none — the dot then rides P0 output
     /// timing only (no semantic working/blocked/done self-report via hooks).
@@ -402,6 +416,15 @@ impl AgentProfile for ClaudeProfile {
         Some(TranscriptImageSpec {
             resolve: crate::state::claude_transcript::resolve_active_jsonl,
         })
+    }
+    /// Claude Code pastes an image with `^v`, not the terminal's own paste
+    /// (`Cmd+V`/`Ctrl+Shift+V` go through the terminal, which can only carry
+    /// text). Same key on macOS and Linux.
+    fn image_paste_key(&self) -> Option<crossterm::event::KeyEvent> {
+        Some(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('v'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ))
     }
     fn status_hooks(&self) -> Option<StatusHookSupport> {
         Some(StatusHookSupport {

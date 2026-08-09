@@ -718,6 +718,26 @@ save, `y` copy, `Y` copy the prompt it arrived with, `b` base64, `o`
 external viewer); `q` closes the gallery. Movement is the normal list
 keys — `j`/`k`, `G`, `/` search all work.
 
+Images you've pasted but **not sent yet** lead the list, marked 📎:
+
+```
+  📎 #1    png     412 KB  just now    1920×1080, not sent yet
+  1. #1    jpeg    485 KB  yesterday   it would be helpful to show the creation…
+```
+
+That half is what answers "what did I just attach?" *before* you hit
+Enter — the moment the question actually gets asked. It works because an
+agent reads the system clipboard itself when you press its paste key (`^v`
+for Claude; the terminal can't carry image bytes), so spyc reads the same
+clipboard at the same moment and keeps a copy. Purely additive: the paste
+still reaches the agent untouched.
+
+These live in memory only — nothing is written to disk unless you save it
+— and they're dropped when you submit the prompt, at which point the
+agent's transcript becomes the record. Only agents with a known paste key
+are watched, never a shell tab. Turn it off with `[pane]
+preview_pasted_images = false`.
+
 The **leading number is spyc's**, not the agent's. The agent's `[Image #N]`
 is shown beside it for cross-reference but can't be the handle: its counter
 restarts when a conversation is cleared or resumed, so the same label can

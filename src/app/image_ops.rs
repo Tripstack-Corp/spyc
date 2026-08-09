@@ -43,6 +43,8 @@ pub enum ImageOrigin {
     Mermaid { source: String },
     /// An image file opened from the list.
     File { path: PathBuf },
+    /// An image pasted into a pane but not yet sent — spyc's clipboard capture.
+    Pending { seq: usize },
     /// An image the agent received, read back out of its transcript. Carries
     /// what the gallery row showed so the overlay can still identify it once
     /// the list is gone.
@@ -62,7 +64,7 @@ impl ImageOrigin {
     pub fn mermaid_source(&self) -> Option<&str> {
         match self {
             Self::Mermaid { source } => Some(source),
-            Self::File { .. } | Self::Transcript { .. } => None,
+            Self::File { .. } | Self::Transcript { .. } | Self::Pending { .. } => None,
         }
     }
 
@@ -83,6 +85,7 @@ impl ImageOrigin {
                 Some(l) => format!("image {seq} (agent {l})"),
                 None => format!("image {seq}"),
             },
+            Self::Pending { seq } => format!("pasted image {seq} (not sent yet)"),
         }
     }
 
@@ -92,6 +95,8 @@ impl ImageOrigin {
             Self::Mermaid { source } => (source.clone(), "mermaid source"),
             Self::File { path } => (path.display().to_string(), "path"),
             Self::Transcript { prompt, .. } => (prompt.clone(), "prompt"),
+            // Nothing textual behind it yet — the prompt is still being typed.
+            Self::Pending { .. } => (String::new(), "nothing"),
         }
     }
 }
@@ -110,6 +115,22 @@ pub struct ImageOpenOp {
 #[derive(Debug)]
 pub struct TranscriptIndexOp {
     pub path: PathBuf,
+}
+
+/// Show already-in-hand bytes full-screen: no fetch, just decode + protocol.
+#[derive(Debug)]
+pub struct ImageBytesOp {
+    pub bytes: Vec<u8>,
+    pub origin: ImageOrigin,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+/// Grab whatever image is on the system clipboard right now, for the tab the
+/// user is pasting into.
+#[derive(Debug)]
+pub struct ClipboardCaptureOp {
+    pub tab_id: String,
 }
 
 /// Open one already-indexed transcript image: re-read its record, decode the
@@ -146,6 +167,16 @@ pub enum ImageOutcome {
         path: PathBuf,
         images: Vec<crate::state::transcript_images::TranscriptImage>,
     },
+    /// A clipboard image grabbed as the user pasted it into a pane.
+    Captured {
+        tab_id: String,
+        encoded: Vec<u8>,
+        dims: (u32, u32),
+    },
+    /// The paste carried no image. The overwhelmingly common outcome of a
+    /// capture — a distinct variant so the drain can stay completely silent
+    /// (and skip the redraw) rather than flashing a non-event on every paste.
+    NothingCaptured,
     /// Handed to the OS viewer (mermaid's `o`); nothing to install.
     Opened,
     /// Complete, user-facing failure reason — flashed verbatim, so the producer
@@ -184,6 +215,48 @@ pub fn open_image_file(op: ImageOpenOp, picker: Option<Picker>) -> ImageOutcome 
             dark: false,
         },
         Err(e) => ImageOutcome::Failed(format!("{}: {e}", path.display())),
+    }
+}
+
+/// Build the overlay for bytes the caller already holds. Runs on the detached
+/// worker — decode plus protocol encode is the same cost wherever the bytes
+/// came from.
+pub fn show_image_bytes(op: ImageBytesOp, picker: Option<Picker>) -> ImageOutcome {
+    let ImageBytesOp {
+        bytes,
+        origin,
+        cols,
+        rows,
+    } = op;
+    let Some(picker) = picker else {
+        return ImageOutcome::Failed(no_protocol_reason());
+    };
+    match build_view(&bytes, &picker, cols, rows) {
+        Ok((protocol, ext, dims)) => ImageOutcome::Viewed {
+            protocol: Box::new(protocol),
+            encoded: bytes,
+            ext,
+            dims,
+            origin,
+            dark: false,
+        },
+        Err(e) => ImageOutcome::Failed(format!("{}: {e}", origin.label())),
+    }
+}
+
+/// Read the clipboard image, if there is one. Runs on the detached worker —
+/// see `clipboard::read_image` for why it must.
+pub fn capture_clipboard_image(op: ClipboardCaptureOp) -> ImageOutcome {
+    match crate::clipboard::read_image() {
+        Ok(Some((encoded, dims))) => ImageOutcome::Captured {
+            tab_id: op.tab_id,
+            encoded,
+            dims,
+        },
+        // Nothing there, or the read itself failed — both are the same
+        // non-event to the user, who pressed paste, not "spyc, read my
+        // clipboard". Neither is worth a flash.
+        Ok(None) | Err(_) => ImageOutcome::NothingCaptured,
     }
 }
 
@@ -304,7 +377,10 @@ impl super::App {
         };
         let mut redraw = false;
         for outcome in outcomes {
-            redraw = true;
+            // Per-outcome, not blanket: an empty clipboard capture must not
+            // force a frame (see `NothingCaptured`), and it can share a batch
+            // with outcomes that do.
+            redraw |= !matches!(outcome, ImageOutcome::NothingCaptured);
             match outcome {
                 ImageOutcome::Viewed {
                     protocol,
@@ -333,18 +409,54 @@ impl super::App {
                             .flash_info("no images in this agent's conversation yet");
                     } else {
                         let count = images.len();
-                        self.state.open_images_view(path, images);
+                        self.state.open_images_view(Some(path), images);
                         self.state.flash_info(format!(
                             "{count} image{} \u{00b7} Enter to view \u{00b7} q to close",
                             if count == 1 { "" } else { "s" }
                         ));
                     }
                 }
+                ImageOutcome::Captured {
+                    tab_id,
+                    encoded,
+                    dims,
+                } => self.stash_pending_image(tab_id, encoded, dims),
+                // Nothing on the clipboard: stay silent. The redraw is already
+                // suppressed above — this fires on every paste keystroke, so a
+                // frame per press would be a self-inflicted repaint storm at
+                // the exact moment the user is typing.
+                ImageOutcome::NothingCaptured => {}
                 ImageOutcome::Opened => self.flash_image_status("opened in external viewer"),
                 ImageOutcome::Failed(reason) => self.flash_image_status(&reason),
             }
         }
         redraw
+    }
+
+    /// File a freshly captured clipboard image against its tab and tell the
+    /// user, briefly, that spyc has it.
+    ///
+    /// The note is a plain status flash, never a popup: this fires while the
+    /// user is mid-prompt, and stealing the screen to show them the image they
+    /// just chose would be worse than not having the feature.
+    fn stash_pending_image(&mut self, tab_id: String, encoded: Vec<u8>, dims: (u32, u32)) {
+        let ring = self.state.pane.pending_images.entry(tab_id).or_default();
+        let seq = ring.last().map_or(1, |p| p.seq + 1);
+        ring.push(crate::app::state::PendingImage {
+            seq,
+            encoded,
+            dims,
+            captured_at: crate::sysinfo::epoch_secs(),
+        });
+        // Drop the oldest past the cap; the sequence keeps counting so the
+        // numbers the user was shown stay meaningful.
+        let over = ring
+            .len()
+            .saturating_sub(crate::app::state::MAX_PENDING_IMAGES_PER_TAB);
+        ring.drain(..over);
+        let (w, h) = dims;
+        self.state
+            .flash_info(format!("\u{1f4ce} image {seq} \u{00b7} {w}\u{00d7}{h}"));
     }
 
     /// Report an image-path message wherever the user is actually looking: the

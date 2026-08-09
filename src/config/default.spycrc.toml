@@ -61,6 +61,13 @@
 # new_tab_cwd = "worktree_root"
 # claude_transcript_scrollback = false
 # agy_transcript_scrollback = true
+# preview_pasted_images = true
+#   Keep a copy of each image you paste into an agent pane, so `^a g` can show
+#   it before you send. An agent reads the system clipboard itself on its paste
+#   key (the terminal can't carry image bytes), so spyc reads the same clipboard
+#   at the same moment. Only fires on an agent that declares a paste key
+#   (claude's ^v), never on a shell tab, and nothing is written to disk unless
+#   you save it. Set false to keep spyc's hands off the clipboard entirely.
 # codex_mcp = true
 #   Set false to stop registering spyc's MCP server for codex panes (the
 #   [mcp_servers.spyc] entry in .codex/config.toml). Workaround for codex's
