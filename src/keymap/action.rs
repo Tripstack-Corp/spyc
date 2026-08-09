@@ -156,6 +156,9 @@ pub enum Action {
 
     // Quick Select — wezterm-style labeled overlay over pane output.
     QuickSelectOpen, // ^a u — scan visible pane, label matches, pick to yank/open
+    /// `^a g` — gallery of the images the focused agent tab actually received,
+    /// read back out of its transcript.
+    OpenImageGallery,
 
     // Harpoon — small per-project pinned list of file pointers.
     HarpoonJump(u8), // H 1..9 — chdir to slot N's parent + cursor on it
@@ -277,7 +280,8 @@ impl Action {
             | Self::ToggleDim
             | Self::OpenSecondCommander
             | Self::CloseSecondCommander
-            | Self::QuickSelectOpen => Tier::Pane,
+            | Self::QuickSelectOpen
+            | Self::OpenImageGallery => Tier::Pane,
             // Meta — cross-cutting / informational.
             Self::Help
             | Self::About
@@ -378,6 +382,7 @@ impl Action {
             Self::CloseSecondCommander => "close the second file-commander",
             Self::OpenGraveyardView => "open graveyard viewer (recover deleted)",
             Self::QuickSelectOpen => "quick select — pick URL/path/SHA/IP from pane",
+            Self::OpenImageGallery => "gallery of images the agent received",
             Self::HarpoonJump(_) => "jump to harpoon slot N",
             Self::HarpoonAppend => "harpoon — append cursor file",
             Self::HarpoonRemove => "harpoon — remove cursor file",
@@ -545,6 +550,7 @@ impl Action {
             Self::OpenGraveyardView => "open_graveyard_view",
             // Quick Select.
             Self::QuickSelectOpen => "quick_select_open",
+            Self::OpenImageGallery => "open_image_gallery",
             // Harpoon.
             Self::HarpoonJump(_) => "harpoon_jump",
             Self::HarpoonAppend => "harpoon_append",
@@ -705,6 +711,7 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         "open_graveyard_view" => Action::OpenGraveyardView,
         // Quick Select.
         "quick_select_open" => Action::QuickSelectOpen,
+        "open_image_gallery" => Action::OpenImageGallery,
         // Harpoon (default to slot 1).
         "harpoon_jump" => Action::HarpoonJump(1),
         "harpoon_append" => Action::HarpoonAppend,

@@ -43,6 +43,17 @@ pub enum ImageOrigin {
     Mermaid { source: String },
     /// An image file opened from the list.
     File { path: PathBuf },
+    /// An image the agent received, read back out of its transcript. Carries
+    /// what the gallery row showed so the overlay can still identify it once
+    /// the list is gone.
+    Transcript {
+        /// spyc's own sequence number, e.g. `3`.
+        seq: usize,
+        /// The agent's own `[Image #N]` label, when the prompt carried one.
+        agent_label: Option<String>,
+        /// The prompt this image arrived with — what `Y` yanks.
+        prompt: String,
+    },
 }
 
 impl ImageOrigin {
@@ -51,7 +62,7 @@ impl ImageOrigin {
     pub fn mermaid_source(&self) -> Option<&str> {
         match self {
             Self::Mermaid { source } => Some(source),
-            Self::File { .. } => None,
+            Self::File { .. } | Self::Transcript { .. } => None,
         }
     }
 
@@ -63,6 +74,24 @@ impl ImageOrigin {
                 || path.display().to_string(),
                 |n| n.to_string_lossy().into(),
             ),
+            // The agent's own label is what the user saw in its output, so lead
+            // with it and keep spyc's sequence as the disambiguator — the agent's
+            // counter restarts, so it can't stand alone.
+            Self::Transcript {
+                seq, agent_label, ..
+            } => match agent_label {
+                Some(l) => format!("image {seq} (agent {l})"),
+                None => format!("image {seq}"),
+            },
+        }
+    }
+
+    /// What `Y` copies for this origin, with a word for the flash.
+    pub fn yankable(&self) -> (String, &'static str) {
+        match self {
+            Self::Mermaid { source } => (source.clone(), "mermaid source"),
+            Self::File { path } => (path.display().to_string(), "path"),
+            Self::Transcript { prompt, .. } => (prompt.clone(), "prompt"),
         }
     }
 }
@@ -72,6 +101,23 @@ impl ImageOrigin {
 #[derive(Debug)]
 pub struct ImageOpenOp {
     pub path: PathBuf,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+/// Index an agent transcript's images (the `^a g` gallery). A multi-MB file of
+/// base64 — never on the loop.
+#[derive(Debug)]
+pub struct TranscriptIndexOp {
+    pub path: PathBuf,
+}
+
+/// Open one already-indexed transcript image: re-read its record, decode the
+/// base64, build the protocol.
+#[derive(Debug)]
+pub struct TranscriptImageOpenOp {
+    pub path: PathBuf,
+    pub entry: crate::state::transcript_images::TranscriptImage,
     pub cols: u16,
     pub rows: u16,
 }
@@ -90,6 +136,15 @@ pub enum ImageOutcome {
         origin: ImageOrigin,
         /// Whether this render used the dark theme — mermaid's `c` toggle reads it.
         dark: bool,
+    },
+    /// A transcript's image index, ready for the gallery. Empty is a legitimate
+    /// result (no images in this conversation), so the drain says so rather
+    /// than opening an empty list.
+    Indexed {
+        /// Kept so the gallery can re-read an image's bytes on open — the index
+        /// deliberately doesn't hold them.
+        path: PathBuf,
+        images: Vec<crate::state::transcript_images::TranscriptImage>,
     },
     /// Handed to the OS viewer (mermaid's `o`); nothing to install.
     Opened,
@@ -129,6 +184,48 @@ pub fn open_image_file(op: ImageOpenOp, picker: Option<Picker>) -> ImageOutcome 
             dark: false,
         },
         Err(e) => ImageOutcome::Failed(format!("{}: {e}", path.display())),
+    }
+}
+
+/// Index a transcript's images. Runs on the detached worker.
+pub fn index_transcript(op: TranscriptIndexOp) -> ImageOutcome {
+    let images = crate::state::transcript_images::index(&op.path);
+    ImageOutcome::Indexed {
+        path: op.path,
+        images,
+    }
+}
+
+/// Re-read one indexed transcript image and build its protocol. Runs on the
+/// detached worker.
+pub fn open_transcript_image(op: TranscriptImageOpenOp, picker: Option<Picker>) -> ImageOutcome {
+    let TranscriptImageOpenOp {
+        path,
+        entry,
+        cols,
+        rows,
+    } = op;
+    let Some(picker) = picker else {
+        return ImageOutcome::Failed(no_protocol_reason());
+    };
+    let bytes = match crate::state::transcript_images::load(&path, &entry) {
+        Ok(b) => b,
+        Err(e) => return ImageOutcome::Failed(format!("image {}: {e}", entry.seq)),
+    };
+    match build_view(&bytes, &picker, cols, rows) {
+        Ok((protocol, ext, dims)) => ImageOutcome::Viewed {
+            protocol: Box::new(protocol),
+            encoded: bytes,
+            ext,
+            dims,
+            origin: ImageOrigin::Transcript {
+                seq: entry.seq,
+                agent_label: entry.agent_label,
+                prompt: entry.prompt_excerpt,
+            },
+            dark: false,
+        },
+        Err(e) => ImageOutcome::Failed(format!("image {}: {e}", entry.seq)),
     }
 }
 
@@ -227,6 +324,21 @@ impl super::App {
                         dark,
                         flash: None,
                     });
+                }
+                ImageOutcome::Indexed { path, images } => {
+                    // An empty index is a real answer, not a view worth
+                    // opening: an empty gallery reads as "spyc lost them".
+                    if images.is_empty() {
+                        self.state
+                            .flash_info("no images in this agent's conversation yet");
+                    } else {
+                        let count = images.len();
+                        self.state.open_images_view(path, images);
+                        self.state.flash_info(format!(
+                            "{count} image{} \u{00b7} Enter to view \u{00b7} q to close",
+                            if count == 1 { "" } else { "s" }
+                        ));
+                    }
                 }
                 ImageOutcome::Opened => self.flash_image_status("opened in external viewer"),
                 ImageOutcome::Failed(reason) => self.flash_image_status(&reason),

@@ -655,6 +655,13 @@ pub struct AppState {
     /// view; the rebuild_rows path keys off `view` so we don't pay
     /// the disk read except when the user is looking at it.
     pub graveyard: Vec<crate::state::graveyard::Entry>,
+    /// Snapshot of the focused agent tab's received images, built off-thread
+    /// when `View::Images` opens (`^a g`). Metadata only — the bytes are
+    /// re-read from `transcript_images_path` when one is actually opened, so a
+    /// gallery of a dozen screenshots costs kilobytes, not tens of megabytes.
+    pub transcript_images: Vec<crate::state::transcript_images::TranscriptImage>,
+    /// The transcript the snapshot came from. `None` outside the gallery.
+    pub transcript_images_path: Option<PathBuf>,
     /// P2 merge/scope coordination registry (`docs/archive/AGENT_AWARENESS_PLAN.md`):
     /// what each agent tab has declared it's touching, via the `register_scope`
     /// MCP tool. In-memory + session-persisted (rides P3-2's autosave and
@@ -1014,6 +1021,8 @@ impl AppState {
             quit_pending: None,
             pending_delete_preview: None,
             graveyard: Vec::new(),
+            transcript_images: Vec::new(),
+            transcript_images_path: None,
             scope_registry: Vec::new(),
             user_host: "test@host".to_string(),
             pending_new_tab_cmd: None,

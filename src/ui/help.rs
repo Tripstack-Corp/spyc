@@ -303,6 +303,10 @@ const SECTIONS: &[Section] = &[
                 "scroll pane history in the in-app pager (/ ? n/N, :N, V, ^v, y; t toggles transcript tool calls; H transcript help)",
             ),
             ("^a u", "quick select — pick URL/path/SHA/IP from pane"),
+            (
+                "^a g",
+                "gallery of images the agent received (Enter view, q close)",
+            ),
             ("^a s", "send selection paths to pane stdin"),
             (
                 "^a ↓",

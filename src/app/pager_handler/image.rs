@@ -77,10 +77,7 @@ impl App {
         let Some(iv) = self.view.image_view.as_mut() else {
             return;
         };
-        let (text, label) = match &iv.origin {
-            ImageOrigin::Mermaid { source } => (source.clone(), "mermaid source"),
-            ImageOrigin::File { path } => (path.display().to_string(), "path"),
-        };
+        let (text, label) = iv.origin.yankable();
         iv.flash = Some(match crate::clipboard::copy(&text) {
             Ok(()) => format!("{label} copied to clipboard"),
             Err(e) => format!("copy failed: {e:#}"),
@@ -158,6 +155,20 @@ impl App {
                     Ok(()) => "opened in external viewer".to_string(),
                     Err(e) => format!("open failed: {e:#}"),
                 });
+                Vec::new()
+            }
+            // A transcript image has no file of its own — spill it to a temp
+            // file first. Bounded write on the main thread, like `s` above.
+            ImageOrigin::Transcript { seq, .. } => {
+                let path = std::env::temp_dir().join(format!("spyc-agent-image-{seq}.{}", iv.ext));
+                iv.flash = Some(
+                    match std::fs::write(&path, &iv.encoded).and_then(|()| {
+                        open::that_detached(&path).map(|()| path.display().to_string())
+                    }) {
+                        Ok(p) => format!("opened {p}"),
+                        Err(e) => format!("open failed: {e:#}"),
+                    },
+                );
                 Vec::new()
             }
         }

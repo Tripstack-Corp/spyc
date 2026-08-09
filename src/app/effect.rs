@@ -231,6 +231,15 @@ pub enum Effect {
     /// same destination (the `ImageView` overlay), different producer.
     OpenImage(image_ops::ImageOpenOp),
 
+    /// Tier 5. Stream an agent transcript into an image index (`^a g`). Multi-MB
+    /// and mostly base64, so never on the loop. Lands as `ImageOutcome::Indexed`.
+    IndexTranscriptImages(image_ops::TranscriptIndexOp),
+
+    /// Tier 5. Re-read + decode one already-indexed transcript image and show it
+    /// full-screen. The index deliberately holds no bytes, so this is where they
+    /// are actually read.
+    OpenTranscriptImage(image_ops::TranscriptImageOpenOp),
+
     /// Tier 5. Run a file operation (copy / move / pipe) on a detached worker
     /// thread to avoid blocking the event loop. The worker pushes its outcome
     /// onto `runtime.file_results` and wakes with `Message::FileOpDone`.
@@ -933,6 +942,32 @@ impl App {
                     let picker = self.runtime.picker.clone();
                     std::thread::spawn(move || {
                         let outcome = mermaid_ops::render_mermaid_op(op, picker);
+                        results.lock().unwrap().push(outcome);
+                        if let Some(tx) = wake {
+                            let _ = tx.send(Message::ImageDone);
+                        }
+                    });
+                }
+                // Index an agent transcript's images off-thread; same slot and
+                // wake as every other image producer.
+                Effect::IndexTranscriptImages(op) => {
+                    let results = std::sync::Arc::clone(&self.runtime.image_results);
+                    let wake = self.runtime.pane_wake_tx.clone();
+                    std::thread::spawn(move || {
+                        let outcome = image_ops::index_transcript(op);
+                        results.lock().unwrap().push(outcome);
+                        if let Some(tx) = wake {
+                            let _ = tx.send(Message::ImageDone);
+                        }
+                    });
+                }
+                // Re-read + decode one indexed transcript image off-thread.
+                Effect::OpenTranscriptImage(op) => {
+                    let results = std::sync::Arc::clone(&self.runtime.image_results);
+                    let wake = self.runtime.pane_wake_tx.clone();
+                    let picker = self.runtime.picker.clone();
+                    std::thread::spawn(move || {
+                        let outcome = image_ops::open_transcript_image(op, picker);
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
                             let _ = tx.send(Message::ImageDone);

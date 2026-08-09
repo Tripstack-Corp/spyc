@@ -92,6 +92,18 @@ pub struct TranscriptSpec {
     pub miss_message: Option<&'static str>,
 }
 
+/// How to find the images an agent received, for the `^a g` gallery.
+///
+/// Deliberately separate from [`TranscriptSpec`] rather than a field on it: the
+/// `^a v` scrollback view is opt-in per agent (`config_key`), and the gallery
+/// must not inherit that gate — reading the images is useful whether or not the
+/// user wants the structured conversation replacing terminal capture.
+pub struct TranscriptImageSpec {
+    /// Locate the transcript file for the pane (same contract as
+    /// [`TranscriptSpec::resolve`], and in practice the same function).
+    pub resolve: fn(TranscriptQuery) -> Option<PathBuf>,
+}
+
 /// How spyc installs an agent's activity-status lifecycle hooks (the ones that
 /// call `spyc --report-status <state>` so the tab dot tracks the agent's turn).
 /// Returned by [`AgentProfile::status_hooks`] for agents spyc can auto-wire
@@ -183,6 +195,13 @@ pub trait AgentProfile: Sync {
 
     /// Transcript scrollback spec, if any. Default: none.
     fn transcript(&self) -> Option<TranscriptSpec> {
+        None
+    }
+
+    /// Where to read this agent's received images from, for the `^a g` gallery.
+    /// Default: none — `^a g` then says so rather than showing an empty list,
+    /// which would read as "you pasted nothing".
+    fn transcript_images(&self) -> Option<TranscriptImageSpec> {
         None
     }
 
@@ -377,6 +396,11 @@ impl AgentProfile for ClaudeProfile {
             config_key: Some("claude_transcript_scrollback"),
             default_enabled: false,
             miss_message: None,
+        })
+    }
+    fn transcript_images(&self) -> Option<TranscriptImageSpec> {
+        Some(TranscriptImageSpec {
+            resolve: crate::state::claude_transcript::resolve_active_jsonl,
         })
     }
     fn status_hooks(&self) -> Option<StatusHookSupport> {

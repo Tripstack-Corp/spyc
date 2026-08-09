@@ -23,6 +23,7 @@ pub mod scope_registry;
 pub mod session_names;
 pub mod sessions;
 pub mod skill_prompt;
+pub mod transcript_images;
 
 pub use cursor::Cursor;
 pub use frecency::Frecency;
