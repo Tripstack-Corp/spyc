@@ -8,6 +8,12 @@
 
 mod agent;
 mod app;
+/// Archive browsing — see `docs/drafts/ARCHIVE_BROWSING_PLAN.md`.
+///
+/// Public, unlike the rest of the tree, so the round-trip tests in `tests/` —
+/// which link the crate as a library — can drive a real archive all the way
+/// through index → listing → materialize.
+pub mod archive;
 mod clipboard;
 mod config;
 mod context;
@@ -48,6 +54,21 @@ pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("SPYC_GI
 /// and discards the result (no internal types leak into the public API), so a
 /// fuzz target asserts only the "never panics" property.
 pub mod fuzz {
+    /// Normalize one raw archive member name and discard the result.
+    ///
+    /// This is the boundary that makes zip-slip impossible — every member name
+    /// in a downloaded archive is attacker-controlled — so it asserts the
+    /// normalizer never panics and never returns a path that could escape.
+    pub fn normalize_archive_name(raw: &str) {
+        if let Ok(name) = crate::archive::index::normalize(raw) {
+            assert!(
+                !name.inner.starts_with('/') && !name.inner.split('/').any(|p| p == ".."),
+                "normalized name must stay inside the mount: {:?}",
+                name.inner
+            );
+        }
+    }
+
     /// Parse one keymap-DSL line and discard the result. See
     /// `fuzz/fuzz_targets/dsl_parse.rs`.
     pub fn parse_keymap_line(line: &str) {
