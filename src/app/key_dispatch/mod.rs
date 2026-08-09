@@ -250,6 +250,7 @@ impl App {
             route::InputSink::QuickSelect => return Ok(self.handle_quick_select_key(key)),
             route::InputSink::Harpoon => return Ok(self.handle_harpoon_menu_key(key)),
             route::InputSink::ImageGallery => return Ok(self.handle_image_gallery_key(key)),
+            route::InputSink::ImageView => return Ok(self.handle_image_view_key(key)),
             // ── content sinks ──
             route::InputSink::OverlayPty => {
                 // Forward the keystroke to the overlay pty via the sole
@@ -595,6 +596,7 @@ impl App {
             route::InputSink::QuickSelect
             | route::InputSink::Harpoon
             | route::InputSink::ImageGallery
+            | route::InputSink::ImageView
             | route::InputSink::PaneScroll => Vec::new(),
             // ── content sinks ──
             route::InputSink::Prompt => {
