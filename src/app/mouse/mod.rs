@@ -27,7 +27,9 @@ pub(super) mod tab_hit;
 
 // Re-exported so the impure half and its callers keep referring to
 // `mouse::route_mouse` / `mouse::Region` exactly as before this split.
-pub(super) use route::{Gesture, MouseSink, MouseSnapshot, region_at, route_mouse};
+pub(super) use route::{
+    Gesture, MouseSink, MouseSnapshot, PendingViewIntent, region_at, route_mouse,
+};
 
 /// Resolve a raw mouse event kind to the gesture + wheel delta every downstream
 /// consumer (`ListCursor`, `Pager`, `PaneScrollKeys`) shares. `None` for a kind

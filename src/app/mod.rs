@@ -915,13 +915,14 @@ pub struct ViewState {
     /// step and so a short one can't open the view by accident — see
     /// `App::send_agent_view_scroll_keys`. `None` outside a gesture.
     pub pane_scroll_streak: Option<mouse::PaneScrollStreak>,
-    /// Set right after spyc sends an agent's `transcript_toggle_key`, so a fast
-    /// follow-up wheel tick — arriving before the child has redrawn — doesn't see
-    /// the OLD (still-closed) screen and send the toggle again, which would close
-    /// what the first tick just opened. Cleared once a scrape confirms the view is
-    /// open, or after `TOGGLE_SETTLE` if it never does (self-healing rather than
-    /// stuck refusing to retry).
-    pub pane_toggle_sent_at: Option<std::time::Instant>,
+    /// Set right after spyc sends an agent's `transcript_toggle_key` or
+    /// `transcript_close_key`, so a fast follow-up wheel tick — arriving before the
+    /// child has redrawn — doesn't act on the STALE screen and send the same key
+    /// again. Retired once a scrape confirms the send landed, which is
+    /// direction-specific (`mouse::pending_view_confirmed`: marker present for an
+    /// `Open`, absent for a `Close`), or after `TOGGLE_SETTLE` if it never does
+    /// (self-healing rather than stuck refusing to retry).
+    pub pane_view_sent: Option<(std::time::Instant, mouse::PendingViewIntent)>,
     /// Whether an agent-transcript scrollback (`^a v`) renders the agent's
     /// tool-use / tool-result lines. `t` toggles it; the transcript is
     /// re-rendered with the new value. Session-scoped (persists across
@@ -1022,7 +1023,7 @@ impl ViewState {
             chrome_selection: None,
             chrome_rows: std::cell::RefCell::new(Vec::new()),
             pane_scroll_streak: None,
-            pane_toggle_sent_at: None,
+            pane_view_sent: None,
             transcript_show_tool_calls: true,
             term_size: crossterm::terminal::size().unwrap_or((80, 24)),
         }

@@ -9,7 +9,8 @@
 
 use super::super::Effect;
 use super::route::{
-    AgentViewAction, AgentViewInputs, TOGGLE_SETTLE, decide_agent_view_action, scroll_streak_step,
+    AgentViewAction, AgentViewInputs, PendingViewIntent, TOGGLE_SETTLE, decide_agent_view_action,
+    pending_view_confirmed, scroll_streak_step,
 };
 
 impl super::super::App {
@@ -66,7 +67,7 @@ impl super::super::App {
     /// investigation, so scrollback has nothing to scrape). Cheap enough to run
     /// every tick — a plain substring search over one screen's worth of text —
     /// so no debounce is needed for the scrape itself; only the toggle-send
-    /// needs one (see `pane_toggle_sent_at`'s doc).
+    /// needs one (see `pane_view_sent`'s doc).
     ///
     /// Opening it takes a sustained scroll UP (`OPEN_AFTER_UP_TICKS`); a
     /// downward gesture never opens it, only scrolls or closes one already open.
@@ -88,10 +89,8 @@ impl super::super::App {
         let app_cursor = tabs.active().application_cursor();
         let is_open = visible.iter().any(|l| l.contains(marker));
         let at_bottom = is_open && profile.transcript_at_bottom(&visible);
-        let toggle_pending = self
-            .view
-            .pane_toggle_sent_at
-            .is_some_and(|sent| sent.elapsed() < TOGGLE_SETTLE);
+        let pending = self.view.pane_view_sent;
+        let toggle_pending = pending.is_some_and(|(sent, _)| sent.elapsed() < TOGGLE_SETTLE);
 
         let now = std::time::Instant::now();
         // Stepped on every tick, open or closed: while open its elapsed time
@@ -115,8 +114,14 @@ impl super::super::App {
         // State mutation lives here, once, keyed to the decision — not scattered
         // across the branches that produce it.
         self.view.pane_scroll_streak = Some(streak);
-        if is_open {
-            self.view.pane_toggle_sent_at = None; // confirmed open; drop the guard
+        // Retire the guard only when the screen shows what was actually asked for.
+        // Testing `is_open` alone retires a pending CLOSE on the stale marker the
+        // guard exists to ride out, which turns one close into one close key per
+        // wheel tick — `q` each time, into codex's composer.
+        if let Some((_, intent)) = pending
+            && pending_view_confirmed(intent, is_open)
+        {
+            self.view.pane_view_sent = None;
         }
 
         match action {
@@ -129,19 +134,19 @@ impl super::super::App {
                 let Some((code, mods)) = profile.transcript_toggle_key() else {
                     return Vec::new();
                 };
-                self.view.pane_toggle_sent_at = Some(now);
+                self.view.pane_view_sent = Some((now, PendingViewIntent::Open));
                 Self::repeat_key_effect(code, mods, 1, app_cursor)
             }
-            // Reuses the SAME debounce field `Toggle` sets: the next tick or two
-            // will still read `is_open == true` (codex hasn't redrawn the
-            // composer yet), and without this a fast flick continuing past the
-            // bottom would send `q` again into what may already be the
-            // composer's own text input.
+            // Shares the debounce field with `Toggle`, but records the opposite
+            // intent: for the next tick or two the scrape still reads
+            // `is_open == true` (codex hasn't redrawn the composer yet), so the
+            // guard must survive that stale read or a fast flick past the bottom
+            // sends `q` again into what is by then the composer's text input.
             AgentViewAction::Close => {
                 let Some((code, mods)) = profile.transcript_close_key() else {
                     return Vec::new();
                 };
-                self.view.pane_toggle_sent_at = Some(now);
+                self.view.pane_view_sent = Some((now, PendingViewIntent::Close));
                 Self::repeat_key_effect(code, mods, 1, app_cursor)
             }
             AgentViewAction::Scroll { fast } => {
