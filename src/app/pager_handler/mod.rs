@@ -694,6 +694,25 @@ impl App {
     ///
     /// `fs::metadata` follows symlinks (a symlink to a device is non-regular),
     /// matching `build_pager_view`'s special-file guard.
+    /// An `Effect::OpenImage` for `path` when it's an image spyc can decode.
+    ///
+    /// Detection is by magic bytes, not extension: a screenshot saved without a
+    /// suffix is still an image, and a `.png` holding text is not. Callers put
+    /// this ahead of their normal open so an image lands in the full-screen
+    /// overlay rather than a hex dump.
+    pub(crate) fn plan_image_open(&self, path: &Path) -> Option<Effect> {
+        if !crate::fs::ops::is_decodable_image(path) {
+            return None;
+        }
+        let (cols, rows) = self.view.term_size;
+        Some(Effect::OpenImage(crate::app::image_ops::ImageOpenOp {
+            path: path.to_path_buf(),
+            cols,
+            // Leave the footer row to the overlay's verb hints.
+            rows: rows.saturating_sub(1),
+        }))
+    }
+
     pub(crate) fn plan_pager_open(
         &mut self,
         path: &Path,

@@ -237,6 +237,11 @@ impl App {
         // File: dispatch based on intent.
         match intent {
             ActivateIntent::Display => {
+                // An image goes to the full-screen overlay instead of the pager
+                // — a hex dump of a PNG answers nothing the picture doesn't.
+                if let Some(effect) = self.plan_image_open(&path) {
+                    return vec![effect];
+                }
                 // Regular file → built + installed inline; a special file (a
                 // device under the cursor in `/dev`) → read off-thread via the
                 // returned `OpenSpecialFile` effect, so a blocking read can't

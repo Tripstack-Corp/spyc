@@ -444,7 +444,7 @@ impl App {
         self.render_hook_consent_popup(frame, h_divider_row, v_divider_col);
         // Full-screen mermaid image overlay (the `i` key) — drawn last so it
         // sits on top of everything, including the HUD.
-        self.render_mermaid_overlay(frame, frame_area);
+        self.render_image_overlay(frame, frame_area);
     }
 
     /// Pre-draw pass: compute the frame layout and settle the derived list

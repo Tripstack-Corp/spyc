@@ -46,7 +46,12 @@ do from here?", modeled on Neovim's which-key.
 
 ## Directory browsing
 
-- **Enter** descend into a directory, or view a text file in the pager
+- **Enter** descend into a directory, or view a text file in the pager —
+  or, on a PNG / JPEG / GIF / WebP, show the picture full-screen (`s` save,
+  `y` copy image, `Y` copy path, `b` base64, `o` external viewer, `q`
+  dismiss). Detected by magic bytes, so an extensionless screenshot still
+  previews and a misnamed `.png` full of text still hex-dumps. Needs a
+  terminal with a graphics protocol; without one, `o` still opens it.
 - **e / v** descend into a directory, or open a file in `$EDITOR` (suspends TUI)
 - **dd / Ndd** remove the cursor entry (+ N-1 below) to the graveyard,
   confirming with `y` (bare `d` arms the chord, vim-style; any other key
@@ -693,6 +698,34 @@ while in the pager, or **`gp`** to reopen the most-recent closed
 buffer in one keystroke. The help overlay is excluded from the
 stack. Walking off the end keeps the current pager open with a
 flash instead of silently closing. Scroll positions are preserved.
+
+## Agent image gallery — what you actually pasted
+
+An agent renders a pasted image as an opaque token (`[Image #3]`), so you
+can't see what you attached and can't check it later. **`^a g`** (or
+`:images`) lists the images the focused agent tab actually *received*, read
+back out of its own transcript — so it survives spyc restarts and
+`claude --resume`:
+
+```
+  1. #1    jpeg    485 KB  yesterday   it would be helpful to show the creation date…
+  2. #2    png      77 KB  4h ago      all numbers should be presented as "human friendly"
+  3. #3    jpeg    493 KB  2h ago      columns in tables should be space aligned nicely:
+```
+
+`Enter` (or `i`) shows one full-screen with the usual image verbs (`s`
+save, `y` copy, `Y` copy the prompt it arrived with, `b` base64, `o`
+external viewer); `q` closes the gallery. Movement is the normal list
+keys — `j`/`k`, `G`, `/` search all work.
+
+The **leading number is spyc's**, not the agent's. The agent's `[Image #N]`
+is shown beside it for cross-reference but can't be the handle: its counter
+restarts when a conversation is cleared or resumed, so the same label can
+name two different pictures. Images the agent received without a label
+appear too.
+
+Claude only for now — other agents report that rather than showing an
+empty list, which would read as "spyc lost them".
 
 ## Quick Select — labeled overlay picker
 

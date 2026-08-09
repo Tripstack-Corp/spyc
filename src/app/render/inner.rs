@@ -616,11 +616,12 @@ impl App {
         }
     }
 
-    /// Draw the full-screen mermaid image overlay (the pager `i` key) on top of
-    /// everything, with a dismiss-hint footer. No-op when no diagram is up. The
-    /// `Protocol` was built off-thread at terminal size by `mermaid_ops`; this
-    /// is a pure blit (graphics terminals only). Pure `&self`.
-    pub(super) fn render_mermaid_overlay(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+    /// Draw the full-screen image overlay (a mermaid diagram via the pager `i`
+    /// key, or an image file opened from the list) on top of everything, with a
+    /// verb-hint footer. No-op when no image is up. The `Protocol` was built
+    /// off-thread at terminal size by the producer; this is a pure blit
+    /// (graphics terminals only). Pure `&self`.
+    pub(super) fn render_image_overlay(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
         let Some(iv) = self.view.image_view.as_ref() else {
             return;
         };
@@ -659,16 +660,20 @@ impl App {
         let style = Style::default()
             .fg(self.view.theme.prompt_prefix)
             .add_modifier(Modifier::BOLD);
-        // Footer: transient verb feedback if set, else the key hints. `Y`
-        // (copy source) only when this is a mermaid diagram.
+        // Footer: transient verb feedback if set, else what this is plus the key
+        // hints. `Y` names what it yanks per origin; `c` (theme) is mermaid-only
+        // and is offered only there rather than advertising a key that refuses.
         let footer = iv.flash.clone().unwrap_or_else(|| {
-            // `Y` (source) and `c` (theme) are mermaid-only.
-            let mermaid = if iv.source.is_some() {
-                " \u{00b7} Y copy source \u{00b7} c theme"
+            let (yank, theme) = if iv.origin.mermaid_source().is_some() {
+                ("Y copy source", " \u{00b7} c theme")
             } else {
-                ""
+                ("Y copy path", "")
             };
-            format!(" mermaid diagram \u{2014} s save \u{00b7} y copy image{mermaid} \u{00b7} b base64 \u{00b7} o open \u{00b7} q/Esc dismiss")
+            let (w, h) = iv.dims;
+            format!(
+                " {} \u{00b7} {w}\u{00d7}{h} \u{2014} s save \u{00b7} y copy image \u{00b7} {yank}{theme} \u{00b7} b base64 \u{00b7} o open \u{00b7} q/Esc dismiss",
+                iv.origin.label()
+            )
         });
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(footer, style))),
