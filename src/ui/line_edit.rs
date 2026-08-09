@@ -210,9 +210,7 @@ impl LineEditor {
                         self.next_word_start_delete()
                     };
                     self.delete_range(self.cursor, end);
-                    if op == PendingOp::Change {
-                        self.mode = Mode::Insert;
-                    }
+                    self.finish_operator(op);
                 }
                 KeyCode::Char('b') => {
                     let start = self.prev_word_start();
@@ -225,9 +223,7 @@ impl LineEditor {
                 KeyCode::Char('e') => {
                     let end = (self.word_end() + 1).min(self.buf.len());
                     self.delete_range(self.cursor, end);
-                    if op == PendingOp::Change {
-                        self.mode = Mode::Insert;
-                    }
+                    self.finish_operator(op);
                 }
                 KeyCode::Char('$') => {
                     self.buf.truncate(self.cursor);
@@ -342,12 +338,36 @@ impl LineEditor {
 
     // ---- Helpers ------------------------------------------------------------
 
-    /// Delete characters in `[start..end)` and clamp cursor.
+    /// Delete characters in `[start..end)`. Deliberately does NOT touch the
+    /// cursor: where it should come to rest depends on the mode the operator
+    /// finishes in, which only the caller knows — see [`Self::finish_operator`].
     fn delete_range(&mut self, start: usize, end: usize) {
         let end = end.min(self.buf.len());
         if start < end {
             self.buf.drain(start..end);
         }
+    }
+
+    /// Land the cursor after a `d{motion}` / `c{motion}` whose motion left it
+    /// wherever the deletion ended.
+    ///
+    /// The two operators finish in different modes and so have different legal
+    /// resting places: `c` enters Insert, where `cursor == buf.len()` IS the
+    /// end-of-line column, while `d` stays in Normal, where the cursor must sit
+    /// ON a character. Clamping both — which is what a clamp inside
+    /// `delete_range` amounts to — pulls every `cw`/`ce` that reaches the buffer
+    /// end one column left, so the next typed character lands before the final
+    /// one instead of after it.
+    fn finish_operator(&mut self, op: PendingOp) {
+        if op == PendingOp::Change {
+            self.mode = Mode::Insert;
+        } else {
+            self.clamp_cursor_normal();
+        }
+    }
+
+    /// Normal mode's cursor invariant: on a character, never one past the end.
+    const fn clamp_cursor_normal(&mut self) {
         if self.cursor >= self.buf.len() && !self.buf.is_empty() {
             self.cursor = self.buf.len() - 1;
         }
@@ -755,6 +775,44 @@ mod tests {
         e.feed(k(KeyCode::Char('w')));
     }
 
+    fn op(e: &mut LineEditor, operator: char, motion: char) {
+        e.feed(k(KeyCode::Char(operator)));
+        e.feed(k(KeyCode::Char(motion)));
+    }
+
+    /// The mirror of the `cw`-at-end cases, and the half that keeps the clamp:
+    /// `d{motion}` stays in NORMAL mode, where the cursor must sit on a
+    /// character, so deleting through the buffer end pulls it back to the last
+    /// one. Without these, inverting `finish_operator` would leave the Normal
+    /// cursor one past the end and no test would notice.
+    #[test]
+    fn dw_and_de_to_the_buffer_end_keep_the_normal_cursor_on_a_character() {
+        for motion in ['w', 'e'] {
+            let mut e = normal_at("git commit", 4); // on the `c` of `commit`
+            op(&mut e, 'd', motion);
+            assert_eq!(e.text(), "git ", "d{motion} text");
+            assert_eq!(e.mode, Mode::Normal, "d{motion} must stay in Normal");
+            assert_eq!(
+                e.cursor,
+                3,
+                "d{motion} left the Normal cursor off the end of {:?}",
+                e.text()
+            );
+        }
+    }
+
+    /// Emptying the buffer entirely is the one case where a Normal-mode cursor
+    /// legitimately equals `buf.len()` — there's no character to sit on, so the
+    /// clamp must not underflow.
+    #[test]
+    fn dw_emptying_the_buffer_leaves_the_cursor_at_zero() {
+        let mut e = normal_at("hello", 0);
+        op(&mut e, 'd', 'w');
+        assert_eq!(e.text(), "");
+        assert_eq!(e.mode, Mode::Normal);
+        assert_eq!(e.cursor, 0);
+    }
+
     #[test]
     fn cw_mid_word_changes_to_word_end() {
         let mut e = normal_at("hello world", 2); // on the first 'l'
@@ -806,23 +864,20 @@ mod tests {
         assert_eq!(e.cursor, 0);
     }
 
-    // The two cases below FAIL against current behavior and are ignored so the
-    // suite stays green while the assertions stay vi-correct (#26). Defect:
-    // `delete_range` ends with a Normal-mode clamp — cursor must sit ON a
-    // character — but `c{motion}` ends in Insert mode, where `cursor ==
-    // buf.len()` is the legal end-of-line position. Any `cw`/`ce` whose range
-    // reaches the buffer end therefore lands one column left, and the next
-    // typed character goes in before the final character instead of after it.
-    // `c$`/`c0`/`cb`/`cc` are unaffected — each sets the cursor itself.
+    // The two cases below are the acceptance criteria for #267: a `c{motion}`
+    // reaching the buffer end must leave the cursor AT the end, because it
+    // finishes in Insert mode where `cursor == buf.len()` is the legal
+    // end-of-line column. They were landed `#[ignore]`d with these assertions
+    // already vi-correct, and un-ignored by the fix that moved the Normal-mode
+    // clamp out of `delete_range` and into `finish_operator`'s `d` half.
 
     #[test]
-    #[ignore = "known defect (#26): cw to end-of-buffer leaves the cursor one left"]
     fn cw_on_the_last_word_leaves_the_cursor_at_the_end() {
         // Retyping the final token is the common `!`-prompt edit. The change
         // ends at the buffer end, where Insert mode's cursor legitimately
         // equals `buf.len()` — Normal mode's "cursor sits on a char" clamp
         // must not apply, or the typed text lands before the space.
-        // Observed: cursor 3, so typing yields `gitX ` instead of `git X`.
+        // Regression shape: cursor 3 typed `gitX ` instead of `git X`.
         let mut e = normal_at("git commit", 4);
         cw(&mut e);
         assert_eq!(e.text(), "git ");
@@ -833,10 +888,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "known defect (#26): cw to end-of-buffer leaves the cursor one left"]
     fn cw_on_trailing_whitespace_leaves_the_cursor_at_the_end() {
         // Same end-of-buffer shape, reached through the whitespace branch.
-        // Observed: cursor 1, so typing yields `lXs` instead of `lsX`.
+        // Regression shape: cursor 1 typed `lXs` instead of `lsX`.
         let mut e = normal_at("ls  ", 2);
         cw(&mut e);
         assert_eq!(e.text(), "ls");
