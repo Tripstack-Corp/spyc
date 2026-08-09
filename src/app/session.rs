@@ -12,6 +12,7 @@
 //! Worktree helpers moved to `git_state.rs` and pane-sizing helpers to
 //! `pane_tabs.rs`.
 
+use crate::app::Effect;
 use crate::pane::PaneTabs;
 use crate::state::sessions::AgentKind;
 use crate::ui::line_edit::LineEditor;
@@ -416,19 +417,31 @@ impl App {
         self.set_pager(view);
     }
 
-    pub fn restore_session(&mut self, session: &crate::state::sessions::Session) {
+    pub fn restore_session(&mut self, session: &crate::state::sessions::Session) -> Vec<Effect> {
         // Restore working directory and update start_dir so backtick (`)
         // jumps to the session's home, not where spyc was launched from.
+        let mut effects = Vec::new();
         if session.cwd.is_dir() {
             if let Err(e) = self.state.chdir(&session.cwd) {
                 self.state.flash_error(format!("session chdir: {e:#}"));
-                return;
+                return effects;
             }
             self.state.start_dir.clone_from(&session.cwd);
+        } else if super::archive::archive_ancestor_of(&session.cwd).is_some() {
+            // The user quit while browsing an archive. It isn't a directory and
+            // never was — the effect screen mounts it and lands the column back
+            // where they left off. The rest of the restore carries on meanwhile.
+            self.state.start_dir.clone_from(&session.cwd);
+            effects.push(Effect::ChangeDir {
+                path: session.cwd.clone(),
+                focus: None,
+                on_ok: None,
+                err_prefix: "session chdir failed",
+            });
         } else {
             self.state
                 .flash_error(format!("session dir gone: {}", session.cwd.display()));
-            return;
+            return effects;
         }
         // Keep the startup-generated name when an older session file
         // has no name field; otherwise take the saved one.
@@ -527,6 +540,7 @@ impl App {
         // informative and releasable rather than silently lost.
         self.state.scope_registry.clone_from(&session.scope_claims);
         self.state.flash_info("session restored");
+        effects
     }
 
     /// Restore a saved vertical split: reopen the second commander at its saved

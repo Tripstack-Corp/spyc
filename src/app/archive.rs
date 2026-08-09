@@ -18,11 +18,26 @@ impl App {
     /// Kick a mount for `path`. `confirmed` is set on the second pass, after the
     /// user answered a size prompt.
     pub(super) fn request_mount(&mut self, path: &Path, confirmed: bool) -> Vec<Effect> {
+        self.request_mount_then(path, confirmed, None)
+    }
+
+    /// Mount `path`, then run `then` — the held-back effect that wanted a place
+    /// inside it. See [`Self::mount_and_retry`].
+    pub(super) fn request_mount_then(
+        &mut self,
+        path: &Path,
+        confirmed: bool,
+        then: Option<Box<Effect>>,
+    ) -> Vec<Effect> {
         // Already mounted: step back in rather than reading it again. A re-mount
         // installs a fresh journal, so it would silently discard changes the user
         // hasn't written back — and for a compressed tar it would re-stream the
         // whole archive to learn what it already knows.
         if self.state.mounts.contains(path) {
+            // Already mounted, so whatever was waiting on it can just run.
+            if let Some(effect) = then {
+                return vec![*effect];
+            }
             self.enter_mount(path);
             return Vec::new();
         }
@@ -44,6 +59,7 @@ impl App {
             max_entries: self.state.config.archive.max_entries,
             confirmed,
             cancel: std::sync::Arc::clone(&self.runtime.archive_cancel),
+            then,
         })]
     }
 
@@ -110,6 +126,7 @@ impl App {
                 capability,
                 warnings,
                 staging_root,
+                then,
             } => {
                 let archive = index.archive.clone();
                 let notes = mount_notes(&capability, &warnings);
@@ -127,8 +144,17 @@ impl App {
                     &protected,
                 );
                 // Enter it, then say what was odd about it — the flash outlives
-                // the chdir, so the note is what the user is left reading.
-                self.enter_mount(&archive);
+                // the chdir, so the note is what the user is left reading. A
+                // held-back effect names where to land instead, and re-running it
+                // is what gets the cursor and the message it came with.
+                let mut effects = clean_effects(evicted);
+                match then {
+                    Some(effect) => {
+                        self.state.mounts.touch(&archive);
+                        effects.push(*effect);
+                    }
+                    None => self.enter_mount(&archive),
+                }
                 if let Some(note) = notes.first() {
                     let extra = notes.len().saturating_sub(1);
                     self.state.flash_info(if extra > 0 {
@@ -138,9 +164,17 @@ impl App {
                     });
                 }
                 self.view.needs_full_repaint = true;
-                clean_effects(evicted)
+                effects
             }
-            ArchiveOutcome::NeedsConfirm { path, question } => {
+            ArchiveOutcome::NeedsConfirm {
+                path,
+                question,
+                then,
+            } => {
+                // The prompt is a round trip through the keyboard, and a
+                // `PromptKind` is plain data — so what was waiting on the mount
+                // waits here until the answer comes back.
+                self.runtime.archive_mount_then = then.map(|effect| (path.clone(), effect));
                 self.state.mode = Mode::Prompting(Prompt::simple(
                     PromptKind::ArchiveMountConfirm { path },
                     format!("{question} [Y/n] "),
@@ -554,7 +588,39 @@ impl App {
     ///
     /// `Some` means execute it; `None` means it was held back for extraction (or
     /// refused), and the drain will bring it round again once the bytes exist.
+    /// Two questions, in order: does this effect want an archive mounted before it
+    /// can run at all, and does it name something inside one that already is?
     pub(super) fn screen_archive_effect(&mut self, effect: Effect) -> Option<Effect> {
+        self.mount_and_retry(effect)
+    }
+
+    /// Hold back a `ChangeDir` that names a place inside an archive nobody has
+    /// mounted, and mount it first.
+    ///
+    /// Every way of landing on a path goes through this effect — a mark, a harpoon
+    /// slot, a restored session, `navigate_to`, `J` — so doing it here means none
+    /// of them has to know that a path can name a place inside a file. The mount
+    /// carries the original effect and re-issues it, which is how the cursor
+    /// target and the message survive the round trip.
+    fn mount_and_retry(&mut self, effect: Effect) -> Option<Effect> {
+        let Effect::ChangeDir { path, .. } = &effect else {
+            return self.screen_mount_paths(effect);
+        };
+        // An already-mounted path is served from the index by `chdir_into_mount`,
+        // and a real directory is a real directory.
+        if !self.state.config.archive.enable || self.state.mounts.contains(path) || path.is_dir() {
+            return self.screen_mount_paths(effect);
+        }
+        let Some((archive, _inner)) = archive_ancestor_of(path) else {
+            return self.screen_mount_paths(effect);
+        };
+        self.request_mount_then(&archive, false, Some(Box::new(effect)))
+            .into_iter()
+            .next()
+    }
+
+    /// The member/container screen proper: [`route_archive_effect`]'s verdict.
+    fn screen_mount_paths(&mut self, effect: Effect) -> Option<Effect> {
         use super::archive_route::{ArchiveSink, route_archive_effect};
         let staged_check = |p: &Path| {
             self.state
@@ -817,6 +883,19 @@ pub fn sweep_orphan_staging() {
             let _ = std::fs::remove_dir_all(entry.path());
         }
     }
+}
+
+/// [`super::archive_route::archive_ancestor`] against the real filesystem.
+///
+/// The name test runs before the `is_file` stat and costs no syscall, so an
+/// ordinary path pays nothing here — only one with an archive-shaped component in
+/// it goes on to ask the disk.
+pub(super) fn archive_ancestor_of(path: &Path) -> Option<(PathBuf, String)> {
+    super::archive_route::archive_ancestor(path, &|p: &Path| {
+        p.file_name()
+            .is_some_and(|n| crate::archive::looks_mountable(&n.to_string_lossy()))
+            && p.is_file()
+    })
 }
 
 fn clean_effects(roots: Vec<PathBuf>) -> Vec<Effect> {

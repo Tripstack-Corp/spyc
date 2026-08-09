@@ -319,6 +319,7 @@ impl App {
                 image_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 archive_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 archive_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                archive_mount_then: None,
                 file_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 listing_refresh_inflight: false,
                 listing_refresh_dirty: false,

@@ -31,11 +31,6 @@ pub const fn refusal(action: &Action) -> Option<&'static str> {
             "archive: shell commands run outside the archive"
         }
 
-        // Bookmarks that would persist a path with nothing behind it once the
-        // mount is dropped. Jumping *out* by a mark or harpoon slot is fine.
-        A::SetMark(_) => "archive: marks can't point inside an archive",
-        A::HarpoonAppend | A::HarpoonRemove => "archive: harpoon can't point inside an archive",
-
         // A member has no history, and there is no worktree in here.
         A::GitDiff
         | A::GitDiffCached
@@ -132,12 +127,20 @@ mod tests {
         assert!(why.contains("outside"), "{why}");
     }
 
+    /// A bookmark inside an archive is allowed because coming back to one works:
+    /// a `ChangeDir` naming a place inside an unmounted archive mounts it first.
+    /// Before that it could only dangle, so it was refused.
     #[test]
-    fn bookmarks_that_would_dangle_are_refused_but_jumps_out_are_not() {
-        assert!(refusal(&Action::SetMark('a')).is_some());
-        assert!(refusal(&Action::HarpoonAppend).is_some());
-        assert_eq!(refusal(&Action::JumpMark('a')), None);
-        assert_eq!(refusal(&Action::HarpoonJump(2)), None);
+    fn bookmarks_inside_an_archive_are_allowed_now_that_they_can_be_returned_to() {
+        for action in [
+            Action::SetMark('a'),
+            Action::JumpMark('a'),
+            Action::HarpoonAppend,
+            Action::HarpoonRemove,
+            Action::HarpoonJump(2),
+        ] {
+            assert_eq!(refusal(&action), None, "{action:?}");
+        }
     }
 
     #[test]
@@ -159,7 +162,7 @@ mod tests {
     fn every_refusal_message_is_user_facing() {
         for action in [
             Action::MakeDirPrompt,
-            Action::SetMark('a'),
+            Action::ChmodAdd('x'),
             Action::GitDiff,
             Action::FindFile,
             Action::StartShell,
