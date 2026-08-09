@@ -178,8 +178,15 @@ impl App {
         else {
             return Vec::new();
         };
+        // Whatever was waiting on this mount was parked when the prompt went up.
+        let then = self
+            .runtime
+            .archive_mount_then
+            .take()
+            .filter(|(archive, _)| *archive == path)
+            .map(|(_, effect)| effect);
         if confirmed {
-            self.request_mount(&path, true)
+            self.request_mount_then(&path, true, then)
         } else {
             self.state.flash_info("archive: not mounted");
             Vec::new()

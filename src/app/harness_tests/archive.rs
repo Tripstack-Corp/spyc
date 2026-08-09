@@ -37,6 +37,7 @@ fn mount_inline(app: &mut App, archive: &Path, staging: &Path) -> Vec<Effect> {
         max_entries: 1000,
         confirmed: false,
         cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        then: None,
     });
     assert!(
         matches!(outcome, ArchiveOutcome::Mounted { .. }),
@@ -556,6 +557,15 @@ fn settle(app: &mut App, effects: Vec<Effect>) {
                     let outcome = crate::app::graveyard_ops::run_graveyard_op(op);
                     app.runtime.graveyard_results.lock().unwrap().push(outcome);
                 }
+                // A mount re-issues the `ChangeDir` that was waiting for it.
+                Effect::ChangeDir {
+                    path,
+                    focus,
+                    on_ok,
+                    err_prefix,
+                } => app
+                    .state
+                    .change_dir(&path, focus.as_deref(), on_ok.as_deref(), err_prefix),
                 _ => {}
             }
         }
@@ -1503,6 +1513,164 @@ fn a_mixed_selection_rewrites_the_staged_member_too() {
         assert!(
             paths.contains(&main),
             "and the unextracted one still waits for the worker: {paths:?}"
+        );
+    });
+}
+
+// ── coming back to a place inside an archive ──────────────────────────────
+
+/// The smallest session that names a cwd — nothing else about it is under test.
+fn session_at(cwd: PathBuf) -> crate::state::sessions::Session {
+    crate::state::sessions::Session {
+        id: 1,
+        saved_at: String::new(),
+        epoch_secs: 0,
+        cwd,
+        tabs: Vec::new(),
+        active_tab: 0,
+        pane_height_pct: 30,
+        pane_focused: false,
+        name: String::new(),
+        project_home: None,
+        vsplit: None,
+        scope_claims: Vec::new(),
+    }
+}
+
+/// A mark inside an archive used to be refused, because the mount it pointed into
+/// was gone by the time you came back. Now the jump mounts it again.
+#[test]
+fn a_mark_inside_an_archive_mounts_it_again_on_the_way_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir.clone());
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Into `src/`, mark it, then leave the archive entirely.
+        app.apply(&Action::EnterOrDisplay).unwrap();
+        assert_eq!(app.state.cur().listing.dir, archive.join("src"));
+        app.apply(&Action::SetMark('a')).unwrap();
+
+        // `:archive unmount` steps the column out itself, then drops the mount.
+        let fx = app.cmd_archive("unmount");
+        settle(&mut app, fx);
+        assert!(!app.state.mounts.contains(&archive), "unmounted");
+        assert_eq!(app.state.cur().listing.dir, dir, "and out of it");
+
+        // The jump names a path inside a file. Nothing is mounted, so the effect
+        // screen has to mount it before the chdir can mean anything.
+        let fx = app.apply(&Action::JumpMark('a')).unwrap();
+        settle(&mut app, fx);
+
+        assert!(app.state.mounts.contains(&archive), "re-mounted");
+        assert_eq!(
+            app.state.cur().listing.dir,
+            archive.join("src"),
+            "and landed where the mark pointed: {:?}",
+            app.state.flash.as_ref().map(|f| f.text.clone())
+        );
+        assert_eq!(row_names(&app), ["deep/", "main.rs"]);
+    });
+}
+
+/// Quitting while browsing an archive and restoring the session puts you back
+/// inside it. The saved cwd is not a directory and never was, so the restore path
+/// can't `chdir` to it — it hands the effect screen a `ChangeDir` instead.
+#[test]
+fn restoring_a_session_that_ended_inside_an_archive_mounts_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+
+        let session = session_at(archive.join("src"));
+        let fx = app.restore_session(&session);
+        settle(&mut app, fx);
+
+        assert!(
+            app.state.mounts.contains(&archive),
+            "the archive is mounted"
+        );
+        assert_eq!(
+            app.state.cur().listing.dir,
+            archive.join("src"),
+            "back where the session ended: {:?}",
+            app.state.flash.as_ref().map(|f| f.text.clone())
+        );
+    });
+}
+
+/// A session whose cwd is simply gone still reports that, rather than being
+/// mistaken for an archive.
+#[test]
+fn restoring_a_session_whose_directory_is_gone_still_says_so() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let mut app = App::test_app(dir.clone());
+
+        let session = session_at(dir.join("no-such-dir"));
+        let fx = app.restore_session(&session);
+
+        assert!(fx.is_empty(), "nothing to mount");
+        let flash = app.state.flash.as_ref().map(|f| f.text.clone());
+        assert!(
+            flash.as_deref().is_some_and(|t| t.contains("gone")),
+            "{flash:?}"
+        );
+    });
+}
+
+/// Harpoon, the other bookmark: appending inside a mount is allowed now, and the
+/// slot jump comes back the same way a mark does.
+#[test]
+fn a_harpoon_slot_inside_an_archive_comes_back_to_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir.clone());
+        // Harpoon is keyed on the column's repo root or PROJECT_HOME; inside a
+        // mount there is no repo, so the archive's own project is the key.
+        app.state.project_home = Some(dir);
+        app.reconcile_harpoon();
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        app.apply(&Action::EnterOrDisplay).unwrap();
+        assert_eq!(app.state.cur().listing.dir, archive.join("src"));
+        app.apply(&Action::HarpoonAppend).unwrap();
+        assert!(
+            app.state
+                .cur()
+                .harpoon
+                .as_ref()
+                .is_some_and(|h| h.get(1).is_some()),
+            "the slot took: {:?}",
+            app.state.flash.as_ref().map(|f| f.text.clone())
+        );
+
+        let fx = app.cmd_archive("unmount");
+        settle(&mut app, fx);
+        assert!(!app.state.mounts.contains(&archive), "unmounted");
+
+        let fx = app.apply(&Action::HarpoonJump(1)).unwrap();
+        settle(&mut app, fx);
+        assert!(app.state.mounts.contains(&archive), "re-mounted");
+        assert_eq!(
+            app.state.cur().listing.dir,
+            archive.join("src"),
+            "{:?}",
+            app.state.flash.as_ref().map(|f| f.text.clone())
         );
     });
 }

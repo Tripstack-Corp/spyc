@@ -47,6 +47,11 @@ pub enum ArchiveOp {
         max_entries: usize,
         confirmed: bool,
         cancel: Arc<AtomicBool>,
+        /// An effect that was waiting for this archive to be mounted — a
+        /// `ChangeDir` naming a path inside it, held back because the mount
+        /// didn't exist yet. Re-issued once it does, so the original keeps its
+        /// cursor target and its message. `None` for an ordinary `Enter`.
+        then: Option<Box<super::Effect>>,
     },
     /// Extract one member so something can read it.
     Materialize {
@@ -90,11 +95,15 @@ pub enum ArchiveOutcome {
         capability: Capability,
         warnings: Vec<String>,
         staging_root: PathBuf,
+        /// The held-back effect from [`ArchiveOp::Mount`], to run now that the
+        /// mount exists.
+        then: Option<Box<super::Effect>>,
     },
     /// Big enough to ask about first. Answering `y` re-issues the op.
     NeedsConfirm {
         path: PathBuf,
         question: String,
+        then: Option<Box<super::Effect>>,
     },
     /// The magic bytes say this isn't a container after all — the name filter
     /// admitted it, so fall back to opening it as a file.
@@ -143,13 +152,17 @@ pub fn run_archive_op(op: ArchiveOp) -> ArchiveOutcome {
             max_entries,
             confirmed,
             cancel,
-        } => mount(
-            &path,
-            &staging_root,
-            &limits,
-            max_entries,
-            confirmed,
-            &cancel,
+            then,
+        } => carry_then(
+            mount(
+                &path,
+                &staging_root,
+                &limits,
+                max_entries,
+                confirmed,
+                &cancel,
+            ),
+            then,
         ),
         ArchiveOp::Materialize {
             archive,
@@ -212,6 +225,37 @@ pub fn run_archive_op(op: ArchiveOp) -> ArchiveOutcome {
     }
 }
 
+/// Attach the held-back effect to a mount outcome.
+///
+/// Done here rather than inside [`mount`] so the decision to carry something
+/// lives at the op boundary and `mount` keeps its one job. Only the two outcomes
+/// that lead somewhere carry it: a mount that failed, or turned out not to be an
+/// archive, has nowhere for a `ChangeDir` to land — and re-issuing it would find
+/// no mount, hold it back again, and mount in a circle.
+fn carry_then(outcome: ArchiveOutcome, then: Option<Box<super::Effect>>) -> ArchiveOutcome {
+    match outcome {
+        ArchiveOutcome::Mounted {
+            index,
+            capability,
+            warnings,
+            staging_root,
+            ..
+        } => ArchiveOutcome::Mounted {
+            index,
+            capability,
+            warnings,
+            staging_root,
+            then,
+        },
+        ArchiveOutcome::NeedsConfirm { path, question, .. } => ArchiveOutcome::NeedsConfirm {
+            path,
+            question,
+            then,
+        },
+        other => other,
+    }
+}
+
 fn mount(
     path: &Path,
     staging_root: &Path,
@@ -271,6 +315,8 @@ fn mount(
         capability,
         warnings,
         staging_root: staging_root.to_path_buf(),
+        // `carry_then` attaches the held-back effect at the op boundary.
+        then: None,
     }
 }
 
@@ -299,6 +345,7 @@ fn gate(
         }),
         MountDecision::Confirm(question) if ask && !confirmed => {
             Some(ArchiveOutcome::NeedsConfirm {
+                then: None,
                 path: path.to_path_buf(),
                 question,
             })
@@ -328,6 +375,7 @@ fn preflight_streamed(
             error: why,
         }),
         MountDecision::Confirm(question) if !confirmed => Some(ArchiveOutcome::NeedsConfirm {
+            then: None,
             path: path.to_path_buf(),
             question,
         }),
@@ -386,6 +434,7 @@ mod tests {
             max_entries: 1000,
             confirmed,
             cancel: Arc::new(AtomicBool::new(false)),
+            then: None,
         })
     }
 
