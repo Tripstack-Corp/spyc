@@ -109,6 +109,7 @@ mod tests {
             Action::MovePrompt,
             Action::Drop,
             Action::RemovePrompt(None),
+            Action::Take,
         ] {
             assert_eq!(
                 refusal(&action),

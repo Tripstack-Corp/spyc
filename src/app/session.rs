@@ -652,7 +652,16 @@ impl App {
             });
             let running_bg = self.runtime.background_tasks.running_count();
             let running = running_panes + running_bg;
-            if running > 0 {
+            // Pending archive changes live only in memory, so quitting drops
+            // them. Name that on the first tap, where the double-tap confirm
+            // already gives the user somewhere to stop.
+            let dirty_archives = self.dirty_mounts();
+            if !dirty_archives.is_empty() {
+                self.state.flash_info(format!(
+                    "{} archive(s) have unwritten changes (:archive write) — press again to quit",
+                    dirty_archives.len()
+                ));
+            } else if running > 0 {
                 self.state.flash_info(format!(
                     "{running} running process{} — press again to quit",
                     if running == 1 { "" } else { "es" }

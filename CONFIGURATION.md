@@ -224,7 +224,14 @@ enable = true              # false → Enter pages the archive as bytes
 extract_budget_mb = 512    # hard ceiling for a .tar.gz / .tar.zst mount
 warn_over_mb = 128         # confirm before extracting more than this
 max_entries = 200000       # cap on indexed members
+write_back = "ask"         # "ask" | "never" — offer to write pending changes
+snapshot_max_mb = 64       # graveyard-snapshot the original below this size
 ```
+
+A write-back never puts the original at risk: the new archive is written to a
+temp file beside it, verified by reading it back, and only then renamed into
+place. `snapshot_max_mb` is about *regret*, not corruption — below that size the
+original is also copied into the graveyard so `:undo` can restore it.
 
 Staging lives under `$XDG_STATE_HOME/spyc/archives/<pid>-<hash>/` and is removed
 when the archive is unmounted or spyc exits; a tree left behind by a killed

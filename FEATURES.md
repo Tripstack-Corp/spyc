@@ -483,10 +483,22 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   all, so `p` outside the archive writes a real file), `c` copies members out,
   `^a p` pipes one to the pane, and `f` / `L` report on them. Each extracts what
   it needs first, so nothing is unpacked speculatively.
-- **Not yet supported inside an archive** — writing, deleting, renaming, editing
-  a member, `:grep`, `F`, marks, harpoon and shell commands are refused with a
+- **Deleting a member** — `R` marks it for removal; the archive on disk is
+  untouched until you write. Because a delete is an edit to the container's
+  index, dropping a 500 MB member never extracts it.
+- **Writing back** — `:archive write` replaces the archive: untouched members are
+  carried across without being recompressed, the result is verified by reading it
+  back, and only then renamed over the original. **A failed write can't damage
+  the original** — nothing touches it until that rename. Archives up to
+  `[archive] snapshot_max_mb` are also copied into the graveyard first, so
+  `:undo` can bring the old one back. `:archive discard` throws the pending
+  changes away instead; unmounting a changed archive offers to write it first,
+  and quitting warns before dropping unwritten changes.
+- **Not yet supported inside an archive** — adding files, renaming, editing a
+  member, `:grep`, `F`, marks, harpoon and shell commands are refused with a
   message rather than half-working. The status suffix shows the container
-  (`zip`, `tar.gz`) and `ro` when the archive can't be written back.
+  (`zip`, `tar.gz`), `ro` when the archive can't be written back, and a `+2 ~1 -3`
+  badge while changes are pending.
 - **`:archive`** — `info` (everything about this mount), `list` (every mounted
   archive), `unmount` (drop it and its staged bytes), `cancel`.
 

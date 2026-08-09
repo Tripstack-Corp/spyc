@@ -33,6 +33,16 @@ pub enum ArchiveSink {
     },
     /// Can't be done inside an archive; the string is shown to the user.
     Refuse(&'static str),
+    /// The op means something different inside a container: record it as a pending
+    /// change rather than touching the filesystem. Deleting a member is an index
+    /// edit, which is why a 500 MB member can be dropped without extracting it.
+    Record(Vec<PendingChange>),
+}
+
+/// A filesystem op reinterpreted as a change to a container.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PendingChange {
+    Delete { archive: PathBuf, inner: String },
 }
 
 /// Classify `effect` against the live mounts.
@@ -55,6 +65,7 @@ pub fn route_archive_effect(
             then: Box::new(effect),
         },
         Verdict::Refuse(why) => ArchiveSink::Refuse(why),
+        Verdict::Record(changes) => ArchiveSink::Record(changes),
     }
 }
 
@@ -63,6 +74,7 @@ enum Verdict {
     Pass,
     Need(Vec<PathBuf>),
     Refuse(&'static str),
+    Record(Vec<PendingChange>),
 }
 
 fn classify(effect: &Effect, mounts: &Mounts, is_staged: &dyn Fn(&Path) -> bool) -> Verdict {
@@ -115,11 +127,37 @@ fn classify(effect: &Effect, mounts: &Mounts, is_staged: &dyn Fn(&Path) -> bool)
                 Verdict::Pass
             }
         }
+        // Deleting a member is an edit to the container's index, not a file
+        // removal — recorded now, applied by the next write-back. A mixed
+        // selection is refused rather than half-done: the two halves have
+        // different recovery stories (the graveyard vs. the journal).
         Effect::Graveyard(op) => {
-            if graveyard_paths(op).iter().any(|p| mounts.contains(p)) {
-                Verdict::Refuse("archive: deleting a member is not supported")
+            let paths = graveyard_paths(op);
+            let (members, outside): (Vec<&PathBuf>, Vec<&PathBuf>) =
+                paths.iter().partition(|p| mounts.contains(p));
+            if members.is_empty() {
+                return Verdict::Pass;
+            }
+            if !outside.is_empty() {
+                return Verdict::Refuse(
+                    "archive: select members or files, not both — they delete differently",
+                );
+            }
+            let changes = members
+                .iter()
+                .filter_map(|p| {
+                    let (mount, _) = mounts.resolve(p)?;
+                    let entry = mount.entry_at(p)?;
+                    Some(PendingChange::Delete {
+                        archive: mount.archive().to_path_buf(),
+                        inner: entry.inner.clone(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            if changes.is_empty() {
+                Verdict::Refuse("archive: no such member")
             } else {
-                Verdict::Pass
+                Verdict::Record(changes)
             }
         }
         Effect::FileOp(FileOp::GitRestore { repo_root, .. }) => {
@@ -388,17 +426,42 @@ mod tests {
         }
     }
 
+    /// Deleting a member is an index edit, not a file removal — so it is recorded
+    /// against the container rather than sent to the graveyard, and a 500 MB
+    /// member can be dropped without ever extracting it.
     #[test]
-    fn deleting_a_member_is_refused() {
+    fn deleting_a_member_is_recorded_not_unlinked() {
         let mounts = mounts_with(&["a.txt"]);
         let effect = Effect::Graveyard(crate::app::graveyard_ops::GraveyardOp::Archive {
             paths: vec![member("a.txt")],
         });
+        let ArchiveSink::Record(changes) = route_archive_effect(effect, &mounts, &nothing_staged)
+        else {
+            panic!("a member delete must be recorded");
+        };
+        assert_eq!(
+            changes,
+            [PendingChange::Delete {
+                archive: PathBuf::from("/src/pkg.zip"),
+                inner: "a.txt".to_string(),
+            }]
+        );
+    }
+
+    /// A selection spanning both a member and a real file would delete two ways at
+    /// once — the graveyard for one, the journal for the other — with different
+    /// recovery stories. Refusing beats doing half of each.
+    #[test]
+    fn a_mixed_delete_selection_is_refused() {
+        let mounts = mounts_with(&["a.txt"]);
+        let effect = Effect::Graveyard(crate::app::graveyard_ops::GraveyardOp::Archive {
+            paths: vec![member("a.txt"), PathBuf::from("/real/x.txt")],
+        });
         let ArchiveSink::Refuse(why) = route_archive_effect(effect, &mounts, &nothing_staged)
         else {
-            panic!("deleting a member must be refused");
+            panic!("a mixed selection must be refused");
         };
-        assert!(why.contains("deleting"), "{why}");
+        assert!(why.contains("not both"), "{why}");
     }
 
     /// Deleting a real file while an archive happens to be mounted is untouched.

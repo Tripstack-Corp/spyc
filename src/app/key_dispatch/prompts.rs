@@ -57,6 +57,12 @@ impl App {
         }
         if matches!(
             &self.state.mode,
+            Mode::Prompting(p) if matches!(p.kind, PromptKind::ArchiveWriteConfirm { .. })
+        ) {
+            return self.handle_archive_write_confirm_key(key);
+        }
+        if matches!(
+            &self.state.mode,
             Mode::Prompting(p) if matches!(p.kind, PromptKind::ArchiveMountConfirm { .. })
         ) {
             return self.handle_archive_mount_confirm_key(key);
