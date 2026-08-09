@@ -9,8 +9,9 @@ use crate::mcp_cmd::{McpCommand, McpRequest, McpResponse};
 
 use super::readers::{
     DiffMode, claim_worktree_result, effective_root, git_diff_text, git_log_json, git_status_json,
-    grep_matches_to_json, list_worktrees_json, read_context_or_empty, read_file_content,
-    read_inventory_from_context, read_picks_from_context, release_worktree_result,
+    grep_matches_to_json, is_in_mount, list_worktrees_json, read_context_or_empty,
+    read_cwd_from_context, read_file_content, read_inventory_from_context, read_member_content,
+    read_picks_from_context, release_worktree_result,
 };
 use super::{
     CONTEXT_URI, PROTOCOL_VERSION, PROXY_IO_TIMEOUT, SERVER_INSTRUCTIONS, SERVER_NAME,
@@ -38,6 +39,23 @@ const READ_TOOL_TIMEOUT: std::time::Duration = {
 /// always outlasts the loop's own timed-out reply.
 const DEFAULT_SCOPE_WAIT_MS: u64 = 300_000;
 const MAX_SCOPE_WAIT_MS: u64 = 600_000;
+
+/// Why a tree-walking tool can't run against `root`, when `root` is inside a
+/// mounted archive.
+///
+/// Both the finder and grep walk real directories, and a mount has none — the
+/// members are index entries. Pointing them at the mount root would walk a single
+/// binary *file* and report "no matches", which reads as an answer rather than as
+/// the wrong question.
+fn mount_refusal(root: &Path, ctx_path: &Path, tool: &str) -> Option<String> {
+    is_in_mount(root, ctx_path).then(|| {
+        format!(
+            "{tool}: {} is inside a mounted archive, whose members aren't on disk. \
+             Read one with get_file_content, or pass `root` to search a real directory.",
+            root.display()
+        )
+    })
+}
 
 /// Run `f` on a detached thread and wait at most `timeout` for its result,
 /// returning `Err` on timeout. There is no cancellation: a timed-out thread
@@ -610,6 +628,22 @@ fn handle_tools_call(
             } else {
                 root.join(path_str)
             };
+            // A member of a mounted archive, before `canonicalize` gets a chance
+            // to fail on it: the mount root is a *file*, so every path beneath it
+            // is ENOTDIR on disk. Also try the user's cwd, which is where an agent
+            // reading "the file I'm looking at" points a relative path.
+            let member = read_member_content(&resolved, ctx_path).or_else(|| {
+                let alt = read_cwd_from_context(ctx_path).join(path_str);
+                (!Path::new(path_str).is_absolute() && alt != resolved)
+                    .then(|| read_member_content(&alt, ctx_path))
+                    .flatten()
+            });
+            if let Some(result) = member {
+                return match result {
+                    Ok(content) => send_tool_result(w, id, &content),
+                    Err(e) => send_tool_error(w, id, &e),
+                };
+            }
             // Canonicalize to resolve symlinks and ".." components, then verify
             // the path is under the search root to prevent directory traversal.
             let canonical = match std::fs::canonicalize(&resolved) {
@@ -635,6 +669,9 @@ fn handle_tools_call(
                 Ok(r) => r,
                 Err(e) => return send_tool_error(w, id, &e),
             };
+            if let Some(e) = mount_refusal(&root, ctx_path, "search_paths") {
+                return send_tool_error(w, id, &e);
+            }
             match call_with_timeout(READ_TOOL_TIMEOUT, move || {
                 crate::fs::finder::find_paths(&root, &query, limit)
             }) {
@@ -659,6 +696,9 @@ fn handle_tools_call(
                 Ok(r) => r,
                 Err(e) => return send_tool_error(w, id, &e),
             };
+            if let Some(e) = mount_refusal(&root, ctx_path, "search_content") {
+                return send_tool_error(w, id, &e);
+            }
             match call_with_timeout(READ_TOOL_TIMEOUT, move || {
                 crate::fs::grep::search_to_vec(&root, &pattern, limit)
             }) {

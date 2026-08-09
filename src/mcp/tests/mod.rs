@@ -97,6 +97,7 @@ fn resources_read_with_context_file() {
         session_name: String::new(),
         pid: 0,
         version: String::new(),
+        archive_mounts: Vec::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -172,6 +173,7 @@ fn tools_call_returns_context() {
         session_name: String::new(),
         pid: 0,
         version: String::new(),
+        archive_mounts: Vec::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -265,6 +267,7 @@ fn search_paths_tool_walks_root() {
         session_name: String::new(),
         pid: 0,
         version: String::new(),
+        archive_mounts: Vec::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -318,6 +321,7 @@ fn search_root_overrides_project_home() {
         session_name: String::new(),
         pid: 0,
         version: String::new(),
+        archive_mounts: Vec::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -377,6 +381,7 @@ fn git_diff_tool_honors_explicit_root_arg() {
         session_name: String::new(),
         pid: 0,
         version: String::new(),
+        archive_mounts: Vec::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -475,6 +480,7 @@ fn search_content_tool_returns_matches() {
         session_name: String::new(),
         pid: 0,
         version: String::new(),
+        archive_mounts: Vec::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -517,6 +523,7 @@ fn search_picks_tool_only_picked_files() {
         session_name: String::new(),
         pid: 0,
         version: String::new(),
+        archive_mounts: Vec::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -571,6 +578,7 @@ fn socket_server_responds() {
         session_name: String::new(),
         pid: 0,
         version: String::new(),
+        archive_mounts: Vec::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -614,6 +622,7 @@ fn disconnect_notification_routes_through_channel() {
         session_name: String::new(),
         pid: 0,
         version: String::new(),
+        archive_mounts: Vec::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -887,6 +896,7 @@ fn get_file_content_blocks_path_traversal() {
         session_name: String::new(),
         pid: 0,
         version: String::new(),
+        archive_mounts: Vec::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -954,6 +964,7 @@ fn get_file_content_resolves_relative_against_search_root() {
         session_name: String::new(),
         pid: 0,
         version: String::new(),
+        archive_mounts: Vec::new(),
     };
     let ctx_path = context::context_path(tmp.path());
     context::write_context_file(&ctx_path, &ctx).unwrap();
@@ -1238,4 +1249,195 @@ fn session_id_piggybacks_from_hook_payload() {
     );
     assert_eq!(sid(""), None);
     assert_eq!(sid("not json"), None);
+}
+
+// ── reading a member of a mounted archive ─────────────────────────────────
+
+/// A zip holding one text member, plus a context file that says it's mounted.
+fn mounted_zip(dir: &std::path::Path, staging: &std::path::Path) -> (PathBuf, PathBuf) {
+    use std::io::Write as _;
+    let archive = dir.join("pkg.zip");
+    let file = std::fs::File::create(&archive).unwrap();
+    let mut w = zip::ZipWriter::new(file);
+    let opts = zip::write::SimpleFileOptions::default();
+    w.start_file("README.md", opts).unwrap();
+    w.write_all(b"# from inside the archive\n").unwrap();
+    w.start_file("src/main.rs", opts).unwrap();
+    w.write_all(b"fn main() {}\n").unwrap();
+    w.finish().unwrap();
+
+    let ctx = context::SpycContext {
+        // The user is standing inside the mount, which is what makes `cwd` a
+        // path that is not a directory.
+        cwd: archive.clone(),
+        cursor_file: Some("README.md".into()),
+        picks: vec![],
+        inventory: vec![],
+        filter: None,
+        git_branch: None,
+        project_home: Some(dir.to_path_buf()),
+        search_root: Some(dir.to_path_buf()),
+        session_name: String::new(),
+        pid: 0,
+        version: String::new(),
+        archive_mounts: vec![context::ArchiveMountRef {
+            root: archive.clone(),
+            staging: staging.to_path_buf(),
+        }],
+    };
+    let ctx_path = context::context_path(dir);
+    context::write_context_file(&ctx_path, &ctx).unwrap();
+    (archive, ctx_path)
+}
+
+fn call_get_file_content(ctx_path: &std::path::Path, path: &str) -> Value {
+    let mut output = Vec::new();
+    dispatch(
+        &mut output,
+        &json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+                "params":{"name":"get_file_content","arguments":{"path":path}}})
+        .to_string(),
+        ctx_path,
+        None,
+    )
+    .unwrap();
+    parse_response(&output)
+}
+
+/// The point of the feature: a member's bytes come back even though nothing is on
+/// disk at that path. `canonicalize` fails with ENOTDIR there, so this has to be
+/// answered before the ordinary file path is tried at all.
+#[test]
+fn get_file_content_reads_a_member_of_a_mounted_archive() {
+    let tmp = tempfile::tempdir().unwrap();
+    let staging = tmp.path().join("staging");
+    let (archive, ctx_path) = mounted_zip(tmp.path(), &staging);
+
+    let resp = call_get_file_content(&ctx_path, &archive.join("README.md").display().to_string());
+    assert_eq!(
+        resp["result"]["content"][0]["text"].as_str(),
+        Some("# from inside the archive\n"),
+        "{resp}"
+    );
+}
+
+/// An agent asking about "the file I'm looking at" sends a relative path, which
+/// resolves against the user's cwd — inside the mount.
+#[test]
+fn get_file_content_resolves_a_relative_member_against_the_mount() {
+    let tmp = tempfile::tempdir().unwrap();
+    let staging = tmp.path().join("staging");
+    let (_archive, ctx_path) = mounted_zip(tmp.path(), &staging);
+
+    let resp = call_get_file_content(&ctx_path, "src/main.rs");
+    assert_eq!(
+        resp["result"]["content"][0]["text"].as_str(),
+        Some("fn main() {}\n"),
+        "{resp}"
+    );
+}
+
+/// The staged copy wins: it's what the user is looking at, so an edit they
+/// haven't written back yet is what the agent should see — not the stale bytes
+/// still in the container.
+#[test]
+fn a_staged_member_is_read_from_staging_not_the_container() {
+    let tmp = tempfile::tempdir().unwrap();
+    let staging = tmp.path().join("staging");
+    let (archive, ctx_path) = mounted_zip(tmp.path(), &staging);
+    std::fs::create_dir_all(&staging).unwrap();
+    std::fs::write(staging.join("README.md"), b"edited, not yet written back\n").unwrap();
+
+    let resp = call_get_file_content(&ctx_path, &archive.join("README.md").display().to_string());
+    assert_eq!(
+        resp["result"]["content"][0]["text"].as_str(),
+        Some("edited, not yet written back\n"),
+        "{resp}"
+    );
+}
+
+#[test]
+fn get_file_content_says_so_when_the_member_does_not_exist() {
+    let tmp = tempfile::tempdir().unwrap();
+    let staging = tmp.path().join("staging");
+    let (archive, ctx_path) = mounted_zip(tmp.path(), &staging);
+
+    let resp = call_get_file_content(&ctx_path, &archive.join("nope.txt").display().to_string());
+    let err = resp["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+        + resp["error"]["message"].as_str().unwrap_or_default();
+    assert!(err.contains("no such member"), "{resp}");
+}
+
+/// A traversing path is not a member, so it never reaches the staging join.
+///
+/// `strip_prefix` is lexical: `pkg.zip/../x` strips to `../x`, which joined onto
+/// the staging root would land outside the mount. The index's own normalization —
+/// the one that defends against attacker-controlled names *inside* an archive —
+/// rejects it here too, and the path falls through to the ordinary file rules
+/// (canonicalize, then the root check), which is where it belongs.
+#[test]
+fn a_traversing_path_is_not_treated_as_a_member() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Nested so `staging/../…` names somewhere a naive join could actually reach.
+    let staging = tmp.path().join("staging/inner");
+    let (archive, ctx_path) = mounted_zip(tmp.path(), &staging);
+    std::fs::create_dir_all(&staging).unwrap();
+    std::fs::write(staging.join("../leaked.txt"), b"outside the mount\n").unwrap();
+
+    assert!(
+        super::readers::read_member_content(&archive.join("../leaked.txt"), &ctx_path).is_none(),
+        "`..` must not resolve as a member"
+    );
+    assert!(
+        super::readers::read_member_content(&archive.join("README.md"), &ctx_path).is_some(),
+        "while an ordinary member still does"
+    );
+}
+
+/// Grep and the finder walk real directories. Pointed at a mount they'd walk one
+/// binary file and report "no matches", which reads as an answer to the question
+/// rather than the wrong question.
+#[test]
+fn searching_inside_a_mount_is_refused_rather_than_answered_emptily() {
+    let tmp = tempfile::tempdir().unwrap();
+    let staging = tmp.path().join("staging");
+    let (archive, ctx_path) = mounted_zip(tmp.path(), &staging);
+
+    // The tool's own scope is the mount: no `root` argument, and a context whose
+    // search_root is where the user is standing. (An explicit `root` naming the
+    // archive is rejected earlier for not being a directory, so it would prove
+    // nothing about this guard.)
+    let ctx: Value = serde_json::from_str(&std::fs::read_to_string(&ctx_path).unwrap()).unwrap();
+    let mut ctx = ctx;
+    ctx["search_root"] = Value::String(archive.display().to_string());
+    ctx["project_home"] = Value::String(archive.display().to_string());
+    std::fs::write(&ctx_path, ctx.to_string()).unwrap();
+
+    for (tool, args) in [
+        ("search_content", json!({"pattern": "inside"})),
+        ("search_paths", json!({"query": "main"})),
+    ] {
+        let mut output = Vec::new();
+        dispatch(
+            &mut output,
+            &json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+                    "params":{"name":tool,"arguments":args}})
+            .to_string(),
+            &ctx_path,
+            None,
+        )
+        .unwrap();
+        let resp = parse_response(&output);
+        let msg = resp["error"]["message"]
+            .as_str()
+            .or_else(|| resp["result"]["content"][0]["text"].as_str())
+            .unwrap_or_default();
+        assert!(
+            msg.contains("archive") || msg.contains("not a directory"),
+            "{tool} should refuse a mount: {resp}"
+        );
+    }
 }

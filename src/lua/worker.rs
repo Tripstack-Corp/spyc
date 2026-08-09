@@ -470,6 +470,7 @@ mod tests {
             session_name: String::new(),
             pid: 0,
             version: String::new(),
+            archive_mounts: Vec::new(),
         }
     }
 
