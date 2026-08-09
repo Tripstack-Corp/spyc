@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
-use glob::Pattern;
 use ratatui::Frame;
 
 use crate::Tui;
@@ -127,11 +126,12 @@ enum Message {
     /// (drop-safe in coalesce); the redraw is driven by the drain, not by this
     /// message surviving. Same shape as `AgentStatusReady`.
     GraveyardDone,
-    /// An off-thread mermaid render+open (`Effect::RenderMermaid`) finished and
-    /// pushed its outcome onto `runtime.mermaid_results`. Payloadless wake —
-    /// `apply_mermaid_outcomes` drains the slot in the pre-recv scan. Same shape
-    /// as `GraveyardDone`.
-    MermaidDone,
+    /// An off-thread image render (`Effect::RenderMermaid` / `Effect::OpenImage`)
+    /// finished and pushed its outcome onto `runtime.image_results`. Payloadless
+    /// wake — `apply_image_outcomes` drains the slot in the pre-recv scan. Same
+    /// shape as `GraveyardDone`. One message for every producer: what the render
+    /// *was* rides `ImageOrigin` on the outcome, not the wake.
+    ImageDone,
     /// An off-thread file op (`Effect::FileOp`) finished and pushed its outcome.
     FileOpDone,
     /// An off-thread inventory op (`Effect::Inventory`) finished.
@@ -140,7 +140,7 @@ enum Message {
     /// its outcome onto `runtime.worktree_results`. Payloadless wake —
     /// `apply_worktree_outcomes` drains it in the pre-recv scan, re-applies the
     /// listing/context update, then answers the MCP client. Same shape as
-    /// `MermaidDone`.
+    /// `ImageDone`.
     WorktreeJobDone,
     /// A Lua script finished on the worker thread (`runtime.lua`). Payloadless
     /// wake — `handle_lua_done` drains the worker's outcome buffer in the
@@ -151,7 +151,7 @@ enum Message {
     /// An off-thread vertical-split preview reload (`kick_preview_reload`)
     /// finished and pushed its outcome onto `runtime.preview_results`.
     /// Payloadless wake — `apply_preview_reloads` drains the slot in the
-    /// pre-recv scan. Same shape as `MermaidDone`.
+    /// pre-recv scan. Same shape as `ImageDone`.
     PreviewReloadDone,
     /// Option B (`codex_pin`): an off-thread `~/.codex/sessions` scan landed a
     /// rollout snapshot in `codex_pin_pending`. Payloadless wake — the snapshot
@@ -257,11 +257,14 @@ mod grep_session;
 #[cfg(test)]
 mod harness_tests;
 mod harpoon;
+mod image_gallery;
+pub mod image_ops;
 mod inventory_ops;
 mod key_dispatch;
 mod loop_steps;
 mod lua;
 mod lua_events;
+mod matcher;
 mod mcp;
 mod mermaid_ops;
 #[cfg(test)]
@@ -304,6 +307,7 @@ use capture::PendingCapture;
 pub use effect::SigOk;
 pub use effect::{ClipMsg, Effect, PaneInput, PaneTarget, PaneTextKind, PaneTextSink};
 use find_picker::FindPicker;
+pub use matcher::Matcher;
 use pager_history::PagerHistory;
 use pane_wake::SinkId;
 use proc::{ForegroundExec, spawn_input_reader};
@@ -327,6 +331,10 @@ pub enum View {
     /// restore-to-original, `dd`/`x` purge entry to system trash,
     /// `Z` purge all (with confirm), `Esc`/`gy` close.
     Graveyard,
+    /// Image gallery (`^a g`): the images the focused agent tab actually
+    /// received, newest last. Bindings inside: `Enter`/`i` show the image
+    /// full-screen, `Esc`/`q` close.
+    Images,
 }
 
 /// Input mode: normal key bindings or a one-line text prompt.
@@ -590,12 +598,12 @@ struct Runtime {
     /// `apply_graveyard_outcomes` drains it every pre-recv scan (a `Vec` so
     /// concurrent ops never clobber each other — no in-flight guard needed).
     graveyard_results: std::sync::Arc<std::sync::Mutex<Vec<graveyard_ops::GraveyardOutcome>>>,
-    /// Landing slot for off-thread mermaid render+open ops (`Effect::RenderMermaid`).
-    /// The worker pushes a `MermaidOutcome` here and wakes with
-    /// `Message::MermaidDone`; `apply_mermaid_outcomes` drains it each pre-recv
-    /// scan and surfaces the result in the pager status line. Same shape as
-    /// `graveyard_results`.
-    mermaid_results: std::sync::Arc<std::sync::Mutex<Vec<mermaid_ops::MermaidOutcome>>>,
+    /// Landing slot for every off-thread image render — a mermaid diagram
+    /// (`Effect::RenderMermaid`) and an image file (`Effect::OpenImage`) share
+    /// it. The worker pushes an `ImageOutcome` here and wakes with
+    /// `Message::ImageDone`; `apply_image_outcomes` drains it each pre-recv scan
+    /// and installs or flashes the result. Same shape as `graveyard_results`.
+    image_results: std::sync::Arc<std::sync::Mutex<Vec<image_ops::ImageOutcome>>>,
     /// Landing slot for off-thread file operations.
     file_results: std::sync::Arc<std::sync::Mutex<Vec<file_ops::FileOutcome>>>,
     /// The watcher-driven listing refresh (`FileOp::RefreshListing`) reads the
@@ -627,15 +635,21 @@ struct Runtime {
     picker: Option<ratatui_image::picker::Picker>,
 }
 
-/// A rendered image shown full-screen (the pager `i` view). Holds the
-/// ready-to-blit protocol plus the PNG bytes and — for a mermaid diagram — its
-/// source, so the image-pager verbs (`s` save, `Y` yank source, later
-/// `y`/`b`/`c`) work without re-rendering. Generalizes to image-file preview
-/// (where `source` is `None`). See `docs/archive/MERMAID_PAGER_PLAN.md`.
+/// A rendered image shown full-screen. Holds the ready-to-blit protocol plus
+/// the encoded bytes, so the overlay verbs (`s` save, `y` copy, `b` base64)
+/// work without re-rendering, and the [`ImageOrigin`](image_ops::ImageOrigin)
+/// that tells them *what* they're acting on. See
+/// `docs/archive/MERMAID_PAGER_PLAN.md`.
 pub struct ImageView {
     pub protocol: ratatui_image::protocol::Protocol,
-    pub png: Vec<u8>,
-    pub source: Option<String>,
+    /// The image as it arrived — a mermaid render's PNG, or an image file's own
+    /// bytes verbatim (which may be JPEG/GIF/WebP, hence not `png`).
+    pub encoded: Vec<u8>,
+    /// Extension matching `encoded`'s real format, for `s`.
+    pub ext: &'static str,
+    /// Natural pixel size, for the footer.
+    pub dims: (u32, u32),
+    pub origin: image_ops::ImageOrigin,
     /// Whether the current render uses the dark theme — tracked so `c` toggles it.
     pub dark: bool,
     /// Transient verb feedback (e.g. "saved: …"), shown in the overlay footer —
@@ -707,7 +721,7 @@ pub struct ViewState {
     /// Full-screen image overlay (the pager `i` key): a rendered diagram/image
     /// blitted over everything until dismissed (q/Esc), with its own verbs
     /// (`s`/`Y`/`o`/…). `None` when nothing is being viewed. Set by
-    /// `apply_mermaid_outcomes`. Graphics terminals only. See
+    /// `apply_image_outcomes`. Graphics terminals only. See
     /// `docs/archive/MERMAID_PAGER_PLAN.md`.
     pub image_view: Option<ImageView>,
     pub pager_history: PagerHistory,
@@ -1251,74 +1265,6 @@ impl App {
             .pager
             .as_ref()
             .is_some_and(|v| v.title == Self::HELP_TITLE)
-    }
-}
-
-/// Search / filter matcher: case-insensitive substring for plain
-/// text, glob for anything with `*`, `?`, or `[`. Used by `/`
-/// (search) and `=` (limit filter). Substring (not anchored at the
-/// start) so `/env` finds `.env`, `.envrc`, and `environment.toml`
-/// — anchored prefix mode hid dot-prefixed files behind their
-/// leading `.` and was consistently surprising. Globs are still
-/// available for users who want anchoring (`env*`, `.env*`).
-pub enum Matcher {
-    Substring(String),
-    Glob(Pattern),
-    /// An invalid glob produced by a malformed pattern. Matches nothing.
-    Never,
-}
-
-impl Matcher {
-    pub fn build(query: &str) -> Self {
-        let is_glob = query.contains(['*', '?', '[']);
-        let lower = query.to_lowercase();
-        if is_glob {
-            match Pattern::new(&lower) {
-                Ok(p) => Self::Glob(p),
-                Err(_) => Self::Never,
-            }
-        } else {
-            Self::Substring(lower)
-        }
-    }
-
-    pub fn matches(&self, name: &str) -> bool {
-        match self {
-            Self::Substring(q) => ascii_or_lower_contains(name, q),
-            Self::Glob(p) => {
-                // Glob matching needs an owned &str; skip the lowercasing
-                // allocation for the common case of an already-lowercase ASCII
-                // name. Non-ASCII (or any uppercase) names fall back to
-                // `to_lowercase` to preserve Unicode case-folding semantics.
-                if name.is_ascii() && !name.bytes().any(|b| b.is_ascii_uppercase()) {
-                    p.matches(name)
-                } else {
-                    p.matches(&name.to_lowercase())
-                }
-            }
-            Self::Never => false,
-        }
-    }
-}
-
-/// Case-insensitive substring test that avoids allocating a lowercased copy of
-/// `name` on the filter/search hot path (called once per listing row per
-/// keystroke). `needle` is already lowercased by `Matcher::build`. The ASCII
-/// fast path is allocation-free; non-ASCII names fall back to `to_lowercase`
-/// so Unicode case folding stays identical to the old behavior.
-fn ascii_or_lower_contains(name: &str, needle: &str) -> bool {
-    if name.is_ascii() && needle.is_ascii() {
-        let (h, n) = (name.as_bytes(), needle.as_bytes());
-        if n.is_empty() {
-            return true;
-        }
-        if n.len() > h.len() {
-            return false;
-        }
-        h.windows(n.len())
-            .any(|w| w.iter().zip(n).all(|(&a, &b)| a.to_ascii_lowercase() == b))
-    } else {
-        name.to_lowercase().contains(needle)
     }
 }
 

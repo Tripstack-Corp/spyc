@@ -24,7 +24,7 @@ keys drive the file view (letters / `g` / `H` / `[`/`]`); **pane** keys use the
 | `V` | Open `$EDITOR` in top pane (bottom pane stays visible) |
 | `D` | Open file in the in-app pager in top pane (bottom pane stays visible) |
 | `u` / `-` | Climb to parent |
-| `/` | Search current listing (incremental, glob-aware) |
+| `/` | Search current listing (incremental; glob-aware, `^`/`$` anchors) |
 | `~` / `Home` | Jump to home (`H` is the harpoon prefix) |
 | `J` | Jump to any path |
 | `F` | Project-wide fuzzy filename finder (gitignore-aware) |
@@ -140,6 +140,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a v` | Pane scrollback in the in-app pager (search, jump, visual yank) |
 | `Ctrl+J` | Newline in pane (multi-line input) |
 | `^a ↓` | Send a literal `^a` to the pane (e.g. so Claude receives it) |
+| `^a g` | Gallery of images the agent received (`Enter` view, `q` close) |
 | `gf` | Jump to file path in pane output |
 | `gF` | Jump to file + open at referenced line |
 
@@ -149,6 +150,22 @@ Press `Enter` on a file to view it in the built-in pager with
 syntax highlighting, search (`/` forward, `?` backward; `n` / `N`
 repeat), line numbers, hex dump, markdown rendering, and ANSI color
 support. Press `H` (or `F1`) inside the pager for its own help overlay.
+
+`Enter` on a **PNG / JPEG / GIF / WebP** shows the picture full-screen
+instead (detected by magic bytes, not the extension). Its verbs:
+
+| Key | Action |
+| --- | --- |
+| `s` | save a copy (an image file reports where it already is) |
+| `y` | copy the image to the clipboard |
+| `Y` | copy the file path (a diagram: its mermaid source) |
+| `b` | flip to a base64 text buffer |
+| `o` | open in the OS image viewer |
+| `c` | light/dark toggle (mermaid diagrams only) |
+| `q` / `Esc` / `i` | dismiss |
+
+On a terminal with no graphics protocol the picture can't be drawn
+inline; `o` still opens it externally.
 
 The pager isn't limited to a centered overlay. It can also mount
 in place:
@@ -219,7 +236,7 @@ back to it later.
 | `` ` `` | Jump to start dir (set with `gS` or `:startdir`) |
 | `a` | Toggle dotfile filter |
 | `o` | Toggle build artifact filter |
-| `=` | Temporary glob filter (`=*.rs`, `=!` picks, `=git` git, `=h` harpoon) |
+| `=` | Temporary glob filter (`=*.rs`, `=^2026`, `=!` picks, `=git` git, `=h` harpoon) |
 
 ## Harpoon (per-worktree pinned files)
 

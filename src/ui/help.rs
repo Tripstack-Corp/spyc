@@ -66,7 +66,10 @@ const SECTIONS: &[Section] = &[
     Section {
         title: "Directories & files",
         rows: &[
-            ("Enter", "enter dir / open file in the in-app pager"),
+            (
+                "Enter",
+                "enter dir / open file in the in-app pager (an image previews full-screen)",
+            ),
             (
                 "e  v",
                 "enter dir / editor ($EDITOR) on file (suspends TUI)",
@@ -300,6 +303,10 @@ const SECTIONS: &[Section] = &[
                 "scroll pane history in the in-app pager (/ ? n/N, :N, V, ^v, y; t toggles transcript tool calls; H transcript help)",
             ),
             ("^a u", "quick select — pick URL/path/SHA/IP from pane"),
+            (
+                "^a g",
+                "gallery of images the agent received (Enter view, q close)",
+            ),
             ("^a s", "send selection paths to pane stdin"),
             (
                 "^a ↓",

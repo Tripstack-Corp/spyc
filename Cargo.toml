@@ -37,10 +37,15 @@ ratatui = "0.30"
 # false` on ratatui-image drops the `chafa-dyn` default (a C lib via
 # pkg-config); Sixel still works via pure-Rust `icy_sixel`, and Kitty/iTerm2/
 # halfblocks are built in. ratatui-image tracks ratatui 0.30; mermaid-rs-renderer
-# emits PNG via resvg (no Node/Chromium); `image` (png only) decodes it.
+# emits PNG via resvg (no Node/Chromium); `image` decodes it.
+#
+# `image`'s formats are the set spyc can PREVIEW, not just what mermaid emits:
+# jpeg/gif/webp are what a screenshot or an agent-pasted attachment actually
+# arrives as (the Claude transcript carries image/png and image/jpeg). All four
+# decoders are pure-Rust.
 ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
 mermaid-rs-renderer = { version = "0.3", default-features = false, features = ["png"] }
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 # Rasterize the mermaid SVG → PNG (pure-Rust; same version mermaid-rs-renderer
 # pulls in, so no duplicate in the tree). We drive it directly to control the
 # white background + system-font loading.

@@ -72,6 +72,35 @@ impl AppState {
                     }
                 })
                 .collect(),
+            View::Images => self
+                .transcript_images
+                .iter()
+                .map(|i| {
+                    // Lead with spyc's own number (the handle that's actually
+                    // stable), then the agent's label so a `[Image #3]` in the
+                    // conversation can be found here.
+                    let label = i
+                        .agent_label
+                        .as_deref()
+                        .map_or_else(|| "     ".to_string(), |l| format!("{l:<5}"));
+                    let kind = i.media_type.strip_prefix("image/").unwrap_or(&i.media_type);
+                    RowData {
+                        // The transcript, not a file of its own — an image here
+                        // has no path, and pointing rows at the JSONL keeps any
+                        // path-consuming code honest instead of handing it "".
+                        path: self.transcript_images_path.clone().unwrap_or_default(),
+                        display: format!(
+                            "{:>3}. {label} {kind:<5} {:>8}  {:<10}  {}",
+                            i.seq,
+                            crate::fs::ops::format_size(i.bytes_len as u64),
+                            image_age(i.timestamp.as_deref()),
+                            i.prompt_excerpt,
+                        ),
+                        kind: crate::fs::EntryKind::File,
+                        deleted: false,
+                    }
+                })
+                .collect(),
         };
         let row_count = self.cur().rows.len();
         self.cur_mut().cursor.clamp(row_count);
@@ -507,6 +536,19 @@ impl AppState {
 /// `unwrap_or` is a belt-and-suspenders for a pathological relative input.
 /// Used as the orphaned-column heal target when PROJECT_HOME is also gone, so
 /// a column is never left on a dead path.
+/// Relative age of a transcript image, from its ISO-8601 stamp.
+///
+/// Goes through the graveyard's `format_age` so the gallery reads the same way
+/// ("3m ago", "yesterday") — and, more to the point, so a UTC stamp is never
+/// shown as if it were local time. An unparseable or absent stamp yields an
+/// empty cell rather than a wrong one.
+fn image_age(timestamp: Option<&str>) -> String {
+    timestamp
+        .and_then(|t| t.parse::<jiff::Timestamp>().ok())
+        .and_then(|ts| u64::try_from(ts.as_second()).ok())
+        .map_or_else(String::new, super::format_age)
+}
+
 fn nearest_existing_ancestor(path: &Path) -> PathBuf {
     path.ancestors()
         .find(|p| p.is_dir())

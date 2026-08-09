@@ -468,6 +468,7 @@ impl App {
             Action::PanePipeInventory => effects = self.pipe_content_to_pane(true),
 
             Action::QuickSelectOpen => self.open_quick_select(),
+            Action::OpenImageGallery => return Ok(self.open_image_gallery()),
             Action::OpenGraveyardView => {
                 self.state.open_graveyard_view();
                 // Discoverability hint on entry only — open_graveyard_view

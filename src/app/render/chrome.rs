@@ -475,6 +475,13 @@ impl App {
                     self.state.graveyard.len()
                 ),
             ),
+            View::Images => (
+                "<AGENT IMAGES>".to_string(),
+                format!(
+                    "[{} image(s)]  (Enter/i: view, q/ESC: return)",
+                    self.state.transcript_images.len()
+                ),
+            ),
         }
     }
 
