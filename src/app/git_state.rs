@@ -373,6 +373,69 @@ mod tests {
         }
     }
 
+    /// The 1 Hz poll must fall silent once a walk has landed. It compares
+    /// `compute_git_mtime_key_fast` against `git_poll_cache`, and
+    /// `apply_git_worker_result` is what fills that cache — so the walk's key
+    /// (`repo_status_stable`) and the poll's have to be the same function. When
+    /// the config fold lived only on the poll side, every repo whose
+    /// `.git/config` was newer than its branch ref mismatched on each poll,
+    /// dispatched a walk, and the walk re-stamped the mismatching key: a full
+    /// repo status walk every second for the life of the session.
+    #[test]
+    fn a_landed_walk_leaves_the_poll_quiet_when_config_is_newest() {
+        use crate::app::App;
+        use crate::app::state::{GitWorkerResult, Side};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        crate::git::test_support::run_git(dir, &["init"]);
+        std::fs::write(dir.join("f.txt"), "v1\n").expect("write");
+        crate::git::test_support::run_git(dir, &["add", "f.txt"]);
+        crate::git::test_support::run_git(dir, &["commit", "-m", "c1"]);
+        // Push the shared config past every other input: a config write (spyc's
+        // own merge-driver install is one) moves neither `index` nor `HEAD`.
+        std::fs::File::options()
+            .write(true)
+            .open(dir.join(".git/config"))
+            .and_then(|f| {
+                f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(30))
+            })
+            .expect("stamp config");
+
+        let mut app = App::test_app(dir.to_path_buf());
+        app.state.left.listing.dir = dir.to_path_buf();
+        app.state.update_repo_root(Side::Left, dir);
+        // Read the root back so the result's relevance gate sees the same path
+        // resolution the column cached (tempdirs are symlinked on macOS).
+        let root = app
+            .state
+            .left
+            .git_cache
+            .current_repo_root
+            .clone()
+            .expect("repo root resolved");
+        // Take the off-thread path, where a walk is a request + a generation bump.
+        app.state.left.git_cache.git_worker_available = true;
+
+        let (entries, index_mtime, head_mtime) = crate::git::status::repo_status_stable(&root);
+        let generation = app.state.left.git_cache.git_generation;
+        app.apply_git_worker_result(GitWorkerResult {
+            generation,
+            repo_root: root,
+            side: Side::Left,
+            entries,
+            index_mtime,
+            head_mtime,
+        });
+
+        app.state.refresh_git_state();
+        assert_eq!(
+            app.state.left.git_cache.git_generation, generation,
+            "the poll must short-circuit on the key the landed walk stamped — a \
+             bumped generation means it dispatched another walk"
+        );
+    }
+
     #[test]
     fn git_restore_cursor_is_a_noop_on_a_live_row() {
         use crate::app::{App, RowData};

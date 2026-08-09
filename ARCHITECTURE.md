@@ -404,6 +404,34 @@ chdir into a new repo and on HEAD change.
 > the deferred git-status-owner-thread consolidation, not a committed
 > plan.
 
+## Git marker poll: one key function
+
+<!-- SPYC-TRAP: git-poll-key-single-source -->
+`git::status::poll_key` is the *only* place the 1 Hz marker poll's
+freshness key is computed — `index`'s mtime plus the latest of
+`head_ref_mtime` (the HEAD file **and** the resolved branch ref, since a
+commit moves only the ref) and the shared `config` (which decides what
+`status` reports — `core.bare = true` makes a dirty tree read clean —
+while moving neither).
+
+Both ends of the cache must use it: `refresh_git_state_for` compares the
+live key against `git_poll_cache`, and the status walk that fills the
+cache (`repo_status_stable`, off-thread) stamps its result with the key
+it measured *before* walking. Two key functions that differ by any input
+never compare equal, so the poll's short-circuit never fires and spyc
+dispatches a full repo status walk **every second, forever** — silent
+except for the CPU, since the markers it produces are correct.
+
+That is not hypothetical: the config fold once lived only on the poll
+side, so any repo whose `.git/config` was newer than its branch ref
+(one `.git/config` write — spyc's own merge-driver install among them —
+poisons every worktree sharing it) re-walked at 1 Hz for the life of the
+session. A `:why-git` dump showed it as `generation: 3879` on the
+affected column against `7` on a healthy one.
+
+`:why-git`'s `on-disk` line calls the same fn, so the dump can't drift
+from the mechanism it exists to explain.
+
 ## State persistence (XDG)
 
 All persistent state lives under XDG paths (`$XDG_STATE_HOME` or
