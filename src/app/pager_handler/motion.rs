@@ -425,7 +425,7 @@ impl App {
             // Mermaid diagram on screen: `o` opens it full-res in the OS viewer
             // (Preview.app / xdg-open); `i` renders it as a full-screen image
             // overlay inside spyc (graphics terminals). Both render off-thread
-            // via `Effect::RenderMermaid`; `apply_mermaid_outcomes` installs the
+            // via `Effect::RenderMermaid`; `apply_image_outcomes` installs the
             // result + flashes status. `.map(...)` ends the immutable borrow
             // before we mutate `flash`. See docs/archive/MERMAID_PAGER_PLAN.md.
             KeyCode::Char('o' | 'i') => {

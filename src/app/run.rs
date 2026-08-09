@@ -263,7 +263,7 @@ impl App {
                 | Message::ReaderExited
                 | Message::AgentStatusReady
                 | Message::GraveyardDone
-                | Message::MermaidDone
+                | Message::ImageDone
                 | Message::FileOpDone
                 | Message::InventoryDone
                 | Message::PreviewReloadDone
@@ -570,9 +570,9 @@ impl App {
                 ctx.draw.mark(3);
             }
 
-            // Mermaid render+open results (woke us via `Message::MermaidDone`) —
+            // Mermaid render+open results (woke us via `Message::ImageDone`) —
             // surface success/failure in the pager status line.
-            if self.apply_mermaid_outcomes() {
+            if self.apply_image_outcomes() {
                 ctx.draw.mark(3);
             }
 

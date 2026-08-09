@@ -66,7 +66,10 @@ const SECTIONS: &[Section] = &[
     Section {
         title: "Directories & files",
         rows: &[
-            ("Enter", "enter dir / open file in the in-app pager"),
+            (
+                "Enter",
+                "enter dir / open file in the in-app pager (an image previews full-screen)",
+            ),
             (
                 "e  v",
                 "enter dir / editor ($EDITOR) on file (suspends TUI)",

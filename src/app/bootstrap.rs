@@ -310,7 +310,7 @@ impl App {
                     false,
                 )),
                 graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                mermaid_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                image_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 file_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 listing_refresh_inflight: false,
                 listing_refresh_dirty: false,

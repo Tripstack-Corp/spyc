@@ -20,8 +20,12 @@ Everything is keyboard-driven with vi motions as the foundation.
 - **Count prefix** — `5j`, `10k`, etc. with visual display in the prompt area
 - **/ search** case-insensitive substring match by default (so `/env`
   finds `.env`, `.envrc`, *and* `environment.toml`); switches to glob
-  the moment the query contains `*`, `?`, or `[` — `/env*` re-anchors
-  at the start when you want that
+  the moment the query contains `*`, `?`, or `[`. Anchor it with
+  `^`/`$` when you want starts-with / ends-with: `/^env` finds
+  `environment.toml` but not `.envrc`, `/env$` finds `.env` but not
+  `.envrc`, `/^env$` is an exact match. Anchors compose with globs
+  (`/^a?c$`). A `$` that doesn't trail the query stays literal, so
+  `/$RECYCLE` still finds `$RECYCLE.BIN`. `=` takes the same syntax.
 - **n / N** to repeat search forward / backward
 
 ## Chord hints (which-key popup)
@@ -42,7 +46,12 @@ do from here?", modeled on Neovim's which-key.
 
 ## Directory browsing
 
-- **Enter** descend into a directory, or view a text file in the pager
+- **Enter** descend into a directory, or view a text file in the pager —
+  or, on a PNG / JPEG / GIF / WebP, show the picture full-screen (`s` save,
+  `y` copy image, `Y` copy path, `b` base64, `o` external viewer, `q`
+  dismiss). Detected by magic bytes, so an extensionless screenshot still
+  previews and a misnamed `.png` full of text still hex-dumps. Needs a
+  terminal with a graphics protocol; without one, `o` still opens it.
 - **e / v** descend into a directory, or open a file in `$EDITOR` (suspends TUI)
 - **dd / Ndd** remove the cursor entry (+ N-1 below) to the graveyard,
   confirming with `y` (bare `d` arms the chord, vim-style; any other key
@@ -860,7 +869,9 @@ Masks are configurable in `.spycrc.toml` — you can define custom glob
 patterns for each group.
 
 **Temporary filter** (`=`): type a glob pattern to temporarily hide
-non-matching files. `=!` shows only picked files. `=git` (or `=g`)
+non-matching files — same matcher as `/`, so `^`/`$` anchor it
+(`=^2026` keeps only names starting with `2026`). `=!` shows only
+picked files. `=git` (or `=g`)
 shows only files appearing in `git status` — modified, staged,
 untracked, deleted, renamed, conflicted — plus parent directories
 that contain such files (so you can navigate into changed subtrees).
