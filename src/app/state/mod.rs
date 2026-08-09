@@ -23,7 +23,7 @@ use super::{Effect, FlashKind, FlashMessage, Mode, RowData, View};
 mod apply;
 mod dispatch;
 mod git;
-mod listing;
+pub mod listing;
 mod navigation;
 mod selection;
 
@@ -448,11 +448,38 @@ pub struct VSplit {
     pub focus: Side,
 }
 
+/// An image spyc captured off the system clipboard as the user pasted it into
+/// an agent pane — before the agent has sent it, and therefore before it exists
+/// anywhere else spyc can read.
+///
+/// Memory-only, deliberately: these are the user's screenshots, and nothing
+/// writes them to disk unless the user asks (`s` in the overlay).
+pub struct PendingImage {
+    /// 1-based within the tab, counting from the last submitted prompt.
+    pub seq: usize,
+    /// PNG. `arboard` returns RGBA, so this was encoded once on the worker
+    /// rather than kept raw — a 4K screenshot is 33 MB unencoded.
+    pub encoded: Vec<u8>,
+    pub dims: (u32, u32),
+    pub captured_at: u64,
+}
+
+/// Most uncommitted images kept per tab. Past this the oldest is dropped: a
+/// prompt carrying more than a handful of images is not a case worth spending
+/// hundreds of MB on.
+pub const MAX_PENDING_IMAGES_PER_TAB: usize = 8;
+
 /// `AppState`'s loose pane fields.
 #[derive(Default)]
 pub struct PaneLayout {
     pub pane_prompt_buf: String,
     pub last_pane_prompt: Option<String>,
+    /// Images pasted into each tab but not yet sent, keyed by tab id (unlike
+    /// `pane_prompt_buf`, which tracks only the focused pane — an image pasted
+    /// into tab 2 must not surface in tab 1's gallery). Cleared for a tab when
+    /// its prompt is submitted, at which point the agent's transcript becomes
+    /// the record instead.
+    pub pending_images: std::collections::HashMap<String, Vec<PendingImage>>,
     /// MVU Phase 5: active-pane routing flags, refreshed at loop-top (see
     /// [`PaneSnapshot`]). Read by `route_snapshot` so routing reads the
     /// Model, not the live pane host.
@@ -660,8 +687,14 @@ pub struct AppState {
     /// re-read from `transcript_images_path` when one is actually opened, so a
     /// gallery of a dozen screenshots costs kilobytes, not tens of megabytes.
     pub transcript_images: Vec<crate::state::transcript_images::TranscriptImage>,
-    /// The transcript the snapshot came from. `None` outside the gallery.
+    /// The transcript the snapshot came from. `None` outside the gallery, and
+    /// also when the gallery is showing only uncommitted images (nothing has
+    /// been sent yet, so there is no transcript to read back from).
     pub transcript_images_path: Option<PathBuf>,
+    /// Which pane tab the open gallery belongs to. Its uncommitted images are
+    /// read from `pane.pending_images` by this id rather than copied into the
+    /// view — they're megabytes each.
+    pub gallery_tab_id: Option<String>,
     /// P2 merge/scope coordination registry (`docs/archive/AGENT_AWARENESS_PLAN.md`):
     /// what each agent tab has declared it's touching, via the `register_scope`
     /// MCP tool. In-memory + session-persisted (rides P3-2's autosave and
@@ -1023,6 +1056,7 @@ impl AppState {
             graveyard: Vec::new(),
             transcript_images: Vec::new(),
             transcript_images_path: None,
+            gallery_tab_id: None,
             scope_registry: Vec::new(),
             user_host: "test@host".to_string(),
             pending_new_tab_cmd: None,

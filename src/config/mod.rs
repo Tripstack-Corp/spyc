@@ -207,6 +207,12 @@ pub struct PaneConfig {
     /// call. Status hooks still install (activity dots keep working); codex just
     /// loses spyc's MCP tools. Default true (integration on). Claude unaffected.
     pub codex_mcp: bool,
+    /// When true, spyc reads the system clipboard as you paste an image into an
+    /// agent pane, so `^a g` can show it before you send. The capture only ever
+    /// runs on an agent that declares a paste key, and nothing is written to
+    /// disk. Set false to keep spyc's hands off the clipboard entirely.
+    /// Default true.
+    pub preview_pasted_images: bool,
 }
 
 impl Default for PaneConfig {
@@ -217,6 +223,7 @@ impl Default for PaneConfig {
             claude_transcript_scrollback: false,
             agy_transcript_scrollback: true,
             codex_mcp: true,
+            preview_pasted_images: true,
         }
     }
 }
@@ -251,6 +258,8 @@ struct FilePane {
     agy_transcript_scrollback: Option<bool>,
     #[serde(default)]
     codex_mcp: Option<bool>,
+    #[serde(default)]
+    preview_pasted_images: Option<bool>,
 }
 
 /// Yank / clipboard knobs.
@@ -772,6 +781,9 @@ impl Config {
         }
         if let Some(b) = file.pane.agy_transcript_scrollback {
             self.pane.agy_transcript_scrollback = b;
+        }
+        if let Some(b) = file.pane.preview_pasted_images {
+            self.pane.preview_pasted_images = b;
         }
         if let Some(b) = file.pane.codex_mcp {
             self.pane.codex_mcp = b;
