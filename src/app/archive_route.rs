@@ -570,6 +570,7 @@ mod tests {
                 warnings: Vec::new(),
                 staging_root: PathBuf::from("/staging"),
                 last_used: 0,
+                depth: 0,
             },
             &[],
         );

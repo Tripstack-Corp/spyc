@@ -239,6 +239,23 @@ impl App {
         // A *mounted archive* is not a member of itself — it falls through to the
         // container branch below, so leaving one and coming back re-enters it.
         if self.state.mounts.holds_member(&path) {
+            // A member that is itself a container: walk into it, the same as
+            // `Enter` on an archive out on disk. Its bytes have to become a real
+            // file first, so the mount rides the extraction.
+            if matches!(intent, ActivateIntent::Display)
+                && self.state.config.archive.enable
+                && path
+                    .file_name()
+                    .is_some_and(|n| crate::archive::looks_mountable(&n.to_string_lossy()))
+            {
+                return self.open_member(
+                    &path,
+                    crate::app::archive_ops::MaterializeThen::Mount {
+                        at: path.clone(),
+                        then: None,
+                    },
+                );
+            }
             return match intent {
                 ActivateIntent::Display => self.open_member(
                     &path,

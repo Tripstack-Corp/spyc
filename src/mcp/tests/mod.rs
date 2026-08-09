@@ -1283,6 +1283,7 @@ fn mounted_zip(dir: &std::path::Path, staging: &std::path::Path) -> (PathBuf, Pa
         archive_mounts: vec![context::ArchiveMountRef {
             root: archive.clone(),
             staging: staging.to_path_buf(),
+            source: None,
         }],
     };
     let ctx_path = context::context_path(dir);

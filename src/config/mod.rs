@@ -456,6 +456,10 @@ pub struct ArchiveConfig {
     pub warn_over_mb: u64,
     /// Cap on indexed members; past it the listing marks itself truncated.
     pub max_entries: usize,
+    /// How deep archives may nest. 0 refuses a container inside a container; each
+    /// level costs a full copy of that container in the level above's staging,
+    /// which is why it's bounded rather than unlimited.
+    pub max_depth: usize,
     /// Whether leaving a container with unwritten changes offers to write them.
     pub write_back: WriteBack,
     /// Copy the original into the graveyard before replacing it, for archives up
@@ -483,6 +487,7 @@ impl Default for ArchiveConfig {
             extract_budget_mb: 512,
             warn_over_mb: 128,
             max_entries: 200_000,
+            max_depth: 2,
             write_back: WriteBack::Ask,
             snapshot_max_mb: 64,
         }
@@ -509,6 +514,7 @@ struct FileArchive {
     extract_budget_mb: Option<u64>,
     warn_over_mb: Option<u64>,
     max_entries: Option<usize>,
+    max_depth: Option<usize>,
     write_back: Option<WriteBack>,
     snapshot_max_mb: Option<u64>,
 }
@@ -917,6 +923,9 @@ impl Config {
         }
         if let Some(v) = file.archive.max_entries {
             self.archive.max_entries = v;
+        }
+        if let Some(v) = file.archive.max_depth {
+            self.archive.max_depth = v;
         }
         if let Some(v) = file.archive.write_back {
             self.archive.write_back = v;

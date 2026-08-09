@@ -279,6 +279,8 @@ impl IndexBuilder {
         (
             ArchiveIndex {
                 archive,
+                // Set by the mount when the bytes came from somewhere else.
+                source: None,
                 format,
                 entries: self.entries,
                 truncated: self.truncated,
@@ -341,7 +343,14 @@ impl IndexBuilder {
 /// The immutable entry table for one mounted archive.
 #[derive(Debug, Clone)]
 pub struct ArchiveIndex {
+    /// Where this archive is **addressed**: the mount root, under which every
+    /// member is a path. Usually the archive file itself — but a *nested* archive
+    /// is addressed at its member path (`outer.zip/inner.zip`), which is not a
+    /// file on disk. Reading bytes goes through [`Self::source`], never this.
     pub archive: PathBuf,
+    /// Where the bytes are, when that isn't [`Self::archive`] — the staged copy of
+    /// a nested archive. `None` for an archive that is its own file.
+    pub source: Option<PathBuf>,
     pub format: ArchiveFormat,
     /// Sorted by [`IndexEntry::inner`], which the prefix lookups depend on.
     pub entries: Vec<IndexEntry>,
@@ -358,6 +367,7 @@ impl ArchiveIndex {
     pub const fn empty(archive: PathBuf, format: ArchiveFormat) -> Self {
         Self {
             archive,
+            source: None,
             format,
             entries: Vec::new(),
             truncated: false,
@@ -434,6 +444,15 @@ impl ArchiveIndex {
         } else {
             self.archive.join(inner)
         }
+    }
+
+    /// The file to read this archive's bytes out of.
+    ///
+    /// Every read and the repack's rename target go through here. For a nested
+    /// archive that's the staged copy: its address names a member of the archive
+    /// above it, which no `File::open` can resolve.
+    pub fn source(&self) -> &Path {
+        self.source.as_deref().unwrap_or(&self.archive)
     }
 
     /// Inverse of [`Self::mount_path`]: the inner path for an absolute path

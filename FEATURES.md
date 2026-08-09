@@ -506,6 +506,13 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   pressing `Enter` again re-enters it without re-reading it, so pending changes
   survive the round trip. Deleting or moving the archive drops its mount with it —
   unless it carries unwritten changes, which would then have nowhere to go.
+- **An archive inside an archive** — `Enter` on a member that is itself a
+  container walks into it, browsed at its own member path (`outer.zip/bundle.zip`)
+  while its bytes are read from the copy spyc extracted. Each level costs a full
+  copy of that container in staging, since bytes have to be a real file before
+  anything can read them, so `[archive] max_depth` (default 2) bounds it. Writing
+  the inner one leaves the outer with a pending change of its own — it says so,
+  and `:archive write` there puts it back.
 - **Coming back to a place inside one** — a mark (`ma`), a harpoon slot (`Ha`)
   and the session you quit from can all point inside an archive. Jumping to one
   mounts the archive again on the way, so it doesn't matter that nothing has it

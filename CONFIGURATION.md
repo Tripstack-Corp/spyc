@@ -224,9 +224,14 @@ enable = true              # false → Enter pages the archive as bytes
 extract_budget_mb = 512    # hard ceiling for a .tar.gz / .tar.zst mount
 warn_over_mb = 128         # confirm before extracting more than this
 max_entries = 200000       # cap on indexed members
+max_depth = 2              # how deep archives may nest (0 = no nesting)
 write_back = "ask"         # "ask" | "never" — offer to write pending changes
 snapshot_max_mb = 64       # graveyard-snapshot the original below this size
 ```
+
+`max_depth` is about disk, not correctness: a container inside a container has to
+be copied out whole before anything can read it, so every level costs its own
+size in staging. Set it to 0 to refuse nested archives entirely.
 
 A write-back never puts the original at risk: the new archive is written to a
 temp file beside it, verified by reading it back, and only then renamed into

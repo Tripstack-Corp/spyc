@@ -38,6 +38,8 @@ fn mount_inline(app: &mut App, archive: &Path, staging: &Path) -> Vec<Effect> {
         confirmed: false,
         cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         then: None,
+        address: None,
+        depth: 0,
     });
     assert!(
         matches!(outcome, ArchiveOutcome::Mounted { .. }),
@@ -513,6 +515,7 @@ fn eviction_hands_back_the_staging_tree_to_clean() {
                     warnings: Vec::new(),
                     staging_root: staging,
                     last_used: 0,
+                    depth: 0,
                 },
                 &[],
             ));
@@ -1672,5 +1675,272 @@ fn a_harpoon_slot_inside_an_archive_comes_back_to_it() {
             "{:?}",
             app.state.flash.as_ref().map(|f| f.text.clone())
         );
+    });
+}
+
+// ── an archive inside an archive ──────────────────────────────────────────
+
+/// A zip holding a text file and a second zip.
+fn build_nested_zip(path: &Path) {
+    let inner_bytes = {
+        let mut buf = std::io::Cursor::new(Vec::new());
+        let mut w = zip::ZipWriter::new(&mut buf);
+        let opts = zip::write::SimpleFileOptions::default().unix_permissions(0o644);
+        w.start_file("deep/note.txt", opts).unwrap();
+        w.write_all(b"from the inner archive\n").unwrap();
+        w.start_file("inner.txt", opts).unwrap();
+        w.write_all(b"second member\n").unwrap();
+        w.finish().unwrap();
+        buf.into_inner()
+    };
+    let file = std::fs::File::create(path).unwrap();
+    let mut w = zip::ZipWriter::new(file);
+    let opts = zip::write::SimpleFileOptions::default().unix_permissions(0o644);
+    w.start_file("README.md", opts).unwrap();
+    w.write_all(b"# outer\n").unwrap();
+    // Stored, not deflated: a nested archive compresses badly anyway, and this
+    // keeps the fixture's own bytes recognisable.
+    w.start_file(
+        "bundle.zip",
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored),
+    )
+    .unwrap();
+    w.write_all(&inner_bytes).unwrap();
+    w.finish().unwrap();
+}
+
+/// `Enter` on a member that is itself an archive walks into it. The mount is
+/// **addressed** at the member path — what the user sees — while its bytes are
+/// read from the staged copy, which is the whole trick.
+#[test]
+fn entering_an_archive_inside_an_archive_browses_it_at_its_member_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("outer.zip");
+        build_nested_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Cursor onto `bundle.zip` and enter it.
+        let idx = app
+            .state
+            .cur()
+            .rows
+            .iter()
+            .position(|r| r.display.starts_with("bundle.zip"))
+            .expect("the nested archive is listed");
+        app.state.cur_mut().cursor.index = idx;
+        let fx = app.apply(&Action::EnterOrDisplay).unwrap();
+        settle(&mut app, fx);
+
+        let inner = archive.join("bundle.zip");
+        assert_eq!(
+            app.state.cur().listing.dir,
+            inner,
+            "browsing the inner archive at its member path: {:?}",
+            app.state.flash.as_ref().map(|f| f.text.clone())
+        );
+        assert_eq!(row_names(&app), ["deep/", "inner.txt"]);
+
+        let mount = app.state.mounts.get(&inner).expect("mounted");
+        assert_eq!(mount.depth, 1, "recorded as one level deep");
+        assert_ne!(
+            mount.source(),
+            inner,
+            "and read from the staged copy, not its address"
+        );
+        assert!(mount.source().is_file(), "which is a real file");
+    });
+}
+
+/// Reading a member of the inner archive gets the inner archive's bytes — the
+/// read follows `source`, not the address.
+#[test]
+fn a_member_of_a_nested_archive_reads_its_own_bytes() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("outer.zip");
+        build_nested_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let idx = app
+            .state
+            .cur()
+            .rows
+            .iter()
+            .position(|r| r.display.starts_with("bundle.zip"))
+            .unwrap();
+        app.state.cur_mut().cursor.index = idx;
+        let fx = app.apply(&Action::EnterOrDisplay).unwrap();
+        settle(&mut app, fx);
+
+        // Yank `inner.txt` out of the inner archive.
+        let idx = app
+            .state
+            .cur()
+            .rows
+            .iter()
+            .position(|r| r.display.starts_with("inner.txt"))
+            .expect("listed");
+        app.state.cur_mut().cursor.index = idx;
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+
+        let item = app
+            .state
+            .inventory
+            .items()
+            .find(|i| i.filename == "inner.txt")
+            .unwrap_or_else(|| {
+                panic!(
+                    "the inner member should be in the inventory; flash: {:?}",
+                    app.state.flash.as_ref().map(|f| f.text.clone())
+                )
+            });
+        assert_eq!(
+            app.state.inventory.read_content(&item.id).as_deref(),
+            Some(b"second member\n".as_slice())
+        );
+    });
+}
+
+/// The cap is what stops each level from costing another full copy in staging.
+#[test]
+fn nesting_past_max_depth_is_refused_and_names_the_knob() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("outer.zip");
+        build_nested_zip(&archive);
+        let mut app = App::test_app(dir);
+        app.state.config.archive.max_depth = 0;
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let idx = app
+            .state
+            .cur()
+            .rows
+            .iter()
+            .position(|r| r.display.starts_with("bundle.zip"))
+            .unwrap();
+        app.state.cur_mut().cursor.index = idx;
+        let fx = app.apply(&Action::EnterOrDisplay).unwrap();
+        settle(&mut app, fx);
+
+        // `get`, not `contains`: the inner archive's path is inside the outer
+        // mount either way, so only "is there a mount rooted here" answers this.
+        assert!(
+            app.state.mounts.get(&archive.join("bundle.zip")).is_none(),
+            "not mounted"
+        );
+        let flash = app.state.flash.as_ref().map(|f| f.text.clone());
+        assert!(
+            flash.as_deref().is_some_and(|t| t.contains("max_depth")),
+            "the refusal names the knob: {flash:?}"
+        );
+    });
+}
+
+/// Unmounting the outer archive would delete the staged copy the inner one is
+/// reading from, so it says which to unmount first.
+#[test]
+fn unmounting_the_outer_archive_is_refused_while_the_inner_is_mounted() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("outer.zip");
+        build_nested_zip(&archive);
+        let mut app = App::test_app(dir.clone());
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let idx = app
+            .state
+            .cur()
+            .rows
+            .iter()
+            .position(|r| r.display.starts_with("bundle.zip"))
+            .unwrap();
+        app.state.cur_mut().cursor.index = idx;
+        let fx = app.apply(&Action::EnterOrDisplay).unwrap();
+        settle(&mut app, fx);
+
+        // Step right out of both, then try to drop the outer.
+        let fx = app.apply(&Action::Climb).unwrap();
+        apply_effects(&mut app, fx);
+        let fx = app.apply(&Action::Climb).unwrap();
+        apply_effects(&mut app, fx);
+        assert_eq!(app.state.cur().listing.dir, dir, "outside both");
+
+        let fx = app.unmount_archive(&archive);
+        settle(&mut app, fx);
+
+        assert!(app.state.mounts.contains(&archive), "still mounted");
+        let flash = app.state.flash.as_ref().map(|f| f.text.clone());
+        assert!(
+            flash.as_deref().is_some_and(|t| t.contains("bundle.zip")),
+            "and it says which one is in the way: {flash:?}"
+        );
+    });
+}
+
+/// A repack renumbers a zip's entries, so the index built before it describes a
+/// file that no longer exists. The mount has to be re-read, not re-entered —
+/// otherwise a later read follows a stale locator to the wrong member's bytes.
+#[test]
+fn a_write_re_reads_the_archive_rather_than_trusting_the_old_index() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Delete the FIRST stored member, which shifts every later member's
+        // position in the central directory.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::RemovePrompt(None)).unwrap();
+        let fx = if fx.is_empty() {
+            app.handle_remove_confirm_key(crossterm::event::KeyEvent::new(
+                KeyCode::Char('y'),
+                KeyModifiers::empty(),
+            ))
+        } else {
+            fx
+        };
+        settle(&mut app, fx);
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+
+        // Read every surviving member through the index the mount now holds. A
+        // repack writes members in index order, which is not the order they were
+        // stored in, so a stale locator points at a *different* member's bytes —
+        // checking them all is what makes that impossible to pass by luck.
+        let mount = app.state.mounts.get(&archive).expect("re-mounted");
+        for (inner, want) in [
+            ("src/main.rs", "fn main() {}\n"),
+            ("src/deep/mod.rs", "pub fn helper() {}\n"),
+        ] {
+            let entry = mount
+                .index
+                .get(inner)
+                .unwrap_or_else(|| panic!("{inner} is still in the archive"))
+                .clone();
+            let bytes = crate::archive::read::member_bytes(mount.source(), &entry)
+                .unwrap_or_else(|e| panic!("reading {inner} after the write: {e:#}"));
+            assert_eq!(
+                String::from_utf8_lossy(&bytes),
+                want,
+                "{inner}: the index has to describe the archive as it is now"
+            );
+        }
     });
 }

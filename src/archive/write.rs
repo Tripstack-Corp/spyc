@@ -41,7 +41,7 @@ pub struct RepackReport {
     pub snapshot: Option<String>,
 }
 
-/// Write `steps` over `index.archive`.
+/// Write `steps` over the archive's [`ArchiveIndex::source`] file.
 ///
 /// The order of operations is the safety property: precheck, write a temp,
 /// verify the temp, snapshot the original, rename. The snapshot comes *after*
@@ -53,7 +53,9 @@ pub fn repack(
     staging_root: &Path,
     opts: &RepackOptions,
 ) -> Result<RepackReport> {
-    let archive = &index.archive;
+    // The file the bytes live in — the staged copy for a nested archive, whose
+    // address names a member of the archive above it.
+    let archive = index.source();
     let parent = archive
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -109,8 +111,8 @@ fn write_zip(
     dest: &Path,
 ) -> Result<()> {
     let mut src = zip::ZipArchive::new(BufReader::new(
-        File::open(&index.archive)
-            .with_context(|| format!("opening {}", index.archive.display()))?,
+        File::open(index.source())
+            .with_context(|| format!("opening {}", index.source().display()))?,
     ))?;
     let out_file = File::create(dest).with_context(|| format!("writing {}", dest.display()))?;
     let mut out = zip::ZipWriter::new(BufWriter::new(out_file));
@@ -202,7 +204,7 @@ fn write_tar(
                 let bytes = match entry.locator {
                     // A plain tar is seekable, so untouched bytes come straight
                     // from it.
-                    Locator::TarData { offset } => read_at(&index.archive, offset, entry.size)?,
+                    Locator::TarData { offset } => read_at(index.source(), offset, entry.size)?,
                     // A streamed mount extracted everything, so its "archived"
                     // bytes are the staged copy.
                     Locator::Staged => std::fs::read(staging_root.join(entry.staging_rel()))

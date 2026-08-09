@@ -31,6 +31,15 @@ pub enum MaterializeThen {
     /// up by the next write-back, which compares each staged file against what
     /// spyc wrote when it extracted it.
     Edit { in_pane: bool },
+    /// Mount the extracted copy as an archive in its own right — a container
+    /// inside a container. `at` is where it's addressed (its member path), which
+    /// is what the column browses; the extracted copy is only where the bytes are.
+    /// `then` carries an effect that was waiting for that mount, so a path several
+    /// containers deep resolves one level at a time.
+    Mount {
+        at: PathBuf,
+        then: Option<Box<super::Effect>>,
+    },
 }
 
 #[derive(Debug)]
@@ -52,6 +61,11 @@ pub enum ArchiveOp {
         /// didn't exist yet. Re-issued once it does, so the original keeps its
         /// cursor target and its message. `None` for an ordinary `Enter`.
         then: Option<Box<super::Effect>>,
+        /// Where to address the mount, when that isn't `path`: a nested archive
+        /// is read from its staged copy (`path`) but browsed at its member path.
+        address: Option<PathBuf>,
+        /// Nesting depth to record on the mount — 0 for a file on disk.
+        depth: usize,
     },
     /// Extract one member so something can read it.
     Materialize {
@@ -98,6 +112,7 @@ pub enum ArchiveOutcome {
         /// The held-back effect from [`ArchiveOp::Mount`], to run now that the
         /// mount exists.
         then: Option<Box<super::Effect>>,
+        depth: usize,
     },
     /// Big enough to ask about first. Answering `y` re-issues the op.
     NeedsConfirm {
@@ -153,14 +168,21 @@ pub fn run_archive_op(op: ArchiveOp) -> ArchiveOutcome {
             confirmed,
             cancel,
             then,
+            address,
+            depth,
         } => carry_then(
-            mount(
+            readdress(
+                mount(
+                    &path,
+                    &staging_root,
+                    &limits,
+                    max_entries,
+                    confirmed,
+                    &cancel,
+                ),
                 &path,
-                &staging_root,
-                &limits,
-                max_entries,
-                confirmed,
-                &cancel,
+                address,
+                depth,
             ),
             then,
         ),
@@ -232,6 +254,44 @@ pub fn run_archive_op(op: ArchiveOp) -> ArchiveOutcome {
 /// that lead somewhere carry it: a mount that failed, or turned out not to be an
 /// archive, has nowhere for a `ChangeDir` to land — and re-issuing it would find
 /// no mount, hold it back again, and mount in a circle.
+/// Point a freshly-built index at the address the mount will be browsed under.
+///
+/// [`mount`] indexes a *file*, so the index it hands back is addressed at that
+/// file. A nested archive was read from a staged copy, and browsing it there would
+/// put the user in the cache; it belongs at its member path. Splitting address
+/// from source is the whole of what makes nesting work — everything else already
+/// keys on one or the other.
+fn readdress(
+    outcome: ArchiveOutcome,
+    read_from: &Path,
+    address: Option<PathBuf>,
+    depth: usize,
+) -> ArchiveOutcome {
+    let ArchiveOutcome::Mounted {
+        mut index,
+        capability,
+        warnings,
+        staging_root,
+        then,
+        ..
+    } = outcome
+    else {
+        return outcome;
+    };
+    if let Some(address) = address {
+        index.archive = address;
+        index.source = Some(read_from.to_path_buf());
+    }
+    ArchiveOutcome::Mounted {
+        index,
+        capability,
+        warnings,
+        staging_root,
+        then,
+        depth,
+    }
+}
+
 fn carry_then(outcome: ArchiveOutcome, then: Option<Box<super::Effect>>) -> ArchiveOutcome {
     match outcome {
         ArchiveOutcome::Mounted {
@@ -239,6 +299,7 @@ fn carry_then(outcome: ArchiveOutcome, then: Option<Box<super::Effect>>) -> Arch
             capability,
             warnings,
             staging_root,
+            depth,
             ..
         } => ArchiveOutcome::Mounted {
             index,
@@ -246,6 +307,9 @@ fn carry_then(outcome: ArchiveOutcome, then: Option<Box<super::Effect>>) -> Arch
             warnings,
             staging_root,
             then,
+            // Carried, not reset: `readdress` ran first and it is what knows how
+            // deep this mount is.
+            depth,
         },
         ArchiveOutcome::NeedsConfirm { path, question, .. } => ArchiveOutcome::NeedsConfirm {
             path,
@@ -311,6 +375,8 @@ fn mount(
     let capability = assess(&indexed.facts, format);
     let warnings = warnings(&indexed.facts, &indexed.index);
     ArchiveOutcome::Mounted {
+        // `readdress` sets the real depth at the op boundary.
+        depth: 0,
         index: Box::new(indexed.index),
         capability,
         warnings,
@@ -435,6 +501,8 @@ mod tests {
             confirmed,
             cancel: Arc::new(AtomicBool::new(false)),
             then: None,
+            address: None,
+            depth: 0,
         })
     }
 

@@ -37,11 +37,23 @@ pub struct ArchiveMount {
     /// Monotonic stamp of the last time a column entered this mount, so the
     /// least-recently-used one is the one evicted.
     pub last_used: u64,
+    /// How many archives deep this one is: 0 when it's a file on disk, 1 for one
+    /// inside that, and so on. Carried rather than derived so a third level can't
+    /// read as a second.
+    pub depth: usize,
 }
 
 impl ArchiveMount {
+    /// Where this mount is addressed — its root, and the registry key. Every
+    /// member path sits under it.
     pub fn archive(&self) -> &Path {
         &self.index.archive
+    }
+
+    /// The file its bytes come out of. Differs from [`Self::archive`] only for a
+    /// nested archive, which is read from the staged copy.
+    pub fn source(&self) -> &Path {
+        self.index.source()
     }
 
     pub const fn format(&self) -> ArchiveFormat {
@@ -248,6 +260,7 @@ mod tests {
             warnings: Vec::new(),
             staging_root: PathBuf::from(format!("/staging/{}", archive.replace('/', "_"))),
             last_used: 0,
+            depth: 0,
         }
     }
 
