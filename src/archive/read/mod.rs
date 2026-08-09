@@ -222,11 +222,7 @@ fn write_member<R: Read>(
 
 /// Extract one member's bytes into the staging tree and return where they
 /// landed. Idempotent: an already-materialized member is left alone.
-pub fn materialize(
-    index: &ArchiveIndex,
-    entry: &IndexEntry,
-    staging_root: &Path,
-) -> Result<PathBuf> {
+pub fn materialize(archive: &Path, entry: &IndexEntry, staging_root: &Path) -> Result<PathBuf> {
     let dest = staging_root.join(entry.staging_rel());
     if dest.exists() {
         return Ok(dest);
@@ -240,8 +236,8 @@ pub fn materialize(
     }
     create_parent(&dest)?;
     let bytes = match entry.locator {
-        Locator::Zip { index: pos } => read_zip_member(&index.archive, pos)?,
-        Locator::TarData { offset } => read_tar_member(&index.archive, offset, entry.size)?,
+        Locator::Zip { index: pos } => read_zip_member(archive, pos)?,
+        Locator::TarData { offset } => read_tar_member(archive, offset, entry.size)?,
         // Already on disk (a streamed mount, or the user's own file) — if it
         // isn't there, it was removed behind our back.
         Locator::Staged | Locator::Implied => {

@@ -264,6 +264,7 @@ impl App {
                 | Message::AgentStatusReady
                 | Message::GraveyardDone
                 | Message::ImageDone
+                | Message::ArchiveDone
                 | Message::FileOpDone
                 | Message::InventoryDone
                 | Message::PreviewReloadDone
@@ -386,6 +387,9 @@ impl App {
         // Remove the MCP client configs we wrote on agent launch — our socket
         // is about to die, so a lingering entry would point at nothing.
         self.cleanup_written_mcp_configs();
+        // Drop every archive staging tree this session created. The startup
+        // sweep is the backstop for a process that never gets here.
+        self.clean_all_staging();
         // Drop the `!`-capture spill dir now (it also auto-removes on Runtime
         // drop, but do it explicitly so the temp files don't linger if the
         // process exits without unwinding). Capture buffers are session-scoped.
@@ -545,6 +549,18 @@ impl App {
             // which wake survived coalescing; the apply does the flash + refresh.
             if self.apply_graveyard_outcomes() {
                 ctx.draw.mark(3);
+            }
+
+            // Archive mount / materialize / cleanup outcomes — same
+            // unconditional pre-recv drain as the graveyard above. Mounting can
+            // return effects (a materialize kicked by a mount, a pager open), so
+            // the drain hands them back to be run.
+            let (archive_draw, archive_fx) = self.apply_archive_outcomes();
+            if archive_draw {
+                ctx.draw.mark(3);
+            }
+            if !archive_fx.is_empty() {
+                self.run_effects(archive_fx, terminal, &foreground_exec);
             }
 
             let (file_draw, file_fx) = self.apply_file_outcomes();

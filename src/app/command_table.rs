@@ -98,6 +98,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     app("about", commands::cmd_about),
     app("activity", commands::cmd_activity),
     app("agent", commands::cmd_agent),
+    app("archive", commands::cmd_archive),
     app("bnext", commands::cmd_bnext),
     app("bprev", commands::cmd_bprev),
     pure("cd"),

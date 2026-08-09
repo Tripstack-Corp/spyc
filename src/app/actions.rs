@@ -138,6 +138,17 @@ impl App {
             return Ok(Vec::new());
         }
 
+        // Inside a mounted archive, refuse the handful of actions whose meaning
+        // depends on the rows being real files — before dispatch, so no handler
+        // has to know about mounts.
+        if !self.state.mounts.is_empty()
+            && self.state.mounts.contains(&self.state.cur().listing.dir)
+            && let Some(why) = state::archive::refusal(action)
+        {
+            self.state.flash_error(why);
+            return Ok(Vec::new());
+        }
+
         spyc_debug!(
             "apply {:?}: cursor={} vt={} grid={}x{} pp={} len={}",
             action,

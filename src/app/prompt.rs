@@ -126,6 +126,14 @@ pub enum PromptKind {
     /// [`Self::ClosePane`]: `y`/`Y` restarts, anything else keeps the tab. An
     /// exited tab has nothing to lose and restarts without asking.
     RestartPane,
+    /// A mount big enough to ask about first — a `.tar.gz` that has to be
+    /// extracted, or an archive whose expansion ratio looks like a bomb. `y`/`Y`
+    /// / Enter re-issues the mount as confirmed; anything else abandons it.
+    /// `path` is the archive, carried so the answer doesn't depend on where the
+    /// cursor has wandered since.
+    ArchiveMountConfirm {
+        path: std::path::PathBuf,
+    },
     /// A Lua script has run past the soft threshold — "keep waiting? [y/N]".
     /// `y`/`Y` re-arms the watchdog and keeps waiting; `n`/`N`/Esc (or any
     /// other key) requests the abort. Raised from the runaway watchdog
@@ -824,6 +832,12 @@ mod tests {
                 },
             ),
             ("ClosePane", K::ClosePane),
+            (
+                "ArchiveMountConfirm",
+                K::ArchiveMountConfirm {
+                    path: std::path::PathBuf::new(),
+                },
+            ),
             ("RestartPane", K::RestartPane),
             ("LuaRunaway", K::LuaRunaway),
             (

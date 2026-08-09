@@ -11,11 +11,13 @@ pub mod budget;
 pub mod index;
 pub mod journal;
 pub mod listing;
+pub mod mount;
 pub mod read;
 pub mod scan;
 
 pub use index::{ArchiveIndex, IndexEntry, Locator};
 pub use journal::{Change, Journal};
+pub use mount::{ArchiveMount, Mounts};
 pub use scan::{Capability, IndexFacts};
 
 use std::path::Path;
@@ -55,6 +57,24 @@ impl ArchiveFormat {
             Self::TarZst => "tar.zst",
         }
     }
+}
+
+/// Suffixes that make a file worth sniffing on `Enter`.
+///
+/// Detection proper needs the file's magic bytes, and reading those for every
+/// `Enter` on every file would put a syscall in front of the most-pressed key in
+/// spyc. The name is the cheap pre-filter: it decides whether to *ask*, never
+/// what the answer is.
+const MOUNTABLE_SUFFIXES: &[&str] = &[
+    ".zip", ".jar", ".war", ".apk", ".xpi", ".ipa", ".whl", ".epub", ".docx", ".xlsx", ".pptx",
+    ".tar", ".tgz", ".tar.gz", ".tzst", ".tar.zst",
+];
+
+/// Whether a file name is worth sniffing for a container. Pure and cheap — the
+/// inline check on the `Enter` path.
+pub fn looks_mountable(file_name: &str) -> bool {
+    let name = file_name.to_ascii_lowercase();
+    MOUNTABLE_SUFFIXES.iter().any(|s| name.ends_with(s))
 }
 
 /// Head bytes [`detect`] needs: tar's `ustar` magic sits at offset 257.
@@ -164,6 +184,25 @@ mod tests {
     fn plain_files_are_not_archives() {
         assert_eq!(detect("main.rs", b"fn main() {}"), None);
         assert_eq!(detect("empty", &[]), None);
+    }
+
+    #[test]
+    fn the_name_filter_admits_containers_and_rejects_ordinary_files() {
+        for name in [
+            "a.zip",
+            "lib.jar",
+            "src.tar.gz",
+            "src.tgz",
+            "p.tar.zst",
+            "x.TAR",
+        ] {
+            assert!(looks_mountable(name), "{name}");
+        }
+        // The filter only decides whether to sniff, so a false positive costs a
+        // 512-byte read; a false negative would make the archive unmountable.
+        for name in ["main.rs", "notes.txt.gz", "archive", "zip", "a.zipper"] {
+            assert!(!looks_mountable(name), "{name}");
+        }
     }
 
     #[test]
