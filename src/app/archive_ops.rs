@@ -18,10 +18,13 @@ use crate::archive::{detect_at, read};
 use super::file_ops::PagerDest;
 
 /// What to do with a member once its bytes are on disk.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub enum MaterializeThen {
     /// Open it in the pager at `dest` — `Enter` / `D` on a member.
     OpenPager(PagerDest),
+    /// Re-run the effect that was held back, against the extracted copies. The
+    /// op it carries never learns its inputs came out of an archive.
+    Retry(Box<super::Effect>),
 }
 
 #[derive(Debug)]
@@ -43,6 +46,15 @@ pub enum ArchiveOp {
     Materialize {
         archive: PathBuf,
         entry: Box<IndexEntry>,
+        staging_root: PathBuf,
+        then: MaterializeThen,
+    },
+    /// Extract several members — one held-back op's whole selection.
+    MaterializeMany {
+        archive: PathBuf,
+        /// `(mount path, member)` pairs, so the reply can say which extracted
+        /// copy stands in for which row.
+        entries: Vec<(PathBuf, IndexEntry)>,
         staging_root: PathBuf,
         then: MaterializeThen,
     },
@@ -77,6 +89,12 @@ pub enum ArchiveOutcome {
     },
     Materialized {
         real: PathBuf,
+        then: MaterializeThen,
+    },
+    /// Several members landed. `staged` maps each mount path to the extracted
+    /// copy standing in for it.
+    MaterializedMany {
+        staged: Vec<(PathBuf, PathBuf)>,
         then: MaterializeThen,
     },
     MaterializeFailed {
@@ -115,6 +133,32 @@ pub fn run_archive_op(op: ArchiveOp) -> ArchiveOutcome {
                 error: format!("{}: {e:#}", entry.inner),
             },
         },
+        ArchiveOp::MaterializeMany {
+            archive,
+            entries,
+            staging_root,
+            then,
+        } => {
+            let mut staged = Vec::with_capacity(entries.len());
+            for (mount_path, entry) in &entries {
+                match read::materialize(&archive, entry, &staging_root) {
+                    Ok(real) => staged.push((mount_path.clone(), real)),
+                    // One unreadable member must not sink the whole selection —
+                    // the retry runs with what came out, and the op reports on
+                    // what it was actually given.
+                    Err(e) => {
+                        crate::spyc_debug!("archive: materialize {}: {e:#}", entry.inner);
+                    }
+                }
+            }
+            if staged.is_empty() {
+                ArchiveOutcome::MaterializeFailed {
+                    error: "archive: nothing could be extracted".to_string(),
+                }
+            } else {
+                ArchiveOutcome::MaterializedMany { staged, then }
+            }
+        }
         ArchiveOp::Clean { staging_roots } => {
             for root in staging_roots {
                 let _ = std::fs::remove_dir_all(&root);

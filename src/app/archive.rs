@@ -63,10 +63,7 @@ impl App {
         }
         let staged = mount.staging_path(&entry);
         if staged.exists() {
-            match then {
-                MaterializeThen::OpenPager(dest) => self.open_staged_in_pager(&staged, dest),
-            }
-            return Vec::new();
+            return self.do_after_materialize(then, &staged);
         }
         if !entry.readable {
             self.state.flash_error(format!(
@@ -144,12 +141,7 @@ impl App {
             }
             // The name said archive, the bytes said otherwise: open it as the
             // file it is, which is what `Enter` would have done anyway.
-            ArchiveOutcome::NotAnArchive { path, then } => {
-                match then {
-                    MaterializeThen::OpenPager(dest) => self.open_staged_in_pager(&path, dest),
-                }
-                Vec::new()
-            }
+            ArchiveOutcome::NotAnArchive { path, then } => self.do_after_materialize(then, &path),
             ArchiveOutcome::Failed { path, error } => {
                 self.state
                     .flash_error(format!("{}: {error}", display_name(&path)));
@@ -157,10 +149,25 @@ impl App {
             }
             ArchiveOutcome::Materialized { real, then } => {
                 self.record_staged(&real);
-                match then {
-                    MaterializeThen::OpenPager(dest) => self.open_staged_in_pager(&real, dest),
+                self.do_after_materialize(then, &real)
+            }
+            ArchiveOutcome::MaterializedMany { staged, then } => {
+                for (_, real) in &staged {
+                    self.record_staged(real);
                 }
-                Vec::new()
+                match then {
+                    MaterializeThen::OpenPager(dest) => {
+                        if let Some((_, real)) = staged.first() {
+                            self.open_staged_in_pager(real, dest);
+                        }
+                        Vec::new()
+                    }
+                    MaterializeThen::Retry(effect) => {
+                        let map: std::collections::HashMap<PathBuf, PathBuf> =
+                            staged.into_iter().collect();
+                        vec![super::archive_route::rewrite_paths(*effect, &map)]
+                    }
+                }
             }
             ArchiveOutcome::MaterializeFailed { error } => {
                 self.state.flash_error(error);
@@ -168,6 +175,50 @@ impl App {
             }
             ArchiveOutcome::Cleaned => Vec::new(),
         }
+    }
+
+    /// Carry out what was waiting on a member's bytes.
+    fn do_after_materialize(&mut self, then: MaterializeThen, real: &Path) -> Vec<Effect> {
+        match then {
+            MaterializeThen::OpenPager(dest) => {
+                self.open_staged_in_pager(real, dest);
+                Vec::new()
+            }
+            // A single-member retry: the effect's own paths are rewritten from
+            // this one mapping.
+            MaterializeThen::Retry(effect) => {
+                let mut staged = std::collections::HashMap::new();
+                if let Some(original) = self.mount_path_for_staged(real) {
+                    staged.insert(original, real.to_path_buf());
+                }
+                vec![super::archive_route::rewrite_paths(*effect, &staged)]
+            }
+        }
+    }
+
+    /// The mount path a staged file stands in for — the inverse of
+    /// `ArchiveMount::staging_path`, used to rewrite a held-back effect.
+    fn mount_path_for_staged(&self, real: &Path) -> Option<PathBuf> {
+        let mount = self
+            .state
+            .mounts
+            .iter()
+            .find(|m| real.starts_with(&m.staging_root))?;
+        let rel = real.strip_prefix(&mount.staging_root).ok()?;
+        // A case-colliding member stages under its own prefix, so strip that
+        // before reading the path back as a member.
+        let rel = rel
+            .components()
+            .next()
+            .and_then(|first| {
+                first
+                    .as_os_str()
+                    .to_str()
+                    .filter(|s| s.starts_with(".spyc-case-"))
+                    .and_then(|_| rel.strip_prefix(first).ok())
+            })
+            .unwrap_or(rel);
+        Some(mount.archive().join(rel))
     }
 
     /// Open an already-extracted member. The pager's own planner takes it from
@@ -388,6 +439,60 @@ impl App {
         let mut view = crate::ui::pager::PagerView::new_plain(title, lines);
         view.saveable = true;
         self.set_pager(view);
+    }
+
+    /// Run an outgoing effect past the archive screen.
+    ///
+    /// `Some` means execute it; `None` means it was held back for extraction (or
+    /// refused), and the drain will bring it round again once the bytes exist.
+    pub(super) fn screen_archive_effect(&mut self, effect: Effect) -> Option<Effect> {
+        use super::archive_route::{ArchiveSink, route_archive_effect};
+        let staged_check = |p: &Path| {
+            self.state
+                .mounts
+                .resolve(p)
+                .and_then(|(mount, _)| mount.entry_at(p).map(|e| mount.is_materialized(e)))
+                .unwrap_or(false)
+        };
+        match route_archive_effect(effect, &self.state.mounts, &staged_check) {
+            ArchiveSink::PassThrough(effect) => Some(effect),
+            ArchiveSink::Refuse(why) => {
+                self.state.flash_error(why);
+                None
+            }
+            // Replaced, not spawned: the op goes back into the same effect list
+            // the executor is already walking, so there is one path to the worker
+            // and the screen stays a rewriter.
+            ArchiveSink::Materialize { members, then } => {
+                self.extraction_effect(&members, MaterializeThen::Retry(then))
+            }
+        }
+    }
+
+    /// The extraction op for a batch of members, to run in place of the effect
+    /// that wanted them.
+    fn extraction_effect(&mut self, members: &[PathBuf], then: MaterializeThen) -> Option<Effect> {
+        let (mount, _) = members.first().and_then(|p| self.state.mounts.resolve(p))?;
+        let archive = mount.archive().to_path_buf();
+        let staging_root = mount.staging_root.clone();
+        let entries: Vec<(PathBuf, crate::archive::IndexEntry)> = members
+            .iter()
+            .filter_map(|p| mount.entry_at(p).map(|e| (p.clone(), e.clone())))
+            .filter(|(_, e)| e.readable)
+            .collect();
+        if entries.is_empty() {
+            self.state
+                .flash_error("archive: nothing readable in the selection");
+            return None;
+        }
+        self.state
+            .flash_info(format!("extracting {} member(s)…", entries.len()));
+        Some(Effect::Archive(ArchiveOp::MaterializeMany {
+            archive,
+            entries,
+            staging_root,
+            then,
+        }))
     }
 
     /// Best-effort removal of every staging tree this process created. Called at

@@ -479,10 +479,14 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   of the archive, duplicate or case-colliding names, encrypted members and a
   capped index are all reported when the mount opens, in full under
   `:archive info`.
-- **Not yet supported inside an archive** — writing, deleting, yanking,
-  `:grep`, `F`, marks, harpoon and shell commands are refused with a message
-  rather than half-working. The status suffix shows the container (`zip`,
-  `tar.gz`) and `ro` when the archive can't be written back.
+- **Taking things out** — `y` yanks a member into the inventory (contents and
+  all, so `p` outside the archive writes a real file), `c` copies members out,
+  `^a p` pipes one to the pane, and `f` / `L` report on them. Each extracts what
+  it needs first, so nothing is unpacked speculatively.
+- **Not yet supported inside an archive** — writing, deleting, renaming, editing
+  a member, `:grep`, `F`, marks, harpoon and shell commands are refused with a
+  message rather than half-working. The status suffix shows the container
+  (`zip`, `tar.gz`) and `ro` when the archive can't be written back.
 - **`:archive`** — `info` (everything about this mount), `list` (every mounted
   archive), `unmount` (drop it and its staged bytes), `cancel`.
 
