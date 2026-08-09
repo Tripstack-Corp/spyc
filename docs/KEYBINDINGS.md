@@ -124,7 +124,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a ^a` | Jump to last-active tab |
 | `^a r` | Rename tab |
 | `^a R` | Restart tab in place, keeping its number (confirms first while its child is still running) |
-| `^z` | Suspend / resume the agent pane (💤); a shell tab's `^z` forwards as usual |
+| `^z` | Suspend / resume the pane's child (💤); a shell tab's `^z` forwards as usual |
 | `^a s` | Send selection paths to pane |
 | `^a P` | Pipe file contents to pane |
 | `^a i` | Pipe inventory file contents to pane |
