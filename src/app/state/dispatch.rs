@@ -388,6 +388,7 @@ impl AppState {
             | PromptKind::RestartPane
             | PromptKind::LuaRunaway
             | PromptKind::ArchiveMountConfirm { .. }
+            | PromptKind::ArchiveWriteConfirm { .. }
             | PromptKind::GraveyardPurgeAllConfirm => PromptResult::Handled,
             // These need terminal/overlay/pager — caller handles them.
             // Terminal-touching — handled by `App::dispatch_prompt`.

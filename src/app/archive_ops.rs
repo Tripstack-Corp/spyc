@@ -12,7 +12,9 @@ use std::sync::atomic::AtomicBool;
 
 use crate::archive::budget::{BudgetLimits, MountDecision, MountFacts, decide_mount};
 use crate::archive::index::{ArchiveIndex, IndexEntry};
+use crate::archive::journal::RepackStep;
 use crate::archive::scan::{Capability, assess, warnings};
+use crate::archive::write::RepackOptions;
 use crate::archive::{detect_at, read};
 
 use super::file_ops::PagerDest;
@@ -58,6 +60,19 @@ pub enum ArchiveOp {
         staging_root: PathBuf,
         then: MaterializeThen,
     },
+    /// Write pending changes back over the archive.
+    ///
+    /// Carries a clone of the index because the worker needs it to resolve which
+    /// stored member each carried-across step refers to. A 200k-member clone is
+    /// not cheap, but a write is rare and user-initiated, and re-indexing on the
+    /// worker would be wrong for a streamed mount whose members only exist in
+    /// staging.
+    Write {
+        index: Box<ArchiveIndex>,
+        steps: Vec<RepackStep>,
+        staging_root: PathBuf,
+        opts: RepackOptions,
+    },
     /// Delete staging trees — an unmount, an eviction, or the quit sweep.
     Clean { staging_roots: Vec<PathBuf> },
 }
@@ -98,6 +113,16 @@ pub enum ArchiveOutcome {
         then: MaterializeThen,
     },
     MaterializeFailed {
+        error: String,
+    },
+    /// The archive was replaced. `archive` identifies the mount whose journal
+    /// should now be considered clean.
+    Written {
+        archive: PathBuf,
+        report: crate::archive::write::RepackReport,
+    },
+    WriteFailed {
+        archive: PathBuf,
         error: String,
     },
     Cleaned,
@@ -157,6 +182,21 @@ pub fn run_archive_op(op: ArchiveOp) -> ArchiveOutcome {
                 }
             } else {
                 ArchiveOutcome::MaterializedMany { staged, then }
+            }
+        }
+        ArchiveOp::Write {
+            index,
+            steps,
+            staging_root,
+            opts,
+        } => {
+            let archive = index.archive.clone();
+            match crate::archive::write::repack(&index, &steps, &staging_root, &opts) {
+                Ok(report) => ArchiveOutcome::Written { archive, report },
+                Err(e) => ArchiveOutcome::WriteFailed {
+                    archive,
+                    error: format!("{e:#}"),
+                },
             }
         }
         ArchiveOp::Clean { staging_roots } => {

@@ -179,11 +179,22 @@
 #   warn_over_mb       (default 128)    confirm before extracting more.
 #   max_entries        (default 200000) cap on indexed members; past it
 #                        the listing shows itself as truncated.
+#   write_back         (default "ask")  "ask" offers to write pending
+#                        changes back when you unmount a changed
+#                        archive; "never" leaves them pending.
+#   snapshot_max_mb    (default 64)     copy the original into the
+#                        graveyard before replacing it, for archives up
+#                        to this size (so `:undo` can bring it back).
+#                        A failed write can never damage the original
+#                        regardless — it is written to a temp file,
+#                        verified, and only then renamed into place.
 [archive]
 # enable = true
 # extract_budget_mb = 512
 # warn_over_mb = 128
 # max_entries = 200000
+# write_back = "ask"
+# snapshot_max_mb = 64
 
 # ── notify ────────────────────────────────────────────────────────────
 # Notifications when an agent pane changes status (P3-1 "which agent needs

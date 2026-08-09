@@ -173,6 +173,34 @@ impl App {
                 self.state.flash_error(error);
                 Vec::new()
             }
+            ArchiveOutcome::Written { archive, report } => {
+                // The journal is only cleared once the archive on disk actually
+                // holds the changes — a failed write leaves them pending.
+                if let Some(mount) = self.state.mounts.get_mut(&archive) {
+                    mount.journal.clear();
+                    mount.staged.clear();
+                }
+                let snapshot = report
+                    .snapshot
+                    .as_ref()
+                    .map_or_else(String::new, |_| " (original in the graveyard)".to_string());
+                self.state.flash_info(format!(
+                    "wrote {} — {} member(s), {}{snapshot}",
+                    display_name(&archive),
+                    report.members,
+                    crate::fs::ops::format_size(report.bytes),
+                ));
+                // Re-mount so the index describes what is now on disk rather than
+                // what used to be.
+                self.request_mount(&archive, true)
+            }
+            ArchiveOutcome::WriteFailed { archive, error } => {
+                self.state.flash_error(format!(
+                    "{} NOT written: {error} — changes are still pending",
+                    display_name(&archive)
+                ));
+                Vec::new()
+            }
             ArchiveOutcome::Cleaned => Vec::new(),
         }
     }
@@ -323,6 +351,30 @@ impl App {
                 self.archive_list();
                 Vec::new()
             }
+            "write" => {
+                if let Some((mount, _)) = self.state.mounts.resolve(&self.state.cur().listing.dir) {
+                    let archive = mount.archive().to_path_buf();
+                    self.write_effect(&archive).into_iter().collect()
+                } else {
+                    self.state.flash_error("archive: not inside an archive");
+                    Vec::new()
+                }
+            }
+            "discard" => {
+                if let Some((mount, _)) = self.state.mounts.resolve(&self.state.cur().listing.dir) {
+                    let archive = mount.archive().to_path_buf();
+                    if let Some(m) = self.state.mounts.get_mut(&archive) {
+                        m.journal.clear();
+                    }
+                    // Re-mount to throw away any edited staged copies along with
+                    // the journal, so "discard" means all of it.
+                    self.state.flash_info("archive: pending changes discarded");
+                    self.request_mount(&archive, true)
+                } else {
+                    self.state.flash_error("archive: not inside an archive");
+                    Vec::new()
+                }
+            }
             "cancel" => {
                 self.cancel_archive_mount();
                 self.state.flash_info("archive: cancel requested");
@@ -332,6 +384,24 @@ impl App {
                 let dir = self.state.cur().listing.dir.clone();
                 if let Some((mount, _)) = self.state.mounts.resolve(&dir) {
                     let archive = mount.archive().to_path_buf();
+                    // Unwritten changes would go with the mount, so ask before
+                    // dropping them rather than after.
+                    if self.mount_is_dirty(&archive)
+                        && self.state.config.archive.write_back == crate::config::WriteBack::Ask
+                    {
+                        let counts = self
+                            .state
+                            .mounts
+                            .get(&archive)
+                            .map_or_else(String::new, |m| m.journal.counts().badge());
+                        self.state.mode = Mode::Prompting(Prompt::simple(
+                            PromptKind::ArchiveWriteConfirm {
+                                archive: archive.clone(),
+                            },
+                            format!("write {counts} back to {}? [Y/n] ", display_name(&archive)),
+                        ));
+                        return Vec::new();
+                    }
                     // Step out *now*, not via a deferred `ChangeDir`: the unmount
                     // below refuses while a column is inside, and a queued effect
                     // hasn't moved it yet.
@@ -347,7 +417,8 @@ impl App {
             }
             other => {
                 self.state.flash_error(format!(
-                    "archive: unknown subcommand `{other}` (info | list | unmount | cancel)"
+                    "archive: unknown subcommand `{other}` \
+                     (info | list | write | discard | unmount | cancel)"
                 ));
                 Vec::new()
             }
@@ -466,6 +537,10 @@ impl App {
             ArchiveSink::Materialize { members, then } => {
                 self.extraction_effect(&members, MaterializeThen::Retry(then))
             }
+            ArchiveSink::Record(changes) => {
+                self.record_pending(changes);
+                None
+            }
         }
     }
 
@@ -493,6 +568,120 @@ impl App {
             staging_root,
             then,
         }))
+    }
+
+    /// Answer to "write these changes back?" — `yes` writes and then unmounts,
+    /// `no` unmounts and leaves the changes pending in nothing (the mount is
+    /// gone), which is why the prompt defaults to yes.
+    pub(super) fn finish_archive_write_confirm(
+        &mut self,
+        archive: &Path,
+        yes: bool,
+    ) -> Vec<Effect> {
+        if yes {
+            // Unmount after the write lands, not before: the drain re-mounts the
+            // archive so the index matches what is now on disk.
+            return self.write_effect(archive).into_iter().collect();
+        }
+        if let Some(parent) = archive.parent().map(Path::to_path_buf) {
+            self.state.change_dir(&parent, Some(archive), None, "chdir");
+        }
+        self.state
+            .flash_info("archive: unmounted, changes discarded");
+        self.unmount_archive(archive)
+    }
+
+    /// Fold recorded changes into the mounts' journals.
+    fn record_pending(&mut self, changes: Vec<super::archive_route::PendingChange>) {
+        use super::archive_route::PendingChange;
+        let mut deleted = 0usize;
+        for change in changes {
+            match change {
+                PendingChange::Delete { archive, inner } => {
+                    if let Some(mount) = self.state.mounts.get_mut(&archive) {
+                        mount.journal.delete(inner);
+                        deleted += 1;
+                    }
+                }
+            }
+        }
+        if deleted > 0 {
+            self.state.refresh_listing();
+            self.state.flash_info(format!(
+                "{deleted} member(s) marked for removal — :archive write to apply"
+            ));
+        }
+    }
+
+    /// The write-back op for a mount, or `None` when there is nothing to write.
+    ///
+    /// The plan is built here, on the main thread, from the journal plus a fresh
+    /// stat of the staged files — the comparison against what spyc recorded at
+    /// materialize time is what notices an edit made by an editor or an agent.
+    fn write_effect(&mut self, archive: &Path) -> Option<Effect> {
+        const MB: u64 = 1024 * 1024;
+        let snapshot_limit = self.state.config.archive.snapshot_max_mb.saturating_mul(MB);
+        // Everything the op needs is gathered before the first flash, so the
+        // immutable read of the mount ends before the mutable borrow begins.
+        let prepared = {
+            let mount = self.state.mounts.get(archive)?;
+            let now = current_staged_stats(mount);
+            if !mount.is_dirty() && !differs(&mount.staged, &now) {
+                None
+            } else if let Some(why) = mount.capability.reason() {
+                Some(Err(format!("archive is read-only: {why}")))
+            } else {
+                Some(Ok(ArchiveOp::Write {
+                    steps: crate::archive::plan_repack(
+                        &mount.index,
+                        &mount.journal,
+                        &mount.staged,
+                        &now,
+                    ),
+                    index: Box::new(mount.index.clone()),
+                    staging_root: mount.staging_root.clone(),
+                    opts: crate::archive::write::RepackOptions {
+                        snapshot_original: mount.index.compressed_size <= snapshot_limit,
+                        free_space_margin: 8 * MB,
+                    },
+                }))
+            }
+        };
+        match prepared {
+            None => {
+                self.state.flash_info("archive: nothing to write");
+                None
+            }
+            Some(Err(why)) => {
+                self.state.flash_error(why);
+                None
+            }
+            Some(Ok(op)) => {
+                self.state
+                    .flash_info(format!("writing {}…", display_name(archive)));
+                Some(Effect::Archive(op))
+            }
+        }
+    }
+
+    /// Whether a mount has anything a write would change — the journal, or a
+    /// staged file that no longer matches what spyc wrote.
+    pub(super) fn mount_is_dirty(&self, archive: &Path) -> bool {
+        let Some(mount) = self.state.mounts.get(archive) else {
+            return false;
+        };
+        mount.is_dirty() || differs(&mount.staged, &current_staged_stats(mount))
+    }
+
+    /// Archives carrying changes nobody has written back. Read at quit time, so
+    /// the warning names them rather than counting silently.
+    pub(super) fn dirty_mounts(&self) -> Vec<PathBuf> {
+        self.state
+            .mounts
+            .iter()
+            .map(|m| m.archive().to_path_buf())
+            .filter(|a| self.mount_is_dirty(a))
+            .collect()
     }
 
     /// Best-effort removal of every staging tree this process created. Called at
@@ -563,6 +752,37 @@ fn display_name(path: &Path) -> String {
         || path.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
     )
+}
+
+/// Stat every staged file a mount knows about, keyed the same way the recorded
+/// stats are. The difference between the two is the only signal that an edit spyc
+/// didn't perform has happened.
+fn current_staged_stats(mount: &ArchiveMount) -> crate::archive::journal::StagedStats {
+    let mut now = crate::archive::journal::StagedStats::new();
+    for entry in &mount.index.entries {
+        let path = mount.staging_path(entry);
+        let Ok(md) = std::fs::metadata(&path) else {
+            continue;
+        };
+        now.insert(
+            entry.inner.clone(),
+            crate::archive::journal::StagedStat {
+                size: md.len(),
+                mtime: md.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+                is_dir: md.is_dir(),
+            },
+        );
+    }
+    now
+}
+
+/// Whether anything staged differs from what spyc recorded when it wrote it.
+fn differs(
+    recorded: &crate::archive::journal::StagedStats,
+    now: &crate::archive::journal::StagedStats,
+) -> bool {
+    now.iter()
+        .any(|(inner, current)| recorded.get(inner) != Some(current))
 }
 
 #[cfg(test)]

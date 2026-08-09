@@ -217,7 +217,7 @@ const SECTIONS: &[Section] = &[
             ("C", "toggle colors / mono"),
             (
                 ":archive",
-                "archive mount: info / list / unmount / cancel (Enter on an archive mounts it)",
+                "archive mount: info / list / write / discard / unmount / cancel (Enter on an archive mounts it)",
             ),
             (
                 ":activity",

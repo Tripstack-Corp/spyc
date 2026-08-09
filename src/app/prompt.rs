@@ -134,6 +134,13 @@ pub enum PromptKind {
     ArchiveMountConfirm {
         path: std::path::PathBuf,
     },
+    /// Unmounting an archive that has unwritten changes. `y`/`Y`/Enter writes it
+    /// back (and the write's own completion drops the mount); anything else drops
+    /// the mount and the changes with it. Defaults to yes — the changes are the
+    /// user's work, so the safe answer is to keep them.
+    ArchiveWriteConfirm {
+        archive: std::path::PathBuf,
+    },
     /// A Lua script has run past the soft threshold — "keep waiting? [y/N]".
     /// `y`/`Y` re-arms the watchdog and keeps waiting; `n`/`N`/Esc (or any
     /// other key) requests the abort. Raised from the runaway watchdog
@@ -832,6 +839,12 @@ mod tests {
                 },
             ),
             ("ClosePane", K::ClosePane),
+            (
+                "ArchiveWriteConfirm",
+                K::ArchiveWriteConfirm {
+                    archive: std::path::PathBuf::new(),
+                },
+            ),
             (
                 "ArchiveMountConfirm",
                 K::ArchiveMountConfirm {

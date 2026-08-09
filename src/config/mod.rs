@@ -456,6 +456,24 @@ pub struct ArchiveConfig {
     pub warn_over_mb: u64,
     /// Cap on indexed members; past it the listing marks itself truncated.
     pub max_entries: usize,
+    /// Whether leaving a container with unwritten changes offers to write them.
+    pub write_back: WriteBack,
+    /// Copy the original into the graveyard before replacing it, for archives up
+    /// to this size. Above it the snapshot would cost as much again as the write,
+    /// and the verify-then-rename order already means a failed write can't damage
+    /// the original — the snapshot only guards against *regret*.
+    pub snapshot_max_mb: u64,
+}
+
+/// `[archive] write_back` — what happens to unwritten changes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WriteBack {
+    /// Offer to write when unmounting a changed archive.
+    #[default]
+    Ask,
+    /// Never write; changes stay pending until discarded.
+    Never,
 }
 
 impl Default for ArchiveConfig {
@@ -465,6 +483,8 @@ impl Default for ArchiveConfig {
             extract_budget_mb: 512,
             warn_over_mb: 128,
             max_entries: 200_000,
+            write_back: WriteBack::Ask,
+            snapshot_max_mb: 64,
         }
     }
 }
@@ -489,6 +509,8 @@ struct FileArchive {
     extract_budget_mb: Option<u64>,
     warn_over_mb: Option<u64>,
     max_entries: Option<usize>,
+    write_back: Option<WriteBack>,
+    snapshot_max_mb: Option<u64>,
 }
 
 /// How a clipboard copy is delivered (`[clipboard].via`).
@@ -895,6 +917,12 @@ impl Config {
         }
         if let Some(v) = file.archive.max_entries {
             self.archive.max_entries = v;
+        }
+        if let Some(v) = file.archive.write_back {
+            self.archive.write_back = v;
+        }
+        if let Some(v) = file.archive.snapshot_max_mb {
+            self.archive.snapshot_max_mb = v;
         }
 
         // Clipboard: per-field merge.

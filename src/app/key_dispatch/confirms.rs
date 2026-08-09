@@ -142,6 +142,24 @@ impl App {
         Vec::new()
     }
 
+    /// Single-key confirmation for unmounting an archive with unwritten changes.
+    ///
+    /// Defaults to yes: the pending changes are work the user did, and the
+    /// alternative is losing them. `n` drops them deliberately.
+    pub(super) fn handle_archive_write_confirm_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        let yes = matches!(key.code, KeyCode::Char('y' | 'Y') | KeyCode::Enter);
+        let prev = std::mem::replace(&mut self.state.mode, Mode::Normal);
+        self.view.needs_full_repaint = true;
+        let Mode::Prompting(Prompt {
+            kind: PromptKind::ArchiveWriteConfirm { archive },
+            ..
+        }) = prev
+        else {
+            return Vec::new();
+        };
+        self.finish_archive_write_confirm(&archive, yes)
+    }
+
     /// Single-key confirmation for a mount that would extract a lot, or whose
     /// expansion ratio looks like a bomb.
     ///

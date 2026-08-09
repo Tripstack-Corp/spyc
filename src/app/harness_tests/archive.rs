@@ -742,3 +742,210 @@ fn the_screen_leaves_unrelated_effects_alone() {
         assert!(held.is_some(), "a real file's yank runs as normal");
     });
 }
+
+// ── writing back ─────────────────────────────────────────────────────────
+
+/// Read an archive's member names back off disk.
+fn member_names(archive: &Path) -> Vec<String> {
+    let indexed =
+        crate::archive::read::index_seekable(archive, crate::archive::ArchiveFormat::Zip, 1000)
+            .unwrap();
+    let mut names: Vec<String> = indexed
+        .index
+        .entries
+        .iter()
+        .filter(|e| e.locator != crate::archive::Locator::Implied)
+        .map(|e| e.inner.clone())
+        .collect();
+    names.sort();
+    names
+}
+
+/// The whole delete-then-write story: `R` marks a member, the archive on disk is
+/// untouched until `:archive write`, and afterwards the member is gone.
+#[test]
+fn deleting_a_member_then_writing_removes_it_from_the_archive() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        let before = std::fs::read(&archive).unwrap();
+
+        // Mark `README.md` (the row after `src/`) for removal.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::RemovePrompt(None)).unwrap();
+        // The remove prompt confirms first; answer it.
+        let fx = if fx.is_empty() {
+            app.handle_remove_confirm_key(crossterm::event::KeyEvent::new(
+                KeyCode::Char('y'),
+                KeyModifiers::empty(),
+            ))
+        } else {
+            fx
+        };
+        settle(&mut app, fx);
+
+        assert_eq!(
+            std::fs::read(&archive).unwrap(),
+            before,
+            "nothing is written until asked"
+        );
+        assert!(
+            !app.state
+                .cur()
+                .rows
+                .iter()
+                .any(|r| r.display.contains("README")),
+            "but the row is gone from the listing"
+        );
+        assert!(app.mount_is_dirty(&archive), "and the mount reads as dirty");
+
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+
+        assert_eq!(member_names(&archive), ["src/deep/mod.rs", "src/main.rs"]);
+        assert!(!app.mount_is_dirty(&archive), "clean again after the write");
+    });
+}
+
+/// Discarding throws the pending change away and leaves the archive alone.
+#[test]
+fn discarding_pending_changes_restores_the_listing() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        let before = std::fs::read(&archive).unwrap();
+
+        if let Some(mount) = app.state.mounts.get_mut(&archive) {
+            mount.journal.delete("README.md");
+        }
+        app.state.refresh_listing();
+        assert!(app.mount_is_dirty(&archive));
+
+        let fx = app.cmd_archive("discard");
+        settle(&mut app, fx);
+
+        assert!(!app.mount_is_dirty(&archive), "the change is gone");
+        assert_eq!(std::fs::read(&archive).unwrap(), before);
+        assert!(
+            app.state
+                .cur()
+                .rows
+                .iter()
+                .any(|r| r.display.contains("README")),
+            "and the member is back in the listing"
+        );
+    });
+}
+
+/// Unmounting an archive with unwritten changes asks before dropping them.
+#[test]
+fn unmounting_a_changed_archive_offers_to_write_it_first() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        if let Some(mount) = app.state.mounts.get_mut(&archive) {
+            mount.journal.delete("README.md");
+        }
+
+        let fx = app.cmd_archive("unmount");
+        assert!(
+            fx.is_empty(),
+            "nothing happens until the question is answered"
+        );
+        assert!(
+            matches!(app.state.mode, Mode::Prompting(_)),
+            "the prompt is up"
+        );
+        assert!(app.state.mounts.contains(&archive), "still mounted");
+    });
+}
+
+/// Declining that offer drops the mount and the changes deliberately.
+#[test]
+fn declining_the_write_unmounts_and_discards() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir.clone());
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        if let Some(mount) = app.state.mounts.get_mut(&archive) {
+            mount.journal.delete("README.md");
+        }
+        let before = std::fs::read(&archive).unwrap();
+
+        let fx = app.finish_archive_write_confirm(&archive, false);
+        settle(&mut app, fx);
+
+        assert!(!app.state.mounts.contains(&archive), "the mount is gone");
+        assert_eq!(
+            std::fs::read(&archive).unwrap(),
+            before,
+            "and so is the change"
+        );
+        assert_eq!(app.state.cur().listing.dir, dir);
+    });
+}
+
+/// A read-only archive refuses the write rather than producing a lossy one.
+#[test]
+fn a_read_only_mount_refuses_to_be_written() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        if let Some(mount) = app.state.mounts.get_mut(&archive) {
+            mount.journal.delete("README.md");
+            mount.capability =
+                crate::archive::Capability::ReadOnly("2 duplicate member name(s)".to_string());
+        }
+        let before = std::fs::read(&archive).unwrap();
+
+        let fx = app.cmd_archive("write");
+        assert!(fx.is_empty(), "no write is attempted");
+        let flash = app.flash_text().unwrap_or_default();
+        assert!(flash.contains("read-only"), "{flash}");
+        assert_eq!(std::fs::read(&archive).unwrap(), before);
+    });
+}
+
+/// Quitting with pending changes says so on the first tap, where the existing
+/// double-tap confirm already gives the user somewhere to stop.
+#[test]
+fn quitting_with_unwritten_changes_warns_first() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        if let Some(mount) = app.state.mounts.get_mut(&archive) {
+            mount.journal.delete("README.md");
+        }
+
+        app.request_quit();
+
+        assert!(!app.state.should_quit, "the first tap does not quit");
+        let flash = app.flash_text().unwrap_or_default();
+        assert!(flash.contains("unwritten changes"), "{flash}");
+    });
+}

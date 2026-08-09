@@ -11,6 +11,7 @@
 //! maps index path → displayed path, [`Journal::original_of`] maps back.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 /// What a staged file looked like when spyc last wrote it.
@@ -25,7 +26,12 @@ pub struct StagedStat {
     pub is_dir: bool,
 }
 
-/// Staged bytes by journal path (the archive's namespace, not the displayed one).
+/// Staged bytes by **journal path**.
+///
+/// That's the archive's namespace — not the displayed one, and not the
+/// staging-relative one. A case-colliding member stages under a prefix
+/// ([`crate::archive::IndexEntry::staging_rel`]), so keying by the file's location
+/// would give one member two different names depending on how you looked it up.
 pub type StagedStats = HashMap<String, StagedStat>;
 
 /// One pending change.
@@ -357,5 +363,324 @@ mod tests {
         j.clear();
         assert!(!j.is_dirty());
         assert!(!j.is_deleted("x"));
+    }
+}
+
+/// One member of the archive a repack is about to write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepackStep {
+    /// The member's name in the *new* archive — post-rename.
+    pub out: String,
+    pub source: StepSource,
+}
+
+/// Where a repacked member's bytes come from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StepSource {
+    /// The stored bytes, carried across as they are. For a zip that means a raw
+    /// copy — no decompress, no recompress — which is what keeps a repack
+    /// I/O-bound instead of a re-zip.
+    Archived { inner: String },
+    /// A file in the staging tree, `staging_root`-relative.
+    Staging { rel: PathBuf },
+}
+
+/// The exact content list of the archive a write-back would produce.
+///
+/// The rule is one sentence: **every member is carried across unless it was
+/// deleted, under its post-rename name, from staging if its bytes changed and
+/// from the archive if they didn't.** Getting that wrong in the "didn't change"
+/// direction costs a recompress; getting it wrong the other way loses an edit, so
+/// an unknown staged file is treated as changed.
+///
+/// `recorded` is what spyc wrote at materialize time and `now` is what's on disk,
+/// both keyed by journal path. Their difference is how an edit spyc didn't perform
+/// — `$EDITOR`, or an agent in the pane — is noticed at all. Neither is stat'ed
+/// here; the caller gathers both so this stays a pure decision.
+pub fn plan_repack(
+    index: &crate::archive::ArchiveIndex,
+    journal: &Journal,
+    recorded: &StagedStats,
+    now: &StagedStats,
+) -> Vec<RepackStep> {
+    let mut steps: Vec<RepackStep> = Vec::new();
+    for entry in &index.entries {
+        // A directory the archive never stored is spyc's own scaffolding, so
+        // emitting it would add an entry the original didn't have.
+        if entry.locator == crate::archive::Locator::Implied {
+            continue;
+        }
+        if journal.is_deleted(&entry.inner) {
+            continue;
+        }
+        let out = journal.effective(&entry.inner);
+        let source = if takes_from_staging(&entry.inner, journal, recorded, now) {
+            StepSource::Staging {
+                rel: entry.staging_rel(),
+            }
+        } else {
+            StepSource::Archived {
+                inner: entry.inner.clone(),
+            }
+        };
+        steps.push(RepackStep { out, source });
+    }
+    for added in journal.additions() {
+        steps.push(RepackStep {
+            out: journal.effective(added),
+            source: StepSource::Staging {
+                rel: PathBuf::from(added),
+            },
+        });
+    }
+    steps
+}
+
+fn takes_from_staging(
+    inner: &str,
+    journal: &Journal,
+    recorded: &StagedStats,
+    now: &StagedStats,
+) -> bool {
+    if journal.is_replaced(inner) {
+        return true;
+    }
+    match now.get(inner) {
+        // Not extracted, so there is nothing local that could differ.
+        None => false,
+        // Extracted, and either unaccounted for or no longer what we wrote.
+        Some(current) => recorded.get(inner) != Some(current),
+    }
+}
+
+#[cfg(test)]
+mod repack_tests {
+    use super::*;
+    use crate::archive::index::{Draft, IndexBuilder, Locator};
+    use crate::archive::{ArchiveFormat, ArchiveIndex};
+
+    fn index_of(members: &[&str]) -> ArchiveIndex {
+        let mut b = IndexBuilder::new(1000);
+        for (i, name) in members.iter().enumerate() {
+            b.push(name, Draft::file(1, Locator::Zip { index: i }));
+        }
+        b.finish(PathBuf::from("/src/pkg.zip"), ArchiveFormat::Zip, 10)
+            .0
+    }
+
+    fn stat(size: u64, secs: u64) -> StagedStat {
+        StagedStat {
+            size,
+            mtime: SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs),
+            is_dir: false,
+        }
+    }
+
+    fn outs(steps: &[RepackStep]) -> Vec<&str> {
+        steps.iter().map(|s| s.out.as_str()).collect()
+    }
+
+    /// A clean mount repacks to exactly what it was, every member carried across
+    /// without touching its bytes.
+    #[test]
+    fn an_untouched_archive_repacks_to_itself() {
+        let index = index_of(&["a.txt", "d/b.txt"]);
+        let steps = plan_repack(
+            &index,
+            &Journal::default(),
+            &StagedStats::new(),
+            &StagedStats::new(),
+        );
+        // `d` is implied (only `d/b.txt` was stored), so it is not written back.
+        assert_eq!(outs(&steps), ["a.txt", "d/b.txt"]);
+        assert!(
+            steps
+                .iter()
+                .all(|s| matches!(s.source, StepSource::Archived { .. })),
+            "nothing is recompressed: {steps:?}"
+        );
+    }
+
+    /// The directories spyc synthesized to make the tree walkable were never in
+    /// the archive, so a repack must not invent them.
+    #[test]
+    fn implied_directories_are_not_written_back() {
+        let index = index_of(&["deep/nested/a.txt"]);
+        let steps = plan_repack(
+            &index,
+            &Journal::default(),
+            &StagedStats::new(),
+            &StagedStats::new(),
+        );
+        assert_eq!(outs(&steps), ["deep/nested/a.txt"]);
+    }
+
+    #[test]
+    fn a_deleted_member_is_absent_from_the_plan() {
+        let index = index_of(&["a.txt", "b.txt"]);
+        let mut j = Journal::default();
+        j.delete("a.txt");
+        let steps = plan_repack(&index, &j, &StagedStats::new(), &StagedStats::new());
+        assert_eq!(outs(&steps), ["b.txt"]);
+    }
+
+    #[test]
+    fn deleting_a_directory_drops_its_whole_subtree() {
+        let index = index_of(&["keep.txt", "d/one.txt", "d/two.txt"]);
+        let mut j = Journal::default();
+        j.delete("d");
+        let steps = plan_repack(&index, &j, &StagedStats::new(), &StagedStats::new());
+        assert_eq!(outs(&steps), ["keep.txt"]);
+    }
+
+    /// A rename changes the name in the output and nothing else — the bytes are
+    /// still carried across untouched, which is why renaming costs nothing.
+    #[test]
+    fn a_rename_only_changes_the_output_name() {
+        let index = index_of(&["src/main.rs"]);
+        let mut j = Journal::default();
+        j.rename("src", "source");
+        let steps = plan_repack(&index, &j, &StagedStats::new(), &StagedStats::new());
+        assert_eq!(outs(&steps), ["source/main.rs"]);
+        assert_eq!(
+            steps[0].source,
+            StepSource::Archived {
+                inner: "src/main.rs".to_string()
+            },
+            "still a raw copy, just under a new name"
+        );
+    }
+
+    /// An extracted-but-untouched member still comes from the archive: taking it
+    /// from staging would be correct but would recompress it for nothing.
+    #[test]
+    fn an_unchanged_extracted_member_is_still_copied_from_the_archive() {
+        let index = index_of(&["a.txt"]);
+        let mut recorded = StagedStats::new();
+        recorded.insert("a.txt".to_string(), stat(10, 100));
+        let now = recorded.clone();
+
+        let steps = plan_repack(&index, &Journal::default(), &recorded, &now);
+        assert!(matches!(steps[0].source, StepSource::Archived { .. }));
+    }
+
+    /// The WinRAR trick: an edit spyc never performed shows up as a staged file
+    /// that no longer matches what spyc wrote.
+    #[test]
+    fn an_externally_edited_member_is_taken_from_staging() {
+        let index = index_of(&["a.txt"]);
+        let mut recorded = StagedStats::new();
+        recorded.insert("a.txt".to_string(), stat(10, 100));
+        let mut now = StagedStats::new();
+        now.insert("a.txt".to_string(), stat(12, 200));
+
+        let steps = plan_repack(&index, &Journal::default(), &recorded, &now);
+        assert_eq!(
+            steps[0].source,
+            StepSource::Staging {
+                rel: PathBuf::from("a.txt")
+            }
+        );
+    }
+
+    /// A staged file spyc has no record of is treated as changed. Guessing wrong
+    /// this way costs a recompress; guessing wrong the other way loses an edit.
+    #[test]
+    fn an_unaccounted_staged_file_is_treated_as_changed() {
+        let index = index_of(&["a.txt"]);
+        let mut now = StagedStats::new();
+        now.insert("a.txt".to_string(), stat(10, 100));
+
+        let steps = plan_repack(&index, &Journal::default(), &StagedStats::new(), &now);
+        assert!(matches!(steps[0].source, StepSource::Staging { .. }));
+    }
+
+    #[test]
+    fn an_explicit_replacement_comes_from_staging() {
+        let index = index_of(&["a.txt"]);
+        let mut j = Journal::default();
+        j.replace("a.txt");
+        let steps = plan_repack(&index, &j, &StagedStats::new(), &StagedStats::new());
+        assert!(matches!(steps[0].source, StepSource::Staging { .. }));
+    }
+
+    #[test]
+    fn additions_are_appended_from_staging() {
+        let index = index_of(&["a.txt"]);
+        let mut j = Journal::default();
+        j.add("notes.md");
+        let steps = plan_repack(&index, &j, &StagedStats::new(), &StagedStats::new());
+        assert_eq!(outs(&steps), ["a.txt", "notes.md"]);
+        assert_eq!(
+            steps[1].source,
+            StepSource::Staging {
+                rel: PathBuf::from("notes.md")
+            }
+        );
+    }
+
+    /// A case-colliding member stages under its own prefix, so the plan has to
+    /// name that path rather than the member's — otherwise the repack would read
+    /// the wrong file on a case-insensitive volume.
+    #[test]
+    fn a_case_colliding_member_is_read_from_its_isolated_staging_path() {
+        let index = index_of(&["README", "readme"]);
+        let mut j = Journal::default();
+        j.replace("readme");
+        let steps = plan_repack(&index, &j, &StagedStats::new(), &StagedStats::new());
+        let staged = steps
+            .iter()
+            .find(|s| s.out == "readme")
+            .expect("the colliding member is planned");
+        assert_eq!(
+            staged.source,
+            StepSource::Staging {
+                rel: PathBuf::from(".spyc-case-1/readme")
+            }
+        );
+    }
+
+    proptest::proptest! {
+        /// The invariant a repack rests on: every member is accounted for exactly
+        /// once, and no two end up sharing a name. A duplicate output name would
+        /// produce an archive that extracts differently than it lists; a missing
+        /// one would silently drop a member the user never deleted.
+        #[test]
+        fn a_plan_never_loses_or_duplicates_a_member(
+            keep in proptest::collection::vec("[a-c]{1,3}", 0..6),
+            delete_first in proptest::bool::ANY,
+            rename in proptest::bool::ANY,
+        ) {
+            let names: Vec<&str> = keep.iter().map(String::as_str).collect();
+            let index = index_of(&names);
+            let mut journal = Journal::default();
+            let stored: Vec<String> = index
+                .entries
+                .iter()
+                .filter(|e| e.locator != crate::archive::Locator::Implied)
+                .map(|e| e.inner.clone())
+                .collect();
+            if delete_first && let Some(first) = stored.first() {
+                journal.delete(first.clone());
+            }
+            if rename && let Some(last) = stored.last() {
+                journal.rename(last.clone(), format!("{last}-renamed"));
+            }
+
+            let steps = plan_repack(&index, &journal, &StagedStats::new(), &StagedStats::new());
+
+            let mut seen = std::collections::HashSet::new();
+            for step in &steps {
+                proptest::prop_assert!(
+                    seen.insert(step.out.clone()),
+                    "duplicate output name {:?}", step.out
+                );
+            }
+            let expected = stored
+                .iter()
+                .filter(|inner| !journal.is_deleted(inner))
+                .count();
+            proptest::prop_assert_eq!(steps.len(), expected);
+        }
     }
 }
