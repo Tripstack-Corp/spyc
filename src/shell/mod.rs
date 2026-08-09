@@ -95,6 +95,27 @@ fn sources_interactive_rc(basename: &str) -> bool {
     matches!(basename, "zsh" | "bash" | "fish" | "ksh" | "ksh93" | "mksh")
 }
 
+/// True when a pane command is a shell — a child that runs its own job
+/// control, so `^z` is *its* key (background the foreground job) and must
+/// reach the pty rather than becoming spyc's managed suspend.
+///
+/// Deliberately broader than [`sources_interactive_rc`]: `sh`, `dash` and the
+/// csh family read no interactive rc but still background jobs. An empty
+/// command spawns the bare `$SHELL`, so it counts too — and "unsure" should
+/// fall on the side of forwarding, never of swallowing a key.
+pub fn command_is_shell(command: &str) -> bool {
+    let Some(word) = command.split_whitespace().next() else {
+        return true; // empty ⇒ bare $SHELL
+    };
+    Path::new(word)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|basename| {
+            sources_interactive_rc(basename)
+                || matches!(basename, "sh" | "dash" | "csh" | "tcsh" | "ash" | "yash")
+        })
+}
+
 /// Builds the `$SHELL -i -c <cmd>` invocation, taking the SHELL value as an
 /// argument. Tests call this directly so they don't need to mutate the
 /// process-global env var.
@@ -242,5 +263,31 @@ mod tests {
     fn pane_empty_command_spawns_a_bare_shell() {
         let (_, args) = pane_invocation_for(Some("/bin/zsh"), "", true);
         assert_eq!(args, vec!["-i", "-c", ""]);
+    }
+
+    #[test]
+    fn shells_own_their_job_control() {
+        // Includes the rc-less ones: `sh`/`dash` background jobs all the same,
+        // so `^z` is theirs even though they take no `-i`.
+        for cmd in ["zsh", "/bin/bash", "fish -l", "sh", "dash", "tcsh"] {
+            assert!(command_is_shell(cmd), "{cmd}");
+        }
+        // Empty ⇒ bare $SHELL. "Unsure" must forward, never swallow.
+        assert!(command_is_shell(""));
+        assert!(command_is_shell("   "));
+    }
+
+    #[test]
+    fn non_shell_pane_commands_leave_ctrl_z_to_spyc() {
+        // The reported case: a raw-mode TUI runs with ISIG off, so a forwarded
+        // ^z is a byte it discards — spyc's managed suspend has to take it.
+        for cmd in ["claude", "rmatrix", "htop", "vim src/lib.rs", "npm run dev"] {
+            assert!(!command_is_shell(cmd), "{cmd}");
+        }
+        // Same first-word-only conservatism as `pane_invocation`: a wrapped
+        // shell isn't one (the wrapper is the child that sees the key).
+        for cmd in ["sudo zsh", "FOO=1 zsh", "zshx", "myzsh"] {
+            assert!(!command_is_shell(cmd), "{cmd}");
+        }
     }
 }

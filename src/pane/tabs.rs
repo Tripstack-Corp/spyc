@@ -128,8 +128,8 @@ pub struct TabInfo {
     /// process group (the child is stopped, not exited) and the divider shows
     /// 💤 instead of the activity dot. Set/cleared by the `^z` toggle
     /// (`App::toggle_pane_suspend`); a `SIGCONT` resumes it. App-controlled, so
-    /// it stays accurate without probing process state. Only agent tabs reach
-    /// this (a shell's `^z` is forwarded for its own job control).
+    /// it stays accurate without probing process state. Every tab but a shell
+    /// one reaches this (a shell's `^z` is forwarded for its own job control).
     pub suspended: bool,
     /// Latest semantic self-report from the agent (`report_status` MCP tool),
     /// or `None`. Overrides output timing per the [`ReportedStatus`] authority
