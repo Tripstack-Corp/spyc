@@ -510,6 +510,11 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   file, moving across the archive boundary in one step, `:grep`, `F`, marks,
   harpoon and shell commands are refused with a message rather than
   half-working. The suffix shows `ro` when the archive can't be written back.
+- **An agent can read a member too** — MCP `get_file_content` resolves a path
+  inside a mount, reading the container in memory (or your not-yet-written edit,
+  if there is one), so asking the agent in the pane about the file you're looking
+  at works in here as well. `search_content` / `search_paths` say why they can't
+  instead of reporting "no matches" from walking a single binary file.
 - **`:archive`** — `info` (everything about this mount), `list` (every mounted
   archive), `unmount` (drop it and its staged bytes), `cancel`.
 
