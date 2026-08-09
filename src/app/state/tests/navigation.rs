@@ -399,6 +399,12 @@ proptest! {
         name in "\\P{C}{0,10}",
         query in "[^*?\\[]{0,8}",
     ) {
+        // A leading `^` / trailing `$` are anchors, not substrings — issue #199
+        // grew the metacharacter set past the three this strategy excludes.
+        // Anchors have their own differential property below; keep this one's
+        // subject to what it names. Mid-query `^`/`$` stay in scope: they are
+        // still literal, and that's worth covering.
+        prop_assume!(!query.starts_with('^') && !query.ends_with('$'));
         let expected = name.to_lowercase().contains(&query.to_lowercase());
         prop_assert_eq!(
             crate::app::Matcher::build(&query).matches(&name),
@@ -406,6 +412,38 @@ proptest! {
             "name={:?} query={:?}",
             name,
             query
+        );
+    }
+
+    /// The `^`/`$` anchors (issue #199) must agree with the obvious reference —
+    /// `starts_with` / `ends_with` / `==` on the lowercased name — for any body
+    /// carrying no metacharacters of its own.
+    ///
+    /// The body excludes `*?[]\` (glob metacharacters, `\` being glob's escape),
+    /// `^$` (so the body can't smuggle in a second anchor), and `/` (glob's path
+    /// separator, and no name from `read_dir` contains one). It's non-empty
+    /// because a bare `$` is deliberately a literal, not an empty end-anchor.
+    #[test]
+    fn anchors_agree_with_starts_and_ends_with(
+        name in "[^/\\\\]{0,10}",
+        body in "[^*?\\[\\]\\\\^$/]{1,8}",
+    ) {
+        use crate::app::Matcher;
+        let (n, b) = (name.to_lowercase(), body.to_lowercase());
+        prop_assert_eq!(
+            Matcher::build(&format!("^{body}")).matches(&name),
+            n.starts_with(&b),
+            "^{:?} vs {:?}", body, name
+        );
+        prop_assert_eq!(
+            Matcher::build(&format!("{body}$")).matches(&name),
+            n.ends_with(&b),
+            "{:?}$ vs {:?}", body, name
+        );
+        prop_assert_eq!(
+            Matcher::build(&format!("^{body}$")).matches(&name),
+            n == b,
+            "^{:?}$ vs {:?}", body, name
         );
     }
 }

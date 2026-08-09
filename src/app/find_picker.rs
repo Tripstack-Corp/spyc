@@ -8,14 +8,75 @@
 //! sweep). Fields are `pub` (built via a struct literal). The `F` open /
 //! render / key-handler `impl App` methods live here too (`pub`, called from
 //! `actions` / `key_dispatch` / the run loop).
+//!
+//! Key handling splits the `route.rs` / `focus.rs` way: the pure
+//! [`decide_find_picker_key`] maps a `Copy` snapshot + key to a
+//! [`FindPickerAction`], and `handle_find_picker_key` only applies it. Every
+//! bound (list ends, empty query, the CONTROL/ALT chord guard) is decided in
+//! the pure half, so the key matrix is table-testable without a live walk.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::ui::pager;
 
 use super::App;
+
+/// The picker state [`decide_find_picker_key`] reads. `Copy` so tests construct
+/// one inline.
+#[derive(Debug, Clone, Copy)]
+struct FindPickerSnapshot {
+    /// Cursor index into the ranked results.
+    selected: usize,
+    /// How many results the current query matched.
+    filtered_len: usize,
+    /// Whether the query buffer has anything left to delete.
+    query_is_empty: bool,
+}
+
+/// What a key does to the open `F` picker. Each variant is a complete
+/// instruction — the bounds live in [`decide_find_picker_key`], so the applier
+/// never re-guards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FindPickerAction {
+    /// Swallow it; the picker owns every key while open.
+    Ignore,
+    /// `Esc`, or `Enter` with nothing to accept — close without navigating.
+    Close,
+    /// `Enter` on a result — close, then land on the selected path.
+    Accept,
+    MoveUp,
+    MoveDown,
+    /// `Backspace` against a non-empty query.
+    Backspace,
+    /// A printable char — append to the query and re-rank.
+    Insert(char),
+}
+
+/// Decide what a key does to the `F` picker. **Pure** (the `route.rs` /
+/// `focus.rs` template), so every branch is unit-testable without a live walk.
+///
+/// Takes the whole [`KeyEvent`]: the printable-char arm has to read modifiers
+/// so a `^n` / `⌥f` doesn't get typed into the query as an `n` / `f`.
+const fn decide_find_picker_key(snap: FindPickerSnapshot, key: KeyEvent) -> FindPickerAction {
+    match key.code {
+        // `Enter` navigates only when the cursor is over a real result; against
+        // an empty result set it merely dismisses, exactly like `Esc`.
+        KeyCode::Enter if snap.selected < snap.filtered_len => FindPickerAction::Accept,
+        KeyCode::Esc | KeyCode::Enter => FindPickerAction::Close,
+        KeyCode::Up if snap.selected > 0 => FindPickerAction::MoveUp,
+        KeyCode::Down if snap.selected + 1 < snap.filtered_len => FindPickerAction::MoveDown,
+        KeyCode::Backspace if !snap.query_is_empty => FindPickerAction::Backspace,
+        KeyCode::Char(c)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            FindPickerAction::Insert(c)
+        }
+        _ => FindPickerAction::Ignore,
+    }
+}
 
 pub struct FindPicker {
     /// Repo-relative paths accumulated from the walk so far.
@@ -178,76 +239,86 @@ impl App {
     /// file's parent and places the cursor on it; Up/Down move selection;
     /// printable chars + Backspace edit the query and re-rank.
     pub fn handle_find_picker_key(&mut self, key: KeyEvent) {
-        if self.runtime.find_picker.is_none() {
+        let Some(picker) = self.runtime.find_picker.as_ref() else {
             return;
-        }
-        match key.code {
-            KeyCode::Esc => {
-                self.runtime.find_picker = None;
-                self.clear_pager();
-                self.view.needs_full_repaint = true;
-            }
-            KeyCode::Enter => {
-                let target = self.runtime.find_picker.as_ref().and_then(|p| {
-                    p.filtered
-                        .get(p.selected)
-                        .cloned()
-                        .map(|rel| (p.root.clone(), rel))
-                });
-                self.runtime.find_picker = None;
-                self.clear_pager();
-                self.view.needs_full_repaint = true;
-                if let Some((root, rel)) = target {
-                    let abs = root.join(&rel);
-                    if let Some(parent) = abs.parent() {
-                        if let Err(e) = self.state.chdir(parent) {
-                            self.state.flash_error(format!("chdir: {e:#}"));
-                        } else if let Some(idx) =
-                            self.state.cur().rows.iter().position(|r| r.path == abs)
-                        {
-                            self.state.cur_mut().cursor.index = idx;
-                            let row_count = self.state.cur().rows.len();
-                            self.state.cur_mut().cursor.clamp(row_count);
-                        }
-                    }
+        };
+        let snap = FindPickerSnapshot {
+            selected: picker.selected,
+            filtered_len: picker.filtered.len(),
+            query_is_empty: picker.query.is_empty(),
+        };
+
+        match decide_find_picker_key(snap, key) {
+            FindPickerAction::Ignore => {}
+            FindPickerAction::Close => self.close_find_picker(),
+            FindPickerAction::Accept => {
+                let target = self
+                    .runtime
+                    .find_picker
+                    .as_ref()
+                    .and_then(|p| p.filtered.get(p.selected).map(|rel| p.root.join(rel)));
+                self.close_find_picker();
+                if let Some(abs) = target {
+                    self.land_on_found_path(&abs);
                 }
             }
-            KeyCode::Up => {
-                if let Some(picker) = self.runtime.find_picker.as_mut()
-                    && picker.selected > 0
-                {
-                    picker.selected -= 1;
-                    self.render_find_picker();
+            FindPickerAction::MoveUp => {
+                if let Some(picker) = self.runtime.find_picker.as_mut() {
+                    picker.selected = picker.selected.saturating_sub(1);
                 }
+                self.render_find_picker();
             }
-            KeyCode::Down => {
-                if let Some(picker) = self.runtime.find_picker.as_mut()
-                    && picker.selected + 1 < picker.filtered.len()
-                {
+            FindPickerAction::MoveDown => {
+                if let Some(picker) = self.runtime.find_picker.as_mut() {
                     picker.selected += 1;
-                    self.render_find_picker();
                 }
+                self.render_find_picker();
             }
-            KeyCode::Backspace => {
-                if let Some(picker) = self.runtime.find_picker.as_mut()
-                    && !picker.query.is_empty()
-                {
+            FindPickerAction::Backspace => {
+                if let Some(picker) = self.runtime.find_picker.as_mut() {
                     picker.query.pop();
                     picker.refilter();
-                    self.render_find_picker();
                 }
+                self.render_find_picker();
             }
-            KeyCode::Char(c)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
+            FindPickerAction::Insert(c) => {
                 if let Some(picker) = self.runtime.find_picker.as_mut() {
                     picker.query.push(c);
                     picker.refilter();
-                    self.render_find_picker();
                 }
+                self.render_find_picker();
             }
-            _ => {} // Swallow other keys while picker is open.
+        }
+    }
+
+    /// Tear down the picker together with the pager view it renders into.
+    fn close_find_picker(&mut self) {
+        self.runtime.find_picker = None;
+        self.clear_pager();
+        self.view.needs_full_repaint = true;
+    }
+
+    /// Cursor-land on `abs`: chdir to its parent and park the cursor on the
+    /// file itself, leaving the verb to the user — the same semantics as a
+    /// harpoon jump. A chdir failure flashes its whole cause chain.
+    fn land_on_found_path(&mut self, abs: &Path) {
+        let Some(parent) = abs.parent() else {
+            return;
+        };
+        if let Err(e) = self.state.chdir(parent) {
+            self.state.flash_error(format!("chdir: {e:#}"));
+            return;
+        }
+        if let Some(idx) = self
+            .state
+            .cur()
+            .rows
+            .iter()
+            .position(|r| r.path.as_path() == abs)
+        {
+            self.state.cur_mut().cursor.index = idx;
+            let row_count = self.state.cur().rows.len();
+            self.state.cur_mut().cursor.clamp(row_count);
         }
     }
 }
@@ -297,5 +368,151 @@ mod tests {
         p.query = "alpha".to_string();
         p.refilter();
         assert_eq!(p.selected, 0);
+    }
+}
+
+#[cfg(test)]
+mod picker_key_tests {
+    use super::{FindPickerAction, FindPickerSnapshot, decide_find_picker_key};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    /// A picker showing `filtered_len` results with the cursor at `selected`
+    /// and an empty query.
+    const fn snap(selected: usize, filtered_len: usize) -> FindPickerSnapshot {
+        FindPickerSnapshot {
+            selected,
+            filtered_len,
+            query_is_empty: true,
+        }
+    }
+
+    /// Same, but with something typed to delete.
+    const fn typed(selected: usize, filtered_len: usize) -> FindPickerSnapshot {
+        FindPickerSnapshot {
+            selected,
+            filtered_len,
+            query_is_empty: false,
+        }
+    }
+
+    fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, mods)
+    }
+
+    fn decide(s: FindPickerSnapshot, code: KeyCode) -> FindPickerAction {
+        decide_find_picker_key(s, key(code, KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn esc_closes() {
+        assert_eq!(decide(snap(0, 5), KeyCode::Esc), FindPickerAction::Close);
+    }
+
+    #[test]
+    fn enter_accepts_the_selected_result() {
+        assert_eq!(decide(snap(0, 5), KeyCode::Enter), FindPickerAction::Accept);
+        assert_eq!(decide(snap(4, 5), KeyCode::Enter), FindPickerAction::Accept);
+    }
+
+    #[test]
+    fn enter_on_no_results_closes_without_navigating() {
+        // A query matching nothing still dismisses the picker — it just has no
+        // path to land on.
+        assert_eq!(decide(snap(0, 0), KeyCode::Enter), FindPickerAction::Close);
+        // Defensive: a cursor somehow past the results is not a valid accept.
+        assert_eq!(decide(snap(9, 5), KeyCode::Enter), FindPickerAction::Close);
+    }
+
+    #[test]
+    fn up_and_down_move_within_the_results() {
+        assert_eq!(decide(snap(1, 5), KeyCode::Up), FindPickerAction::MoveUp);
+        assert_eq!(
+            decide(snap(1, 5), KeyCode::Down),
+            FindPickerAction::MoveDown
+        );
+    }
+
+    #[test]
+    fn up_and_down_are_inert_at_the_ends() {
+        // Neither may run off the list: `Up` at the top would underflow
+        // `selected`, `Down` at the bottom would index past `filtered`.
+        assert_eq!(decide(snap(0, 5), KeyCode::Up), FindPickerAction::Ignore);
+        assert_eq!(decide(snap(4, 5), KeyCode::Down), FindPickerAction::Ignore);
+        assert_eq!(decide(snap(0, 0), KeyCode::Up), FindPickerAction::Ignore);
+        assert_eq!(decide(snap(0, 0), KeyCode::Down), FindPickerAction::Ignore);
+    }
+
+    #[test]
+    fn backspace_edits_only_a_non_empty_query() {
+        assert_eq!(
+            decide(typed(0, 5), KeyCode::Backspace),
+            FindPickerAction::Backspace
+        );
+        assert_eq!(
+            decide(snap(0, 5), KeyCode::Backspace),
+            FindPickerAction::Ignore
+        );
+    }
+
+    #[test]
+    fn printable_chars_type_into_the_query() {
+        assert_eq!(
+            decide(snap(0, 5), KeyCode::Char('a')),
+            FindPickerAction::Insert('a')
+        );
+        // Punctuation and digits are query text too — paths contain both.
+        assert_eq!(
+            decide(snap(0, 5), KeyCode::Char('.')),
+            FindPickerAction::Insert('.')
+        );
+        assert_eq!(
+            decide(snap(0, 5), KeyCode::Char('7')),
+            FindPickerAction::Insert('7')
+        );
+    }
+
+    #[test]
+    fn shifted_letters_still_type() {
+        // Uppercase must reach the query — the modifier guard rejects CONTROL
+        // and ALT only, never SHIFT.
+        assert_eq!(
+            decide_find_picker_key(snap(0, 5), key(KeyCode::Char('R'), KeyModifiers::SHIFT)),
+            FindPickerAction::Insert('R')
+        );
+    }
+
+    #[test]
+    fn control_and_alt_chords_do_not_type_their_letter() {
+        // The regression this guard exists for: `^c` must not append a literal
+        // `c` to the query (and `⌥f` must not append an `f`).
+        assert_eq!(
+            decide_find_picker_key(snap(0, 5), key(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            FindPickerAction::Ignore
+        );
+        assert_eq!(
+            decide_find_picker_key(snap(0, 5), key(KeyCode::Char('f'), KeyModifiers::ALT)),
+            FindPickerAction::Ignore
+        );
+    }
+
+    #[test]
+    fn unbound_keys_are_swallowed_not_leaked() {
+        // The picker owns all input while open — nothing falls through to the
+        // resolver behind it.
+        for code in [
+            KeyCode::Tab,
+            KeyCode::Left,
+            KeyCode::Right,
+            KeyCode::Home,
+            KeyCode::End,
+            KeyCode::Delete,
+            KeyCode::F(1),
+        ] {
+            assert_eq!(
+                decide(snap(1, 5), code),
+                FindPickerAction::Ignore,
+                "{code:?} must be swallowed"
+            );
+        }
     }
 }
