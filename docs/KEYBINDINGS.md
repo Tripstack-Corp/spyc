@@ -150,6 +150,22 @@ syntax highlighting, search (`/` forward, `?` backward; `n` / `N`
 repeat), line numbers, hex dump, markdown rendering, and ANSI color
 support. Press `H` (or `F1`) inside the pager for its own help overlay.
 
+`Enter` on a **PNG / JPEG / GIF / WebP** shows the picture full-screen
+instead (detected by magic bytes, not the extension). Its verbs:
+
+| Key | Action |
+| --- | --- |
+| `s` | save a copy (an image file reports where it already is) |
+| `y` | copy the image to the clipboard |
+| `Y` | copy the file path (a diagram: its mermaid source) |
+| `b` | flip to a base64 text buffer |
+| `o` | open in the OS image viewer |
+| `c` | light/dark toggle (mermaid diagrams only) |
+| `q` / `Esc` / `i` | dismiss |
+
+On a terminal with no graphics protocol the picture can't be drawn
+inline; `o` still opens it externally.
+
 The pager isn't limited to a centered overlay. It can also mount
 in place:
 

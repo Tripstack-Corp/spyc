@@ -362,6 +362,26 @@ pub fn file_type_label(path: &Path) -> String {
     format!("{kind}, {}", format_size(md.len()))
 }
 
+/// Whether `path` is an image spyc's decoders can actually render.
+///
+/// Sniffs magic bytes rather than trusting the extension — a screenshot saved
+/// with no suffix is still an image, and a `.png` full of text is not. Narrowed
+/// to the formats the `image` crate is built with: `infer` recognizes plenty
+/// more (TIFF, HEIF, AVIF …), and claiming one spyc can't decode would trade a
+/// working hex dump for a failure flash.
+pub fn is_decodable_image(path: &Path) -> bool {
+    if !fs::metadata(path).is_ok_and(|m| m.is_file()) {
+        return false;
+    }
+    let head = read_head(path, 512).unwrap_or_default();
+    infer::get(&head).is_some_and(|k| {
+        matches!(
+            k.mime_type(),
+            "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+        )
+    })
+}
+
 fn read_head(path: &Path, cap: usize) -> io::Result<Vec<u8>> {
     use std::io::Read as _;
     let mut f = fs::File::open(path)?;
