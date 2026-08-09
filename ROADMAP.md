@@ -352,13 +352,15 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/drafts/AUTO_APPROVAL_PLAN.md` | Pending design (post-2.0). |
 | `docs/drafts/PANE_STARTUP_TABS_PLAN.md` | Pending design (road-to-2.0). |
 | `docs/drafts/PATH_HANDOFF_PLAN.md` | Pending design (Option A is road-to-2.0). |
+| `docs/drafts/ARCHIVE_BROWSING_PLAN.md` | Approved design, unstarted — navigate into zip/tarballs with full editing ([#149](https://github.com/Tripstack-Corp/spyc/issues/149)). Prior art, the mount-is-an-index model, and the 6-PR staging. |
 | `docs/archive/TESTING_STRATEGY.md` | Testing strategy & guidelines (coverage, anti-"test theater", proptest/cargo-fuzz, AI-testing rules). Campaign complete (#426–#438); kept as the how-we-test reference. |
 | `docs/archive/V1_60_PLAN.md` | Archived design — CounterTop multi-instance hub. Considered & parked (fights the single-process core); summarized in Post-2.0. |
 | `docs/archive/V1_70_PLAN.md` | Archived design — Mise en Place typed addressability + crate split. Post-2.0 speculative; MCP already covers the basics. Summarized in Post-2.0. |
 | `docs/COMPETITIVE_REVIEW.md` | Consolidated competitive review + GTM: the AI coding-agent-manager category (§1–§1c: herdr, psmux, claude-code-ide.el) plus the TUI file-manager lane (§1d: Yazi, folded 2026-07-02). Refresh on a competitor's next major. (Standalone Yazi original archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md`.) |
 | `docs/archive/` | Shipped plans, kept as historical record. |
 
-> **Note on pending plans:** the three feature plans predate the MVU
-> decomposition — their designs hold, but `src/app/mod.rs:NNNN`-style
-> file pointers are stale; re-resolve against the current module
-> layout when picking one up.
+> **Note on pending plans:** `AUTO_APPROVAL_PLAN`, `PANE_STARTUP_TABS_PLAN`
+> and `PATH_HANDOFF_PLAN` predate the MVU decomposition — their designs hold,
+> but `src/app/mod.rs:NNNN`-style file pointers are stale; re-resolve against
+> the current module layout when picking one up. `ARCHIVE_BROWSING_PLAN` is
+> written against the current layout.
