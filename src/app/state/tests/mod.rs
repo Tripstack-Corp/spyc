@@ -67,6 +67,53 @@ fn rebuild_rows_synthesizes_struck_ghost_for_deleted_file() {
     );
 }
 
+/// The watcher-driven refresh — any fs event in the listed dir, e.g. a `touch`
+/// creating a file — used to install the freshly-read `Listing` verbatim.
+/// `Listing::read` always name-sorts, so the visible order silently reverted to
+/// name while `sort_order` (and the status bar reading off it) still said mtime.
+#[test]
+fn refreshed_listing_keeps_the_columns_sort_order() {
+    use crate::fs::{Entry, Listing};
+    use std::time::{Duration, SystemTime};
+
+    let dir = PathBuf::from("/tmp/test");
+    let mk = |name: &str, mtime_secs: u64| Entry {
+        path: dir.join(name),
+        name: name.to_string(),
+        kind: EntryKind::File,
+        size: 0,
+        mtime: SystemTime::UNIX_EPOCH + Duration::from_secs(mtime_secs),
+    };
+    // Name order is a/b/c; mtime order (newest first) is its exact reverse, so
+    // the two can't be confused for one another.
+    let mut s = test_state();
+    s.left.view = crate::app::View::Dir;
+    s.left.sort_order = SortMode::Mtime;
+    s.left.sort_reversed = false;
+
+    // What the off-thread worker hands back: a name-sorted read of the dir.
+    let entries = vec![mk("a.txt", 100), mk("b.txt", 200), mk("c.txt", 300)];
+    let mut fresh = Listing {
+        dir,
+        entries,
+        truncated: false,
+    };
+    fresh.sort(SortMode::Name, false);
+    s.apply_refreshed_listing(fresh);
+
+    let names: Vec<&str> = s.left.rows.iter().map(|r| r.display.as_str()).collect();
+    assert_eq!(
+        names,
+        ["c.txt", "b.txt", "a.txt"],
+        "a refresh must re-apply sort:mtime (newest first), not keep the read's name order"
+    );
+    assert_eq!(
+        s.left.sort_order,
+        SortMode::Mtime,
+        "the sort mode itself was never the thing that changed"
+    );
+}
+
 #[test]
 fn rebuild_rows_does_not_ghost_a_deleted_file_still_on_disk() {
     use crate::fs::Entry;

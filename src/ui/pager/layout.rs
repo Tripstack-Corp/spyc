@@ -354,15 +354,15 @@ const fn centered_rect(area: Rect, percent_w: u16, percent_h: u16) -> Rect {
 }
 
 /// Same x / y / width as the standard centered pager, but shrinks from
-/// the bottom: height = lines + borders + status row, capped at the
-/// standard 92% height. Top edge stays where the user expects (matching
-/// the regular pager origin); short summaries don't sit inside a
+/// the bottom: height = the rows the content needs + borders + status row,
+/// capped at the standard 92% height. Top edge stays where the user expects
+/// (matching the regular pager origin); short summaries don't sit inside a
 /// near-full-screen frame.
 pub(super) fn fit_height_rect(area: Rect, view: &PagerView) -> Rect {
     const MIN_H: u16 = 5;
 
     let centered = centered_rect(area, CENTERED_W_PCT, 92);
-    let need_h = (view.lines.len() as u16).saturating_add(3);
+    let need_h = fit_content_rows(centered.width, centered.height, view).saturating_add(3);
     let height = need_h.clamp(MIN_H.min(centered.height), centered.height);
 
     Rect {
@@ -371,6 +371,39 @@ pub(super) fn fit_height_rect(area: Rect, view: &PagerView) -> Rect {
         width: centered.width,
         height,
     }
+}
+
+/// Rows the content occupies at the fit-to-content box's width — VISUAL rows,
+/// not logical lines, because one line wider than the body wraps to several and
+/// a line-count height then hides the overflow inside an under-sized box (the
+/// `L` long listing does this: its rows run past 200 columns).
+///
+/// `box_w` is the outer width; the body loses the two border columns and the
+/// line-number gutter. Stops accumulating at `cap` — the caller clamps there
+/// anyway, so the walk costs a screenful regardless of how long the content is.
+fn fit_content_rows(box_w: u16, cap: u16, view: &PagerView) -> u16 {
+    let logical = u16::try_from(view.lines.len()).unwrap_or(u16::MAX);
+    if !view.wrap {
+        return logical;
+    }
+    let gutter_w = if view.show_line_numbers {
+        view.lines.len().max(1).ilog10() as usize + 2
+    } else {
+        0
+    };
+    let body_w = (box_w as usize).saturating_sub(2).saturating_sub(gutter_w);
+    if body_w == 0 {
+        return logical;
+    }
+    let cap = cap as usize;
+    let mut rows = 0usize;
+    for line in &view.lines {
+        rows = rows.saturating_add(visual_rows(line, body_w, view.tab_width));
+        if rows >= cap {
+            break;
+        }
+    }
+    u16::try_from(rows).unwrap_or(u16::MAX)
 }
 
 #[cfg(test)]
