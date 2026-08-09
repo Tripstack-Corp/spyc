@@ -241,6 +241,7 @@ impl App {
                 .map(|m| crate::context::ArchiveMountRef {
                     root: m.archive().to_path_buf(),
                     staging: m.staging_root.clone(),
+                    source: (m.source() != m.archive()).then(|| m.source().to_path_buf()),
                 })
                 .collect(),
         }

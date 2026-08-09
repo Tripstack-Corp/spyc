@@ -135,7 +135,7 @@ pub(super) fn search_root(ctx_path: &Path) -> PathBuf {
 ///
 /// Empty unless the user is browsing an archive, which is why every reader that
 /// doesn't care can ignore mounts entirely.
-pub(super) fn archive_mounts(ctx_path: &Path) -> Vec<(PathBuf, PathBuf)> {
+pub(super) fn archive_mounts(ctx_path: &Path) -> Vec<ArchiveMountView> {
     let Ok(text) = std::fs::read_to_string(ctx_path) else {
         return Vec::new();
     };
@@ -147,11 +147,28 @@ pub(super) fn archive_mounts(ctx_path: &Path) -> Vec<(PathBuf, PathBuf)> {
     };
     list.iter()
         .filter_map(|m| {
-            let root = m["root"].as_str()?;
-            let staging = m["staging"].as_str()?;
-            Some((PathBuf::from(root), PathBuf::from(staging)))
+            let root = PathBuf::from(m["root"].as_str()?);
+            let staging = PathBuf::from(m["staging"].as_str()?);
+            // A nested archive is read from a staged copy; its own address is a
+            // member of the archive above it and opens nothing.
+            let source = m["source"]
+                .as_str()
+                .map_or_else(|| root.clone(), PathBuf::from);
+            Some(ArchiveMountView {
+                root,
+                staging,
+                source,
+            })
         })
         .collect()
+}
+
+/// A mounted archive as a reader sees it: where it's addressed, where its
+/// extracted bytes go, and which file to actually open.
+pub(super) struct ArchiveMountView {
+    pub root: PathBuf,
+    pub staging: PathBuf,
+    pub source: PathBuf,
 }
 
 /// Split `path` into the mount holding it and the member within, longest mount
@@ -159,21 +176,21 @@ pub(super) fn archive_mounts(ctx_path: &Path) -> Vec<(PathBuf, PathBuf)> {
 ///
 /// `None` for the mount root itself: the archive file is an ordinary file, and
 /// reading it means reading the container's bytes.
-fn member_in_mount(
-    path: &Path,
-    mounts: &[(PathBuf, PathBuf)],
-) -> Option<(PathBuf, PathBuf, String)> {
+fn member_in_mount(path: &Path, mounts: &[ArchiveMountView]) -> Option<(PathBuf, PathBuf, String)> {
     mounts
         .iter()
-        .filter_map(|(root, staging)| {
-            let rel = path.strip_prefix(root).ok()?;
+        .filter_map(|m| {
+            let rel = path.strip_prefix(&m.root).ok()?;
             // A member name that survives normalization is relative and has no
             // `..`, so neither the staging join below nor the index lookup can be
             // walked out of the mount by a crafted argument.
             let inner = crate::archive::index::normalize(&rel.to_string_lossy()).ok()?;
-            Some((root.clone(), staging.clone(), inner.inner))
+            Some((m, inner.inner))
         })
-        .max_by_key(|(root, _, _)| root.as_os_str().len())
+        // Longest root wins, so a nested archive answers for its own members
+        // rather than for the one it sits inside.
+        .max_by_key(|(m, _)| m.root.as_os_str().len())
+        .map(|(m, inner)| (m.source.clone(), m.staging.clone(), inner))
 }
 
 /// Whether `path` is at or inside a mounted archive — the guard for a tool that
@@ -181,7 +198,7 @@ fn member_in_mount(
 pub(super) fn is_in_mount(path: &Path, ctx_path: &Path) -> bool {
     archive_mounts(ctx_path)
         .iter()
-        .any(|(root, _)| path == root || path.starts_with(root))
+        .any(|m| path == m.root || path.starts_with(&m.root))
 }
 
 /// Content for a path inside a mounted archive, or `None` when it isn't one (the

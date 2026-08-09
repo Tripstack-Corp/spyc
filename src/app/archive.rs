@@ -33,7 +33,11 @@ impl App {
         // installs a fresh journal, so it would silently discard changes the user
         // hasn't written back — and for a compressed tar it would re-stream the
         // whole archive to learn what it already knows.
-        if self.state.mounts.contains(path) {
+        //
+        // `get`, not `contains`: a nested archive's path is *inside* the mount
+        // above it, so "is this path in a mount" is true before it is mounted at
+        // all — and answering it would land the column on a file member's path.
+        if self.state.mounts.get(path).is_some() {
             // Already mounted, so whatever was waiting on it can just run.
             if let Some(effect) = then {
                 return vec![*effect];
@@ -60,6 +64,65 @@ impl App {
             confirmed,
             cancel: std::sync::Arc::clone(&self.runtime.archive_cancel),
             then,
+            address: None,
+            depth: 0,
+        })]
+    }
+
+    /// Mount an archive that lives *inside* another one: `at` is its member path
+    /// (where the column browses it), `source` the extracted copy the bytes come
+    /// from.
+    ///
+    /// Each level costs a full copy of that container in the level above's
+    /// staging — the bytes have to be a real file before anything can read them —
+    /// so `[archive] max_depth` bounds how far this can go.
+    pub(super) fn request_nested_mount(
+        &mut self,
+        at: &Path,
+        source: &Path,
+        then: Option<Box<Effect>>,
+    ) -> Vec<Effect> {
+        if self.state.mounts.get(at).is_some() {
+            if let Some(effect) = then {
+                return vec![*effect];
+            }
+            self.enter_mount(at);
+            return Vec::new();
+        }
+        let depth = self
+            .state
+            .mounts
+            .resolve(at)
+            .map_or(0, |(parent, _)| parent.depth + 1);
+        let max = self.state.config.archive.max_depth;
+        if depth > max {
+            self.state.flash_error(format!(
+                "archive: {} is {depth} archives deep — [archive] max_depth is {max}",
+                display_name(at)
+            ));
+            return Vec::new();
+        }
+        // Staging is keyed on the address, so re-entering a nested archive finds
+        // the same tree rather than a second copy of it.
+        let Some(staging_root) = staging_root_for(at) else {
+            self.state
+                .flash_error("archive: no state directory to stage into");
+            return Vec::new();
+        };
+        self.runtime.archive_cancel =
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.state
+            .flash_info(format!("reading {}…", display_name(at)));
+        vec![Effect::Archive(ArchiveOp::Mount {
+            path: source.to_path_buf(),
+            staging_root,
+            limits: self.state.config.archive.limits(),
+            max_entries: self.state.config.archive.max_entries,
+            confirmed: false,
+            cancel: std::sync::Arc::clone(&self.runtime.archive_cancel),
+            then,
+            address: Some(at.to_path_buf()),
+            depth,
         })]
     }
 
@@ -97,7 +160,9 @@ impl App {
             return Vec::new();
         }
         vec![Effect::Archive(ArchiveOp::Materialize {
-            archive: mount.archive().to_path_buf(),
+            // Where the bytes are, not where the mount is addressed — a nested
+            // archive is read out of its staged copy.
+            archive: mount.source().to_path_buf(),
             entry: Box::new(entry),
             staging_root: mount.staging_root.clone(),
             then,
@@ -127,6 +192,7 @@ impl App {
                 warnings,
                 staging_root,
                 then,
+                depth,
             } => {
                 let archive = index.archive.clone();
                 let notes = mount_notes(&capability, &warnings);
@@ -140,6 +206,7 @@ impl App {
                         warnings,
                         staging_root,
                         last_used: 0,
+                        depth,
                     },
                     &protected,
                 );
@@ -235,9 +302,41 @@ impl App {
                     report.members,
                     crate::fs::ops::format_size(report.bytes),
                 ));
-                // Re-mount so the index describes what is now on disk rather than
-                // what used to be.
-                self.request_mount(&archive, true)
+                // Re-read it: a repack renumbers a zip's entries and moves a tar's
+                // offsets, so every locator in the old index now points at the
+                // wrong bytes. The mount has to be *dropped* for that to happen —
+                // a live one is re-entered rather than re-indexed, which is right
+                // everywhere except here.
+                let nested = self
+                    .state
+                    .mounts
+                    .get(&archive)
+                    .and_then(|m| (m.depth > 0).then(|| m.source().to_path_buf()));
+                let mut effects = match self.state.mounts.remove(&archive) {
+                    Some(staging) => clean_effects(vec![staging]),
+                    None => Vec::new(),
+                };
+                effects.extend(match &nested {
+                    // A nested archive is read from its staged copy, which the
+                    // write just replaced in place.
+                    Some(source) => self.request_nested_mount(&archive, source, None),
+                    None => self.request_mount(&archive, true),
+                });
+                // Writing an archive that lives inside another one changes a file
+                // in that one's staging, so the outer now has a pending change of
+                // its own. Say so rather than leaving it to the quit warning.
+                let outer = self
+                    .state
+                    .mounts
+                    .member_of(&archive)
+                    .map(|(outer, _)| display_name(outer.archive()));
+                if let Some(outer) = outer {
+                    self.state.flash_info(format!(
+                        "wrote {} into {outer} — :archive write there too",
+                        display_name(&archive)
+                    ));
+                }
+                effects
             }
             ArchiveOutcome::WriteFailed { archive, error } => {
                 self.state.flash_error(format!(
@@ -257,6 +356,9 @@ impl App {
                 self.open_staged_in_pager(real, dest);
                 Vec::new()
             }
+            // A container inside a container: the bytes are on disk now, so mount
+            // them — addressed where the user sees them, read from where they are.
+            MaterializeThen::Mount { at, then } => self.request_nested_mount(&at, real, then),
             MaterializeThen::Edit { in_pane } => {
                 let argv = crate::shell::resolve_editor();
                 if argv.is_empty() {
@@ -387,6 +489,15 @@ impl App {
                 .filter(|m| m.is_dirty())
                 .map(|m| m.archive().to_path_buf()),
         );
+        // A nested mount reads from a staged copy inside the mount above it, so
+        // evicting the parent would take the child's bytes with it.
+        for child in self.state.mounts.iter() {
+            if child.depth > 0
+                && let Some((parent, _)) = self.state.mounts.resolve(child.archive())
+            {
+                out.push(parent.archive().to_path_buf());
+            }
+        }
         out
     }
 
@@ -400,6 +511,27 @@ impl App {
                 .is_some_and(|(m, _)| m.archive() == archive)
         }) {
             self.state.flash_error("archive: climb out of it first (h)");
+            return Vec::new();
+        }
+        // Dropping this one would delete the staged copy another mount is reading
+        // from, leaving that one pointing at nothing.
+        let staging = self
+            .state
+            .mounts
+            .get(archive)
+            .map(|m| m.staging_root.clone());
+        let child = staging.and_then(|staging| {
+            self.state
+                .mounts
+                .iter()
+                .find(|m| m.depth > 0 && m.archive() != archive && m.source().starts_with(&staging))
+                .map(|m| m.archive().to_path_buf())
+        });
+        if let Some(child) = child {
+            self.state.flash_error(format!(
+                "archive: unmount {} first — it lives inside this one",
+                display_name(&child)
+            ));
             return Vec::new();
         }
         if let Some(staging) = self.state.mounts.remove(archive) {
@@ -693,7 +825,7 @@ impl App {
     /// that wanted them.
     fn extraction_effect(&mut self, members: &[PathBuf], then: MaterializeThen) -> Option<Effect> {
         let (mount, _) = members.first().and_then(|p| self.state.mounts.resolve(p))?;
-        let archive = mount.archive().to_path_buf();
+        let archive = mount.source().to_path_buf();
         let staging_root = mount.staging_root.clone();
         let entries: Vec<(PathBuf, crate::archive::IndexEntry)> = members
             .iter()

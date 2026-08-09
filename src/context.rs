@@ -58,6 +58,10 @@ pub struct ArchiveMountRef {
     pub root: PathBuf,
     /// Directory holding whatever has been extracted so far.
     pub staging: PathBuf,
+    /// The file the bytes are read out of, when that isn't `root` — a nested
+    /// archive is addressed at its member path but read from a staged copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<PathBuf>,
 }
 
 /// Environment variable that tells `spyc --mcp` where to find the
