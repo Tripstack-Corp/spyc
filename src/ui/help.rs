@@ -309,7 +309,7 @@ const SECTIONS: &[Section] = &[
             ("^a u", "quick select — pick URL/path/SHA/IP from pane"),
             (
                 "^a g",
-                "gallery of images the agent received (Enter view, q close)",
+                "image gallery popup: received + unsent pastes (Enter view, q close)",
             ),
             ("^a s", "send selection paths to pane stdin"),
             (

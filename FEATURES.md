@@ -747,10 +747,11 @@ back out of its own transcript — so it survives spyc restarts and
   3. #3    jpeg    493 KB  2h ago      columns in tables should be space aligned nicely:
 ```
 
-`Enter` (or `i`) shows one full-screen with the usual image verbs (`s`
-save, `y` copy, `Y` copy the prompt it arrived with, `b` base64, `o`
-external viewer); `q` closes the gallery. Movement is the normal list
-keys — `j`/`k`, `G`, `/` search all work.
+It's a popup over whatever you were doing, not a view the file list
+switches into — checking an attachment is a glance, not a destination.
+`j`/`k` move, `1`-`9` jump, `Enter` (or `i`) shows one full-screen with
+the usual image verbs (`s` save, `y` copy, `Y` copy the prompt it arrived
+with, `b` base64, `o` external viewer), and `q` closes.
 
 Images you've pasted but **not sent yet** lead the list, marked 📎:
 

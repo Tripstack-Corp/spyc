@@ -26,6 +26,8 @@ pub(super) enum Modal {
     QuickSelect,
     /// Harpoon menu (`view.harpoon_menu`).
     Harpoon,
+    /// Agent image gallery (`view.image_gallery`).
+    ImageGallery,
 }
 
 /// The App-state bits the modal decision reads. `Copy` so tests construct one
@@ -37,12 +39,14 @@ pub(super) struct ModalSnapshot {
     pub overlay_awaiting_dismiss: bool,
     pub has_quick_select: bool,
     pub has_harpoon: bool,
+    pub has_image_gallery: bool,
 }
 
 /// Decide which [`Modal`] (if any) owns input. **Pure** — no mutation, no I/O.
 ///
 /// Branch order is the precedence the historical `handle_key` pre-check ladder
-/// used: finder > capture > overlay-dismiss > quick-select > harpoon. In
+/// used: finder > capture > overlay-dismiss > quick-select > harpoon >
+/// image-gallery. In
 /// practice at most one is ever live at once (a single pager slot + the modal
 /// open/close discipline), but pinning the order keeps the decision total and
 /// the routing deterministic if two were ever set.
@@ -57,6 +61,8 @@ pub(super) const fn active_modal(snap: ModalSnapshot) -> Option<Modal> {
         Some(Modal::QuickSelect)
     } else if snap.has_harpoon {
         Some(Modal::Harpoon)
+    } else if snap.has_image_gallery {
+        Some(Modal::ImageGallery)
     } else {
         None
     }
@@ -74,6 +80,7 @@ mod tests {
             overlay_awaiting_dismiss: false,
             has_quick_select: false,
             has_harpoon: false,
+            has_image_gallery: false,
         }
     }
 
@@ -126,6 +133,7 @@ mod tests {
     #[test]
     fn precedence_order() {
         let all = ModalSnapshot {
+            has_image_gallery: true,
             has_find_picker: true,
             has_capture: true,
             overlay_awaiting_dismiss: true,
