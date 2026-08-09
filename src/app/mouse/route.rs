@@ -227,7 +227,7 @@ impl MouseSnapshot {
 }
 
 /// How long spyc waits, after sending an agent's `transcript_toggle_key`, before
-/// it's willing to send it again — see [`ViewState::pane_toggle_sent_at`].
+/// it's willing to send it again — see [`ViewState::pane_view_sent`].
 /// Comfortably longer than one local pty round trip, short enough to recover
 /// quickly if the scrape genuinely never confirms.
 pub const TOGGLE_SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
@@ -312,13 +312,40 @@ pub enum AgentViewAction {
     Close,
 }
 
+/// Which way spyc last moved an agent's own scrollback view, and is waiting to
+/// see land on screen. Held with the send instant in
+/// [`crate::app::ViewState::pane_view_sent`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingViewIntent {
+    /// [`AgentViewAction::Toggle`] — waiting for the marker to APPEAR.
+    Open,
+    /// [`AgentViewAction::Close`] — waiting for the marker to DISAPPEAR.
+    Close,
+}
+
+/// Pure. Has the pending send landed, judged by what's on screen right now?
+///
+/// The confirmation is direction-specific, and that's the whole point: an `Open`
+/// is confirmed by the marker appearing, a `Close` by it going away. Retiring the
+/// guard on "marker present" regardless of intent looks equivalent and isn't —
+/// after a close the marker is still there for a tick or two while the child
+/// redraws, so the guard erased itself and every further wheel tick sent the close
+/// key again. For codex that key is a bare `q`, so a single flick past the bottom
+/// typed a run of `q`s into its composer.
+pub const fn pending_view_confirmed(intent: PendingViewIntent, is_open: bool) -> bool {
+    match intent {
+        PendingViewIntent::Open => is_open,
+        PendingViewIntent::Close => !is_open,
+    }
+}
+
 /// Inputs to [`decide_agent_view_action`], bundled rather than four positional
 /// `bool`s — each has a distinct meaning, and four bare bools at a call site is
 /// exactly the shape that gets two of them silently transposed.
 #[derive(Debug, Clone, Copy)]
 pub struct AgentViewInputs {
     pub is_open: bool,
-    /// `pane_toggle_sent_at`'s guard already resolved to a bool (elapsed vs.
+    /// `pane_view_sent`'s guard already resolved to a bool (elapsed vs.
     /// [`TOGGLE_SETTLE`]) — kept out of this function so it stays clock-free
     /// and trivially testable. Reused for BOTH directions of the open/close
     /// transition (see `send_agent_view_scroll_keys`'s doc): the same debounce
@@ -596,7 +623,8 @@ pub fn clamp_to_area(view: &crate::ui::pager::PagerView, col: u16, row: u16) -> 
 mod tests {
     use super::{
         AgentViewAction, AgentViewInputs, Gesture, MouseSink, MouseSnapshot, OPEN_AFTER_UP_TICKS,
-        Region, decide_agent_view_action, region_at, route_mouse, scroll_streak_step,
+        PendingViewIntent, Region, decide_agent_view_action, pending_view_confirmed, region_at,
+        route_mouse, scroll_streak_step,
     };
     use crate::app::App;
     use crate::app::pager_handler::PagerSlot;
@@ -1607,6 +1635,64 @@ mod tests {
                 "{ticks} up ticks"
             );
         }
+    }
+
+    /// One flick past the bottom must send the close key ONCE, not once per wheel
+    /// tick — codex's close key is a bare `q`, so every extra send types a
+    /// character into its composer.
+    ///
+    /// Models `send_agent_view_scroll_keys`'s per-tick bookkeeping, because that
+    /// is where this broke: the decision fn was already right (`Close` needs
+    /// `!toggle_pending`), and the caller retired the guard on `is_open` alone.
+    /// The child keeps the marker on screen for a tick or two after the view
+    /// closes, so that read is stale exactly when the guard matters, and it
+    /// erased itself every tick.
+    #[test]
+    fn one_flick_past_the_bottom_sends_the_close_key_once() {
+        let mut pending: Option<PendingViewIntent> = None;
+        let mut closes_sent = 0;
+        // Five down-ticks while the marker is still up: the close landed, codex's
+        // redraw hasn't.
+        for _ in 0..5 {
+            let is_open = true;
+            let action = decide_agent_view_action(
+                AgentViewInputs {
+                    is_open,
+                    // Every tick here is inside TOGGLE_SETTLE.
+                    toggle_pending: pending.is_some(),
+                    escalate: false,
+                    at_bottom: true,
+                    streak_ticks: 1,
+                },
+                PaneScrollView::Native,
+                1,
+            );
+            if matches!(action, AgentViewAction::Close) {
+                closes_sent += 1;
+                pending = Some(PendingViewIntent::Close);
+            }
+            if let Some(intent) = pending
+                && pending_view_confirmed(intent, is_open)
+            {
+                pending = None;
+            }
+        }
+        assert_eq!(
+            closes_sent, 1,
+            "close key sent {closes_sent}× on one flick — each extra one is a `q` in codex's composer"
+        );
+        // Self-healing: once the redraw drops the marker the guard retires, so a
+        // later deliberate close still works.
+        assert!(pending_view_confirmed(PendingViewIntent::Close, false));
+        assert!(!pending_view_confirmed(PendingViewIntent::Close, true));
+    }
+
+    /// The other direction, which the old `if is_open` clear got right and must
+    /// keep getting right: an open is confirmed by the marker APPEARING.
+    #[test]
+    fn an_open_is_confirmed_by_the_marker_appearing() {
+        assert!(pending_view_confirmed(PendingViewIntent::Open, true));
+        assert!(!pending_view_confirmed(PendingViewIntent::Open, false));
     }
 
     /// A toggle already in flight (within TOGGLE_SETTLE) must NOT be re-sent —
