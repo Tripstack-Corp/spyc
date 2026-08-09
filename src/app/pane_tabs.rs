@@ -494,11 +494,12 @@ impl App {
         }
     }
 
-    /// `^z` toggle for the active (agent) bottom pane: suspend it with
-    /// `SIGSTOP` or resume it with `SIGCONT`. spyc manages the suspend itself
-    /// (rather than forwarding `^z` for the agent to self-suspend — Claude
-    /// catches `^z`/SIGTSTP and its handler trips the macOS false-exit), so the
-    /// tab tracks the state deterministically and the divider shows 💤. The
+    /// `^z` toggle for the active bottom pane: suspend it with `SIGSTOP` or
+    /// resume it with `SIGCONT`. spyc manages the suspend itself (rather than
+    /// forwarding `^z` for the child to self-suspend — a raw-mode TUI has
+    /// `ISIG` off and discards the byte, and Claude, which does catch
+    /// `^z`/SIGTSTP, has a handler that trips the macOS false-exit), so the tab
+    /// tracks the state deterministically and the divider shows 💤. The
     /// `suspended` flip + flash are pure state here; only the signal is the
     /// `Effect` (`SignalPane`, which uses the uncatchable `SIGSTOP`). A shell
     /// tab's `^z` is forwarded for its own job control and never reaches this.
@@ -509,9 +510,9 @@ impl App {
             let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
                 return Vec::new();
             };
-            // The pty's foreground process group — the agent itself, since a
-            // pane execs the agent (direct child / session leader, no wrapper
-            // shell). This is exactly the group a real `^z` would signal.
+            // The pty's foreground process group — the command itself, since a
+            // pane execs it (direct child / session leader, no wrapper shell).
+            // This is exactly the group a real `^z` would signal.
             // Fall back to the child pid if `tcgetpgrp` is somehow unavailable.
             let active = tabs.active();
             let Some(pgrp) = active.foreground_pgrp().or_else(|| active.process_id()) else {
@@ -765,8 +766,11 @@ impl App {
             .and_then(|tabs| tabs.tabs_mut().get_mut(idx))
         {
             // The fresh `TabInfo` re-derives the label from the command; restore
-            // a `^a r` rename so a restart doesn't silently undo it.
-            entry.info.label = label;
+            // a `^a r` rename so a restart doesn't silently undo it. Strip the
+            // `[exited N]` annotation first — it's runtime display state, and
+            // `mark_exited` skips any label already carrying one, so restoring
+            // it verbatim leaves a live tab tagged "exited 0" for good.
+            entry.info.label = crate::pane::tabs::strip_exit_suffix(&label);
         }
         // The replacement carries a fresh `claim_owner`, so the old child's P2
         // scope claims can never be released by it — drop them now (mirrors

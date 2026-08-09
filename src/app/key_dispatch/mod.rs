@@ -58,7 +58,8 @@ fn paste_bytes_for_pane(text: &str, child_bracketed: bool) -> Vec<u8> {
 /// What a key destined for the bottom pane should do, w.r.t. `^z` job control.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PaneKeyAction {
-    /// `^z` on an agent tab — toggle spyc-managed suspend/resume.
+    /// `^z` on a tab whose child has no job control of its own — toggle
+    /// spyc-managed suspend/resume.
     Toggle,
     /// A non-`^z` key while the tab is suspended — swallow it (the child is
     /// stopped; forwarding would queue keystrokes that "type" on resume).
@@ -68,14 +69,20 @@ enum PaneKeyAction {
 }
 
 /// Decide a bottom-pane key's `^z` job-control fate. **Pure** (route.rs/focus.rs
-/// template): `^z` toggles only on an agent tab — a shell's `^z` forwards for
-/// its own job control; a suspended tab (always an agent) swallows every other
-/// key. Toggle covers both directions: `toggle_pane_suspend` suspends when
-/// running and resumes when suspended.
-const fn pane_suspend_key_action(key: KeyEvent, is_agent: bool, suspended: bool) -> PaneKeyAction {
+/// template): `^z` toggles a spyc-managed suspend on every tab EXCEPT a shell
+/// one, where it forwards so the shell backgrounds its own foreground job; a
+/// suspended tab swallows every other key. Toggle covers both directions:
+/// `toggle_pane_suspend` suspends when running and resumes when suspended.
+///
+/// The carve-out is the shell, not "everything but an agent": `toggle_pane_suspend`
+/// signals the pty's foreground process group, which works for any child. A
+/// full-screen TUI (`htop`, `rmatrix`, `vim`) runs with `ISIG` off, so the
+/// forwarded `^z` reached it as a literal byte it discards — the key read as
+/// dead on every non-agent tab.
+const fn pane_suspend_key_action(key: KeyEvent, is_shell: bool, suspended: bool) -> PaneKeyAction {
     let is_ctrl_z =
         matches!(key.code, KeyCode::Char('z')) && key.modifiers.contains(KeyModifiers::CONTROL);
-    if is_ctrl_z && is_agent {
+    if is_ctrl_z && !is_shell {
         PaneKeyAction::Toggle
     } else if suspended {
         PaneKeyAction::EatSuspended
@@ -266,23 +273,23 @@ impl App {
             }
             route::InputSink::BottomPane => {
                 // `^z` job-control for the bottom pane, decided purely (tested):
-                // on an agent tab `^z` toggles a spyc-managed suspend/resume (so
-                // claude can't self-suspend and trip the macOS false-exit); while
+                // `^z` toggles a spyc-managed suspend/resume on any non-shell tab
+                // (so claude can't self-suspend and trip the macOS false-exit, and
+                // so a raw-mode TUI that ignores the byte still suspends); while
                 // suspended every other key is swallowed (the child is stopped —
                 // forwarding would queue keystrokes that "type" on resume); a
-                // shell's `^z` and everything else forwards as normal. Meta
+                // shell tab forwards so its own job control keeps working. Meta
                 // chords never reach here (they route to the resolver), so
                 // `^a-x` still closes a suspended tab.
-                let (is_agent, suspended) =
-                    self.runtime.pane_tabs.as_ref().map_or((false, false), |t| {
+                let (is_shell, suspended) =
+                    self.runtime.pane_tabs.as_ref().map_or((true, false), |t| {
                         let info = t.active_info();
                         (
-                            crate::agent::detect(&info.command).kind()
-                                != crate::state::sessions::AgentKind::Other,
+                            crate::shell::command_is_shell(&info.command),
                             info.suspended,
                         )
                     });
-                match pane_suspend_key_action(key, is_agent, suspended) {
+                match pane_suspend_key_action(key, is_shell, suspended) {
                     PaneKeyAction::Toggle => return Ok(self.toggle_pane_suspend()),
                     PaneKeyAction::EatSuspended => {
                         self.state.flash_info("pane suspended — ^z to resume");
@@ -845,14 +852,14 @@ mod suspend_key_tests {
     }
 
     #[test]
-    fn ctrl_z_toggles_on_an_agent_running_or_suspended() {
-        // Running agent: ^z suspends. Suspended agent: ^z resumes. Both Toggle.
+    fn ctrl_z_toggles_on_a_non_shell_tab_running_or_suspended() {
+        // Running: ^z suspends. Suspended: ^z resumes. Both Toggle.
         assert_eq!(
-            pane_suspend_key_action(ctrl_z(), true, false),
+            pane_suspend_key_action(ctrl_z(), false, false),
             PaneKeyAction::Toggle
         );
         assert_eq!(
-            pane_suspend_key_action(ctrl_z(), true, true),
+            pane_suspend_key_action(ctrl_z(), false, true),
             PaneKeyAction::Toggle
         );
     }
@@ -862,7 +869,7 @@ mod suspend_key_tests {
         // The bug we must NOT reintroduce: a shell tab's ^z must reach the pty,
         // not get intercepted as a spyc suspend.
         assert_eq!(
-            pane_suspend_key_action(ctrl_z(), false, false),
+            pane_suspend_key_action(ctrl_z(), true, false),
             PaneKeyAction::Forward
         );
     }
@@ -872,13 +879,17 @@ mod suspend_key_tests {
         // While stopped, a stray key must not be forwarded (it would "type" on
         // resume); only ^z (handled above) wakes it.
         assert_eq!(
-            pane_suspend_key_action(plain('j'), true, true),
+            pane_suspend_key_action(plain('j'), false, true),
             PaneKeyAction::EatSuspended
         );
     }
 
     #[test]
-    fn running_agent_forwards_ordinary_keys() {
+    fn running_tab_forwards_ordinary_keys() {
+        assert_eq!(
+            pane_suspend_key_action(plain('j'), false, false),
+            PaneKeyAction::Forward
+        );
         assert_eq!(
             pane_suspend_key_action(plain('j'), true, false),
             PaneKeyAction::Forward

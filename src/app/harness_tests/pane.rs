@@ -832,6 +832,67 @@ fn restarting_a_tab_keeps_its_number() {
     });
 }
 
+/// Regression: restarting an exited tab must not carry its `[exited N]`
+/// annotation onto the live replacement. The rename-preservation step restored
+/// the outgoing label verbatim, and `mark_exited` skips any label already
+/// holding a suffix — so the tag stuck for the rest of the session (reported
+/// against a restarted `rmatrix` still tagged "exited 0" while animating).
+#[test]
+fn restarting_an_exited_tab_drops_the_exit_suffix() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat");
+
+        // Exactly what `mark_exited` writes once the reader sees EOF.
+        let tabs = app.runtime.pane_tabs.as_mut().expect("tabs exist");
+        tabs.active_info_mut().label = "cat [exited 0]".to_string();
+
+        app.restart_active_tab_now();
+
+        assert_eq!(
+            app.runtime
+                .pane_tabs
+                .as_ref()
+                .expect("tabs exist")
+                .active_info()
+                .label,
+            "cat",
+            "the live replacement is not labelled exited"
+        );
+    });
+}
+
+/// The same requirement one layer up: a rename that itself ends in an exit
+/// suffix still restores its base, so the two rules compose.
+#[test]
+fn restarting_a_renamed_exited_tab_keeps_the_rename() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat");
+        let tabs = app.runtime.pane_tabs.as_mut().expect("tabs exist");
+        tabs.active_info_mut().label = "matrix [exited 130]".to_string();
+
+        app.restart_active_tab_now();
+
+        assert_eq!(
+            app.runtime
+                .pane_tabs
+                .as_ref()
+                .expect("tabs exist")
+                .active_info()
+                .label,
+            "matrix",
+            "the rename survives, the annotation does not"
+        );
+    });
+}
+
 /// Regression: `V`'s top-overlay editor pauses Pane-tier actions (new tab,
 /// rename, etc. would mutate the pane hidden behind the editor) — but the
 /// bottom pane STAYS VISIBLE while `V` is open (only the top file-list area is

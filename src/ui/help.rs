@@ -320,7 +320,7 @@ const SECTIONS: &[Section] = &[
             ("^a i", "pipe inventory file contents to pane"),
             (
                 "^z",
-                "suspend/resume the agent pane (💤); shell ^z forwards as usual",
+                "suspend/resume the pane's child (💤); shell ^z forwards as usual",
             ),
             ("Ctrl+J", "newline in pane (multi-line input)"),
         ],
