@@ -26,7 +26,7 @@
 //!   neither "skip attachments" nor "dedupe by label" is correct; dedupe is on
 //!   content identity.
 
-use std::io::{BufRead, BufReader};
+use std::io::BufReader;
 use std::path::Path;
 
 /// How much of a base64 payload to read from each end when fingerprinting it
@@ -72,18 +72,46 @@ pub fn index(path: &Path) -> Vec<TranscriptImage> {
     };
     let mut seen: Vec<u64> = Vec::new();
     let mut out: Vec<TranscriptImage> = Vec::new();
-    for (line_no, line) in BufReader::new(file).lines().enumerate() {
-        let Ok(line) = line else { continue };
+    let mut reader = BufReader::new(file);
+    let mut buf = Vec::new();
+    let mut oversized = 0usize;
+    // Bounded per line, NOT `lines()`: a file with no newline in it would be
+    // read whole. See `read_line_capped`.
+    for line_no in 0.. {
+        match crate::state::read_line_capped(
+            &mut reader,
+            &mut buf,
+            crate::state::MAX_TRANSCRIPT_LINE_BYTES,
+        ) {
+            Ok(None) | Err(_) => break,
+            Ok(Some(false)) => {
+                oversized += 1;
+                continue;
+            }
+            Ok(Some(true)) => {}
+        }
+        let Ok(line) = std::str::from_utf8(&buf) else {
+            continue;
+        };
         // Cheap reject first: only a handful of lines in a transcript hold an
         // image, and parsing a multi-hundred-KB JSON line to discover otherwise
         // is the whole cost of this pass.
         if !line.contains("\"type\":\"image\"") {
             continue;
         }
-        let Ok(record) = serde_json::from_str::<serde_json::Value>(&line) else {
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
         index_record(&record, line_no, &mut seen, &mut out);
+    }
+    if oversized > 0 {
+        // Not silent: a skipped record could have held an image, and a gallery
+        // that quietly omits one is worse than one that says it did.
+        crate::debug_log::log(&format!(
+            "transcript_images: skipped {oversized} record(s) over {} bytes in {}",
+            crate::state::MAX_TRANSCRIPT_LINE_BYTES,
+            path.display()
+        ));
     }
     out
 }
@@ -164,13 +192,25 @@ fn index_record(
 pub fn load(path: &Path, entry: &TranscriptImage) -> Result<Vec<u8>, String> {
     use base64::Engine;
     let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let line = BufReader::new(file)
-        .lines()
-        .nth(entry.line)
-        .ok_or_else(|| "transcript changed under us (line is gone)".to_string())?
-        .map_err(|e| format!("read: {e}"))?;
+    let mut reader = BufReader::new(file);
+    let mut buf = Vec::new();
+    // Same bound as the index pass — this walks the same records.
+    for _ in 0..=entry.line {
+        match crate::state::read_line_capped(
+            &mut reader,
+            &mut buf,
+            crate::state::MAX_TRANSCRIPT_LINE_BYTES,
+        ) {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return Err("transcript changed under us (line is gone)".to_string());
+            }
+            Err(e) => return Err(format!("read: {e}")),
+        }
+    }
+    let line = std::str::from_utf8(&buf).map_err(|e| format!("read: {e}"))?;
     let record: serde_json::Value =
-        serde_json::from_str(&line).map_err(|e| format!("parse: {e}"))?;
+        serde_json::from_str(line).map_err(|e| format!("parse: {e}"))?;
     let blocks = content_blocks(&record).ok_or_else(|| "no content blocks".to_string())?;
     let data = blocks
         .iter()
@@ -379,6 +419,33 @@ mod tests {
             .decode(PNG_B64)
             .expect("fixture decodes");
         assert_eq!(decoded_len(PNG_B64), actual.len());
+    }
+
+    /// A monstrous record must not cost the images after it: the index has to
+    /// skip it and carry on, not stop or mis-split the rest of the file.
+    #[test]
+    fn an_oversized_record_does_not_hide_the_images_after_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("session.jsonl");
+        let mut data = user_line("first", &[PNG_B64], "2026-08-04T10:00:00Z");
+        data.push('\n');
+        // A single line far past the cap, with no newline inside it.
+        data.push_str(&"x".repeat(crate::state::MAX_TRANSCRIPT_LINE_BYTES + 1024));
+        data.push('\n');
+        let other = PNG_B64.replace("iVBORw0", "iVBORw1");
+        data.push_str(&user_line("second", &[&other], "2026-08-04T11:00:00Z"));
+        std::fs::write(&path, data).expect("write transcript");
+
+        let images = index(&path);
+        assert_eq!(
+            images.len(),
+            2,
+            "the record after the huge line is still indexed"
+        );
+        assert_eq!(images[1].prompt_excerpt, "second");
+        // And its bytes still load — the line index survived the skip.
+        let bytes = load(&path, &images[1]).expect("load the second image");
+        assert_eq!(&bytes[1..4], b"PNG");
     }
 
     /// A transcript with no images, a missing file, and a corrupt line are all
