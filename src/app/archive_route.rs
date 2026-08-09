@@ -88,10 +88,13 @@ pub fn route_archive_effect(
     }
     match classify(&effect, mounts, is_staged, inventory_names) {
         Verdict::Pass => ArchiveSink::PassThrough(effect),
-        Verdict::Need(members) => ArchiveSink::Materialize {
+        // Substitute what's already on disk now, and let the extraction's own
+        // result substitute the rest — an op must never see a mount path.
+        Verdict::Need { members, staged } => ArchiveSink::Materialize {
             members,
-            then: Box::new(effect),
+            then: Box::new(rewrite_paths(effect, &staged)),
         },
+        Verdict::Staged(staged) => ArchiveSink::PassThrough(rewrite_paths(effect, &staged)),
         Verdict::Refuse(why) => ArchiveSink::Refuse(why),
         Verdict::TakesContainer(archives) => ArchiveSink::UnmountFirst {
             archives,
@@ -107,7 +110,14 @@ pub fn route_archive_effect(
 /// The decision, before the effect is moved into a sink.
 enum Verdict {
     Pass,
-    Need(Vec<PathBuf>),
+    /// Extract `members`; `staged` names the ones already on disk, whose paths are
+    /// substituted before the effect is held back.
+    Need {
+        members: Vec<PathBuf>,
+        staged: HashMap<PathBuf, PathBuf>,
+    },
+    /// Every member named is on disk already — only the paths need substituting.
+    Staged(HashMap<PathBuf, PathBuf>),
     Refuse(&'static str),
     TakesContainer(Vec<PathBuf>),
     Record(Vec<PendingChange>),
@@ -398,23 +408,50 @@ fn join_inner(dir: &str, name: &str) -> String {
     }
 }
 
-/// The members among `paths` that aren't extracted yet.
+/// Sort the members among `paths` into "needs extracting" and "already on disk,
+/// here is where".
 ///
-/// A mounted archive named here is a real file already, so it needs nothing — a
-/// read of `pkg.zip` itself is a read of `pkg.zip`, mounted or not.
+/// A member's bytes are **never** at its mount path — extracted, they live in the
+/// staging tree, so an op naming one has to be pointed there whether or not
+/// anything had to be extracted first. Skipping the substitution because nothing
+/// needed extracting is how a yank inside a streamed `.tar.gz` (where the mount
+/// stages every member up front) reached the OS as
+/// `demo.tar.gz/src/main.rs: Not a directory`.
+///
+/// A mounted archive named here is a real file already and needs neither: a read
+/// of `pkg.zip` itself is a read of `pkg.zip`, mounted or not.
 fn need(paths: &[PathBuf], mounts: &Mounts, is_staged: &dyn Fn(&Path) -> bool) -> Verdict {
-    let members: Vec<PathBuf> = paths
-        .iter()
-        .filter(|p| mounts.holds_member(p) && !is_staged(p))
-        .cloned()
-        .collect();
-    if members.is_empty() {
-        // Either nothing is in an archive, or every member is already extracted —
-        // in both cases the effect's paths are real files right now.
-        Verdict::Pass
-    } else {
-        Verdict::Need(members)
+    let mut wanted: Vec<PathBuf> = Vec::new();
+    let mut staged: HashMap<PathBuf, PathBuf> = HashMap::new();
+    for path in paths.iter().filter(|p| mounts.holds_member(p)) {
+        match staging_path(path, mounts).filter(|_| is_staged(path)) {
+            Some(real) => {
+                staged.insert(path.clone(), real);
+            }
+            // Not extracted — or extracted somewhere we can't name, in which case
+            // extracting it again is how it gets a path we can.
+            None => wanted.push(path.clone()),
+        }
     }
+    if wanted.is_empty() {
+        if staged.is_empty() {
+            // Nothing in `paths` is in an archive.
+            Verdict::Pass
+        } else {
+            Verdict::Staged(staged)
+        }
+    } else {
+        Verdict::Need {
+            members: wanted,
+            staged,
+        }
+    }
+}
+
+/// Where a member's extracted bytes live, or would.
+fn staging_path(member: &Path, mounts: &Mounts) -> Option<PathBuf> {
+    let (mount, _) = mounts.member_of(member)?;
+    mount.entry_at(member).map(|e| mount.staging_path(e))
 }
 
 fn graveyard_paths(op: &super::graveyard_ops::GraveyardOp) -> Vec<PathBuf> {

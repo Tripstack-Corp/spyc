@@ -1347,3 +1347,162 @@ fn deleting_a_dirty_mounted_archive_is_refused() {
         );
     });
 }
+
+// ── an extracted member's bytes are in staging, never at its mount path ───
+
+/// Same three members, as a `.tar.gz` — a *streamed* mount, which extracts every
+/// member as it reads because a compressed tar can't be listed any other way.
+fn build_tar_gz(path: &Path) {
+    let enc = flate2::write::GzEncoder::new(
+        std::fs::File::create(path).unwrap(),
+        flate2::Compression::default(),
+    );
+    let mut b = tar::Builder::new(enc);
+    for (name, body) in [
+        ("README.md", "# pkg\n"),
+        ("src/main.rs", "fn main() {}\n"),
+        ("src/deep/mod.rs", "pub fn helper() {}\n"),
+    ] {
+        let mut h = tar::Header::new_gnu();
+        h.set_size(body.len() as u64);
+        h.set_mode(0o644);
+        h.set_mtime(1_000_000);
+        h.set_entry_type(tar::EntryType::Regular);
+        b.append_data(&mut h, name, body.as_bytes()).unwrap();
+    }
+    b.into_inner().unwrap().finish().unwrap();
+}
+
+/// The reported bug: `y` inside a `.tar.gz` failed with
+/// `demo.tar.gz/src/main.rs: Not a directory`.
+///
+/// A streamed mount stages every member up front, so nothing needed extracting —
+/// and the screen took "nothing to extract" to mean "these paths are real", when
+/// a member's bytes are in the staging tree and its mount path is never a file.
+#[test]
+fn yanking_a_member_of_a_streamed_archive_captures_its_contents() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.tar.gz");
+        build_tar_gz(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+
+        let item = app
+            .state
+            .inventory
+            .items()
+            .find(|i| i.filename == "README.md")
+            .unwrap_or_else(|| {
+                panic!(
+                    "the member should be in the inventory; flash: {:?}",
+                    app.state.flash.as_ref().map(|f| f.text.clone())
+                )
+            });
+        assert_eq!(
+            app.state.inventory.read_content(&item.id).as_deref(),
+            Some(b"# pkg\n".as_slice()),
+            "and it carries the member's real bytes"
+        );
+    });
+}
+
+/// The same hole with a seekable archive: reading a member stages it, so the
+/// *second* read is the one that finds nothing to extract.
+#[test]
+fn reading_a_member_twice_still_reads_its_bytes() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        app.apply(&Action::Down(1)).unwrap();
+
+        // First read extracts it; second finds it staged.
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+        app.state.flash = None;
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+
+        // The second yank is the one under test, so its *outcome* is what has to
+        // be clean — an inventory item from the first read would hide a failure.
+        assert!(
+            !matches!(
+                app.state.flash.as_ref().map(|f| f.kind),
+                Some(crate::app::FlashKind::Error)
+            ),
+            "the second yank failed: {:?}",
+            app.state.flash.as_ref().map(|f| f.text.clone())
+        );
+        let held: Vec<_> = app
+            .state
+            .inventory
+            .items()
+            .filter(|i| i.filename == "README.md")
+            .map(|i| app.state.inventory.read_content(&i.id))
+            .collect();
+        assert!(!held.is_empty(), "and the member is in the inventory");
+        for content in held {
+            assert_eq!(
+                content.as_deref(),
+                Some(b"# pkg\n".as_slice()),
+                "every copy carries the member's bytes"
+            );
+        }
+    });
+}
+
+/// A mixed selection is the subtle half: extracting only what's missing means the
+/// worker's own result can't be the whole substitution, so the already-staged
+/// member would keep its mount path.
+#[test]
+fn a_mixed_selection_rewrites_the_staged_member_too() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Stage `README.md` by yanking it, then yank it together with a member
+        // that is still only an index entry.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+
+        let readme = archive.join("README.md");
+        let main = archive.join("src/main.rs");
+        let fx = app.screen_archive_effect(Effect::Inventory(
+            crate::app::inventory_ops::InventoryOp::Yank {
+                paths: vec![readme.clone(), main.clone()],
+            },
+        ));
+        let Some(Effect::Archive(ArchiveOp::MaterializeMany { then, .. })) = fx else {
+            panic!("expected the extraction to be held back, got {fx:?}");
+        };
+        let crate::app::archive_ops::MaterializeThen::Retry(effect) = then else {
+            panic!("a held-back read retries the original effect");
+        };
+        let Effect::Inventory(crate::app::inventory_ops::InventoryOp::Yank { paths }) = *effect
+        else {
+            panic!("shape preserved");
+        };
+        assert!(
+            !paths.contains(&readme),
+            "the staged member is already pointed at staging: {paths:?}"
+        );
+        assert!(
+            paths.contains(&main),
+            "and the unextracted one still waits for the worker: {paths:?}"
+        );
+    });
+}
