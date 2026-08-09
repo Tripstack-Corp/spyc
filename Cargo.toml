@@ -126,6 +126,19 @@ strip-ansi-escapes = "0.2"
 pulldown-cmark = { version = "0.13", default-features = false }
 tar = "0.4"
 zstd = "0.13"
+# Archive browsing (docs/drafts/ARCHIVE_BROWSING_PLAN.md): read the zip central
+# directory to index a mount without decompressing, and `raw_copy_file` untouched
+# entries on repack. `default-features = false` is required, not tidiness — the
+# 14-feature default set pulls a C `bzip2` binding plus lzma/xz/ppmd/zopfli/aes.
+# We take deflate through the `zlib-rs` already in the tree (gix) and zstd
+# through the crate above, so no new compiled-C dependency enters the build.
+zip = { version = "8", default-features = false, features = [
+    "deflate-flate2-zlib-rs",
+    "zstd",
+] }
+# gzip streaming for `.tar.gz` mounts, on the same `zlib-rs` backend as `zip`'s
+# deflate (already in the tree) rather than pulling a second inflate impl.
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 trash = "5"
 # tempfile is a runtime dep (not just dev-deps) because the
 # graveyard's cascade-to-trash and legacy-migration paths stage

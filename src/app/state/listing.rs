@@ -72,10 +72,27 @@ impl AppState {
                     }
                 })
                 .collect(),
+            // Uncommitted images (pasted, not yet sent) lead, then what the
+            // agent has actually received. `GalleryRow::of` is the one place
+            // that knows this ordering, so the cursor and the rows can't drift.
             View::Images => self
-                .transcript_images
+                .pending_gallery_images()
                 .iter()
-                .map(|i| {
+                .map(|p| {
+                    let (w, h) = p.dims;
+                    RowData {
+                        path: PathBuf::new(),
+                        display: format!(
+                            "  \u{1f4ce} {:<5} png   {:>8}  {:<10}  {w}\u{00d7}{h}, not sent yet",
+                            format!("#{}", p.seq),
+                            crate::fs::ops::format_size(p.encoded.len() as u64),
+                            crate::app::state::format_age(p.captured_at),
+                        ),
+                        kind: crate::fs::EntryKind::File,
+                        deleted: false,
+                    }
+                })
+                .chain(self.transcript_images.iter().map(|i| {
                     // Lead with spyc's own number (the handle that's actually
                     // stable), then the agent's label so a `[Image #3]` in the
                     // conversation can be found here.
@@ -99,7 +116,7 @@ impl AppState {
                         kind: crate::fs::EntryKind::File,
                         deleted: false,
                     }
-                })
+                }))
                 .collect(),
         };
         let row_count = self.cur().rows.len();
@@ -536,6 +553,34 @@ impl AppState {
 /// `unwrap_or` is a belt-and-suspenders for a pathological relative input.
 /// Used as the orphaned-column heal target when PROJECT_HOME is also gone, so
 /// a column is never left on a dead path.
+/// Which image a gallery cursor position refers to.
+///
+/// The gallery concatenates two lists — uncommitted images first, then received
+/// ones — so the cursor index means different things in different halves.
+/// Resolving that in exactly one place is what keeps "row 3" and "the image
+/// opened by row 3" from drifting apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GalleryRow {
+    /// Nth uncommitted (pasted, not yet sent) image.
+    Pending(usize),
+    /// Nth image from the agent's transcript.
+    Received(usize),
+}
+
+impl GalleryRow {
+    /// Resolve a cursor index against a gallery of `pending` + `received` rows.
+    /// `None` past the end.
+    pub const fn of(index: usize, pending: usize, received: usize) -> Option<Self> {
+        if index < pending {
+            Some(Self::Pending(index))
+        } else if index - pending < received {
+            Some(Self::Received(index - pending))
+        } else {
+            None
+        }
+    }
+}
+
 /// Relative age of a transcript image, from its ISO-8601 stamp.
 ///
 /// Goes through the graveyard's `format_age` so the gallery reads the same way
@@ -553,4 +598,43 @@ fn nearest_existing_ancestor(path: &Path) -> PathBuf {
     path.ancestors()
         .find(|p| p.is_dir())
         .map_or_else(|| PathBuf::from("/"), Path::to_path_buf)
+}
+
+#[cfg(test)]
+mod gallery_row_tests {
+    use super::GalleryRow;
+
+    /// The whole point of the type: the cursor index means different things in
+    /// the two halves, and "row 3" must open the image row 3 renders.
+    #[test]
+    fn the_cursor_resolves_across_both_sections() {
+        // 2 unsent, then 3 received.
+        assert_eq!(GalleryRow::of(0, 2, 3), Some(GalleryRow::Pending(0)));
+        assert_eq!(GalleryRow::of(1, 2, 3), Some(GalleryRow::Pending(1)));
+        assert_eq!(GalleryRow::of(2, 2, 3), Some(GalleryRow::Received(0)));
+        assert_eq!(GalleryRow::of(4, 2, 3), Some(GalleryRow::Received(2)));
+        assert_eq!(GalleryRow::of(5, 2, 3), None, "past the end");
+    }
+
+    /// With nothing pasted the gallery is transcript-only, and index 0 must be
+    /// the first received image rather than a phantom unsent one.
+    #[test]
+    fn with_no_unsent_images_every_row_is_received() {
+        assert_eq!(GalleryRow::of(0, 0, 2), Some(GalleryRow::Received(0)));
+        assert_eq!(GalleryRow::of(1, 0, 2), Some(GalleryRow::Received(1)));
+        assert_eq!(GalleryRow::of(2, 0, 2), None);
+    }
+
+    /// The pre-submit case the capture exists for: unsent images with no
+    /// transcript behind them at all.
+    #[test]
+    fn unsent_images_alone_are_addressable() {
+        assert_eq!(GalleryRow::of(0, 1, 0), Some(GalleryRow::Pending(0)));
+        assert_eq!(GalleryRow::of(1, 1, 0), None);
+    }
+
+    #[test]
+    fn an_empty_gallery_has_no_rows() {
+        assert_eq!(GalleryRow::of(0, 0, 0), None);
+    }
 }

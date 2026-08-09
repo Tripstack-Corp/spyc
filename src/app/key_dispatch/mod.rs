@@ -297,6 +297,11 @@ impl App {
                     }
                     PaneKeyAction::Forward => {}
                 }
+                // The agent reads the system clipboard itself on its paste key
+                // (the terminal can't carry image bytes), so this is spyc's one
+                // chance to keep a copy of what it just took. Purely additive:
+                // the key still forwards below, unmodified.
+                let capture = self.plan_clipboard_capture(key);
                 // Track what the user types so `yP` can yank the
                 // last prompt.
                 match key.code {
@@ -306,6 +311,11 @@ impl App {
                             self.state.pane.last_pane_prompt = Some(trimmed);
                         }
                         self.state.pane.pane_prompt_buf.clear();
+                        // Submitting hands the images to the agent, whose
+                        // transcript becomes the record — so the uncommitted
+                        // ring for this tab is done. Same signal the prompt
+                        // buffer uses, deliberately: one notion of "sent".
+                        self.clear_pending_images_for_active_tab();
                     }
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         self.state.pane.pane_prompt_buf.clear();
@@ -321,13 +331,17 @@ impl App {
                 // Forward the keystroke to the active pane via the sole
                 // executor (no flash — result was always ignored). The
                 // `pane_prompt_buf` tracking above stays as pure
-                // transitions before the emit.
-                return Ok(vec![Effect::SendToPane {
+                // transitions before the emit. Any clipboard capture rides
+                // ALONGSIDE the forward, never instead of it — the agent must
+                // still receive the paste it asked for.
+                let mut effects = vec![Effect::SendToPane {
                     target: PaneTarget::Active,
                     input: PaneInput::Key(key),
                     on_ok: None,
                     err_prefix: None,
-                }]);
+                }];
+                effects.extend(capture);
+                return Ok(effects);
             }
             route::InputSink::Prompt => {
                 return Ok(self.handle_prompt_key(key));

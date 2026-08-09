@@ -208,6 +208,59 @@ pub fn copy_image(png: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("clipboard: {e}"))
 }
 
+/// A clipboard image: PNG bytes plus its natural pixel size.
+pub type ClipboardImage = (Vec<u8>, (u32, u32));
+
+/// Read an image off the system clipboard, re-encoded as PNG.
+///
+/// `Ok(None)` means "the clipboard holds no image" — the overwhelmingly common
+/// case when this fires on a paste keystroke, and not a failure worth telling
+/// the user about.
+///
+/// **Runs on a worker, never the loop.** `arboard` hands back raw RGBA (33 MB
+/// for a 4K screenshot), so this allocates heavily and then spends real time
+/// encoding. Verified safe off the main thread on macOS: a clipboard image
+/// round-trips exactly from a spawned thread, ~3 ms at 3840×2160 for the read.
+///
+/// Encoding uses fast compression deliberately — this is a transient preview
+/// cache, and a smaller file isn't worth a second of a worker's time.
+///
+/// Over SSH this reads the *server's* clipboard, the same asymmetry OSC 52
+/// exists to solve for the write direction. That's the right behavior here:
+/// the agent running in the pane reads that same clipboard, so spyc sees
+/// exactly what the agent saw.
+pub fn read_image() -> Result<Option<ClipboardImage>, String> {
+    let img = match arboard::Clipboard::new().and_then(|mut cb| cb.get_image()) {
+        Ok(img) => img,
+        // Every "nothing usable there" shape — no image, empty clipboard, an
+        // unsupported flavor — is the same non-event to the caller.
+        Err(arboard::Error::ContentNotAvailable | arboard::Error::ClipboardNotSupported) => {
+            return Ok(None);
+        }
+        Err(e) => return Err(format!("clipboard: {e}")),
+    };
+    let (w, h) = (
+        u32::try_from(img.width).map_err(|_| "clipboard image too wide".to_string())?,
+        u32::try_from(img.height).map_err(|_| "clipboard image too tall".to_string())?,
+    );
+    let buf: image::RgbaImage = image::ImageBuffer::from_raw(w, h, img.bytes.into_owned())
+        .ok_or_else(|| "clipboard image dimensions don't match its bytes".to_string())?;
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::ImageEncoder::write_image(
+        image::codecs::png::PngEncoder::new_with_quality(
+            &mut out,
+            image::codecs::png::CompressionType::Fast,
+            image::codecs::png::FilterType::NoFilter,
+        ),
+        &buf,
+        w,
+        h,
+        image::ExtendedColorType::Rgba8,
+    )
+    .map_err(|e| format!("png encode: {e}"))?;
+    Ok(Some((out.into_inner(), (w, h))))
+}
+
 /// The largest payload spyc will hand to OSC 52.
 ///
 /// xterm's own limit is ~74 994 bytes of base64 and several terminals inherit it;

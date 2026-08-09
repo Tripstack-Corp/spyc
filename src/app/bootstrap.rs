@@ -186,6 +186,7 @@ impl App {
             graveyard: Vec::new(),
             transcript_images: Vec::new(),
             transcript_images_path: None,
+            gallery_tab_id: None,
             scope_registry: Vec::new(),
             pending_new_tab_cmd: None,
             last_captured_cmd: None,

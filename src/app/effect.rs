@@ -235,6 +235,16 @@ pub enum Effect {
     /// and mostly base64, so never on the loop. Lands as `ImageOutcome::Indexed`.
     IndexTranscriptImages(image_ops::TranscriptIndexOp),
 
+    /// Tier 5. Read whatever image is on the system clipboard, as the user
+    /// pastes it into an agent pane. Off-thread: `arboard` returns raw RGBA
+    /// (33 MB for a 4K screenshot) and this then encodes it.
+    CaptureClipboardImage(image_ops::ClipboardCaptureOp),
+
+    /// Tier 5. Show bytes the caller already holds (an uncommitted pasted
+    /// image) full-screen. Same worker shape as the other image producers —
+    /// the decode and protocol encode are the cost, not the fetch.
+    ShowImageBytes(image_ops::ImageBytesOp),
+
     /// Tier 5. Re-read + decode one already-indexed transcript image and show it
     /// full-screen. The index deliberately holds no bytes, so this is where they
     /// are actually read.
@@ -942,6 +952,31 @@ impl App {
                     let picker = self.runtime.picker.clone();
                     std::thread::spawn(move || {
                         let outcome = mermaid_ops::render_mermaid_op(op, picker);
+                        results.lock().unwrap().push(outcome);
+                        if let Some(tx) = wake {
+                            let _ = tx.send(Message::ImageDone);
+                        }
+                    });
+                }
+                // Build an overlay from bytes already in hand.
+                Effect::ShowImageBytes(op) => {
+                    let results = std::sync::Arc::clone(&self.runtime.image_results);
+                    let wake = self.runtime.pane_wake_tx.clone();
+                    let picker = self.runtime.picker.clone();
+                    std::thread::spawn(move || {
+                        let outcome = image_ops::show_image_bytes(op, picker);
+                        results.lock().unwrap().push(outcome);
+                        if let Some(tx) = wake {
+                            let _ = tx.send(Message::ImageDone);
+                        }
+                    });
+                }
+                // Grab the clipboard image off-thread as the user pastes.
+                Effect::CaptureClipboardImage(op) => {
+                    let results = std::sync::Arc::clone(&self.runtime.image_results);
+                    let wake = self.runtime.pane_wake_tx.clone();
+                    std::thread::spawn(move || {
+                        let outcome = image_ops::capture_clipboard_image(op);
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
                             let _ = tx.send(Message::ImageDone);
