@@ -77,13 +77,19 @@ pub fn render_mermaid_op(op: MermaidRenderOp, picker: Option<Picker>) -> ImageOu
     }
 }
 
-/// Persist the PNG to a stable temp path (one file per diagram source) and open
-/// it in the OS viewer.
+/// Persist the PNG to a stable name inside spyc's private scratch dir (one file
+/// per diagram source) and open it in the OS viewer.
 fn open_png(source: &str, bytes: &[u8]) -> ImageOutcome {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     source.hash(&mut h);
-    let path: PathBuf = std::env::temp_dir().join(format!("spyc-mermaid-{:016x}.png", h.finish()));
+    // Stable per source, but under a private 0700 dir — see
+    // SPYC-TRAP(viewer-temp-symlink) in `image_ops::viewer_scratch_path`.
+    let path: PathBuf =
+        match image_ops::viewer_scratch_path(&format!("spyc-mermaid-{:016x}.png", h.finish())) {
+            Ok(p) => p,
+            Err(e) => return ImageOutcome::Failed(format!("mermaid render failed: {e}")),
+        };
     if let Err(e) = std::fs::write(&path, bytes) {
         return ImageOutcome::Failed(format!("mermaid render failed: write temp file: {e}"));
     }

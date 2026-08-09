@@ -70,6 +70,29 @@ same pattern: spawn a worker, push a typed message into a channel,
 drop stale messages by generation. See `ROADMAP.md`'s "Background
 directory loading" entry.
 
+## Files handed to an external viewer live in a private scratch dir
+
+<!-- SPYC-TRAP: viewer-temp-symlink -->
+`image_ops::viewer_scratch_path` is the only way spyc builds a path for a
+file it hands to the OS image viewer (`o` on a diagram or an agent image).
+It creates ONE per-process directory via `tempfile` — random name, `O_EXCL`,
+mode 0700 — and returns paths inside it. Never join `env::temp_dir()`
+directly and never use a predictable file name there.
+
+`fs::write` follows symlinks. Both call sites previously wrote to a fully
+predictable path (`spyc-agent-image-1.png`, `spyc-mermaid-<hash-of-source>.png`)
+directly under `env::temp_dir()`. On macOS `$TMPDIR` is per-user and mode 700,
+so nothing could be planted; on Linux it is the shared world-writable `/tmp`,
+where any local user can pre-create that exact name as a symlink to a file of
+the user's and turn the keypress into an arbitrary-file overwrite. The sticky
+bit does not help — it prevents deleting or renaming *other people's* files,
+not creating a name that does not exist yet. The 0700 directory also stops the
+images (often screenshots) being world-readable while they sit there.
+
+The directory deliberately outlives the process: the external viewer opens the
+file after spyc has moved on. That is what lets the file *name* stay stable per
+content, so re-opening the same diagram reuses its file rather than littering.
+
 ## Watcher event filtering (read-only access events)
 
 <!-- SPYC-TRAP: fs-watch-readonly-access -->
