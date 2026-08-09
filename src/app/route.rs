@@ -63,6 +63,8 @@ pub(super) enum InputSink {
     Harpoon,
     /// Agent image gallery popup is open.
     ImageGallery,
+    /// Full-screen image overlay is up.
+    ImageView,
     // ── content sinks: the focused region owns the input ──
     /// In-app prompt is active (`Mode::Prompting`); the key feeds
     /// the prompt's line editor.
@@ -151,6 +153,7 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
     // Modal layer — a single typed value (precedence decided by `active_modal`)
     // maps straight to its sink. Eats every input kind before the content layer.
     match snap.modal {
+        Some(Modal::ImageView) => return InputSink::ImageView,
         Some(Modal::FindPicker) => return InputSink::FindPicker,
         Some(Modal::Capture) => return InputSink::Capture,
         Some(Modal::OverlayDismiss) => return InputSink::OverlayDismiss,
@@ -259,6 +262,7 @@ impl App {
                 has_quick_select: self.view.quick_select.is_some(),
                 has_harpoon: self.view.harpoon_menu.is_some(),
                 has_image_gallery: self.view.image_gallery.is_some(),
+                has_image_view: self.view.image_view.is_some(),
             }),
             is_prompting: matches!(self.state.mode, Mode::Prompting(_)),
             // The authoritative focus, recomputed at the loop top before this
@@ -745,6 +749,42 @@ mod tests {
         assert_eq!(route_key(snap, key('1')), InputSink::Harpoon);
         assert_eq!(route_key(snap, ctrl('a')), InputSink::Harpoon);
         assert_eq!(route_input(snap, InputKind::Paste), InputSink::Harpoon);
+    }
+
+    // ── regression: the full-screen image overlay was undismissable ──
+    //
+    // The reported symptom: previewing a pasted image left the overlay stuck —
+    // `q`/`Esc` did nothing. The overlay is the LAST surface drawn, but it was
+    // only consulted inside `handle_pager_key`, so it received keys solely when
+    // a pager happened to be open. With the pane focused (the normal case when
+    // opening it from `^a g`) routing sent every key to the child instead, and
+    // nothing could dismiss it. These pin the modal layer as the authority.
+
+    #[test]
+    fn the_image_overlay_owns_input_with_the_pane_focused() {
+        let snap = RouteSnapshot {
+            modal: Some(Modal::ImageView),
+            has_pane_tabs: true,
+            focus: Focus::Pane,
+            ..idle()
+        };
+        // The exact stuck keys, plus a meta chord and a paste.
+        assert_eq!(route_key(snap, key('q')), InputSink::ImageView);
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::ImageView);
+        assert_eq!(route_input(snap, InputKind::Paste), InputSink::ImageView);
+    }
+
+    /// Opened from the file list (`Enter` on a PNG) — no pager, list focus.
+    #[test]
+    fn the_image_overlay_owns_input_with_the_list_focused() {
+        let snap = RouteSnapshot {
+            modal: Some(Modal::ImageView),
+            has_pane_tabs: true,
+            focus: Focus::FileList,
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('q')), InputSink::ImageView);
+        assert_eq!(route_key(snap, key('j')), InputSink::ImageView);
     }
 
     // ── regression: paste into a pager's `/` search (#16) ─────────────

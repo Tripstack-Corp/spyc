@@ -255,6 +255,7 @@ impl super::App {
                 has_quick_select: self.view.quick_select.is_some(),
                 has_harpoon: self.view.harpoon_menu.is_some(),
                 has_image_gallery: self.view.image_gallery.is_some(),
+                has_image_view: self.view.image_view.is_some(),
             }),
             region,
             pager_mount: self.focused_top_pager_mount(),
