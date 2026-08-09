@@ -127,11 +127,12 @@ enum Message {
     /// (drop-safe in coalesce); the redraw is driven by the drain, not by this
     /// message surviving. Same shape as `AgentStatusReady`.
     GraveyardDone,
-    /// An off-thread mermaid render+open (`Effect::RenderMermaid`) finished and
-    /// pushed its outcome onto `runtime.mermaid_results`. Payloadless wake —
-    /// `apply_mermaid_outcomes` drains the slot in the pre-recv scan. Same shape
-    /// as `GraveyardDone`.
-    MermaidDone,
+    /// An off-thread image render (`Effect::RenderMermaid` / `Effect::OpenImage`)
+    /// finished and pushed its outcome onto `runtime.image_results`. Payloadless
+    /// wake — `apply_image_outcomes` drains the slot in the pre-recv scan. Same
+    /// shape as `GraveyardDone`. One message for every producer: what the render
+    /// *was* rides `ImageOrigin` on the outcome, not the wake.
+    ImageDone,
     /// An off-thread file op (`Effect::FileOp`) finished and pushed its outcome.
     FileOpDone,
     /// An off-thread inventory op (`Effect::Inventory`) finished.
@@ -140,7 +141,7 @@ enum Message {
     /// its outcome onto `runtime.worktree_results`. Payloadless wake —
     /// `apply_worktree_outcomes` drains it in the pre-recv scan, re-applies the
     /// listing/context update, then answers the MCP client. Same shape as
-    /// `MermaidDone`.
+    /// `ImageDone`.
     WorktreeJobDone,
     /// A Lua script finished on the worker thread (`runtime.lua`). Payloadless
     /// wake — `handle_lua_done` drains the worker's outcome buffer in the
@@ -151,7 +152,7 @@ enum Message {
     /// An off-thread vertical-split preview reload (`kick_preview_reload`)
     /// finished and pushed its outcome onto `runtime.preview_results`.
     /// Payloadless wake — `apply_preview_reloads` drains the slot in the
-    /// pre-recv scan. Same shape as `MermaidDone`.
+    /// pre-recv scan. Same shape as `ImageDone`.
     PreviewReloadDone,
     /// Option B (`codex_pin`): an off-thread `~/.codex/sessions` scan landed a
     /// rollout snapshot in `codex_pin_pending`. Payloadless wake — the snapshot
@@ -257,6 +258,7 @@ mod grep_session;
 #[cfg(test)]
 mod harness_tests;
 mod harpoon;
+pub mod image_ops;
 mod inventory_ops;
 mod key_dispatch;
 mod loop_steps;
@@ -590,12 +592,12 @@ struct Runtime {
     /// `apply_graveyard_outcomes` drains it every pre-recv scan (a `Vec` so
     /// concurrent ops never clobber each other — no in-flight guard needed).
     graveyard_results: std::sync::Arc<std::sync::Mutex<Vec<graveyard_ops::GraveyardOutcome>>>,
-    /// Landing slot for off-thread mermaid render+open ops (`Effect::RenderMermaid`).
-    /// The worker pushes a `MermaidOutcome` here and wakes with
-    /// `Message::MermaidDone`; `apply_mermaid_outcomes` drains it each pre-recv
-    /// scan and surfaces the result in the pager status line. Same shape as
-    /// `graveyard_results`.
-    mermaid_results: std::sync::Arc<std::sync::Mutex<Vec<mermaid_ops::MermaidOutcome>>>,
+    /// Landing slot for every off-thread image render — a mermaid diagram
+    /// (`Effect::RenderMermaid`) and an image file (`Effect::OpenImage`) share
+    /// it. The worker pushes an `ImageOutcome` here and wakes with
+    /// `Message::ImageDone`; `apply_image_outcomes` drains it each pre-recv scan
+    /// and installs or flashes the result. Same shape as `graveyard_results`.
+    image_results: std::sync::Arc<std::sync::Mutex<Vec<image_ops::ImageOutcome>>>,
     /// Landing slot for off-thread file operations.
     file_results: std::sync::Arc<std::sync::Mutex<Vec<file_ops::FileOutcome>>>,
     /// The watcher-driven listing refresh (`FileOp::RefreshListing`) reads the
@@ -627,15 +629,21 @@ struct Runtime {
     picker: Option<ratatui_image::picker::Picker>,
 }
 
-/// A rendered image shown full-screen (the pager `i` view). Holds the
-/// ready-to-blit protocol plus the PNG bytes and — for a mermaid diagram — its
-/// source, so the image-pager verbs (`s` save, `Y` yank source, later
-/// `y`/`b`/`c`) work without re-rendering. Generalizes to image-file preview
-/// (where `source` is `None`). See `docs/archive/MERMAID_PAGER_PLAN.md`.
+/// A rendered image shown full-screen. Holds the ready-to-blit protocol plus
+/// the encoded bytes, so the overlay verbs (`s` save, `y` copy, `b` base64)
+/// work without re-rendering, and the [`ImageOrigin`](image_ops::ImageOrigin)
+/// that tells them *what* they're acting on. See
+/// `docs/archive/MERMAID_PAGER_PLAN.md`.
 pub struct ImageView {
     pub protocol: ratatui_image::protocol::Protocol,
-    pub png: Vec<u8>,
-    pub source: Option<String>,
+    /// The image as it arrived — a mermaid render's PNG, or an image file's own
+    /// bytes verbatim (which may be JPEG/GIF/WebP, hence not `png`).
+    pub encoded: Vec<u8>,
+    /// Extension matching `encoded`'s real format, for `s`.
+    pub ext: &'static str,
+    /// Natural pixel size, for the footer.
+    pub dims: (u32, u32),
+    pub origin: image_ops::ImageOrigin,
     /// Whether the current render uses the dark theme — tracked so `c` toggles it.
     pub dark: bool,
     /// Transient verb feedback (e.g. "saved: …"), shown in the overlay footer —
@@ -707,7 +715,7 @@ pub struct ViewState {
     /// Full-screen image overlay (the pager `i` key): a rendered diagram/image
     /// blitted over everything until dismissed (q/Esc), with its own verbs
     /// (`s`/`Y`/`o`/…). `None` when nothing is being viewed. Set by
-    /// `apply_mermaid_outcomes`. Graphics terminals only. See
+    /// `apply_image_outcomes`. Graphics terminals only. See
     /// `docs/archive/MERMAID_PAGER_PLAN.md`.
     pub image_view: Option<ImageView>,
     pub pager_history: PagerHistory,

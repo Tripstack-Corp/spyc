@@ -66,8 +66,8 @@ pub fn coalesce_pending(
             // unconditionally by `apply_graveyard_outcomes` in the pre-recv scan.
             | Message::GraveyardDone
             // Mermaid render+open done — same payloadless wake; drained by
-            // `apply_mermaid_outcomes` in the pre-recv scan.
-            | Message::MermaidDone
+            // `apply_image_outcomes` in the pre-recv scan.
+            | Message::ImageDone
             // Vsplit preview reload done — same payloadless wake; the rebuilt
             // view rides `runtime.preview_results`, drained by
             // `apply_preview_reloads` in the pre-recv scan.
@@ -176,7 +176,7 @@ pub fn coalesce_recv(
             // scan's `apply_graveyard_outcomes`, so collapse-to-Timeout here.
             | Message::GraveyardDone
             // Mermaid render+open done — same payloadless-wake shape.
-            | Message::MermaidDone
+            | Message::ImageDone
             // Vsplit preview reload done — payloadless, drained by
             // `apply_preview_reloads` in the pre-recv scan.
             | Message::PreviewReloadDone
@@ -601,7 +601,7 @@ mod tests {
             Message::ReaderExited,
             Message::AgentStatusReady,
             Message::GraveyardDone,
-            Message::MermaidDone,
+            Message::ImageDone,
             Message::PreviewReloadDone,
             Message::WorktreeJobDone,
             Message::CodexSessionReady,

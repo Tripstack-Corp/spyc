@@ -9,16 +9,24 @@
 //!
 //! Both are far too heavy (parse → layout → SVG → resvg raster → font load) for
 //! the loop, so they run on a detached worker like the graveyard ops. The
-//! worker pushes a [`MermaidOutcome`] onto `runtime.mermaid_results` and wakes
-//! the loop with `Message::MermaidDone`; `App::apply_mermaid_outcomes` (pre-recv
-//! scan) opens/installs the result and flashes status. All pure-Rust
-//! (mermaid-rs-renderer → resvg), no Node/Chromium.
+//! worker pushes an [`ImageOutcome`] onto `runtime.image_results` and wakes the
+//! loop with `Message::ImageDone`; `App::apply_image_outcomes` (pre-recv scan)
+//! opens/installs the result and flashes status — this module owns only the
+//! mermaid-specific half (source → raster), with the display last mile shared
+//! with every other image producer in [`image_ops`](super::image_ops). All
+//! pure-Rust (mermaid-rs-renderer → resvg), no Node/Chromium.
 //! See `docs/archive/MERMAID_PAGER_PLAN.md`.
 
 use std::path::PathBuf;
 
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::Protocol;
+
+use super::image_ops::{self, ImageOrigin, ImageOutcome};
+
+/// A rendered diagram: the blittable protocol, its PNG bytes (kept for the
+/// overlay's `s`/`y`/`b` verbs), and the natural pixel size.
+type RenderedDiagram = (Protocol, Vec<u8>, (u32, u32));
 
 /// What to do with a rendered diagram.
 #[derive(Debug)]
@@ -39,49 +47,31 @@ pub struct MermaidRenderOp {
     pub mode: MermaidMode,
 }
 
-/// Worker result, applied by `apply_mermaid_outcomes`.
-pub enum MermaidOutcome {
-    /// Open path: rendered + handed to the OS viewer.
-    Opened,
-    /// Open path failed; short reason for the status line.
-    Failed(String),
-    /// View path: protocol ready for the full-screen overlay, plus the PNG
-    /// bytes (for `s`/`y`/`b`) and the mermaid source (for `Y`).
-    Viewed {
-        protocol: Box<Protocol>,
-        png: Vec<u8>,
-        source: String,
-        /// Which theme this was rendered with — tracked so `c` can toggle it.
-        dark: bool,
-    },
-    /// View path failed (incl. "no image protocol"); short reason.
-    ViewFailed(String),
-}
-
 /// Render `op.source` per its mode. Runs on the detached worker — all IO and
 /// the (blocking) protocol encode are off the loop. `picker` is `Some` only
 /// when the terminal supports a graphics protocol (needed by `View`).
-pub fn render_mermaid_op(op: MermaidRenderOp, picker: Option<Picker>) -> MermaidOutcome {
+pub fn render_mermaid_op(op: MermaidRenderOp, picker: Option<Picker>) -> ImageOutcome {
     let MermaidRenderOp { source, mode } = op;
     match mode {
         MermaidMode::Open => match render_to_png(&source, None, false) {
             Ok(bytes) => open_png(&source, &bytes),
-            Err(e) => MermaidOutcome::Failed(e),
+            Err(e) => ImageOutcome::Failed(format!("mermaid render failed: {e}")),
         },
         MermaidMode::View { cols, rows, dark } => {
             let Some(picker) = picker else {
-                return MermaidOutcome::ViewFailed(
-                    "terminal has no image protocol (use `o` to open externally)".to_string(),
-                );
+                return ImageOutcome::Failed(image_ops::no_protocol_reason());
             };
             match render_to_protocol(&source, &picker, cols, rows, dark) {
-                Ok((protocol, png)) => MermaidOutcome::Viewed {
+                Ok((protocol, png, dims)) => ImageOutcome::Viewed {
                     protocol: Box::new(protocol),
-                    png,
-                    source,
+                    encoded: png,
+                    // resvg always hands us a PNG, whatever the source diagram.
+                    ext: "png",
+                    dims,
+                    origin: ImageOrigin::Mermaid { source },
                     dark,
                 },
-                Err(e) => MermaidOutcome::ViewFailed(e),
+                Err(e) => ImageOutcome::Failed(format!("mermaid render failed: {e}")),
             }
         }
     }
@@ -89,17 +79,17 @@ pub fn render_mermaid_op(op: MermaidRenderOp, picker: Option<Picker>) -> Mermaid
 
 /// Persist the PNG to a stable temp path (one file per diagram source) and open
 /// it in the OS viewer.
-fn open_png(source: &str, bytes: &[u8]) -> MermaidOutcome {
+fn open_png(source: &str, bytes: &[u8]) -> ImageOutcome {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     source.hash(&mut h);
     let path: PathBuf = std::env::temp_dir().join(format!("spyc-mermaid-{:016x}.png", h.finish()));
     if let Err(e) = std::fs::write(&path, bytes) {
-        return MermaidOutcome::Failed(format!("write temp file: {e}"));
+        return ImageOutcome::Failed(format!("mermaid render failed: write temp file: {e}"));
     }
     match open::that_detached(&path) {
-        Ok(()) => MermaidOutcome::Opened,
-        Err(e) => MermaidOutcome::Failed(format!("open: {e}")),
+        Ok(()) => ImageOutcome::Opened,
+        Err(e) => ImageOutcome::Failed(format!("mermaid render failed: open: {e}")),
     }
 }
 
@@ -113,7 +103,7 @@ fn render_to_protocol(
     cols: u16,
     rows: u16,
     dark: bool,
-) -> Result<(Protocol, Vec<u8>), String> {
+) -> Result<RenderedDiagram, String> {
     let font = picker.font_size();
     let box_px = (
         u32::from(cols) * u32::from(font.width.max(1)),
@@ -121,15 +111,13 @@ fn render_to_protocol(
     );
     let bytes = render_to_png(source, Some(box_px), dark)?;
     let img = image::load_from_memory(&bytes).map_err(|e| format!("decode: {e}"))?;
-    let protocol = picker
-        .new_protocol(
-            img,
-            ratatui::layout::Size::new(cols, rows),
-            ratatui_image::Resize::Fit(None),
-        )
-        .map_err(|e| format!("protocol: {e}"))?;
+    let dims = (
+        image::GenericImageView::width(&img),
+        image::GenericImageView::height(&img),
+    );
+    let protocol = image_ops::raster_to_protocol(img, picker, cols, rows)?;
     // Return the PNG too — the overlay keeps it for `s`/`y`/`b` without re-render.
-    Ok((protocol, bytes))
+    Ok((protocol, bytes, dims))
 }
 
 /// mermaid source → PNG bytes, pure-Rust: mermaid-rs-renderer for the SVG, resvg
@@ -198,52 +186,4 @@ fn render_to_png(source: &str, fit_px: Option<(u32, u32)>, dark: bool) -> Result
     });
     resvg::render(&tree, transform, &mut pixmap.as_mut());
     pixmap.encode_png().map_err(|e| format!("png encode: {e}"))
-}
-
-impl super::App {
-    /// Pre-recv drain: open/install finished `Effect::RenderMermaid` outcomes
-    /// and flash status. Returns whether a redraw is needed. Mirrors
-    /// `apply_graveyard_outcomes`.
-    pub(crate) fn apply_mermaid_outcomes(&mut self) -> bool {
-        let outcomes: Vec<MermaidOutcome> = {
-            let mut slot = self.runtime.mermaid_results.lock().unwrap();
-            if slot.is_empty() {
-                return false;
-            }
-            std::mem::take(&mut *slot)
-        };
-        let mut redraw = false;
-        for outcome in outcomes {
-            redraw = true;
-            match outcome {
-                MermaidOutcome::Viewed {
-                    protocol,
-                    png,
-                    source,
-                    dark,
-                } => {
-                    // Install the full-screen overlay; the draw blits it.
-                    self.view.image_view = Some(super::ImageView {
-                        protocol: *protocol,
-                        png,
-                        source: Some(source),
-                        dark,
-                        flash: None,
-                    });
-                }
-                MermaidOutcome::Opened => self.flash_pager("opened diagram in external viewer"),
-                MermaidOutcome::Failed(reason) | MermaidOutcome::ViewFailed(reason) => {
-                    self.flash_pager(&format!("mermaid render failed: {reason}"));
-                }
-            }
-        }
-        redraw
-    }
-
-    /// Set the pager status-line flash if a pager is open (no-op otherwise).
-    fn flash_pager(&mut self, msg: &str) {
-        if let Some(pager) = self.view.pager.as_mut() {
-            pager.flash = Some(msg.to_string());
-        }
-    }
 }

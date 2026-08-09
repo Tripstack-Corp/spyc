@@ -27,8 +27,8 @@ use crate::pane::Pane;
 use crate::ui::pager::PagerView;
 
 use super::{
-    App, ForegroundExec, Message, PagerReturn, PostAction, file_ops, graveyard_ops, inventory_ops,
-    mermaid_ops, worktree_ops,
+    App, ForegroundExec, Message, PagerReturn, PostAction, file_ops, graveyard_ops, image_ops,
+    inventory_ops, mermaid_ops, worktree_ops,
 };
 
 /// A side effect for the run loop to execute. Producers (handlers) return
@@ -220,11 +220,16 @@ pub enum Effect {
 
     /// Render a ` ```mermaid ` block to a PNG on a detached worker and open it in
     /// the OS image viewer — parse/layout/raster/font-load is far too heavy for
-    /// the loop. The worker pushes a `MermaidOutcome` onto
-    /// `runtime.mermaid_results` and wakes with `Message::MermaidDone`;
-    /// `apply_mermaid_outcomes` (pre-recv scan) surfaces it in the pager status
+    /// the loop. The worker pushes an `ImageOutcome` onto
+    /// `runtime.image_results` and wakes with `Message::ImageDone`;
+    /// `apply_image_outcomes` (pre-recv scan) surfaces it in the pager status
     /// line. See `docs/archive/MERMAID_PAGER_PLAN.md`.
     RenderMermaid(mermaid_ops::MermaidRenderOp),
+
+    /// Tier 5. Read + decode an image file on a detached worker and show it
+    /// full-screen. Shares `RenderMermaid`'s landing slot and wake message —
+    /// same destination (the `ImageView` overlay), different producer.
+    OpenImage(image_ops::ImageOpenOp),
 
     /// Tier 5. Run a file operation (copy / move / pipe) on a detached worker
     /// thread to avoid blocking the event loop. The worker pushes its outcome
@@ -918,9 +923,9 @@ impl App {
                 }
                 // Render the mermaid diagram + open it externally on a detached
                 // worker (same shape as Graveyard); the outcome lands in
-                // `mermaid_results` and `apply_mermaid_outcomes` flashes it.
+                // `image_results` and `apply_image_outcomes` installs/flashes it.
                 Effect::RenderMermaid(op) => {
-                    let results = std::sync::Arc::clone(&self.runtime.mermaid_results);
+                    let results = std::sync::Arc::clone(&self.runtime.image_results);
                     let wake = self.runtime.pane_wake_tx.clone();
                     // The picker (graphics-protocol capability, detected once at
                     // startup) lives in Runtime; inject it so the View mode can
@@ -930,7 +935,21 @@ impl App {
                         let outcome = mermaid_ops::render_mermaid_op(op, picker);
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
-                            let _ = tx.send(Message::MermaidDone);
+                            let _ = tx.send(Message::ImageDone);
+                        }
+                    });
+                }
+                // Read + decode an image file off-thread; same slot and wake as
+                // the mermaid render above.
+                Effect::OpenImage(op) => {
+                    let results = std::sync::Arc::clone(&self.runtime.image_results);
+                    let wake = self.runtime.pane_wake_tx.clone();
+                    let picker = self.runtime.picker.clone();
+                    std::thread::spawn(move || {
+                        let outcome = image_ops::open_image_file(op, picker);
+                        results.lock().unwrap().push(outcome);
+                        if let Some(tx) = wake {
+                            let _ = tx.send(Message::ImageDone);
                         }
                     });
                 }
