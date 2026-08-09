@@ -56,9 +56,15 @@ impl App {
         let now = crate::sysinfo::format_now().replace([' ', ':'], "_");
         let stamp = now.trim_end_matches("_UTC");
         let ext = iv.ext;
+        // `create_new` (O_EXCL): refuse an existing file rather than silently
+        // clobbering it, and don't follow a symlink planted at that name — the
+        // cwd is not always somewhere only the user can write.
         let result = std::env::current_dir().and_then(|d| {
+            use std::io::Write as _;
             let p = d.join(format!("spyc_mermaid_{stamp}.{ext}"));
-            std::fs::write(&p, &iv.encoded).map(|()| p)
+            std::fs::File::create_new(&p)
+                .and_then(|mut f| f.write_all(&iv.encoded))
+                .map(|()| p)
         });
         iv.flash = Some(match result {
             Ok(p) => format!("saved: {}", p.display()),
@@ -161,13 +167,18 @@ impl App {
             // its own — spill it to a temp file first. Bounded write on the main
             // thread, like `s` above.
             ImageOrigin::Transcript { seq, .. } | ImageOrigin::Pending { seq } => {
-                let path = std::env::temp_dir().join(format!("spyc-agent-image-{seq}.{}", iv.ext));
+                // Private 0700 scratch dir, never a predictable path under a
+                // shared /tmp — SPYC-TRAP(viewer-temp-symlink).
+                let name = format!("spyc-agent-image-{seq}.{}", iv.ext);
                 iv.flash = Some(
-                    match std::fs::write(&path, &iv.encoded).and_then(|()| {
-                        open::that_detached(&path).map(|()| path.display().to_string())
+                    match crate::app::image_ops::viewer_scratch_path(&name).and_then(|path| {
+                        std::fs::write(&path, &iv.encoded)
+                            .and_then(|()| open::that_detached(&path))
+                            .map(|()| path.display().to_string())
+                            .map_err(|e| format!("{e}"))
                     }) {
                         Ok(p) => format!("opened {p}"),
-                        Err(e) => format!("open failed: {e:#}"),
+                        Err(e) => format!("open failed: {e}"),
                     },
                 );
                 Vec::new()
