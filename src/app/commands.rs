@@ -491,6 +491,11 @@ pub(super) fn cmd_graveyard(app: &mut App, _args: &str) -> Vec<Effect> {
     app.apply(&Action::OpenGraveyardView).unwrap_or_default()
 }
 
+/// `:images` — the `^a g` gallery of images the focused agent tab received.
+pub(super) fn cmd_images(app: &mut App, _args: &str) -> Vec<Effect> {
+    app.apply(&Action::OpenImageGallery).unwrap_or_default()
+}
+
 // `:activity` / `:longlist` / `:filetype` / `:chmod` — typed entry points for
 // features that are losing (or have lost) their default key, so they stay
 // reachable and re-bindable (`map KEY command <name>`). Each just runs the

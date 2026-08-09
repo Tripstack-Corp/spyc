@@ -140,6 +140,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a v` | Pane scrollback in the in-app pager (search, jump, visual yank) |
 | `Ctrl+J` | Newline in pane (multi-line input) |
 | `^a ↓` | Send a literal `^a` to the pane (e.g. so Claude receives it) |
+| `^a g` | Gallery of images the agent received (`Enter` view, `q` close) |
 | `gf` | Jump to file path in pane output |
 | `gF` | Jump to file + open at referenced line |
 

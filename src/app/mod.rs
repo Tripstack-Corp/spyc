@@ -257,6 +257,7 @@ mod grep_session;
 #[cfg(test)]
 mod harness_tests;
 mod harpoon;
+mod image_gallery;
 pub mod image_ops;
 mod inventory_ops;
 mod key_dispatch;
@@ -330,6 +331,10 @@ pub enum View {
     /// restore-to-original, `dd`/`x` purge entry to system trash,
     /// `Z` purge all (with confirm), `Esc`/`gy` close.
     Graveyard,
+    /// Image gallery (`^a g`): the images the focused agent tab actually
+    /// received, newest last. Bindings inside: `Enter`/`i` show the image
+    /// full-screen, `Esc`/`q` close.
+    Images,
 }
 
 /// Input mode: normal key bindings or a one-line text prompt.

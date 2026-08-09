@@ -371,6 +371,14 @@ impl App {
         if self.state.cur().view == View::Graveyard {
             return Ok(self.handle_graveyard_view_key(key));
         }
+        // Image gallery: only its own verbs are claimed (`Enter`/`i` view,
+        // `Esc`/`q` close) — anything else falls through to the resolver so the
+        // normal list motions (`j`/`k`/`G`, `/` search) keep working.
+        if self.state.cur().view == View::Images
+            && let Some(effects) = self.handle_images_view_key(key)
+        {
+            return Ok(effects);
+        }
         let outcome = self.state.resolver.feed(key, &self.state.user_keymap);
         if crate::key_trace::is_enabled() {
             crate::key_trace::log(&format!("  resolver -> {outcome:?}"));

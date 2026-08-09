@@ -184,6 +184,8 @@ impl App {
             vsplit: None,
             pending_delete_preview: None,
             graveyard: Vec::new(),
+            transcript_images: Vec::new(),
+            transcript_images_path: None,
             scope_registry: Vec::new(),
             pending_new_tab_cmd: None,
             last_captured_cmd: None,

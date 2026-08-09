@@ -115,12 +115,14 @@ impl AppState {
 
     pub fn toggle_inventory_view(&mut self) {
         self.cur_mut().view = match self.cur().view {
-            View::Dir | View::Graveyard => View::Inventory,
+            View::Dir | View::Graveyard | View::Images => View::Inventory,
             View::Inventory => View::Dir,
         };
-        // Leaving graveyard view drops the snapshot so a stale set
+        // Leaving graveyard / gallery view drops the snapshot so a stale set
         // of entries can't bleed into a later open.
         self.graveyard.clear();
+        self.transcript_images.clear();
+        self.transcript_images_path = None;
         self.cur_mut().cursor = Cursor::new();
         self.rebuild_rows();
     }
@@ -135,6 +137,31 @@ impl AppState {
             self.graveyard = crate::state::graveyard::Graveyard::load().entries;
             self.cur_mut().view = View::Graveyard;
         }
+        self.cur_mut().cursor = Cursor::new();
+        self.rebuild_rows();
+    }
+
+    /// Show `images` (from `path`) in the gallery, landing the cursor on the
+    /// newest — the one you most likely came to check.
+    pub fn open_images_view(
+        &mut self,
+        path: std::path::PathBuf,
+        images: Vec<crate::state::transcript_images::TranscriptImage>,
+    ) {
+        self.transcript_images = images;
+        self.transcript_images_path = Some(path);
+        self.cur_mut().view = View::Images;
+        self.cur_mut().cursor = Cursor::new();
+        self.rebuild_rows();
+        let last = self.transcript_images.len().saturating_sub(1);
+        self.cur_mut().cursor.index = last;
+    }
+
+    /// Leave the gallery, dropping the snapshot with it.
+    pub fn close_images_view(&mut self) {
+        self.transcript_images.clear();
+        self.transcript_images_path = None;
+        self.cur_mut().view = View::Dir;
         self.cur_mut().cursor = Cursor::new();
         self.rebuild_rows();
     }

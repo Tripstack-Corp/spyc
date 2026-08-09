@@ -109,6 +109,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     app("graveyard", commands::cmd_graveyard),
     app("grep", commands::cmd_grep),
     app("hooks", commands::cmd_hooks),
+    app("images", commands::cmd_images),
     pure("limit"),
     app("longlist", commands::cmd_longlist),
     app("lua", lua::cmd_lua),

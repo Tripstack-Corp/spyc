@@ -63,14 +63,27 @@ type:"user"  message.content = [
 ]
 ```
 
-Confirmed on a real transcript: `[Image #N]` is **session-monotonic** (observed
-up to `#12`), the text block and the image block share a record, and the record
-carries a `timestamp`. So the transcript is the *authoritative* numbering — no
-guessing, no drift, and it survives spyc restarts and `claude --resume`.
+Confirmed on a real transcript: the text block and the image block share a
+record, and the record carries a `timestamp`. So the transcript is the
+authoritative record of what the agent actually received, and it survives spyc
+restarts and `claude --resume`.
 
-Two gotchas found while reading it:
+**Correction (found while building PR 2):** an earlier reading of this file
+called `[Image #N]` session-monotonic and therefore a stable key. It is not. A
+full scan of the same transcript shows the counter **restarts** mid-file (`#1`
+appears again at line 7388, after `#12` at 6408 — a clear or a resume), one
+record can carry **two** images (`#6` and `#7` at line 2233, paired positionally
+with two image blocks), and some images carry **no label at all** (line 7966).
+So **spyc owns the numbering** — a 1-based sequence over the indexed images —
+and `[Image #N]` is shown alongside as the agent's own cross-reference, not used
+as a key.
+
+Gotchas found while reading it:
 - `type:"attachment"` records **duplicate** the same image under
-  `attachment.prompt[]`. Dedupe (by `[Image #N]` label or uuid).
+  `attachment.prompt[]` — sometimes *before* the `user` record, sometimes as the
+  only copy (there is no `user` twin for `#3`), and sometimes twice over
+  (`#12` appears as two attachments). So neither "prefer user" nor "dedupe by
+  label" works: dedupe on **content identity** (length + head/tail digest).
 - media types are `image/png` **and** `image/jpeg`. spyc's `image` crate is
   currently `default-features = false, features = ["png"]` — jpeg (and webp/gif,
   which the API also accepts) must be added.

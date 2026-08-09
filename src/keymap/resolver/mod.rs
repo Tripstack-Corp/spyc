@@ -323,6 +323,7 @@ impl Resolver {
                 KeyCode::Char('P') => ResolverOutcome::Action(Action::PanePipeContent),
                 KeyCode::Char('i' | 'I') => ResolverOutcome::Action(Action::PanePipeInventory),
                 KeyCode::Char('u' | 'U') => ResolverOutcome::Action(Action::QuickSelectOpen),
+                KeyCode::Char('g' | 'G') => ResolverOutcome::Action(Action::OpenImageGallery),
                 // `^a ↓` — send a literal Ctrl-A to the pane (tmux send-prefix):
                 // the prefix is otherwise unreachable by the child, but Claude
                 // binds ^a (e.g. expand notes), so this is the escape hatch.
