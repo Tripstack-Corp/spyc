@@ -193,6 +193,69 @@ pub fn read_tail_lossy(path: &std::path::Path, max_bytes: u64) -> std::io::Resul
     })
 }
 
+/// Cap on a SINGLE line of a transcript being streamed whole (the `^a g` image
+/// index, which needs every record rather than a tail).
+///
+/// A JSONL line is one record, and an image record is the big one: ~0.5 MB of
+/// base64 per image, a handful per message. 32 MB is far above anything a real
+/// conversation produces and far below what a file with no newlines at all
+/// would cost — `BufRead::lines` on such a file allocates the whole thing.
+pub const MAX_TRANSCRIPT_LINE_BYTES: usize = 32 * 1024 * 1024;
+
+/// Read one `\n`-terminated line, bounded.
+///
+/// Returns `Ok(Some(true))` for a line that fit (in `buf`, newline trimmed),
+/// `Ok(Some(false))` for one that exceeded `cap` — `buf` is cleared and the
+/// reader is advanced past the offending line, so the caller stays in sync and
+/// can simply skip it — and `Ok(None)` at EOF.
+///
+/// Exists because `BufRead::lines()` / `read_until` grow without limit: a
+/// corrupt or hostile file with no newline in it is read entirely into memory.
+pub fn read_line_capped<R: std::io::BufRead>(
+    reader: &mut R,
+    buf: &mut Vec<u8>,
+    cap: usize,
+) -> std::io::Result<Option<bool>> {
+    use std::io::{BufRead, Read};
+    buf.clear();
+    // `cap + 1`: reading that many bytes without a newline proves the line is
+    // over the cap, rather than merely reaching it exactly.
+    let read = reader
+        .by_ref()
+        .take(cap as u64 + 1)
+        .read_until(b'\n', buf)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if buf.last() == Some(&b'\n') {
+        buf.pop();
+        if buf.last() == Some(&b'\r') {
+            buf.pop();
+        }
+        return Ok(Some(true));
+    }
+    // No newline. Either EOF (a final unterminated line, which is fine and
+    // fits) or the cap stopped us mid-line.
+    if read <= cap {
+        return Ok(Some(true));
+    }
+    // Over the cap: drop it and step to the next newline in bounded chunks, so
+    // skipping a huge line costs no more memory than reading a normal one.
+    buf.clear();
+    const SKIP_CHUNK: u64 = 64 * 1024;
+    let mut scratch = Vec::with_capacity(SKIP_CHUNK as usize);
+    loop {
+        scratch.clear();
+        let n = reader
+            .by_ref()
+            .take(SKIP_CHUNK)
+            .read_until(b'\n', &mut scratch)?;
+        if n == 0 || scratch.last() == Some(&b'\n') {
+            return Ok(Some(false));
+        }
+    }
+}
+
 /// Append an agent prose block to a transcript view, rendered through
 /// the Markdown viewer so headings / lists / code / emphasis show as
 /// formatting instead of raw `#` / `**` source. Inserts a single blank
@@ -541,5 +604,91 @@ mod tests {
             assert!(open_state_file_append("link.log").is_none());
             assert_eq!(std::fs::read_to_string(&target).unwrap(), "private");
         });
+    }
+}
+
+#[cfg(test)]
+mod capped_line_tests {
+    use super::{MAX_TRANSCRIPT_LINE_BYTES, read_line_capped};
+    use std::io::BufReader;
+
+    /// Read every line through the capped reader, marking the skipped ones.
+    fn read_all(data: &[u8], cap: usize) -> Vec<Option<String>> {
+        let mut r = BufReader::new(data);
+        let mut buf = Vec::new();
+        let mut out = Vec::new();
+        while let Ok(Some(fit)) = read_line_capped(&mut r, &mut buf, cap) {
+            out.push(fit.then(|| String::from_utf8_lossy(&buf).into_owned()));
+        }
+        out
+    }
+
+    #[test]
+    fn ordinary_lines_round_trip() {
+        assert_eq!(
+            read_all(b"one\ntwo\nthree\n", 1024),
+            vec![Some("one".into()), Some("two".into()), Some("three".into())]
+        );
+    }
+
+    /// A final line with no trailing newline is still a line, not a truncation.
+    #[test]
+    fn a_missing_final_newline_still_yields_the_line() {
+        assert_eq!(
+            read_all(b"a\nb", 1024),
+            vec![Some("a".into()), Some("b".into())]
+        );
+    }
+
+    #[test]
+    fn crlf_is_trimmed() {
+        assert_eq!(
+            read_all(b"a\r\nb\r\n", 1024),
+            vec![Some("a".into()), Some("b".into())]
+        );
+    }
+
+    /// The whole point: an over-cap line is skipped AND the reader resyncs, so
+    /// the lines after it are still read correctly. Getting this wrong would
+    /// silently mis-split the rest of the file.
+    #[test]
+    fn an_oversized_line_is_skipped_and_the_reader_resyncs() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"before\n");
+        data.extend(std::iter::repeat_n(b'x', 5000));
+        data.push(b'\n');
+        data.extend_from_slice(b"after\n");
+        assert_eq!(
+            read_all(&data, 100),
+            vec![Some("before".into()), None, Some("after".into())],
+            "the huge line is dropped, not mis-split"
+        );
+    }
+
+    /// A file with NO newline at all is the case `BufRead::lines()` reads
+    /// whole. Bounded here: it yields one skip, not one enormous allocation.
+    #[test]
+    fn a_file_with_no_newline_is_bounded() {
+        let data: Vec<u8> = std::iter::repeat_n(b'x', 100_000).collect();
+        assert_eq!(read_all(&data, 1024), vec![None]);
+    }
+
+    /// Exact-boundary behaviour: a line of exactly `cap` bytes fits; `cap + 1`
+    /// does not. Off-by-one here would reject legitimate records.
+    #[test]
+    fn the_cap_boundary_is_inclusive() {
+        let at_cap = format!("{}\n", "x".repeat(64));
+        assert_eq!(read_all(at_cap.as_bytes(), 64), vec![Some("x".repeat(64))]);
+        let over = format!("{}\n", "x".repeat(65));
+        assert_eq!(read_all(over.as_bytes(), 64), vec![None]);
+    }
+
+    /// The shipped cap must clear a realistic image record by a wide margin —
+    /// too tight and the gallery silently loses real screenshots.
+    #[test]
+    fn the_shipped_cap_clears_a_realistic_image_record() {
+        // ~0.7 MB of base64 per image was the largest seen in a real
+        // transcript; even ten in one record must fit.
+        const { assert!(MAX_TRANSCRIPT_LINE_BYTES > 10 * 700_000) };
     }
 }
