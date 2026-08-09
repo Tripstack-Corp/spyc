@@ -139,14 +139,11 @@ impl App {
     /// dirty or delete something the user committed. Best-effort; called from
     /// `run_teardown` after the terminal is restored, so warnings are visible.
     pub fn cleanup_written_mcp_configs(&mut self) {
+        let me = std::process::id();
         for dir in std::mem::take(&mut self.runtime.mcp_config_dirs) {
             // Try each shape per dir; each is a no-op unless it finds an entry
-            // that's *ours*, so attempting the wrong one is harmless. The agent
-            // status hooks (claude `.claude/settings.json`, codex's hooks in the
-            // shared `.codex/config.toml`) ride the same dir set. Codex's MCP
-            // entry and its status hooks live in one file; cleaning either leaves
-            // the other, and whichever empties it last deletes the file/dir.
-            for tracked_path in [
+            // that's *ours*, so attempting the wrong one is harmless.
+            let mut tracked: Vec<std::path::PathBuf> = [
                 matches!(
                     crate::mcp::cleanup_mcp_json(&dir),
                     crate::mcp::ConfigCleanup::SkippedTracked
@@ -162,25 +159,44 @@ impl App {
                     crate::mcp::ConfigCleanup::SkippedTracked
                 )
                 .then(|| dir.join(".codex").join("config.toml")),
-                matches!(
-                    crate::mcp::cleanup_codex_status_hooks(&dir),
-                    crate::mcp::ConfigCleanup::SkippedTracked
-                )
-                .then(|| dir.join(".codex").join("config.toml")),
-                matches!(
-                    crate::mcp::cleanup_claude_status_hooks(&dir),
-                    crate::mcp::ConfigCleanup::SkippedTracked
-                )
-                .then(|| dir.join(".claude").join("settings.json")),
-                matches!(
-                    crate::mcp::cleanup_agy_status_hooks(&dir),
-                    crate::mcp::ConfigCleanup::SkippedTracked
-                )
-                .then(|| dir.join(".agents").join("hooks.json")),
             ]
             .into_iter()
             .flatten()
-            {
+            .collect();
+            // The status hooks (claude `.claude/settings.json`, codex's hooks in
+            // the shared `.codex/config.toml`, agy's `.agents/hooks.json`) ride
+            // the same dir set but are SHARED, not ours alone: one file serves
+            // every spyc, because the reporter targets whichever socket the
+            // pane's env names. Removing them while another instance still has
+            // live panes there silently drops its dots to output-timing for the
+            // rest of its run, so the last owner out is the only one that may.
+            // (Codex's MCP entry and its status hooks live in one file; cleaning
+            // either leaves the other, and whichever empties it last deletes the
+            // file/dir.)
+            if crate::state::hook_owners::release(&dir, me) {
+                tracked.extend(
+                    [
+                        matches!(
+                            crate::mcp::cleanup_codex_status_hooks(&dir),
+                            crate::mcp::ConfigCleanup::SkippedTracked
+                        )
+                        .then(|| dir.join(".codex").join("config.toml")),
+                        matches!(
+                            crate::mcp::cleanup_claude_status_hooks(&dir),
+                            crate::mcp::ConfigCleanup::SkippedTracked
+                        )
+                        .then(|| dir.join(".claude").join("settings.json")),
+                        matches!(
+                            crate::mcp::cleanup_agy_status_hooks(&dir),
+                            crate::mcp::ConfigCleanup::SkippedTracked
+                        )
+                        .then(|| dir.join(".agents").join("hooks.json")),
+                    ]
+                    .into_iter()
+                    .flatten(),
+                );
+            }
+            for tracked_path in tracked {
                 eprintln!(
                     "spyc: left git-tracked MCP config in place: {} (remove the spyc entry by hand if unwanted)",
                     tracked_path.display()
@@ -778,6 +794,37 @@ fn resolve_report_target(
 #[cfg(test)]
 mod tests {
     use super::resolve_report_target;
+    use crate::app::App;
+
+    /// The regression: a second spyc quitting used to delete the status hooks
+    /// out from under the first one's live panes. Teardown removes them only
+    /// once it is the last live owner of the dir.
+    #[test]
+    fn teardown_leaves_the_hooks_a_live_sibling_still_needs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
+        crate::state::with_state_root(&dir.join("state"), || {
+            let mut app = App::test_app(dir.clone());
+            crate::state::hook_consent::set_consent(&dir, true);
+            app.install_status_hooks(&dir, crate::state::sessions::AgentKind::Claude);
+            let settings = dir.join(".claude").join("settings.json");
+            assert!(settings.exists(), "install must write them");
+
+            // A sibling spyc claims the same dir (pid 1 is always live).
+            crate::state::hook_owners::claim(&dir, 1);
+            app.cleanup_written_mcp_configs();
+            assert!(
+                settings.exists(),
+                "a live sibling's hooks must survive our exit"
+            );
+
+            // Sibling gone: the next instance out is free to clean up.
+            assert!(crate::state::hook_owners::release(&dir, 1));
+            app.runtime.mcp_config_dirs.push(dir.clone());
+            app.cleanup_written_mcp_configs();
+            assert!(!settings.exists(), "the last one out must clean up");
+        });
+    }
 
     #[test]
     fn report_target_prefers_pane_id_then_index_then_focused() {

@@ -286,6 +286,10 @@ impl App {
     /// Assumes consent is already granted. A no-op for an agent without a
     /// status-hook installer; a no-op-returning write (git-tracked config)
     /// simply isn't tracked.
+    ///
+    /// Also claims the dir in the cross-instance owner registry, so a *sibling*
+    /// spyc quitting can't delete the hooks this session's panes are still
+    /// reporting through (`state::hook_owners`).
     pub(super) fn install_status_hooks(
         &mut self,
         cwd: &std::path::Path,
@@ -294,8 +298,11 @@ impl App {
         let Some(support) = crate::agent::profile_for(kind).status_hooks() else {
             return;
         };
-        if (support.ensure)(cwd) && !self.runtime.mcp_config_dirs.iter().any(|d| d == cwd) {
-            self.runtime.mcp_config_dirs.push(cwd.to_path_buf());
+        if (support.ensure)(cwd) {
+            crate::state::hook_owners::claim(cwd, std::process::id());
+            if !self.runtime.mcp_config_dirs.iter().any(|d| d == cwd) {
+                self.runtime.mcp_config_dirs.push(cwd.to_path_buf());
+            }
         }
     }
 
@@ -323,27 +330,19 @@ impl App {
         // Hook-supporting panes whose project root matches — collect (cwd, kind)
         // first (immutable borrow) so the install/cleanup mutations don't alias.
         let panes: Vec<(std::path::PathBuf, crate::state::sessions::AgentKind)> = self
-            .runtime
-            .pane_tabs
-            .as_ref()
-            .map(|tabs| {
-                tabs.tabs()
-                    .iter()
-                    .filter_map(|t| {
-                        let profile = crate::agent::detect(&t.info.command);
-                        profile
-                            .status_hooks()
-                            .is_some()
-                            .then(|| (t.info.cwd.clone(), profile.kind()))
-                    })
-                    .filter(|(cwd, _)| state::find_repo_root(cwd).as_deref().unwrap_or(cwd) == root)
-                    .collect()
-            })
-            .unwrap_or_default();
+            .hook_supporting_panes()
+            .into_iter()
+            .filter(|(cwd, _)| state::find_repo_root(cwd).as_deref().unwrap_or(cwd) == root)
+            .collect();
         for (cwd, kind) in &panes {
             if enable {
                 self.install_status_hooks(cwd, *kind);
             } else if let Some(support) = crate::agent::profile_for(*kind).status_hooks() {
+                // Unlike teardown, an explicit `:hooks off` removes them even
+                // with a sibling spyc still claiming the dir: the user is
+                // revoking consent for the project, and consent is what the
+                // sibling's own re-heal consults before re-installing.
+                let _ = crate::state::hook_owners::release(cwd, std::process::id());
                 (support.cleanup)(cwd);
                 self.runtime.mcp_config_dirs.retain(|d| d != cwd);
             }

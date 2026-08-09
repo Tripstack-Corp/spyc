@@ -301,6 +301,7 @@ mod session;
 mod skill;
 mod sources;
 pub mod state;
+mod status_hooks;
 mod streaming;
 mod tasks;
 #[cfg(test)]
@@ -507,6 +508,10 @@ struct Runtime {
     /// only while a change awaits its save; cleared on save / when clean. An
     /// OS-ish clock value, correctly in `Runtime` (never the pure Model).
     autosave_due: Option<std::time::Instant>,
+    /// When the agent status-hook drift check may next run
+    /// (`settle_status_hooks`). A throttle, not a deadline — nothing wakes the
+    /// loop for it, so idle stays 0 dps. `None` = due now (startup).
+    hook_recheck_at: Option<std::time::Instant>,
     /// P2 `wait_for_scope_clear`: parked MCP waiters, each holding the one-shot
     /// reply sender the loop fires (from `settle_scope_waiters`) once its scope
     /// clears or its deadline passes. In `Runtime` — it owns OS handles (the

@@ -227,7 +227,20 @@ pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
         } else {
             "output-timing".to_string()
         };
-        format!("why-status [{}]: {state} ({source}) — {age}", info.label)
+        // Name a missing hook install outright. Without it the fallback reads
+        // as the answer ("idle (output-timing)") when the real story is that
+        // nothing can report — the exact ambiguity that turned one removal into
+        // a forensics session.
+        let hooks = match crate::agent::detect(&info.command).status_hooks() {
+            Some(s) if !s.installed(&info.cwd) => {
+                format!(" — NO status hooks in {} (`:hooks on`)", s.config_label)
+            }
+            _ => String::new(),
+        };
+        format!(
+            "why-status [{}]: {state} ({source}) — {age}{hooks}",
+            info.label
+        )
     } else {
         format!("why-status: '{}' is not a known agent — no dot", info.label)
     };
@@ -530,8 +543,9 @@ pub(super) fn cmd_activity(app: &mut App, args: &str) -> Vec<Effect> {
     app.apply(&Action::ToggleActivity).unwrap_or_default()
 }
 
-/// Build the `:activity dump` report (see [`cmd_activity`]). Pure read of the
-/// live tabs + activity tallies → plain lines; no I/O, no mutation.
+/// Build the `:activity dump` report (see [`cmd_activity`]). Reads the live
+/// tabs + activity tallies, plus each agent dir's hook config (the one I/O — a
+/// dot that can't report is the first thing to rule out) → plain lines.
 fn activity_dump_lines(app: &App) -> Vec<String> {
     use crate::pane::AgentActivity;
     use crate::state::sessions::AgentKind;
@@ -587,6 +601,17 @@ fn activity_dump_lines(app: &App) -> Vec<String> {
         ));
         out.push(format!("    command: {}", info.command));
         out.push(format!("    cwd: {}", info.cwd.display()));
+        if let Some(support) = crate::agent::detect(&info.command).status_hooks() {
+            out.push(format!(
+                "    hooks: {} in {}",
+                if support.installed(&info.cwd) {
+                    "installed"
+                } else {
+                    "MISSING (`:hooks on`)"
+                },
+                support.config_label,
+            ));
+        }
         // The crux: live self-report > P1-2 scrape fallback > output timing.
         match (info.reported, info.scrape_status) {
             (Some(r), _) => out.push(format!(
