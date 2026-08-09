@@ -170,10 +170,12 @@ become `%` in shell expansion.
   radius is visible before you press `y`. Removed items go to the
   **graveyard** (see below) — recover with `:graveyard` or `:undo`.
 - **+** create a new directory
-- **L** long listing -- aligned table with inode, mode, octal,
-  links, owner, group, size, bytes, blocks, mtime/atime/ctime/birth,
-  name (symlinks as `name -> target`). Pager height fits to content.
-  (Also reachable as `:longlist`.)
+- **L** long listing -- aligned table, name first (symlinks as
+  `name -> target`), then mode, size, mtime, owner, group, links, octal,
+  bytes, blocks, inode, atime/ctime/birth. The row is wider than a
+  terminal, so it wraps: leading with the name means the wrap sheds the
+  forensic columns rather than the one that identifies the row. Pager
+  height fits the wrapped content. (Also reachable as `:longlist`.)
 - **:filetype** run `file(1)` on the selection
 - **:chmod** chmod +x
 

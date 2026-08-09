@@ -40,7 +40,7 @@ keys drive the file view (letters / `g` / `H` / `[`/`]`); **pane** keys use the
 | `M` | Move / rename selection (prompt) |
 | `+` | Make a new directory (prompt) |
 | `O` | Create a new file in `$EDITOR` (prompt) |
-| `L` | Long listing — wide aligned table (inode, mode, octal, …) |
+| `L` | Long listing — wide aligned table (name, mode, size, mtime, …) |
 | `S` | Cycle sort: name → size → mtime → ext |
 | `:chmod <mode>` | Change mode on the selection |
 | `:filetype` | Show the cursor file's detected type |
