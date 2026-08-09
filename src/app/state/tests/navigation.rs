@@ -423,9 +423,17 @@ proptest! {
     /// `^$` (so the body can't smuggle in a second anchor), and `/` (glob's path
     /// separator, and no name from `read_dir` contains one). It's non-empty
     /// because a bare `$` is deliberately a literal, not an empty end-anchor.
+    ///
+    /// The *name* excludes `*` for the same reason it excludes `/`: both are row
+    /// kind decorations, and an anchored query deliberately looks past them (`$`
+    /// finds `src` in the row `src/`). A name ending in `*` is indistinguishable
+    /// from an executable row, so `ends_with` is not the right reference for one —
+    /// which is what made this a latent flake, firing only when the generated name
+    /// happened to end in a decoration. That behavior has its own tests in
+    /// `app::matcher` (`end_anchor_looks_past_the_row_kind_decoration`).
     #[test]
     fn anchors_agree_with_starts_and_ends_with(
-        name in "[^/\\\\]{0,10}",
+        name in "[^/*\\\\]{0,10}",
         body in "[^*?\\[\\]\\\\^$/]{1,8}",
     ) {
         use crate::app::Matcher;
