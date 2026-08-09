@@ -226,7 +226,7 @@ mod map_tests {
 #[cfg(test)]
 mod parity_tests {
     use super::super::{
-        StatusEntry, decode_porcelain, head_ref_mtime, map_to_listing, repo_status,
+        StatusEntry, decode_porcelain, head_ref_mtime, map_to_listing, poll_key, repo_status,
         repo_status_stable,
     };
     use crate::git::test_support::run_git;
@@ -496,6 +496,33 @@ mod parity_tests {
             head_ref_mtime(&gd),
             Some(newer),
             "head key must follow the branch ref (moves on commit), not the HEAD pointer",
+        );
+    }
+
+    /// The key's head half also follows the shared `config`: config decides what
+    /// `status` reports (`core.bare = true` makes a dirty tree read clean) while
+    /// moving neither `index` nor `HEAD`, so a config-only change must
+    /// invalidate the poll. An absent config path is not a reason to stop
+    /// polling — the key falls back to the HEAD/ref side.
+    #[test]
+    fn poll_key_head_half_folds_the_shared_config() {
+        let (_t, root) = repo_with_commit();
+        let gd = crate::git::discovery::gitdir(&root).expect("gitdir");
+        let config = crate::git::discovery::shared_config_path(&gd).expect("config path");
+        let older = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+        let newer = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(2_000_000_000);
+        set_mtime(&gd.join("HEAD"), older);
+        set_mtime(&gd.join("refs/heads/main"), older);
+        set_mtime(&config, newer);
+        assert_eq!(
+            poll_key(&gd, Some(&config)).map(|(_, head)| head),
+            Some(newer),
+            "a config write must move the key's head half",
+        );
+        assert_eq!(
+            poll_key(&gd, None).map(|(_, head)| head),
+            Some(older),
+            "no config path → the HEAD/ref side still keys the poll",
         );
     }
 
