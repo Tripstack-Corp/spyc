@@ -60,6 +60,26 @@ pub struct MountFacts {
 }
 
 impl MountFacts {
+    /// Facts for the check that runs *before* a streamed mount decompresses
+    /// anything.
+    ///
+    /// A compressed tar reveals its member count and real size only to the pass
+    /// that extracts it, so the only figure available up front is the archive's
+    /// own size — a floor, since a stream never shrinks. `entries` is 1 because
+    /// the count is genuinely unknown here and an empty archive is caught after
+    /// the pass, where it can be counted rather than guessed.
+    pub const fn preflight_streamed(compressed_size: u64, free_space: Option<u64>) -> Self {
+        Self {
+            total_uncompressed: compressed_size,
+            size_is_exact: false,
+            compressed_size,
+            entries: 1,
+            skipped: 0,
+            free_space,
+            needs_extraction: true,
+        }
+    }
+
     /// Message prefix that keeps a lower-bound size from reading as the real one.
     const fn at_least(&self) -> &'static str {
         if self.size_is_exact { "" } else { "at least " }
@@ -352,6 +372,25 @@ mod tests {
             matches!(d, MountDecision::Confirm(ref m) if m.contains("at least")),
             "{d:?}"
         );
+    }
+
+    /// The pre-flight is a floor, so it must refuse only what is *certainly* too
+    /// big and let the in-pass ceiling catch the rest.
+    #[test]
+    fn the_streamed_preflight_judges_what_it_can_and_defers_the_rest() {
+        let limits = BudgetLimits::default();
+        // 900 MB compressed cannot possibly extract to less, so it is refused
+        // before a single byte is decompressed.
+        let big = MountFacts::preflight_streamed(900 * MIB, Some(100 * 1024 * MIB));
+        assert!(matches!(
+            decide_mount(&big, &limits),
+            MountDecision::Refuse(_)
+        ));
+
+        // A small archive says nothing about what it expands to; the budget
+        // inside the pass is what stops a bomb.
+        let small = MountFacts::preflight_streamed(2 * MIB, Some(100 * 1024 * MIB));
+        assert_eq!(decide_mount(&small, &limits), MountDecision::Proceed);
     }
 
     #[test]

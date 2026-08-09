@@ -211,6 +211,25 @@ without waiting for a real agent transition.
 
 ---
 
+## Archives — `[archive]`
+
+`Enter` on a zip / tarball browses it as a directory (see FEATURES.md →
+Archives). A mount is an *index*, so entering one costs no disk; these knobs
+bound the one case that does — a compressed tar, which has to be extracted as it
+streams because it can't be listed any other way.
+
+```toml
+[archive]
+enable = true              # false → Enter pages the archive as bytes
+extract_budget_mb = 512    # hard ceiling for a .tar.gz / .tar.zst mount
+warn_over_mb = 128         # confirm before extracting more than this
+max_entries = 200000       # cap on indexed members
+```
+
+Staging lives under `$XDG_STATE_HOME/spyc/archives/<pid>-<hash>/` and is removed
+when the archive is unmounted or spyc exits; a tree left behind by a killed
+process is reaped at the next launch.
+
 ## Mouse — `[mouse]`
 
 ```toml

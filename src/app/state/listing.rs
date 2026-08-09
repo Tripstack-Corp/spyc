@@ -259,6 +259,17 @@ impl AppState {
         // is orphaned. Runs here because every fs-event / poll refresh lands in
         // this method, so an external deletion is healed on the next refresh.
         self.reset_orphaned_columns_to_home();
+        // Inside an archive there is nothing on disk to re-read: the rows come
+        // from the index, so a refresh rebuilds them (picking up any pending
+        // change) and keeps the cursor where it was.
+        let dir = self.cur().listing.dir.clone();
+        if let Some((mount, inner)) = self.mounts.resolve(&dir) {
+            let listing = mount.listing_for(&inner);
+            let side = self.focused_side();
+            self.install_listing(side, listing);
+            self.rebuild_rows();
+            return;
+        }
         match Listing::read(&self.cur().listing.dir) {
             Ok(new) => self.apply_refreshed_listing(new),
             Err(e) => {
@@ -366,6 +377,12 @@ impl AppState {
     /// the process cwd or back-nav history out from under the focused one.
     /// `chdir` is the `side == focused_side()` case, behavior-for-behavior.
     pub fn chdir_side(&mut self, side: Side, path: &Path) -> Result<()> {
+        // A path inside a mounted archive is virtual — there is no directory to
+        // canonicalize and nothing to `chdir` into, since the "directory" is a
+        // file. `chdir_into_mount` builds the listing from the index instead.
+        if self.chdir_into_mount(side, path) {
+            return Ok(());
+        }
         let canonical =
             std::fs::canonicalize(path).with_context(|| format!("resolving {}", path.display()))?;
         let new_listing = Listing::read(&canonical)?;
@@ -418,6 +435,46 @@ impl AppState {
         Ok(())
     }
 
+    /// Move `side` to a directory inside a mounted archive, or report `false`
+    /// when `path` isn't in one.
+    ///
+    /// Deliberately *not* a `chdir`: the process cwd stays where it was, because
+    /// the mount root is a regular file and no OS can make it a working
+    /// directory. Everything a real chdir resets — picks, the temp filter,
+    /// ghosts, the cursor — resets here too, so entering an archive behaves like
+    /// entering a directory. Git state is cleared rather than computed: a member
+    /// has no history, and discovery from a virtual path would climb out of the
+    /// archive and report whatever repository happens to hold it.
+    fn chdir_into_mount(&mut self, side: Side, path: &Path) -> bool {
+        let Some((mount, inner)) = self.mounts.resolve(path) else {
+            return false;
+        };
+        let listing = mount.listing_for(&inner);
+        let truncated = listing.truncated;
+        let focused = self.focused_side() == side;
+        if focused && self.col(side).listing.dir != listing.dir {
+            self.prev_dir = Some(self.col(side).listing.dir.clone());
+        }
+        self.install_listing(side, listing);
+        self.col_mut(side)
+            .git
+            .set(None, std::collections::HashMap::new());
+        self.col_mut(side).git_cache.current_repo_root = None;
+        self.col_mut(side).picks.clear();
+        self.col_mut(side).temp_filter = None;
+        self.col_mut(side).pending_ghosts.clear();
+        self.col_mut(side).cursor = Cursor::new();
+        self.col_mut(side).view = View::Dir;
+        self.rebuild_rows();
+        if truncated {
+            self.flash_info(format!(
+                "archive index capped at {} members — it has more",
+                self.col(side).listing.entries.len()
+            ));
+        }
+        true
+    }
+
     /// Snap any column (A or B) whose cwd no longer exists back to a real
     /// directory with a flash, rather than stranding it on a deleted path.
     /// Cause-agnostic: covers a worktree torn down by spyc's own
@@ -440,6 +497,12 @@ impl AppState {
             let orphaned = self.col(side).listing.dir.clone();
             if orphaned.is_dir() {
                 continue; // still a valid directory — leave it
+            }
+            // A path inside a mounted archive is *supposed* to look like a
+            // non-directory: the mount root is a file. Healing it would eject the
+            // column from the archive on the next refresh.
+            if self.mounts.contains(&orphaned) {
+                continue;
             }
             // Prefer PROJECT_HOME; else the nearest existing ancestor of the
             // dead path (so even a missing PROJECT_HOME can't leave the column

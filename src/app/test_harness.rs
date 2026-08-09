@@ -66,6 +66,8 @@ impl App {
                 )),
                 graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 image_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                archive_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                archive_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 worktree_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 preview_results: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 file_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
