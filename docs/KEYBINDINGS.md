@@ -24,7 +24,7 @@ keys drive the file view (letters / `g` / `H` / `[`/`]`); **pane** keys use the
 | `V` | Open `$EDITOR` in top pane (bottom pane stays visible) |
 | `D` | Open file in the in-app pager in top pane (bottom pane stays visible) |
 | `u` / `-` | Climb to parent |
-| `/` | Search current listing (incremental, glob-aware) |
+| `/` | Search current listing (incremental; glob-aware, `^`/`$` anchors) |
 | `~` / `Home` | Jump to home (`H` is the harpoon prefix) |
 | `J` | Jump to any path |
 | `F` | Project-wide fuzzy filename finder (gitignore-aware) |
@@ -219,7 +219,7 @@ back to it later.
 | `` ` `` | Jump to start dir (set with `gS` or `:startdir`) |
 | `a` | Toggle dotfile filter |
 | `o` | Toggle build artifact filter |
-| `=` | Temporary glob filter (`=*.rs`, `=!` picks, `=git` git, `=h` harpoon) |
+| `=` | Temporary glob filter (`=*.rs`, `=^2026`, `=!` picks, `=git` git, `=h` harpoon) |
 
 ## Harpoon (per-worktree pinned files)
 
