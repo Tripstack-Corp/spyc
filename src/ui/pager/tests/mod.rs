@@ -283,6 +283,55 @@ fn pager_inner_area_top_pane_uses_area_as_is() {
     assert_eq!(pager_inner_area(slot, &view), slot);
 }
 
+/// The fit-to-content box (the `L` long listing) sized itself from the LOGICAL
+/// line count, so content wider than the body wrapped to several rows each and
+/// the overflow was hidden inside an under-sized frame — the reported symptom
+/// was a long listing of 3 files showing a clipped, seemingly-garbled table.
+/// The height must come from visual rows.
+#[test]
+fn fit_to_content_height_counts_wrapped_rows_not_lines() {
+    // A 160-col terminal ⇒ a 90% box of 144 ⇒ a 142-col body. Long-listing rows
+    // run past 200 columns, so each wraps to 2 visual rows.
+    let area = Rect::new(0, 0, 160, 60);
+    let wide: Vec<String> = (0..4).map(|i| format!("{i}{}", "x".repeat(200))).collect();
+    let mut view = PagerView::new_plain("long listing — /tmp", wide);
+    view.fit_to_content = true;
+    assert!(view.wrap, "the fit-to-content pager wraps");
+
+    let rect = pager_inner_area(area, &view);
+    // 4 lines × 2 visual rows + 2 borders + 1 status row.
+    assert_eq!(
+        rect.height, 11,
+        "the box must fit all 8 visual rows, not 4+3=7"
+    );
+
+    // Narrow content of the same line count still gets the compact box, so the
+    // fix doesn't just inflate every fit-to-content pager.
+    let narrow: Vec<String> = (0..4).map(|i| format!("line {i}")).collect();
+    let mut view = PagerView::new_plain("summary", narrow);
+    view.fit_to_content = true;
+    assert_eq!(pager_inner_area(area, &view).height, 7);
+}
+
+/// The fit-to-content box never exceeds the standard 92% height — the whole
+/// point of the mode is that a short summary doesn't get a near-full-screen
+/// frame, and wrap-aware sizing must not turn wide content into a full screen.
+#[test]
+fn fit_to_content_height_stays_capped_at_the_centered_height() {
+    let area = Rect::new(0, 0, 160, 60);
+    let many: Vec<String> = (0..500)
+        .map(|i| format!("{i}{}", "x".repeat(400)))
+        .collect();
+    let mut view = PagerView::new_plain("huge", many);
+    view.fit_to_content = true;
+    let capped = pager_inner_area(area, &view);
+    assert_eq!(
+        capped.height,
+        60 * 92 / 100,
+        "capped at the centered height"
+    );
+}
+
 #[test]
 fn pager_inner_area_top_pane_ignores_full_width_and_fit() {
     // Pane mounts deliberately ignore the overlay sizing
