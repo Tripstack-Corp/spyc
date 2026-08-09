@@ -79,9 +79,40 @@ pub fn display_pad_right(s: &str, width: usize) -> String {
     }
 }
 
+/// Human-readable size: `512B`, `4.0K`, `1.2M`, `3.4G`, etc. Shared by the
+/// long-listing table, the file-type label, and the image-gallery popup —
+/// a pure `u64 -> String`, so it lives with the renderers rather than in `fs`.
+pub fn format_size(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "K", "M", "G", "T", "P"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes}B")
+    } else if value >= 10.0 {
+        format!("{value:.0}{}", UNITS[unit])
+    } else {
+        format!("{value:.1}{}", UNITS[unit])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn format_size_picks_appropriate_unit() {
+        assert_eq!(format_size(0), "0B");
+        assert_eq!(format_size(512), "512B");
+        assert_eq!(format_size(1024), "1.0K");
+        assert_eq!(format_size(1536), "1.5K");
+        assert_eq!(format_size(10 * 1024), "10K");
+        assert_eq!(format_size(1024 * 1024), "1.0M");
+        assert_eq!(format_size(12 * 1024 * 1024), "12M");
+    }
 
     #[test]
     fn ascii_width() {

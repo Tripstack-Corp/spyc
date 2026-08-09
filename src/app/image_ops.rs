@@ -402,19 +402,7 @@ impl super::App {
                     });
                 }
                 ImageOutcome::Indexed { path, images } => {
-                    // An empty index is a real answer, not a view worth
-                    // opening: an empty gallery reads as "spyc lost them".
-                    if images.is_empty() {
-                        self.state
-                            .flash_info("no images in this agent's conversation yet");
-                    } else {
-                        let count = images.len();
-                        self.state.open_images_view(Some(path), images);
-                        self.state.flash_info(format!(
-                            "{count} image{} \u{00b7} Enter to view \u{00b7} q to close",
-                            if count == 1 { "" } else { "s" }
-                        ));
-                    }
+                    self.apply_gallery_index(&path, images);
                 }
                 ImageOutcome::Captured {
                     tab_id,

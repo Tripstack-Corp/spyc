@@ -340,10 +340,6 @@ pub enum View {
     /// restore-to-original, `dd`/`x` purge entry to system trash,
     /// `Z` purge all (with confirm), `Esc`/`gy` close.
     Graveyard,
-    /// Image gallery (`^a g`): the images the focused agent tab actually
-    /// received, newest last. Bindings inside: `Enter`/`i` show the image
-    /// full-screen, `Esc`/`q` close.
-    Images,
 }
 
 /// Input mode: normal key bindings or a one-line text prompt.
@@ -652,6 +648,24 @@ struct Runtime {
     picker: Option<ratatui_image::picker::Picker>,
 }
 
+/// The `^a g` image-gallery popup.
+///
+/// Holds the *received* half (indexed off the agent's transcript) inline, but
+/// reads the unsent half from `state.pane.pending_images` by `tab_id` rather
+/// than copying it — those are megabytes each, and the popup is a glance.
+pub struct ImageGallery {
+    /// Which pane tab this gallery belongs to. Pins a late-arriving index so a
+    /// tab switch mid-load can't show one agent's images under another's name.
+    pub tab_id: String,
+    pub received: Vec<crate::state::transcript_images::TranscriptImage>,
+    /// Where `received` came from, and where an image's bytes are re-read from.
+    /// `None` when there's no readable transcript and only unsent images show.
+    pub transcript_path: Option<std::path::PathBuf>,
+    pub cursor: usize,
+    /// The transcript index is still being built off-thread.
+    pub loading: bool,
+}
+
 /// A rendered image shown full-screen. Holds the ready-to-blit protocol plus
 /// the encoded bytes, so the overlay verbs (`s` save, `y` copy, `b` base64)
 /// work without re-rendering, and the [`ImageOrigin`](image_ops::ImageOrigin)
@@ -741,6 +755,8 @@ pub struct ViewState {
     /// `apply_image_outcomes`. Graphics terminals only. See
     /// `docs/archive/MERMAID_PAGER_PLAN.md`.
     pub image_view: Option<ImageView>,
+    /// The `^a g` gallery popup, when open.
+    pub image_gallery: Option<ImageGallery>,
     pub pager_history: PagerHistory,
     pub pager_pending_bracket: Option<char>,
     pub pager_was_open: bool,
@@ -987,6 +1003,7 @@ impl ViewState {
             dim_inactive: true,
             preview_dirty: false,
             image_view: None,
+            image_gallery: None,
             pager_history: PagerHistory::new(),
             pager_pending_bracket: None,
             pager_was_open: false,

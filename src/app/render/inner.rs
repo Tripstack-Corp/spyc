@@ -261,6 +261,15 @@ impl App {
                 layout.vdivider.map(|r| r.x),
             );
         }
+
+        // Agent image gallery — same modal popup treatment as harpoon.
+        if self.view.image_gallery.is_some() {
+            self.render_image_gallery(
+                frame,
+                layout.divider.map(|r| r.y),
+                layout.vdivider.map(|r| r.x),
+            );
+        }
     }
 
     /// Draw the bottom region into `rect`: the `^a v` scrollback pager

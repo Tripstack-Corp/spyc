@@ -115,14 +115,12 @@ impl AppState {
 
     pub fn toggle_inventory_view(&mut self) {
         self.cur_mut().view = match self.cur().view {
-            View::Dir | View::Graveyard | View::Images => View::Inventory,
+            View::Dir | View::Graveyard => View::Inventory,
             View::Inventory => View::Dir,
         };
-        // Leaving graveyard / gallery view drops the snapshot so a stale set
+        // Leaving graveyard view drops the snapshot so a stale set
         // of entries can't bleed into a later open.
         self.graveyard.clear();
-        self.transcript_images.clear();
-        self.transcript_images_path = None;
         self.cur_mut().cursor = Cursor::new();
         self.rebuild_rows();
     }
@@ -137,51 +135,6 @@ impl AppState {
             self.graveyard = crate::state::graveyard::Graveyard::load().entries;
             self.cur_mut().view = View::Graveyard;
         }
-        self.cur_mut().cursor = Cursor::new();
-        self.rebuild_rows();
-    }
-
-    /// Show `images` (from `path`) in the gallery, landing the cursor on the
-    /// newest — the one you most likely came to check.
-    pub fn open_images_view(
-        &mut self,
-        path: Option<std::path::PathBuf>,
-        images: Vec<crate::state::transcript_images::TranscriptImage>,
-    ) {
-        self.transcript_images = images;
-        self.transcript_images_path = path;
-        self.cur_mut().view = View::Images;
-        self.cur_mut().cursor = Cursor::new();
-        self.rebuild_rows();
-        let last = self.transcript_images.len().saturating_sub(1);
-        self.cur_mut().cursor.index = last;
-    }
-
-    /// The open gallery's uncommitted images — its tab's ring, or empty.
-    pub fn pending_gallery_images(&self) -> &[crate::app::state::PendingImage] {
-        self.gallery_tab_id
-            .as_ref()
-            .and_then(|id| self.pane.pending_images.get(id))
-            .map_or(&[], Vec::as_slice)
-    }
-
-    /// What the gallery cursor is pointing at.
-    pub fn gallery_row_at_cursor(&self) -> Option<crate::app::state::listing::GalleryRow> {
-        crate::app::state::listing::GalleryRow::of(
-            self.cur().cursor.index,
-            self.pending_gallery_images().len(),
-            self.transcript_images.len(),
-        )
-    }
-
-    /// Leave the gallery, dropping the snapshot with it. The uncommitted-image
-    /// ring is NOT touched — those belong to the tab's in-progress prompt, not
-    /// to this view.
-    pub fn close_images_view(&mut self) {
-        self.transcript_images.clear();
-        self.transcript_images_path = None;
-        self.gallery_tab_id = None;
-        self.cur_mut().view = View::Dir;
         self.cur_mut().cursor = Cursor::new();
         self.rebuild_rows();
     }

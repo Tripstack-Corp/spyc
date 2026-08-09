@@ -249,6 +249,7 @@ impl App {
             }
             route::InputSink::QuickSelect => return Ok(self.handle_quick_select_key(key)),
             route::InputSink::Harpoon => return Ok(self.handle_harpoon_menu_key(key)),
+            route::InputSink::ImageGallery => return Ok(self.handle_image_gallery_key(key)),
             // ── content sinks ──
             route::InputSink::OverlayPty => {
                 // Forward the keystroke to the overlay pty via the sole
@@ -391,14 +392,6 @@ impl App {
         // pager's `d` already being free here — second `d` confirms.
         if self.state.cur().view == View::Graveyard {
             return Ok(self.handle_graveyard_view_key(key));
-        }
-        // Image gallery: only its own verbs are claimed (`Enter`/`i` view,
-        // `Esc`/`q` close) — anything else falls through to the resolver so the
-        // normal list motions (`j`/`k`/`G`, `/` search) keep working.
-        if self.state.cur().view == View::Images
-            && let Some(effects) = self.handle_images_view_key(key)
-        {
-            return Ok(effects);
         }
         let outcome = self.state.resolver.feed(key, &self.state.user_keymap);
         if crate::key_trace::is_enabled() {
@@ -597,10 +590,11 @@ impl App {
                 Vec::new()
             }
             // No text sink — swallow (don't leak to the bottom pane). Quick-
-            // select / harpoon are single-key label menus; pane-scrollback is
-            // effectively dead (scroll routes via PagerKey).
+            // select / harpoon / the image gallery are single-key menus;
+            // pane-scrollback is effectively dead (scroll routes via PagerKey).
             route::InputSink::QuickSelect
             | route::InputSink::Harpoon
+            | route::InputSink::ImageGallery
             | route::InputSink::PaneScroll => Vec::new(),
             // ── content sinks ──
             route::InputSink::Prompt => {
