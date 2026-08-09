@@ -1255,12 +1255,13 @@ impl App {
 }
 
 /// Search / filter matcher: case-insensitive substring for plain
-/// text, glob for anything with `*`, `?`, or `[`. Used by `/`
-/// (search) and `=` (limit filter). Substring (not anchored at the
+/// text, glob for anything with `*`, `?`, or `[`, and a leading `^` /
+/// trailing `$` as regex-style anchors. Used by `/` (search) and `=`
+/// (limit filter). Substring (not anchored at the
 /// start) so `/env` finds `.env`, `.envrc`, and `environment.toml`
 /// — anchored prefix mode hid dot-prefixed files behind their
-/// leading `.` and was consistently surprising. Globs are still
-/// available for users who want anchoring (`env*`, `.env*`).
+/// leading `.` and was consistently surprising. Anchor explicitly with
+/// `^env` (or the equivalent glob `env*`) when you want starts-with.
 pub enum Matcher {
     Substring(String),
     Glob(Pattern),
@@ -1270,9 +1271,20 @@ pub enum Matcher {
 
 impl Matcher {
     pub fn build(query: &str) -> Self {
-        let is_glob = query.contains(['*', '?', '[']);
         let lower = query.to_lowercase();
-        if is_glob {
+        // `^`/`$` anchors desugar into the glob engine — the whole-string glob
+        // match IS the anchoring, so `^env` is `env*` and `env$` is `*env`.
+        // Costs no new matching code and composes with `*`/`?`/`[` (`^a?c$`).
+        //
+        // Without this, `^env` was a literal substring no filename contains, so
+        // the regex reflex silently matched NOTHING rather than starts-with.
+        if let Some(anchored) = desugar_anchors(&lower) {
+            return match Pattern::new(&anchored) {
+                Ok(p) => Self::Glob(p),
+                Err(_) => Self::Never,
+            };
+        }
+        if lower.contains(['*', '?', '[']) {
             match Pattern::new(&lower) {
                 Ok(p) => Self::Glob(p),
                 Err(_) => Self::Never,
@@ -1298,6 +1310,34 @@ impl Matcher {
             }
             Self::Never => false,
         }
+    }
+}
+
+/// Rewrite a `^`/`$`-anchored query as the equivalent glob, or `None` when the
+/// query carries no anchor and the caller should use its normal path.
+///
+/// Only a LEADING `^` and a TRAILING `$` are anchors — `$RECYCLE.BIN` is a real
+/// filename, so a `$` anywhere else stays literal, and a trailing `$` with
+/// nothing before it is a search FOR `$` rather than a useless empty anchor.
+/// A bare `^` matches everything, which is what an incremental search wants
+/// after the first keystroke of `^env`.
+fn desugar_anchors(query: &str) -> Option<String> {
+    let at_start = query.starts_with('^');
+    let body = query.strip_prefix('^').unwrap_or(query);
+    let at_end = body.len() > 1 && body.ends_with('$');
+    let body = if at_end {
+        body.strip_suffix('$').unwrap_or(body)
+    } else {
+        body
+    };
+    match (at_start, at_end) {
+        (false, false) => None,
+        (true, true) => Some(body.to_string()),
+        // Don't double up an existing `*` — `**` is its own thing in a glob.
+        (true, false) if body.ends_with('*') => Some(body.to_string()),
+        (true, false) => Some(format!("{body}*")),
+        (false, true) if body.starts_with('*') => Some(body.to_string()),
+        (false, true) => Some(format!("*{body}")),
     }
 }
 

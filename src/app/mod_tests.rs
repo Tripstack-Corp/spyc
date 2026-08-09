@@ -1134,6 +1134,79 @@ mod matcher_tests {
         assert!(!m.matches("rd"));
     }
 
+    /// Issue #199: `^` is the reflex for starts-with, and it used to be a
+    /// literal substring no filename contains — so the query silently matched
+    /// NOTHING instead of anchoring. Glob mode already anchored (`env*`); `^`
+    /// desugars into it.
+    #[test]
+    fn caret_anchors_at_the_start() {
+        let m = Matcher::build("^env");
+        assert!(m.matches("environment.toml"));
+        assert!(m.matches("env"));
+        assert!(m.matches("ENV_FILE")); // still case-insensitive
+        assert!(!m.matches(".envrc")); // the leading `.` is not a match
+        assert!(!m.matches("MY_ENV.txt"));
+    }
+
+    #[test]
+    fn dollar_anchors_at_the_end() {
+        let m = Matcher::build("env$");
+        assert!(m.matches(".env"));
+        assert!(m.matches("MY_ENV"));
+        assert!(!m.matches(".envrc"));
+        assert!(!m.matches("environment.toml"));
+    }
+
+    #[test]
+    fn both_anchors_are_an_exact_match() {
+        let m = Matcher::build("^env$");
+        assert!(m.matches("env"));
+        assert!(m.matches("ENV"));
+        assert!(!m.matches(".env"));
+        assert!(!m.matches("envrc"));
+    }
+
+    #[test]
+    fn anchors_compose_with_glob_metacharacters() {
+        let m = Matcher::build("^a?c$");
+        assert!(m.matches("abc"));
+        assert!(m.matches("axc"));
+        assert!(!m.matches("abcd"));
+
+        // An existing `*` on the anchored side isn't doubled into `**`.
+        let m = Matcher::build("^src*");
+        assert!(m.matches("src/lib.rs"));
+        assert!(m.matches("srcfile"));
+        assert!(!m.matches("mysrc"));
+    }
+
+    /// `$RECYCLE.BIN` is a real filename (Windows volumes mounted on a Mac), so
+    /// a `$` that isn't trailing must stay literal — and a bare trailing `$`
+    /// with no body is a search FOR `$`, not an empty end-anchor.
+    #[test]
+    fn dollar_is_literal_unless_it_trails_a_body() {
+        let m = Matcher::build("$recycle");
+        assert!(m.matches("$RECYCLE.BIN"));
+
+        let m = Matcher::build("$");
+        assert!(m.matches("$RECYCLE.BIN"));
+        assert!(!m.matches("plain.txt"));
+
+        // Mid-query `^` is literal too.
+        let m = Matcher::build("a^b");
+        assert!(m.matches("xa^by"));
+        assert!(!m.matches("ab"));
+    }
+
+    /// A lone `^` is the first keystroke of `^env` under incremental search, so
+    /// it must match everything rather than nothing.
+    #[test]
+    fn bare_caret_matches_everything_mid_typing() {
+        let m = Matcher::build("^");
+        assert!(m.matches("anything.txt"));
+        assert!(m.matches(".hidden"));
+    }
+
     #[test]
     fn glob_skips_alloc_for_lowercase_ascii_but_stays_case_insensitive() {
         let m = Matcher::build("*.RS");
