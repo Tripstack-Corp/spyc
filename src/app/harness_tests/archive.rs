@@ -2198,3 +2198,60 @@ fn archive_info_outside_a_mount_reports_what_is_mounted() {
         assert!(shown.contains("-1"), "and its pending change: {shown}");
     });
 }
+
+/// End to end, in the terms the complaint was made in: after an edit, the badge is
+/// **painted**.
+///
+/// Every other test here asserts the *journal*. That's one layer short of "I get
+/// no visual indicator", and the gap between the two is where a blind badge hid
+/// twice — once because the edit never reached the journal, once because the tag
+/// was resolved against the wrong column.
+#[test]
+fn the_status_bar_paints_the_badge_after_an_edit() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let paint = |app: &mut App| -> String {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 24)).unwrap();
+            terminal.draw(|f| app.render(f)).unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect()
+        };
+
+        let before = paint(&mut app);
+        assert!(before.contains("zip"), "inside a mount, the bar says so");
+        assert!(
+            !before.contains("~1"),
+            "and nothing is pending yet: {before}"
+        );
+
+        // Read a member (staging it), then change that copy the way the pager's
+        // `v` — or an agent in the pane — would, without telling spyc.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+        let staged = {
+            let mount = app.state.mounts.get(&archive).unwrap();
+            mount.staging_path(mount.index.get("README.md").unwrap())
+        };
+        std::fs::write(&staged, b"# edited\n").unwrap();
+        assert!(app.settle_archive_edits(), "the change is noticed");
+
+        let after = paint(&mut app);
+        assert!(
+            after.contains("~1"),
+            "the status bar is what the user reads: {after}"
+        );
+    });
+}
