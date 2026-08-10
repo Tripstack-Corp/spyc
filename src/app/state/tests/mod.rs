@@ -461,6 +461,47 @@ fn flash_error_sets_message() {
 }
 
 #[test]
+fn flash_progress_sets_message() {
+    let mut s = test_state();
+    s.flash_progress("reading pkg.zip…");
+    let flash = s.flash.as_ref().unwrap();
+    assert_eq!(flash.text, "reading pkg.zip…");
+    assert!(matches!(flash.kind, FlashKind::Progress));
+}
+
+/// The clear is narrow on purpose: an in-flight message goes when its work
+/// finishes, but a real message that landed meanwhile is what the user needs to
+/// read, so it stays.
+#[test]
+fn clearing_progress_leaves_a_real_message_alone() {
+    let mut s = test_state();
+
+    s.flash_progress("reading pkg.zip…");
+    s.clear_progress_flash();
+    assert!(s.flash.is_none(), "an in-flight message goes");
+
+    s.flash_info("1 member(s) differ only by case");
+    s.clear_progress_flash();
+    assert_eq!(
+        s.flash.as_ref().map(|f| f.text.clone()),
+        Some("1 member(s) differ only by case".to_string()),
+        "a note stays"
+    );
+
+    s.flash_error("could not read it");
+    s.clear_progress_flash();
+    assert_eq!(
+        s.flash.as_ref().map(|f| f.text.clone()),
+        Some("could not read it".to_string()),
+        "an error stays"
+    );
+
+    s.flash = None;
+    s.clear_progress_flash();
+    assert!(s.flash.is_none(), "and clearing nothing is fine");
+}
+
+#[test]
 fn flash_saved_file_reports_basename_on_success() {
     let mut s = test_state();
     s.flash_saved_file(Ok(std::path::PathBuf::from("/tmp/foo/spyc_pane_x.txt")));
