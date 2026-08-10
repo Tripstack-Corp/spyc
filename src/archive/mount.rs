@@ -37,11 +37,23 @@ pub struct ArchiveMount {
     /// Monotonic stamp of the last time a column entered this mount, so the
     /// least-recently-used one is the one evicted.
     pub last_used: u64,
+    /// How many archives deep this one is: 0 when it's a file on disk, 1 for one
+    /// inside that, and so on. Carried rather than derived so a third level can't
+    /// read as a second.
+    pub depth: usize,
 }
 
 impl ArchiveMount {
+    /// Where this mount is addressed — its root, and the registry key. Every
+    /// member path sits under it.
     pub fn archive(&self) -> &Path {
         &self.index.archive
+    }
+
+    /// The file its bytes come out of. Differs from [`Self::archive`] only for a
+    /// nested archive, which is read from the staged copy.
+    pub fn source(&self) -> &Path {
+        self.index.source()
     }
 
     pub const fn format(&self) -> ArchiveFormat {
@@ -84,21 +96,24 @@ impl ArchiveMount {
 /// The mounted archives, newest activity last.
 #[derive(Debug, Default)]
 pub struct Mounts {
-    mounts: Vec<ArchiveMount>,
+    live: Vec<ArchiveMount>,
+    /// Staging trees left behind by a mount dropped mid-session, still owed a
+    /// removal at teardown.
+    orphaned: Vec<PathBuf>,
     tick: u64,
 }
 
 impl Mounts {
     pub const fn is_empty(&self) -> bool {
-        self.mounts.is_empty()
+        self.live.is_empty()
     }
 
     pub const fn len(&self) -> usize {
-        self.mounts.len()
+        self.live.len()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &ArchiveMount> {
-        self.mounts.iter()
+        self.live.iter()
     }
 
     /// The mount containing `path`, with the inner path within it.
@@ -107,23 +122,42 @@ impl Mounts {
     /// another resolves to the inner one rather than whichever was registered
     /// first.
     pub fn resolve(&self, path: &Path) -> Option<(&ArchiveMount, String)> {
-        self.mounts
+        self.live
             .iter()
             .filter_map(|m| m.index.inner_of(path).map(|inner| (m, inner)))
             .max_by_key(|(m, _)| m.archive().as_os_str().len())
     }
 
-    /// Whether `path` is inside any mount.
+    /// Whether `path` is at or inside any mount.
+    ///
+    /// True for the archive file itself, which is what makes it a valid
+    /// *destination* — putting a file into `pkg.zip` means its root directory.
+    /// Asking "is this a member?" is [`Self::holds_member`].
     pub fn contains(&self, path: &Path) -> bool {
         self.resolve(path).is_some()
     }
 
+    /// The mount `path` is a **member** of, excluding the mount root.
+    ///
+    /// A mounted archive is still an ordinary file where it lives: it can be
+    /// entered, yanked, copied, renamed and deleted like any other. Treating it
+    /// as a member of itself asks the index for the entry named `""`, which is
+    /// how re-entering a mounted archive once failed with "no such member".
+    pub fn member_of(&self, path: &Path) -> Option<(&ArchiveMount, String)> {
+        self.resolve(path).filter(|(_, inner)| !inner.is_empty())
+    }
+
+    /// Whether `path` names a member inside a mount, rather than a container.
+    pub fn holds_member(&self, path: &Path) -> bool {
+        self.member_of(path).is_some()
+    }
+
     pub fn get(&self, archive: &Path) -> Option<&ArchiveMount> {
-        self.mounts.iter().find(|m| m.archive() == archive)
+        self.live.iter().find(|m| m.archive() == archive)
     }
 
     pub fn get_mut(&mut self, archive: &Path) -> Option<&mut ArchiveMount> {
-        self.mounts.iter_mut().find(|m| m.archive() == archive)
+        self.live.iter_mut().find(|m| m.archive() == archive)
     }
 
     /// Mark a mount as just used, which is what keeps it off the eviction block.
@@ -148,30 +182,30 @@ impl Mounts {
         mount.last_used = self.tick;
         // Re-mounting an archive replaces its entry rather than duplicating it.
         if let Some(pos) = self
-            .mounts
+            .live
             .iter()
             .position(|m| m.archive() == mount.archive())
         {
-            let old = std::mem::replace(&mut self.mounts[pos], mount);
-            return if old.staging_root == self.mounts[pos].staging_root {
+            let old = std::mem::replace(&mut self.live[pos], mount);
+            return if old.staging_root == self.live[pos].staging_root {
                 Vec::new()
             } else {
                 vec![old.staging_root]
             };
         }
-        self.mounts.push(mount);
+        self.live.push(mount);
 
         let mut evicted = Vec::new();
-        while self.mounts.len() > MAX_MOUNTS {
+        while self.live.len() > MAX_MOUNTS {
             let victim = self
-                .mounts
+                .live
                 .iter()
                 .enumerate()
                 .filter(|(_, m)| !protected.iter().any(|p| p == m.archive()) && !m.is_dirty())
                 .min_by_key(|(_, m)| m.last_used)
                 .map(|(i, _)| i);
             match victim {
-                Some(i) => evicted.push(self.mounts.remove(i).staging_root),
+                Some(i) => evicted.push(self.live.remove(i).staging_root),
                 // Everything is in use or dirty: hold them all rather than
                 // discard state the user still needs.
                 None => break,
@@ -182,17 +216,28 @@ impl Mounts {
 
     /// Drop a mount, returning its staging root to clean up.
     pub fn remove(&mut self, archive: &Path) -> Option<PathBuf> {
-        let pos = self.mounts.iter().position(|m| m.archive() == archive)?;
-        Some(self.mounts.remove(pos).staging_root)
+        let pos = self.live.iter().position(|m| m.archive() == archive)?;
+        Some(self.live.remove(pos).staging_root)
+    }
+
+    /// Hand back a staging root whose mount is gone but which nobody has removed
+    /// yet, so teardown still gets to it.
+    ///
+    /// The caller that drops a mount can't always emit the removal itself — the
+    /// effect screen returns one effect, and it's the user's.
+    pub fn defer_cleanup(&mut self, root: PathBuf) {
+        self.orphaned.push(root);
     }
 
     /// Drop every mount, returning all staging roots — the quit path.
     pub fn drain_all(&mut self) -> Vec<PathBuf> {
-        self.mounts.drain(..).map(|m| m.staging_root).collect()
+        let mut roots: Vec<PathBuf> = self.live.drain(..).map(|m| m.staging_root).collect();
+        roots.append(&mut self.orphaned);
+        roots
     }
 
     pub fn dirty_count(&self) -> usize {
-        self.mounts.iter().filter(|m| m.is_dirty()).count()
+        self.live.iter().filter(|m| m.is_dirty()).count()
     }
 }
 
@@ -215,6 +260,7 @@ mod tests {
             warnings: Vec::new(),
             staging_root: PathBuf::from(format!("/staging/{}", archive.replace('/', "_"))),
             last_used: 0,
+            depth: 0,
         }
     }
 
@@ -229,6 +275,40 @@ mod tests {
 
         let (_, root) = mounts.resolve(Path::new("/src/pkg.zip")).unwrap();
         assert_eq!(root, "", "the archive's own path is the mount root");
+    }
+
+    /// A container is not a member of itself. Conflating the two asks the index
+    /// for the entry named `""`, which is how re-entering a mounted archive once
+    /// failed with "no such member" — and it's why a mounted `pkg.zip` can still
+    /// be yanked, copied, renamed and deleted like the file it is.
+    #[test]
+    fn a_mount_root_is_not_one_of_its_own_members() {
+        let mut mounts = Mounts::default();
+        mounts.insert(mount_at("/src/pkg.zip", &["a/b.txt"]), &[]);
+
+        let root = Path::new("/src/pkg.zip");
+        assert!(mounts.contains(root), "the root is at a mount");
+        assert!(!mounts.holds_member(root), "but it is not a member");
+        assert!(mounts.member_of(root).is_none());
+
+        let member = Path::new("/src/pkg.zip/a/b.txt");
+        assert!(mounts.holds_member(member));
+        assert_eq!(
+            mounts.member_of(member).map(|(_, inner)| inner),
+            Some("a/b.txt".to_string())
+        );
+    }
+
+    /// A staging tree handed over when its mount was dropped mid-session is still
+    /// owed a removal, so teardown has to hand it back.
+    #[test]
+    fn a_deferred_staging_tree_is_still_returned_at_teardown() {
+        let mut mounts = Mounts::default();
+        mounts.insert(mount_at("/src/pkg.zip", &["a.txt"]), &[]);
+        let orphan = mounts.remove(Path::new("/src/pkg.zip")).unwrap();
+        mounts.defer_cleanup(orphan.clone());
+
+        assert_eq!(mounts.drain_all(), vec![orphan]);
     }
 
     #[test]

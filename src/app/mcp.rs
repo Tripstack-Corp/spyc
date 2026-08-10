@@ -247,6 +247,19 @@ impl App {
             // client can detect a stale server and name what to restart.
             pid: std::process::id(),
             version: crate::VERSION.to_string(),
+            // A member's bytes aren't on disk at its path, so a reader outside
+            // this process can't tell a member from a missing file without being
+            // told where the mounts are.
+            archive_mounts: self
+                .state
+                .mounts
+                .iter()
+                .map(|m| crate::context::ArchiveMountRef {
+                    root: m.archive().to_path_buf(),
+                    staging: m.staging_root.clone(),
+                    source: (m.source() != m.archive()).then(|| m.source().to_path_buf()),
+                })
+                .collect(),
         }
     }
 

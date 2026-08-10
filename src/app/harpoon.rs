@@ -201,17 +201,22 @@ impl App {
     /// the directory if the slot is a directory). The user picks
     /// the verb (Enter, V, ^a s) afterwards. Missing-on-disk → flash
     /// and bail; we don't auto-prune (the user might be mid-rebase).
-    pub fn harpoon_jump(&mut self, slot: u8) {
+    pub fn harpoon_jump(&mut self, slot: u8) -> Vec<Effect> {
         let Some(h) = self.state.cur().harpoon.as_ref() else {
             self.state
                 .flash_error("harpoon: open a repo or set PROJECT_HOME (gP)");
-            return;
+            return Vec::new();
         };
         let Some(target) = h.get(slot).map(Path::to_path_buf) else {
             self.state.flash_info(format!("harpoon: slot {slot} empty"));
-            return;
+            return Vec::new();
         };
-        if !target.exists() {
+        // A slot inside an archive can't pass `exists` — its bytes are an index
+        // entry, and the archive may not even be mounted right now. The chdir
+        // itself mounts what it needs, so let it try.
+        let in_archive = self.state.mounts.contains(&target)
+            || super::archive::archive_ancestor_of(&target).is_some();
+        if !target.exists() && !in_archive {
             self.state.flash_error(format!(
                 "harpoon: gone — {}",
                 target.file_name().map_or_else(
@@ -219,25 +224,48 @@ impl App {
                     |n| n.to_string_lossy().into_owned(),
                 )
             ));
-            return;
+            return Vec::new();
         }
-        let (chdir_to, focus) = if target.is_dir() {
+        let is_dir = if in_archive {
+            // A member's kind lives in the index, and only while it's mounted.
+            // Unmounted, land next to it rather than guess — one keystroke from
+            // either answer, and never wrong.
+            self.state
+                .mounts
+                .resolve(&target)
+                .and_then(|(mount, inner)| mount.index.is_dir(&inner).then_some(()))
+                .is_some()
+        } else {
+            target.is_dir()
+        };
+        let (chdir_to, focus) = if is_dir {
             (target, None)
         } else if let Some(parent) = target.parent() {
             (parent.to_path_buf(), Some(target.clone()))
         } else {
             self.state.flash_error("harpoon: slot has no parent dir");
-            return;
+            return Vec::new();
         };
+        if in_archive {
+            // Through the effect screen, which mounts the archive first when
+            // nothing has it open — the inline chdir below can't.
+            return vec![Effect::ChangeDir {
+                path: chdir_to,
+                focus,
+                on_ok: Some(format!("harpoon[{slot}]")),
+                err_prefix: "harpoon chdir",
+            }];
+        }
         if let Err(e) = self.state.chdir(&chdir_to) {
             self.state.flash_error(format!("harpoon chdir: {e:#}"));
-            return;
+            return Vec::new();
         }
         if let Some(p) = focus {
             self.state.focus_on_path(&p);
         }
         self.state.rebuild_rows();
         self.state.flash_info(format!("harpoon[{slot}]"));
+        Vec::new()
     }
 
     /// `Hh` / `gh` — open the harpoon menu overlay. The menu

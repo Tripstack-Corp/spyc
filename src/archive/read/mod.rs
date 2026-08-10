@@ -270,6 +270,28 @@ pub fn materialize(archive: &Path, entry: &IndexEntry, staging_root: &Path) -> R
     Ok(dest)
 }
 
+/// A member's bytes, in memory, without staging them.
+///
+/// [`materialize`] is the path for anything that hands a member to another
+/// process — it needs a real file. A reader that only wants the content takes
+/// this instead: writing into the staging tree is how the *mount* records what it
+/// extracted, so a read from outside the event loop that staged its own copy
+/// would make the archive read as changed.
+pub fn member_bytes(archive: &Path, entry: &IndexEntry) -> Result<Vec<u8>> {
+    if !entry.readable {
+        bail!("{}: encrypted or unsupported compression", entry.inner);
+    }
+    match entry.locator {
+        Locator::Zip { index: pos } => read_zip_member(archive, pos),
+        Locator::TarData { offset } => read_tar_member(archive, offset, entry.size),
+        // Only a streamed mount produces these, and its bytes are already on
+        // disk — there is nothing in the container to re-read them from.
+        Locator::Staged | Locator::Implied => {
+            bail!("{}: staged bytes are missing", entry.inner)
+        }
+    }
+}
+
 fn read_zip_member(archive: &Path, pos: usize) -> Result<Vec<u8>> {
     let file = File::open(archive).with_context(|| format!("opening {}", archive.display()))?;
     let mut zip = zip::ZipArchive::new(BufReader::new(file))?;

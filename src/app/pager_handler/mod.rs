@@ -95,11 +95,11 @@ impl App {
     }
 
     fn dispatch_pager_key(&mut self, key: KeyEvent) -> Vec<Effect> {
-        // The full-screen image overlay sits on top of the pager and is modal:
-        // intercept before any pager handler and route to its own verbs.
-        if self.view.image_view.is_some() {
-            return self.handle_image_view_key(key);
-        }
+        // No image-overlay check here: `Modal::ImageView` takes the key before
+        // routing ever reaches a pager sink. This used to intercept, which only
+        // worked while the overlay was reachable *from a pager* — once it could
+        // open from the file list or the gallery, a pane-focused key went to the
+        // child instead and the overlay was undismissable.
         let Some(view) = active_pager_mut!(self) else {
             return Vec::new();
         };
@@ -517,7 +517,7 @@ impl App {
         }
         // A member has no bytes on disk yet, so it is extracted first and the
         // editor opens on the extracted copy.
-        if self.state.mounts.contains(&path) {
+        if self.state.mounts.holds_member(&path) {
             return self.open_member(
                 &path,
                 crate::app::archive_ops::MaterializeThen::Edit { in_pane: true },

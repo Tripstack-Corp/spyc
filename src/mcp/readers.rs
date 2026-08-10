@@ -131,6 +131,138 @@ pub(super) fn search_root(ctx_path: &Path) -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
 }
 
+/// The archives spyc has mounted, as `(mount root, staging root)`.
+///
+/// Empty unless the user is browsing an archive, which is why every reader that
+/// doesn't care can ignore mounts entirely.
+pub(super) fn archive_mounts(ctx_path: &Path) -> Vec<ArchiveMountView> {
+    let Ok(text) = std::fs::read_to_string(ctx_path) else {
+        return Vec::new();
+    };
+    let Ok(v) = serde_json::from_str::<Value>(&text) else {
+        return Vec::new();
+    };
+    let Some(list) = v["archive_mounts"].as_array() else {
+        return Vec::new();
+    };
+    list.iter()
+        .filter_map(|m| {
+            let root = PathBuf::from(m["root"].as_str()?);
+            let staging = PathBuf::from(m["staging"].as_str()?);
+            // A nested archive is read from a staged copy; its own address is a
+            // member of the archive above it and opens nothing.
+            let source = m["source"]
+                .as_str()
+                .map_or_else(|| root.clone(), PathBuf::from);
+            Some(ArchiveMountView {
+                root,
+                staging,
+                source,
+            })
+        })
+        .collect()
+}
+
+/// A mounted archive as a reader sees it: where it's addressed, where its
+/// extracted bytes go, and which file to actually open.
+pub(super) struct ArchiveMountView {
+    pub root: PathBuf,
+    pub staging: PathBuf,
+    pub source: PathBuf,
+}
+
+/// Split `path` into the mount holding it and the member within, longest mount
+/// first so a nested mount wins.
+///
+/// `None` for the mount root itself: the archive file is an ordinary file, and
+/// reading it means reading the container's bytes.
+fn member_in_mount(path: &Path, mounts: &[ArchiveMountView]) -> Option<(PathBuf, PathBuf, String)> {
+    mounts
+        .iter()
+        .filter_map(|m| {
+            let rel = path.strip_prefix(&m.root).ok()?;
+            // A member name that survives normalization is relative and has no
+            // `..`, so neither the staging join below nor the index lookup can be
+            // walked out of the mount by a crafted argument.
+            let inner = crate::archive::index::normalize(&rel.to_string_lossy()).ok()?;
+            Some((m, inner.inner))
+        })
+        // Longest root wins, so a nested archive answers for its own members
+        // rather than for the one it sits inside.
+        .max_by_key(|(m, _)| m.root.as_os_str().len())
+        .map(|(m, inner)| (m.source.clone(), m.staging.clone(), inner))
+}
+
+/// Whether `path` is at or inside a mounted archive — the guard for a tool that
+/// walks a directory tree, since a mount has no tree to walk.
+pub(super) fn is_in_mount(path: &Path, ctx_path: &Path) -> bool {
+    archive_mounts(ctx_path)
+        .iter()
+        .any(|m| path == m.root || path.starts_with(&m.root))
+}
+
+/// Content for a path inside a mounted archive, or `None` when it isn't one (the
+/// caller then treats it as an ordinary file).
+///
+/// Prefers the staged copy: that's what the user is looking at, edits and all.
+/// Failing that the member is read straight out of the container, in memory —
+/// staging it here would tell the mount it extracted something it didn't.
+pub(super) fn read_member_content(path: &Path, ctx_path: &Path) -> Option<Result<String, String>> {
+    let mounts = archive_mounts(ctx_path);
+    let (archive, staging, inner) = member_in_mount(path, &mounts)?;
+    let staged = staging.join(&inner);
+    if staged.is_file() {
+        return Some(read_file_content(&staged));
+    }
+    Some(read_member_from_archive(&archive, &inner))
+}
+
+/// Read one member out of the container. Indexes it to find the member, which is
+/// a central-directory read for a zip — cheap enough for a per-call read, and the
+/// only way to get an offset for a tar.
+fn read_member_from_archive(archive: &Path, inner: &str) -> Result<String, String> {
+    let format = crate::archive::detect_at(archive)
+        .ok_or_else(|| format!("{}: not an archive spyc can read", archive.display()))?;
+    if !format.is_seekable() {
+        // A compressed tar is extracted as it's mounted, so anything readable is
+        // already staged; reaching here means it isn't there any more.
+        return Err(format!(
+            "{inner}: not extracted — open it in spyc to read it"
+        ));
+    }
+    let indexed = crate::archive::read::index_seekable(archive, format, MEMBER_INDEX_CAP)
+        .map_err(|e| format!("{}: {e:#}", archive.display()))?;
+    let entry = indexed
+        .index
+        .get(inner)
+        .ok_or_else(|| format!("{inner}: no such member of {}", archive.display()))?;
+    if entry.kind == crate::archive::index::ArchiveEntryKind::Dir {
+        return Err(format!("{inner}: is a directory"));
+    }
+    // Checked before reading, so an enormous member costs an index lookup rather
+    // than the allocation.
+    if entry.size > MAX_READ_BYTES {
+        return Err(format!(
+            "{inner}: file too large ({} KB, limit {} KB)",
+            entry.size / 1024,
+            MAX_READ_BYTES / 1024
+        ));
+    }
+    let bytes = crate::archive::read::member_bytes(archive, entry)
+        .map_err(|e| format!("{inner}: {e:#}"))?;
+    let check_len = bytes.len().min(8192);
+    if bytes[..check_len].contains(&0) {
+        return Err(format!("{inner}: binary file"));
+    }
+    String::from_utf8(bytes).map_err(|_| format!("{inner}: not valid UTF-8"))
+}
+
+/// How much of a huge archive's index to read to find one member.
+const MEMBER_INDEX_CAP: usize = 200_000;
+
+/// Ceiling on a single read, whether it comes off disk or out of an archive.
+const MAX_READ_BYTES: u64 = 100 * 1024;
+
 /// Read picks from the context file as absolute paths (resolved
 /// against `cwd`). Returns the picks plus the cwd to use as the
 /// display-relative root for match formatting. Picks list may be
@@ -221,11 +353,12 @@ pub fn read_file_content(path: &Path) -> Result<String, String> {
     if !meta.is_file() {
         return Err(format!("{}: not a regular file", path.display()));
     }
-    if meta.len() > 100 * 1024 {
+    if meta.len() > MAX_READ_BYTES {
         return Err(format!(
-            "{}: file too large ({} KB, limit 100 KB)",
+            "{}: file too large ({} KB, limit {} KB)",
             path.display(),
-            meta.len() / 1024
+            meta.len() / 1024,
+            MAX_READ_BYTES / 1024
         ));
     }
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;

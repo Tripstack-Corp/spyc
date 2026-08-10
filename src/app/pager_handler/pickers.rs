@@ -391,8 +391,8 @@ impl App {
                         let session = session.clone();
                         self.clear_pager();
                         self.view.needs_full_repaint = true;
-                        self.restore_session(&session);
-                        return Some(Vec::new());
+                        let fx = self.restore_session(&session);
+                        return Some(fx);
                     }
                     self.state.pending_sessions = Some(sessions);
                 }
@@ -415,8 +415,8 @@ impl App {
                         let session = session.clone();
                         self.clear_pager();
                         self.view.needs_full_repaint = true;
-                        self.restore_session(&session);
-                        return Some(Vec::new());
+                        let fx = self.restore_session(&session);
+                        return Some(fx);
                     }
                     self.state.pending_sessions = Some(sessions);
                 }

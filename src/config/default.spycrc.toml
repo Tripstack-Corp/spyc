@@ -179,6 +179,10 @@
 #   warn_over_mb       (default 128)    confirm before extracting more.
 #   max_entries        (default 200000) cap on indexed members; past it
 #                        the listing shows itself as truncated.
+#   max_depth          (default 2)      how deep archives may nest. A
+#                        container inside a container has to be copied
+#                        out whole before it can be read, so each level
+#                        costs its own size in staging. 0 refuses one.
 #   write_back         (default "ask")  "ask" offers to write pending
 #                        changes back when you unmount a changed
 #                        archive; "never" leaves them pending.
@@ -193,6 +197,7 @@
 # extract_budget_mb = 512
 # warn_over_mb = 128
 # max_entries = 200000
+# max_depth = 2
 # write_back = "ask"
 # snapshot_max_mb = 64
 

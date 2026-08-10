@@ -501,10 +501,32 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   `:archive write`; the suffix carries a `+2 ~1 -3` badge meanwhile. An edit made
   outside spyc — by your editor, or by an agent in the pane — is noticed too,
   because spyc compares each extracted file against what it wrote.
+- **The archive is still a file** — where it lives, `pkg.zip` can be yanked,
+  copied, renamed and deleted like anything else, mounted or not. Leaving one and
+  pressing `Enter` again re-enters it without re-reading it, so pending changes
+  survive the round trip. Deleting or moving the archive drops its mount with it —
+  unless it carries unwritten changes, which would then have nowhere to go.
+- **An archive inside an archive** — `Enter` on a member that is itself a
+  container walks into it, browsed at its own member path (`outer.zip/bundle.zip`)
+  while its bytes are read from the copy spyc extracted. Each level costs a full
+  copy of that container in staging, since bytes have to be a real file before
+  anything can read them, so `[archive] max_depth` (default 2) bounds it. Writing
+  the inner one leaves the outer with a pending change of its own — it says so,
+  and `:archive write` there puts it back.
+- **Coming back to a place inside one** — a mark (`ma`), a harpoon slot (`Ha`)
+  and the session you quit from can all point inside an archive. Jumping to one
+  mounts the archive again on the way, so it doesn't matter that nothing has it
+  open — `spyc -r` puts you back where you left off, several directories deep in
+  a tarball.
 - **Not yet supported inside an archive** — creating an empty directory or a new
-  file, moving across the archive boundary in one step, `:grep`, `F`, marks,
-  harpoon and shell commands are refused with a message rather than
-  half-working. The suffix shows `ro` when the archive can't be written back.
+  file, moving across the archive boundary in one step, `:grep`, `F` and shell
+  commands are refused with a message rather than half-working. The suffix shows
+  `ro` when the archive can't be written back.
+- **An agent can read a member too** — MCP `get_file_content` resolves a path
+  inside a mount, reading the container in memory (or your not-yet-written edit,
+  if there is one), so asking the agent in the pane about the file you're looking
+  at works in here as well. `search_content` / `search_paths` say why they can't
+  instead of reporting "no matches" from walking a single binary file.
 - **`:archive`** — `info` (everything about this mount), `list` (every mounted
   archive), `unmount` (drop it and its staged bytes), `cancel`.
 

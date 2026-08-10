@@ -43,6 +43,25 @@ pub struct SpycContext {
     /// commit, so a client can compare it against the repo HEAD to detect the
     /// running spyc predates a tool it expects and prompt a restart.
     pub version: String,
+    /// Archives currently mounted, so a read tool can tell a member path from a
+    /// path on disk. Empty in the overwhelmingly common case.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub archive_mounts: Vec<ArchiveMountRef>,
+}
+
+/// A mounted archive, as much as an out-of-process reader needs: where the
+/// container is, and where its extracted bytes go.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ArchiveMountRef {
+    /// The archive file's own path, which is also the mount root: a member is
+    /// addressed beneath it (`/src/pkg.zip/a.txt`).
+    pub root: PathBuf,
+    /// Directory holding whatever has been extracted so far.
+    pub staging: PathBuf,
+    /// The file the bytes are read out of, when that isn't `root` — a nested
+    /// archive is addressed at its member path but read from a staged copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<PathBuf>,
 }
 
 /// Environment variable that tells `spyc --mcp` where to find the
@@ -129,6 +148,7 @@ mod tests {
             session_name: "SAFFRON_CUMIN".into(),
             pid: 4242,
             version: "1.59.0 (deadbee)".into(),
+            archive_mounts: Vec::new(),
         };
         write_context_file(&path, &ctx).unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();
@@ -161,6 +181,7 @@ mod tests {
             session_name: String::new(),
             pid: 0,
             version: String::new(),
+            archive_mounts: Vec::new(),
         };
         write_context_file(&path, &ctx).unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();
@@ -222,6 +243,7 @@ mod tests {
             session_name: "SAFFRON_CUMIN".into(),
             pid: 4242,
             version: "1.59.0 (deadbee)".into(),
+            archive_mounts: Vec::new(),
         };
         let same = base.clone();
         let mut different = base.clone();

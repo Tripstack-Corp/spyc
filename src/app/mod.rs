@@ -623,6 +623,12 @@ struct Runtime {
     /// be abandoned with `:archive cancel`. Replaced per mount, so cancelling one
     /// can never cancel the next.
     archive_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// An effect parked across the mount-size prompt, with the archive it's
+    /// waiting for: a `ChangeDir` into a not-yet-mounted archive whose size asked
+    /// a question first. A `PromptKind` is plain data and an `Effect` is not, so
+    /// the in-flight half waits here — beside `archive_cancel`, the other piece of
+    /// in-flight mount state.
+    archive_mount_then: Option<(std::path::PathBuf, Box<Effect>)>,
     /// Landing slot for off-thread file operations.
     file_results: std::sync::Arc<std::sync::Mutex<Vec<file_ops::FileOutcome>>>,
     /// The watcher-driven listing refresh (`FileOp::RefreshListing`) reads the
