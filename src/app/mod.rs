@@ -366,6 +366,11 @@ pub struct FlashMessage {
 pub enum FlashKind {
     Info,
     Error,
+    /// An operation is in flight. Reads like `Info`, but it names something that
+    /// hasn't finished — so whatever the operation lands as replaces it, and a
+    /// completion with nothing to say clears it rather than leaving a message
+    /// that claims work is still going on.
+    Progress,
 }
 
 /// State for returning to the pager after `v` (edit) exits.

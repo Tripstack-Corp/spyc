@@ -885,6 +885,32 @@ impl AppState {
         });
     }
 
+    /// Announce work that is starting, to be replaced or cleared when it lands.
+    ///
+    /// A flash has no lifetime of its own — it shows until something else
+    /// replaces it — so an in-flight message left behind by a completion that had
+    /// nothing to say goes on claiming the work is still running.
+    pub fn flash_progress<S: Into<String>>(&mut self, text: S) {
+        self.flash = Some(FlashMessage {
+            text: text.into(),
+            kind: FlashKind::Progress,
+        });
+    }
+
+    /// Drop an in-flight message now that its operation has finished.
+    ///
+    /// Only ever clears a [`FlashKind::Progress`], so a real message that landed
+    /// in the meantime — a warning about the archive, an error — survives.
+    pub fn clear_progress_flash(&mut self) {
+        if self
+            .flash
+            .as_ref()
+            .is_some_and(|f| matches!(f.kind, FlashKind::Progress))
+        {
+            self.flash = None;
+        }
+    }
+
     /// Flash the outcome of a "save pane contents to file" action: the
     /// saved file's basename on success, the error text on failure. Shared
     /// by the two pane-scrollback save handlers (the `PaneScrollSave` action

@@ -192,6 +192,32 @@ impl Journal {
         (self.effective(inner) != inner).then_some(MemberChange::Renamed)
     }
 
+    /// Whether `inner` is a file the user brought in and hasn't written back.
+    pub fn is_addition(&self, inner: &str) -> bool {
+        self.additions().any(|added| added == inner)
+    }
+
+    /// Un-add a pending addition, as deleting one does.
+    ///
+    /// Recording a `Deleted` against it instead would also hide the row, but the
+    /// archive never held those bytes — so the pair would describe removing
+    /// something that was never there, and the staged copy would linger under a
+    /// name a second put of the same file then collides with. Dropping the
+    /// addition outright is what "delete a file I just brought in" means.
+    ///
+    /// Renames of the addition go with it: they name a path that no longer
+    /// exists, and leaving one behind keeps the listing on its slow path forever.
+    /// Returns whether anything was pending.
+    pub fn forget_addition(&mut self, inner: &str) -> bool {
+        let before = self.changes.len();
+        self.changes.retain(|change| match change {
+            Change::Added { inner: added } => added != inner,
+            Change::Renamed { from, .. } => from != inner,
+            _ => true,
+        });
+        self.changes.len() != before
+    }
+
     /// Whether a staged copy supersedes this member's archived bytes.
     pub fn is_replaced(&self, inner: &str) -> bool {
         self.changes
@@ -331,6 +357,53 @@ mod tests {
         );
         j.delete("scratch.txt");
         assert_eq!(j.additions().collect::<Vec<_>>(), ["notes.md"]);
+    }
+
+    /// Deleting a file the user brought in un-adds it rather than recording a
+    /// removal of something the archive never held — which is also what frees the
+    /// name for a second put of the same file.
+    #[test]
+    fn un_adding_an_addition_leaves_no_trace_of_it() {
+        let mut j = Journal::default();
+        j.add("brought.txt");
+        j.add("keep.txt");
+        assert!(j.is_addition("brought.txt"));
+
+        assert!(j.forget_addition("brought.txt"));
+        assert!(!j.is_addition("brought.txt"));
+        assert_eq!(j.additions().collect::<Vec<_>>(), ["keep.txt"]);
+        assert!(
+            !j.is_deleted("brought.txt"),
+            "no removal is recorded for bytes the archive never had"
+        );
+        assert_eq!(j.counts().deleted, 0);
+        assert!(!j.forget_addition("brought.txt"), "and it is idempotent");
+    }
+
+    /// A rename of the addition names a path that no longer exists, so it goes
+    /// too — left behind it would hold the listing on its slow path forever.
+    #[test]
+    fn un_adding_takes_its_rename_with_it() {
+        let mut j = Journal::default();
+        j.add("brought.txt");
+        j.rename("brought.txt", "renamed.txt");
+        assert!(j.has_renames());
+
+        assert!(j.forget_addition("brought.txt"));
+        assert!(!j.is_dirty(), "nothing is left pending");
+        assert!(!j.has_renames());
+    }
+
+    /// An archived member is untouched by the addition path: deleting one is
+    /// still a recorded removal, because the bytes really are in the container.
+    #[test]
+    fn un_adding_does_not_apply_to_an_archived_member() {
+        let mut j = Journal::default();
+        assert!(!j.is_addition("src/main.rs"));
+        assert!(!j.forget_addition("src/main.rs"));
+        j.delete("src/main.rs");
+        assert!(j.is_deleted("src/main.rs"));
+        assert_eq!(j.counts().deleted, 1);
     }
 
     #[test]

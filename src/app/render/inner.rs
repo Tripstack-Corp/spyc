@@ -341,7 +341,9 @@ impl App {
             self.draw_chrome_rows(frame, rect, lines);
         } else if let Some(flash) = &self.state.flash {
             let color = match flash.kind {
-                FlashKind::Info => self.view.theme.take,
+                // Progress reads as info: the difference is how long it lives,
+                // not how it looks.
+                FlashKind::Info | FlashKind::Progress => self.view.theme.take,
                 FlashKind::Error => self.view.theme.cursor_bg,
             };
             let line = Line::from(Span::styled(

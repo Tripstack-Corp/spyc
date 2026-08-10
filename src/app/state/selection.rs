@@ -90,7 +90,12 @@ impl AppState {
             return Vec::new();
         }
         vec![crate::app::Effect::Inventory(
-            crate::app::inventory_ops::InventoryOp::Yank { paths: to_take },
+            crate::app::inventory_ops::InventoryOp::Yank {
+                sources: to_take
+                    .into_iter()
+                    .map(crate::app::inventory_ops::YankSource::plain)
+                    .collect(),
+            },
         )]
     }
 

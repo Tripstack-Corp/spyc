@@ -358,7 +358,12 @@ spyc's workflow: browse files above, talk to Claude below.
 - **W l** opens a **worktree picker** — `j`/`k` (or arrows) move the
   highlighted row, `Enter` switches the *focused* column to it, `/`
   searches (the cursor lands on the match), and `1`-`9` quick-switch by
-  number (focus `b` first to put a worktree there). With the MCP tools
+  number (focus `b` first to put a worktree there). Rows list the main
+  worktree first (git's ordering), each showing the branch checked out
+  in it; the main one is marked **`(main worktree)`** and the one the
+  focused column is in `← current`. The marker is what tells you which
+  row is your git home when a feature branch is checked out there
+  directly — the branch column can't. With the MCP tools
   (`create_worktree` / `open_worktree` /
   `remove_worktree` / `clean_worktree`) an agent can spin up a worktree,
   open it in `b`, work, and tear it down — while `a` stays on the main
@@ -480,7 +485,10 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   capped index are all reported when the mount opens, in full under
   `:archive info`.
 - **Taking things out** — `y` yanks a member into the inventory (contents and
-  all, so `p` outside the archive writes a real file), `c` copies members out,
+  all, so `p` outside the archive writes a real file), remembered by its path
+  *inside* the archive — `pkg.zip/src/main.rs` — so the row reads as taken, a
+  re-yank refreshes that entry, and the inventory never holds a cache path that
+  outlives the session. It puts as its basename, like any other yank, `c` copies members out,
   `^a p` pipes one to the pane, and `f` / `L` report on them. Each extracts what
   it needs first, so nothing is unpacked speculatively.
 - **Deleting a member** — `R` marks it for removal; the archive on disk is
@@ -497,7 +505,10 @@ they land in a session-scoped staging dir that is cleaned up on exit.
 - **Changing an archive** — `R` marks a member for removal, `p` puts an
   inventory item in, `c` copies files in, `M` renames a member (an index edit, so
   no bytes move however large it is), and `e` / `V` edit a member by extracting it
-  and opening your editor on that copy. Everything stays pending until
+  and opening your editor on that copy. A file you bring in is a member from that
+  moment — read it, edit it, rename it — and `R` on one takes it straight back out
+  rather than recording a removal, since the archive never held it. Everything
+  else stays pending until
   `:archive write`; the suffix carries a `+2 ~1 -3` badge meanwhile, and each
   changed member is marked in the listing's own status gutter — and the archive
   file itself is marked `~` in the directory it lives in, so a container holding
@@ -534,8 +545,12 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   if there is one), so asking the agent in the pane about the file you're looking
   at works in here as well. `search_content` / `search_paths` say why they can't
   instead of reporting "no matches" from walking a single binary file.
-- **`:archive`** — `info` (everything about this mount), `list` (every mounted
-  archive), `unmount` (drop it and its staged bytes), `cancel`.
+- **`:archive`** — `info` (this mount, or what's mounted when you're outside one),
+  `list` (every mounted archive, dirty ones marked), `write` / `discard`,
+  `unmount` (drop it and its staged bytes), `cancel`. `write` and `discard` work
+  from outside a mount too: they take the archive under the cursor — the row
+  showing `~` — else the only one with changes, and name them rather than guess
+  when several do.
 
 ## In-app pager
 

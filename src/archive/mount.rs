@@ -21,6 +21,40 @@ use super::{ArchiveFormat, listing};
 /// capped separately.
 pub const MAX_MOUNTS: usize = 8;
 
+/// A member the user can act on.
+///
+/// Two things can occupy a path inside a mount, and only one of them is in the
+/// index: a member the archive stores, and a file the user brought in, which
+/// exists as a journal entry plus bytes in the staging tree until the next
+/// write-back. Asking the index alone is how a put file came to list fine but
+/// refuse every read, edit and delete with "no such member".
+#[derive(Debug)]
+pub enum MemberRef<'a> {
+    /// Stored in the archive. Its bytes may or may not be staged yet.
+    Archived(&'a IndexEntry),
+    /// Brought in by the user. There is nothing in the container to extract —
+    /// the staging tree holds the only copy, at `rel` under the staging root.
+    Added { inner: String, rel: PathBuf },
+}
+
+impl MemberRef<'_> {
+    /// The member's path in the archive's own namespace — the journal key.
+    pub fn inner(&self) -> &str {
+        match self {
+            Self::Archived(entry) => &entry.inner,
+            Self::Added { inner, .. } => inner,
+        }
+    }
+
+    /// Where its bytes live under the staging root.
+    pub fn staging_rel(&self) -> PathBuf {
+        match self {
+            Self::Archived(entry) => entry.staging_rel(),
+            Self::Added { rel, .. } => rel.clone(),
+        }
+    }
+}
+
 /// One mounted archive.
 #[derive(Debug)]
 pub struct ArchiveMount {
@@ -83,6 +117,38 @@ impl ArchiveMount {
     pub fn entry_at(&self, path: &Path) -> Option<&IndexEntry> {
         let shown = self.index.inner_of(path)?;
         self.index.get(&self.journal.original_of(&shown))
+    }
+
+    /// The member behind an absolute mount path, archived **or** merely added.
+    ///
+    /// The one place that knows those are the two ways a path inside a mount can
+    /// be real. Everything that acts on a member goes through this rather than
+    /// [`Self::entry_at`], which answers the narrower question "what does the
+    /// archive store here?" and is `None` for a file the user brought in.
+    pub fn member_at(&self, path: &Path) -> Option<MemberRef<'_>> {
+        let shown = self.index.inner_of(path)?;
+        if shown.is_empty() {
+            // The container itself is not one of its own members.
+            return None;
+        }
+        let inner = self.journal.original_of(&shown);
+        if let Some(entry) = self.index.get(&inner) {
+            return Some(MemberRef::Archived(entry));
+        }
+        // An addition's bytes were staged under the path it was added at, and a
+        // later rename moves no bytes — the same path `plan_repack` reads from.
+        self.journal
+            .additions()
+            .any(|added| added == inner)
+            .then(|| MemberRef::Added {
+                rel: PathBuf::from(&inner),
+                inner,
+            })
+    }
+
+    /// Absolute path of a member's bytes, staged or not yet.
+    pub fn bytes_at(&self, path: &Path) -> Option<PathBuf> {
+        Some(self.staging_root.join(self.member_at(path)?.staging_rel()))
     }
 
     /// Absolute staging path for a member's bytes.
@@ -317,6 +383,65 @@ mod tests {
         mounts.defer_cleanup(orphan.clone());
 
         assert_eq!(mounts.drain_all(), vec![orphan]);
+    }
+
+    /// A file the user put in is a member the moment it's recorded — not only
+    /// once it's been written back. The index doesn't know it, which is why
+    /// `entry_at` alone left every read, edit and delete of a put file refusing
+    /// with "no such member".
+    #[test]
+    fn a_pending_addition_is_a_member_the_index_never_heard_of() {
+        let mut mounts = Mounts::default();
+        mounts.insert(mount_at("/src/pkg.zip", &["a.txt"]), &[]);
+        let m = mounts.get_mut(Path::new("/src/pkg.zip")).unwrap();
+        m.journal.add("brought.txt");
+
+        let added = Path::new("/src/pkg.zip/brought.txt");
+        assert!(
+            m.entry_at(added).is_none(),
+            "the archive stores nothing there"
+        );
+        let member = m.member_at(added).expect("but it is still a member");
+        assert!(matches!(member, MemberRef::Added { .. }));
+        assert_eq!(member.inner(), "brought.txt");
+        assert_eq!(
+            m.bytes_at(added),
+            Some(PathBuf::from("/staging/_src_pkg.zip/brought.txt")),
+            "its bytes are the staged copy the put wrote"
+        );
+    }
+
+    /// A rename moves no bytes, so a renamed addition still reads from where it
+    /// was staged — the same path `plan_repack` takes it from.
+    #[test]
+    fn a_renamed_addition_still_resolves_to_its_original_staged_bytes() {
+        let mut mounts = Mounts::default();
+        mounts.insert(mount_at("/src/pkg.zip", &["a.txt"]), &[]);
+        let m = mounts.get_mut(Path::new("/src/pkg.zip")).unwrap();
+        m.journal.add("brought.txt");
+        m.journal.rename("brought.txt", "renamed.txt");
+
+        let member = m
+            .member_at(Path::new("/src/pkg.zip/renamed.txt"))
+            .expect("addressed by the name it shows under");
+        assert_eq!(
+            member.inner(),
+            "brought.txt",
+            "keyed in the archive's namespace"
+        );
+        assert_eq!(member.staging_rel(), PathBuf::from("brought.txt"));
+    }
+
+    #[test]
+    fn an_archived_member_resolves_to_its_index_entry() {
+        let mut mounts = Mounts::default();
+        mounts.insert(mount_at("/src/pkg.zip", &["a/b.txt"]), &[]);
+        let m = mounts.get(Path::new("/src/pkg.zip")).unwrap();
+        let member = m.member_at(Path::new("/src/pkg.zip/a/b.txt")).unwrap();
+        assert!(matches!(member, MemberRef::Archived(_)));
+        assert_eq!(member.inner(), "a/b.txt");
+        // The container itself resolves to no member, added or archived.
+        assert!(m.member_at(Path::new("/src/pkg.zip")).is_none());
     }
 
     #[test]

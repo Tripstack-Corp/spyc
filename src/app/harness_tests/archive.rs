@@ -40,6 +40,7 @@ fn mount_inline(app: &mut App, archive: &Path, staging: &Path) -> Vec<Effect> {
         then: None,
         address: None,
         depth: 0,
+        reset_staging: false,
     });
     assert!(
         matches!(outcome, ArchiveOutcome::Mounted { .. }),
@@ -743,7 +744,10 @@ fn an_already_extracted_member_passes_straight_through_the_screen() {
 
         let held = app.screen_archive_effect(Effect::Inventory(
             crate::app::inventory_ops::InventoryOp::Yank {
-                paths: vec![archive.join("README.md")],
+                sources: vec![archive.join("README.md")]
+                    .into_iter()
+                    .map(crate::app::inventory_ops::YankSource::plain)
+                    .collect(),
             },
         ));
         assert!(held.is_some(), "no round trip for bytes already on disk");
@@ -765,7 +769,10 @@ fn the_screen_leaves_unrelated_effects_alone() {
 
         let held = app.screen_archive_effect(Effect::Inventory(
             crate::app::inventory_ops::InventoryOp::Yank {
-                paths: vec![dir.join("real.txt")],
+                sources: vec![dir.join("real.txt")]
+                    .into_iter()
+                    .map(crate::app::inventory_ops::YankSource::plain)
+                    .collect(),
             },
         ));
         assert!(held.is_some(), "a real file's yank runs as normal");
@@ -997,7 +1004,10 @@ fn putting_an_inventory_item_into_an_archive_adds_it() {
             &mut app,
             vec![Effect::Inventory(
                 crate::app::inventory_ops::InventoryOp::Yank {
-                    paths: vec![source],
+                    sources: vec![source]
+                        .into_iter()
+                        .map(crate::app::inventory_ops::YankSource::plain)
+                        .collect(),
                 },
             )],
         );
@@ -1517,7 +1527,10 @@ fn a_mixed_selection_rewrites_the_staged_member_too() {
         let main = archive.join("src/main.rs");
         let fx = app.screen_archive_effect(Effect::Inventory(
             crate::app::inventory_ops::InventoryOp::Yank {
-                paths: vec![readme.clone(), main.clone()],
+                sources: vec![readme.clone(), main.clone()]
+                    .into_iter()
+                    .map(crate::app::inventory_ops::YankSource::plain)
+                    .collect(),
             },
         ));
         let Some(Effect::Archive(ArchiveOp::MaterializeMany { then, .. })) = fx else {
@@ -1526,17 +1539,22 @@ fn a_mixed_selection_rewrites_the_staged_member_too() {
         let crate::app::archive_ops::MaterializeThen::Retry(effect) = then else {
             panic!("a held-back read retries the original effect");
         };
-        let Effect::Inventory(crate::app::inventory_ops::InventoryOp::Yank { paths }) = *effect
+        let Effect::Inventory(crate::app::inventory_ops::InventoryOp::Yank { sources }) = *effect
         else {
             panic!("shape preserved");
         };
+        let reads: Vec<PathBuf> = sources.iter().map(|s| s.read.clone()).collect();
         assert!(
-            !paths.contains(&readme),
-            "the staged member is already pointed at staging: {paths:?}"
+            !reads.contains(&readme),
+            "the staged member is already pointed at staging: {reads:?}"
         );
         assert!(
-            paths.contains(&main),
-            "and the unextracted one still waits for the worker: {paths:?}"
+            reads.contains(&main),
+            "and the unextracted one still waits for the worker: {reads:?}"
+        );
+        assert!(
+            sources.iter().all(|s| s.record_as.starts_with(&archive)),
+            "both are still remembered by their member paths"
         );
     });
 }
@@ -2387,5 +2405,724 @@ fn a_dirty_archive_is_marked_in_the_directory_it_lives_in() {
         apply_effects(&mut app, fx);
         let row = archive_row(&mut app);
         assert!(!row.contains('~'), "clean again after the write: {row:?}");
+    });
+}
+
+// ── what a yanked member is remembered as ─────────────────────────────────
+
+/// A yanked member is remembered by its path *into the archive*, not by the
+/// staged copy the bytes came from.
+///
+/// The staging path is a per-process cache location: recording it meant the row
+/// never showed as taken (its path is the member's), a re-yank in a later session
+/// made a second entry instead of refreshing the first, and the inventory kept a
+/// path that stopped existing when the session did.
+#[test]
+fn a_yanked_member_is_remembered_by_its_path_in_the_archive() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // `y` on `README.md`.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+
+        let member = archive.join("README.md");
+        let item = app
+            .state
+            .inventory
+            .items()
+            .find(|i| i.filename == "README.md")
+            .expect("in the inventory");
+        assert_eq!(
+            item.orig_path, member,
+            "remembered as the member path, not the staging copy"
+        );
+        assert_eq!(
+            app.state.inventory.read_content(&item.id).as_deref(),
+            Some(b"# pkg\n".as_slice()),
+            "with the member's real bytes, which came from staging"
+        );
+        // Which is what makes the row's take-check work: it compares the row's own
+        // path against the inventory.
+        assert!(
+            app.state.inventory.contains(&member),
+            "so the member row reads as taken"
+        );
+    });
+}
+
+/// Re-yanking the same member refreshes its entry rather than adding a second
+/// one. Keyed on the staging path it couldn't: that path carries the pid.
+#[test]
+fn re_yanking_a_member_refreshes_one_entry() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        app.apply(&Action::Down(1)).unwrap();
+
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+        // Re-mount into a *different* staging tree, as a later session would, and
+        // yank the same member again.
+        app.state.mounts.remove(&archive);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging-2"));
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+
+        let held: Vec<_> = app
+            .state
+            .inventory
+            .items()
+            .filter(|i| i.filename == "README.md")
+            .collect();
+        assert_eq!(held.len(), 1, "one entry, refreshed: {held:?}");
+    });
+}
+
+// ── writing without being inside the archive ──────────────────────────────
+
+/// Delete a member, then climb out, leaving the cursor on the archive.
+fn dirty_then_climb_out(app: &mut App, dir: &Path) {
+    app.apply(&Action::Down(1)).unwrap();
+    let fx = app.apply(&Action::RemovePrompt(None)).unwrap();
+    let fx = if fx.is_empty() {
+        app.handle_remove_confirm_key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('y'),
+            KeyModifiers::empty(),
+        ))
+    } else {
+        fx
+    };
+    settle(app, fx);
+    let fx = app.apply(&Action::Climb).unwrap();
+    apply_effects(app, fx);
+    assert_eq!(app.state.cur().listing.dir, dir, "outside the archive");
+}
+
+/// The dead end the container marker created: you can see `demo.zip` holds
+/// unwritten changes from the directory it lives in, and `:archive write` there
+/// did nothing because it resolved the archive from the cwd. The cursor is on the
+/// row that told you, so that's what it means.
+#[test]
+fn writing_from_outside_uses_the_archive_under_the_cursor() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir.clone());
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        dirty_then_climb_out(&mut app, &dir);
+
+        // Climbing out leaves the cursor on the archive it came from.
+        let cursor = app
+            .state
+            .cur()
+            .rows
+            .get(app.state.cur().cursor.index)
+            .map(|r| r.path.clone());
+        assert_eq!(
+            cursor.as_deref(),
+            Some(archive.as_path()),
+            "cursor is on it"
+        );
+
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+
+        assert_eq!(
+            member_names(&archive),
+            ["src/deep/mod.rs", "src/main.rs"],
+            "the delete was applied to the archive on disk"
+        );
+        assert!(!app.mount_is_dirty(&archive), "and nothing is pending");
+    });
+}
+
+/// Cursor elsewhere: one archive has changes, so there's nothing to guess at.
+#[test]
+fn writing_from_outside_falls_back_to_the_only_dirty_archive() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        std::fs::write(dir.join("aaa.txt"), b"not an archive\n").unwrap();
+        let mut app = App::test_app(dir.clone());
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        dirty_then_climb_out(&mut app, &dir);
+
+        // Move the cursor off the archive entirely.
+        app.state.cur_mut().cursor.index = 0;
+        let cursor = app
+            .state
+            .cur()
+            .rows
+            .first()
+            .map(|r| r.path.clone())
+            .unwrap();
+        assert_ne!(cursor, archive, "cursor is not on the archive");
+
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+        assert!(!app.mount_is_dirty(&archive), "written anyway");
+    });
+}
+
+/// Two dirty archives and no cursor to disambiguate: say so rather than pick.
+#[test]
+fn writing_from_outside_refuses_to_guess_between_two() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let mut app = App::test_app(dir.clone());
+        for (name, staging) in [("one.zip", "s1"), ("two.zip", "s2")] {
+            let archive = dir.join(name);
+            build_zip(&archive);
+            mount_inline(&mut app, &archive, &tmp.path().join(staging));
+            dirty_then_climb_out(&mut app, &dir);
+        }
+        assert_eq!(app.dirty_mounts().len(), 2, "both are dirty");
+
+        // Cursor on neither.
+        std::fs::write(dir.join("aaa.txt"), b"x\n").unwrap();
+        app.state.refresh_listing();
+        app.state.cur_mut().cursor.index = 0;
+
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+
+        let flash = app.state.flash.as_ref().map(|f| f.text.clone());
+        assert!(
+            flash
+                .as_deref()
+                .is_some_and(|t| t.contains('2') && t.contains("write")),
+            "names the count and the verb: {flash:?}"
+        );
+        assert_eq!(app.dirty_mounts().len(), 2, "and wrote neither");
+    });
+}
+
+#[test]
+fn writing_with_nothing_pending_says_so() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let mut app = App::test_app(dir);
+
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+        let flash = app.state.flash.as_ref().map(|f| f.text.clone());
+        assert_eq!(flash.as_deref(), Some("archive: nothing to write"));
+    });
+}
+
+/// `:archive discard` has to drop the staged copies too, not just the journal.
+///
+/// Clearing the journal alone left an edited copy on disk for the next scan to
+/// re-record — so the badge came back and the "discarded" edit was still pending.
+#[test]
+fn discarding_an_edit_drops_the_staged_copy_too() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Read a member (staging it), then change that copy behind spyc's back.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+        let staged = {
+            let mount = app.state.mounts.get(&archive).unwrap();
+            mount.staging_path(mount.index.get("README.md").unwrap())
+        };
+        std::fs::write(&staged, b"# edited\n").unwrap();
+        assert!(app.settle_archive_edits(), "noticed as pending");
+        assert_eq!(
+            app.state
+                .mounts
+                .get(&archive)
+                .unwrap()
+                .journal
+                .counts()
+                .badge(),
+            "~1"
+        );
+
+        let fx = app.cmd_archive("discard");
+        settle(&mut app, fx);
+
+        assert!(!staged.exists(), "the edited copy is gone");
+        assert!(
+            !app.mount_is_dirty(&archive),
+            "and nothing is pending any more"
+        );
+        assert!(
+            !app.settle_archive_edits(),
+            "including on the next scan — this is where it used to come back"
+        );
+
+        // Reading it again gets the archive's own bytes.
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+        let item = app
+            .state
+            .inventory
+            .items()
+            .find(|i| i.filename == "README.md")
+            .unwrap();
+        assert_eq!(
+            app.state.inventory.read_content(&item.id).as_deref(),
+            Some(b"# pkg\n".as_slice()),
+            "the archive's version, not the discarded edit"
+        );
+    });
+}
+
+/// An added member's staged bytes go too — nothing brought in survives a discard.
+#[test]
+fn discarding_an_added_member_removes_its_staged_bytes() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let brought = dir.join("extra.txt");
+        std::fs::write(&brought, b"brought in\n").unwrap();
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Copy a real file into the mount, which records an Add and stages bytes.
+        let fx = app.screen_archive_effect(Effect::FileOp(crate::app::file_ops::FileOp::Copy {
+            paths: vec![brought],
+            dest: archive.clone(),
+        }));
+        settle(&mut app, fx.into_iter().collect());
+        let staged = app
+            .state
+            .mounts
+            .get(&archive)
+            .unwrap()
+            .staging_root
+            .join("extra.txt");
+        assert!(staged.exists(), "the brought-in bytes are staged");
+
+        let fx = app.cmd_archive("discard");
+        settle(&mut app, fx);
+
+        assert!(!staged.exists(), "and discarded with the change");
+        assert!(!app.mount_is_dirty(&archive));
+        assert!(
+            !app.state
+                .cur()
+                .rows
+                .iter()
+                .any(|r| r.display.starts_with("extra.txt")),
+            "the row is gone too"
+        );
+    });
+}
+
+// ── a member the user brought in is a member ──────────────────────────────
+
+/// Yank a real file and put it into a mount, handing back the inventory ids in
+/// case the test needs to put it again.
+fn put_a_file_into(app: &mut App, archive: &Path, staging: &Path, name: &str, body: &[u8]) {
+    let source = archive.parent().unwrap().join(name);
+    std::fs::write(&source, body).unwrap();
+    settle(
+        app,
+        vec![Effect::Inventory(
+            crate::app::inventory_ops::InventoryOp::Yank {
+                sources: vec![source]
+                    .into_iter()
+                    .map(crate::app::inventory_ops::YankSource::plain)
+                    .collect(),
+            },
+        )],
+    );
+    if !app.state.mounts.contains(archive) {
+        mount_inline(app, archive, staging);
+    }
+    let ids: Vec<String> = app.state.inventory.items().map(|i| i.id.clone()).collect();
+    settle(
+        app,
+        vec![Effect::Inventory(
+            crate::app::inventory_ops::InventoryOp::Put {
+                dest_dir: archive.to_path_buf(),
+                ids,
+            },
+        )],
+    );
+}
+
+/// The bug this fixes: a put file listed fine but refused every read, edit and
+/// delete with "no such member", because it lives in the journal and the staging
+/// tree while `entry_at` only ever asked the index.
+#[test]
+fn a_put_member_can_be_opened_yanked_and_deleted() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let staging = tmp.path().join("staging");
+        let mut app = App::test_app(dir);
+        put_a_file_into(&mut app, &archive, &staging, "brought.txt", b"payload");
+
+        let added = archive.join("brought.txt");
+        assert!(
+            row_names(&app).contains(&"brought.txt".to_string()),
+            "the put file lists: {:?}",
+            row_names(&app)
+        );
+
+        // Opening it reaches the staged bytes. Those are already on disk — a put
+        // wrote them — so the pager opens with no worker round trip at all, which
+        // is why the proof is the pager rather than an effect.
+        app.state.flash = None;
+        let fx = app.open_member(
+            &added,
+            crate::app::archive_ops::MaterializeThen::OpenPager(
+                crate::app::file_ops::PagerDest::Overlay { scroll: None },
+            ),
+        );
+        assert!(fx.is_empty(), "nothing to extract: {fx:?}");
+        assert_eq!(
+            app.state.flash.as_ref().map(|f| f.text.clone()),
+            None,
+            "and it is not refused"
+        );
+        assert_eq!(
+            app.view
+                .pager
+                .as_ref()
+                .expect("the put member is paged")
+                .source_path
+                .as_deref(),
+            Some(staging.join("brought.txt").as_path()),
+            "reading the staged copy the put wrote"
+        );
+        app.view.pager = None;
+
+        // Reading it out — `y`, and by the same route `L` / `f` / copy-out.
+        settle(
+            &mut app,
+            vec![Effect::Inventory(
+                crate::app::inventory_ops::InventoryOp::Yank {
+                    sources: vec![crate::app::inventory_ops::YankSource::plain(added.clone())],
+                },
+            )],
+        );
+        let cached = app
+            .state
+            .inventory
+            .items()
+            .find(|i| i.orig_path == added)
+            .expect("the put member yanks, addressed by its path in the archive");
+        assert_eq!(cached.filename, "brought.txt");
+    });
+}
+
+/// Deleting a put member un-adds it: the row goes, the journal goes clean, and
+/// the staged copy is unlinked so the same name can be put again.
+#[test]
+fn deleting_a_put_member_un_adds_it_and_frees_the_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let staging = tmp.path().join("staging");
+        let mut app = App::test_app(dir);
+        put_a_file_into(&mut app, &archive, &staging, "brought.txt", b"first");
+
+        let added = archive.join("brought.txt");
+        let staged_copy = staging.join("brought.txt");
+        assert!(staged_copy.exists(), "the put staged its bytes");
+
+        app.state.flash = None;
+        settle(
+            &mut app,
+            vec![Effect::Graveyard(
+                crate::app::graveyard_ops::GraveyardOp::Archive { paths: vec![added] },
+            )],
+        );
+        assert!(
+            !row_names(&app).contains(&"brought.txt".to_string()),
+            "the row is gone: {:?}",
+            row_names(&app)
+        );
+        assert!(
+            !app.mount_is_dirty(&archive),
+            "nothing is pending — the archive never held it"
+        );
+        assert!(
+            !staged_copy.exists(),
+            "and its staged copy went with it, so the name is free again"
+        );
+
+        // Free means free: the same file can be put back.
+        put_a_file_into(&mut app, &archive, &staging, "brought.txt", b"second");
+        assert!(
+            row_names(&app).contains(&"brought.txt".to_string()),
+            "a second put of the same name lands: {:?}",
+            row_names(&app)
+        );
+        assert_eq!(std::fs::read(&staged_copy).unwrap(), b"second");
+    });
+}
+
+/// An archived member is unaffected: deleting one is still a recorded removal
+/// that the write-back applies.
+#[test]
+fn deleting_an_archived_member_is_still_recorded() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        settle(
+            &mut app,
+            vec![Effect::Graveyard(
+                crate::app::graveyard_ops::GraveyardOp::Archive {
+                    paths: vec![archive.join("README.md")],
+                },
+            )],
+        );
+        assert!(app.mount_is_dirty(&archive), "the removal is pending");
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+        assert!(
+            !member_names(&archive).contains(&"README.md".to_string()),
+            "{:?}",
+            member_names(&archive)
+        );
+    });
+}
+
+/// End to end: a put member survives the write-back and is a real archived
+/// member afterwards — the point of making it actionable in the first place.
+#[test]
+fn a_put_member_edited_then_written_carries_its_edit_in() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let staging = tmp.path().join("staging");
+        let mut app = App::test_app(dir);
+        put_a_file_into(&mut app, &archive, &staging, "brought.txt", b"before");
+
+        // Edit it the way an editor or an agent would — straight on the staged copy.
+        std::fs::write(staging.join("brought.txt"), b"after the edit").unwrap();
+
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+
+        assert!(
+            member_names(&archive).contains(&"brought.txt".to_string()),
+            "{:?}",
+            member_names(&archive)
+        );
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&archive).unwrap()).unwrap();
+        let mut body = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name("brought.txt").unwrap(), &mut body).unwrap();
+        assert_eq!(body, "after the edit");
+    });
+}
+
+/// After a write-back the mount is rebuilt from the file on disk, and the stale
+/// staging tree is emptied **by that same op** — never by a `Clean` issued
+/// alongside it.
+///
+/// Every archive op gets its own thread, so a `Clean` and a `Mount` naming one
+/// staging root run concurrently: `remove_dir_all` walking the tree while the
+/// extraction refills it produced `creating <staging>/…: File exists (os error
+/// 17)` against a real 459-member tarball, reproducible about one run in ten.
+/// A race can't be proved absent by running it, so the guard is structural.
+#[test]
+fn a_write_back_re_reads_without_a_clean_racing_its_staging_tree() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        settle(
+            &mut app,
+            vec![Effect::Graveyard(
+                crate::app::graveyard_ops::GraveyardOp::Archive {
+                    paths: vec![archive.join("README.md")],
+                },
+            )],
+        );
+
+        // Run the write, then take exactly what its outcome asks for next.
+        let write = app.cmd_archive("write");
+        for effect in write {
+            let Effect::Archive(op) = effect else {
+                continue;
+            };
+            let outcome = run_archive_op(op);
+            app.runtime.archive_results.lock().unwrap().push(outcome);
+        }
+        let (_, after_write) = app.apply_archive_outcomes();
+
+        let mut mount_roots = Vec::new();
+        let mut clean_roots = Vec::new();
+        for effect in &after_write {
+            match effect {
+                Effect::Archive(ArchiveOp::Mount {
+                    staging_root,
+                    reset_staging,
+                    ..
+                }) => {
+                    assert!(
+                        *reset_staging,
+                        "the re-read empties the tree itself, so no separate Clean is needed"
+                    );
+                    mount_roots.push(staging_root.clone());
+                }
+                Effect::Archive(ArchiveOp::Clean { staging_roots }) => {
+                    clean_roots.extend(staging_roots.iter().cloned());
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(mount_roots.len(), 1, "one re-read: {after_write:?}");
+        assert!(
+            !clean_roots.contains(&mount_roots[0]),
+            "a Clean on {:?} would race the re-read filling it — cleans: {clean_roots:?}",
+            mount_roots[0]
+        );
+    });
+}
+
+// ── an in-flight message doesn't outlive its operation ────────────────────
+
+/// The user's report: after entering an archive, `reading pkg.zip…` stayed on
+/// the status bar, reading as though more were still to come.
+///
+/// A flash has no lifetime of its own, and the mount arm only speaks up when the
+/// archive had something odd about it — so a clean mount left the in-flight
+/// message as the last thing said.
+#[test]
+fn the_reading_message_goes_once_the_archive_is_mounted() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+
+        let fx = app.request_mount(&archive, true);
+        let flash = app.state.flash.as_ref().expect("the wait is announced");
+        assert_eq!(flash.text, "reading pkg.zip…");
+        assert!(matches!(flash.kind, crate::app::FlashKind::Progress));
+
+        settle(&mut app, fx);
+
+        assert_eq!(
+            app.state.flash.as_ref().map(|f| f.text.clone()),
+            None,
+            "nothing is left claiming the read is still going"
+        );
+        assert!(app.state.mounts.contains(&archive), "and it did mount");
+    });
+}
+
+/// The clear must not eat what the mount had to say. Two members differing only
+/// by case is a real warning — and the reason the arm flashes at all.
+///
+/// Duplicate *identical* names would be the sharper fixture, but `ZipWriter`
+/// refuses to write them, which is why the read-only test builds its capability
+/// by hand.
+#[test]
+fn a_mount_with_something_to_report_still_reports_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("collide.zip");
+        let f = std::fs::File::create(&archive).unwrap();
+        let mut w = zip::ZipWriter::new(f);
+        let opts = zip::write::SimpleFileOptions::default();
+        for name in ["same.txt", "SAME.txt"] {
+            w.start_file(name, opts).unwrap();
+            w.write_all(b"body").unwrap();
+        }
+        w.finish().unwrap();
+        let mut app = App::test_app(dir);
+
+        let fx = app.request_mount(&archive, true);
+        settle(&mut app, fx);
+
+        let flash = app
+            .state
+            .flash
+            .as_ref()
+            .expect("the note survives the clear");
+        assert!(
+            flash.text.contains("differ only by case"),
+            "it is the note, not the in-flight message: {}",
+            flash.text
+        );
+        assert!(
+            !matches!(flash.kind, crate::app::FlashKind::Progress),
+            "a note is not progress"
+        );
+    });
+}
+
+/// An error is a real message too: a failed read replaces the in-flight one
+/// rather than being cleared along with it.
+#[test]
+fn a_failed_read_leaves_its_error_on_screen() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let broken = dir.join("broken.zip");
+        std::fs::write(&broken, b"PK\x03\x04 and then nothing usable").unwrap();
+        let mut app = App::test_app(dir);
+
+        let fx = app.request_mount(&broken, true);
+        settle(&mut app, fx);
+
+        let flash = app.state.flash.as_ref().expect("the failure is reported");
+        assert!(
+            matches!(flash.kind, crate::app::FlashKind::Error),
+            "an error replaced the in-flight message rather than being cleared with it"
+        );
+        // Not a `contains("reading")` check: the error's own context chain says
+        // "reading zip <path>", so the wording overlaps the progress message and
+        // only the kind distinguishes them.
+        assert!(
+            flash.text.contains("Could not find EOCD"),
+            "and it still names the cause: {}",
+            flash.text
+        );
     });
 }

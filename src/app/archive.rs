@@ -55,7 +55,7 @@ impl App {
         self.runtime.archive_cancel =
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.state
-            .flash_info(format!("reading {}…", display_name(path)));
+            .flash_progress(format!("reading {}…", display_name(path)));
         vec![Effect::Archive(ArchiveOp::Mount {
             path: path.to_path_buf(),
             staging_root,
@@ -66,6 +66,7 @@ impl App {
             then,
             address: None,
             depth: 0,
+            reset_staging: false,
         })]
     }
 
@@ -112,7 +113,7 @@ impl App {
         self.runtime.archive_cancel =
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.state
-            .flash_info(format!("reading {}…", display_name(at)));
+            .flash_progress(format!("reading {}…", display_name(at)));
         vec![Effect::Archive(ArchiveOp::Mount {
             path: source.to_path_buf(),
             staging_root,
@@ -123,6 +124,53 @@ impl App {
             then,
             address: Some(at.to_path_buf()),
             depth,
+            reset_staging: false,
+        })]
+    }
+
+    /// Re-read an archive spyc has just rewritten.
+    ///
+    /// A repack renumbers a zip's entries and moves a tar's offsets, so every
+    /// locator in the old index points at the wrong bytes and the mount has to be
+    /// built again from the file on disk. The stale staging tree goes with it —
+    /// **in the same op**, because each archive op runs on its own thread and a
+    /// separate `Clean` would race the extraction refilling that directory.
+    ///
+    /// `nested_source` is the staged copy for an archive that lives inside
+    /// another one; `None` for a file on disk.
+    pub(super) fn request_remount(
+        &mut self,
+        archive: &Path,
+        nested_source: Option<PathBuf>,
+    ) -> Vec<Effect> {
+        let Some(staging_root) = staging_root_for(archive) else {
+            self.state
+                .flash_error("archive: no state directory to stage into");
+            return Vec::new();
+        };
+        let depth = if nested_source.is_some() {
+            self.state
+                .mounts
+                .resolve(archive)
+                .map_or(1, |(parent, _)| parent.depth + 1)
+        } else {
+            0
+        };
+        self.runtime.archive_cancel =
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        vec![Effect::Archive(ArchiveOp::Mount {
+            path: nested_source.unwrap_or_else(|| archive.to_path_buf()),
+            staging_root,
+            limits: self.state.config.archive.limits(),
+            max_entries: self.state.config.archive.max_entries,
+            // Already read once at this size — re-reading it is not a new
+            // decision for the user to make.
+            confirmed: true,
+            cancel: std::sync::Arc::clone(&self.runtime.archive_cancel),
+            then: None,
+            address: Some(archive.to_path_buf()),
+            depth,
+            reset_staging: true,
         })]
     }
 
@@ -141,9 +189,26 @@ impl App {
         let Some((mount, _)) = self.state.mounts.member_of(path) else {
             return Vec::new();
         };
-        let Some(entry) = mount.entry_at(path).cloned() else {
-            self.state.flash_error("archive: no such member");
-            return Vec::new();
+        let entry = match mount.member_at(path) {
+            Some(crate::archive::mount::MemberRef::Archived(entry)) => entry.clone(),
+            // A file the user brought in: the staging tree is the only copy, so
+            // there is nothing to extract and nothing to fall through to.
+            Some(crate::archive::mount::MemberRef::Added { rel, .. }) => {
+                let staged = mount.staging_root.join(rel);
+                if staged.is_dir() {
+                    return Vec::new();
+                }
+                if !staged.exists() {
+                    self.state
+                        .flash_error("archive: the added file's staged copy is gone");
+                    return Vec::new();
+                }
+                return self.do_after_materialize(then, &staged);
+            }
+            None => {
+                self.state.flash_error("archive: no such member");
+                return Vec::new();
+            }
         };
         if entry.kind == crate::archive::index::ArchiveEntryKind::Dir {
             return Vec::new();
@@ -185,6 +250,13 @@ impl App {
     }
 
     fn apply_one_archive_outcome(&mut self, outcome: ArchiveOutcome) -> Vec<Effect> {
+        // An outcome means the op it was announcing is over, so the in-flight
+        // message goes now — before the arms below get their say. Done here rather
+        // than per-arm because the one that leaked was the arm with nothing to
+        // report: entering an archive that had no warnings left "reading …" on
+        // screen, reading as though more were coming. Only a `Progress` flash is
+        // cleared, so a warning or error already showing survives.
+        self.state.clear_progress_flash();
         match outcome {
             ArchiveOutcome::Mounted {
                 index,
@@ -310,22 +382,15 @@ impl App {
                 // offsets, so every locator in the old index now points at the
                 // wrong bytes. The mount has to be *dropped* for that to happen —
                 // a live one is re-entered rather than re-indexed, which is right
-                // everywhere except here.
+                // everywhere except here. A nested archive is read from its staged
+                // copy, which the write just replaced in place.
                 let nested = self
                     .state
                     .mounts
                     .get(&archive)
                     .and_then(|m| (m.depth > 0).then(|| m.source().to_path_buf()));
-                let mut effects = match self.state.mounts.remove(&archive) {
-                    Some(staging) => clean_effects(vec![staging]),
-                    None => Vec::new(),
-                };
-                effects.extend(match &nested {
-                    // A nested archive is read from its staged copy, which the
-                    // write just replaced in place.
-                    Some(source) => self.request_nested_mount(&archive, source, None),
-                    None => self.request_mount(&archive, true),
-                });
+                self.state.mounts.remove(&archive);
+                let effects = self.request_remount(&archive, nested);
                 // Writing an archive that lives inside another one changes a file
                 // in that one's staging, so the outer now has a pending change of
                 // its own. Say so rather than leaving it to the quit warning.
@@ -563,6 +628,90 @@ impl App {
         }
     }
 
+    /// Throw away an archive's pending changes: the journal *and* the staged copies
+    /// that superseded its bytes.
+    ///
+    /// Clearing the journal alone left an edited copy on disk, and the next scan
+    /// re-recorded it as pending moments later — so discarded changes came straight
+    /// back. Re-mounting would drop them too, but a live mount is re-*entered*
+    /// rather than re-read, and issuing a staging clean beside a fresh mount races
+    /// it: each archive op rides its own worker thread and both name the same
+    /// staging path. Removing exactly what was recorded needs neither.
+    fn discard_pending(&mut self, archive: &Path) {
+        let mut drop_files: Vec<(String, PathBuf)> = Vec::new();
+        if let Some(mount) = self.state.mounts.get(archive) {
+            for change in mount.journal.changes() {
+                match change {
+                    // A member the user brought in has no index entry; its bytes sit
+                    // under its own inner path.
+                    crate::archive::Change::Added { inner } => {
+                        drop_files.push((inner.clone(), mount.staging_root.join(inner)));
+                    }
+                    // A replaced one is at its entry's staging path, which differs
+                    // from the inner path for a case-colliding member.
+                    crate::archive::Change::Replaced { inner } => {
+                        if let Some(entry) = mount.index.get(inner) {
+                            drop_files.push((inner.clone(), mount.staging_path(entry)));
+                        }
+                    }
+                    // A delete or rename never wrote anything: they're index edits.
+                    crate::archive::Change::Deleted { .. }
+                    | crate::archive::Change::Renamed { .. } => {}
+                }
+            }
+        }
+        for (_, path) in &drop_files {
+            let _ = std::fs::remove_file(path);
+        }
+        if let Some(mount) = self.state.mounts.get_mut(archive) {
+            for (inner, _) in &drop_files {
+                mount.staged.remove(inner);
+            }
+            mount.journal.clear();
+            mount.editing.clear();
+        }
+        self.state.flash_info("archive: pending changes discarded");
+        // The rows come from the index plus the journal, so they have to be rebuilt
+        // for the deletes and renames to come back.
+        self.state.refresh_listing();
+    }
+
+    /// Which archive `:archive write` / `discard` means.
+    ///
+    /// Inside a mount it's that one. From outside it used to be nothing at all,
+    /// which left the container's `~` marker as a dead end: you could see an
+    /// archive held unwritten changes and had to climb back in to act on it. So:
+    /// the archive under the cursor if it's a dirty mount — that's the row telling
+    /// you — else the only dirty mount when there's exactly one. More than one is
+    /// named rather than guessed at.
+    fn archive_to_act_on(&self, verb: &str) -> Result<PathBuf, String> {
+        if let Some((mount, _)) = self.state.mounts.resolve(&self.state.cur().listing.dir) {
+            return Ok(mount.archive().to_path_buf());
+        }
+        let cursor = self
+            .state
+            .cur()
+            .rows
+            .get(self.state.cur().cursor.index)
+            .map(|r| r.path.clone());
+        if let Some(path) = cursor
+            && self.state.mounts.get(&path).is_some()
+            && self.mount_is_dirty(&path)
+        {
+            return Ok(path);
+        }
+        let dirty = self.dirty_mounts();
+        match dirty.len() {
+            0 => Err(format!("archive: nothing to {verb}")),
+            1 => Ok(dirty[0].clone()),
+            _ => Err(format!(
+                "archive: {} archives have changes — put the cursor on the one to {verb}, \
+                 or go into it",
+                dirty.len()
+            )),
+        }
+    }
+
     /// `:archive [info|list|unmount]`.
     pub(crate) fn cmd_archive(&mut self, arg: &str) -> Vec<Effect> {
         // Anything about to be reported — or written — should account for edits
@@ -577,30 +726,23 @@ impl App {
                 self.archive_list();
                 Vec::new()
             }
-            "write" => {
-                if let Some((mount, _)) = self.state.mounts.resolve(&self.state.cur().listing.dir) {
-                    let archive = mount.archive().to_path_buf();
-                    self.write_effect(&archive).into_iter().collect()
-                } else {
-                    self.state.flash_error("archive: not inside an archive");
+            "write" => match self.archive_to_act_on("write") {
+                Ok(archive) => self.write_effect(&archive).into_iter().collect(),
+                Err(why) => {
+                    self.state.flash_error(why);
                     Vec::new()
                 }
-            }
-            "discard" => {
-                if let Some((mount, _)) = self.state.mounts.resolve(&self.state.cur().listing.dir) {
-                    let archive = mount.archive().to_path_buf();
-                    if let Some(m) = self.state.mounts.get_mut(&archive) {
-                        m.journal.clear();
-                    }
-                    // Re-mount to throw away any edited staged copies along with
-                    // the journal, so "discard" means all of it.
-                    self.state.flash_info("archive: pending changes discarded");
-                    self.request_mount(&archive, true)
-                } else {
-                    self.state.flash_error("archive: not inside an archive");
+            },
+            "discard" => match self.archive_to_act_on("discard") {
+                Ok(archive) => {
+                    self.discard_pending(&archive);
                     Vec::new()
                 }
-            }
+                Err(why) => {
+                    self.state.flash_error(why);
+                    Vec::new()
+                }
+            },
             "cancel" => {
                 self.cancel_archive_mount();
                 self.state.flash_info("archive: cancel requested");
@@ -785,9 +927,9 @@ impl App {
         let staged_check = |p: &Path| {
             self.state
                 .mounts
-                .resolve(p)
-                .and_then(|(mount, _)| mount.entry_at(p).map(|e| mount.is_materialized(e)))
-                .unwrap_or(false)
+                .member_of(p)
+                .and_then(|(mount, _)| mount.bytes_at(p))
+                .is_some_and(|bytes| bytes.exists())
         };
         let inventory_names = |ids: &[String]| -> Vec<String> {
             self.state
@@ -866,7 +1008,7 @@ impl App {
             return None;
         }
         self.state
-            .flash_info(format!("extracting {} member(s)…", entries.len()));
+            .flash_progress(format!("extracting {} member(s)…", entries.len()));
         Some(Effect::Archive(ArchiveOp::MaterializeMany {
             archive,
             entries,
@@ -905,9 +1047,26 @@ impl App {
         for change in changes {
             match change {
                 PendingChange::Delete { archive, inner } => {
+                    // Deleting a file the user brought in un-adds it: the archive
+                    // never held it, so its staged bytes are the only copy and
+                    // leaving them behind would collide with a second put.
+                    let staged = self
+                        .state
+                        .mounts
+                        .get(&archive)
+                        .filter(|mount| mount.journal.is_addition(&inner))
+                        .map(|mount| mount.staging_root.join(&inner));
                     if let Some(mount) = self.state.mounts.get_mut(&archive) {
-                        mount.journal.delete(inner);
+                        match &staged {
+                            Some(_) => {
+                                mount.journal.forget_addition(&inner);
+                            }
+                            None => mount.journal.delete(inner),
+                        }
                         deleted += 1;
+                    }
+                    if let Some(staged) = staged {
+                        let _ = std::fs::remove_file(&staged);
                     }
                 }
                 PendingChange::Rename { archive, from, to } => {
@@ -934,8 +1093,20 @@ impl App {
             .map(|(n, verb)| format!("{n} {verb}"))
             .collect::<Vec<_>>()
             .join(", ");
-        self.state
-            .flash_info(format!("{what} — :archive write to apply"));
+        // Un-adding the last pending addition leaves nothing to write back, so
+        // pointing at `:archive write` would name a no-op.
+        let touched: Vec<PathBuf> = self
+            .state
+            .mounts
+            .iter()
+            .map(|m| m.archive().to_path_buf())
+            .collect();
+        let still_dirty = touched.iter().any(|a| self.mount_is_dirty(a));
+        self.state.flash_info(if still_dirty {
+            format!("{what} — :archive write to apply")
+        } else {
+            what
+        });
     }
 
     /// The write-back op for a mount, or `None` when there is nothing to write.
@@ -983,7 +1154,7 @@ impl App {
             }
             Some(Ok(op)) => {
                 self.state
-                    .flash_info(format!("writing {}…", display_name(archive)));
+                    .flash_progress(format!("writing {}…", display_name(archive)));
                 Some(Effect::Archive(op))
             }
         }
