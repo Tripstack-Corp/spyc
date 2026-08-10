@@ -49,6 +49,17 @@ pub enum Change {
     Replaced { inner: String },
 }
 
+/// What a listing row should say about a member with a pending change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemberChange {
+    /// Brought in by the user; not in the archive yet.
+    Added,
+    /// Still in the archive, but the staged copy supersedes it — an edit.
+    Replaced,
+    /// Shown somewhere other than where the archive stores it.
+    Renamed,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Counts {
     pub added: usize,
@@ -165,6 +176,20 @@ impl Journal {
             Change::Deleted { inner: victim } => strip_path_prefix(inner, victim).is_some(),
             _ => false,
         })
+    }
+
+    /// What is pending for one member, for a per-row marker in the listing.
+    ///
+    /// `None` for a member nobody has touched. Deletion isn't a state here —
+    /// a deleted member doesn't appear in the listing at all.
+    pub fn state_of(&self, inner: &str) -> Option<MemberChange> {
+        if self.additions().any(|a| a == inner) {
+            return Some(MemberChange::Added);
+        }
+        if self.is_replaced(inner) {
+            return Some(MemberChange::Replaced);
+        }
+        (self.effective(inner) != inner).then_some(MemberChange::Renamed)
     }
 
     /// Whether a staged copy supersedes this member's archived bytes.

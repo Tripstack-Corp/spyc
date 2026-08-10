@@ -2255,3 +2255,66 @@ fn the_status_bar_paints_the_badge_after_an_edit() {
         );
     });
 }
+
+/// The reported flow, keys and all — `Enter` a member to page it, `v` to edit it,
+/// save — and the thing the user is looking at while they do it: **the row**.
+///
+/// The aggregate badge in the status suffix was there all along; what wasn't was
+/// any mark on the member itself, so an edited file looked exactly like an
+/// untouched one. Inside a mount the gutter answers the archive's question rather
+/// than git's.
+#[test]
+fn an_edited_member_is_marked_in_the_listing() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Painted, not inspected: the gutter's unstaged column is what the user
+        // is looking at, and `~` is its modified glyph.
+        let readme_row = |app: &mut App| -> String {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 12)).unwrap();
+            terminal.draw(|f| app.render(f)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol())
+                        .collect::<String>()
+                })
+                .find(|line| line.contains("README"))
+                .unwrap_or_default()
+        };
+        let before = readme_row(&mut app);
+        assert!(!before.contains('~'), "untouched to begin with: {before:?}");
+
+        // Enter it (pager on the staged copy), then `v` to hand it to an editor.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::EnterOrDisplay).unwrap();
+        settle(&mut app, fx);
+        let staged = app
+            .view
+            .pager
+            .as_ref()
+            .and_then(|p| p.source_path.clone())
+            .expect("paged from the staging tree");
+        let _ = app.handle_pager_key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('v'),
+            KeyModifiers::empty(),
+        ));
+
+        // The editor saves.
+        std::fs::write(&staged, b"# edited in the editor\n").unwrap();
+        assert!(app.settle_archive_edits(), "the edit is noticed");
+
+        let after = readme_row(&mut app);
+        assert!(
+            after.contains('~'),
+            "and the row is marked: {after:?} (was {before:?})"
+        );
+    });
+}

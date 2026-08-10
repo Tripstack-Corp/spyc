@@ -102,11 +102,11 @@ Used sparingly — every glyph below has a specific meaning.
 | Glyph | Meaning |
 |---|---|
 | `🌶️` | spyc logo (status bar, exit summary) |
-| `~` | git-modified file marker |
-| `+` | git-added marker / pane-tab activity badge |
+| `~` | git-modified file marker; an edited archive member |
+| `+` | git-added marker / a member added to an archive / pane-tab activity badge |
 | `?` | git-untracked marker |
 | `-` | git-deleted marker |
-| `>` | git-renamed marker |
+| `>` | git-renamed marker; a renamed archive member |
 | `↪` | live pane cwd has drifted from spawn cwd |
 | `⏳` | `!` captured command running |
 | `…` | middle-truncation in a path |

@@ -17,7 +17,7 @@ pub mod scan;
 pub mod write;
 
 pub use index::{ArchiveIndex, IndexEntry, Locator};
-pub use journal::{Change, Journal, RepackStep, StepSource, plan_repack};
+pub use journal::{Change, Journal, MemberChange, RepackStep, StepSource, plan_repack};
 pub use mount::{ArchiveMount, Mounts};
 pub use scan::{Capability, IndexFacts};
 
