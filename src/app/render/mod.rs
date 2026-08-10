@@ -996,6 +996,9 @@ mod render_tests {
     /// rows-cache forced to rebuild the way `demo_app` does for the left.
     #[test]
     fn snapshot_frame_second_commander() {
+        // The status bar describes `b` here, because `b` is what's focused — see
+        // `the_status_bar_describes_the_focused_column`.
+
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             // Real files so `b`'s listing has deterministic basenames; the
@@ -1008,6 +1011,34 @@ mod render_tests {
             app.open_second_commander_at(tmp.path()); // b reads the 3 files, focused
             app.state.right.as_mut().unwrap().listing.dir = PathBuf::from("/projects/other");
             insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
+        });
+    }
+
+    /// The status bar follows focus, so it can't describe one column's path beside
+    /// the other's branch — `render_status_bar` takes the git half from `cur()`,
+    /// and taking the rest from `left` is how an archive badge for a mount browsed
+    /// in `b` never appeared at all.
+    #[test]
+    fn the_status_bar_describes_the_focused_column() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = demo_app(&files()); // a = /projects/demo
+            app.open_second_commander_at(tmp.path());
+            app.state.right.as_mut().unwrap().listing.dir = PathBuf::from("/projects/other");
+
+            let flip = |app: &mut App, side| {
+                if let Some(v) = app.state.vsplit.as_mut() {
+                    v.focus = side;
+                }
+            };
+
+            flip(&mut app, crate::app::state::Side::Right);
+            let (path, _) = app.header_parts();
+            assert!(path.contains("other"), "b focused: {path}");
+
+            flip(&mut app, crate::app::state::Side::Left);
+            let (path, _) = app.header_parts();
+            assert!(path.contains("demo"), "a focused: {path}");
         });
     }
 

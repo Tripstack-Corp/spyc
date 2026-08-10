@@ -393,90 +393,93 @@ impl App {
     /// Status-bar header: the left (path / view name) and right
     /// (status tags) halves of the top line, per current view.
     pub(super) fn header_parts(&self) -> (String, String) {
-        match self.state.left.view {
-            View::Dir => (crate::paths::display_tilde(&self.state.left.listing.dir), {
-                let filter_tag = match &self.state.left.temp_filter {
-                    Some(f) if f == "!" => " limit:picks".to_string(),
-                    Some(f) => format!(" limit:{f}"),
-                    None => String::new(),
-                };
+        match self.state.cur().view {
+            View::Dir => (
+                crate::paths::display_tilde(&self.state.cur().listing.dir),
                 {
-                    let total = self.state.left.listing.entries.len();
-                    let shown = self.state.left.rows.len();
-                    let hidden = total.saturating_sub(shown);
-                    let hidden_tag = format!(" hidden:{hidden}");
-                    // Bg tasks normally render in the divider line above
-                    // the pane (distinct color, right-aligned). When the
-                    // pane is hidden there is no divider, so fall back
-                    // to the status-bar suffix here.
-                    let bg_tag = if self.runtime.pane_tabs.is_some() {
-                        String::new()
-                    } else {
-                        let running = self.runtime.background_tasks.running_count();
-                        let done = self.runtime.background_tasks.done_count();
-                        if running == 0 && done == 0 {
-                            String::new()
-                        } else if done == 0 {
-                            format!(" bg:{running}\u{25cf}")
-                        } else {
-                            format!(" bg:{running}\u{25cf}{done}\u{2713}")
-                        }
+                    let filter_tag = match &self.state.cur().temp_filter {
+                        Some(f) if f == "!" => " limit:picks".to_string(),
+                        Some(f) => format!(" limit:{f}"),
+                        None => String::new(),
                     };
-                    // Inside a mounted archive, say so — the path alone reads
-                    // like an ordinary directory under a file, which is exactly
-                    // what it is, but not obviously deliberate.
-                    let archive_tag = self
-                        .state
-                        .mounts
-                        .resolve(&self.state.left.listing.dir)
-                        .map_or_else(String::new, |(mount, _)| {
-                            let ro = if mount.capability.is_writable() {
-                                ""
-                            } else {
-                                " ro"
-                            };
-                            let pending = if mount.is_dirty() {
-                                format!(" {}", mount.journal.counts().badge())
-                            } else {
-                                String::new()
-                            };
-                            format!(" {}{ro}{pending}", mount.format().label())
-                        });
-                    let sort_tag = format!(
-                        " sort:{}{}",
-                        self.state.left.sort_order,
-                        if self.state.left.sort_reversed {
-                            "\u{2191}"
+                    {
+                        let total = self.state.cur().listing.entries.len();
+                        let shown = self.state.cur().rows.len();
+                        let hidden = total.saturating_sub(shown);
+                        let hidden_tag = format!(" hidden:{hidden}");
+                        // Bg tasks normally render in the divider line above
+                        // the pane (distinct color, right-aligned). When the
+                        // pane is hidden there is no divider, so fall back
+                        // to the status-bar suffix here.
+                        let bg_tag = if self.runtime.pane_tabs.is_some() {
+                            String::new()
                         } else {
-                            ""
-                        },
-                    );
-                    let suffix = format!(
-                        "[picks:{} inv:{} m1:{} m2:{}{}{}{}{}{}]",
-                        self.state.left.picks.len(),
-                        self.state.inventory.len(),
-                        on_off(self.state.left.masks.mask1.enabled),
-                        on_off(self.state.left.masks.mask2.enabled),
-                        filter_tag,
-                        hidden_tag,
-                        sort_tag,
-                        archive_tag,
-                        bg_tag,
-                    );
-                    // `TopList` zoom collapses the pane (no divider), so its
-                    // zoom cue can't ride the pane divider like `BottomPane`'s
-                    // does — surface it here, the same fallback the bg-task
-                    // tag uses when there's no divider.
-                    if matches!(
-                        self.state.pane.zoom,
-                        state::ZoomTarget::TopList | state::ZoomTarget::RightColumn
-                    ) {
-                        format!("{suffix} [ZOOM]")
-                    } else {
-                        suffix
+                            let running = self.runtime.background_tasks.running_count();
+                            let done = self.runtime.background_tasks.done_count();
+                            if running == 0 && done == 0 {
+                                String::new()
+                            } else if done == 0 {
+                                format!(" bg:{running}\u{25cf}")
+                            } else {
+                                format!(" bg:{running}\u{25cf}{done}\u{2713}")
+                            }
+                        };
+                        // Inside a mounted archive, say so — the path alone reads
+                        // like an ordinary directory under a file, which is exactly
+                        // what it is, but not obviously deliberate.
+                        let archive_tag = self
+                            .state
+                            .mounts
+                            .resolve(&self.state.cur().listing.dir)
+                            .map_or_else(String::new, |(mount, _)| {
+                                let ro = if mount.capability.is_writable() {
+                                    ""
+                                } else {
+                                    " ro"
+                                };
+                                let pending = if mount.is_dirty() {
+                                    format!(" {}", mount.journal.counts().badge())
+                                } else {
+                                    String::new()
+                                };
+                                format!(" {}{ro}{pending}", mount.format().label())
+                            });
+                        let sort_tag = format!(
+                            " sort:{}{}",
+                            self.state.cur().sort_order,
+                            if self.state.cur().sort_reversed {
+                                "\u{2191}"
+                            } else {
+                                ""
+                            },
+                        );
+                        let suffix = format!(
+                            "[picks:{} inv:{} m1:{} m2:{}{}{}{}{}{}]",
+                            self.state.cur().picks.len(),
+                            self.state.inventory.len(),
+                            on_off(self.state.cur().masks.mask1.enabled),
+                            on_off(self.state.cur().masks.mask2.enabled),
+                            filter_tag,
+                            hidden_tag,
+                            sort_tag,
+                            archive_tag,
+                            bg_tag,
+                        );
+                        // `TopList` zoom collapses the pane (no divider), so its
+                        // zoom cue can't ride the pane divider like `BottomPane`'s
+                        // does — surface it here, the same fallback the bg-task
+                        // tag uses when there's no divider.
+                        if matches!(
+                            self.state.pane.zoom,
+                            state::ZoomTarget::TopList | state::ZoomTarget::RightColumn
+                        ) {
+                            format!("{suffix} [ZOOM]")
+                        } else {
+                            suffix
+                        }
                     }
-                }
-            }),
+                },
+            ),
             View::Inventory => (
                 "<INVENTORY>".to_string(),
                 format!(
