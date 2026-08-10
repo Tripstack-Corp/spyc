@@ -20,6 +20,12 @@ fn archive_change(
 ) -> Option<crate::ui::list_view::GitChange> {
     use crate::archive::MemberChange;
     use crate::ui::list_view::GitChange;
+    // The archive *file*, seen from the directory it lives in: an unwritten change
+    // inside it is invisible out here otherwise — the suffix badge only shows while
+    // you're standing in the mount, and the members aren't listed.
+    if let Some(mount) = mounts.get(path) {
+        return mount.journal.is_dirty().then_some(GitChange::Modified);
+    }
     let (mount, _) = mounts.member_of(path)?;
     let entry = mount.entry_at(path)?;
     Some(match mount.journal.state_of(&entry.inner)? {

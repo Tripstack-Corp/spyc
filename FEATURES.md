@@ -499,9 +499,11 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   no bytes move however large it is), and `e` / `V` edit a member by extracting it
   and opening your editor on that copy. Everything stays pending until
   `:archive write`; the suffix carries a `+2 ~1 -3` badge meanwhile, and each
-  changed member is marked in the listing's own status gutter — `~` edited, `+`
-  added, `>` renamed, the same glyphs git changes use, because it's the same
-  question: what about this row isn't written yet. An edit made
+  changed member is marked in the listing's own status gutter — and the archive
+  file itself is marked `~` in the directory it lives in, so a container holding
+  unwritten changes is visible from outside it too. Inside, `~` is an edited
+  member, `+` added, `>` renamed — the same glyphs git changes use, because it's
+  the same question: what about this row isn't written yet. An edit made
   outside spyc — by your editor, or by an agent in the pane — counts as a change
   too, and shows in that badge: spyc compares each extracted file against what it
   wrote. From outside the archive, where the badge isn't visible, `:archive info`

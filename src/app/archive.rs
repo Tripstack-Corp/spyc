@@ -464,26 +464,18 @@ impl App {
         let Ok(md) = std::fs::metadata(real) else {
             return;
         };
-        let Some(archive) = self
-            .state
-            .mounts
-            .iter()
-            .find(|m| real.starts_with(&m.staging_root))
-            .map(|m| m.archive().to_path_buf())
-        else {
+        // Keyed by **journal path**, which is what every reader of this map uses.
+        // The staging-relative path is not the same string: a case-colliding member
+        // stages under a `.spyc-case-N/` prefix, so recording its location gave one
+        // member two names and its edits were never noticed.
+        let Some((archive, inner)) = self.staged_owner(real) else {
             return;
         };
         let Some(mount) = self.state.mounts.get_mut(&archive) else {
             return;
         };
-        let Ok(rel) = real.strip_prefix(&mount.staging_root) else {
-            return;
-        };
-        let key = rel
-            .to_string_lossy()
-            .replace(std::path::MAIN_SEPARATOR, "/");
         mount.staged.insert(
-            key,
+            inner,
             crate::archive::journal::StagedStat {
                 size: md.len(),
                 mtime: md.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH),
