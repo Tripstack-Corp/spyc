@@ -181,6 +181,58 @@ pub fn stream_mount(
     Ok(Indexed { index, facts })
 }
 
+/// Re-extract only the members whose staged copies have gone missing.
+///
+/// Staging is a cache in a user-writable directory, and things outside spyc remove
+/// files from it — a backup or indexing daemon reaping macOS AppleDouble (`._*`)
+/// entries is one observed case. For a streamed archive those staged bytes are the
+/// only copy *outside* the container, so losing one used to make the archive
+/// unwritable for good. The container still has them, so refill instead.
+///
+/// An existing file is never overwritten: a staged copy the user has *edited* is
+/// the whole point of the pending change, and refilling must not undo it. Returns
+/// how many members were restored.
+pub fn restage_missing(
+    archive: &Path,
+    format: ArchiveFormat,
+    staging_root: &Path,
+    cap: usize,
+) -> Result<usize> {
+    let file = File::open(archive).with_context(|| format!("opening {}", archive.display()))?;
+    let reader: Box<dyn Read> = match format {
+        ArchiveFormat::TarGz => Box::new(flate2::read::GzDecoder::new(BufReader::new(file))),
+        ArchiveFormat::TarZst => Box::new(zstd::stream::read::Decoder::new(BufReader::new(file))?),
+        _ => bail!("{} is not a streamed format", format.label()),
+    };
+    let mut facts = super::scan::IndexFacts::default();
+    let mut restored = 0;
+    let mut seen = 0;
+    let mut tar = tar::Archive::new(reader);
+    for entry in tar
+        .entries()
+        .with_context(|| format!("reading {}", archive.display()))?
+    {
+        let mut entry = entry.with_context(|| format!("reading {}", archive.display()))?;
+        seen += 1;
+        if seen > cap {
+            break;
+        }
+        let (name, draft) = tar_draft(&entry, Locator::Staged, &mut facts);
+        let Some(draft) = draft else { continue };
+        let Ok(clean) = normalize(&name) else {
+            continue;
+        };
+        // `staging_rel` is what a reader looks under, so a case-colliding member is
+        // restored where its own reader expects it.
+        if staging_root.join(&clean.inner).exists() {
+            continue;
+        }
+        write_member(&mut entry, &draft, &clean.inner, staging_root, &mut facts)?;
+        restored += 1;
+    }
+    Ok(restored)
+}
+
 /// Put one streamed member on disk under `staging_root`.
 fn write_member<R: Read>(
     entry: &mut tar::Entry<'_, R>,

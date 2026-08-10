@@ -70,6 +70,30 @@ pub fn repack(
         );
     }
 
+    // A streamed archive's untouched members are carried across *from staging*,
+    // which is a cache: something outside spyc can remove a file from it, and then
+    // the archive could never be written again. The container still holds those
+    // bytes, so refill what's gone before writing — never overwriting a staged copy
+    // that's there, since an edited one is the change being written.
+    if !index.format.is_seekable() {
+        let missing = steps.iter().any(|step| match &step.source {
+            StepSource::Archived { inner } => index.get(inner).is_some_and(|entry| {
+                matches!(entry.locator, Locator::Staged)
+                    && !staging_root.join(entry.staging_rel()).exists()
+            }),
+            StepSource::Staging { .. } => false,
+        });
+        if missing {
+            read::restage_missing(
+                archive,
+                index.format,
+                staging_root,
+                index.entries.len().saturating_add(1024),
+            )
+            .context("refilling the staging tree from the archive")?;
+        }
+    }
+
     // The temp file lives in the archive's own directory so the final rename
     // stays on one filesystem, where it is atomic.
     let tmp = tempfile::NamedTempFile::new_in(parent)
@@ -755,6 +779,113 @@ mod tests {
                 "{format:?}: and still a directory"
             );
         }
+    }
+
+    /// Staging is a cache: something outside spyc can remove a member spyc
+    /// extracted. Observed on a real archive — a daemon reaped ~100 macOS
+    /// AppleDouble (`._*`) files out of `~/.local/state`, and the write then
+    /// refused with `No such file or directory`, permanently.
+    #[test]
+    fn a_repack_refills_staging_that_lost_a_member() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("pkg.tar.gz");
+        let staging = tmp.path().join("staging");
+        tar_at(
+            &archive,
+            &[
+                ("keep.txt", b"kept", 0o644),
+                ("gone.txt", b"recovered", 0o644),
+                ("drop.txt", b"dropped", 0o644),
+            ],
+            ArchiveFormat::TarGz,
+        );
+        let indexed = read::stream_mount(
+            &archive,
+            ArchiveFormat::TarGz,
+            &staging,
+            u64::MAX,
+            1000,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap();
+
+        // Something else removes a staged member spyc isn't changing.
+        std::fs::remove_file(staging.join("gone.txt")).unwrap();
+
+        let mut journal = Journal::default();
+        journal.delete("drop.txt");
+        let steps = plan_repack(
+            &indexed.index,
+            &journal,
+            &StagedStats::new(),
+            &StagedStats::new(),
+        );
+        repack(&indexed.index, &steps, &staging, &opts()).expect("writes rather than refusing");
+
+        let after = contents(&archive);
+        assert!(
+            after.contains(&("gone.txt".to_string(), b"recovered".to_vec())),
+            "the lost member came back out of the archive: {after:?}"
+        );
+        assert!(
+            after.contains(&("keep.txt".to_string(), b"kept".to_vec())),
+            "{after:?}"
+        );
+        assert!(
+            !after.iter().any(|(n, _)| n == "drop.txt"),
+            "and the delete still applied"
+        );
+    }
+
+    /// The refill must not undo the change being written: an edited staged copy is
+    /// the pending change, so a member that IS there is left alone.
+    #[test]
+    fn refilling_staging_never_overwrites_an_edited_member() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("pkg.tar.gz");
+        let staging = tmp.path().join("staging");
+        tar_at(
+            &archive,
+            &[
+                ("edited.txt", b"from the archive", 0o644),
+                ("gone.txt", b"recovered", 0o644),
+            ],
+            ArchiveFormat::TarGz,
+        );
+        let indexed = read::stream_mount(
+            &archive,
+            ArchiveFormat::TarGz,
+            &staging,
+            u64::MAX,
+            1000,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap();
+
+        // One member edited in staging, another lost from it — so the refill runs
+        // in the same repack that carries the edit.
+        std::fs::write(staging.join("edited.txt"), b"edited by hand").unwrap();
+        std::fs::remove_file(staging.join("gone.txt")).unwrap();
+
+        let mut journal = Journal::default();
+        journal.replace("edited.txt");
+        let steps = plan_repack(
+            &indexed.index,
+            &journal,
+            &StagedStats::new(),
+            &StagedStats::new(),
+        );
+        repack(&indexed.index, &steps, &staging, &opts()).unwrap();
+
+        let after = contents(&archive);
+        assert!(
+            after.contains(&("edited.txt".to_string(), b"edited by hand".to_vec())),
+            "the edit survived the refill: {after:?}"
+        );
+        assert!(
+            after.contains(&("gone.txt".to_string(), b"recovered".to_vec())),
+            "and the lost member still came back: {after:?}"
+        );
     }
 
     #[test]
