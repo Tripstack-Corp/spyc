@@ -103,6 +103,28 @@ They all ride the same `mcp_config_dirs` teardown path. Non-live-reload agents
 already-consented repo via `maybe_preinstall_startup_hooks`, because they read
 their config once at startup and would otherwise miss them until next launch.
 
+### Who owns them (why one spyc's exit can't blind another)
+
+The installed hooks are **shared, not per-instance**: the reporter they invoke
+targets whichever socket the *pane's* env names, so one `.claude/settings.json`
+serves every spyc on the machine. Installing is therefore safe to repeat — but
+removing is not. Until this was refcounted, a second spyc quitting deleted the
+hooks out from under the first one's live panes, and every dot there fell back
+to output timing for the rest of that session, silently. Two things close it:
+
+- **`state/hook_owners.rs`** — `{dir: [pid, ...]}` in the state dir, pruned by
+  liveness on each write (a `SIGKILL`ed spyc never releases). Teardown removes
+  the hooks only when `release` reports no live owner left. An explicit
+  `:hooks off` still removes them regardless — that's the user revoking consent
+  for the project, and consent is what every instance's re-heal consults.
+- **`app/status_hooks.rs`** — `settle_status_hooks` re-installs, at loop bottom
+  behind a 30s throttle, whenever a consented pane's config has lost the hooks
+  by any other route (`git clean -xfd`, a hand edit, an older spyc). It arms no
+  deadline, so idle stays 0 dps.
+
+When they *are* missing, `:why-status` and `:activity dump` say so outright
+rather than reporting the output-timing fallback as if it were the answer.
+
 ---
 
 ## 2. Notifications — the ping when an agent needs you

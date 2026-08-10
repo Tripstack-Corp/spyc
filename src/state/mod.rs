@@ -14,6 +14,7 @@ pub mod health;
 #[allow(dead_code, clippy::question_mark)]
 pub mod history;
 pub mod hook_consent;
+pub mod hook_owners;
 pub mod ignore;
 pub mod inventory;
 pub mod marks;
