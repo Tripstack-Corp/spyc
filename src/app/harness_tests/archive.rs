@@ -2739,3 +2739,215 @@ fn discarding_an_added_member_removes_its_staged_bytes() {
         );
     });
 }
+
+// ── a member the user brought in is a member ──────────────────────────────
+
+/// Yank a real file and put it into a mount, handing back the inventory ids in
+/// case the test needs to put it again.
+fn put_a_file_into(app: &mut App, archive: &Path, staging: &Path, name: &str, body: &[u8]) {
+    let source = archive.parent().unwrap().join(name);
+    std::fs::write(&source, body).unwrap();
+    settle(
+        app,
+        vec![Effect::Inventory(
+            crate::app::inventory_ops::InventoryOp::Yank {
+                sources: vec![source]
+                    .into_iter()
+                    .map(crate::app::inventory_ops::YankSource::plain)
+                    .collect(),
+            },
+        )],
+    );
+    if !app.state.mounts.contains(archive) {
+        mount_inline(app, archive, staging);
+    }
+    let ids: Vec<String> = app.state.inventory.items().map(|i| i.id.clone()).collect();
+    settle(
+        app,
+        vec![Effect::Inventory(
+            crate::app::inventory_ops::InventoryOp::Put {
+                dest_dir: archive.to_path_buf(),
+                ids,
+            },
+        )],
+    );
+}
+
+/// The bug this fixes: a put file listed fine but refused every read, edit and
+/// delete with "no such member", because it lives in the journal and the staging
+/// tree while `entry_at` only ever asked the index.
+#[test]
+fn a_put_member_can_be_opened_yanked_and_deleted() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let staging = tmp.path().join("staging");
+        let mut app = App::test_app(dir);
+        put_a_file_into(&mut app, &archive, &staging, "brought.txt", b"payload");
+
+        let added = archive.join("brought.txt");
+        assert!(
+            row_names(&app).contains(&"brought.txt".to_string()),
+            "the put file lists: {:?}",
+            row_names(&app)
+        );
+
+        // Opening it reaches the staged bytes. Those are already on disk — a put
+        // wrote them — so the pager opens with no worker round trip at all, which
+        // is why the proof is the pager rather than an effect.
+        app.state.flash = None;
+        let fx = app.open_member(
+            &added,
+            crate::app::archive_ops::MaterializeThen::OpenPager(
+                crate::app::file_ops::PagerDest::Overlay { scroll: None },
+            ),
+        );
+        assert!(fx.is_empty(), "nothing to extract: {fx:?}");
+        assert_eq!(
+            app.state.flash.as_ref().map(|f| f.text.clone()),
+            None,
+            "and it is not refused"
+        );
+        assert_eq!(
+            app.view
+                .pager
+                .as_ref()
+                .expect("the put member is paged")
+                .source_path
+                .as_deref(),
+            Some(staging.join("brought.txt").as_path()),
+            "reading the staged copy the put wrote"
+        );
+        app.view.pager = None;
+
+        // Reading it out — `y`, and by the same route `L` / `f` / copy-out.
+        settle(
+            &mut app,
+            vec![Effect::Inventory(
+                crate::app::inventory_ops::InventoryOp::Yank {
+                    sources: vec![crate::app::inventory_ops::YankSource::plain(added.clone())],
+                },
+            )],
+        );
+        let cached = app
+            .state
+            .inventory
+            .items()
+            .find(|i| i.orig_path == added)
+            .expect("the put member yanks, addressed by its path in the archive");
+        assert_eq!(cached.filename, "brought.txt");
+    });
+}
+
+/// Deleting a put member un-adds it: the row goes, the journal goes clean, and
+/// the staged copy is unlinked so the same name can be put again.
+#[test]
+fn deleting_a_put_member_un_adds_it_and_frees_the_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let staging = tmp.path().join("staging");
+        let mut app = App::test_app(dir);
+        put_a_file_into(&mut app, &archive, &staging, "brought.txt", b"first");
+
+        let added = archive.join("brought.txt");
+        let staged_copy = staging.join("brought.txt");
+        assert!(staged_copy.exists(), "the put staged its bytes");
+
+        app.state.flash = None;
+        settle(
+            &mut app,
+            vec![Effect::Graveyard(
+                crate::app::graveyard_ops::GraveyardOp::Archive { paths: vec![added] },
+            )],
+        );
+        assert!(
+            !row_names(&app).contains(&"brought.txt".to_string()),
+            "the row is gone: {:?}",
+            row_names(&app)
+        );
+        assert!(
+            !app.mount_is_dirty(&archive),
+            "nothing is pending — the archive never held it"
+        );
+        assert!(
+            !staged_copy.exists(),
+            "and its staged copy went with it, so the name is free again"
+        );
+
+        // Free means free: the same file can be put back.
+        put_a_file_into(&mut app, &archive, &staging, "brought.txt", b"second");
+        assert!(
+            row_names(&app).contains(&"brought.txt".to_string()),
+            "a second put of the same name lands: {:?}",
+            row_names(&app)
+        );
+        assert_eq!(std::fs::read(&staged_copy).unwrap(), b"second");
+    });
+}
+
+/// An archived member is unaffected: deleting one is still a recorded removal
+/// that the write-back applies.
+#[test]
+fn deleting_an_archived_member_is_still_recorded() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        settle(
+            &mut app,
+            vec![Effect::Graveyard(
+                crate::app::graveyard_ops::GraveyardOp::Archive {
+                    paths: vec![archive.join("README.md")],
+                },
+            )],
+        );
+        assert!(app.mount_is_dirty(&archive), "the removal is pending");
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+        assert!(
+            !member_names(&archive).contains(&"README.md".to_string()),
+            "{:?}",
+            member_names(&archive)
+        );
+    });
+}
+
+/// End to end: a put member survives the write-back and is a real archived
+/// member afterwards — the point of making it actionable in the first place.
+#[test]
+fn a_put_member_edited_then_written_carries_its_edit_in() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let staging = tmp.path().join("staging");
+        let mut app = App::test_app(dir);
+        put_a_file_into(&mut app, &archive, &staging, "brought.txt", b"before");
+
+        // Edit it the way an editor or an agent would — straight on the staged copy.
+        std::fs::write(staging.join("brought.txt"), b"after the edit").unwrap();
+
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+
+        assert!(
+            member_names(&archive).contains(&"brought.txt".to_string()),
+            "{:?}",
+            member_names(&archive)
+        );
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&archive).unwrap()).unwrap();
+        let mut body = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name("brought.txt").unwrap(), &mut body).unwrap();
+        assert_eq!(body, "after the edit");
+    });
+}

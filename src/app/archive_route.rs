@@ -271,10 +271,9 @@ fn classify(
                 .iter()
                 .filter_map(|p| {
                     let (mount, _) = mounts.member_of(p)?;
-                    let entry = mount.entry_at(p)?;
                     Some(PendingChange::Delete {
                         archive: mount.archive().to_path_buf(),
-                        inner: entry.inner.clone(),
+                        inner: mount.member_at(p)?.inner().to_string(),
                     })
                 })
                 .collect::<Vec<_>>();
@@ -488,7 +487,7 @@ fn need(paths: &[PathBuf], mounts: &Mounts, is_staged: &dyn Fn(&Path) -> bool) -
 /// Where a member's extracted bytes live, or would.
 fn staging_path(member: &Path, mounts: &Mounts) -> Option<PathBuf> {
     let (mount, _) = mounts.member_of(member)?;
-    mount.entry_at(member).map(|e| mount.staging_path(e))
+    mount.bytes_at(member)
 }
 
 fn graveyard_paths(op: &super::graveyard_ops::GraveyardOp) -> Vec<PathBuf> {

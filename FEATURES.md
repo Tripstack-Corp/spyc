@@ -500,7 +500,10 @@ they land in a session-scoped staging dir that is cleaned up on exit.
 - **Changing an archive** — `R` marks a member for removal, `p` puts an
   inventory item in, `c` copies files in, `M` renames a member (an index edit, so
   no bytes move however large it is), and `e` / `V` edit a member by extracting it
-  and opening your editor on that copy. Everything stays pending until
+  and opening your editor on that copy. A file you bring in is a member from that
+  moment — read it, edit it, rename it — and `R` on one takes it straight back out
+  rather than recording a removal, since the archive never held it. Everything
+  else stays pending until
   `:archive write`; the suffix carries a `+2 ~1 -3` badge meanwhile, and each
   changed member is marked in the listing's own status gutter — and the archive
   file itself is marked `~` in the directory it lives in, so a container holding
