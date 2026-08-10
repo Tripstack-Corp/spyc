@@ -66,6 +66,7 @@ impl App {
             then,
             address: None,
             depth: 0,
+            reset_staging: false,
         })]
     }
 
@@ -123,6 +124,53 @@ impl App {
             then,
             address: Some(at.to_path_buf()),
             depth,
+            reset_staging: false,
+        })]
+    }
+
+    /// Re-read an archive spyc has just rewritten.
+    ///
+    /// A repack renumbers a zip's entries and moves a tar's offsets, so every
+    /// locator in the old index points at the wrong bytes and the mount has to be
+    /// built again from the file on disk. The stale staging tree goes with it —
+    /// **in the same op**, because each archive op runs on its own thread and a
+    /// separate `Clean` would race the extraction refilling that directory.
+    ///
+    /// `nested_source` is the staged copy for an archive that lives inside
+    /// another one; `None` for a file on disk.
+    pub(super) fn request_remount(
+        &mut self,
+        archive: &Path,
+        nested_source: Option<PathBuf>,
+    ) -> Vec<Effect> {
+        let Some(staging_root) = staging_root_for(archive) else {
+            self.state
+                .flash_error("archive: no state directory to stage into");
+            return Vec::new();
+        };
+        let depth = if nested_source.is_some() {
+            self.state
+                .mounts
+                .resolve(archive)
+                .map_or(1, |(parent, _)| parent.depth + 1)
+        } else {
+            0
+        };
+        self.runtime.archive_cancel =
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        vec![Effect::Archive(ArchiveOp::Mount {
+            path: nested_source.unwrap_or_else(|| archive.to_path_buf()),
+            staging_root,
+            limits: self.state.config.archive.limits(),
+            max_entries: self.state.config.archive.max_entries,
+            // Already read once at this size — re-reading it is not a new
+            // decision for the user to make.
+            confirmed: true,
+            cancel: std::sync::Arc::clone(&self.runtime.archive_cancel),
+            then: None,
+            address: Some(archive.to_path_buf()),
+            depth,
+            reset_staging: true,
         })]
     }
 
@@ -327,22 +375,15 @@ impl App {
                 // offsets, so every locator in the old index now points at the
                 // wrong bytes. The mount has to be *dropped* for that to happen —
                 // a live one is re-entered rather than re-indexed, which is right
-                // everywhere except here.
+                // everywhere except here. A nested archive is read from its staged
+                // copy, which the write just replaced in place.
                 let nested = self
                     .state
                     .mounts
                     .get(&archive)
                     .and_then(|m| (m.depth > 0).then(|| m.source().to_path_buf()));
-                let mut effects = match self.state.mounts.remove(&archive) {
-                    Some(staging) => clean_effects(vec![staging]),
-                    None => Vec::new(),
-                };
-                effects.extend(match &nested {
-                    // A nested archive is read from its staged copy, which the
-                    // write just replaced in place.
-                    Some(source) => self.request_nested_mount(&archive, source, None),
-                    None => self.request_mount(&archive, true),
-                });
+                self.state.mounts.remove(&archive);
+                let effects = self.request_remount(&archive, nested);
                 // Writing an archive that lives inside another one changes a file
                 // in that one's staging, so the outer now has a pending change of
                 // its own. Say so rather than leaving it to the quit warning.

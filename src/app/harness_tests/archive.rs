@@ -40,6 +40,7 @@ fn mount_inline(app: &mut App, archive: &Path, staging: &Path) -> Vec<Effect> {
         then: None,
         address: None,
         depth: 0,
+        reset_staging: false,
     });
     assert!(
         matches!(outcome, ArchiveOutcome::Mounted { .. }),
@@ -2949,5 +2950,74 @@ fn a_put_member_edited_then_written_carries_its_edit_in() {
         let mut body = String::new();
         std::io::Read::read_to_string(&mut zip.by_name("brought.txt").unwrap(), &mut body).unwrap();
         assert_eq!(body, "after the edit");
+    });
+}
+
+/// After a write-back the mount is rebuilt from the file on disk, and the stale
+/// staging tree is emptied **by that same op** — never by a `Clean` issued
+/// alongside it.
+///
+/// Every archive op gets its own thread, so a `Clean` and a `Mount` naming one
+/// staging root run concurrently: `remove_dir_all` walking the tree while the
+/// extraction refills it produced `creating <staging>/…: File exists (os error
+/// 17)` against a real 459-member tarball, reproducible about one run in ten.
+/// A race can't be proved absent by running it, so the guard is structural.
+#[test]
+fn a_write_back_re_reads_without_a_clean_racing_its_staging_tree() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        settle(
+            &mut app,
+            vec![Effect::Graveyard(
+                crate::app::graveyard_ops::GraveyardOp::Archive {
+                    paths: vec![archive.join("README.md")],
+                },
+            )],
+        );
+
+        // Run the write, then take exactly what its outcome asks for next.
+        let write = app.cmd_archive("write");
+        for effect in write {
+            let Effect::Archive(op) = effect else {
+                continue;
+            };
+            let outcome = run_archive_op(op);
+            app.runtime.archive_results.lock().unwrap().push(outcome);
+        }
+        let (_, after_write) = app.apply_archive_outcomes();
+
+        let mut mount_roots = Vec::new();
+        let mut clean_roots = Vec::new();
+        for effect in &after_write {
+            match effect {
+                Effect::Archive(ArchiveOp::Mount {
+                    staging_root,
+                    reset_staging,
+                    ..
+                }) => {
+                    assert!(
+                        *reset_staging,
+                        "the re-read empties the tree itself, so no separate Clean is needed"
+                    );
+                    mount_roots.push(staging_root.clone());
+                }
+                Effect::Archive(ArchiveOp::Clean { staging_roots }) => {
+                    clean_roots.extend(staging_roots.iter().cloned());
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(mount_roots.len(), 1, "one re-read: {after_write:?}");
+        assert!(
+            !clean_roots.contains(&mount_roots[0]),
+            "a Clean on {:?} would race the re-read filling it — cleans: {clean_roots:?}",
+            mount_roots[0]
+        );
     });
 }
