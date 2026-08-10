@@ -1,18 +1,20 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# spyc demo — the in-process review loop (gd), in a short throwaway repo.
+# spyc tour — "review it here": the in-process diff, no git subprocess.
 #
-#   Story:  a file shows the git gutter (~ modified) → gd opens the in-house,
-#           syntax-highlighted side-by-side diff vs HEAD → | toggles unified →
-#           q closes. No git subprocess; all gix, in the pager.
+#   Story:  the listing carries a two-column git gutter → `gd` opens the
+#           in-house, syntax-highlighted diff vs HEAD → `|` collapses it to
+#           unified and back → `gb` blames the file → `q` returns to the list.
+#           All gix, in the pager.
 #
 #   Generate (from the repo root):
-#       vhs docs/assets/demo/review.tape        # writes docs/assets/demo-review.mp4
+#       make demos            # or: vhs docs/assets/demo/review.tape
 #
-#   MP4 output (crisp). Runs in a short /tmp repo so nothing touches your tree
-#   and the status bar stays clean. DRAFT — record + tune the Sleep beats.
+#   The fixture (docs/assets/demo/demo-env.sh) commits the tree and then leaves
+#   a real local edit — a whitespace fix in the parser plus the test that pins
+#   it — so the diff on screen is one a reviewer would actually read.
 # ─────────────────────────────────────────────────────────────────────────────
 
-Output docs/assets/demo-review.mp4
+Output docs/assets/demo-review.gif
 
 Set Shell        "bash"
 Set FontFamily   "MesloLGLDZ Nerd Font Mono"
@@ -29,31 +31,45 @@ Set Theme        "Catppuccin Macchiato"
 Set CursorBlink  false
 Set TypingSpeed  55ms
 
-# ── Hidden setup: a short throwaway repo with one committed file, then a local
-#    edit, so `gd` renders a real diff and your working tree is untouched. ─────
 Hide
-Type `d=/tmp/spyc-demo && rm -rf "$d" && mkdir -p "$d" && cd "$d" && git init -q && git config user.email d@x && git config user.name d && printf 'fn main() {\n    println!("hi");\n}\n' > main.rs && git add -A && git commit -qm init && printf 'fn main() {\n    // greet the room, in colour\n    println!("hello, spyc");\n}\n' > main.rs`
+Type "source docs/assets/demo/demo-env.sh"
 Enter
 Type "spyc"
 Enter
-Sleep 3.5s
+Sleep 4s
 Show
 
-# ── 1. Land on the modified file — the git gutter shows it changed ───────────
-Sleep 2s
+# ── 1. The gutter: src/ and tests/ carry the modified marker ─────────────────
+Sleep 1.5s
+Type "/"
+Sleep 250ms
+Type "src"
+Sleep 350ms
+Enter
+Sleep 400ms
+Enter
+Sleep 1.2s
+Type "/"
+Sleep 250ms
+Type "parser"
+Sleep 350ms
+Enter
+Sleep 1.4s
 
-# ── 2. gd — the in-house side-by-side diff vs HEAD (word-level highlighting) ──
+# ── 2. gd — side-by-side vs HEAD, syntax highlighted, word-level ─────────────
 Type "gd"
-Sleep 3.5s
+Sleep 4s
 
-# ── 3. | — collapse to a unified view ────────────────────────────────────────
+# ── 3. | — collapse to unified, then back ───────────────────────────────────
 Type "|"
 Sleep 3s
-
-# ── 4. | — back to side-by-side ──────────────────────────────────────────────
 Type "|"
 Sleep 2.5s
-
-# ── 5. q — close the review pager, back to the list ─────────────────────────
 Type "q"
-Sleep 2.5s
+Sleep 1s
+
+# ── 4. gb — blame the same file, in the same pager ──────────────────────────
+Type "gb"
+Sleep 4s
+Type "q"
+Sleep 1.5s

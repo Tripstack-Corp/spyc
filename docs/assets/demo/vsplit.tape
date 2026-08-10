@@ -1,17 +1,23 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# spyc demo — the vertical split live-preview (^a |).
+# spyc tour — "look without leaving": the live preview column (^a |).
 #
-#   Story:  cursor on a markdown file → ^a | cycles a right-hand column: off →
-#           top-only → full-height, rendering the file live → cycle it back.
+#   Story:  `^a |` opens a right-hand column previewing the cursor file →
+#           navigate elsewhere and press it again to SWAP the preview to that
+#           file → press it on the same file to grow it full-height → once more
+#           cycles it off.
 #
 #   Generate (from the repo root):
-#       vhs docs/assets/demo/vsplit.tape        # writes docs/assets/demo-vsplit.mp4
+#       make demos            # or: vhs docs/assets/demo/vsplit.tape
 #
-#   MP4 output (crisp). Runs in a short /tmp repo with a rich README to preview,
-#   so the status bar stays clean. DRAFT — record + tune the Sleep beats.
+#   What `^a |` does depends on where the cursor is (`vsplit.rs`): closed →
+#   open on the cursor file; open with a DIFFERENT previewable file under the
+#   cursor → swap to it; open on the SAME file → cycle the shape. Moving the
+#   cursor alone changes nothing, so a beat that only presses `j` records a
+#   preview that looks stuck. ("Live reload" is about the previewed file
+#   changing on DISK — that's `preview_ops`, not cursor movement.)
 # ─────────────────────────────────────────────────────────────────────────────
 
-Output docs/assets/demo-vsplit.mp4
+Output docs/assets/demo-vsplit.gif
 
 Set Shell        "bash"
 Set FontFamily   "MesloLGLDZ Nerd Font Mono"
@@ -28,37 +34,58 @@ Set Theme        "Catppuccin Macchiato"
 Set CursorBlink  false
 Set TypingSpeed  55ms
 
-# ── Hidden setup: a short repo with a rich README to preview ─────────────────
 Hide
-Type `d=/tmp/spyc-demo && rm -rf "$d" && mkdir -p "$d/src" && cd "$d" && git init -q && printf 'fn main() {}\n' > src/main.rs && printf '[package]\nname = "demo"\n' > Cargo.toml && printf '# spyc\n\nThe file commander built for collaborating with your coding agents.\n\n## Features\n\n- vi navigation, marks, picks\n- MCP bridge to the agent\n- in-process git (gix)\n\n## Install\n\n    make install\n' > README.md`
+Type "source docs/assets/demo/demo-env.sh"
 Enter
 Type "spyc"
 Enter
-Sleep 3.5s
+Sleep 4s
 Show
 
-# ── 1. Put the cursor on the markdown file ───────────────────────────────────
-Sleep 1s
+# ── 1. Cursor on the markdown file ──────────────────────────────────────────
+Sleep 1.5s
 Type "/"
-Sleep 300ms
+Sleep 250ms
 Type "README"
-Sleep 400ms
+Sleep 350ms
 Enter
 Sleep 1.2s
 
-# ── 2. ^a | — open the preview column (top-only), markdown rendered live ─────
+# ── 2. ^a | — the preview column opens, rendering it ────────────────────────
 Ctrl+A
 Sleep 300ms
 Type "|"
-Sleep 3.5s
+Sleep 3.2s
 
-# ── 3. ^a | — grow it to full-height ─────────────────────────────────────────
+# ── 3. Navigate into src/ — the preview stays put while you move ────────────
+Type "/"
+Sleep 250ms
+Type "src"
+Sleep 350ms
+Enter
+Sleep 400ms
+Enter
+Sleep 1.2s
+Type "/"
+Sleep 250ms
+Type "parser"
+Sleep 350ms
+Enter
+Sleep 1.4s
+
+# ── 4. ^a | on a different file — the preview SWAPS to it, highlighted ──────
 Ctrl+A
 Sleep 300ms
 Type "|"
-Sleep 3.5s
+Sleep 3.2s
 
-# ── 4. ^a | — cycle the preview back off ─────────────────────────────────────
+# ── 5. ^a | on the same file — grow it full-height ──────────────────────────
+Ctrl+A
+Sleep 300ms
+Type "|"
+Sleep 3.2s
+
+# ── 6. ^a | once more — cycle it off ────────────────────────────────────────
 Ctrl+A
 Sleep 300ms
 Type "|"
