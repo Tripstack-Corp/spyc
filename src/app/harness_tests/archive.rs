@@ -2488,3 +2488,145 @@ fn re_yanking_a_member_refreshes_one_entry() {
         assert_eq!(held.len(), 1, "one entry, refreshed: {held:?}");
     });
 }
+
+// ── writing without being inside the archive ──────────────────────────────
+
+/// Delete a member, then climb out, leaving the cursor on the archive.
+fn dirty_then_climb_out(app: &mut App, dir: &Path) {
+    app.apply(&Action::Down(1)).unwrap();
+    let fx = app.apply(&Action::RemovePrompt(None)).unwrap();
+    let fx = if fx.is_empty() {
+        app.handle_remove_confirm_key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('y'),
+            KeyModifiers::empty(),
+        ))
+    } else {
+        fx
+    };
+    settle(app, fx);
+    let fx = app.apply(&Action::Climb).unwrap();
+    apply_effects(app, fx);
+    assert_eq!(app.state.cur().listing.dir, dir, "outside the archive");
+}
+
+/// The dead end the container marker created: you can see `demo.zip` holds
+/// unwritten changes from the directory it lives in, and `:archive write` there
+/// did nothing because it resolved the archive from the cwd. The cursor is on the
+/// row that told you, so that's what it means.
+#[test]
+fn writing_from_outside_uses_the_archive_under_the_cursor() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir.clone());
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        dirty_then_climb_out(&mut app, &dir);
+
+        // Climbing out leaves the cursor on the archive it came from.
+        let cursor = app
+            .state
+            .cur()
+            .rows
+            .get(app.state.cur().cursor.index)
+            .map(|r| r.path.clone());
+        assert_eq!(
+            cursor.as_deref(),
+            Some(archive.as_path()),
+            "cursor is on it"
+        );
+
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+
+        assert_eq!(
+            member_names(&archive),
+            ["src/deep/mod.rs", "src/main.rs"],
+            "the delete was applied to the archive on disk"
+        );
+        assert!(!app.mount_is_dirty(&archive), "and nothing is pending");
+    });
+}
+
+/// Cursor elsewhere: one archive has changes, so there's nothing to guess at.
+#[test]
+fn writing_from_outside_falls_back_to_the_only_dirty_archive() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        std::fs::write(dir.join("aaa.txt"), b"not an archive\n").unwrap();
+        let mut app = App::test_app(dir.clone());
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        dirty_then_climb_out(&mut app, &dir);
+
+        // Move the cursor off the archive entirely.
+        app.state.cur_mut().cursor.index = 0;
+        let cursor = app
+            .state
+            .cur()
+            .rows
+            .first()
+            .map(|r| r.path.clone())
+            .unwrap();
+        assert_ne!(cursor, archive, "cursor is not on the archive");
+
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+        assert!(!app.mount_is_dirty(&archive), "written anyway");
+    });
+}
+
+/// Two dirty archives and no cursor to disambiguate: say so rather than pick.
+#[test]
+fn writing_from_outside_refuses_to_guess_between_two() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let mut app = App::test_app(dir.clone());
+        for (name, staging) in [("one.zip", "s1"), ("two.zip", "s2")] {
+            let archive = dir.join(name);
+            build_zip(&archive);
+            mount_inline(&mut app, &archive, &tmp.path().join(staging));
+            dirty_then_climb_out(&mut app, &dir);
+        }
+        assert_eq!(app.dirty_mounts().len(), 2, "both are dirty");
+
+        // Cursor on neither.
+        std::fs::write(dir.join("aaa.txt"), b"x\n").unwrap();
+        app.state.refresh_listing();
+        app.state.cur_mut().cursor.index = 0;
+
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+
+        let flash = app.state.flash.as_ref().map(|f| f.text.clone());
+        assert!(
+            flash
+                .as_deref()
+                .is_some_and(|t| t.contains('2') && t.contains("write")),
+            "names the count and the verb: {flash:?}"
+        );
+        assert_eq!(app.dirty_mounts().len(), 2, "and wrote neither");
+    });
+}
+
+#[test]
+fn writing_with_nothing_pending_says_so() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let mut app = App::test_app(dir);
+
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+        let flash = app.state.flash.as_ref().map(|f| f.text.clone());
+        assert_eq!(flash.as_deref(), Some("archive: nothing to write"));
+    });
+}

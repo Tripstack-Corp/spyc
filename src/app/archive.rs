@@ -563,6 +563,42 @@ impl App {
         }
     }
 
+    /// Which archive `:archive write` / `discard` means.
+    ///
+    /// Inside a mount it's that one. From outside it used to be nothing at all,
+    /// which left the container's `~` marker as a dead end: you could see an
+    /// archive held unwritten changes and had to climb back in to act on it. So:
+    /// the archive under the cursor if it's a dirty mount — that's the row telling
+    /// you — else the only dirty mount when there's exactly one. More than one is
+    /// named rather than guessed at.
+    fn archive_to_act_on(&self, verb: &str) -> Result<PathBuf, String> {
+        if let Some((mount, _)) = self.state.mounts.resolve(&self.state.cur().listing.dir) {
+            return Ok(mount.archive().to_path_buf());
+        }
+        let cursor = self
+            .state
+            .cur()
+            .rows
+            .get(self.state.cur().cursor.index)
+            .map(|r| r.path.clone());
+        if let Some(path) = cursor
+            && self.state.mounts.get(&path).is_some()
+            && self.mount_is_dirty(&path)
+        {
+            return Ok(path);
+        }
+        let dirty = self.dirty_mounts();
+        match dirty.len() {
+            0 => Err(format!("archive: nothing to {verb}")),
+            1 => Ok(dirty[0].clone()),
+            _ => Err(format!(
+                "archive: {} archives have changes — put the cursor on the one to {verb}, \
+                 or go into it",
+                dirty.len()
+            )),
+        }
+    }
+
     /// `:archive [info|list|unmount]`.
     pub(crate) fn cmd_archive(&mut self, arg: &str) -> Vec<Effect> {
         // Anything about to be reported — or written — should account for edits
@@ -577,18 +613,15 @@ impl App {
                 self.archive_list();
                 Vec::new()
             }
-            "write" => {
-                if let Some((mount, _)) = self.state.mounts.resolve(&self.state.cur().listing.dir) {
-                    let archive = mount.archive().to_path_buf();
-                    self.write_effect(&archive).into_iter().collect()
-                } else {
-                    self.state.flash_error("archive: not inside an archive");
+            "write" => match self.archive_to_act_on("write") {
+                Ok(archive) => self.write_effect(&archive).into_iter().collect(),
+                Err(why) => {
+                    self.state.flash_error(why);
                     Vec::new()
                 }
-            }
-            "discard" => {
-                if let Some((mount, _)) = self.state.mounts.resolve(&self.state.cur().listing.dir) {
-                    let archive = mount.archive().to_path_buf();
+            },
+            "discard" => match self.archive_to_act_on("discard") {
+                Ok(archive) => {
                     if let Some(m) = self.state.mounts.get_mut(&archive) {
                         m.journal.clear();
                     }
@@ -596,11 +629,12 @@ impl App {
                     // the journal, so "discard" means all of it.
                     self.state.flash_info("archive: pending changes discarded");
                     self.request_mount(&archive, true)
-                } else {
-                    self.state.flash_error("archive: not inside an archive");
+                }
+                Err(why) => {
+                    self.state.flash_error(why);
                     Vec::new()
                 }
-            }
+            },
             "cancel" => {
                 self.cancel_archive_mount();
                 self.state.flash_info("archive: cancel requested");

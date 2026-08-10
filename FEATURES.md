@@ -537,8 +537,12 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   if there is one), so asking the agent in the pane about the file you're looking
   at works in here as well. `search_content` / `search_paths` say why they can't
   instead of reporting "no matches" from walking a single binary file.
-- **`:archive`** — `info` (everything about this mount), `list` (every mounted
-  archive), `unmount` (drop it and its staged bytes), `cancel`.
+- **`:archive`** — `info` (this mount, or what's mounted when you're outside one),
+  `list` (every mounted archive, dirty ones marked), `write` / `discard`,
+  `unmount` (drop it and its staged bytes), `cancel`. `write` and `discard` work
+  from outside a mount too: they take the archive under the cursor — the row
+  showing `~` — else the only one with changes, and name them rather than guess
+  when several do.
 
 ## In-app pager
 
