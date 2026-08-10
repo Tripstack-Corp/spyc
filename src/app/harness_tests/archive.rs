@@ -3021,3 +3021,108 @@ fn a_write_back_re_reads_without_a_clean_racing_its_staging_tree() {
         );
     });
 }
+
+// ── an in-flight message doesn't outlive its operation ────────────────────
+
+/// The user's report: after entering an archive, `reading pkg.zip…` stayed on
+/// the status bar, reading as though more were still to come.
+///
+/// A flash has no lifetime of its own, and the mount arm only speaks up when the
+/// archive had something odd about it — so a clean mount left the in-flight
+/// message as the last thing said.
+#[test]
+fn the_reading_message_goes_once_the_archive_is_mounted() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+
+        let fx = app.request_mount(&archive, true);
+        let flash = app.state.flash.as_ref().expect("the wait is announced");
+        assert_eq!(flash.text, "reading pkg.zip…");
+        assert!(matches!(flash.kind, crate::app::FlashKind::Progress));
+
+        settle(&mut app, fx);
+
+        assert_eq!(
+            app.state.flash.as_ref().map(|f| f.text.clone()),
+            None,
+            "nothing is left claiming the read is still going"
+        );
+        assert!(app.state.mounts.contains(&archive), "and it did mount");
+    });
+}
+
+/// The clear must not eat what the mount had to say. Two members differing only
+/// by case is a real warning — and the reason the arm flashes at all.
+///
+/// Duplicate *identical* names would be the sharper fixture, but `ZipWriter`
+/// refuses to write them, which is why the read-only test builds its capability
+/// by hand.
+#[test]
+fn a_mount_with_something_to_report_still_reports_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("collide.zip");
+        let f = std::fs::File::create(&archive).unwrap();
+        let mut w = zip::ZipWriter::new(f);
+        let opts = zip::write::SimpleFileOptions::default();
+        for name in ["same.txt", "SAME.txt"] {
+            w.start_file(name, opts).unwrap();
+            w.write_all(b"body").unwrap();
+        }
+        w.finish().unwrap();
+        let mut app = App::test_app(dir);
+
+        let fx = app.request_mount(&archive, true);
+        settle(&mut app, fx);
+
+        let flash = app
+            .state
+            .flash
+            .as_ref()
+            .expect("the note survives the clear");
+        assert!(
+            flash.text.contains("differ only by case"),
+            "it is the note, not the in-flight message: {}",
+            flash.text
+        );
+        assert!(
+            !matches!(flash.kind, crate::app::FlashKind::Progress),
+            "a note is not progress"
+        );
+    });
+}
+
+/// An error is a real message too: a failed read replaces the in-flight one
+/// rather than being cleared along with it.
+#[test]
+fn a_failed_read_leaves_its_error_on_screen() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let broken = dir.join("broken.zip");
+        std::fs::write(&broken, b"PK\x03\x04 and then nothing usable").unwrap();
+        let mut app = App::test_app(dir);
+
+        let fx = app.request_mount(&broken, true);
+        settle(&mut app, fx);
+
+        let flash = app.state.flash.as_ref().expect("the failure is reported");
+        assert!(
+            matches!(flash.kind, crate::app::FlashKind::Error),
+            "an error replaced the in-flight message rather than being cleared with it"
+        );
+        // Not a `contains("reading")` check: the error's own context chain says
+        // "reading zip <path>", so the wording overlaps the progress message and
+        // only the kind distinguishes them.
+        assert!(
+            flash.text.contains("Could not find EOCD"),
+            "and it still names the cause: {}",
+            flash.text
+        );
+    });
+}

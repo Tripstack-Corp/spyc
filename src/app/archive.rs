@@ -55,7 +55,7 @@ impl App {
         self.runtime.archive_cancel =
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.state
-            .flash_info(format!("reading {}…", display_name(path)));
+            .flash_progress(format!("reading {}…", display_name(path)));
         vec![Effect::Archive(ArchiveOp::Mount {
             path: path.to_path_buf(),
             staging_root,
@@ -113,7 +113,7 @@ impl App {
         self.runtime.archive_cancel =
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.state
-            .flash_info(format!("reading {}…", display_name(at)));
+            .flash_progress(format!("reading {}…", display_name(at)));
         vec![Effect::Archive(ArchiveOp::Mount {
             path: source.to_path_buf(),
             staging_root,
@@ -250,6 +250,13 @@ impl App {
     }
 
     fn apply_one_archive_outcome(&mut self, outcome: ArchiveOutcome) -> Vec<Effect> {
+        // An outcome means the op it was announcing is over, so the in-flight
+        // message goes now — before the arms below get their say. Done here rather
+        // than per-arm because the one that leaked was the arm with nothing to
+        // report: entering an archive that had no warnings left "reading …" on
+        // screen, reading as though more were coming. Only a `Progress` flash is
+        // cleared, so a warning or error already showing survives.
+        self.state.clear_progress_flash();
         match outcome {
             ArchiveOutcome::Mounted {
                 index,
@@ -1001,7 +1008,7 @@ impl App {
             return None;
         }
         self.state
-            .flash_info(format!("extracting {} member(s)…", entries.len()));
+            .flash_progress(format!("extracting {} member(s)…", entries.len()));
         Some(Effect::Archive(ArchiveOp::MaterializeMany {
             archive,
             entries,
@@ -1147,7 +1154,7 @@ impl App {
             }
             Some(Ok(op)) => {
                 self.state
-                    .flash_info(format!("writing {}…", display_name(archive)));
+                    .flash_progress(format!("writing {}…", display_name(archive)));
                 Some(Effect::Archive(op))
             }
         }
