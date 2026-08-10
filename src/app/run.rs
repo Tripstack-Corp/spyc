@@ -712,6 +712,15 @@ impl App {
             // never needs a redraw, so nothing to mark.
             self.settle_autosave(now_pre, &mut ctx);
 
+            // An `$EDITOR` (or an agent) writing a member spyc extracted leaves no
+            // trace but the file's own stats, so notice it here and record it —
+            // the status badge reads the Model, and the draw pass can't stat
+            // anything. Only looks at members handed to an editor, so an idle loop
+            // (which never gets here) costs nothing either way.
+            if self.settle_archive_edits() {
+                ctx.draw.mark(3);
+            }
+
             // Fire the low-frequency `spyc.on` state-change events (dir_changed
             // / project_changed) by diffing against the last-fired baselines —
             // AFTER `handle_lua_done` + its `run_effects(lua_fx)` above, so a
