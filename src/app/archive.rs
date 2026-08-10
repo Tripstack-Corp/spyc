@@ -406,7 +406,7 @@ impl App {
     }
 
     /// Start watching a staged copy for a change spyc won't make itself.
-    fn watch_for_edits(&mut self, real: &Path) {
+    pub(super) fn watch_for_edits(&mut self, real: &Path) {
         let Some((archive, inner)) = self.staged_owner(real) else {
             return;
         };
@@ -999,13 +999,24 @@ impl App {
 
     /// Whether a mount has anything a write would change — the journal, or a
     /// staged file that no longer matches what spyc wrote.
-    /// Record edits to members the user opened in an editor.
+    /// Notice a staged member that changed, and record it as a pending change.
     ///
-    /// Runs on every loop wake, which is affordable because it only stats what
-    /// [`ArchiveMount::editing`] names — usually one member. An edit is otherwise
-    /// invisible until something asks the disk, and the *draw* pass can't: a staged
-    /// copy that supersedes its archived bytes has to be in the Model for the
-    /// badge, `:archive info` and the repack to agree about it.
+    /// Runs on every loop wake. An edit is otherwise invisible until something
+    /// asks the disk, and the *draw* pass can't: a staged copy that supersedes its
+    /// archived bytes has to be in the Model for the badge, `:archive info` and
+    /// the repack to agree about it.
+    ///
+    /// Deliberately **not** limited to members spyc handed to an editor. There are
+    /// several routes to the same staged file — the pager's `v` edits its own
+    /// `source_path`, an agent in the pane can write it, so can `!vim` — and a fix
+    /// that only watched the ones spyc knew about left the badge blank for all of
+    /// them. What bounds the cost instead is the size of the staged set: it holds
+    /// only members that have actually been extracted, which for a zip is whatever
+    /// the user has read. Past [`AUTO_SCAN_MAX`] — a streamed tarball, where
+    /// mounting extracts everything — statting it on every keypress would be
+    /// visible jank, so those fall back to [`Self::scan_archive_edits`] at the
+    /// moments something reports or writes, plus the `editing` set, which stays
+    /// cheap however large the archive is.
     pub(super) fn settle_archive_edits(&mut self) -> bool {
         if self.state.mounts.is_empty() {
             return false;
@@ -1014,8 +1025,17 @@ impl App {
             .state
             .mounts
             .iter()
-            .filter(|m| !m.editing.is_empty())
-            .map(|m| (m.archive().to_path_buf(), changed_among(m, &m.editing)))
+            .map(|m| {
+                let mut candidates: Vec<String> = m.editing.clone();
+                if m.staged.len() <= AUTO_SCAN_MAX {
+                    for inner in m.staged.keys() {
+                        if !candidates.contains(inner) {
+                            candidates.push(inner.clone());
+                        }
+                    }
+                }
+                (m.archive().to_path_buf(), changed_among(m, &candidates))
+            })
             .filter(|(_, changed)| !changed.is_empty())
             .collect();
         self.record_replacements(found)
@@ -1198,6 +1218,12 @@ fn current_staged_stats(mount: &ArchiveMount) -> crate::archive::journal::Staged
     }
     now
 }
+
+/// How many staged members spyc will stat on every loop wake to notice an edit.
+///
+/// A handful of reads costs nothing; a streamed tarball's whole member list would
+/// cost tens of milliseconds per keypress.
+const AUTO_SCAN_MAX: usize = 256;
 
 /// Which of `candidates` has a staged copy that no longer matches what spyc
 /// recorded — skipping any already recorded as replaced.
