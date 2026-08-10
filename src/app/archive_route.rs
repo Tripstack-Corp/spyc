@@ -17,7 +17,7 @@ use crate::archive::Mounts;
 
 use super::Effect;
 use super::file_ops::FileOp;
-use super::inventory_ops::InventoryOp;
+use super::inventory_ops::{InventoryOp, YankSource as InventoryYankSource};
 
 /// What to do with an outgoing effect. Takes ownership so a held-back effect can
 /// be handed straight back later without the enum needing to be cloneable.
@@ -135,8 +135,13 @@ fn classify(
 ) -> Verdict {
     match effect {
         // --- reads: extract, then run ---
-        Effect::Inventory(InventoryOp::Yank { paths })
-        | Effect::FileOp(
+        // A yank names each file twice — where to read it, and what to remember it
+        // as — and only the former can be a member path needing extraction.
+        Effect::Inventory(InventoryOp::Yank { sources }) => {
+            let reads: Vec<PathBuf> = sources.iter().map(|s| s.read.clone()).collect();
+            need(&reads, mounts, is_staged)
+        }
+        Effect::FileOp(
             FileOp::PipeContent { paths, .. }
             | FileOp::LongList { paths, .. }
             | FileOp::FileType { paths },
@@ -266,10 +271,9 @@ fn classify(
                 .iter()
                 .filter_map(|p| {
                     let (mount, _) = mounts.member_of(p)?;
-                    let entry = mount.entry_at(p)?;
                     Some(PendingChange::Delete {
                         archive: mount.archive().to_path_buf(),
-                        inner: entry.inner.clone(),
+                        inner: mount.member_at(p)?.inner().to_string(),
                     })
                 })
                 .collect::<Vec<_>>();
@@ -483,7 +487,7 @@ fn need(paths: &[PathBuf], mounts: &Mounts, is_staged: &dyn Fn(&Path) -> bool) -
 /// Where a member's extracted bytes live, or would.
 fn staging_path(member: &Path, mounts: &Mounts) -> Option<PathBuf> {
     let (mount, _) = mounts.member_of(member)?;
-    mount.entry_at(member).map(|e| mount.staging_path(e))
+    mount.bytes_at(member)
 }
 
 fn graveyard_paths(op: &super::graveyard_ops::GraveyardOp) -> Vec<PathBuf> {
@@ -503,8 +507,16 @@ pub fn rewrite_paths(effect: Effect, staged: &HashMap<PathBuf, PathBuf>) -> Effe
     let map = |p: &PathBuf| staged.get(p).cloned().unwrap_or_else(|| p.clone());
     let map_all = |paths: &[PathBuf]| paths.iter().map(map).collect::<Vec<_>>();
     match effect {
-        Effect::Inventory(InventoryOp::Yank { paths }) => Effect::Inventory(InventoryOp::Yank {
-            paths: map_all(&paths),
+        // Only `read` moves to the staging tree; `record_as` stays the member path,
+        // which is the whole point of carrying both.
+        Effect::Inventory(InventoryOp::Yank { sources }) => Effect::Inventory(InventoryOp::Yank {
+            sources: sources
+                .iter()
+                .map(|s| InventoryYankSource {
+                    read: map(&s.read),
+                    record_as: s.record_as.clone(),
+                })
+                .collect(),
         }),
         Effect::FileOp(FileOp::Copy { paths, dest }) => Effect::FileOp(FileOp::Copy {
             paths: map_all(&paths),
@@ -598,7 +610,10 @@ mod tests {
     #[test]
     fn with_nothing_mounted_every_effect_passes_through() {
         let effect = Effect::Inventory(InventoryOp::Yank {
-            paths: vec![PathBuf::from("/real/file.txt")],
+            sources: vec![PathBuf::from("/real/file.txt")]
+                .into_iter()
+                .map(crate::app::inventory_ops::YankSource::plain)
+                .collect(),
         });
         assert!(matches!(
             route_archive_effect(effect, &Mounts::default(), &nothing_staged, &no_names),
@@ -610,7 +625,10 @@ mod tests {
     fn an_effect_over_real_files_passes_through_even_with_a_mount_open() {
         let mounts = mounts_with(&["a.txt"]);
         let effect = Effect::Inventory(InventoryOp::Yank {
-            paths: vec![PathBuf::from("/real/file.txt")],
+            sources: vec![PathBuf::from("/real/file.txt")]
+                .into_iter()
+                .map(crate::app::inventory_ops::YankSource::plain)
+                .collect(),
         });
         assert!(matches!(
             route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
@@ -623,7 +641,10 @@ mod tests {
     fn yanking_a_member_is_held_back_for_extraction() {
         let mounts = mounts_with(&["a.txt", "d/b.txt"]);
         let effect = Effect::Inventory(InventoryOp::Yank {
-            paths: vec![member("a.txt"), member("d/b.txt")],
+            sources: vec![member("a.txt"), member("d/b.txt")]
+                .into_iter()
+                .map(crate::app::inventory_ops::YankSource::plain)
+                .collect(),
         });
         let ArchiveSink::Materialize { members, then } =
             route_archive_effect(effect, &mounts, &nothing_staged, &no_names)
@@ -640,7 +661,10 @@ mod tests {
     fn staged_members_pass_straight_through() {
         let mounts = mounts_with(&["a.txt"]);
         let effect = Effect::Inventory(InventoryOp::Yank {
-            paths: vec![member("a.txt")],
+            sources: vec![member("a.txt")]
+                .into_iter()
+                .map(crate::app::inventory_ops::YankSource::plain)
+                .collect(),
         });
         assert!(matches!(
             route_archive_effect(effect, &mounts, &all_staged, &no_names),
@@ -654,11 +678,14 @@ mod tests {
         let mounts = mounts_with(&["a.txt", "b.txt"]);
         let staged = |p: &Path| p == member("b.txt");
         let effect = Effect::Inventory(InventoryOp::Yank {
-            paths: vec![
+            sources: vec![
                 PathBuf::from("/real/x.txt"),
                 member("a.txt"),
                 member("b.txt"),
-            ],
+            ]
+            .into_iter()
+            .map(crate::app::inventory_ops::YankSource::plain)
+            .collect(),
         });
         let ArchiveSink::Materialize { members, .. } =
             route_archive_effect(effect, &mounts, &staged, &no_names)
@@ -867,20 +894,31 @@ mod tests {
 
         let rewritten = rewrite_paths(
             Effect::Inventory(InventoryOp::Yank {
-                paths: vec![member("a.txt"), PathBuf::from("/real/x.txt")],
+                sources: vec![member("a.txt"), PathBuf::from("/real/x.txt")]
+                    .into_iter()
+                    .map(crate::app::inventory_ops::YankSource::plain)
+                    .collect(),
             }),
             &staged,
         );
-        let Effect::Inventory(InventoryOp::Yank { paths }) = rewritten else {
+        let Effect::Inventory(InventoryOp::Yank { sources }) = rewritten else {
             panic!("shape preserved");
         };
         assert_eq!(
-            paths,
+            sources.iter().map(|s| s.read.clone()).collect::<Vec<_>>(),
             [
                 PathBuf::from("/staging/a.txt"),
                 PathBuf::from("/real/x.txt")
             ],
-            "members are redirected, real paths left alone"
+            "members are redirected to read from staging, real paths left alone"
+        );
+        assert_eq!(
+            sources
+                .iter()
+                .map(|s| s.record_as.clone())
+                .collect::<Vec<_>>(),
+            [member("a.txt"), PathBuf::from("/real/x.txt")],
+            "and each is still remembered by the path the user sees"
         );
     }
 
@@ -959,7 +997,10 @@ mod tests {
         let container = PathBuf::from("/src/pkg.zip");
         for effect in [
             Effect::Inventory(InventoryOp::Yank {
-                paths: vec![container.clone()],
+                sources: vec![container.clone()]
+                    .into_iter()
+                    .map(crate::app::inventory_ops::YankSource::plain)
+                    .collect(),
             }),
             Effect::FileOp(FileOp::FileType {
                 paths: vec![container.clone()],

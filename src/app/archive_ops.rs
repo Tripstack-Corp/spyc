@@ -66,6 +66,15 @@ pub enum ArchiveOp {
         address: Option<PathBuf>,
         /// Nesting depth to record on the mount — 0 for a file on disk.
         depth: usize,
+        /// Empty the staging tree before reading, for a re-read of an archive
+        /// whose bytes changed underneath it (a write-back).
+        ///
+        /// It rides *inside* this op rather than arriving as a separate
+        /// [`ArchiveOp::Clean`] because every archive op gets its own thread: a
+        /// clean issued beside a mount races `remove_dir_all` against the
+        /// extraction filling the same directory. Doing both here is the only
+        /// ordering guarantee available.
+        reset_staging: bool,
     },
     /// Extract one member so something can read it.
     Materialize {
@@ -170,22 +179,29 @@ pub fn run_archive_op(op: ArchiveOp) -> ArchiveOutcome {
             then,
             address,
             depth,
-        } => carry_then(
-            readdress(
-                mount(
+            reset_staging,
+        } => {
+            // Before the read, on this thread — see `reset_staging`.
+            if reset_staging {
+                let _ = std::fs::remove_dir_all(&staging_root);
+            }
+            carry_then(
+                readdress(
+                    mount(
+                        &path,
+                        &staging_root,
+                        &limits,
+                        max_entries,
+                        confirmed,
+                        &cancel,
+                    ),
                     &path,
-                    &staging_root,
-                    &limits,
-                    max_entries,
-                    confirmed,
-                    &cancel,
+                    address,
+                    depth,
                 ),
-                &path,
-                address,
-                depth,
-            ),
-            then,
-        ),
+                then,
+            )
+        }
         ArchiveOp::Materialize {
             archive,
             entry,
@@ -503,7 +519,67 @@ mod tests {
             then: None,
             address: None,
             depth: 0,
+            reset_staging: false,
         })
+    }
+
+    /// A re-read after a write-back empties the staging tree **on the worker
+    /// thread, before reading** — not as a separate `Clean` op, which would race
+    /// the extraction refilling the same directory from its own thread.
+    #[test]
+    fn a_reset_mount_empties_the_staging_tree_before_reading_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("pkg.tar.gz");
+        let staging = tmp.path().join("staging");
+        // A streamed archive is the case that matters: its mount writes every
+        // member into staging, so a concurrent removal has something to collide
+        // with.
+        let tar = {
+            let mut b = tar::Builder::new(Vec::new());
+            for (name, body) in [("a.txt", &b"alpha"[..]), ("d/b.txt", &b"beta"[..])] {
+                let mut h = tar::Header::new_gnu();
+                h.set_size(body.len() as u64);
+                h.set_mode(0o644);
+                h.set_mtime(1_000_000);
+                h.set_entry_type(tar::EntryType::Regular);
+                b.append_data(&mut h, name, body).unwrap();
+            }
+            b.into_inner().unwrap()
+        };
+        let gz = {
+            use std::io::Write as _;
+            let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+            e.write_all(&tar).unwrap();
+            e.finish().unwrap()
+        };
+        std::fs::write(&archive, gz).unwrap();
+
+        // A stale tree, as the mount before a write-back leaves behind.
+        std::fs::create_dir_all(staging.join("gone")).unwrap();
+        std::fs::write(staging.join("gone/stale.txt"), b"from the old index").unwrap();
+
+        let out = run_archive_op(ArchiveOp::Mount {
+            path: archive.clone(),
+            staging_root: staging.clone(),
+            limits: BudgetLimits::default(),
+            max_entries: 1000,
+            confirmed: true,
+            cancel: Arc::new(AtomicBool::new(false)),
+            then: None,
+            address: Some(archive),
+            depth: 0,
+            reset_staging: true,
+        });
+        assert!(matches!(out, ArchiveOutcome::Mounted { .. }), "got {out:?}");
+        assert!(
+            !staging.join("gone/stale.txt").exists(),
+            "the stale tree is gone"
+        );
+        assert_eq!(
+            std::fs::read(staging.join("a.txt")).unwrap(),
+            b"alpha",
+            "and the fresh members were extracted after it, not into a half-removed tree"
+        );
     }
 
     #[test]
