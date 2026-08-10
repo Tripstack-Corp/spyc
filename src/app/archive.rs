@@ -563,6 +563,54 @@ impl App {
         }
     }
 
+    /// Throw away an archive's pending changes: the journal *and* the staged copies
+    /// that superseded its bytes.
+    ///
+    /// Clearing the journal alone left an edited copy on disk, and the next scan
+    /// re-recorded it as pending moments later — so discarded changes came straight
+    /// back. Re-mounting would drop them too, but a live mount is re-*entered*
+    /// rather than re-read, and issuing a staging clean beside a fresh mount races
+    /// it: each archive op rides its own worker thread and both name the same
+    /// staging path. Removing exactly what was recorded needs neither.
+    fn discard_pending(&mut self, archive: &Path) {
+        let mut drop_files: Vec<(String, PathBuf)> = Vec::new();
+        if let Some(mount) = self.state.mounts.get(archive) {
+            for change in mount.journal.changes() {
+                match change {
+                    // A member the user brought in has no index entry; its bytes sit
+                    // under its own inner path.
+                    crate::archive::Change::Added { inner } => {
+                        drop_files.push((inner.clone(), mount.staging_root.join(inner)));
+                    }
+                    // A replaced one is at its entry's staging path, which differs
+                    // from the inner path for a case-colliding member.
+                    crate::archive::Change::Replaced { inner } => {
+                        if let Some(entry) = mount.index.get(inner) {
+                            drop_files.push((inner.clone(), mount.staging_path(entry)));
+                        }
+                    }
+                    // A delete or rename never wrote anything: they're index edits.
+                    crate::archive::Change::Deleted { .. }
+                    | crate::archive::Change::Renamed { .. } => {}
+                }
+            }
+        }
+        for (_, path) in &drop_files {
+            let _ = std::fs::remove_file(path);
+        }
+        if let Some(mount) = self.state.mounts.get_mut(archive) {
+            for (inner, _) in &drop_files {
+                mount.staged.remove(inner);
+            }
+            mount.journal.clear();
+            mount.editing.clear();
+        }
+        self.state.flash_info("archive: pending changes discarded");
+        // The rows come from the index plus the journal, so they have to be rebuilt
+        // for the deletes and renames to come back.
+        self.state.refresh_listing();
+    }
+
     /// Which archive `:archive write` / `discard` means.
     ///
     /// Inside a mount it's that one. From outside it used to be nothing at all,
@@ -622,13 +670,8 @@ impl App {
             },
             "discard" => match self.archive_to_act_on("discard") {
                 Ok(archive) => {
-                    if let Some(m) = self.state.mounts.get_mut(&archive) {
-                        m.journal.clear();
-                    }
-                    // Re-mount to throw away any edited staged copies along with
-                    // the journal, so "discard" means all of it.
-                    self.state.flash_info("archive: pending changes discarded");
-                    self.request_mount(&archive, true)
+                    self.discard_pending(&archive);
+                    Vec::new()
                 }
                 Err(why) => {
                     self.state.flash_error(why);

@@ -2630,3 +2630,112 @@ fn writing_with_nothing_pending_says_so() {
         assert_eq!(flash.as_deref(), Some("archive: nothing to write"));
     });
 }
+
+/// `:archive discard` has to drop the staged copies too, not just the journal.
+///
+/// Clearing the journal alone left an edited copy on disk for the next scan to
+/// re-record — so the badge came back and the "discarded" edit was still pending.
+#[test]
+fn discarding_an_edit_drops_the_staged_copy_too() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Read a member (staging it), then change that copy behind spyc's back.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+        let staged = {
+            let mount = app.state.mounts.get(&archive).unwrap();
+            mount.staging_path(mount.index.get("README.md").unwrap())
+        };
+        std::fs::write(&staged, b"# edited\n").unwrap();
+        assert!(app.settle_archive_edits(), "noticed as pending");
+        assert_eq!(
+            app.state
+                .mounts
+                .get(&archive)
+                .unwrap()
+                .journal
+                .counts()
+                .badge(),
+            "~1"
+        );
+
+        let fx = app.cmd_archive("discard");
+        settle(&mut app, fx);
+
+        assert!(!staged.exists(), "the edited copy is gone");
+        assert!(
+            !app.mount_is_dirty(&archive),
+            "and nothing is pending any more"
+        );
+        assert!(
+            !app.settle_archive_edits(),
+            "including on the next scan — this is where it used to come back"
+        );
+
+        // Reading it again gets the archive's own bytes.
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+        let item = app
+            .state
+            .inventory
+            .items()
+            .find(|i| i.filename == "README.md")
+            .unwrap();
+        assert_eq!(
+            app.state.inventory.read_content(&item.id).as_deref(),
+            Some(b"# pkg\n".as_slice()),
+            "the archive's version, not the discarded edit"
+        );
+    });
+}
+
+/// An added member's staged bytes go too — nothing brought in survives a discard.
+#[test]
+fn discarding_an_added_member_removes_its_staged_bytes() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let brought = dir.join("extra.txt");
+        std::fs::write(&brought, b"brought in\n").unwrap();
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Copy a real file into the mount, which records an Add and stages bytes.
+        let fx = app.screen_archive_effect(Effect::FileOp(crate::app::file_ops::FileOp::Copy {
+            paths: vec![brought],
+            dest: archive.clone(),
+        }));
+        settle(&mut app, fx.into_iter().collect());
+        let staged = app
+            .state
+            .mounts
+            .get(&archive)
+            .unwrap()
+            .staging_root
+            .join("extra.txt");
+        assert!(staged.exists(), "the brought-in bytes are staged");
+
+        let fx = app.cmd_archive("discard");
+        settle(&mut app, fx);
+
+        assert!(!staged.exists(), "and discarded with the change");
+        assert!(!app.mount_is_dirty(&archive));
+        assert!(
+            !app.state
+                .cur()
+                .rows
+                .iter()
+                .any(|r| r.display.starts_with("extra.txt")),
+            "the row is gone too"
+        );
+    });
+}
