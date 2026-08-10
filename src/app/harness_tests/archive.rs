@@ -516,6 +516,7 @@ fn eviction_hands_back_the_staging_tree_to_clean() {
                     staging_root: staging,
                     last_used: 0,
                     depth: 0,
+                    editing: Vec::new(),
                 },
                 &[],
             ));
@@ -1386,6 +1387,26 @@ fn build_tar_gz(path: &Path) {
     b.into_inner().unwrap().finish().unwrap();
 }
 
+/// A `.tar.gz` with `count` small members, for the staged-set bound.
+fn build_tar_gz_with(path: &Path, count: usize) {
+    let enc = flate2::write::GzEncoder::new(
+        std::fs::File::create(path).unwrap(),
+        flate2::Compression::default(),
+    );
+    let mut b = tar::Builder::new(enc);
+    for i in 0..count {
+        let body = format!("member {i}\n");
+        let mut h = tar::Header::new_gnu();
+        h.set_size(body.len() as u64);
+        h.set_mode(0o644);
+        h.set_mtime(1_000_000);
+        h.set_entry_type(tar::EntryType::Regular);
+        b.append_data(&mut h, format!("file-{i}.txt"), body.as_bytes())
+            .unwrap();
+    }
+    b.into_inner().unwrap().finish().unwrap();
+}
+
 /// The reported bug: `y` inside a `.tar.gz` failed with
 /// `demo.tar.gz/src/main.rs: Not a directory`.
 ///
@@ -1942,5 +1963,295 @@ fn a_write_re_reads_the_archive_rather_than_trusting_the_old_index() {
                 "{inner}: the index has to describe the archive as it is now"
             );
         }
+    });
+}
+
+// ── an edit is a pending change, and says so ──────────────────────────────
+
+/// A streamed mount writes every member during the pass, so what's on disk at
+/// mount time is what spyc put there. Recording nothing is how a `.tar.gz` came
+/// out of its own mount already reading as edited — and the only sign was a
+/// warning at quit about changes nobody made.
+#[test]
+fn a_streamed_mount_is_not_dirty_the_moment_it_opens() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.tar.gz");
+        build_tar_gz(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        assert!(
+            !app.state.cur().rows.is_empty(),
+            "the mount really did extract"
+        );
+        assert!(
+            !app.mount_is_dirty(&archive),
+            "a freshly opened archive has no pending changes"
+        );
+        assert!(app.dirty_mounts().is_empty(), "and quitting says nothing");
+    });
+}
+
+/// The user's question: with an edit staged and nothing written, what says so?
+/// The badge reads the journal, so the edit has to be *in* it — the draw pass
+/// can't go and stat the staging tree.
+#[test]
+fn an_edit_becomes_a_pending_change_the_badge_can_show() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // `e` on `README.md`: extracts it and hands the copy to an editor.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::EnterOrEdit).unwrap();
+        settle(&mut app, fx);
+        let mount = app.state.mounts.get(&archive).expect("mounted");
+        assert_eq!(
+            mount.editing,
+            ["README.md"],
+            "the member is watched from the moment it's handed over"
+        );
+        let staged = mount.staging_path(mount.index.get("README.md").unwrap());
+        assert!(!mount.journal.is_dirty(), "nothing pending yet");
+
+        // The editor saves.
+        std::fs::write(&staged, b"# edited by hand\n").unwrap();
+        assert!(app.settle_archive_edits(), "the change is noticed");
+
+        let mount = app.state.mounts.get(&archive).expect("mounted");
+        assert!(mount.journal.is_dirty(), "and recorded as pending");
+        assert_eq!(
+            mount.journal.counts().badge(),
+            "~1",
+            "which is what the status suffix shows"
+        );
+        assert!(
+            mount.editing.is_empty(),
+            "and it stops being watched once recorded"
+        );
+    });
+}
+
+/// The route that actually bit: the pager's `v` edits its own `source_path`,
+/// which for a member *is* the staged copy — so spyc never handed the member to
+/// an editor through `open_member`. An agent in the pane writing the same file
+/// looks identical. Neither can be caught by watching only what spyc knows it
+/// handed over, which is why the scan covers everything staged.
+#[test]
+fn an_edit_spyc_did_not_make_shows_up_without_being_asked() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Extract a member the way a *read* does — nothing is handed to an editor.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+        let mount = app.state.mounts.get(&archive).expect("mounted");
+        assert!(mount.editing.is_empty(), "spyc handed nothing to an editor");
+        let staged = mount.staging_path(mount.index.get("README.md").unwrap());
+
+        std::fs::write(&staged, b"# changed by something else\n").unwrap();
+
+        assert!(
+            app.settle_archive_edits(),
+            "and it is still noticed, with no command run"
+        );
+        assert_eq!(
+            app.state
+                .mounts
+                .get(&archive)
+                .unwrap()
+                .journal
+                .counts()
+                .badge(),
+            "~1"
+        );
+    });
+}
+
+/// The bound that keeps that scan affordable. A streamed mount extracts every
+/// member, so its staged set is the whole archive — statting it on every keypress
+/// would be visible jank, and those fall back to the scan at reporting time.
+#[test]
+fn a_huge_staged_set_falls_back_to_the_reporting_scan() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("many.tar.gz");
+        build_tar_gz_with(&archive, 300);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let mount = app.state.mounts.get(&archive).expect("mounted");
+        assert!(
+            mount.staged.len() > 256,
+            "the fixture is past the bound: {}",
+            mount.staged.len()
+        );
+        let staged = mount.staging_path(mount.index.get("file-7.txt").unwrap());
+        std::fs::write(&staged, b"edited\n").unwrap();
+
+        assert!(
+            !app.settle_archive_edits(),
+            "too many to stat on every wake"
+        );
+        assert!(app.scan_archive_edits(), "but reporting still catches it");
+        assert_eq!(
+            app.state
+                .mounts
+                .get(&archive)
+                .unwrap()
+                .journal
+                .counts()
+                .badge(),
+            "~1"
+        );
+    });
+}
+
+/// A staging directory's mtime moves whenever any member inside it is written, so
+/// counting directories reported a change to a member nobody touched.
+#[test]
+fn writing_one_member_does_not_mark_its_neighbours() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Extract two members that share a directory.
+        for inner in ["src/main.rs", "src/deep/mod.rs"] {
+            let fx = app.open_member(
+                &archive.join(inner),
+                crate::app::archive_ops::MaterializeThen::OpenPager(
+                    crate::app::file_ops::PagerDest::Overlay { scroll: None },
+                ),
+            );
+            settle(&mut app, fx);
+        }
+        assert!(app.dirty_mounts().is_empty(), "reading changes nothing");
+        assert!(
+            !app.scan_archive_edits(),
+            "and neither does the directory mtime that moved with them"
+        );
+    });
+}
+
+/// From outside a mount, `:archive info` used to refuse — which is exactly where
+/// an archive holding unwritten changes is hardest to notice.
+#[test]
+fn archive_info_outside_a_mount_reports_what_is_mounted() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir.clone());
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Delete a member, then climb out of the archive entirely.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::RemovePrompt(None)).unwrap();
+        let fx = if fx.is_empty() {
+            app.handle_remove_confirm_key(crossterm::event::KeyEvent::new(
+                KeyCode::Char('y'),
+                KeyModifiers::empty(),
+            ))
+        } else {
+            fx
+        };
+        settle(&mut app, fx);
+        let fx = app.apply(&Action::Climb).unwrap();
+        apply_effects(&mut app, fx);
+        assert_eq!(app.state.cur().listing.dir, dir, "outside the archive");
+
+        let fx = app.cmd_archive("info");
+        settle(&mut app, fx);
+
+        let shown = app
+            .view
+            .pager
+            .as_ref()
+            .map(|p| {
+                p.lines
+                    .iter()
+                    .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+            .join("");
+        assert!(shown.contains("pkg.zip"), "names the archive: {shown}");
+        assert!(shown.contains("-1"), "and its pending change: {shown}");
+    });
+}
+
+/// End to end, in the terms the complaint was made in: after an edit, the badge is
+/// **painted**.
+///
+/// Every other test here asserts the *journal*. That's one layer short of "I get
+/// no visual indicator", and the gap between the two is where a blind badge hid
+/// twice — once because the edit never reached the journal, once because the tag
+/// was resolved against the wrong column.
+#[test]
+fn the_status_bar_paints_the_badge_after_an_edit() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let paint = |app: &mut App| -> String {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 24)).unwrap();
+            terminal.draw(|f| app.render(f)).unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect()
+        };
+
+        let before = paint(&mut app);
+        assert!(before.contains("zip"), "inside a mount, the bar says so");
+        assert!(
+            !before.contains("~1"),
+            "and nothing is pending yet: {before}"
+        );
+
+        // Read a member (staging it), then change that copy the way the pager's
+        // `v` — or an agent in the pane — would, without telling spyc.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+        let staged = {
+            let mount = app.state.mounts.get(&archive).unwrap();
+            mount.staging_path(mount.index.get("README.md").unwrap())
+        };
+        std::fs::write(&staged, b"# edited\n").unwrap();
+        assert!(app.settle_archive_edits(), "the change is noticed");
+
+        let after = paint(&mut app);
+        assert!(
+            after.contains("~1"),
+            "the status bar is what the user reads: {after}"
+        );
     });
 }

@@ -551,6 +551,30 @@ mod tests {
         PASTE_OVERRIDE.with(|c| assert!(c.borrow().is_none()));
     }
 
+    /// Run `f`, retrying only while the OS reports `ETXTBSY` ("Text file busy").
+    ///
+    /// These tests write a stub script and execute it microseconds later. If another
+    /// test thread forks in that window — the suite runs in parallel and plenty of
+    /// tests spawn processes — the child inherits the still-open writable fd and
+    /// holds a dup across its own exec, so ours is refused
+    /// (rust-lang/rust#74253). Nothing under test is racy: the *fixture* is, and the
+    /// window is microseconds, so a bounded retry beats serializing the suite.
+    /// Every other outcome, success or failure, is returned untouched — the tests
+    /// that assert a specific error still see it on the first attempt.
+    #[cfg(unix)]
+    fn retry_text_busy<T>(mut f: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+        let busy = rustix::io::Errno::TXTBSY.raw_os_error();
+        for _ in 0..50 {
+            match f() {
+                Err(e) if e.raw_os_error() == Some(busy) => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                other => return other,
+            }
+        }
+        f()
+    }
+
     #[cfg(unix)]
     #[test]
     fn copy_via_override_writes_to_stub() {
@@ -566,7 +590,7 @@ mod tests {
         // Long budget: this test reads the file the stub writes, so it needs
         // spawn_and_pipe to have actually waited for the child.
         with_reap_budget(TEST_REAP_BUDGET, || {
-            with_clipboard_override(&stub, || copy("hello world\n"))
+            retry_text_busy(|| with_clipboard_override(&stub, || copy("hello world\n")))
                 .expect("copy via stub should succeed");
         });
 
@@ -596,7 +620,7 @@ mod tests {
         fs::set_permissions(&stub, perms).unwrap();
 
         let err = with_reap_budget(TEST_REAP_BUDGET, || {
-            with_clipboard_override(&stub, || copy("ignored"))
+            retry_text_busy(|| with_clipboard_override(&stub, || copy("ignored")))
                 .expect_err("non-zero exit should surface as error")
         });
         // Crucially NOT NotFound — the Linux cascade falls through
@@ -625,7 +649,7 @@ mod tests {
         fs::set_permissions(&stub, perms).unwrap();
 
         let big = "x".repeat(512 * 1024); // >> any pipe buffer
-        let err = with_clipboard_override(&stub, || copy(&big))
+        let err = retry_text_busy(|| with_clipboard_override(&stub, || copy(&big)))
             .expect_err("a helper that ignores a large stdin should surface a write error");
         assert_eq!(err.kind(), io::ErrorKind::BrokenPipe, "got {err:?}");
     }
@@ -695,7 +719,7 @@ mod tests {
 
         let cmd = format!("{} first second", stub.display());
         with_reap_budget(TEST_REAP_BUDGET, || {
-            copy_via_user_command(&cmd, "hello").expect("stub should succeed");
+            retry_text_busy(|| copy_via_user_command(&cmd, "hello")).expect("stub should succeed");
         });
 
         let captured = fs::read_to_string(&sidecar).expect("read sidecar");
@@ -715,7 +739,7 @@ mod tests {
         fs::set_permissions(&stub, perms).unwrap();
 
         with_reap_budget(TEST_REAP_BUDGET, || {
-            copy_via_user_command(&stub.display().to_string(), "hello world\n")
+            retry_text_busy(|| copy_via_user_command(&stub.display().to_string(), "hello world\n"))
                 .expect("stub should succeed");
         });
 
@@ -735,7 +759,7 @@ mod tests {
         fs::set_permissions(&stub, perms).unwrap();
 
         let err = with_reap_budget(TEST_REAP_BUDGET, || {
-            copy_via_user_command(&stub.display().to_string(), "ignored")
+            retry_text_busy(|| copy_via_user_command(&stub.display().to_string(), "ignored"))
                 .expect_err("non-zero exit should surface as error")
         });
         assert!(
@@ -770,7 +794,7 @@ mod tests {
         // loaded/parallel test run.
         let start = Instant::now();
         with_reap_budget(Duration::from_millis(100), || {
-            with_clipboard_override(&stub, || copy("hello"))
+            retry_text_busy(|| with_clipboard_override(&stub, || copy("hello")))
                 .expect("a persisting-but-successful helper must read as Ok, not an error");
         });
         assert!(

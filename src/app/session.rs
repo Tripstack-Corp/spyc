@@ -669,6 +669,7 @@ impl App {
             // Pending archive changes live only in memory, so quitting drops
             // them. Name that on the first tap, where the double-tap confirm
             // already gives the user somewhere to stop.
+            self.scan_archive_edits();
             let dirty_archives = self.dirty_mounts();
             if !dirty_archives.is_empty() {
                 self.state.flash_info(format!(
