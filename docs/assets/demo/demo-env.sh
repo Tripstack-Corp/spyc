@@ -67,6 +67,12 @@ spyc.pick(table.unpack(names))
 spyc.notify("picked " .. #names .. " files with a TODO")
 LUA
 
+# The hero tape records in spyc's OWN repo (its stand-in answers with real
+# spyc paths), so it wants the private HOME and nothing else.
+if [ -n "${DEMO_HOME_ONLY:-}" ]; then
+  return 0
+fi
+
 # ── The project under review ─────────────────────────────────────────────────
 P="$DEMO/tour"
 mkdir -p "$P/src" "$P/docs" "$P/tests"

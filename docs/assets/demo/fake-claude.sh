@@ -21,9 +21,21 @@ gold() { printf '\033[38;5;179m%s\033[0m' "$1"; }   # tool-call gold
 clear
 printf '\n '; mag '✻'; printf ' '; bold 'Claude Code'; printf '   '; dim 'spyc MCP connected'; printf '\n\n'
 
-# Read the user's question (typed by VHS).
+# Read the user's question (typed by VHS), then REPAINT the line with the
+# question in full.
+#
+# The tty echo of the first ~10 keystrokes after the pane spawns is lost —
+# deterministically, not on a race: instrumenting this script showed it READ
+# only "c structured, per these three docs?" no matter how long the tape waits
+# before typing. Left alone that ships a hero GIF whose prompt reads `> c
+# structured, per these three docs?`. This script exists to make one scripted
+# exchange reproducible (see the header), so it repaints the line it was always
+# depicting rather than leaving a truncation on the README's first image.
+QUESTION='how is spyc structured, per these three docs?'
 printf ' '; mag '>'; printf ' '
 read -r _question
+printf '\033[1A\r\033[2K'
+printf ' '; mag '>'; printf ' %s\n' "$QUESTION"
 printf '\n'
 
 # MCP tool call: read the user's picks (the three docs they selected).

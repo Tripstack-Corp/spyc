@@ -79,6 +79,15 @@ no editor, and the file list is still right there. Images open as actual
 pictures on a terminal with a graphics protocol, and `^a |` puts any of it in a
 live-reloading side column.
 
+### Keep a file open beside the list
+
+<img src="docs/assets/demo-vsplit.gif" alt="^a | opening a preview column on a markdown file, swapping it to a Rust file, growing it full-height, then cycling it off" width="820">
+
+`^a |` opens a preview column on the cursor file. Press it on a *different*
+file and the preview swaps to that one; press it again on the same file and it
+grows full-height, then cycles off. The previewed file re-renders when it
+changes on disk, so it doubles as a watch window while something else writes.
+
 ### Review it where you are
 
 <img src="docs/assets/demo-review.gif" alt="The git gutter marking modified files, gd opening a syntax-highlighted side-by-side diff, | toggling unified, gb blaming the file" width="820">

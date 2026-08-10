@@ -112,7 +112,9 @@ deny: ## Supply-chain checks: advisories, licenses, sources, bans (cargo-deny)
 #
 # The tapes record the RELEASE binary from this tree (prepended to PATH), never
 # whatever `spyc` is installed — a demo must show the code it ships beside.
-# TAPE=<name> re-records one; bare `make demos` does all four.
+# TAPE=<name> re-records one; bare `make demos` does the hero + all five tour
+# loops. The hero (spyc.tape) records in THIS repo — its stand-in answers with
+# real spyc paths — so it takes only the fixture's private HOME.
 #
 # Not recordable here, by design of the medium: an inline image (ttyd/xterm.js
 # has no graphics protocol, so spyc correctly draws nothing) and the desktop
@@ -120,7 +122,7 @@ deny: ## Supply-chain checks: advisories, licenses, sources, bans (cargo-deny)
 # "an agent needs you" cue — the red dot and the spice-heat border pulse — is
 # in demo-agents.gif.
 .PHONY: demos
-demos: ## Re-record the README demo GIFs (needs vhs; TAPE=pager|lua|review|agents for one)
+demos: ## Re-record the README demo GIFs (needs vhs; TAPE=spyc|pager|vsplit|lua|review|agents for one)
 	@command -v vhs >/dev/null 2>&1 || { \
 		echo "vhs not found — install with: brew install vhs"; \
 		exit 1; \
@@ -129,7 +131,7 @@ demos: ## Re-record the README demo GIFs (needs vhs; TAPE=pager|lua|review|agent
 		echo "no release binary — run: cargo build --release"; \
 		exit 1; \
 	}
-	@for tape in $(or $(TAPE),pager lua review agents); do \
+	@for tape in $(or $(TAPE),spyc pager vsplit lua review agents); do \
 		echo "── recording $$tape ──"; \
 		PATH="$(CURDIR)/target/release:$$PATH" vhs docs/assets/demo/$$tape.tape || exit 1; \
 	done
