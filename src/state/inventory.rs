@@ -68,16 +68,34 @@ impl Inventory {
 
     /// Yank a file into the inventory cache. Returns an error message
     /// if the file can't be yanked (not a regular file, too large, etc.).
+    /// Read and remember one path. Test-only: production always knows both halves
+    /// (they're simply equal for a file that isn't an archive member), so it goes
+    /// through [`Self::yank_as`].
+    #[cfg(test)]
     pub fn yank(&mut self, path: &Path) -> Result<(), String> {
+        self.yank_as(path, path)
+    }
+
+    /// Cache `read`'s bytes, remembered under `record_as`.
+    ///
+    /// They differ for an archive member: the bytes come from a staged copy in a
+    /// per-process cache, but the item is remembered by its path *into the
+    /// archive*. Recording the staging path instead meant the row never showed as
+    /// taken (its path is the member's), a later re-yank made a second entry
+    /// rather than refreshing the first (the cache dir is keyed on pid), and the
+    /// inventory kept a path that stopped existing when the session did.
+    pub fn yank_as(&mut self, read: &Path, record_as: &Path) -> Result<(), String> {
         let Some(dir) = inventory_dir() else {
             return Err("no state directory".into());
         };
-        let meta =
-            std::fs::metadata(path).map_err(|e| format!("can't read {}: {e}", path.display()))?;
+        let meta = std::fs::metadata(read)
+            .map_err(|e| format!("can't read {}: {e}", record_as.display()))?;
         if !meta.is_file() {
-            return Err(format!("{}: not a regular file", path.display()));
+            return Err(format!("{}: not a regular file", record_as.display()));
         }
-        let filename = path
+        // Filename only, as for any other yank: a member deep inside an archive
+        // puts as its basename.
+        let filename = record_as
             .file_name()
             .unwrap_or_default()
             .to_string_lossy()
@@ -89,14 +107,14 @@ impl Inventory {
         let id = self
             .items
             .values()
-            .find(|item| item.orig_path == path)
+            .find(|item| item.orig_path == record_as)
             .map_or_else(
                 || uuid::Uuid::now_v7().simple().to_string(),
                 |item| item.id.clone(),
             );
         let item = CachedItem {
             id: id.clone(),
-            orig_path: path.to_path_buf(),
+            orig_path: record_as.to_path_buf(),
             filename,
             timestamp: now_secs(),
             size: meta.len(),
@@ -104,30 +122,12 @@ impl Inventory {
         let _ = std::fs::create_dir_all(&dir);
         let dat_path = dir.join(format!("{id}.dat"));
         let json_path = dir.join(format!("{id}.json"));
-        std::fs::copy(path, &dat_path).map_err(|e| format!("copy failed: {e}"))?;
+        std::fs::copy(read, &dat_path).map_err(|e| format!("copy failed: {e}"))?;
         let json = serde_json::to_string_pretty(&item).map_err(|e| format!("json: {e}"))?;
         crate::fs::write_atomic(&json_path, json.as_bytes())
             .map_err(|e| format!("write meta: {e}"))?;
         self.items.insert(id, item);
         Ok(())
-    }
-
-    /// Yank multiple files. Returns count of successfully yanked files
-    /// and the first error (if any).
-    pub fn yank_many(&mut self, paths: &[PathBuf]) -> (usize, Option<String>) {
-        let mut count = 0;
-        let mut first_err = None;
-        for p in paths {
-            match self.yank(p) {
-                Ok(()) => count += 1,
-                Err(e) => {
-                    if first_err.is_none() {
-                        first_err = Some(e);
-                    }
-                }
-            }
-        }
-        (count, first_err)
     }
 
     /// Put a cached item to a destination directory. Copies the cached
