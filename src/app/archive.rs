@@ -141,9 +141,26 @@ impl App {
         let Some((mount, _)) = self.state.mounts.member_of(path) else {
             return Vec::new();
         };
-        let Some(entry) = mount.entry_at(path).cloned() else {
-            self.state.flash_error("archive: no such member");
-            return Vec::new();
+        let entry = match mount.member_at(path) {
+            Some(crate::archive::mount::MemberRef::Archived(entry)) => entry.clone(),
+            // A file the user brought in: the staging tree is the only copy, so
+            // there is nothing to extract and nothing to fall through to.
+            Some(crate::archive::mount::MemberRef::Added { rel, .. }) => {
+                let staged = mount.staging_root.join(rel);
+                if staged.is_dir() {
+                    return Vec::new();
+                }
+                if !staged.exists() {
+                    self.state
+                        .flash_error("archive: the added file's staged copy is gone");
+                    return Vec::new();
+                }
+                return self.do_after_materialize(then, &staged);
+            }
+            None => {
+                self.state.flash_error("archive: no such member");
+                return Vec::new();
+            }
         };
         if entry.kind == crate::archive::index::ArchiveEntryKind::Dir {
             return Vec::new();
@@ -862,9 +879,9 @@ impl App {
         let staged_check = |p: &Path| {
             self.state
                 .mounts
-                .resolve(p)
-                .and_then(|(mount, _)| mount.entry_at(p).map(|e| mount.is_materialized(e)))
-                .unwrap_or(false)
+                .member_of(p)
+                .and_then(|(mount, _)| mount.bytes_at(p))
+                .is_some_and(|bytes| bytes.exists())
         };
         let inventory_names = |ids: &[String]| -> Vec<String> {
             self.state
@@ -982,9 +999,26 @@ impl App {
         for change in changes {
             match change {
                 PendingChange::Delete { archive, inner } => {
+                    // Deleting a file the user brought in un-adds it: the archive
+                    // never held it, so its staged bytes are the only copy and
+                    // leaving them behind would collide with a second put.
+                    let staged = self
+                        .state
+                        .mounts
+                        .get(&archive)
+                        .filter(|mount| mount.journal.is_addition(&inner))
+                        .map(|mount| mount.staging_root.join(&inner));
                     if let Some(mount) = self.state.mounts.get_mut(&archive) {
-                        mount.journal.delete(inner);
+                        match &staged {
+                            Some(_) => {
+                                mount.journal.forget_addition(&inner);
+                            }
+                            None => mount.journal.delete(inner),
+                        }
                         deleted += 1;
+                    }
+                    if let Some(staged) = staged {
+                        let _ = std::fs::remove_file(&staged);
                     }
                 }
                 PendingChange::Rename { archive, from, to } => {
@@ -1011,8 +1045,20 @@ impl App {
             .map(|(n, verb)| format!("{n} {verb}"))
             .collect::<Vec<_>>()
             .join(", ");
-        self.state
-            .flash_info(format!("{what} — :archive write to apply"));
+        // Un-adding the last pending addition leaves nothing to write back, so
+        // pointing at `:archive write` would name a no-op.
+        let touched: Vec<PathBuf> = self
+            .state
+            .mounts
+            .iter()
+            .map(|m| m.archive().to_path_buf())
+            .collect();
+        let still_dirty = touched.iter().any(|a| self.mount_is_dirty(a));
+        self.state.flash_info(if still_dirty {
+            format!("{what} — :archive write to apply")
+        } else {
+            what
+        });
     }
 
     /// The write-back op for a mount, or `None` when there is nothing to write.
