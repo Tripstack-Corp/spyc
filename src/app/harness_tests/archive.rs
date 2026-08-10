@@ -2318,3 +2318,74 @@ fn an_edited_member_is_marked_in_the_listing() {
         );
     });
 }
+
+/// The place the indicator was missing that mattered most: standing in the
+/// directory the archive lives in, looking at the archive file, with an unwritten
+/// change inside it.
+///
+/// The suffix badge only shows while you're *in* the mount, and the members aren't
+/// listed out here — so without a mark on the container's own row there is nothing
+/// at all to see.
+#[test]
+fn a_dirty_archive_is_marked_in_the_directory_it_lives_in() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir.clone());
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let archive_row = |app: &mut App| -> String {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 12)).unwrap();
+            terminal.draw(|f| app.render(f)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol())
+                        .collect::<String>()
+                })
+                .find(|line| line.contains("pkg.zip"))
+                .unwrap_or_default()
+        };
+
+        // Delete a member, then climb out to where the archive lives.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::RemovePrompt(None)).unwrap();
+        let fx = if fx.is_empty() {
+            app.handle_remove_confirm_key(crossterm::event::KeyEvent::new(
+                KeyCode::Char('y'),
+                KeyModifiers::empty(),
+            ))
+        } else {
+            fx
+        };
+        settle(&mut app, fx);
+        let fx = app.apply(&Action::Climb).unwrap();
+        apply_effects(&mut app, fx);
+        assert_eq!(app.state.cur().listing.dir, dir, "outside the archive");
+
+        let row = archive_row(&mut app);
+        assert!(
+            row.contains('~'),
+            "the archive says it holds unwritten changes: {row:?}"
+        );
+
+        // And once written it stops saying so. (The write runs from *inside* the
+        // mount: `:archive write` resolves which archive it means from the cwd.)
+        let fx = app.apply(&Action::EnterOrDisplay).unwrap();
+        settle(&mut app, fx);
+        assert_eq!(app.state.cur().listing.dir, archive, "back inside");
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+        assert!(!app.mount_is_dirty(&archive), "the write landed");
+
+        let fx = app.apply(&Action::Climb).unwrap();
+        apply_effects(&mut app, fx);
+        let row = archive_row(&mut app);
+        assert!(!row.contains('~'), "clean again after the write: {row:?}");
+    });
+}
