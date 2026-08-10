@@ -201,23 +201,40 @@ fn write_tar(
                 let entry = index
                     .get(inner)
                     .with_context(|| format!("{inner} vanished from the index"))?;
-                let bytes = match entry.locator {
-                    // A plain tar is seekable, so untouched bytes come straight
-                    // from it.
-                    Locator::TarData { offset } => read_at(index.source(), offset, entry.size)?,
-                    // A streamed mount extracted everything, so its "archived"
-                    // bytes are the staged copy.
-                    Locator::Staged => std::fs::read(staging_root.join(entry.staging_rel()))
-                        .with_context(|| format!("reading staged {inner}"))?,
-                    _ => bail!("{inner} has no readable tar source"),
-                };
-                let mut header = header_for(entry, bytes.len() as u64);
-                if entry.kind == ArchiveEntryKind::Symlink {
-                    let target = entry.link_target.clone().unwrap_or_default();
-                    header.set_size(0);
-                    builder.append_link(&mut header, &step.out, Path::new(&target))?;
-                } else {
-                    builder.append_data(&mut header, &step.out, bytes.as_slice())?;
+                // Decided by *kind* before any read: only a file has bytes. A
+                // streamed mount's members are all `Locator::Staged`, directory
+                // entries included, and reading one gave `Is a directory` — so a
+                // `.tar.gz` holding explicit directory entries (which is any
+                // tarball of a tree) could never be written back. A symlink was
+                // read for nothing, and a dangling one failed the same way.
+                match entry.kind {
+                    ArchiveEntryKind::Dir => {
+                        let mut header = header_for(entry, 0);
+                        builder.append_data(&mut header, &step.out, std::io::empty())?;
+                    }
+                    ArchiveEntryKind::Symlink => {
+                        let target = entry.link_target.clone().unwrap_or_default();
+                        let mut header = header_for(entry, 0);
+                        builder.append_link(&mut header, &step.out, Path::new(&target))?;
+                    }
+                    ArchiveEntryKind::File => {
+                        let bytes = match entry.locator {
+                            // A plain tar is seekable, so untouched bytes come
+                            // straight from it.
+                            Locator::TarData { offset } => {
+                                read_at(index.source(), offset, entry.size)?
+                            }
+                            // A streamed mount extracted everything, so its
+                            // "archived" bytes are the staged copy.
+                            Locator::Staged => {
+                                std::fs::read(staging_root.join(entry.staging_rel()))
+                                    .with_context(|| format!("reading staged {inner}"))?
+                            }
+                            _ => bail!("{inner} has no readable tar source"),
+                        };
+                        let mut header = header_for(entry, bytes.len() as u64);
+                        builder.append_data(&mut header, &step.out, bytes.as_slice())?;
+                    }
                 }
             }
             StepSource::Staging { rel } => {
@@ -391,10 +408,17 @@ mod tests {
         let mut b = tar::Builder::new(sink);
         for (name, data, mode) in members {
             let mut h = tar::Header::new_gnu();
-            h.set_size(data.len() as u64);
+            // A trailing `/` makes it an explicit directory entry, which is what
+            // `tar czf` on a tree writes — and what nothing here used to cover.
+            let dir = name.ends_with('/');
+            h.set_size(if dir { 0 } else { data.len() as u64 });
             h.set_mode(*mode);
             h.set_mtime(1_700_000_000);
-            h.set_entry_type(tar::EntryType::Regular);
+            h.set_entry_type(if dir {
+                tar::EntryType::Directory
+            } else {
+                tar::EntryType::Regular
+            });
             b.append_data(&mut h, name, *data).unwrap();
         }
         b.into_inner().unwrap();
@@ -648,6 +672,87 @@ mod tests {
                 contents(&archive),
                 [("d/b.txt".to_string(), b"beta".to_vec())],
                 "{name}"
+            );
+        }
+    }
+
+    /// A streamed mount gives *every* member a `Staged` locator — directory
+    /// entries included — and an untouched member was read as bytes to carry it
+    /// across. On a directory that is `Is a directory (os error 21)`, so a
+    /// `.tar.gz` of a real tree (which always has explicit directory entries)
+    /// could never be written back at all.
+    #[test]
+    fn a_streamed_tar_with_directory_entries_writes_back() {
+        for format in [ArchiveFormat::TarGz, ArchiveFormat::TarZst] {
+            let tmp = tempfile::tempdir().unwrap();
+            // Named for its format: `detect_at` cross-checks magic against the
+            // name, so a zstd body called `.tar.gz` reads as neither.
+            let archive = tmp.path().join(match format {
+                ArchiveFormat::TarZst => "pkg.tar.zst",
+                _ => "pkg.tar.gz",
+            });
+            let staging = tmp.path().join("staging");
+            tar_at(
+                &archive,
+                &[
+                    ("pkg/", b"", 0o755),
+                    ("pkg/a.txt", b"alpha", 0o644),
+                    ("pkg/sub/", b"", 0o755),
+                    ("pkg/sub/b.txt", b"beta", 0o644),
+                ],
+                format,
+            );
+            let indexed = read::stream_mount(
+                &archive,
+                format,
+                &staging,
+                u64::MAX,
+                1000,
+                &std::sync::atomic::AtomicBool::new(false),
+            )
+            .unwrap();
+            let mut journal = Journal::default();
+            journal.delete("pkg/a.txt");
+            let steps = plan_repack(
+                &indexed.index,
+                &journal,
+                &StagedStats::new(),
+                &StagedStats::new(),
+            );
+
+            repack(&indexed.index, &steps, &staging, &opts()).expect("{format:?} must write");
+
+            // The surviving file is intact and the directories came across as
+            // directories rather than failing the write.
+            let after = contents(&archive);
+            assert!(
+                after.contains(&("pkg/sub/b.txt".to_string(), b"beta".to_vec())),
+                "{format:?}: {after:?}"
+            );
+            assert!(
+                !after.iter().any(|(n, _)| n == "pkg/a.txt"),
+                "{format:?}: the delete applied"
+            );
+            // Streamed, not `index_seekable`: pointed at a compressed tar that
+            // reader finds no headers and hands back an *empty* index rather than
+            // an error, which would make this assertion vacuous.
+            let reindexed = read::stream_mount(
+                &archive,
+                format,
+                &tmp.path().join("check"),
+                u64::MAX,
+                1000,
+                &std::sync::atomic::AtomicBool::new(false),
+            )
+            .unwrap();
+            let dir = reindexed
+                .index
+                .get("pkg/sub")
+                .expect("the directory is in the rewritten archive");
+            assert_eq!(
+                dir.kind,
+                crate::archive::index::ArchiveEntryKind::Dir,
+                "{format:?}: and still a directory"
             );
         }
     }
