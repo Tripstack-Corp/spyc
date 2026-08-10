@@ -48,6 +48,12 @@ Set TypingSpeed  55ms
 Hide
 Type `mkdir -p /tmp/spycbin && cp "$PWD/docs/assets/demo/fake-claude.sh" /tmp/spycbin/claude && chmod +x /tmp/spycbin/claude`
 Enter
+# Private HOME (project fixture skipped — this tape records in spyc's own repo).
+# Without it the recorder's spyc theme, session history and the REAL agent's
+# statusline leak into the frame; the committed GIF this replaces was recorded
+# against a live claude and published a garbled turn plus account usage stats.
+Type `DEMO_HOME_ONLY=1 source docs/assets/demo/demo-env.sh`
+Enter
 Type `export PATH="/tmp/spycbin:$PATH" SPYC_PANE_CMD=claude`
 Enter
 Type "spyc"
@@ -55,23 +61,13 @@ Enter
 Sleep 4s
 Show
 
-# ── 1. Open the agent pane at the repo root (two pre-filled prompts) ──────────
-Ctrl+A
-Sleep 250ms
-Type "c"
-Sleep 800ms
-Enter
-Sleep 600ms
-Enter
-Sleep 3s
-
-# ── 2. Focus the list and pick three architecture docs (amber * markers) ──────
+# ── 1. Pick three architecture docs (amber * markers), BEFORE any pane exists ─
+#       Order matters. Picking first means the list already has focus — the
+#       startup default — so these keys cannot be stolen by a pane. Opening the
+#       pane first and then focusing back with `^a k` is what produced the
+#       garbled takes: one dropped chord and the whole rest of the tape typed
+#       itself into the agent (`> TS`, `thow is spyc structured…`).
 #       Staying at the repo root keeps the pane cwd at root so gf resolves.
-Ctrl+A
-Sleep 250ms
-Type "k"
-Sleep 700ms
-
 Type "/"
 Sleep 300ms
 Type "ARCH"
@@ -99,11 +95,40 @@ Sleep 400ms
 Type "t"
 Sleep 1200ms
 
-# ── 3. Focus the pane and ask about "these three docs" — never naming them ────
+# ── 2. Open the agent pane at the repo root (two pre-filled prompts). Spawning
+#       it focuses the pane, so no `^a j` is needed to type into it. ───────────
+#       `^a c` raises TWO prompts (command, then cwd) — Enter each.
 Ctrl+A
-Sleep 250ms
-Type "j"
-Sleep 700ms
+Sleep 400ms
+Type "c"
+Sleep 1.4s
+Enter
+Sleep 1.2s
+Enter
+
+#       Then WAIT for the agent's banner rather than sleeping at it. The
+#       stand-in opens with `clear`, which erases whatever the tty has already
+#       echoed — so typing before it lands silently eats the head of the
+#       question and leaves `> c structured, per these three docs?` on screen.
+#       That's a fixed-length loss, not a slow machine: no Sleep is long enough
+#       if the clear happens after typing starts.
+Wait+Screen@15s /MCP connected/
+Sleep 1.2s
+
+#       Then focus the pane EXPLICITLY. Spawning does not reliably leave focus
+#       there by the time the banner is up, and the failure is silent: the head
+#       of the question is swallowed by the file list as commands — the `h` in
+#       "how is spy" toggles hidden files (watch `hidden:` in the status bar) —
+#       leaving `> c structured, per these three docs?` on the agent's prompt.
+#       Then hold, hard, before typing. The pane is already focused here (`^a j`
+#       flashes nothing, so there is no event to wait on), but keystrokes sent
+#       too soon after the banner are DISCARDED — the interactive shell spyc
+#       execs the agent through drops type-ahead while it starts. Instrumenting
+#       the stand-in proved it: the child READ only "c structured, per these
+#       three docs?", so the head was never delivered to anything.
+Sleep 3s
+
+# ── 3. Ask about "these three docs" — never naming them ──────────────────────
 Type "how is spyc structured, per these three docs?"
 Sleep 500ms
 Enter

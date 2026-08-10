@@ -26,7 +26,7 @@
 #   Needs `[notify] visual = true` (default).
 # ─────────────────────────────────────────────────────────────────────────────
 
-Output docs/assets/demo-agents.mp4
+Output docs/assets/demo-agents.gif
 
 Set Shell        "bash"
 Set FontFamily   "MesloLGLDZ Nerd Font Mono"
@@ -50,9 +50,9 @@ Type `mkdir -p /tmp/spycbin && cp "$PWD/docs/assets/demo/fake-claude-status.sh" 
 Enter
 Type `rm -f /tmp/spyc-demo-agent-n`
 Enter
-Type `export PATH="/tmp/spycbin:$PATH" SPYC_PANE_CMD=claude`
+Type "source docs/assets/demo/demo-env.sh"
 Enter
-Type `d=/tmp/spyc-demo && rm -rf "$d" && mkdir -p "$d/src" && cd "$d" && printf 'fn main() {}\n' > src/main.rs && printf 'mod app;\nmod git;\n' > src/lib.rs && printf '# demo\n' > README.md && printf '[package]\nname = "demo"\n' > Cargo.toml && git init -q && git add -A && git commit -qm init`
+Type `export PATH="/tmp/spycbin:$PATH" SPYC_PANE_CMD=claude`
 Enter
 Type "spyc"
 Enter
