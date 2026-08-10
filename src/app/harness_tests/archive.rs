@@ -743,7 +743,10 @@ fn an_already_extracted_member_passes_straight_through_the_screen() {
 
         let held = app.screen_archive_effect(Effect::Inventory(
             crate::app::inventory_ops::InventoryOp::Yank {
-                paths: vec![archive.join("README.md")],
+                sources: vec![archive.join("README.md")]
+                    .into_iter()
+                    .map(crate::app::inventory_ops::YankSource::plain)
+                    .collect(),
             },
         ));
         assert!(held.is_some(), "no round trip for bytes already on disk");
@@ -765,7 +768,10 @@ fn the_screen_leaves_unrelated_effects_alone() {
 
         let held = app.screen_archive_effect(Effect::Inventory(
             crate::app::inventory_ops::InventoryOp::Yank {
-                paths: vec![dir.join("real.txt")],
+                sources: vec![dir.join("real.txt")]
+                    .into_iter()
+                    .map(crate::app::inventory_ops::YankSource::plain)
+                    .collect(),
             },
         ));
         assert!(held.is_some(), "a real file's yank runs as normal");
@@ -997,7 +1003,10 @@ fn putting_an_inventory_item_into_an_archive_adds_it() {
             &mut app,
             vec![Effect::Inventory(
                 crate::app::inventory_ops::InventoryOp::Yank {
-                    paths: vec![source],
+                    sources: vec![source]
+                        .into_iter()
+                        .map(crate::app::inventory_ops::YankSource::plain)
+                        .collect(),
                 },
             )],
         );
@@ -1517,7 +1526,10 @@ fn a_mixed_selection_rewrites_the_staged_member_too() {
         let main = archive.join("src/main.rs");
         let fx = app.screen_archive_effect(Effect::Inventory(
             crate::app::inventory_ops::InventoryOp::Yank {
-                paths: vec![readme.clone(), main.clone()],
+                sources: vec![readme.clone(), main.clone()]
+                    .into_iter()
+                    .map(crate::app::inventory_ops::YankSource::plain)
+                    .collect(),
             },
         ));
         let Some(Effect::Archive(ArchiveOp::MaterializeMany { then, .. })) = fx else {
@@ -1526,17 +1538,22 @@ fn a_mixed_selection_rewrites_the_staged_member_too() {
         let crate::app::archive_ops::MaterializeThen::Retry(effect) = then else {
             panic!("a held-back read retries the original effect");
         };
-        let Effect::Inventory(crate::app::inventory_ops::InventoryOp::Yank { paths }) = *effect
+        let Effect::Inventory(crate::app::inventory_ops::InventoryOp::Yank { sources }) = *effect
         else {
             panic!("shape preserved");
         };
+        let reads: Vec<PathBuf> = sources.iter().map(|s| s.read.clone()).collect();
         assert!(
-            !paths.contains(&readme),
-            "the staged member is already pointed at staging: {paths:?}"
+            !reads.contains(&readme),
+            "the staged member is already pointed at staging: {reads:?}"
         );
         assert!(
-            paths.contains(&main),
-            "and the unextracted one still waits for the worker: {paths:?}"
+            reads.contains(&main),
+            "and the unextracted one still waits for the worker: {reads:?}"
+        );
+        assert!(
+            sources.iter().all(|s| s.record_as.starts_with(&archive)),
+            "both are still remembered by their member paths"
         );
     });
 }
@@ -2387,5 +2404,87 @@ fn a_dirty_archive_is_marked_in_the_directory_it_lives_in() {
         apply_effects(&mut app, fx);
         let row = archive_row(&mut app);
         assert!(!row.contains('~'), "clean again after the write: {row:?}");
+    });
+}
+
+// ── what a yanked member is remembered as ─────────────────────────────────
+
+/// A yanked member is remembered by its path *into the archive*, not by the
+/// staged copy the bytes came from.
+///
+/// The staging path is a per-process cache location: recording it meant the row
+/// never showed as taken (its path is the member's), a re-yank in a later session
+/// made a second entry instead of refreshing the first, and the inventory kept a
+/// path that stopped existing when the session did.
+#[test]
+fn a_yanked_member_is_remembered_by_its_path_in_the_archive() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // `y` on `README.md`.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+
+        let member = archive.join("README.md");
+        let item = app
+            .state
+            .inventory
+            .items()
+            .find(|i| i.filename == "README.md")
+            .expect("in the inventory");
+        assert_eq!(
+            item.orig_path, member,
+            "remembered as the member path, not the staging copy"
+        );
+        assert_eq!(
+            app.state.inventory.read_content(&item.id).as_deref(),
+            Some(b"# pkg\n".as_slice()),
+            "with the member's real bytes, which came from staging"
+        );
+        // Which is what makes the row's take-check work: it compares the row's own
+        // path against the inventory.
+        assert!(
+            app.state.inventory.contains(&member),
+            "so the member row reads as taken"
+        );
+    });
+}
+
+/// Re-yanking the same member refreshes its entry rather than adding a second
+/// one. Keyed on the staging path it couldn't: that path carries the pid.
+#[test]
+fn re_yanking_a_member_refreshes_one_entry() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        app.apply(&Action::Down(1)).unwrap();
+
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+        // Re-mount into a *different* staging tree, as a later session would, and
+        // yank the same member again.
+        app.state.mounts.remove(&archive);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging-2"));
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+
+        let held: Vec<_> = app
+            .state
+            .inventory
+            .items()
+            .filter(|i| i.filename == "README.md")
+            .collect();
+        assert_eq!(held.len(), 1, "one entry, refreshed: {held:?}");
     });
 }

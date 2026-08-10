@@ -480,7 +480,10 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   capped index are all reported when the mount opens, in full under
   `:archive info`.
 - **Taking things out** — `y` yanks a member into the inventory (contents and
-  all, so `p` outside the archive writes a real file), `c` copies members out,
+  all, so `p` outside the archive writes a real file), remembered by its path
+  *inside* the archive — `pkg.zip/src/main.rs` — so the row reads as taken, a
+  re-yank refreshes that entry, and the inventory never holds a cache path that
+  outlives the session. It puts as its basename, like any other yank, `c` copies members out,
   `^a p` pipes one to the pane, and `f` / `L` report on them. Each extracts what
   it needs first, so nothing is unpacked speculatively.
 - **Deleting a member** — `R` marks it for removal; the archive on disk is

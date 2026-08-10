@@ -8,9 +8,33 @@ use crate::state::inventory::Inventory;
 /// serialization. This means rapid concurrent operations (like double-yanking)
 /// can race during the read-modify-write cache update. This is an accepted
 /// race condition for now, as inventory ops are usually human-driven and sparse.
+/// One file to yank: where its bytes are, and the path the inventory should
+/// remember it by.
+///
+/// The two differ only for an archive member. Its bytes are a staged copy in a
+/// per-process cache directory, but what identifies it is the path *into the
+/// archive* — that's what the user sees, what a re-yank should refresh, and what
+/// survives the mount being dropped. `rewrite_paths` therefore only ever
+/// substitutes `read`.
+#[derive(Debug, Clone)]
+pub struct YankSource {
+    pub read: PathBuf,
+    pub record_as: PathBuf,
+}
+
+impl YankSource {
+    /// A file that is what it appears to be — read and remembered by one path.
+    pub fn plain(path: PathBuf) -> Self {
+        Self {
+            record_as: path.clone(),
+            read: path,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum InventoryOp {
-    Yank { paths: Vec<PathBuf> },
+    Yank { sources: Vec<YankSource> },
     Remove { id: String, show_flash: bool },
     Clear,
     Put { dest_dir: PathBuf, ids: Vec<String> },
@@ -38,9 +62,20 @@ pub enum InventoryOutcome {
 pub fn run_inventory_op(op: InventoryOp) -> InventoryOutcome {
     let mut inv = Inventory::load();
     match op {
-        InventoryOp::Yank { paths } => {
-            let total = paths.len();
-            let (count, first_err) = inv.yank_many(&paths);
+        InventoryOp::Yank { sources } => {
+            let total = sources.len();
+            let mut count = 0;
+            let mut first_err = None;
+            for source in &sources {
+                match inv.yank_as(&source.read, &source.record_as) {
+                    Ok(()) => count += 1,
+                    Err(e) => {
+                        if first_err.is_none() {
+                            first_err = Some(e);
+                        }
+                    }
+                }
+            }
             InventoryOutcome::Yanked {
                 count,
                 skipped: total - count,
@@ -183,7 +218,10 @@ mod tests {
             let subdir = work.path().join("sub");
             std::fs::create_dir(&subdir).unwrap();
             let out = run_inventory_op(InventoryOp::Yank {
-                paths: vec![a, subdir],
+                sources: vec![a, subdir]
+                    .into_iter()
+                    .map(super::YankSource::plain)
+                    .collect(),
             });
             let InventoryOutcome::Yanked {
                 count,
