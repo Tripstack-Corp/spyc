@@ -516,6 +516,7 @@ fn eviction_hands_back_the_staging_tree_to_clean() {
                     staging_root: staging,
                     last_used: 0,
                     depth: 0,
+                    editing: Vec::new(),
                 },
                 &[],
             ));
@@ -1942,5 +1943,195 @@ fn a_write_re_reads_the_archive_rather_than_trusting_the_old_index() {
                 "{inner}: the index has to describe the archive as it is now"
             );
         }
+    });
+}
+
+// ── an edit is a pending change, and says so ──────────────────────────────
+
+/// A streamed mount writes every member during the pass, so what's on disk at
+/// mount time is what spyc put there. Recording nothing is how a `.tar.gz` came
+/// out of its own mount already reading as edited — and the only sign was a
+/// warning at quit about changes nobody made.
+#[test]
+fn a_streamed_mount_is_not_dirty_the_moment_it_opens() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.tar.gz");
+        build_tar_gz(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        assert!(
+            !app.state.cur().rows.is_empty(),
+            "the mount really did extract"
+        );
+        assert!(
+            !app.mount_is_dirty(&archive),
+            "a freshly opened archive has no pending changes"
+        );
+        assert!(app.dirty_mounts().is_empty(), "and quitting says nothing");
+    });
+}
+
+/// The user's question: with an edit staged and nothing written, what says so?
+/// The badge reads the journal, so the edit has to be *in* it — the draw pass
+/// can't go and stat the staging tree.
+#[test]
+fn an_edit_becomes_a_pending_change_the_badge_can_show() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // `e` on `README.md`: extracts it and hands the copy to an editor.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::EnterOrEdit).unwrap();
+        settle(&mut app, fx);
+        let mount = app.state.mounts.get(&archive).expect("mounted");
+        assert_eq!(
+            mount.editing,
+            ["README.md"],
+            "the member is watched from the moment it's handed over"
+        );
+        let staged = mount.staging_path(mount.index.get("README.md").unwrap());
+        assert!(!mount.journal.is_dirty(), "nothing pending yet");
+
+        // The editor saves.
+        std::fs::write(&staged, b"# edited by hand\n").unwrap();
+        assert!(app.settle_archive_edits(), "the change is noticed");
+
+        let mount = app.state.mounts.get(&archive).expect("mounted");
+        assert!(mount.journal.is_dirty(), "and recorded as pending");
+        assert_eq!(
+            mount.journal.counts().badge(),
+            "~1",
+            "which is what the status suffix shows"
+        );
+        assert!(
+            mount.editing.is_empty(),
+            "and it stops being watched once recorded"
+        );
+    });
+}
+
+/// An agent in the pane editing a member the user never opened is caught too —
+/// on the next thing that reports, rather than by statting every member forever.
+#[test]
+fn an_edit_to_a_member_nobody_opened_is_caught_when_something_reports() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Extract a member the way a read does (no editor, so nothing is watched).
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::Take).unwrap();
+        settle(&mut app, fx);
+        let mount = app.state.mounts.get(&archive).expect("mounted");
+        assert!(mount.editing.is_empty(), "nothing is being watched");
+        let staged = mount.staging_path(mount.index.get("README.md").unwrap());
+
+        std::fs::write(&staged, b"# changed by something else\n").unwrap();
+        assert!(
+            !app.settle_archive_edits(),
+            "the cheap check only looks where it was told to"
+        );
+        assert!(app.scan_archive_edits(), "the full scan finds it");
+        assert_eq!(
+            app.state
+                .mounts
+                .get(&archive)
+                .unwrap()
+                .journal
+                .counts()
+                .badge(),
+            "~1"
+        );
+    });
+}
+
+/// A staging directory's mtime moves whenever any member inside it is written, so
+/// counting directories reported a change to a member nobody touched.
+#[test]
+fn writing_one_member_does_not_mark_its_neighbours() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Extract two members that share a directory.
+        for inner in ["src/main.rs", "src/deep/mod.rs"] {
+            let fx = app.open_member(
+                &archive.join(inner),
+                crate::app::archive_ops::MaterializeThen::OpenPager(
+                    crate::app::file_ops::PagerDest::Overlay { scroll: None },
+                ),
+            );
+            settle(&mut app, fx);
+        }
+        assert!(app.dirty_mounts().is_empty(), "reading changes nothing");
+        assert!(
+            !app.scan_archive_edits(),
+            "and neither does the directory mtime that moved with them"
+        );
+    });
+}
+
+/// From outside a mount, `:archive info` used to refuse — which is exactly where
+/// an archive holding unwritten changes is hardest to notice.
+#[test]
+fn archive_info_outside_a_mount_reports_what_is_mounted() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir.clone());
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        // Delete a member, then climb out of the archive entirely.
+        app.apply(&Action::Down(1)).unwrap();
+        let fx = app.apply(&Action::RemovePrompt(None)).unwrap();
+        let fx = if fx.is_empty() {
+            app.handle_remove_confirm_key(crossterm::event::KeyEvent::new(
+                KeyCode::Char('y'),
+                KeyModifiers::empty(),
+            ))
+        } else {
+            fx
+        };
+        settle(&mut app, fx);
+        let fx = app.apply(&Action::Climb).unwrap();
+        apply_effects(&mut app, fx);
+        assert_eq!(app.state.cur().listing.dir, dir, "outside the archive");
+
+        let fx = app.cmd_archive("info");
+        settle(&mut app, fx);
+
+        let shown = app
+            .view
+            .pager
+            .as_ref()
+            .map(|p| {
+                p.lines
+                    .iter()
+                    .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+            .join("");
+        assert!(shown.contains("pkg.zip"), "names the archive: {shown}");
+        assert!(shown.contains("-1"), "and its pending change: {shown}");
     });
 }

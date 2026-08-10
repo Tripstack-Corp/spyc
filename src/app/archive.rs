@@ -197,19 +197,23 @@ impl App {
                 let archive = index.archive.clone();
                 let notes = mount_notes(&capability, &warnings);
                 let protected = self.protected_archives();
-                let evicted = self.state.mounts.insert(
-                    ArchiveMount {
-                        index: *index,
-                        journal: Journal::default(),
-                        staged: StagedStats::new(),
-                        capability,
-                        warnings,
-                        staging_root,
-                        last_used: 0,
-                        depth,
-                    },
-                    &protected,
-                );
+                let mut mount = ArchiveMount {
+                    index: *index,
+                    journal: Journal::default(),
+                    staged: StagedStats::new(),
+                    capability,
+                    warnings,
+                    staging_root,
+                    last_used: 0,
+                    depth,
+                    editing: Vec::new(),
+                };
+                // Whatever is on disk at mount time is what spyc just put there —
+                // a streamed mount wrote every member during the pass. Recording
+                // it is what stops the first dirty check from reading the whole
+                // archive as edited behind our back.
+                mount.staged = current_staged_stats(&mount);
+                let evicted = self.state.mounts.insert(mount, &protected);
                 // Enter it, then say what was odd about it — the flash outlives
                 // the chdir, so the note is what the user is left reading. A
                 // held-back effect names where to land instead, and re-running it
@@ -360,6 +364,9 @@ impl App {
             // them — addressed where the user sees them, read from where they are.
             MaterializeThen::Mount { at, then } => self.request_nested_mount(&at, real, then),
             MaterializeThen::Edit { in_pane } => {
+                // Watch it from here: whatever the editor writes to this copy is
+                // the only record that the member changed.
+                self.watch_for_edits(real);
                 let argv = crate::shell::resolve_editor();
                 if argv.is_empty() {
                     self.state.flash_error("no $VISUAL or $EDITOR set");
@@ -396,6 +403,26 @@ impl App {
                 vec![super::archive_route::rewrite_paths(*effect, &staged)]
             }
         }
+    }
+
+    /// Start watching a staged copy for a change spyc won't make itself.
+    fn watch_for_edits(&mut self, real: &Path) {
+        let Some((archive, inner)) = self.staged_owner(real) else {
+            return;
+        };
+        if let Some(mount) = self.state.mounts.get_mut(&archive)
+            && !mount.editing.contains(&inner)
+        {
+            mount.editing.push(inner);
+        }
+    }
+
+    /// The mount and journal path a staged file stands for.
+    fn staged_owner(&self, real: &Path) -> Option<(PathBuf, String)> {
+        let at = self.mount_path_for_staged(real)?;
+        let (mount, _) = self.state.mounts.member_of(&at)?;
+        let entry = mount.entry_at(&at)?;
+        Some((mount.archive().to_path_buf(), entry.inner.clone()))
     }
 
     /// The mount path a staged file stands in for — the inverse of
@@ -546,6 +573,9 @@ impl App {
 
     /// `:archive [info|list|unmount]`.
     pub(crate) fn cmd_archive(&mut self, arg: &str) -> Vec<Effect> {
+        // Anything about to be reported — or written — should account for edits
+        // made outside spyc's own ops, including to members the user never opened.
+        self.scan_archive_edits();
         match arg.trim() {
             "" | "info" => {
                 self.archive_info();
@@ -633,7 +663,13 @@ impl App {
     fn archive_info(&mut self) {
         let dir = self.state.cur().listing.dir.clone();
         let Some((mount, inner)) = self.state.mounts.resolve(&dir) else {
-            self.state.flash_error("archive: not inside an archive");
+            // Out here the useful answer is what *is* mounted — an archive holding
+            // unwritten changes is otherwise invisible from outside it.
+            if self.state.mounts.is_empty() {
+                self.state.flash_error("archive: not inside an archive");
+            } else {
+                self.archive_list();
+            }
             return;
         };
         let mut lines = vec![
@@ -963,6 +999,64 @@ impl App {
 
     /// Whether a mount has anything a write would change — the journal, or a
     /// staged file that no longer matches what spyc wrote.
+    /// Record edits to members the user opened in an editor.
+    ///
+    /// Runs on every loop wake, which is affordable because it only stats what
+    /// [`ArchiveMount::editing`] names — usually one member. An edit is otherwise
+    /// invisible until something asks the disk, and the *draw* pass can't: a staged
+    /// copy that supersedes its archived bytes has to be in the Model for the
+    /// badge, `:archive info` and the repack to agree about it.
+    pub(super) fn settle_archive_edits(&mut self) -> bool {
+        if self.state.mounts.is_empty() {
+            return false;
+        }
+        let found: Vec<(PathBuf, Vec<String>)> = self
+            .state
+            .mounts
+            .iter()
+            .filter(|m| !m.editing.is_empty())
+            .map(|m| (m.archive().to_path_buf(), changed_among(m, &m.editing)))
+            .filter(|(_, changed)| !changed.is_empty())
+            .collect();
+        self.record_replacements(found)
+    }
+
+    /// The same over every staged member — for the moments something is about to
+    /// *report* on an archive or write it, where an agent's edit to a member the
+    /// user never opened has to be caught too. Costs a stat per staged member, so
+    /// it runs on those moments rather than on a timer.
+    pub(super) fn scan_archive_edits(&mut self) -> bool {
+        if self.state.mounts.is_empty() {
+            return false;
+        }
+        let found: Vec<(PathBuf, Vec<String>)> = self
+            .state
+            .mounts
+            .iter()
+            .map(|m| {
+                let all: Vec<String> = m.staged.keys().cloned().collect();
+                (m.archive().to_path_buf(), changed_among(m, &all))
+            })
+            .filter(|(_, changed)| !changed.is_empty())
+            .collect();
+        self.record_replacements(found)
+    }
+
+    /// Enter the detected changes into each journal, and stop watching them.
+    fn record_replacements(&mut self, found: Vec<(PathBuf, Vec<String>)>) -> bool {
+        let any = !found.is_empty();
+        for (archive, changed) in found {
+            let Some(mount) = self.state.mounts.get_mut(&archive) else {
+                continue;
+            };
+            for inner in changed {
+                mount.journal.replace(&inner);
+                mount.editing.retain(|w| *w != inner);
+            }
+        }
+        any
+    }
+
     pub(super) fn mount_is_dirty(&self, archive: &Path) -> bool {
         let Some(mount) = self.state.mounts.get(archive) else {
             return false;
@@ -1087,6 +1181,12 @@ fn current_staged_stats(mount: &ArchiveMount) -> crate::archive::journal::Staged
         let Ok(md) = std::fs::metadata(&path) else {
             continue;
         };
+        // Directories are skipped: a staging directory's mtime moves whenever
+        // *any* member inside it is written, so counting it would report a change
+        // to a member nobody touched.
+        if md.is_dir() {
+            continue;
+        }
         now.insert(
             entry.inner.clone(),
             crate::archive::journal::StagedStat {
@@ -1097,6 +1197,33 @@ fn current_staged_stats(mount: &ArchiveMount) -> crate::archive::journal::Staged
         );
     }
     now
+}
+
+/// Which of `candidates` has a staged copy that no longer matches what spyc
+/// recorded — skipping any already recorded as replaced.
+fn changed_among(mount: &ArchiveMount, candidates: &[String]) -> Vec<String> {
+    candidates
+        .iter()
+        .filter(|inner| !mount.journal.is_replaced(inner))
+        .filter(|inner| {
+            let Some(entry) = mount.index.get(inner) else {
+                return false;
+            };
+            let Ok(md) = std::fs::metadata(mount.staging_path(entry)) else {
+                return false;
+            };
+            if md.is_dir() {
+                return false;
+            }
+            let now = crate::archive::journal::StagedStat {
+                size: md.len(),
+                mtime: md.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+                is_dir: false,
+            };
+            mount.staged.get(inner.as_str()) != Some(&now)
+        })
+        .cloned()
+        .collect()
 }
 
 /// Whether anything staged differs from what spyc recorded when it wrote it.

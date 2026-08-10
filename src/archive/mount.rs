@@ -41,6 +41,13 @@ pub struct ArchiveMount {
     /// inside that, and so on. Carried rather than derived so a third level can't
     /// read as a second.
     pub depth: usize,
+    /// Members handed to an editor, by journal path.
+    ///
+    /// An edit leaves no journal entry of its own — the evidence is the staged
+    /// file's `(size, mtime)` against what spyc recorded. Knowing which members to
+    /// look at means the check costs a stat or two per loop wake instead of one
+    /// per member, which matters for an archive with 50k of them.
+    pub editing: Vec<String>,
 }
 
 impl ArchiveMount {
@@ -261,6 +268,7 @@ mod tests {
             staging_root: PathBuf::from(format!("/staging/{}", archive.replace('/', "_"))),
             last_used: 0,
             depth: 0,
+            editing: Vec::new(),
         }
     }
 

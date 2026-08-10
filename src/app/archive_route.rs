@@ -571,6 +571,7 @@ mod tests {
                 staging_root: PathBuf::from("/staging"),
                 last_used: 0,
                 depth: 0,
+                editing: Vec::new(),
             },
             &[],
         );

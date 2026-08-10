@@ -499,8 +499,10 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   no bytes move however large it is), and `e` / `V` edit a member by extracting it
   and opening your editor on that copy. Everything stays pending until
   `:archive write`; the suffix carries a `+2 ~1 -3` badge meanwhile. An edit made
-  outside spyc — by your editor, or by an agent in the pane — is noticed too,
-  because spyc compares each extracted file against what it wrote.
+  outside spyc — by your editor, or by an agent in the pane — counts as a change
+  too, and shows in that badge: spyc compares each extracted file against what it
+  wrote. From outside the archive, where the badge isn't visible, `:archive info`
+  and `:archive list` name every mount carrying unwritten changes.
 - **The archive is still a file** — where it lives, `pkg.zip` can be yanked,
   copied, renamed and deleted like anything else, mounted or not. Leaving one and
   pressing `Enter` again re-enters it without re-reading it, so pending changes
