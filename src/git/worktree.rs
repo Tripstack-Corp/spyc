@@ -33,6 +33,12 @@ pub struct Worktree {
     pub head: String,
     /// Branch name, "(detached)", or "(bare)".
     pub branch: String,
+    /// The repo's MAIN worktree (git's term) — the checkout at the common dir,
+    /// not a linked one. The `branch` column names whatever is checked out
+    /// there, so this is the only thing that identifies the main worktree once
+    /// it holds a feature branch. False for a bare repo's entry: it has no
+    /// working tree at all, and its row already reads `(bare)`.
+    pub primary: bool,
 }
 
 /// Short-7 commit prefix for a repo's HEAD, or empty if HEAD can't resolve
@@ -80,6 +86,7 @@ pub fn list(dir: &Path) -> Option<Vec<Worktree>> {
             path: workdir,
             head: head_short(&main),
             branch: head_branch_label(&main),
+            primary: true,
         }),
         // Bare repo: no main working tree, but git still lists the bare
         // entry first. Keep the "(bare)" label the callers expect.
@@ -87,6 +94,7 @@ pub fn list(dir: &Path) -> Option<Vec<Worktree>> {
             path: common_dir,
             head: head_short(&repo),
             branch: "(bare)".to_string(),
+            primary: false,
         }),
     }
 
@@ -101,7 +109,12 @@ pub fn list(dir: &Path) -> Option<Vec<Worktree>> {
             Ok(wt_repo) => (head_short(&wt_repo), head_branch_label(&wt_repo)),
             Err(_) => (String::new(), "(detached)".to_string()),
         };
-        worktrees.push(Worktree { path, head, branch });
+        worktrees.push(Worktree {
+            path,
+            head,
+            branch,
+            primary: false,
+        });
     }
 
     if worktrees.is_empty() {
@@ -932,6 +945,31 @@ mod tests {
             paths, main_paths,
             "listing must be identical whether opened from main or a linked worktree"
         );
+    }
+
+    #[test]
+    fn only_the_main_worktree_is_flagged_primary() {
+        let (_tmp, main) = init_repo();
+        let target = add(&main, "feature", None).expect("add");
+
+        // From either vantage point exactly one entry — the main worktree — is
+        // primary. The `W l` picker's "(main worktree)" marker rides this flag,
+        // and it's the only thing naming the main checkout once a feature branch
+        // is checked out there, so a linked worktree wearing it would send the
+        // user to the wrong dir.
+        for from in [&main, &target] {
+            let listed = list(from).expect("list");
+            let flagged: Vec<_> = listed
+                .iter()
+                .filter(|w| w.primary)
+                .map(|w| w.path.clone())
+                .collect();
+            assert_eq!(
+                flagged,
+                vec![main.clone()],
+                "listing from {from:?} should flag only the main worktree"
+            );
+        }
     }
 
     #[test]

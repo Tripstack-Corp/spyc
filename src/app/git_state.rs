@@ -254,21 +254,7 @@ impl App {
                 let lines: Vec<String> = worktrees
                     .iter()
                     .enumerate()
-                    .map(|(i, wt)| {
-                        let current = if wt.path == cur_dir {
-                            " ← current"
-                        } else {
-                            ""
-                        };
-                        format!(
-                            "  [{}]  {:<30} {:>8}  {}{}",
-                            i + 1,
-                            wt.branch,
-                            wt.head,
-                            wt.path.display(),
-                            current,
-                        )
-                    })
+                    .map(|(i, wt)| worktree_row(i, wt, &cur_dir))
                     .collect();
                 let mut view = pager::PagerView::new_plain(
                     "git worktrees — j/k+Enter or 1-9 to switch, / to search, q to close",
@@ -288,6 +274,27 @@ impl App {
                 .flash_error("not in a git repository (or no worktrees)"),
         }
     }
+}
+
+/// One `W l` picker row: `[n]  branch  head  path`, marked ` (main worktree)`
+/// for the repo's main checkout and ` ← current` for the one the focused column
+/// sits in. The branch column names whatever is checked out there, so without
+/// the main marker a main worktree holding a feature branch reads exactly like a
+/// linked one — and then "where do I switch back to?" has no answer on screen.
+fn worktree_row(i: usize, wt: &crate::git::worktree::Worktree, cur_dir: &Path) -> String {
+    format!(
+        "  [{}]  {:<30} {:>8}  {}{}{}",
+        i + 1,
+        wt.branch,
+        wt.head,
+        wt.path.display(),
+        if wt.primary { " (main worktree)" } else { "" },
+        if wt.path == cur_dir {
+            " ← current"
+        } else {
+            ""
+        },
+    )
 }
 
 /// Relativize an absolute `path` to a repo-relative, forward-slash path under
@@ -326,6 +333,61 @@ mod tests {
         assert_eq!(
             repo_relative(Path::new("/home/u/proj/README.md"), root).as_deref(),
             Some("README.md")
+        );
+    }
+
+    fn wt(path: &str, branch: &str, primary: bool) -> crate::git::worktree::Worktree {
+        crate::git::worktree::Worktree {
+            path: std::path::PathBuf::from(path),
+            head: "abc1234".to_string(),
+            branch: branch.to_string(),
+            primary,
+        }
+    }
+
+    /// The whole point of the marker: the main worktree is identifiable even
+    /// when the branch checked out in it isn't the default one.
+    #[test]
+    fn main_worktree_row_is_marked_whatever_branch_it_holds() {
+        let row = super::worktree_row(0, &wt("/src/proj", "fold-rule-8", true), Path::new("/nope"));
+        assert!(
+            row.contains("(main worktree)"),
+            "main worktree row must say so: {row}"
+        );
+        assert!(row.contains("fold-rule-8"), "branch still shown: {row}");
+    }
+
+    #[test]
+    fn linked_worktree_row_is_not_marked_main() {
+        let row = super::worktree_row(
+            1,
+            &wt("/src/proj.worktrees/feat", "feat", false),
+            Path::new("/nope"),
+        );
+        assert!(
+            !row.contains("(main worktree)"),
+            "a linked worktree is not the main one: {row}"
+        );
+    }
+
+    /// A bare repo has no working tree to mark, and its row already reads
+    /// `(bare)` — so the marker must not claim otherwise.
+    #[test]
+    fn bare_repo_row_is_not_marked_main() {
+        let row = super::worktree_row(0, &wt("/src/proj.git", "(bare)", false), Path::new("/nope"));
+        assert!(row.contains("(bare)"), "bare label kept: {row}");
+        assert!(
+            !row.contains("(main worktree)"),
+            "a bare repo has no main worktree: {row}"
+        );
+    }
+
+    #[test]
+    fn both_markers_appear_when_the_user_is_in_the_main_worktree() {
+        let row = super::worktree_row(0, &wt("/src/proj", "main", true), Path::new("/src/proj"));
+        assert!(
+            row.ends_with("(main worktree) ← current"),
+            "main marker precedes the current marker: {row}"
         );
     }
 
