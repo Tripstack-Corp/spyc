@@ -358,7 +358,12 @@ spyc's workflow: browse files above, talk to Claude below.
 - **W l** opens a **worktree picker** — `j`/`k` (or arrows) move the
   highlighted row, `Enter` switches the *focused* column to it, `/`
   searches (the cursor lands on the match), and `1`-`9` quick-switch by
-  number (focus `b` first to put a worktree there). With the MCP tools
+  number (focus `b` first to put a worktree there). Rows list the main
+  worktree first (git's ordering), each showing the branch checked out
+  in it; the main one is marked **`(main worktree)`** and the one the
+  focused column is in `← current`. The marker is what tells you which
+  row is your git home when a feature branch is checked out there
+  directly — the branch column can't. With the MCP tools
   (`create_worktree` / `open_worktree` /
   `remove_worktree` / `clean_worktree`) an agent can spin up a worktree,
   open it in `b`, work, and tear it down — while `a` stays on the main
