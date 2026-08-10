@@ -281,13 +281,17 @@ impl App {
 /// sits in. The branch column names whatever is checked out there, so without
 /// the main marker a main worktree holding a feature branch reads exactly like a
 /// linked one — and then "where do I switch back to?" has no answer on screen.
+///
+/// The path is tilde-collapsed like every other user-facing path display; the
+/// switch target comes from `state.pending_worktrees`, which keeps the real
+/// absolute paths, so shortening the label can't misdirect a jump.
 fn worktree_row(i: usize, wt: &crate::git::worktree::Worktree, cur_dir: &Path) -> String {
     format!(
         "  [{}]  {:<30} {:>8}  {}{}{}",
         i + 1,
         wt.branch,
         wt.head,
-        wt.path.display(),
+        crate::paths::display_tilde(&wt.path),
         if wt.primary { " (main worktree)" } else { "" },
         if wt.path == cur_dir {
             " ← current"
@@ -379,6 +383,32 @@ mod tests {
         assert!(
             !row.contains("(main worktree)"),
             "a bare repo has no main worktree: {row}"
+        );
+    }
+
+    /// Paths under `$HOME` collapse to `~/…` like every other user-facing path
+    /// display (DESIGN.md), and the markers still land after the shortened path.
+    #[test]
+    fn row_path_is_tilde_collapsed() {
+        let Some(home) = std::env::var_os("HOME") else {
+            return;
+        };
+        let home = home.to_string_lossy().trim_end_matches('/').to_string();
+        let path = format!("{home}/src/proj");
+        let row = super::worktree_row(0, &wt(&path, "fold-rule-8", true), Path::new(&path));
+        assert!(
+            row.contains("~/src/proj (main worktree) ← current"),
+            "path should be tilde-collapsed with markers intact: {row}"
+        );
+        assert!(!row.contains(&home), "absolute home prefix leaked: {row}");
+    }
+
+    #[test]
+    fn row_path_outside_home_is_left_absolute() {
+        let row = super::worktree_row(0, &wt("/srv/checkout", "main", true), Path::new("/nope"));
+        assert!(
+            row.contains("/srv/checkout"),
+            "a non-home path stays as-is: {row}"
         );
     }
 
