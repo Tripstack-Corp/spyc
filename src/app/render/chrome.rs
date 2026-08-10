@@ -11,6 +11,24 @@ use crate::ui::list_view::Row;
 
 use crate::app::{App, TaskStatus, View, state};
 
+/// A listing row's pending-archive-change marker, mapped onto the gutter's
+/// vocabulary. `None` when the row isn't a member of a mount, or nothing about it
+/// is pending — which is every row outside an archive.
+fn archive_change(
+    mounts: &crate::archive::Mounts,
+    path: &std::path::Path,
+) -> Option<crate::ui::list_view::GitChange> {
+    use crate::archive::MemberChange;
+    use crate::ui::list_view::GitChange;
+    let (mount, _) = mounts.member_of(path)?;
+    let entry = mount.entry_at(path)?;
+    Some(match mount.journal.state_of(&entry.inner)? {
+        MemberChange::Added => GitChange::Added,
+        MemberChange::Replaced => GitChange::Modified,
+        MemberChange::Renamed => GitChange::Renamed,
+    })
+}
+
 impl App {
     /// Pane status line: tab indicators, active cwd, [SCROLL] tag.
     /// Replaces the old plain-rule divider.
@@ -532,12 +550,25 @@ impl App {
             .map(|rd| {
                 // Per-column git: read THIS commander's markers, so `b` shows
                 // its own repo's status, not `a`'s.
-                let git_status = c
-                    .git
-                    .files
-                    .get(rd.git_key())
-                    .copied()
-                    .unwrap_or_else(GitFileStatus::clean);
+                //
+                // Inside an archive the gutter carries the *archive's* pending
+                // changes instead. It's the same question the git markers answer —
+                // "what about this row isn't written yet" — and `:archive write` is
+                // the commit, so a pending change reads as unstaged.
+                let git_status = archive_change(&self.state.mounts, &rd.path).map_or_else(
+                    || {
+                        c.git
+                            .files
+                            .get(rd.git_key())
+                            .copied()
+                            .unwrap_or_else(GitFileStatus::clean)
+                    },
+                    |change| GitFileStatus {
+                        staged: None,
+                        unstaged: Some(change),
+                        untracked: false,
+                    },
+                );
                 let pending_delete = delete_set
                     .as_ref()
                     .is_some_and(|s| s.contains(rd.path.as_path()));

@@ -1074,6 +1074,13 @@ impl App {
                 mount.editing.retain(|w| *w != inner);
             }
         }
+        if any {
+            // The rows are cached against `list_generation`, and an edit doesn't
+            // change which rows exist — only what one of them should now say. The
+            // rebuild is what makes the marker appear rather than waiting for the
+            // next unrelated listing change.
+            self.state.rebuild_rows();
+        }
         any
     }
 
