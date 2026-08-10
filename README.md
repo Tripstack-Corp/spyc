@@ -64,6 +64,50 @@ coding agents.
 
 <sub>spyc is an independent project, not affiliated with or endorsed by Side Effects Software Inc. or Anthropic.</sub>
 
+## A tour
+
+The bridge above is what makes spyc different. This is the rest of it — the
+commander you spend the day in.
+
+### Read anything, one key
+
+<img src="docs/assets/demo-pager.gif" alt="Opening README.md as rendered markdown, then a Rust file with syntax highlighting, then a binary as a hex dump — all in the same pager" width="820">
+
+Markdown renders — headings, tables, fenced code — source arrives
+syntax-highlighted, and a binary falls back to a hex dump. Same key every time,
+no editor, and the file list is still right there. Images open as actual
+pictures on a terminal with a graphics protocol, and `^a |` puts any of it in a
+live-reloading side column.
+
+### Review it where you are
+
+<img src="docs/assets/demo-review.gif" alt="The git gutter marking modified files, gd opening a syntax-highlighted side-by-side diff, | toggling unified, gb blaming the file" width="820">
+
+The gutter marks what changed; `gd` opens a syntax-highlighted diff against
+HEAD, `|` toggles side-by-side and unified, `gb` blames the file. All of it
+in-process through gix — spyc never shells out to `git`.
+
+### Script it in Lua
+
+<img src="docs/assets/demo-lua.gif" alt="Reading a Lua script in the pager, then pressing the key it is bound to and watching every file with a TODO get picked" width="820">
+
+`map T lua todos` binds a key to a script. This one runs spyc's own
+gitignore-aware content search, then picks every file with a TODO left in it —
+and `=!` narrows the listing to exactly those. Scripts run off the main thread
+behind a kill switch, and `init.lua` can register `:` commands and event hooks
+too.
+
+### See which agent needs you
+
+<img src="docs/assets/demo-agents.gif" alt="Two claude tabs running; one keeps working while the other blocks on a question, turning its tab dot red and pulsing the window border" width="820">
+
+Two agents, one question: which one is waiting on *you*. Each tab carries a
+live dot — pulsing while it works, settling to a hot-red square the moment it
+blocks — and that transition rings a spice-heat border pulse and a desktop
+notification, so you can be in another window and still get pulled back to the
+right pane. It's driven by the agent reporting its own status over MCP, not by
+scraping the screen.
+
 ## Quick start
 
 ### Prerequisites
