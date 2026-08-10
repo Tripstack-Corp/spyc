@@ -302,6 +302,10 @@ impl App {
                 if matches!(mount, crate::ui::pager::Mount::TopPane)
                     && let Some(src) = view.source_path.clone()
                 {
+                    // The pager's source *is* the staged copy when it was opened on
+                    // an archive member, so this hands a member to an editor
+                    // without going through `open_member`.
+                    self.watch_for_edits(&src);
                     let cmd = format!(
                         "{editor_cmd} {}",
                         shell::shell_quote(&src.display().to_string())
@@ -315,7 +319,8 @@ impl App {
                 }
 
                 // Determine the file to edit and the return state.
-                let (edit_path, pager_return) = if let Some(ref src) = view.source_path {
+                let source = view.source_path.clone();
+                let (edit_path, pager_return) = if let Some(ref src) = source {
                     (
                         src.clone(),
                         PagerReturn::SourceFile {
@@ -344,6 +349,13 @@ impl App {
                         }
                     }
                 };
+                // A pager opened on an archive member holds the staged copy as its
+                // source, so this hands a member to an editor without going through
+                // `open_member`. (After the `view` borrow, which the editor path
+                // above still needs.)
+                if source.is_some() {
+                    self.watch_for_edits(&edit_path);
+                }
                 self.view.pending_pager_return = Some(pager_return);
                 // A scrollback `v` lives in `view.scroll_pager`, which
                 // `clear_pager` (top slot only) wouldn't touch — clear ITS slot

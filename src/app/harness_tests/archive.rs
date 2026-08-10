@@ -1387,6 +1387,26 @@ fn build_tar_gz(path: &Path) {
     b.into_inner().unwrap().finish().unwrap();
 }
 
+/// A `.tar.gz` with `count` small members, for the staged-set bound.
+fn build_tar_gz_with(path: &Path, count: usize) {
+    let enc = flate2::write::GzEncoder::new(
+        std::fs::File::create(path).unwrap(),
+        flate2::Compression::default(),
+    );
+    let mut b = tar::Builder::new(enc);
+    for i in 0..count {
+        let body = format!("member {i}\n");
+        let mut h = tar::Header::new_gnu();
+        h.set_size(body.len() as u64);
+        h.set_mode(0o644);
+        h.set_mtime(1_000_000);
+        h.set_entry_type(tar::EntryType::Regular);
+        b.append_data(&mut h, format!("file-{i}.txt"), body.as_bytes())
+            .unwrap();
+    }
+    b.into_inner().unwrap().finish().unwrap();
+}
+
 /// The reported bug: `y` inside a `.tar.gz` failed with
 /// `demo.tar.gz/src/main.rs: Not a directory`.
 ///
@@ -2018,10 +2038,13 @@ fn an_edit_becomes_a_pending_change_the_badge_can_show() {
     });
 }
 
-/// An agent in the pane editing a member the user never opened is caught too —
-/// on the next thing that reports, rather than by statting every member forever.
+/// The route that actually bit: the pager's `v` edits its own `source_path`,
+/// which for a member *is* the staged copy — so spyc never handed the member to
+/// an editor through `open_member`. An agent in the pane writing the same file
+/// looks identical. Neither can be caught by watching only what spyc knows it
+/// handed over, which is why the scan covers everything staged.
 #[test]
-fn an_edit_to_a_member_nobody_opened_is_caught_when_something_reports() {
+fn an_edit_spyc_did_not_make_shows_up_without_being_asked() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let dir = tmp.path().to_path_buf();
@@ -2030,20 +2053,60 @@ fn an_edit_to_a_member_nobody_opened_is_caught_when_something_reports() {
         let mut app = App::test_app(dir);
         mount_inline(&mut app, &archive, &tmp.path().join("staging"));
 
-        // Extract a member the way a read does (no editor, so nothing is watched).
+        // Extract a member the way a *read* does — nothing is handed to an editor.
         app.apply(&Action::Down(1)).unwrap();
         let fx = app.apply(&Action::Take).unwrap();
         settle(&mut app, fx);
         let mount = app.state.mounts.get(&archive).expect("mounted");
-        assert!(mount.editing.is_empty(), "nothing is being watched");
+        assert!(mount.editing.is_empty(), "spyc handed nothing to an editor");
         let staged = mount.staging_path(mount.index.get("README.md").unwrap());
 
         std::fs::write(&staged, b"# changed by something else\n").unwrap();
+
+        assert!(
+            app.settle_archive_edits(),
+            "and it is still noticed, with no command run"
+        );
+        assert_eq!(
+            app.state
+                .mounts
+                .get(&archive)
+                .unwrap()
+                .journal
+                .counts()
+                .badge(),
+            "~1"
+        );
+    });
+}
+
+/// The bound that keeps that scan affordable. A streamed mount extracts every
+/// member, so its staged set is the whole archive — statting it on every keypress
+/// would be visible jank, and those fall back to the scan at reporting time.
+#[test]
+fn a_huge_staged_set_falls_back_to_the_reporting_scan() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("many.tar.gz");
+        build_tar_gz_with(&archive, 300);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let mount = app.state.mounts.get(&archive).expect("mounted");
+        assert!(
+            mount.staged.len() > 256,
+            "the fixture is past the bound: {}",
+            mount.staged.len()
+        );
+        let staged = mount.staging_path(mount.index.get("file-7.txt").unwrap());
+        std::fs::write(&staged, b"edited\n").unwrap();
+
         assert!(
             !app.settle_archive_edits(),
-            "the cheap check only looks where it was told to"
+            "too many to stat on every wake"
         );
-        assert!(app.scan_archive_edits(), "the full scan finds it");
+        assert!(app.scan_archive_edits(), "but reporting still catches it");
         assert_eq!(
             app.state
                 .mounts
