@@ -543,14 +543,35 @@ fn copy_impl(_text: &str) -> io::Result<()> {
 /// the clipboard). Accepted, because the fast-failure case this does catch —
 /// `xclip` with a bad `$DISPLAY` exits in single-digit ms — is the one that
 /// actually happens, and a broken clipboard announces itself at the next
-/// paste. The real fix for both halves is moving the write off-thread
-/// entirely (AGENTS.md's `graveyard_ops` template), where no budget is needed.
+/// paste.
+///
+/// It bounds the **write** as well as the wait. It didn't: `write_all` ran
+/// before the loop, so a helper that never drained stdin blocked the caller
+/// past any budget — see `spawn_and_pipe`. What remains is that the budget is
+/// still spent on the calling thread; moving the whole write off-thread
+/// (AGENTS.md's `graveyard_ops` template, as the paste side now does) is what
+/// would remove that too.
 const HELPER_REAP_BUDGET: Duration = Duration::from_millis(150);
 
 /// Poll granularity for the bounded wait below — small enough that the
 /// common case (helper exits almost immediately) doesn't add perceptible
 /// latency to a yank.
 const HELPER_REAP_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+/// Collect the payload-writing thread's result. `None` means the child had no
+/// stdin to write to, which is not a failure.
+///
+/// A panic in the writer is reported as an error rather than resumed: the caller
+/// is the yank path, and taking spyc down over a clipboard helper would be a
+/// worse outcome than saying the yank failed.
+fn join_write(writer: Option<std::thread::JoinHandle<io::Result<()>>>) -> io::Result<()> {
+    match writer {
+        None => Ok(()),
+        Some(w) => w
+            .join()
+            .unwrap_or_else(|_| Err(io::Error::other("clipboard writer panicked"))),
+    }
+}
 
 fn spawn_and_pipe(prog: &str, args: &[&str], text: &str) -> io::Result<()> {
     // Null out stdout/stderr: spyc runs in raw-mode alternate-screen, so
@@ -563,14 +584,23 @@ fn spawn_and_pipe(prog: &str, args: &[&str], text: &str) -> io::Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
-    // Write the payload, then drop stdin so the helper sees EOF — but do NOT
-    // early-return on a write error: a bare `?` here would drop the child
-    // handle without reaping it, leaking a zombie (the bug this guards).
-    // Capture the result and reap below instead.
-    let write_result = match child.stdin.take() {
-        Some(mut stdin) => stdin.write_all(text.as_bytes()),
-        None => Ok(()),
-    };
+    // Write the payload on its own thread, and drop stdin with it so the helper
+    // sees EOF.
+    //
+    // Not inline: `write_all` to a pipe blocks until the reader drains it, so a
+    // helper that never reads and never exits blocks the caller **forever** —
+    // and this runs from `run_effects`, i.e. on the event loop. The deadline
+    // below has to bound the write as well as the wait, which it can only do if
+    // the write is somewhere it can be abandoned. (Below the pipe buffer the
+    // write completes into the kernel regardless of whether the helper ever
+    // reads; that is genuinely written, and the same as it ever was.)
+    //
+    // The result is collected rather than `?`-returned for the original reason:
+    // a bare `?` here would drop the child handle unreaped, leaking a zombie.
+    let writer = child.stdin.take().map(|mut stdin| {
+        let bytes = text.as_bytes().to_vec();
+        std::thread::spawn(move || stdin.write_all(&bytes))
+    });
 
     // Poll with `try_wait()` rather than block on `wait()` — see
     // HELPER_REAP_BUDGET. A genuine launch failure exits promptly; a helper
@@ -587,16 +617,42 @@ fn spawn_and_pipe(prog: &str, args: &[&str], text: &str) -> io::Result<()> {
     }
 
     let Some(status) = exited else {
-        // Still running past the budget: treat as success and detach a
-        // reaper so it's still cleaned up (no zombie) whenever it does
-        // eventually exit. Nobody is waiting on that outcome, so no
-        // Message/feedback is needed.
-        write_result?;
-        std::thread::spawn(move || {
-            let _ = child.wait();
-        });
-        return Ok(());
+        // Still running past the budget. Two different situations, told apart by
+        // whether the payload actually went in.
+        match writer {
+            // Never took a byte of it. `xclip` persisting to serve the selection
+            // looks identical from the outside *except* for this: it reads first.
+            // So the text is nowhere, and saying "yanked" would be a lie. Killing
+            // the child is also what releases the writer — its pipe loses its
+            // reader, and the blocked `write_all` fails.
+            Some(w) if !w.is_finished() => {
+                let _ = child.kill();
+                let _ = child.wait();
+                drop(w);
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!(
+                        "{prog} did not read the clipboard payload within {:?}",
+                        reap_budget()
+                    ),
+                ));
+            }
+            // Took the text and is simply still running — the X11 helpers keep
+            // serving the selection for as long as they own it. Success; detach a
+            // reaper so it's still cleaned up (no zombie) whenever it exits.
+            // Nobody is waiting on that outcome, so no Message/feedback either.
+            other => {
+                join_write(other)?;
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                return Ok(());
+            }
+        }
     };
+    // The child is gone, so the pipe has no reader and the writer can no longer
+    // block — joining it here is bounded.
+    let write_result = join_write(writer);
 
     // A non-zero exit means xclip/wl-copy/xsel launched cleanly and then
     // failed (no compositor, archived display, dbus unreachable…) — treat it
@@ -761,6 +817,55 @@ mod tests {
         assert!(
             err.to_string().contains("exited unsuccessfully"),
             "error message should mention non-zero exit, got: {err}"
+        );
+    }
+
+    /// **A helper that never reads stdin AND stays alive must not block the
+    /// caller.**
+    ///
+    /// The reap budget bounded the *wait*, not the write: `write_all` ran before
+    /// the deadline loop, so a full pipe blocked it indefinitely — on the event
+    /// loop, since a clipboard write is dispatched from `run_effects`. The
+    /// adjacent case where such a helper *exits* is covered
+    /// (`copy_reaps_child_and_errors_when_helper_ignores_large_stdin`): the
+    /// reader disappears, `write_all` gets EPIPE, and it errors promptly. That is
+    /// what hid this one — the never-reads-**and**-stays-alive shape had no test.
+    ///
+    /// The realistic trigger is `[clipboard] command` / `$SPYC_CLIPBOARD`, which
+    /// runs an arbitrary binary verbatim with nothing constraining it to drain
+    /// stdin.
+    ///
+    /// Run on its own thread so the assertion is a timeout rather than a hung
+    /// suite: before the fix this never returns.
+    #[cfg(unix)]
+    #[test]
+    fn copy_gives_up_on_a_helper_that_never_reads_and_never_exits() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let stub = tmp.path().join("stub-wedged.sh");
+        // Never reads stdin, never exits within any budget under test.
+        fs::write(&stub, "#!/bin/sh\nsleep 30\n").expect("write stub");
+        let mut perms = fs::metadata(&stub).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&stub, perms).unwrap();
+
+        let big = "x".repeat(512 * 1024); // >> any pipe buffer
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let r = with_reap_budget(Duration::from_millis(200), || {
+                retry_text_busy(|| with_clipboard_override(&stub, || copy(&big)))
+            });
+            let _ = tx.send(r);
+        });
+
+        let outcome = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("copy must give up rather than block on a wedged helper");
+        let err = outcome.expect_err("the helper never took the text, so the yank failed");
+        assert_eq!(
+            err.kind(),
+            io::ErrorKind::TimedOut,
+            "it must say the write timed out, not report a phantom success: {err:?}"
         );
     }
 
