@@ -691,7 +691,9 @@ end).
 - **`:bprev`** / **`:bnext`** — navigate pager buffer history (also `[b`/`]b` in pager)
 - **`:mouse on|off|auto`** — real mouse reporting: the wheel scrolls whatever is under
   the pointer, left-click focuses that region (and clicks through to a mouse-aware
-  agent), middle-click pastes, right-click opens the leader menu. **Costs native click-drag text
+  agent), middle-click pastes (read off-thread and bounded, so a wedged
+  `xclip`/pasteboard reports itself instead of freezing spyc), right-click opens
+  the leader menu. **Costs native click-drag text
   selection while on** (hold Shift to select anyway — Option/Fn on iTerm2);
   `:mouse off` gives it back immediately, no restart, and survives a config
   reload (`:mouse auto` returns to following the config). Default **on**
@@ -1207,9 +1209,11 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   then verify the submit landed — re-sending Enter while the command
   is still visibly unsubmitted, since Claude's async startup can eat
   a lone `\r`.
-  Codex tabs spawn `codex resume <UUID>` directly. When no UUID was
-  captured (pane killed before exit), codex falls back to `codex resume
-  --last`, which uses codex's native cwd-filtered picker. `zot` tabs
+  Codex tabs spawn `codex resume <UUID>` directly — the UUID being the
+  rollout spyc pinned to that tab while it ran, so a tab still working at
+  quit resumes exactly rather than guessing. When no UUID was ever pinned,
+  codex falls back to `codex resume --last`, which uses codex's native
+  cwd-filtered picker. `zot` tabs
   restore with `zot --continue` (zot's resume-most-recent-for-cwd);
   specific-session resume and transcript scrollback are a follow-up
   pending its on-disk session-file format.

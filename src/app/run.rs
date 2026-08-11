@@ -266,6 +266,7 @@ impl App {
                 | Message::ImageDone
                 | Message::ArchiveDone
                 | Message::FileOpDone
+                | Message::ClipboardPasteDone
                 | Message::InventoryDone
                 | Message::PreviewReloadDone
                 | Message::WorktreeJobDone
@@ -569,6 +570,17 @@ impl App {
             }
             if !file_fx.is_empty() {
                 self.run_effects(file_fx, terminal, &foreground_exec);
+            }
+
+            // A middle-click clipboard read that landed (woke us via
+            // `Message::ClipboardPasteDone`). Routing runs here, against the
+            // focus of *now* — see `apply_clipboard_pastes`.
+            let (paste_draw, paste_fx) = self.apply_clipboard_pastes();
+            if paste_draw {
+                ctx.draw.mark(3);
+            }
+            if !paste_fx.is_empty() {
+                self.run_effects(paste_fx, terminal, &foreground_exec);
             }
 
             // Drain finished Lua runs (woke via `Message::LuaDone`): apply the

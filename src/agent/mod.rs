@@ -171,11 +171,11 @@ pub trait AgentProfile: Sync {
     }
 
     /// SAVE: confirm the session id pinned to this tab
-    /// ([`crate::pane::tabs::TabInfo::live_session_id`] — from a status-hook
-    /// payload or an injected `/resume`) still names a real conversation, so save
-    /// can prefer it over the spawn-proximity resolver. `Some((id, name))` when it
-    /// checks out; `None` when it's stale or the agent has no history to check it
-    /// against.
+    /// ([`crate::pane::tabs::TabInfo::pinned_session_id`] — a status-hook payload,
+    /// an injected `/resume`, or a claimed codex rollout) still names a real
+    /// conversation, so save can prefer it over the spawn-proximity resolver.
+    /// `Some((id, name))` when it checks out; `None` when it's stale or the agent
+    /// has no history to check it against.
     fn validate_live_session_id(&self, _cwd: &Path, _id: &str) -> Option<(String, Option<String>)> {
         None
     }
@@ -572,6 +572,16 @@ impl AgentProfile for CodexProfile {
         let id = crate::state::sessions::extract_codex_resume_token(&lines)
             .filter(|tok| !claimed.contains(tok));
         (id, None)
+    }
+    /// Codex's pinned id is taken as-is: `codex_pin` read it out of a rollout
+    /// file's *name*, so there is no separate history to check it against — the
+    /// claim already was the observation. If that file has since gone,
+    /// `codex resume <uuid>` fails where the user can see it, which beats
+    /// `--last` silently attaching to whichever rollout in the cwd was written
+    /// last (the #230 shape). Claude validates instead, because its id arrives
+    /// from a hook payload that can name a conversation already gone.
+    fn validate_live_session_id(&self, _cwd: &Path, id: &str) -> Option<(String, Option<String>)> {
+        Some((id.to_string(), None))
     }
     fn command_without_resume(&self, cmd: &str) -> String {
         resume::command_without_codex_resume(cmd)

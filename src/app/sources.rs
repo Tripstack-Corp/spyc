@@ -87,6 +87,10 @@ pub fn coalesce_pending(
             // `apply_codex_session_pins` in the pre-recv scan.
             | Message::CodexSessionReady
             | Message::FileOpDone
+            // Middle-click clipboard read done — same payloadless wake; the text
+            // rides `runtime.clipboard_paste_results`, drained by
+            // `apply_clipboard_pastes` in the pre-recv scan.
+            | Message::ClipboardPasteDone
             | Message::InventoryDone
             | Message::Tick(_) => {}
             Message::Input(ev) => return Some(ev),
