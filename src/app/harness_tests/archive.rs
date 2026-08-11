@@ -3126,3 +3126,56 @@ fn a_failed_read_leaves_its_error_on_screen() {
         );
     });
 }
+
+/// Copying a directory into a mount used to report a successful write and lose
+/// everything inside it: the journal recorded one `Added { inner: "docs" }` for
+/// the whole tree, so the repack emitted a member named `docs` and dropped
+/// `docs/a.md` and `docs/b.md`. The verify pass couldn't catch it either — it
+/// compares the new archive against the same plan the children were missing from.
+#[test]
+fn copying_a_directory_into_an_archive_is_refused_rather_than_flattened() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let before = member_names(&archive);
+        let mut app = App::test_app(dir.clone());
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let tree = dir.join("docs");
+        std::fs::create_dir(&tree).unwrap();
+        std::fs::write(tree.join("a.md"), b"# a\n").unwrap();
+
+        app.state.flash = None;
+        settle(
+            &mut app,
+            vec![Effect::FileOp(crate::app::file_ops::FileOp::Copy {
+                paths: vec![tree],
+                dest: archive.clone(),
+            })],
+        );
+
+        let flash = app.state.flash.as_ref().map(|f| f.text.clone());
+        assert!(
+            flash
+                .as_deref()
+                .is_some_and(|f| f.contains("not directories")),
+            "the user is told why, not left with a silent loss: {flash:?}"
+        );
+        assert!(
+            !app.mount_is_dirty(&archive),
+            "and nothing was recorded to write back"
+        );
+        assert!(
+            !row_names(&app).contains(&"docs".to_string()),
+            "no phantom row: {:?}",
+            row_names(&app)
+        );
+
+        // A write now has nothing to do, and the archive is untouched.
+        let fx = app.cmd_archive("write");
+        settle(&mut app, fx);
+        assert_eq!(member_names(&archive), before);
+    });
+}
