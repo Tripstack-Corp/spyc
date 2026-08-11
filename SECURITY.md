@@ -175,13 +175,14 @@ procedure is stated here but has never been rehearsed.
   access). Note this is the weakest link in the release chain: signing
   proves an artifact came from the workflow, not that the *source* the
   workflow built was authored by who you think.
-- **Fuzz targets exist but do not run in CI.** `fuzz/fuzz_targets/`
-  covers the DSL parser, path/percent expansion, highlighting, markdown
-  rendering, and word wrap, run on demand via `make fuzz` (nightly,
-  deliberately out of `make check`). Nothing runs them on a schedule, so
-  in practice they only execute when someone remembers. Given the
-  untrusted-input surface noted in the threat model, that is a real gap
-  rather than a stylistic one.
+- **Fuzz targets run weekly, not per-PR.** `fuzz/fuzz_targets/` covers the
+  DSL parser, path/percent expansion, highlighting, markdown rendering,
+  word wrap, and the archive layer — member names and the container
+  parsers themselves. `.github/workflows/fuzz.yml` runs every target on a
+  schedule; `make fuzz` runs one on demand (nightly, deliberately out of
+  `make check`). A regression therefore surfaces within the week rather
+  than at the next release, but a PR can still merge without any target
+  having seen its code.
 - **macOS binaries are ad-hoc signed only.** `make install` invokes
   `codesign -s -`, which keeps entitlements stable across rebuilds and
   silences some Gatekeeper-on-translocation noise. It does **not**

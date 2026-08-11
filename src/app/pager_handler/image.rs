@@ -80,13 +80,20 @@ impl App {
     /// `Y` in the image overlay: copy what's *behind* the image — a diagram's
     /// mermaid source, or a file's path.
     fn yank_image_source(&mut self) {
+        let Some((text, label)) = self.view.image_view.as_ref().map(|iv| iv.origin.yankable())
+        else {
+            return;
+        };
+        // Read the text out first: delivery borrows `self` (it needs the config
+        // and the SSH flag), so it can't run while `image_view` is borrowed
+        // mutably for the flash.
+        let outcome = self.deliver_clipboard(&text);
         let Some(iv) = self.view.image_view.as_mut() else {
             return;
         };
-        let (text, label) = iv.origin.yankable();
-        iv.flash = Some(match crate::clipboard::copy(&text) {
+        iv.flash = Some(match outcome {
             Ok(()) => format!("{label} copied to clipboard"),
-            Err(e) => format!("copy failed: {e:#}"),
+            Err(e) => format!("copy failed: {e}"),
         });
         // Footer-only — no full repaint (see `save_image_view`: avoids flashing
         // the inline image).

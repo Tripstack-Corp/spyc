@@ -114,6 +114,41 @@ mod guard_tests {
         );
     }
 
+    /// Every yank goes through `deliver_clipboard`, never `clipboard::copy`.
+    ///
+    /// `copy` is the *local helper* — it writes the clipboard of the machine spyc
+    /// runs on. Over SSH that is the server, where the user can never paste from
+    /// it, and the call reports success. `deliver_clipboard` is the seam that
+    /// knows about `[clipboard] via`, the user's `command` override, and OSC 52
+    /// (which reaches the client terminal). Four yank verbs called `copy`
+    /// directly, so `yf`/`yP` behaved and `yp`/`ya`/`^a u`/image-`Y` silently
+    /// didn't — the delivery test in `app/clipboard.rs` calls that outcome
+    /// "worse than an error".
+    #[test]
+    fn yanks_go_through_the_one_delivery_seam() {
+        // The seam itself, plus the module that defines the helper.
+        const ALLOW: &[&str] = &["clipboard.rs"];
+        // Split so this guard's own source can't match the needle.
+        let needle = format!("{}{}", "clipboard::", "copy(");
+        let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app");
+        let mut offenders = Vec::new();
+        scan_rs(&app, &mut |path, src| {
+            let production = crate::guard_support::production_half(src);
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if production.contains(&needle) && !ALLOW.contains(&name) {
+                offenders.push(name.to_string());
+            }
+        });
+        offenders.sort();
+        assert!(
+            offenders.is_empty(),
+            "`clipboard::copy` writes the LOCAL clipboard — over SSH that's the \
+             server's, and it reports success. Call `self.deliver_clipboard(text)` \
+             instead, which honours `[clipboard] via` and OSC 52. Offenders: \
+             {offenders:?}"
+        );
+    }
+
     /// Every top-level `src/app/<feature>.rs` module must be named in the
     /// AGENTS.md module index — the June-2026 review found `worktree_clean.rs`,
     /// `activity.rs`, and `git_view_session.rs` silently absent, so the "map of
