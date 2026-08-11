@@ -57,6 +57,18 @@ commander exposes a local MCP socket the agent connects to. Everything else
 expect from a keyboard-driven file manager — the MCP bridge is what sets spyc
 apart from Yazi, Broot, or Ranger.
 
+<img src="docs/assets/screenshot.png" alt="spyc mid-task: two file columns browsing a worktree's src/ and its repo root, the activity HUD in the top right, three agent tabs on the divider with per-tab activity dots, and the active agent's output filling the lower pane" width="820">
+
+A real session, mid-task. Two file columns browse the same worktree (`^s n`) —
+`src/` on the left, the repo root on the right — while the status bar names the
+project, the session, the branch, and the agent pinned to the pane. Three agent
+tabs sit on the divider, each carrying its own activity dot; the boxed one is
+active. Top right is the `A` monitor: draws per second, git/fs/MCP throughput,
+pid and uptime, the running version, and a tally of every MCP tool the agents
+have called this session. Two bands are blurred out of the capture: the agent's
+own status line along the bottom, and one command echo that carried an absolute
+home path.
+
 **The name.** Say it *"spy-see"* — near enough to *spicy*, which is where the
 chili comes from. It carries a lineage too: `spy` and the keyboard-driven file
 commanders that came before it, rebuilt from scratch in Rust for the age of
@@ -76,17 +88,19 @@ commander you spend the day in.
 Markdown renders — headings, tables, fenced code — source arrives
 syntax-highlighted, and a binary falls back to a hex dump. Same key every time,
 no editor, and the file list is still right there. Images open as actual
-pictures on a terminal with a graphics protocol, and `^a |` puts any of it in a
+pictures on a terminal with a graphics protocol, and `^s |` puts any of it in a
 live-reloading side column.
 
 ### Keep a file open beside the list
 
-<img src="docs/assets/demo-vsplit.gif" alt="^a | opening a preview column on a markdown file, swapping it to a Rust file, growing it full-height, then cycling it off" width="820">
+<img src="docs/assets/demo-vsplit.gif" alt="A preview column opening full-height beside the file list with an agent pane below, flipping to top-only and back, swapping to a Rust file, scrolling and widening it, then a second full file-commander in the same column" width="820">
 
-`^a |` opens a preview column on the cursor file. Press it on a *different*
-file and the preview swaps to that one; press it again on the same file and it
-grows full-height, then cycles off. The previewed file re-renders when it
-changes on disk, so it doubles as a watch window while something else writes.
+`^s |` (or `^a |`) opens a preview column on the cursor file, full-height by
+default — set `[layout] vsplit_mode = "top_only"` to keep the agent pane
+full-width below instead, and `^s f` flips an open split either way. Press the
+key on a *different* file and the preview swaps to that one; press it again on
+the same file and it closes. The previewed file re-renders when it changes on
+disk, so it doubles as a watch window while something else writes.
 
 ### Review it where you are
 

@@ -1,7 +1,8 @@
-//! Vertical (left/right) split handlers: the `^a |` cycle, a/b focus, and
-//! width resize. The split *shape* is Model state (`AppState.vsplit`); the
-//! right-region preview content lives in `ViewState.right_pager`. The pure
-//! cycle transition is extracted + unit-tested (the `route.rs`/`focus.rs`
+//! Vertical (left/right) split handlers: the `^s |` open/close, the `^s f`
+//! height flip, a/b focus, and width resize. The split *shape* is Model state
+//! (`AppState.vsplit`); the
+//! right-region preview content lives in `ViewState.right_pager`. The opening
+//! shape + the height flip are pure and unit-tested (the `route.rs`/`focus.rs`
 //! template). The cursor-file validation + preview load live with the other
 //! pager-build code (`pager_handler::{previewable_cursor_path, load_right_preview}`).
 
@@ -30,36 +31,42 @@ pub(super) fn vsplit_column_widths(w: u16, width_pct: u16) -> Option<(u16, u16)>
     Some((w - right_w - 1, right_w))
 }
 
-/// Pure `^a |` transition: off → top-only → full-height → off. Width and
-/// focused side carry across the top-only → full-height flip.
-pub(super) fn next_vsplit(current: Option<state::VSplit>) -> Option<state::VSplit> {
-    use state::{Side, VSplit, VsplitMode};
-    match current {
-        None => Some(VSplit {
-            width_pct: DEFAULT_VSPLIT_PCT,
-            mode: VsplitMode::TopOnly,
-            focus: Side::Left,
-        }),
-        Some(v) if v.mode == VsplitMode::TopOnly => Some(VSplit {
-            mode: VsplitMode::FullHeight,
-            ..v
-        }),
-        Some(_) => None,
+/// The shape a fresh split opens in: `[layout] vsplit_mode` for the height, the
+/// default width, and the left column keeping the keyboard. Pure — the caller
+/// loads the preview and owns the "did it fail" rollback.
+pub(super) fn opening_vsplit(mode: crate::config::VsplitMode) -> state::VSplit {
+    state::VSplit {
+        width_pct: DEFAULT_VSPLIT_PCT,
+        mode: mode.into(),
+        focus: state::Side::Left,
+    }
+}
+
+/// Flash label for a split's height — the one place the two modes are named for
+/// the user, so `^s |` and `^s f` can't word them differently.
+const fn mode_label(mode: state::VsplitMode) -> &'static str {
+    match mode {
+        state::VsplitMode::TopOnly => "top-only",
+        state::VsplitMode::FullHeight => "full-height",
     }
 }
 
 impl App {
-    /// `^a |` — the vertical-split key. Behavior depends on what's open and
-    /// what's under the cursor:
-    /// - **Closed:** open (top-only) previewing the cursor file. If the cursor
+    /// `^s |` (and its `^a |` alias) — open or close the vertical split.
+    /// Behavior depends on what's open and what's under the cursor:
+    /// - **Closed:** open previewing the cursor file, at the height
+    ///   `[layout] vsplit_mode` asks for (full-height by default). If the cursor
     ///   isn't a previewable file (e.g. a directory), warn and stay closed.
     /// - **Open, cursor on a *different* file:** swap the preview to that file,
     ///   keeping the current shape (mode/width) — "send this file to the split".
-    /// - **Open, cursor on the same file (or not previewable):** cycle the
-    ///   shape: top-only → full-height → off.
-    pub(super) fn cycle_vsplit(&mut self) {
-        // The right region hosts EITHER a preview (`^a |`) or a second
-        // commander (`^s`) — never both. With a commander open, `^a |` is
+    /// - **Open, cursor on the same file (or not previewable):** close.
+    ///
+    /// The height is NOT part of this key — `^s f`
+    /// ([`Self::toggle_vsplit_height`]) flips it — so repeating `^s |` on one
+    /// file is a plain show/hide rather than a three-step cycle.
+    pub(super) fn toggle_vsplit(&mut self) {
+        // The right region hosts EITHER a preview (`^s |`) or a second
+        // commander (`^s n`) — never both. With a commander open, `^s |` is
         // disabled (no nesting); close it with `^s x` first.
         if self.state.right.is_some() {
             self.state
@@ -73,20 +80,8 @@ impl App {
                 self.state.flash_info("not a valid file for the pager");
                 return;
             };
-            // Default mode: full-height when no lower pane is open — top-only
-            // would reserve a strip for a pane that isn't there. With a pane,
-            // top-only keeps it full-width below both columns.
-            let pane_open = self.runtime.pane_tabs.is_some() && !self.state.pane.pane_hidden;
-            let mode = if pane_open {
-                state::VsplitMode::TopOnly
-            } else {
-                state::VsplitMode::FullHeight
-            };
-            self.state.vsplit = Some(state::VSplit {
-                width_pct: DEFAULT_VSPLIT_PCT,
-                mode,
-                focus: state::Side::Left,
-            });
+            let shape = opening_vsplit(self.state.config.layout.vsplit_mode);
+            self.state.vsplit = Some(shape);
             // If the file couldn't be read/rendered, `load_right_preview`
             // flashed its own error and left the slot as-is — don't leave a
             // blank split open.
@@ -94,9 +89,9 @@ impl App {
                 self.state.vsplit = None;
                 return;
             }
-            let label = if pane_open { "top-only" } else { "full-height" };
+            let label = mode_label(shape.mode);
             self.state
-                .flash_info(format!("vsplit: {label} (^a | to cycle)"));
+                .flash_info(format!("vsplit: {label} (^s f flips height)"));
             self.view.needs_full_repaint = true;
             return;
         }
@@ -126,20 +121,23 @@ impl App {
             return;
         }
 
-        // Same file (or cursor not previewable): cycle the shape.
-        self.state.vsplit = next_vsplit(self.state.vsplit);
-        if let Some(v) = self.state.vsplit {
-            let mode = match v.mode {
-                state::VsplitMode::TopOnly => "top-only",
-                state::VsplitMode::FullHeight => "full-height",
-            };
-            self.state
-                .flash_info(format!("vsplit: {mode} (^a | to cycle)"));
-        } else {
-            // Closed: drop the preview. Keyboard focus stays where it is.
-            self.view.right_pager = None;
-            self.state.flash_info("vsplit: off");
-        }
+        // Same file (or cursor not previewable): close. Keyboard focus stays
+        // where it is; `close_vsplit` drops the preview with the shape.
+        self.close_vsplit();
+    }
+
+    /// `^s f` — flip an open split's height: full-height ⇄ top-only. Width and
+    /// focused column carry across. Applies to whatever the right column holds —
+    /// a `^s |` preview or a second commander (`^s n`), which opens top-only but
+    /// can be made full-height from here.
+    pub(super) fn toggle_vsplit_height(&mut self) {
+        let Some(v) = self.state.vsplit.as_mut() else {
+            self.state.flash_info("no vertical split (^s | opens one)");
+            return;
+        };
+        v.mode = v.mode.flipped();
+        let label = mode_label(v.mode);
+        self.state.flash_info(format!("vsplit: {label}"));
         self.view.needs_full_repaint = true;
     }
 
@@ -164,6 +162,9 @@ impl App {
     /// worktree create/open) use [`Self::open_second_commander_at_background`],
     /// which makes `b` active without pulling the user out of the pane.
     pub(super) fn open_second_commander_at(&mut self, dir: &std::path::Path) {
+        // The user asking for `b` takes ownership of the column: any preview an
+        // agent displaced earlier stops being owed back.
+        self.view.displaced_preview = None;
         self.open_second_commander_at_inner(dir, true);
     }
 
@@ -174,7 +175,14 @@ impl App {
     /// shouldn't be yanked out of it. Differs from the `^s n` open only when the
     /// pane is focused (then focus stays on the pane); from a file column the two
     /// coincide, since a `cur() == b` file column necessarily owns the keyboard.
+    ///
+    /// A preview open in that column is **set aside, not discarded**: the user
+    /// was reading it and never asked for the commander, so closing `b` puts the
+    /// file (and the split shape it had) straight back.
     pub(super) fn open_second_commander_at_background(&mut self, dir: &std::path::Path) {
+        if let (Some(shape), Some(preview)) = (self.state.vsplit, self.view.right_pager.take()) {
+            self.view.displaced_preview = Some((shape, preview));
+        }
         self.open_second_commander_at_inner(dir, false);
     }
 
@@ -183,11 +191,14 @@ impl App {
     /// agent opening `b` in the background doesn't steal the pane from the user.
     /// Either way `b` becomes the active/`cur()` column (`vsplit.focus = Right`).
     /// The right region hosts a real commander (`state.right`) — mutually
-    /// exclusive with the `^a |` preview, so any open preview is dropped.
-    /// Always **top-only**: full-height would clamp the bottom pane to the left
-    /// column (pane under `a` only), which makes no sense for two peer browsers
-    /// sharing one pane — the pane stays full-width below both columns and `b`
-    /// occupies the top-right region.
+    /// exclusive with the `^s |` preview, so an open preview yields the column
+    /// (the agent path stashes it first; the user path discards it, having been
+    /// asked for).
+    /// Opens **top-only** regardless of `[layout] vsplit_mode`: full-height
+    /// clamps the bottom pane to the left column (pane under `a` only), which is
+    /// rarely what two peer browsers sharing one pane want — so the pane stays
+    /// full-width below both columns and `b` occupies the top-right region.
+    /// `^s f` flips it to full-height for the cases that do want that.
     fn open_second_commander_at_inner(&mut self, dir: &std::path::Path, grab_keyboard: bool) {
         // Canonicalize so a relative / `..`-laden path resolves cleanly (and so
         // `cur().listing.dir` matches what later path comparisons expect).
@@ -228,25 +239,45 @@ impl App {
         // Build the right column's rows — `cur()` now resolves to it.
         self.state.rebuild_rows();
         self.state
-            .flash_info("second commander (^s x / ^d to close)");
+            .flash_info(if self.view.displaced_preview.is_some() {
+                "second commander (^s x closes it, restoring your preview)"
+            } else {
+                "second commander (^s x / ^d to close)"
+            });
         self.view.needs_full_repaint = true;
     }
 
     /// `^s x` — close the second commander: drop `state.right` and the split,
-    /// returning to a single (left) column with focus on it.
+    /// returning to a single (left) column with focus on it. A preview an agent
+    /// displaced (`open_second_commander_at_background`) comes back instead,
+    /// with the shape and focus it had — the user's reading position survives a
+    /// worktree the agent opened over it.
     pub(super) fn close_second_commander(&mut self) {
         if self.state.right.is_none() {
             self.state.flash_info("no second commander");
             return;
         }
         self.state.right = None;
-        self.state.vsplit = None;
         // Drop any `V`/`D` overlay open in `b` along with its column — otherwise
         // the editor PTY / pager would linger with no column to render into.
         self.runtime.top_overlay_right = None;
         self.view.pager_right = None;
-        self.state.focus = state::Focus::FileList;
         self.view.needs_full_repaint = true;
+        if let Some((shape, preview)) = self.view.displaced_preview.take() {
+            self.state.vsplit = Some(shape);
+            self.view.right_pager = Some(preview);
+            // `shape.focus` carries the column the user was in; `FileList` hands
+            // the keyboard back to it (the a/b axis lives on the shape).
+            self.state.focus = state::Focus::FileList;
+            // The file may have changed while the commander covered it — the
+            // fs-watch reload no-ops on a stashed preview, so re-read it now.
+            self.kick_preview_reload();
+            self.state
+                .flash_info("second commander closed — preview restored");
+            return;
+        }
+        self.state.vsplit = None;
+        self.state.focus = state::Focus::FileList;
         self.state.flash_info("second commander closed");
     }
 
@@ -374,19 +405,37 @@ mod tests {
     use state::{Side, VsplitMode};
 
     #[test]
-    fn cycle_off_to_top_to_full_to_off() {
-        let top = next_vsplit(None);
-        assert_eq!(top.map(|v| v.mode), Some(VsplitMode::TopOnly));
-        let full = next_vsplit(top);
-        assert_eq!(full.map(|v| v.mode), Some(VsplitMode::FullHeight));
-        assert_eq!(next_vsplit(full), None, "full-height cycles back to off");
+    fn opening_takes_its_height_from_the_config() {
+        assert_eq!(
+            opening_vsplit(crate::config::VsplitMode::FullHeight).mode,
+            VsplitMode::FullHeight,
+            "the default config mode opens full-height"
+        );
+        assert_eq!(
+            opening_vsplit(crate::config::VsplitMode::TopOnly).mode,
+            VsplitMode::TopOnly,
+            "top_only opens with the pane full-width below both columns"
+        );
+        assert_eq!(
+            crate::config::VsplitMode::default(),
+            crate::config::VsplitMode::FullHeight,
+            "full-height is the shipped default"
+        );
     }
 
     #[test]
     fn open_defaults_to_left_focus_and_clamped_width() {
-        let v = next_vsplit(None).unwrap();
+        let v = opening_vsplit(crate::config::VsplitMode::default());
         assert_eq!(v.focus, Side::Left, "opening keeps focus on the list (a)");
         assert!((20..=80).contains(&v.width_pct));
+    }
+
+    #[test]
+    fn flip_is_an_involution() {
+        for m in [VsplitMode::TopOnly, VsplitMode::FullHeight] {
+            assert_ne!(m.flipped(), m, "^s f changes the height");
+            assert_eq!(m.flipped().flipped(), m, "twice returns to the start");
+        }
     }
 
     #[test]
@@ -411,20 +460,5 @@ mod tests {
         // Each column floors at MIN_COL.
         let (l_min, r_min) = vsplit_column_widths(MIN_COL * 2 + 1, 50).unwrap();
         assert!(l_min >= MIN_COL && r_min >= MIN_COL);
-    }
-
-    #[test]
-    fn flip_carries_width_and_focus() {
-        let mut top = next_vsplit(None).unwrap();
-        top.width_pct = 60;
-        top.focus = Side::Right;
-        let full = next_vsplit(Some(top)).unwrap();
-        assert_eq!(full.mode, VsplitMode::FullHeight);
-        assert_eq!(full.width_pct, 60, "width carries across the mode flip");
-        assert_eq!(
-            full.focus,
-            Side::Right,
-            "focus carries across the mode flip"
-        );
     }
 }

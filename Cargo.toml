@@ -96,6 +96,14 @@ unicode-width = "0.2"
 # base char + U+FE0F) wider than the sum of its chars, so anything that
 # measures text incrementally has to advance by cluster to agree with it.
 unicode-segmentation = "1"
+# Cluster-safe truncation for the `src/ui` width helpers (`display_truncate`
+# and `_tail`, `truncate_middle`), which used to walk `char_indices()` and sum
+# per-char widths — measuring "❤️" (U+2764 U+FE0F) as 1 column where the
+# terminal draws 2, and a ZWJ emoji as 6 where it draws 2, while being free to
+# slice either in half. Not a new dependency at all: `ratatui-core` already
+# pulls it in for ratatui's own truncation, so this only promotes it to direct
+# (zero new crates, zero binary-size cost).
+unicode-truncate = { version = "2", default-features = false, features = ["std"] }
 libc = "0.2"
 ignore = "0.4"
 # Git plumbing — the gitoxide crate. Pure-Rust (zlib-rs is the default

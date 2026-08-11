@@ -894,7 +894,7 @@ impl App {
                                         // behavior) silently discarded them. Tell
                                         // the user where to recover them.
                                         self.state.flash_error(format!(
-                                            "couldn't read back edits ({e}); preserved at {}",
+                                            "couldn't read back edits ({e:#}); preserved at {}",
                                             path.display()
                                         ));
                                     }

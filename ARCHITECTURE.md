@@ -280,8 +280,12 @@ Graphics gotchas, each of which cost real debugging time:
 
 ## Vertical (left/right) split
 
-`^a |` opens a second column on the right hosting a **live-reloading
-preview** of the cursor file. The split's *shape* is pure Model
+`^s |` (aliased `^a |`) opens a second column on the right hosting a
+**live-reloading preview** of the cursor file, and closes it again; `^s f` flips
+its height. Splitting the two keys apart is deliberate: height is a layout
+preference (`[layout] vsplit_mode`, full-height by default), not a step on the
+way to closing, so repeating the open key is a plain show/hide. The split's
+*shape* is pure Model
 (`AppState.vsplit: Option<VSplit { width_pct, mode: TopOnly | FullHeight,
 focus: Side }>`); the preview's *content* is a `ViewState.right_pager:
 Option<PagerView>` slot (`Mount::RightPane`), parallel to the top/scrollback
