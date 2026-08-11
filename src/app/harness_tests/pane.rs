@@ -247,6 +247,14 @@ fn empty_scrollback_flashes_hint_and_stays_live() {
         let mut app = App::test_app(dir);
         app.open_pane_tab("cat"); // fresh cat: no output → empty scrollback
         app.open_pane_scroll_pager();
+        // The snapshot is deferred by `SCROLL_SETTLE` so the wait happens on the
+        // event loop rather than in a sleep; `settle_pane_scroll` is what calls
+        // this when the window elapses.
+        assert!(
+            app.runtime.pane_scroll_settle.is_some(),
+            "opening arms the settle rather than snapshotting inline"
+        );
+        app.mount_vt100_scrollback();
         assert_eq!(
             app.flash_text(),
             Some("no terminal scrollback captured"),
@@ -279,6 +287,7 @@ fn empty_scrollback_agent_pane_points_to_transcript() {
             crate::pane::tabs::TabEntry::new(pane, crate::pane::tabs::TabInfo::new("claude", dir));
         app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
         app.open_pane_scroll_pager();
+        app.mount_vt100_scrollback();
         assert_eq!(
             app.flash_text(),
             Some(
@@ -1022,6 +1031,38 @@ fn closing_help_over_a_v_editor_keeps_the_editor_column_pinned() {
             app.view.overlay_column,
             Some(state::Side::Left),
             "the still-open V editor must stay pinned to its column after help closes",
+        );
+    });
+}
+
+/// **A wheel tick must not stall the event loop.**
+///
+/// With `[mouse] pane_scroll_view = "spyc_history"` a qualifying wheel gesture
+/// mounts spyc's own scrollback pager. The vt100 branch used to settle the pty
+/// by sleeping — `3 × 10 ms` inline — so an input event cost 30 ms of dead loop,
+/// re-paid on the next qualifying tick whenever scrollback turned out empty and
+/// nothing mounted. `docs/drafts/native_scroll_plan.md` ruled exactly this out
+/// ("the wheel must never mount anything ... at ~30 ticks/s that's a hang").
+///
+/// Measured rather than asserted structurally: a test that checked for the
+/// absence of a `sleep` call would pass the moment the sleep moved one function
+/// along. What matters is that the call returns promptly.
+#[test]
+fn opening_the_scrollback_pager_does_not_sleep_on_the_loop() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat");
+
+        let started = std::time::Instant::now();
+        app.open_pane_scroll_pager();
+        let spent = started.elapsed();
+
+        assert!(
+            spent < std::time::Duration::from_millis(10),
+            "the input path must not block: {spent:?}"
         );
     });
 }

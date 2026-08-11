@@ -12,6 +12,16 @@ use super::pager_stream::{DrainOutcome, PagerStream, PagerStreamMount, RenderCtx
 use super::{App, Effect, PaneTextKind, PaneTextSink, state};
 use crate::ui::pager::PagerView;
 
+/// How long the vt100 scrollback snapshot waits for in-flight pty bytes to
+/// land before taking it.
+///
+/// Spent on the event loop (a `Deadline`), never in a sleep: this is reachable
+/// from a wheel tick, and `docs/drafts/native_scroll_plan.md` rules out
+/// blocking the loop from one ("at ~30 ticks/s that's a hang"). The loop drains
+/// pane output every iteration anyway, so waiting *on* it is also the more
+/// thorough settle — the old sleep only yielded the thread.
+pub(super) const SCROLL_SETTLE: std::time::Duration = std::time::Duration::from_millis(30);
+
 /// Inputs to the pure `^a v` scrollback-source decision.
 #[derive(Clone, Copy)]
 struct ScrollSnapshot {
@@ -46,6 +56,42 @@ const fn decide_scroll_source(s: ScrollSnapshot) -> ScrollSource {
         ScrollSource::AltScreenDeadEnd
     } else {
         ScrollSource::Vt100
+    }
+}
+
+/// What to do with a pending deferred scrollback snapshot this loop pass.
+#[derive(Debug, PartialEq, Eq)]
+enum ScrollSettle {
+    /// Nothing pending — stay disarmed.
+    Idle,
+    /// The settle window hasn't elapsed; keep the deadline armed at this instant.
+    Wait(std::time::Instant),
+    /// Take the snapshot now.
+    Take,
+    /// The tab that asked is no longer active — drop it. The window is real time
+    /// the user can act in, and mounting a different pane's history would answer
+    /// a question they didn't ask.
+    Abandon,
+}
+
+/// Pure decision for [`App::settle_pane_scroll`] (the `route.rs` / `focus.rs`
+/// template). `active_tab` is `None` when the pane closed under the pending
+/// snapshot, which is an abandon for the same reason a tab switch is.
+fn decide_scroll_settle(
+    pending: Option<(std::time::Instant, usize)>,
+    now: std::time::Instant,
+    active_tab: Option<usize>,
+) -> ScrollSettle {
+    let Some((due, tab)) = pending else {
+        return ScrollSettle::Idle;
+    };
+    if now < due {
+        return ScrollSettle::Wait(due);
+    }
+    if active_tab == Some(tab) {
+        ScrollSettle::Take
+    } else {
+        ScrollSettle::Abandon
     }
 }
 
@@ -258,22 +304,80 @@ impl App {
         }
 
         // vt100 terminal-scrollback path: not an alt-screen app and no engaged
-        // transcript, so snapshot the pane's own scrollback buffer.
+        // transcript, so snapshot the pane's own scrollback buffer — but not
+        // yet. Bytes that reached the OS pipe just before this event may still
+        // be in flight on the reader/parser threads, and the snapshot should
+        // include the most-recent paint. That settle used to be three inline
+        // 10 ms sleeps: 30 ms of dead event loop per invocation, and this is
+        // reachable from a WHEEL TICK (`[mouse] pane_scroll_view =
+        // "spyc_history"`) — re-paid on the next tick whenever scrollback turns
+        // out empty and nothing mounts. So arm a deadline instead and let the
+        // loop keep running; its own per-iteration drain does the flushing,
+        // and `settle_pane_scroll` snapshots when the window elapses.
         let tabs = self
             .runtime
             .pane_tabs
-            .as_mut()
+            .as_ref()
             .expect("pane_tabs presence checked above");
-        let active = tabs.active_mut();
-        // Drain pending bytes before snapshotting. Bytes that hit
-        // the OS pipe between the last render tick and this keypress
-        // may still be in flight on the reader/parser threads; a few
-        // short yields let them flush so the snapshot includes the
-        // most-recent paint.
-        for _ in 0..3 {
-            active.drain_output();
-            std::thread::sleep(std::time::Duration::from_millis(10));
+        self.runtime.pane_scroll_settle = Some((
+            std::time::Instant::now() + SCROLL_SETTLE,
+            tabs.active_index(),
+        ));
+    }
+
+    /// PRE-recv settle for a deferred vt100 scrollback snapshot.
+    ///
+    /// Takes the shot once `SCROLL_SETTLE` has elapsed, then disarms — and
+    /// abandons it if the user switched tabs in the meantime, since the window
+    /// is real time they can act in and mounting another pane's history would
+    /// answer a question they didn't ask. Returns whether the frame changed.
+    pub(crate) fn settle_pane_scroll(
+        &mut self,
+        now: std::time::Instant,
+        ctx: &mut super::RunCtx,
+    ) -> bool {
+        use super::scheduler::Deadline;
+        let active_tab = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .map(crate::pane::tabs::PaneTabs::active_index);
+        match decide_scroll_settle(self.runtime.pane_scroll_settle, now, active_tab) {
+            ScrollSettle::Idle => {
+                ctx.scheduler.disarm(Deadline::PaneScrollSettle);
+                false
+            }
+            ScrollSettle::Wait(due) => {
+                ctx.scheduler.arm(Deadline::PaneScrollSettle, due);
+                false
+            }
+            ScrollSettle::Abandon => {
+                self.runtime.pane_scroll_settle = None;
+                ctx.scheduler.disarm(Deadline::PaneScrollSettle);
+                false
+            }
+            ScrollSettle::Take => {
+                self.runtime.pane_scroll_settle = None;
+                ctx.scheduler.disarm(Deadline::PaneScrollSettle);
+                self.mount_vt100_scrollback();
+                true
+            }
         }
+    }
+
+    /// Snapshot the active pane's vt100 scrollback and mount it, or say why it
+    /// can't be. The tail of [`Self::open_pane_scroll_pager`]'s vt100 branch,
+    /// split off so the settle window can elapse on the loop rather than in a
+    /// sleep. Callable on its own — that is what the harness drives.
+    pub(crate) fn mount_vt100_scrollback(&mut self) {
+        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+            return;
+        };
+        let label = tabs.active_info().label.clone();
+        let command = tabs.active_info().command.clone();
+        let profile = crate::agent::detect(&command);
+        let spec = profile.transcript();
+        let active = tabs.active_mut();
         active.drain_output();
         // Empty scrollback ⇒ a fresh/short process, or an inline agent whose
         // structured transcript is toggled off (an agent with its transcript
@@ -618,5 +722,46 @@ mod tests {
             decide_scroll_source(snap(false, false, false)),
             ScrollSource::Vt100
         );
+    }
+}
+
+#[cfg(test)]
+mod settle_tests {
+    use super::{ScrollSettle, decide_scroll_settle};
+    use std::time::{Duration, Instant};
+
+    /// The window is real time the user can act in, so the decision has to hold
+    /// the tab that asked — not just an instant.
+    #[test]
+    fn a_snapshot_waits_then_fires_for_the_tab_that_asked() {
+        let now = Instant::now();
+        let due = now + Duration::from_millis(30);
+
+        assert_eq!(decide_scroll_settle(None, now, Some(0)), ScrollSettle::Idle);
+        assert_eq!(
+            decide_scroll_settle(Some((due, 0)), now, Some(0)),
+            ScrollSettle::Wait(due),
+            "before the window elapses, keep waiting on the loop"
+        );
+        assert_eq!(
+            decide_scroll_settle(Some((due, 0)), due, Some(0)),
+            ScrollSettle::Take
+        );
+    }
+
+    /// Switching tabs — or closing the pane — inside the settle window drops the
+    /// snapshot. Mounting tab 0's history into tab 1 would answer a question the
+    /// user didn't ask, and they had 30 ms of real time in which to move.
+    #[test]
+    fn moving_away_inside_the_window_abandons_the_snapshot() {
+        let now = Instant::now();
+        let due = now + Duration::from_millis(30);
+        for active in [Some(1), None] {
+            assert_eq!(
+                decide_scroll_settle(Some((due, 0)), due, active),
+                ScrollSettle::Abandon,
+                "active tab {active:?}"
+            );
+        }
     }
 }

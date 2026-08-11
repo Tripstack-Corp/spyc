@@ -38,6 +38,7 @@ impl App {
                 next_sink_id: 0,
                 autosave_last_saved_fp: None,
                 autosave_due: None,
+                pane_scroll_settle: None,
                 hook_recheck_at: None,
                 scope_waiters: Vec::new(),
                 lua: None,

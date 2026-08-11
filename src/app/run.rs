@@ -738,6 +738,15 @@ impl App {
                 ctx.draw.mark(3);
             }
 
+            // A deferred vt100 scrollback snapshot: take it once the settle
+            // window has elapsed. Armed only between `^a v` (or a
+            // `spyc_history` wheel gesture) and the shot, so idle stays 0 dps —
+            // and the wait happens on the loop instead of in a sleep, which is
+            // what keeps a wheel tick from stalling it.
+            if self.settle_pane_scroll(now_pre, &mut ctx) {
+                ctx.draw.mark(3);
+            }
+
             // P3-2 crash-sufficient autosave: debounce a session save after any
             // session-relevant change (tab/cwd/vsplit/project-home/geometry),
             // firing ~AUTOSAVE_DEBOUNCE after the last change so a SIGKILL loses
