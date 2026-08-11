@@ -153,7 +153,10 @@ Two levels of selection for flexible file management.
   install hint. `[clipboard] via` (`.spycrc.toml`) routes to an
   OSC-52 terminal escape over SSH instead; `[clipboard] command` /
   `$SPYC_CLIPBOARD` overrides the backend entirely with a
-  user-supplied command — see CONFIGURATION.md.
+  user-supplied command — see CONFIGURATION.md. Every verb that yanks
+  text shares this one delivery path — `yf`, `yP`, `yp`, `ya`, a mouse
+  drag, `^a u` Quick Select and the image overlay's `Y` — so the SSH
+  and override behavior is the same whichever one you reach for.
 
 - **Y** remove cursor file from inventory
 - **p** put all inventory files to the current directory

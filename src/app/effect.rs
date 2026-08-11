@@ -607,7 +607,7 @@ impl App {
                                     PaneTextKind::Scrollback(_) => "pane scrollback is empty",
                                 });
                             } else {
-                                match crate::clipboard::copy(&text) {
+                                match self.deliver_clipboard(&text) {
                                     Ok(()) => self.state.flash_info(ok.success(&text)),
                                     Err(e) => {
                                         self.state.flash_error(format!("yank failed: {e:#}"));
