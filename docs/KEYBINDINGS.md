@@ -131,7 +131,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a z` | Zoom the active region — list or bottom pane (fullscreen toggle) |
 | `^a +` / `^a -` | Grow / shrink the focused split (pane height or vsplit width) |
 | `^s \|` / `^a \|` | Vertical split — open / close (live-reloading preview of the cursor file; on another file it swaps the preview) |
-| `^s f` | Vertical split — flip the height: full-height ⇄ top-only (opens per `[layout] vsplit_mode`) |
+| `^s f` / `^a f` | Vertical split — flip the height: full-height ⇄ top-only (opens per `[layout] vsplit_mode`) |
 | `^a a` / `^a h` | Focus the left file pane (a) |
 | `^a b` / `^a l` | Focus the right file pane (b) |
 | `^a d` | Toggle dimming of the inactive split column / list |

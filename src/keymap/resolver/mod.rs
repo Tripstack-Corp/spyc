@@ -184,6 +184,7 @@ impl Resolver {
                 Act("a h", A::VsplitFocusLeft),
                 Act("b l", A::VsplitFocusRight),
                 Act("|", A::VsplitToggle),
+                Act("f", A::VsplitToggleHeight),
                 Act("d", A::ToggleDim),
                 Act("n ]", A::PaneNextTab),
                 Act("p [", A::PanePrevTab),
@@ -299,12 +300,15 @@ impl Resolver {
                 KeyCode::Char('j' | 'J') => ResolverOutcome::Action(Action::PaneFocusDown),
                 KeyCode::Char('k') => ResolverOutcome::Action(Action::PaneFocusUp),
                 // Horizontal file-pane focus (vertical split): a/h → left (a),
-                // b/l → right (b). `^a |` opens/closes the split — an alias of
-                // `^s |`, kept here because it's the long-standing key; the rest
-                // of the split family (height flip, second commander) is `^s`.
+                // b/l → right (b). `^a |` / `^a f` alias `^s |` / `^s f`: while
+                // the pane owns the keyboard only `^a`/`^w`/`^\` are intercepted
+                // (`is_spyc_meta_when_pane_focused`), so without these two the
+                // split couldn't be opened or reshaped from the pane at all.
+                // `^s` still hosts the whole family for a focused file column.
                 KeyCode::Char('a' | 'A' | 'h') => ResolverOutcome::Action(Action::VsplitFocusLeft),
                 KeyCode::Char('b' | 'B' | 'l') => ResolverOutcome::Action(Action::VsplitFocusRight),
                 KeyCode::Char('|') => ResolverOutcome::Action(Action::VsplitToggle),
+                KeyCode::Char('f' | 'F') => ResolverOutcome::Action(Action::VsplitToggleHeight),
                 KeyCode::Char('d' | 'D') => ResolverOutcome::Action(Action::ToggleDim),
                 // Tab navigation (screen-style + vim bracket style).
                 KeyCode::Char('n' | ']') => ResolverOutcome::Action(Action::PaneNextTab),

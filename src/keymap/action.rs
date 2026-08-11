@@ -143,7 +143,7 @@ pub enum Action {
 
     // Vertical (left/right) split — file panes labelled a/b.
     VsplitToggle,       // ^s | / ^a | — open (a preview) or close the split
-    VsplitToggleHeight, // ^s f — flip an open split full-height ⇄ top-only
+    VsplitToggleHeight, // ^s f / ^a f — flip an open split full-height ⇄ top-only
     VsplitFocusLeft,    // ^a a / ^a h — focus the left region (a)
     VsplitFocusRight,   // ^a b / ^a l — focus the right region (b)
     ToggleDim,          // ^a d — toggle the focus-dim of the inactive column / list

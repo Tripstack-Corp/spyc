@@ -298,7 +298,7 @@ const SECTIONS: &[Section] = &[
                 "vertical split: open / close (cursor-file preview)",
             ),
             (
-                "^s f",
+                "^s f  ^a f",
                 "vertical split: flip height — full-height / top-only ([layout] vsplit_mode)",
             ),
             ("^a a  ^a h", "focus the left file pane (a)"),

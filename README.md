@@ -81,7 +81,7 @@ live-reloading side column.
 
 ### Keep a file open beside the list
 
-<img src="docs/assets/demo-vsplit.gif" alt="A preview column opening on a markdown file, swapping it to a Rust file, changing height, then closing" width="820">
+<img src="docs/assets/demo-vsplit.gif" alt="A preview column opening full-height beside the file list with an agent pane below, flipping to top-only and back, swapping to a Rust file, scrolling and widening it, then a second full file-commander in the same column" width="820">
 
 `^s |` (or `^a |`) opens a preview column on the cursor file, full-height by
 default — set `[layout] vsplit_mode = "top_only"` to keep the agent pane

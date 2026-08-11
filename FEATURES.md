@@ -328,12 +328,14 @@ spyc's workflow: browse files above, talk to Claude below.
   the right column. Press it again **on a different file** to swap the preview to
   that file, keeping the layout; **on the same file** it closes. A directory
   isn't previewable (it warns).
-- **^s f** flips the open split's **height**: *full-height* (divider runs the
+- **^s f** (alias **^a f**) flips the open split's **height**: *full-height* (divider runs the
   whole frame height; the pane is confined under the left column) ⇄ *top-only*
   (splits just the list; the pane stays full-width below both columns). Width and
   focused column carry across. The shape a split *opens* in is
   **`[layout] vsplit_mode`** — `"full_height"` by default, `"top_only"` for the
-  old half-height open. `^a a` / `^a h` focus the left pane
+  old half-height open. The `^a |` / `^a f` aliases exist because the **pane**
+  intercepts only `^a`-family keys, so `^s` alone would leave the split
+  unreachable while you're typing to an agent. `^a a` / `^a h` focus the left pane
   (a), `^a b` / `^a l` the right (b); `^a + / ^a -` resize the split width when
   a column is focused. Opinionated: exactly two file panes, labelled a/b
   (numbers stay for PTY tabs). The preview **live-reloads**: edit the file
