@@ -176,16 +176,23 @@ impl super::super::App {
             return Vec::new();
         }
         let (lo, hi) = sel.range();
-        let text = {
+        let (text, whole_row) = {
             let rows = self.view.chrome_rows.borrow();
             let Some(row) = rows.iter().find(|r| r.y == sel.y) else {
                 return Vec::new();
             };
-            crate::ui::line_select::text_between_columns(
+            let selected = crate::ui::line_select::text_between_columns(
                 &row.line,
                 usize::from(lo),
                 usize::from(hi),
-            )
+            );
+            // The echo lands on the flash row. If that's the row just copied
+            // from, carry its full text so the confirmation appends to the
+            // message instead of replacing it with a fragment of itself.
+            let whole_row = self
+                .selection_row_is_the_flash_row(sel.y)
+                .then(|| crate::ui::line_select::text_between_columns(&row.line, 0, usize::MAX));
+            (selected, whole_row)
         };
         let text = text.trim().to_string();
         if text.is_empty() {
@@ -193,8 +200,20 @@ impl super::super::App {
         }
         vec![Effect::CopyToClipboard {
             text,
-            ok: super::super::effect::ClipMsg::StatusLine,
+            ok: super::super::effect::ClipMsg::StatusLine { whole_row },
         }]
+    }
+
+    /// Is `y` the row a flash echo will be drawn on? True only while a flash is
+    /// actually up: that's the case where copying from the row and echoing to it
+    /// collide. `render_prompt_line` owns this row, so its rect is the authority
+    /// on where it is (in a vsplit it is narrowed, never moved sideways).
+    fn selection_row_is_the_flash_row(&self, y: u16) -> bool {
+        if self.state.flash.is_none() {
+            return false;
+        }
+        let (cols, rows) = self.view.term_size;
+        self.frame_layout(Rect::new(0, 0, cols, rows)).prompt.y == y
     }
 
     /// Translate the pointer into the pane's own grid coordinates, clamped into it.
@@ -798,6 +817,130 @@ mod tests {
             assert!(
                 app.view.chrome_selection.is_some(),
                 "the highlight stays up after the copy, like the other surfaces"
+            );
+        });
+    }
+
+    /// Dragging part of a live FLASH copies the fragment but echoes the whole
+    /// message, so the message survives being copied from. Reported from a real
+    /// drag over `directory not found, returning to project home`: the echo
+    /// replaced the line with the fragment, and because the highlight holds
+    /// COLUMNS the surviving text appeared to jump left under it.
+    ///
+    /// Drawn through a real frame rather than a hand-pushed `ChromeRow`, because
+    /// the bug is in which row the echo lands on relative to the row copied from —
+    /// a fabricated row can't tell those apart.
+    #[test]
+    fn copying_part_of_a_flash_echoes_the_whole_flash() {
+        use crossterm::event::KeyModifiers;
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let tmp = tempfile::tempdir().expect("tempdir").keep();
+        crate::state::with_state_root(&tmp, || {
+            let mut app = App::test_app(tmp.clone());
+            let whole = "directory not found, returning to project home";
+            app.state.flash_info(whole);
+            // Hit-testing resolves the layout from `term_size` (the resize handler
+            // keeps it current in production), so it must match the frame drawn.
+            app.view.term_size = (100, 24);
+
+            // One real frame, so the flash row records itself where it is drawn.
+            let mut terminal = Terminal::new(TestBackend::new(100, 24)).expect("backend");
+            terminal.draw(|f| app.render(f)).expect("draw");
+            let flash_y = {
+                let rows = app.view.chrome_rows.borrow();
+                rows.iter()
+                    .find(|r| {
+                        crate::ui::line_select::text_between_columns(&r.line, 0, usize::MAX)
+                            .contains("returning to project")
+                    })
+                    .map(|r| r.y)
+                    .expect("the flash row was recorded")
+            };
+
+            let at = |kind, col| MouseEvent {
+                kind,
+                column: col,
+                row: flash_y,
+                modifiers: KeyModifiers::NONE,
+            };
+            // The reported drag: from "found" (col 14) to just past "project".
+            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 14));
+            app.extend_chrome_selection(at(MouseEventKind::Drag(MouseButton::Left), 41));
+            let effects =
+                app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left), 41));
+
+            let [Effect::CopyToClipboard { text, ok }] = effects.as_slice() else {
+                panic!("expected one clipboard copy, got {effects:?}");
+            };
+            assert_eq!(
+                text, "found, returning to project",
+                "the clipboard still gets exactly the dragged columns"
+            );
+            let crate::app::effect::ClipMsg::StatusLine { whole_row } = ok else {
+                panic!("a chrome copy must echo as a status line, got {ok:?}");
+            };
+            assert_eq!(
+                whole_row.as_deref(),
+                Some(whole),
+                "the echo carries the whole message, so copying from it doesn't erase it"
+            );
+        });
+    }
+
+    /// The same drag on the STATUS BAR carries no whole-row echo: that row is not
+    /// the one the flash lands on, so it survives its own echo and showing the
+    /// fragment is the point of substring selection.
+    #[test]
+    fn copying_the_status_bar_still_echoes_only_the_fragment() {
+        use crossterm::event::KeyModifiers;
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let tmp = tempfile::tempdir().expect("tempdir").keep();
+        crate::state::with_state_root(&tmp, || {
+            let mut app = App::test_app(tmp.clone());
+            app.state
+                .flash_info("directory not found, returning to project home");
+            app.view.term_size = (100, 24);
+
+            let mut terminal = Terminal::new(TestBackend::new(100, 24)).expect("backend");
+            terminal.draw(|f| app.render(f)).expect("draw");
+            // The status bar owns the top row (`status_position` defaults to top);
+            // the flash owns the bottom one. Located by position, because a fixture's
+            // status bar is all temp paths with no stable word to search for.
+            let status_y = 0;
+            {
+                let rows = app.view.chrome_rows.borrow();
+                assert!(
+                    rows.iter().any(|r| r.y == status_y),
+                    "the status row was recorded"
+                );
+                assert!(
+                    rows.iter().any(|r| r.y != status_y),
+                    "the flash row is a different row, or this test proves nothing"
+                );
+            }
+
+            let at = |kind, col| MouseEvent {
+                kind,
+                column: col,
+                row: status_y,
+                modifiers: KeyModifiers::NONE,
+            };
+            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 0));
+            app.extend_chrome_selection(at(MouseEventKind::Drag(MouseButton::Left), 40));
+            let effects =
+                app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left), 40));
+
+            let [Effect::CopyToClipboard { ok, .. }] = effects.as_slice() else {
+                panic!("expected one clipboard copy, got {effects:?}");
+            };
+            let crate::app::effect::ClipMsg::StatusLine { whole_row } = ok else {
+                panic!("a chrome copy must echo as a status line, got {ok:?}");
+            };
+            assert!(
+                whole_row.is_none(),
+                "the status bar is not the flash row: {whole_row:?}"
             );
         });
     }

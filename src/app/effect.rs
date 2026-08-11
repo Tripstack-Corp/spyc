@@ -405,7 +405,14 @@ pub enum ClipMsg {
     /// identical to the one it replaced — `copied: <path>: not a regular file` reads
     /// as a copy that failed, not as a successful copy of an error message. Trailing
     /// it leaves the echo starting where the user's eye already is.
-    StatusLine,
+    ///
+    /// `whole_row` is the row's full text, set when the row copied from is the one
+    /// the echo lands on — the flash row. Echoing the fragment there would replace
+    /// the message with a piece of itself, so the message the user copied *from*
+    /// disappears and the surviving text looks left-shifted under the highlight,
+    /// which is how this was reported. The status bar and divider pass `None`: they
+    /// live on other rows and survive their own echo.
+    StatusLine { whole_row: Option<String> },
     /// `"copied {count} name(s)"` / `"copied {count} path(s)"` — a file-list row
     /// selection. `count` is carried because a name may contain a newline, so it
     /// can't be recovered from `text`; `paths` distinguishes the modifier-held copy.
@@ -424,9 +431,16 @@ impl ClipMsg {
                 format!("yanked path: {preview}{ellipsis}")
             }
             Self::MultiPath { count } => format!("yanked {count} paths"),
-            Self::StatusLine => {
-                let preview: String = text.chars().take(60).collect();
-                let ellipsis = if text.chars().count() > 60 { "…" } else { "" };
+            Self::StatusLine { whole_row } => {
+                // Show the whole row when the echo would otherwise eat it; the
+                // drag highlight still marks which part went to the clipboard.
+                let shown = whole_row.as_deref().unwrap_or(text);
+                let preview: String = shown.chars().take(60).collect();
+                let ellipsis = if shown.chars().count() > 60 {
+                    "…"
+                } else {
+                    ""
+                };
                 format!("{preview}{ellipsis} (copied)")
             }
             Self::ListNames { count, paths } => {
@@ -1284,12 +1298,13 @@ mod tests {
     #[test]
     fn clip_status_line_echo_trails_the_confirmation() {
         assert_eq!(
-            ClipMsg::StatusLine.success("/Users/me/src/spyc/docs: not a regular file"),
+            ClipMsg::StatusLine { whole_row: None }
+                .success("/Users/me/src/spyc/docs: not a regular file"),
             "/Users/me/src/spyc/docs: not a regular file (copied)"
         );
         // The echo is not prefixed, so it still begins with the selected text.
         assert!(
-            !ClipMsg::StatusLine
+            !ClipMsg::StatusLine { whole_row: None }
                 .success("anything")
                 .starts_with("copied"),
             "the marker trails"
@@ -1303,8 +1318,33 @@ mod tests {
         let long = "z".repeat(75);
         let preview: String = long.chars().take(60).collect();
         assert_eq!(
-            ClipMsg::StatusLine.success(&long),
+            ClipMsg::StatusLine { whole_row: None }.success(&long),
             format!("{preview}… (copied)")
+        );
+    }
+
+    /// Copying part of a FLASH echoes the whole message, not the fragment. The
+    /// echo lands on the flash row, so echoing the fragment replaces the message
+    /// with a piece of itself — reported as the line jumping left, because the
+    /// drag highlight kept its columns while the text under it got shorter.
+    #[test]
+    fn clip_status_line_echo_keeps_the_message_it_was_taken_from() {
+        let whole = "directory not found, returning to project home";
+        // Columns 14..41 of that message — the reported drag.
+        let fragment = "found, returning to project";
+        assert_eq!(
+            ClipMsg::StatusLine {
+                whole_row: Some(whole.to_string())
+            }
+            .success(fragment),
+            format!("{whole} (copied)"),
+            "the message survives its own copy"
+        );
+        // The status bar and divider are other rows: they still echo the fragment,
+        // which is the point of substring selection.
+        assert_eq!(
+            ClipMsg::StatusLine { whole_row: None }.success(fragment),
+            format!("{fragment} (copied)")
         );
     }
 
