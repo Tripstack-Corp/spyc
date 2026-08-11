@@ -190,3 +190,171 @@ pub(super) fn mouse_report(
         ctrl: ev.modifiers.contains(K::CONTROL),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::{App, Effect, PaneInput, PaneTarget};
+    use super::super::tests::make_pane_speak_mouse;
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+    fn at(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    /// The bytes a `SendToPane` effect carries, or `None` for anything else.
+    fn sent(fx: &[Effect]) -> Option<&[u8]> {
+        match fx {
+            [
+                Effect::SendToPane {
+                    target: PaneTarget::Active,
+                    input: PaneInput::Bytes(bytes),
+                    ..
+                },
+            ] => Some(bytes),
+            _ => None,
+        }
+    }
+
+    /// An App with a mouse-aware pane and a point the layout says is inside it.
+    fn app_with_a_mouse_pane(dir: &std::path::Path) -> (App, (u16, u16)) {
+        let mut app = App::test_app(dir.to_path_buf());
+        app.view.term_size = (120, 24);
+        app.open_pane_tab("cat");
+        make_pane_speak_mouse(&mut app);
+        let layout = app.frame_layout(ratatui::layout::Rect::new(0, 0, 120, 24));
+        let pane = layout.pane.expect("a pane is open");
+        (app, (pane.x + 3, pane.y + 2))
+    }
+
+    /// **A press the child received owes it a release.** claude starts a
+    /// selection on press and fires the actual click on RELEASE, so a press with
+    /// no matching release leaves it drag-selecting forever and never clicking
+    /// anything. The pairing is keyed on the press having been forwarded, not on
+    /// where the pointer is now, so it holds even if the pointer left the pane.
+    #[test]
+    fn a_forwarded_press_is_followed_by_its_release() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let (mut app, (col, row)) = app_with_a_mouse_pane(tmp.path());
+            let frame = ratatui::layout::Rect::new(0, 0, 120, 24);
+            let layout = app.frame_layout(frame);
+
+            let press = app.forward_to_child(
+                at(MouseEventKind::Down(MouseButton::Left), col, row),
+                &layout,
+            );
+            assert!(
+                sent(&press).is_some(),
+                "the press reaches the child: {press:?}"
+            );
+            assert!(
+                app.view.mouse_press_forwarded,
+                "and arms the obligation to deliver the release"
+            );
+
+            // Pointer has left the pane entirely — the release still goes to the
+            // child that saw the press.
+            let release = app.forward_release(
+                at(MouseEventKind::Up(MouseButton::Left), col, row),
+                MouseButton::Left,
+                frame,
+            );
+            assert!(
+                sent(&release).is_some(),
+                "the release reaches the same child: {release:?}"
+            );
+            assert!(
+                !app.view.mouse_press_forwarded,
+                "and the obligation is discharged, not left standing"
+            );
+
+            // A second release is unpaired: the child never saw a press for it,
+            // and an unpaired release is as bad as a missing one.
+            let extra = app.forward_release(
+                at(MouseEventKind::Up(MouseButton::Left), col, row),
+                MouseButton::Left,
+                frame,
+            );
+            assert!(
+                extra.is_empty(),
+                "an unpaired release is not forwarded: {extra:?}"
+            );
+        });
+    }
+
+    /// A press that never reached the child produces no release for it. Without
+    /// this the child would see a button come up that it never saw go down.
+    #[test]
+    fn a_release_whose_press_went_elsewhere_is_not_forwarded() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let (mut app, (col, row)) = app_with_a_mouse_pane(tmp.path());
+            let frame = ratatui::layout::Rect::new(0, 0, 120, 24);
+            // Nothing armed the flag — the press landed on the file list.
+            assert!(!app.view.mouse_press_forwarded);
+            let fx = app.forward_release(
+                at(MouseEventKind::Up(MouseButton::Left), col, row),
+                MouseButton::Left,
+                frame,
+            );
+            assert!(fx.is_empty(), "got {fx:?}");
+        });
+    }
+
+    /// A drag is the middle of one gesture, so it rides the same pairing — but
+    /// must NOT consume it: more drags and then the release still have to arrive.
+    #[test]
+    fn a_drag_rides_the_pairing_without_consuming_it() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let (mut app, (col, row)) = app_with_a_mouse_pane(tmp.path());
+            let frame = ratatui::layout::Rect::new(0, 0, 120, 24);
+            let drag = at(MouseEventKind::Drag(MouseButton::Left), col, row);
+
+            assert!(
+                app.forward_drag(drag, frame).is_empty(),
+                "a drag whose press went elsewhere never reaches the child"
+            );
+
+            app.view.mouse_press_forwarded = true;
+            assert!(
+                sent(&app.forward_drag(drag, frame)).is_some(),
+                "a claimed drag is delivered"
+            );
+            assert!(
+                app.view.mouse_press_forwarded,
+                "and the flag survives, or the release that follows would be dropped"
+            );
+        });
+    }
+
+    /// A wheel tick has no release half, so forwarding one must not arm an
+    /// obligation the child will never be paid — the next real release would
+    /// otherwise be delivered as if it paired with a press.
+    #[test]
+    fn a_forwarded_wheel_tick_arms_no_release() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let (mut app, (col, row)) = app_with_a_mouse_pane(tmp.path());
+            let layout = app.frame_layout(ratatui::layout::Rect::new(0, 0, 120, 24));
+            let fx = app.forward_to_child(at(MouseEventKind::ScrollDown, col, row), &layout);
+            assert!(
+                sent(&fx).is_some(),
+                "the tick still reaches the child: {fx:?}"
+            );
+            assert!(
+                !app.view.mouse_press_forwarded,
+                "a wheel tick owes no release"
+            );
+        });
+    }
+}

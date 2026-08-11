@@ -369,6 +369,7 @@ impl super::App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::App;
 
     /// The default (uninverted): a downward tick is positive, an upward tick is
     /// negative — "scroll down = toward the end", matching the pager and an
@@ -450,5 +451,199 @@ mod tests {
             gesture_and_delta(MouseEventKind::ScrollDown, 7, false),
             Some((Gesture::Wheel, 7))
         );
+    }
+
+    // ── the dispatch entry itself ──
+    //
+    // `handle_mouse` reassembles the frame, hit-tests the pointer, and turns the
+    // routed sink into effects and focus moves. The `MouseSink` half is pinned by
+    // `route.rs`'s own tests; what follows drives the whole entry, because the
+    // gate, the focus side effect and the wheel's sign live only here.
+
+    use std::time::{Duration, Instant};
+
+    /// A synthetic report at `(col, row)` with no modifiers.
+    fn at(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        }
+    }
+
+    /// An App with a known frame size, plus a point the layout itself says is
+    /// inside the file list — computed rather than guessed, so a layout change
+    /// moves the click instead of silently aiming it somewhere else.
+    fn app_and_a_point_in_the_list(dir: &std::path::Path) -> (App, (u16, u16)) {
+        let mut app = App::test_app(dir.to_path_buf());
+        app.view.term_size = (120, 24);
+        app.state.config.mouse.scroll_lines = 1;
+        let layout = app.frame_layout(ratatui::layout::Rect::new(0, 0, 120, 24));
+        let point = (layout.list.x + 2, layout.list.y + 1);
+        (app, point)
+    }
+
+    /// A pane tab that speaks the mouse, the way a real child says so: the DEC
+    /// mode is written to `cat`'s stdin and comes back through the pty, so the
+    /// pane's own vt100 parser sees the request exactly as it would from claude.
+    /// (The `\n` matters — the line discipline echoes a bare ESC as `^[`, so
+    /// only cat's own re-emit carries the real escape.)
+    ///
+    /// `?1002` — button-event tracking — because that is what a child wanting
+    /// drags asks for; under `?1000` a drag encodes to nothing, correctly.
+    pub(super) fn make_pane_speak_mouse(app: &mut App) {
+        let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+        tabs.active_mut()
+            .send_bytes(b"\x1b[?1002h\n")
+            .expect("write to the pty");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            tabs.active_mut().drain_output();
+            if tabs.active().wants_mouse() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("the pane never reported mouse mode");
+    }
+
+    /// **The capture gate.** A terminal or multiplexer can report the mouse when
+    /// spyc never asked — a foreground child that died without resetting, for
+    /// one. Acting on those with the feature off is how a stray middle click
+    /// pasted the clipboard and a right click opened the leader menu.
+    #[test]
+    fn a_middle_click_pastes_only_while_capture_is_on() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let (mut app, (col, row)) = app_and_a_point_in_the_list(tmp.path());
+            let click = at(MouseEventKind::Down(MouseButton::Middle), col, row);
+
+            crate::set_mouse_capture_for_test(false);
+            assert!(
+                app.handle_mouse(click).is_empty(),
+                "a report spyc never asked for must do nothing"
+            );
+
+            crate::set_mouse_capture_for_test(true);
+            assert!(
+                matches!(
+                    app.handle_mouse(click).as_slice(),
+                    [Effect::PasteFromClipboard]
+                ),
+                "with capture on the same click pastes"
+            );
+            crate::set_mouse_capture_for_test(false);
+        });
+    }
+
+    /// The wheel moves the column under the POINTER and **stops** at the ends.
+    /// Not `Action::Up`/`Down`: those move the focused column and wrap through
+    /// `rem_euclid`, which is what made scrolling feel like it was flying out of
+    /// control.
+    #[test]
+    fn the_wheel_moves_the_pointed_list_and_never_wraps_past_the_end() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let (mut app, (col, row)) = app_and_a_point_in_the_list(tmp.path());
+            app.seed_rows(&["a", "b", "c"]);
+            crate::set_mouse_capture_for_test(true);
+
+            let down = at(MouseEventKind::ScrollDown, col, row);
+            let up = at(MouseEventKind::ScrollUp, col, row);
+            assert!(
+                app.handle_mouse(down).is_empty(),
+                "the wheel emits no effect"
+            );
+            assert_eq!(app.state.left.cursor.index, 1, "down moves toward the end");
+
+            for _ in 0..10 {
+                app.handle_mouse(down);
+            }
+            assert_eq!(
+                app.state.left.cursor.index, 2,
+                "the wheel stops on the last row rather than wrapping to the top"
+            );
+            for _ in 0..10 {
+                app.handle_mouse(up);
+            }
+            assert_eq!(
+                app.state.left.cursor.index, 0,
+                "and stops on the first row going back"
+            );
+            crate::set_mouse_capture_for_test(false);
+        });
+    }
+
+    /// **The pointer decides, not the keyboard.** The whole hit-test is built on
+    /// this: with the keyboard in the right column, a wheel tick over the LEFT one
+    /// scrolls the left. Reading focus instead would scroll whichever column the
+    /// user last clicked in, which is the one thing a wheel is never about.
+    #[test]
+    fn the_wheel_scrolls_the_column_under_the_pointer_not_the_focused_one() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let right_dir = tmp.path().join("other");
+            std::fs::create_dir_all(&right_dir).unwrap();
+            let (mut app, _) = app_and_a_point_in_the_list(tmp.path());
+            app.seed_rows(&["a", "b", "c"]);
+            app.open_second_commander_at(&right_dir);
+            assert_eq!(
+                app.state.vsplit.map(|v| v.focus),
+                Some(super::super::state::Side::Right),
+                "the keyboard is in the right column"
+            );
+            crate::set_mouse_capture_for_test(true);
+
+            let layout = app.frame_layout(ratatui::layout::Rect::new(0, 0, 120, 24));
+            let left = (layout.list.x + 1, layout.list.y + 1);
+            let before_right = app.state.right.as_ref().expect("split").cursor.index;
+
+            app.handle_mouse(at(MouseEventKind::ScrollDown, left.0, left.1));
+
+            assert_eq!(
+                app.state.left.cursor.index, 1,
+                "the pointed (left) column moved"
+            );
+            assert_eq!(
+                app.state.right.as_ref().expect("split").cursor.index,
+                before_right,
+                "the focused (right) column did not"
+            );
+            crate::set_mouse_capture_for_test(false);
+        });
+    }
+
+    /// Right-click opens the which-key popup **now**. The `chord_hint_delay_ms`
+    /// debounce exists so a keyboard user mid-chord isn't startled by a popup; a
+    /// deliberate right click has no such problem, so the due instant is set in
+    /// the past for `settle_chord_hint` to build on this same iteration.
+    #[test]
+    fn a_right_click_enters_the_leader_and_shows_the_hint_without_the_delay() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let (mut app, (col, row)) = app_and_a_point_in_the_list(tmp.path());
+            crate::set_mouse_capture_for_test(true);
+            assert!(app.view.chord_hint_due.is_none());
+
+            let fx = app.handle_mouse(at(MouseEventKind::Down(MouseButton::Right), col, row));
+
+            assert!(fx.is_empty(), "the menu is state, not an effect");
+            assert_eq!(
+                app.state.resolver.pending_display().as_deref(),
+                Some("leader-"),
+                "the resolver is mid-chord on the leader"
+            );
+            let due = app.view.chord_hint_due.expect("a hint is due");
+            assert!(
+                due <= Instant::now(),
+                "the popup must be due already, not after the keyboard debounce"
+            );
+            crate::set_mouse_capture_for_test(false);
+        });
     }
 }
