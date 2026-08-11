@@ -1036,3 +1036,105 @@ fn an_honest_archive_still_extracts_completely() {
         "an in-budget member must arrive intact"
     );
 }
+
+/// Two members differing only by case must each read back their OWN bytes.
+///
+/// `staging_rel()` exists so they don't collide on a case-insensitive volume —
+/// every default macOS volume. Every reader used it; the streaming writer used
+/// the raw member path instead, so on macOS the second member's bytes landed on
+/// top of the first's and the reader for rank 1 looked under a prefix nothing had
+/// ever written. Reading `a/README` returned the *other* member's content, and
+/// `a/readme` was unreadable and — because the repack reads the same path —
+/// unwritable.
+///
+/// Asserted through the index rather than against fixed paths, so it tests the
+/// contract ("a member's bytes are where its own entry says") rather than the
+/// current spelling of the escape prefix.
+#[test]
+fn a_streamed_case_collision_stages_each_member_where_its_own_entry_says() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("case.tar.gz");
+    let staging = tmp.path().join("staging");
+    tar_gz_at(
+        &archive,
+        &[("a/README", b"UPPER", 0o644), ("a/readme", b"lower", 0o644)],
+    );
+
+    let indexed = stream_mount(
+        &archive,
+        ArchiveFormat::TarGz,
+        &staging,
+        1 << 20,
+        1000,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+
+    // The premise: the two really are ranked as a collision. Without this the
+    // test could pass on a hypothetical index that never ranked them.
+    assert_eq!(
+        indexed.facts.case_collisions, 1,
+        "the two names differ only by case, so exactly one is ranked above 0"
+    );
+
+    for (inner, want) in [("a/README", &b"UPPER"[..]), ("a/readme", &b"lower"[..])] {
+        let entry = indexed
+            .index
+            .get(inner)
+            .unwrap_or_else(|| panic!("{inner} is in the index"));
+        let at = staging.join(entry.staging_rel());
+        let got = std::fs::read(&at)
+            .unwrap_or_else(|e| panic!("{inner} staged at {}: {e}", at.display()));
+        assert_eq!(
+            got, want,
+            "{inner} must read its own bytes, not the other member's"
+        );
+    }
+}
+
+/// A refill puts a member back where its own entry says too — the same contract,
+/// on the path that repairs staging when something outside spyc empties it.
+///
+/// This is the half a comment used to claim and the code didn't: `restage_missing`
+/// walked the container deriving paths from member names, so a case-ranked member
+/// was checked for (and rewritten) at a path no reader consults. For a streamed
+/// archive the staged bytes are the only copy outside the container, so the
+/// archive became permanently unwritable.
+#[test]
+fn a_refill_puts_a_case_ranked_member_back_where_its_reader_looks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("case.tar.gz");
+    let staging = tmp.path().join("staging");
+    tar_gz_at(
+        &archive,
+        &[("a/README", b"UPPER", 0o644), ("a/readme", b"lower", 0o644)],
+    );
+    let indexed = stream_mount(
+        &archive,
+        ArchiveFormat::TarGz,
+        &staging,
+        1 << 20,
+        1000,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+
+    let ranked = indexed
+        .index
+        .entries
+        .iter()
+        .find(|e| e.case_rank > 0)
+        .expect("one of the pair is ranked");
+    let at = staging.join(ranked.staging_rel());
+    let want = std::fs::read(&at).expect("it was staged");
+    std::fs::remove_file(&at).expect("something outside spyc reaps it");
+
+    let restored = restage_missing(&archive, &indexed.index, &staging, 1000).unwrap();
+
+    assert_eq!(restored, 1, "the one missing member is refilled");
+    assert_eq!(
+        std::fs::read(&at).expect("back where its reader looks"),
+        want,
+        "and with its own bytes"
+    );
+}

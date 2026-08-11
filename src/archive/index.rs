@@ -62,16 +62,27 @@ pub struct IndexEntry {
     pub readable: bool,
 }
 
+/// Where a member's bytes live under the mount's staging root, from its inner
+/// path and case rank.
+///
+/// The one definition, because a reader and a writer that each derive it are a
+/// reader and a writer that can disagree: the streaming extractor wrote raw
+/// inner paths while every reader looked under this, so on a case-insensitive
+/// volume one member's bytes silently answered for the other's.
+pub fn staging_rel_for(inner: &str, case_rank: u32) -> PathBuf {
+    if case_rank == 0 {
+        PathBuf::from(inner)
+    } else {
+        PathBuf::from(format!(".spyc-case-{case_rank}")).join(inner)
+    }
+}
+
 impl IndexEntry {
     /// Path relative to the mount's staging root where this entry's bytes live
     /// once materialized. Identity for all but case-colliding entries, which
     /// would otherwise overwrite each other on macOS.
     pub fn staging_rel(&self) -> PathBuf {
-        if self.case_rank == 0 {
-            PathBuf::from(&self.inner)
-        } else {
-            PathBuf::from(format!(".spyc-case-{}", self.case_rank)).join(&self.inner)
-        }
+        staging_rel_for(&self.inner, self.case_rank)
     }
 
     /// The last path component — the name a listing row shows.
@@ -190,13 +201,35 @@ pub fn normalize(raw: &str) -> Result<Normalized, Reject> {
     })
 }
 
+/// What [`IndexBuilder::push`] did with one member.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pushed {
+    /// Admitted, and its bytes belong at this path under the mount's staging
+    /// root. Handed back rather than re-derived so a one-pass extractor cannot
+    /// write somewhere the finished index won't look.
+    Staged(PathBuf),
+    /// The name was rejected. Keep walking; the reason is in `facts`.
+    Skipped,
+    /// The entry cap is reached and the index is marked truncated. Stop walking.
+    Full,
+}
+
 /// Accumulates members into an [`ArchiveIndex`]: normalizes names, drops unsafe
-/// ones, resolves duplicates, and (at [`Self::finish`]) synthesizes the implied
-/// directories and ranks case collisions.
+/// ones, resolves duplicates, ranks case collisions, and (at [`Self::finish`])
+/// synthesizes the implied directories.
 pub struct IndexBuilder {
     entries: Vec<IndexEntry>,
     /// Inner path → position in `entries`, for last-wins duplicate handling.
     positions: HashMap<String, usize>,
+    /// Case-folded inner path → how many members have claimed it, which is the
+    /// next [`IndexEntry::case_rank`].
+    ///
+    /// Ranked **on arrival** rather than over the finished table, because a
+    /// compressed tar indexes and extracts in one pass: the writer has to know
+    /// where a member's bytes go before the group it collides with is fully
+    /// known. Arrival order is fixed for a given container, so the ranks are
+    /// still deterministic.
+    case_seen: HashMap<String, u32>,
     pub facts: IndexFacts,
     cap: usize,
     truncated: bool,
@@ -207,28 +240,42 @@ impl IndexBuilder {
         Self {
             entries: Vec::new(),
             positions: HashMap::new(),
+            case_seen: HashMap::new(),
             facts: IndexFacts::default(),
             cap,
             truncated: false,
         }
     }
 
-    /// Add one member. Returns `false` once the cap is reached, which is the
-    /// caller's signal to stop walking — the index is marked truncated.
+    /// Claim the next case rank for `inner`, or return the one an entry with
+    /// this exact name already holds — a duplicate replaces its predecessor, so
+    /// it inherits that entry's staging path rather than opening a new one.
+    fn claim_case_rank(&mut self, inner: &str) -> u32 {
+        if let Some(&pos) = self.positions.get(inner) {
+            return self.entries[pos].case_rank;
+        }
+        let slot = self.case_seen.entry(inner.to_lowercase()).or_insert(0);
+        let rank = *slot;
+        *slot += 1;
+        rank
+    }
+
+    /// Add one member, returning the case rank it was admitted under — which is
+    /// where a one-pass extractor must put its bytes ([`staging_rel_for`]).
     ///
     /// A later member with the same normalized name replaces the earlier one,
     /// matching what extractors do (last write wins) so the listing agrees with
     /// what a materialize would produce.
-    pub fn push(&mut self, raw_name: &str, draft: Draft) -> bool {
+    pub fn push(&mut self, raw_name: &str, draft: Draft) -> Pushed {
         if self.entries.len() >= self.cap {
             self.truncated = true;
-            return false;
+            return Pushed::Full;
         }
         let normalized = match normalize(raw_name) {
             Ok(n) => n,
             Err(reject) => {
                 self.facts.record_reject(reject);
-                return true;
+                return Pushed::Skipped;
             }
         };
         if normalized.had_backslash {
@@ -237,6 +284,7 @@ impl IndexBuilder {
         if normalized.was_absolute {
             self.facts.absolute_names += 1;
         }
+        let case_rank = self.claim_case_rank(&normalized.inner);
         let entry = IndexEntry {
             inner: normalized.inner,
             kind: draft.kind,
@@ -247,9 +295,10 @@ impl IndexBuilder {
             gid: draft.gid,
             link_target: draft.link_target,
             locator: draft.locator,
-            case_rank: 0,
+            case_rank,
             readable: draft.readable,
         };
+        let staged = staging_rel_for(&entry.inner, case_rank);
         if let Some(&pos) = self.positions.get(&entry.inner) {
             self.facts.duplicates += 1;
             self.entries[pos] = entry;
@@ -258,7 +307,7 @@ impl IndexBuilder {
                 .insert(entry.inner.clone(), self.entries.len());
             self.entries.push(entry);
         }
-        true
+        Pushed::Staged(staged)
     }
 
     pub fn finish(
@@ -269,7 +318,7 @@ impl IndexBuilder {
     ) -> (ArchiveIndex, IndexFacts) {
         self.synthesize_implied_dirs();
         self.entries.sort_unstable_by(|a, b| a.inner.cmp(&b.inner));
-        self.rank_case_collisions();
+        self.facts.case_collisions = self.entries.iter().filter(|e| e.case_rank > 0).count();
         let total_uncompressed = self
             .entries
             .iter()
@@ -309,6 +358,11 @@ impl IndexBuilder {
         implied.dedup();
         self.facts.implied_dirs = implied.len();
         for inner in implied {
+            // Through the same counter as a real member: a synthesized `a/`
+            // beside a stored `A/` is still a collision on a case-insensitive
+            // volume, and handing it rank 0 unconditionally would put two
+            // directories at one staging path.
+            let case_rank = self.claim_case_rank(&inner);
             self.positions.insert(inner.clone(), self.entries.len());
             self.entries.push(IndexEntry {
                 inner,
@@ -320,23 +374,10 @@ impl IndexBuilder {
                 gid: None,
                 link_target: None,
                 locator: Locator::Implied,
-                case_rank: 0,
+                case_rank,
                 readable: true,
             });
         }
-    }
-
-    /// Assign a nonzero `case_rank` to every entry after the first in a group of
-    /// names that differ only by case. Runs after the sort, so ranks are stable.
-    fn rank_case_collisions(&mut self) {
-        let mut seen: HashMap<String, u32> = HashMap::new();
-        for entry in &mut self.entries {
-            let key = entry.inner.to_lowercase();
-            let next = seen.entry(key).or_insert(0);
-            entry.case_rank = *next;
-            *next += 1;
-        }
-        self.facts.case_collisions = self.entries.iter().filter(|e| e.case_rank > 0).count();
     }
 }
 
@@ -486,7 +527,7 @@ mod tests {
                 size: *size,
                 ..Draft::file(*size, Locator::Zip { index: i })
             };
-            assert!(b.push(name, draft));
+            assert_ne!(b.push(name, draft), Pushed::Full);
         }
         b.finish(PathBuf::from("/src/a.zip"), ArchiveFormat::Zip, 100)
     }
@@ -545,8 +586,15 @@ mod tests {
     #[test]
     fn unsafe_names_are_dropped_and_counted_not_mounted() {
         let mut b = IndexBuilder::new(10);
-        assert!(b.push("../evil", Draft::file(1, Locator::Zip { index: 0 })));
-        assert!(b.push("ok.txt", Draft::file(2, Locator::Zip { index: 1 })));
+        assert_eq!(
+            b.push("../evil", Draft::file(1, Locator::Zip { index: 0 })),
+            Pushed::Skipped,
+            "an unsafe name is dropped, not indexed"
+        );
+        assert_ne!(
+            b.push("ok.txt", Draft::file(2, Locator::Zip { index: 1 })),
+            Pushed::Full
+        );
         let (index, facts) = b.finish(PathBuf::from("/a.zip"), ArchiveFormat::Zip, 10);
         assert_eq!(inners(&index), ["ok.txt"]);
         assert_eq!(facts.traversal_names, 1);
@@ -592,10 +640,10 @@ mod tests {
     #[test]
     fn the_entry_cap_truncates_and_stops_the_walk() {
         let mut b = IndexBuilder::new(2);
-        assert!(b.push("a", Draft::file(1, Locator::Staged)));
-        assert!(b.push("b", Draft::file(1, Locator::Staged)));
+        assert_ne!(b.push("a", Draft::file(1, Locator::Staged)), Pushed::Full);
+        assert_ne!(b.push("b", Draft::file(1, Locator::Staged)), Pushed::Full);
         assert!(
-            !b.push("c", Draft::file(1, Locator::Staged)),
+            b.push("c", Draft::file(1, Locator::Staged)) == Pushed::Full,
             "push reports the cap so the caller stops walking"
         );
         let (index, _) = b.finish(PathBuf::from("/a.zip"), ArchiveFormat::Zip, 10);
