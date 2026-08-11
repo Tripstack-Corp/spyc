@@ -820,15 +820,17 @@ mod tests {
         // A moved/uninstalled binary must no-op, not error the agent turn: every
         // installed command ends in the fail-soft tail; `--status-trace` rides
         // before it.
-        // `shell_quote` always single-quotes; a quoted word with no slash is
-        // still PATH-resolved by the shell, so the bare-name preference holds.
+        // `shell_quote` (shlex) leaves an already-safe word bare, so a bare
+        // install name stays bare and the shell PATH-resolves it — the
+        // bare-name preference holds. Quoting kicks in once the path needs it,
+        // asserted just below and in `hook_command_shell_quotes_spaced_exe_path`.
         assert_eq!(
             reporter_command("spyc", "done", false),
-            "'spyc' --report-status done 2>/dev/null || true"
+            "spyc --report-status done 2>/dev/null || true"
         );
         assert_eq!(
             reporter_command("spyc", "working", true),
-            "'spyc' --report-status working --status-trace 2>/dev/null || true"
+            "spyc --report-status working --status-trace 2>/dev/null || true"
         );
         // A spaced install path stays one shell token, tail still present, and the
         // `--report-status` "ours" marker survives (cleanup keys on it).
@@ -1118,7 +1120,7 @@ mod tests {
         let cmd = agy_tool_reporter_command("spyc", "blocked", false);
         assert_eq!(
             cmd,
-            "'spyc' --report-status blocked >/dev/null 2>&1 || true; printf '{\"decision\":\"allow\"}'"
+            "spyc --report-status blocked >/dev/null 2>&1 || true; printf '{\"decision\":\"allow\"}'"
         );
         // The decision is unconditional: sequenced with `;`, never gated on the
         // reporter succeeding.

@@ -76,6 +76,12 @@ glob = "0.3"
 # we pass our own home + var lookup to `full_with_context_no_errors`. Trimmed
 # this way the crate has ZERO dependencies of its own.
 shellexpand = { version = "3", default-features = false, features = ["base-0"] }
+# POSIX shell word quoting for `%` expansion and the hook/pager command strings
+# spyc builds for `sh -c` (src/shell/expand.rs). Pure-Rust, zero dependencies.
+# Quoting user-selected paths into a shell command is the one place where "small
+# and correct today" still argues for the widely-deployed implementation over
+# our own, so `shell_quote` routes through `shlex::try_quote`.
+shlex = { version = "2", default-features = false, features = ["std"] }
 # In-process three-way text merge for the `spyc --merge-driver` git merge
 # driver (src/merge_driver.rs). Pure-Rust, tiny — lets us resolve the
 # version-line Cargo.toml/Cargo.lock conflicts without shelling out to `git`
