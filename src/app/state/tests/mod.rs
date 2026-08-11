@@ -1023,6 +1023,63 @@ fn tool_root_prefers_worktree_then_project_home_then_listing() {
     assert_eq!(s.tool_root(Side::Left), PathBuf::from("/repo/a"));
 }
 
+/// A worktree op anchors on the column's dir normally, but that dir is the
+/// container *file's* path while the user is inside an archive — git discovery
+/// from there fails with "path is not a directory", which took out every worktree
+/// tool for as long as an archive was open. A worktree op is about the repo, so
+/// the mount case falls back to the repo/project root.
+#[test]
+fn worktree_anchor_leaves_a_mount_for_the_project_root() {
+    use crate::app::state::Side;
+    let mut s = test_state();
+    let archive = PathBuf::from("/src/pkg.tar.gz");
+    s.left.listing.dir = PathBuf::from("/src");
+    s.project_home = Some(PathBuf::from("/src/spyc"));
+    s.left.git_cache.current_repo_root = None;
+
+    // Outside a mount the column's own dir is the anchor, untouched.
+    assert_eq!(s.worktree_anchor(), PathBuf::from("/src"));
+
+    // Register a mount and stand inside it: the archive's own path, and then a
+    // directory within it — neither is a place git can be discovered from.
+    let mut b = crate::archive::index::IndexBuilder::new(10);
+    b.push(
+        "sub/a.txt",
+        crate::archive::index::Draft::file(1, crate::archive::index::Locator::Zip { index: 0 }),
+    );
+    let (index, _) = b.finish(archive.clone(), crate::archive::ArchiveFormat::TarGz, 10);
+    s.mounts.insert(
+        crate::archive::ArchiveMount {
+            index,
+            journal: crate::archive::Journal::default(),
+            staged: crate::archive::journal::StagedStats::new(),
+            capability: crate::archive::Capability::ReadWrite,
+            warnings: Vec::new(),
+            staging_root: PathBuf::from("/staging"),
+            last_used: 0,
+            depth: 0,
+            editing: Vec::new(),
+        },
+        &[],
+    );
+
+    for inside in [archive.clone(), archive.join("sub")] {
+        s.left.listing.dir = inside.clone();
+        assert_eq!(
+            s.worktree_anchor(),
+            PathBuf::from("/src/spyc"),
+            "a column at {} anchors on the project, not on the container",
+            inside.display()
+        );
+    }
+
+    // A mount clears the column's git state, but if a repo root is known it wins
+    // over PROJECT_HOME — same precedence as `tool_root`.
+    s.left.git_cache.current_repo_root = Some(PathBuf::from("/src/other-repo"));
+    assert_eq!(s.worktree_anchor(), PathBuf::from("/src/other-repo"));
+    assert_eq!(s.tool_root(Side::Left), s.worktree_anchor());
+}
+
 /// `harpoon_root` deliberately DROPS tool_root's listing-dir fallback: outside a
 /// repo with no PROJECT_HOME it returns `None` (harpoon disabled) rather than
 /// spawning a per-dir bookmark file. The `None` arm is what distinguishes it

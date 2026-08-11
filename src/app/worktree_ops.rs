@@ -37,7 +37,8 @@ use super::{App, Message};
 /// validated). Built by [`App::plan_worktree_job`] on the main loop.
 pub enum WorktreeJob {
     /// `create_worktree`: add a worktree for `branch`, discovering the repo from
-    /// `dir` (the focused column's listing dir).
+    /// `dir` ([`crate::app::state::AppState::worktree_anchor`] — the focused
+    /// column's dir, or the project root when that column is inside an archive).
     Create {
         dir: std::path::PathBuf,
         branch: String,
@@ -208,9 +209,10 @@ impl App {
                 } else {
                     // Anchor on the FOCUSED column's repo (consistent with `W n`):
                     // `worktree::add` discovers the enclosing repo from any dir
-                    // inside it.
+                    // inside it — so the anchor has to *be* a directory, which a
+                    // column inside an archive mount is not.
                     Ok(WorktreeJob::Create {
-                        dir: self.state.cur().listing.dir.clone(),
+                        dir: self.state.worktree_anchor(),
                         branch: branch.to_string(),
                         // Caller's explicit `base` override, else PROJECT_HOME's
                         // default branch (POLA: not whatever the focused column
