@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::shell;
 
-use super::{App, ClipMsg, Effect, PaneInput, PaneTarget};
+use super::{App, ClipMsg, Effect, Message, PaneInput, PaneTarget};
 
 impl App {
     /// yf — yank the cursor file's absolute path to the system
@@ -463,6 +463,70 @@ impl super::App {
             errs.join("; ")
         })
     }
+
+    /// Kick the middle-click clipboard read onto a detached worker
+    /// (`Effect::PasteFromClipboard`'s whole body).
+    ///
+    /// Reading the clipboard means spawning `pbpaste`/`xclip -o`/`wl-paste` and
+    /// waiting for it — up to [`crate::clipboard::PASTE_READ_BUDGET`] against a
+    /// helper that never answers. On the loop thread that is a total freeze: the
+    /// input reader keeps reading, but nothing dispatches and no frame is drawn,
+    /// with no key to break out. So this is the `graveyard_ops` template — the
+    /// worker pushes its result onto `runtime.clipboard_paste_results` and wakes
+    /// the loop; `apply_clipboard_pastes` does the routing in the pre-recv scan.
+    ///
+    /// `pane_wake_tx` is `None` only before `run()` / in the test harness, where
+    /// there is no loop to wake — the result still lands in the slot.
+    pub(super) fn spawn_clipboard_read(&self) {
+        let results = std::sync::Arc::clone(&self.runtime.clipboard_paste_results);
+        let wake = self.runtime.pane_wake_tx.clone();
+        std::thread::spawn(move || {
+            let read = crate::clipboard::paste();
+            results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(read);
+            if let Some(tx) = wake {
+                let _ = tx.send(Message::ClipboardPasteDone);
+            }
+        });
+    }
+
+    /// Drain + route every landed clipboard read. Called every pre-recv scan, so
+    /// the slot is ALWAYS emptied regardless of which wake survived coalescing.
+    /// Returns whether the frame is dirty plus the effects the paste produced —
+    /// the caller runs them, matching `apply_archive_outcomes`.
+    ///
+    /// Routing happens HERE rather than at kick time: `handle_paste` decides by
+    /// the focus and mode of the moment, and a read that took a second lands in a
+    /// different moment than it started in. Deciding late is what makes the text
+    /// go where the user is now, and it costs nothing — a middle click doesn't
+    /// move focus (only the left button does), so in practice "now" and "then"
+    /// are the same place.
+    pub(crate) fn apply_clipboard_pastes(&mut self) -> (bool, Vec<Effect>) {
+        let landed: Vec<std::io::Result<String>> = std::mem::take(
+            &mut *self
+                .runtime
+                .clipboard_paste_results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        if landed.is_empty() {
+            return (false, Vec::new());
+        }
+        let mut effects = Vec::new();
+        for read in landed {
+            match read {
+                Ok(text) if text.is_empty() => self.state.flash_info("paste: clipboard is empty"),
+                // Reuse the paste path rather than sending bytes: routing,
+                // bracketed-paste wrapping, and prompt handling are all already
+                // decided there.
+                Ok(text) => effects.extend(self.handle_paste(text)),
+                Err(e) => self.state.flash_error(format!("paste: {e:#}")),
+            }
+        }
+        (true, effects)
+    }
 }
 
 #[cfg(test)]
@@ -501,5 +565,111 @@ mod delivery_tests {
             );
             assert_eq!(clipboard_delivery(V::Both, ssh), (true, true), "ssh={ssh}");
         }
+    }
+}
+
+#[cfg(test)]
+mod paste_tests {
+    use super::App;
+    use std::time::{Duration, Instant};
+
+    /// How long the stubbed clipboard "takes" — long enough that a read on the
+    /// loop thread is unmistakable, short enough not to drag the suite.
+    const SLOW_READ: Duration = Duration::from_millis(1500);
+
+    /// Drain until the read lands, or give up. Returns the effects it produced.
+    fn wait_for_paste(app: &mut App) -> Vec<super::Effect> {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline {
+            let (dirty, fx) = app.apply_clipboard_pastes();
+            if dirty {
+                return fx;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("the clipboard read never landed");
+    }
+
+    /// The headline: a middle-click paste must not stall the loop waiting on a
+    /// clipboard helper. A wedged `xclip -o` (or a hung pasteboard server) held
+    /// the whole UI — no dispatch, no frame, no key out of it — for as long as
+    /// it took. The kick returns immediately; the text arrives through the slot.
+    #[test]
+    fn a_middle_click_paste_does_not_read_the_clipboard_on_the_loop() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+            crate::clipboard::with_paste_stub(SLOW_READ, "pasted text", || {
+                let start = Instant::now();
+                app.spawn_clipboard_read();
+                let kick = start.elapsed();
+                assert!(
+                    kick < SLOW_READ / 3,
+                    "the kick waited {kick:?} on the clipboard"
+                );
+                // Nothing has been routed yet — the read is still running.
+                assert!(!app.apply_clipboard_pastes().0);
+                assert!(app.flash_text().is_none());
+
+                wait_for_paste(&mut app);
+                // File-list normal mode has nowhere to put a paste, and says so
+                // with the length — which is how we know the *text* arrived and
+                // not just the wake.
+                assert_eq!(
+                    app.flash_text(),
+                    Some("paste ignored (11 chars) — open `:` or `^\\` to paste")
+                );
+            });
+        });
+    }
+
+    /// An empty clipboard is a distinct answer, not a silent no-op — and it must
+    /// still come back through the slot rather than short-circuit at kick time.
+    #[test]
+    fn an_empty_clipboard_reports_itself() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+            crate::clipboard::with_paste_stub(Duration::ZERO, "", || {
+                app.spawn_clipboard_read();
+                let fx = wait_for_paste(&mut app);
+                assert!(fx.is_empty());
+                assert_eq!(app.flash_text(), Some("paste: clipboard is empty"));
+            });
+        });
+    }
+
+    /// Two clicks, two reads: the slot is a `Vec`, so a second read can't drop
+    /// the first (a middle click is cheap to repeat, and they overlap).
+    #[test]
+    fn overlapping_reads_both_land() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
+            crate::clipboard::with_paste_stub(Duration::from_millis(200), "ab", || {
+                app.spawn_clipboard_read();
+                app.spawn_clipboard_read();
+                // Count what's in the slot, not how many drains saw something:
+                // one drain takes everything that landed since the last.
+                let deadline = Instant::now() + Duration::from_secs(20);
+                loop {
+                    let landed = app
+                        .runtime
+                        .clipboard_paste_results
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .len();
+                    if landed == 2 {
+                        break;
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "only {landed} of 2 reads landed — one clobbered the other"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                assert!(app.apply_clipboard_pastes().0);
+            });
+        });
     }
 }

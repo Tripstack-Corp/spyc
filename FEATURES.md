@@ -687,7 +687,9 @@ end).
 - **`:bprev`** / **`:bnext`** — navigate pager buffer history (also `[b`/`]b` in pager)
 - **`:mouse on|off|auto`** — real mouse reporting: the wheel scrolls whatever is under
   the pointer, left-click focuses that region (and clicks through to a mouse-aware
-  agent), middle-click pastes, right-click opens the leader menu. **Costs native click-drag text
+  agent), middle-click pastes (read off-thread and bounded, so a wedged
+  `xclip`/pasteboard reports itself instead of freezing spyc), right-click opens
+  the leader menu. **Costs native click-drag text
   selection while on** (hold Shift to select anyway — Option/Fn on iTerm2);
   `:mouse off` gives it back immediately, no restart, and survives a config
   reload (`:mouse auto` returns to following the config). Default **on**

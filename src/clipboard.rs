@@ -13,7 +13,7 @@
 //! No external crate dependency — mirrors spyc's in-tree fork-exec
 //! pattern (see `src/sysinfo.rs` for the same `cfg(target_os)` shape).
 
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -27,28 +27,57 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
+/// Test-only stand-in for the clipboard: `paste` sleeps `delay`, then returns
+/// `text` instead of spawning a helper. `delay` is what lets a test watch the
+/// read happen *somewhere else* — see `App::spawn_clipboard_read`.
 #[cfg(test)]
-thread_local! {
-    /// Test-only override: when set, `paste` returns this text instead of
-    /// spawning a helper. Mirrors `CLIPBOARD_OVERRIDE`, but a value rather than a
-    /// binary — the read has nothing to pipe *into*, so a stub script would only
-    /// be testing `capture`.
-    static PASTE_OVERRIDE: std::cell::RefCell<Option<String>> =
-        const { std::cell::RefCell::new(None) };
+#[derive(Clone)]
+struct PasteStub {
+    delay: Duration,
+    text: String,
 }
 
-/// Test-only: run `body` with [`paste`] returning `text`.
 #[cfg(test)]
-pub fn with_paste_override<R>(text: &str, body: impl FnOnce() -> R) -> R {
-    struct Guard;
+static PASTE_STUB: std::sync::RwLock<Option<PasteStub>> = std::sync::RwLock::new(None);
+
+/// Serializes stub installation. Unlike `CLIPBOARD_OVERRIDE`, this one cannot be
+/// a thread-local: the read it stands in for runs on a worker thread, which is
+/// exactly the property under test. Process-global state needs the lock so two
+/// tests can't read each other's stub; nothing else in the suite calls `paste`.
+#[cfg(test)]
+static PASTE_STUB_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Test-only: run `body` with [`paste`] returning `text` after `delay`.
+#[cfg(test)]
+pub fn with_paste_stub<R>(delay: Duration, text: &str, body: impl FnOnce() -> R) -> R {
+    struct Guard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
     impl Drop for Guard {
         fn drop(&mut self) {
-            PASTE_OVERRIDE.with(|c| *c.borrow_mut() = None);
+            *PASTE_STUB
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         }
     }
-    PASTE_OVERRIDE.with(|c| *c.borrow_mut() = Some(text.to_string()));
-    let _g = Guard;
+    // The guard takes the lock BEFORE the stub is installed and holds it for the
+    // whole body, so a concurrent test can neither see nor replace this stub.
+    let _g = Guard(
+        PASTE_STUB_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    *PASTE_STUB
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(PasteStub {
+        delay,
+        text: text.to_string(),
+    });
     body()
+}
+
+/// Test-only: run `body` with [`paste`] returning `text` immediately.
+#[cfg(test)]
+pub fn with_paste_override<R>(text: &str, body: impl FnOnce() -> R) -> R {
+    with_paste_stub(Duration::ZERO, text, body)
 }
 
 #[cfg(test)]
@@ -118,8 +147,15 @@ pub fn with_clipboard_override<R>(bin: &std::path::Path, body: impl FnOnce() -> 
 pub fn paste() -> io::Result<String> {
     #[cfg(test)]
     {
-        if let Some(text) = PASTE_OVERRIDE.with(|c| c.borrow().clone()) {
-            return Ok(text);
+        // Clone out before sleeping — holding the read lock across the delay
+        // would make the next test's stub install wait on this worker.
+        let stub = PASTE_STUB
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(stub) = stub {
+            std::thread::sleep(stub.delay);
+            return Ok(stub.text);
         }
     }
     paste_impl()
@@ -165,21 +201,81 @@ fn paste_impl() -> io::Result<String> {
     ))
 }
 
+/// How long a clipboard READ waits for its helper before killing it.
+///
+/// Generous where [`HELPER_REAP_BUDGET`] is stingy, because the two are paid in
+/// different places: the write budget is spent on the event-loop thread, so a
+/// whole second there would be its own bug, while the read runs on a worker
+/// (`App::spawn_clipboard_read`) and the only cost of waiting is how late the
+/// failure is reported. What this bounds is the *leak* — `xclip -o` blocks until
+/// the selection owner transfers, and a wedged owner would otherwise pin a
+/// thread and a child process for the rest of the session, one pair per middle
+/// click.
+const PASTE_READ_BUDGET: Duration = Duration::from_secs(5);
+
+/// Read `pipe` to EOF on its own thread.
+///
+/// Both of the child's pipes must be drained *concurrently*: reading one to the
+/// end while the other fills deadlocks, and a full pipe also stops the helper
+/// exiting — which would read as a timeout on a perfectly healthy helper.
+fn drain_pipe<R: Read + Send + 'static>(pipe: Option<R>) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut p) = pipe {
+            let _ = p.read_to_end(&mut buf);
+        }
+        let _ = tx.send(buf);
+    });
+    rx
+}
+
 /// Run `prog args` and return its stdout as a lossy `String`. A non-zero exit is
 /// an error carrying the helper's stderr, so a broken `$DISPLAY` reads as itself
 /// rather than as an empty paste.
+///
+/// Bounded by [`PASTE_READ_BUDGET`]: a helper that never answers is killed and
+/// reported as `TimedOut` rather than waited out. `Command::output()` cannot do
+/// this — it blocks until the child exits — so the wait is a `try_wait` poll
+/// against a deadline, the same shape [`spawn_and_pipe`] uses for the write.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn capture(prog: &str, args: &[&str]) -> io::Result<String> {
-    let out = Command::new(prog)
+    let mut child = Command::new(prog)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()?;
-    if out.status.success() {
-        return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
+        .spawn()?;
+    let stdout = drain_pipe(child.stdout.take());
+    let stderr = drain_pipe(child.stderr.take());
+
+    let budget = PASTE_READ_BUDGET;
+    let deadline = Instant::now() + budget;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            // Kill and reap: the point of the budget is that neither the child
+            // nor its reader threads outlive the read that started them.
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("{prog} did not answer within {}s", budget.as_secs_f32()),
+            ));
+        }
+        std::thread::sleep(HELPER_REAP_POLL_INTERVAL);
+    };
+
+    // The child is gone, so both pipes are at EOF and these land immediately —
+    // bounded anyway, because a grandchild that inherited a pipe holds it open.
+    let out = stdout.recv_timeout(budget).unwrap_or_default();
+    if status.success() {
+        return Ok(String::from_utf8_lossy(&out).into_owned());
     }
-    let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let err = stderr.recv_timeout(budget).unwrap_or_default();
+    let msg = String::from_utf8_lossy(&err).trim().to_string();
     Err(io::Error::other(if msg.is_empty() {
         format!("{prog} failed")
     } else {
@@ -548,7 +644,42 @@ mod tests {
         with_paste_override("x", || {});
         // Outside the override the real helper runs; we only assert the override
         // is gone, not what the host clipboard holds (that's the user's).
-        PASTE_OVERRIDE.with(|c| assert!(c.borrow().is_none()));
+        assert!(
+            PASTE_STUB
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_none()
+        );
+    }
+
+    /// A clipboard helper that never answers must be given up on, not waited out.
+    ///
+    /// `xclip -o` blocks until the selection owner transfers; a wedged owner, a
+    /// stalled compositor, or a hung macOS pasteboard server means it never does.
+    /// The read has no business outliving the user's patience regardless of which
+    /// thread it runs on.
+    #[cfg(unix)]
+    #[test]
+    fn a_wedged_paste_helper_gives_up_instead_of_waiting_forever() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let stub = tmp.path().join("stub-wedged.sh");
+        // Never writes, never exits — the shape of a helper waiting on a
+        // selection transfer that will not come.
+        fs::write(&stub, "#!/bin/sh\nsleep 30\n").expect("write stub");
+        let mut perms = fs::metadata(&stub).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&stub, perms).unwrap();
+
+        let start = Instant::now();
+        let err = retry_text_busy(|| capture(&stub.display().to_string(), &[]))
+            .expect_err("a helper that never answers must surface an error");
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the read waited {:?} on a wedged helper",
+            start.elapsed()
+        );
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut, "got {err:?}");
     }
 
     /// Run `f`, retrying only while the OS reports `ETXTBSY` ("Text file busy").

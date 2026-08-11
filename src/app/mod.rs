@@ -140,6 +140,11 @@ enum Message {
     ArchiveDone,
     /// An off-thread file op (`Effect::FileOp`) finished and pushed its outcome.
     FileOpDone,
+    /// A middle-click clipboard read (`Effect::PasteFromClipboard`) finished and
+    /// pushed its result onto `runtime.clipboard_paste_results`. Payloadless
+    /// wake of the same shape as `GraveyardDone`; `apply_clipboard_pastes`
+    /// drains the slot in the pre-recv scan and feeds the text to `handle_paste`.
+    ClipboardPasteDone,
     /// An off-thread inventory op (`Effect::Inventory`) finished.
     InventoryDone,
     /// An off-thread MCP worktree op (create/remove/clean) finished and pushed
@@ -636,6 +641,12 @@ struct Runtime {
     archive_mount_then: Option<(std::path::PathBuf, Box<Effect>)>,
     /// Landing slot for off-thread file operations.
     file_results: std::sync::Arc<std::sync::Mutex<Vec<file_ops::FileOutcome>>>,
+    /// Landing slot for the off-thread middle-click clipboard read
+    /// (`Effect::PasteFromClipboard`). The worker pushes the read's result here
+    /// and wakes with `Message::ClipboardPasteDone`; `apply_clipboard_pastes`
+    /// drains it each pre-recv scan. A `Vec`, like `graveyard_results`: a middle
+    /// click is cheap to repeat, so reads can overlap and must not clobber.
+    clipboard_paste_results: std::sync::Arc<std::sync::Mutex<Vec<std::io::Result<String>>>>,
     /// The watcher-driven listing refresh (`FileOp::RefreshListing`) reads the
     /// dir off-thread; `inflight` keeps a single read in flight at a time, and
     /// `dirty` records a refresh requested while one was running so the result
