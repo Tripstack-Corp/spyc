@@ -86,7 +86,7 @@ pub fn repack(
         if missing {
             read::restage_missing(
                 archive,
-                index.format,
+                index,
                 staging_root,
                 index.entries.len().saturating_add(1024),
             )

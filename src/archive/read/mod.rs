@@ -14,7 +14,7 @@ use anyhow::{Context, Result, bail};
 
 use super::ArchiveFormat;
 use super::index::{
-    ArchiveEntryKind, ArchiveIndex, Draft, IndexBuilder, IndexEntry, Locator, normalize,
+    ArchiveEntryKind, ArchiveIndex, Draft, IndexBuilder, IndexEntry, Locator, Pushed, normalize,
 };
 use super::scan::IndexFacts;
 
@@ -89,7 +89,7 @@ fn index_zip(archive: &Path, cap: usize) -> Result<Indexed> {
         };
         let name = member.name().to_string();
         drop(member);
-        if !builder.push(&name, draft) {
+        if builder.push(&name, draft) == Pushed::Full {
             break;
         }
     }
@@ -110,7 +110,7 @@ fn index_tar(archive: &Path, cap: usize) -> Result<Indexed> {
         let offset = entry.raw_file_position();
         let (name, draft) = tar_draft(&entry, Locator::TarData { offset }, &mut builder.facts);
         let Some(draft) = draft else { continue };
-        if !builder.push(&name, draft) {
+        if builder.push(&name, draft) == Pushed::Full {
             break;
         }
     }
@@ -157,32 +157,38 @@ pub fn stream_mount(
         let mut entry = entry.with_context(|| format!("reading {}", archive.display()))?;
         let (name, draft) = tar_draft(&entry, Locator::Staged, &mut builder.facts);
         let Some(draft) = draft else { continue };
-        if let Ok(clean) = normalize(&name) {
-            // Budgeted on bytes that actually arrive, not on what the header
-            // claims. A tar header's size field is attacker input: declaring 0
-            // and then streaming gigabytes used to walk straight past this gate,
-            // because the gate added up the declarations. `write_member` reports
-            // what it really wrote and stops at the remaining allowance, so a
-            // member can overshoot by at most one byte before this fires.
-            let allowance = budget.saturating_sub(written);
-            let wrote = write_member(
-                &mut entry,
-                &draft,
-                &clean.inner,
-                staging_root,
-                allowance,
-                &mut builder.facts,
-            )?;
-            written = written.saturating_add(wrote);
-            if written > budget {
-                bail!(
-                    "over the {} extract budget — raise [archive] extract_budget_mb to mount it",
-                    crate::fs::ops::format_size(budget)
-                );
-            }
-        }
-        if !builder.push(&name, draft) {
-            break;
+        // Index BEFORE extracting, and take the destination from the index. A
+        // member's staging path depends on its case rank, which is the builder's
+        // to assign — deriving it here instead is how the streamed writer came
+        // to put bytes where no reader looks.
+        let staged = match builder.push(&name, draft.clone()) {
+            Pushed::Staged(rel) => rel,
+            // A refused name has no entry, so nothing would ever read what we
+            // wrote for it.
+            Pushed::Skipped => continue,
+            Pushed::Full => break,
+        };
+        // Budgeted on bytes that actually arrive, not on what the header
+        // claims. A tar header's size field is attacker input: declaring 0
+        // and then streaming gigabytes used to walk straight past this gate,
+        // because the gate added up the declarations. `write_member` reports
+        // what it really wrote and stops at the remaining allowance, so a
+        // member can overshoot by at most one byte before this fires.
+        let allowance = budget.saturating_sub(written);
+        let wrote = write_member(
+            &mut entry,
+            &draft,
+            &staged,
+            staging_root,
+            allowance,
+            &mut builder.facts,
+        )?;
+        written = written.saturating_add(wrote);
+        if written > budget {
+            bail!(
+                "over the {} extract budget — raise [archive] extract_budget_mb to mount it",
+                crate::fs::ops::format_size(budget)
+            );
         }
     }
     let (index, facts) = builder.finish(archive.to_path_buf(), format, compressed_size);
@@ -202,10 +208,11 @@ pub fn stream_mount(
 /// how many members were restored.
 pub fn restage_missing(
     archive: &Path,
-    format: ArchiveFormat,
+    index: &super::ArchiveIndex,
     staging_root: &Path,
     cap: usize,
 ) -> Result<usize> {
+    let format = index.format;
     let file = File::open(archive).with_context(|| format!("opening {}", archive.display()))?;
     let reader: Box<dyn Read> = match format {
         ArchiveFormat::TarGz => Box::new(flate2::read::GzDecoder::new(BufReader::new(file))),
@@ -230,9 +237,14 @@ pub fn restage_missing(
         let Ok(clean) = normalize(&name) else {
             continue;
         };
-        // `staging_rel` is what a reader looks under, so a case-colliding member is
-        // restored where its own reader expects it.
-        if staging_root.join(&clean.inner).exists() {
+        // Asked of the index rather than derived from the name: `staging_rel` is
+        // what a reader looks under, and only the entry knows its case rank. A
+        // member the index doesn't hold has no reader to satisfy.
+        let Some(entry_in_index) = index.get(&clean.inner) else {
+            continue;
+        };
+        let staged = entry_in_index.staging_rel();
+        if staging_root.join(&staged).exists() {
             continue;
         }
         // Refilling a member that was already admitted at mount time — the
@@ -241,7 +253,7 @@ pub fn restage_missing(
         write_member(
             &mut entry,
             &draft,
-            &clean.inner,
+            &staged,
             staging_root,
             u64::MAX,
             &mut facts,
@@ -264,12 +276,12 @@ pub fn restage_missing(
 fn write_member<R: Read>(
     entry: &mut tar::Entry<'_, R>,
     draft: &Draft,
-    inner: &str,
+    staging_rel: &Path,
     staging_root: &Path,
     allowance: u64,
     facts: &mut IndexFacts,
 ) -> Result<u64> {
-    let Ok(dest) = contained_dest(staging_root, inner) else {
+    let Ok(dest) = contained_dest(staging_root, staging_rel) else {
         facts.link_traversals += 1;
         return Ok(0);
     };
