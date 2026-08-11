@@ -201,3 +201,147 @@ impl super::super::App {
         }]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::{App, Effect, PaneInput};
+    use std::time::{Duration, Instant};
+
+    /// Every byte the effects would write to the pty.
+    fn bytes(fx: &[Effect]) -> Vec<u8> {
+        fx.iter()
+            .filter_map(|e| match e {
+                Effect::SendToPane {
+                    input: PaneInput::Bytes(b),
+                    ..
+                } => Some(b.clone()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    /// A pane that looks to spyc like codex with its `^T` transcript open, at the
+    /// bottom of it.
+    ///
+    /// The screen content is what `send_agent_view_scroll_keys` scrapes, so it is
+    /// written through the pty and echoed back rather than injected — the marker
+    /// and the `100%` footer arrive as codex's own would. `cat` is the child; only
+    /// the command string decides which profile answers.
+    fn codex_pane_showing_the_transcript(dir: &std::path::Path) -> App {
+        let mut app = App::test_app(dir.to_path_buf());
+        app.view.term_size = (120, 24);
+        app.state.config.mouse.pane_scroll_view = crate::config::PaneScrollView::Native;
+        app.open_pane_tab("cat");
+        let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+        tabs.active_entry_mut().info.command = "codex".to_string();
+        tabs.active_mut()
+            .send_bytes("T R A N S C R I P T\n\u{2500}\u{2500} 100% \u{2500}\u{2500}\n".as_bytes())
+            .expect("write to the pty");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            tabs.active_mut().drain_output();
+            let visible = tabs.active().visible_lines();
+            if visible.iter().any(|l| l.contains("T R A N S C R I P T"))
+                && visible
+                    .iter()
+                    .rev()
+                    .find(|l| l.contains('\u{2500}'))
+                    .is_some_and(|l| l.contains(" 100% "))
+            {
+                return app;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("the pane never showed the transcript marker and footer");
+    }
+
+    /// **One flick past the bottom closes the view once.** The scrape still reads
+    /// "open" for a tick or two after the close key lands — codex hasn't redrawn
+    /// the composer yet — so without the pending guard riding out that stale read
+    /// every remaining tick of the flick sends another `q`, straight into the
+    /// composer's text input as literal typing.
+    ///
+    /// Drives `send_agent_view_scroll_keys` itself. The route-level test of the
+    /// same name re-implements this loop, so it stays green when the caller is
+    /// wrong; this one doesn't.
+    #[test]
+    fn one_flick_past_the_bottom_sends_the_close_key_once_through_the_caller() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = codex_pane_showing_the_transcript(tmp.path());
+            let profile = crate::agent::detect("codex");
+            let marker = profile
+                .transcript_open_marker()
+                .expect("codex marks its transcript");
+
+            // Five downward ticks, the shape of one trackpad flick.
+            let closes = (0..5)
+                .filter(|_| {
+                    let fx = app.send_agent_view_scroll_keys(profile, marker, 1);
+                    bytes(&fx).contains(&b'q')
+                })
+                .count();
+            assert_eq!(
+                closes, 1,
+                "the close key went out {closes}× on one flick — each extra one is a `q` typed into codex's composer"
+            );
+        });
+    }
+
+    /// A downward tick with the view open but NOT at the bottom scrolls it, using
+    /// codex's own binding — it must not close on the way down.
+    #[test]
+    fn a_tick_inside_the_transcript_scrolls_instead_of_closing() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.view.term_size = (120, 24);
+            app.state.config.mouse.pane_scroll_view = crate::config::PaneScrollView::Native;
+            app.open_pane_tab("cat");
+            let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+            tabs.active_entry_mut().info.command = "codex".to_string();
+            // Marker present, no `100%` footer: open, mid-history.
+            tabs.active_mut()
+                .send_bytes(
+                    "T R A N S C R I P T\n\u{2500}\u{2500} 40% \u{2500}\u{2500}\n".as_bytes(),
+                )
+                .expect("write to the pty");
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while Instant::now() < deadline {
+                tabs.active_mut().drain_output();
+                if tabs
+                    .active()
+                    .visible_lines()
+                    .iter()
+                    .any(|l| l.contains("T R A N S C R I P T"))
+                {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+
+            let profile = crate::agent::detect("codex");
+            let marker = profile.transcript_open_marker().expect("marked");
+            let out = bytes(&app.send_agent_view_scroll_keys(profile, marker, 1));
+            assert!(!out.is_empty(), "a tick mid-transcript has to do something");
+            assert!(
+                !out.contains(&b'q'),
+                "and it must not be the close key: {out:?}"
+            );
+        });
+    }
+
+    /// With no pane there is nothing to scroll — and nothing to panic on.
+    #[test]
+    fn a_tick_with_no_pane_does_nothing() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            assert!(app.send_scroll_keys(1).is_empty());
+        });
+    }
+}
