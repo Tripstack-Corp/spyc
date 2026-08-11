@@ -110,11 +110,11 @@ fn background_open_keeps_pane_focus_while_user_open_grabs_it() {
     });
 }
 
-/// `^a |` is disabled while a second commander occupies the right column —
-/// the two are mutually exclusive, so the cycle no-ops (no preview opens) and
-/// the commander stays put.
+/// `^s |` is disabled while a second commander occupies the right column —
+/// the two are mutually exclusive, so it no-ops (no preview opens) and the
+/// commander stays put. `^s f` still flips the commander split's height.
 #[test]
-fn vsplit_cycle_disabled_with_second_commander() {
+fn vsplit_toggle_disabled_with_second_commander() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let dir = tmp.path().join("work");
@@ -126,16 +126,88 @@ fn vsplit_cycle_disabled_with_second_commander() {
         app.open_second_commander_at(&d);
         let shape = app.state.vsplit;
 
-        app.apply(&Action::VsplitCycle).unwrap();
+        app.apply(&Action::VsplitToggle).unwrap();
         assert!(
             app.state.right.is_some(),
-            "^a | must not tear down the commander"
+            "^s | must not tear down the commander"
         );
         assert!(
             app.view.right_pager.is_none(),
-            "^a | must not open a preview over the commander"
+            "^s | must not open a preview over the commander"
         );
         assert_eq!(app.state.vsplit, shape, "the split shape is unchanged");
+
+        // `^s n` opens top-only; `^s f` is how you get a full-height `b`.
+        assert_eq!(
+            shape.map(|v| v.mode),
+            Some(state::VsplitMode::TopOnly),
+            "a second commander opens top-only whatever the config default"
+        );
+        app.apply(&Action::VsplitToggleHeight).unwrap();
+        assert_eq!(
+            app.state.vsplit.map(|v| v.mode),
+            Some(state::VsplitMode::FullHeight),
+            "^s f flips the commander split to full-height"
+        );
+        assert!(app.state.right.is_some(), "the commander survives the flip");
+    });
+}
+
+/// An agent opening a worktree (`create_worktree open:true` / `open_worktree`)
+/// takes the right column while the user is reading a preview there — so the
+/// preview is set aside, not destroyed: closing `b` puts the same file back with
+/// the split shape it had. The user's own `^s n` is an explicit ask and keeps
+/// none of it.
+#[test]
+fn an_agent_open_sets_the_users_preview_aside_and_gives_it_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.md"), "# A\n\nbody").unwrap();
+        let mut app = App::test_app(dir);
+        app.seed_rows(&["a.md"]);
+
+        // The user is reading a.md in a full-height right column.
+        app.apply(&Action::VsplitToggle).unwrap();
+        app.apply(&Action::VsplitFocusRight).unwrap();
+        let read_shape = app.state.vsplit.expect("preview split open");
+        assert_eq!(read_shape.mode, state::VsplitMode::FullHeight);
+
+        // An agent opens a worktree in `b`.
+        let other = tmp.path().join("wt");
+        std::fs::create_dir(&other).unwrap();
+        app.open_second_commander_at_background(&other);
+        assert!(app.state.right.is_some(), "the agent's column opened");
+        assert!(
+            app.view.right_pager.is_none(),
+            "one thing at a time in the right column"
+        );
+
+        // Closing `b` hands the reading position back, shape and all.
+        app.apply(&Action::CloseSecondCommander).unwrap();
+        assert_eq!(
+            app.state.vsplit,
+            Some(read_shape),
+            "the preview's split shape (height, width, focused column) returns"
+        );
+        assert!(
+            app.view
+                .right_pager
+                .as_ref()
+                .and_then(|v| v.source_path.as_ref())
+                .is_some_and(|p| p.ends_with("a.md")),
+            "the file the user was reading is back in the column"
+        );
+
+        // The user's own `^s n` over a preview is an explicit replace — nothing
+        // is owed back when that column closes.
+        app.open_second_commander_at(&other);
+        app.apply(&Action::CloseSecondCommander).unwrap();
+        assert!(
+            app.state.vsplit.is_none() && app.view.right_pager.is_none(),
+            "^s n discards the preview it replaced"
+        );
     });
 }
 
