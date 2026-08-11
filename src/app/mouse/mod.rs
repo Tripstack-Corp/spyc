@@ -31,19 +31,36 @@ pub(super) use route::{
     Gesture, MouseSink, MouseSnapshot, PendingViewIntent, region_at, route_mouse,
 };
 
-/// Resolve a raw mouse event kind to the gesture + wheel delta every downstream
+/// Apply `[mouse] invert_scroll` to a raw event, at the boundary, before anything
+/// branches on it.
+///
+/// The knob means "this machine reports the wheel the opposite way round from
+/// what I mean", which is a property of the *input* — so it is corrected once,
+/// here, and everything downstream reads a wheel that means what it says. That
+/// includes the report forwarded to a mouse-aware child, which a per-consumer
+/// flip could not reach: inverting the file list and the pagers but not the pane
+/// left the user who set the knob with a half-inverted spyc, the two halves of
+/// one window scrolling opposite ways.
+///
+/// Buttons and drags pass through untouched — there is no direction to invert.
+const fn with_wheel_direction_corrected(mut ev: MouseEvent, invert: bool) -> MouseEvent {
+    if invert {
+        ev.kind = match ev.kind {
+            MouseEventKind::ScrollUp => MouseEventKind::ScrollDown,
+            MouseEventKind::ScrollDown => MouseEventKind::ScrollUp,
+            other => other,
+        };
+    }
+    ev
+}
+
+/// Resolve a mouse event kind to the gesture + wheel delta every downstream
 /// consumer (`ListCursor`, `Pager`, `PaneScrollKeys`) shares. `None` for a kind
 /// with no behaviour (drags, motion, horizontal wheel — see the caller).
 ///
-/// `invert_scroll` (`[mouse] invert_scroll`) flips the sign here, in this ONE
-/// place, so the file list, the pager, and an agent pane's synthesized scroll
-/// keys always agree with each other under either setting — none of them
-/// re-check the config themselves.
-fn gesture_and_delta(
-    kind: MouseEventKind,
-    lines: usize,
-    invert_scroll: bool,
-) -> Option<(Gesture, i32)> {
+/// Direction-agnostic: the kind reaching here has already been through
+/// [`with_wheel_direction_corrected`].
+fn gesture_and_delta(kind: MouseEventKind, lines: usize) -> Option<(Gesture, i32)> {
     let magnitude = i32::try_from(lines).unwrap_or(i32::MAX);
     let (gesture, delta) = match kind {
         MouseEventKind::ScrollUp => (Gesture::Wheel, -magnitude),
@@ -63,7 +80,7 @@ fn gesture_and_delta(
         | MouseEventKind::ScrollLeft
         | MouseEventKind::ScrollRight => return None,
     };
-    Some((gesture, if invert_scroll { -delta } else { delta }))
+    Some((gesture, delta))
 }
 
 /// The surface an in-flight mouse drag belongs to. See
@@ -174,6 +191,10 @@ impl super::App {
         if !crate::mouse_capture_is_on() {
             return Vec::new();
         }
+        // Before anything branches on it — see
+        // [`with_wheel_direction_corrected`]. Every path below, including the one
+        // that hands a report to the child, reads the corrected event.
+        let ev = with_wheel_direction_corrected(ev, self.state.config.mouse.invert_scroll);
         let (cols, rows) = self.view.term_size;
         let frame = ratatui::layout::Rect::new(0, 0, cols, rows);
 
@@ -234,9 +255,8 @@ impl super::App {
         }
 
         let lines = self.state.config.mouse.scroll_lines.max(1);
-        let invert_scroll = self.state.config.mouse.invert_scroll;
         // `delta` is only meaningful for a wheel gesture; buttons ignore it.
-        let Some((gesture, delta)) = gesture_and_delta(ev.kind, lines, invert_scroll) else {
+        let Some((gesture, delta)) = gesture_and_delta(ev.kind, lines) else {
             // Drags, motion, horizontal wheel: no behaviour. spyc asks the terminal
             // only for 1000 (press/release), so `Moved`/`Drag` shouldn't arrive at
             // all — `proc.rs` filters them for the terminals that send them anyway.
@@ -385,54 +405,86 @@ mod tests {
     #[test]
     fn uninverted_keeps_the_documented_sign() {
         assert_eq!(
-            gesture_and_delta(MouseEventKind::ScrollDown, 3, false),
+            gesture_and_delta(MouseEventKind::ScrollDown, 3),
             Some((Gesture::Wheel, 3))
         );
         assert_eq!(
-            gesture_and_delta(MouseEventKind::ScrollUp, 3, false),
+            gesture_and_delta(MouseEventKind::ScrollUp, 3),
             Some((Gesture::Wheel, -3))
         );
     }
 
     /// `invert_scroll = true` flips both directions — the escape hatch for a
-    /// terminal/OS combination that reads backwards from spyc's default.
+    /// terminal/OS combination that reads backwards from spyc's default. Applied
+    /// to the EVENT, at the boundary, so every consumer inherits it including the
+    /// report forwarded to a mouse-aware child.
     #[test]
     fn invert_scroll_flips_both_directions() {
+        let at = |kind| MouseEvent {
+            kind,
+            column: 0,
+            row: 0,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        };
         assert_eq!(
-            gesture_and_delta(MouseEventKind::ScrollDown, 3, true),
+            with_wheel_direction_corrected(at(MouseEventKind::ScrollDown), true).kind,
+            MouseEventKind::ScrollUp
+        );
+        assert_eq!(
+            with_wheel_direction_corrected(at(MouseEventKind::ScrollUp), true).kind,
+            MouseEventKind::ScrollDown
+        );
+        // …and reaches the shared delta through the ordinary path.
+        assert_eq!(
+            gesture_and_delta(
+                with_wheel_direction_corrected(at(MouseEventKind::ScrollDown), true).kind,
+                3
+            ),
             Some((Gesture::Wheel, -3))
         );
+    }
+
+    /// Every consumer (`ListCursor`, `Pager`, `PaneScrollKeys`, and the report
+    /// `PaneForward` hands the child) reads one already-corrected event — the
+    /// toggle is applied at the boundary, once, specifically so they can never
+    /// disagree with each other. This test is the guard against a future edit
+    /// re-introducing a per-consumer flip.
+    #[test]
+    fn the_sign_is_decided_once_for_every_consumer() {
+        let (_, down) = gesture_and_delta(MouseEventKind::ScrollDown, 1).unwrap();
+        let (_, up) = gesture_and_delta(MouseEventKind::ScrollUp, 1).unwrap();
+        assert_eq!(down, -up, "up and down must be exact opposites");
         assert_eq!(
-            gesture_and_delta(MouseEventKind::ScrollUp, 3, true),
-            Some((Gesture::Wheel, 3))
+            gesture_and_delta(MouseEventKind::ScrollUp, 1),
+            gesture_and_delta(MouseEventKind::ScrollUp, 1),
+            "and the function must not consult the config itself"
         );
     }
 
-    /// Every consumer (`ListCursor`, `Pager`, `PaneScrollKeys` in `handle_mouse`)
-    /// reads the SAME delta this function returns — the toggle lives here, once,
-    /// specifically so those three can never disagree with each other. This test
-    /// is the guard against a future edit re-introducing a per-consumer flip.
-    #[test]
-    fn the_sign_is_decided_once_for_every_consumer() {
-        for invert in [false, true] {
-            let (_, down) = gesture_and_delta(MouseEventKind::ScrollDown, 1, invert).unwrap();
-            let (_, up) = gesture_and_delta(MouseEventKind::ScrollUp, 1, invert).unwrap();
-            assert_eq!(
-                down, -up,
-                "invert_scroll={invert}: up and down must be exact opposites"
-            );
-        }
-    }
-
-    /// Buttons carry no delta and are unaffected by the toggle.
+    /// Buttons and drags carry no direction, so the toggle leaves them alone.
     #[test]
     fn button_presses_carry_no_delta_either_way() {
-        for invert in [false, true] {
+        let at = |kind| MouseEvent {
+            kind,
+            column: 0,
+            row: 0,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        };
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+        ] {
             assert_eq!(
-                gesture_and_delta(MouseEventKind::Down(MouseButton::Left), 5, invert),
-                Some((Gesture::Left, 0))
+                with_wheel_direction_corrected(at(kind), true).kind,
+                kind,
+                "{kind:?} has no direction to invert"
             );
         }
+        assert_eq!(
+            gesture_and_delta(MouseEventKind::Down(MouseButton::Left), 5),
+            Some((Gesture::Left, 0))
+        );
     }
 
     /// Drags, motion, and horizontal wheel have no behaviour — matches the
@@ -446,7 +498,7 @@ mod tests {
             MouseEventKind::ScrollRight,
             MouseEventKind::Up(MouseButton::Left),
         ] {
-            assert_eq!(gesture_and_delta(kind, 1, false), None, "{kind:?}");
+            assert_eq!(gesture_and_delta(kind, 1), None, "{kind:?}");
         }
     }
 
@@ -455,7 +507,7 @@ mod tests {
     #[test]
     fn lines_scales_the_magnitude() {
         assert_eq!(
-            gesture_and_delta(MouseEventKind::ScrollDown, 7, false),
+            gesture_and_delta(MouseEventKind::ScrollDown, 7),
             Some((Gesture::Wheel, 7))
         );
     }

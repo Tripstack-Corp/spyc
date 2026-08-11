@@ -380,9 +380,10 @@ pub struct MouseConfig {
     /// Named for the mechanism, not for a convention: which direction counts
     /// as "natural" depends on the OS trackpad setting and the terminal, so a
     /// `natural_scroll` flag would be ambiguous in exactly the cases a user
-    /// reaches for it. Applied once, where the wheel delta is computed
-    /// (`src/app/mouse/mod.rs`), so the file list, the pager, and an agent
-    /// pane's synthesized scroll keys always agree with each other.
+    /// reaches for it. Applied once, to the event itself, at `handle_mouse`'s
+    /// boundary (`src/app/mouse/mod.rs`) — so the file list, the pager, an agent
+    /// pane's synthesized scroll keys and the report forwarded to a mouse-aware
+    /// child all agree with each other.
     pub invert_scroll: bool,
 }
 
