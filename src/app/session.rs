@@ -100,64 +100,73 @@ impl App {
         // pane the same ID and they all collapsed onto one
         // conversation at restore.
         let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let tabs: Vec<SavedTab> =
-            self.runtime
-                .pane_tabs
-                .as_mut()
-                .map(|pt| {
-                    pt.tabs_mut()
-                        .iter_mut()
-                        .map(|t| {
-                            let profile = crate::agent::detect(&t.info.command);
-                            let kind = profile.kind();
-                            // Resolve the (session_id, session_name) to persist.
-                            // Prefer this tab's PINNED claude session id (set at
-                            // restore from the exact `/resume <sid>`) when its JSONL
-                            // still exists — that's the conversation this pane is
-                            // definitively running, so it bypasses the spawn-proximity
-                            // resolver that crosses panes restored together. Otherwise
-                            // fall back to the profile resolver, which honors `claimed`
-                            // internally so multi-pane saves don't collapse onto one
-                            // conversation.
-                            let (agent_session_id, agent_session_name) =
-                                match t.info.live_session_id.as_deref().and_then(|id| {
-                                    profile.validate_live_session_id(&t.info.cwd, id)
-                                }) {
-                                    Some((id, name)) => (Some(id), name),
-                                    None => profile.resolve_resume_target(
-                                        &t.pane,
-                                        &t.info.cwd,
-                                        t.info.spawn_epoch_secs,
-                                        &claimed,
-                                    ),
-                                };
-                            if let Some(ref id) = agent_session_id {
-                                claimed.insert(id.clone());
-                            }
-                            // The sid lives in agent_session_id; baking
-                            // --resume / `resume` into `command` would survive
-                            // past a resolver miss and pollute the next restore.
-                            let saved_command = profile.command_without_resume(&t.info.command);
-                            SavedTab {
-                                command: saved_command,
-                                // Strip any `[exited N]` suffix — that's
-                                // runtime display state for a tab whose
-                                // child has died, not persistent identity.
-                                // Without this, restoring a session that
-                                // saw a tab exit at any point shows the
-                                // freshly-respawned process tagged with
-                                // a stale "exited" suffix.
-                                label: crate::pane::tabs::strip_exit_suffix(&t.info.label),
-                                cwd: t.info.cwd.clone(),
-                                agent_kind: kind,
-                                agent_session_id,
-                                agent_session_name,
-                                claim_owner: t.info.claim_owner.clone(),
-                            }
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+        let tabs: Vec<SavedTab> = self
+            .runtime
+            .pane_tabs
+            .as_mut()
+            .map(|pt| {
+                pt.tabs_mut()
+                    .iter_mut()
+                    .map(|t| {
+                        let profile = crate::agent::detect(&t.info.command);
+                        let kind = profile.kind();
+                        // Resolve the (session_id, session_name) to persist.
+                        // Prefer this tab's PINNED session id — claude's
+                        // `live_session_id` (set at restore from the exact
+                        // `/resume <sid>`) or codex's `codex_session_id` (the
+                        // rollout `codex_pin` claimed for it). That's the
+                        // conversation this pane is definitively running, so it
+                        // bypasses the spawn-proximity resolver that crosses panes
+                        // restored together. Otherwise fall back to the profile
+                        // resolver, which honors `claimed` internally so multi-pane
+                        // saves don't collapse onto one conversation — and which
+                        // for a *live* tab has nothing to read, since both agents
+                        // only print their id on the way out.
+                        let (agent_session_id, agent_session_name) = match t
+                            .info
+                            .pinned_session_id()
+                            // The pinned path honors `claimed` too: two tabs
+                            // pinned to one conversation would otherwise both
+                            // save it and both restore into it, which is the
+                            // collapse this whole block exists to prevent.
+                            .filter(|id| !claimed.contains(*id))
+                            .and_then(|id| profile.validate_live_session_id(&t.info.cwd, id))
+                        {
+                            Some((id, name)) => (Some(id), name),
+                            None => profile.resolve_resume_target(
+                                &t.pane,
+                                &t.info.cwd,
+                                t.info.spawn_epoch_secs,
+                                &claimed,
+                            ),
+                        };
+                        if let Some(ref id) = agent_session_id {
+                            claimed.insert(id.clone());
+                        }
+                        // The sid lives in agent_session_id; baking
+                        // --resume / `resume` into `command` would survive
+                        // past a resolver miss and pollute the next restore.
+                        let saved_command = profile.command_without_resume(&t.info.command);
+                        SavedTab {
+                            command: saved_command,
+                            // Strip any `[exited N]` suffix — that's
+                            // runtime display state for a tab whose
+                            // child has died, not persistent identity.
+                            // Without this, restoring a session that
+                            // saw a tab exit at any point shows the
+                            // freshly-respawned process tagged with
+                            // a stale "exited" suffix.
+                            label: crate::pane::tabs::strip_exit_suffix(&t.info.label),
+                            cwd: t.info.cwd.clone(),
+                            agent_kind: kind,
+                            agent_session_id,
+                            agent_session_name,
+                            claim_owner: t.info.claim_owner.clone(),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
 
         // Anchor the session on `project_home` (explicit) → `start_dir`
         // (where spyc was launched) → `listing.dir` (last resort).
@@ -787,8 +796,89 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{AutosaveAction, autosave_action};
+    use super::{App, AutosaveAction, autosave_action};
     use std::time::{Duration, Instant};
+
+    /// A live codex tab must save the rollout uuid spyc pinned to it.
+    ///
+    /// `resolve_resume_target` reads codex's **exit banner**, which a tab that's
+    /// still running at quit has never printed — so save persisted `None` and
+    /// restore spawned `codex resume --last`, which attaches to whichever rollout
+    /// in the cwd was written most recently, including another spyc instance's.
+    /// The uuid was sitting in `info.codex_session_id` the whole time.
+    #[test]
+    fn a_live_codex_tab_saves_the_rollout_uuid_it_is_pinned_to() {
+        const UUID: &str = "0198c2f4-1a2b-7c3d-8e4f-5a6b7c8d9e0f";
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            // `cat` gives a harmless long-lived pty; `agent::detect` keys on the
+            // command string, so relabelling it is what makes this a codex tab.
+            app.open_pane_tab("cat");
+            {
+                let info = &mut app
+                    .runtime
+                    .pane_tabs
+                    .as_mut()
+                    .expect("a tab was opened")
+                    .tabs_mut()[0]
+                    .info;
+                info.command = "codex".to_string();
+                info.codex_session_id = Some(UUID.to_string());
+            }
+
+            let snapshot = app.build_session_snapshot();
+            let saved = &snapshot.tabs[0];
+            assert_eq!(saved.agent_session_id.as_deref(), Some(UUID));
+            // And the id has to survive into the spawn, or saving it changed
+            // nothing the user can see.
+            assert_eq!(
+                crate::agent::detect(&saved.command)
+                    .reconstruct_restore(
+                        &saved.command,
+                        saved.agent_session_id.as_deref(),
+                        tmp.path()
+                    )
+                    .command,
+                format!("codex resume {UUID}"),
+                "a restored tab must resume that exact rollout, not --last"
+            );
+        });
+    }
+
+    /// Two tabs pinned to the same conversation must not both save it: restoring
+    /// them would put two panes in one conversation, which is the collapse #230
+    /// was filed for. The pinned path honors `claimed` for the same reason the
+    /// spawn-proximity resolver always has.
+    #[test]
+    fn two_tabs_pinned_to_one_conversation_do_not_both_save_it() {
+        const UUID: &str = "0198c2f4-1a2b-7c3d-8e4f-5a6b7c8d9e0f";
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.open_pane_tab("cat");
+            app.open_pane_tab("cat");
+            for entry in app
+                .runtime
+                .pane_tabs
+                .as_mut()
+                .expect("two tabs were opened")
+                .tabs_mut()
+            {
+                entry.info.command = "codex".to_string();
+                entry.info.codex_session_id = Some(UUID.to_string());
+            }
+
+            let snapshot = app.build_session_snapshot();
+            assert_eq!(snapshot.tabs.len(), 2);
+            let claims = snapshot
+                .tabs
+                .iter()
+                .filter(|t| t.agent_session_id.as_deref() == Some(UUID))
+                .count();
+            assert_eq!(claims, 1, "only one tab may claim a conversation");
+        });
+    }
 
     #[test]
     fn autosave_idle_when_not_dirty() {

@@ -1205,9 +1205,11 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   then verify the submit landed — re-sending Enter while the command
   is still visibly unsubmitted, since Claude's async startup can eat
   a lone `\r`.
-  Codex tabs spawn `codex resume <UUID>` directly. When no UUID was
-  captured (pane killed before exit), codex falls back to `codex resume
-  --last`, which uses codex's native cwd-filtered picker. `zot` tabs
+  Codex tabs spawn `codex resume <UUID>` directly — the UUID being the
+  rollout spyc pinned to that tab while it ran, so a tab still working at
+  quit resumes exactly rather than guessing. When no UUID was ever pinned,
+  codex falls back to `codex resume --last`, which uses codex's native
+  cwd-filtered picker. `zot` tabs
   restore with `zot --continue` (zot's resume-most-recent-for-cwd);
   specific-session resume and transcript scrollback are a follow-up
   pending its on-disk session-file format.
