@@ -137,7 +137,7 @@ demos: ## Re-record the README demo GIFs (needs vhs; TAPE=spyc|pager|vsplit|lua|
 	done
 
 .PHONY: fuzz
-fuzz: ## Coverage-guided fuzz (needs nightly + cargo-fuzz; on-demand, NOT in `check`). TARGET=dsl_parse|render_markdown|highlight|word_wrap|expand_path|expand_percent, FUZZ_SECS=N, FUZZ_TOOLCHAIN=nightly-YYYY-MM-DD, FUZZ_TRIPLE=<host triple>.
+fuzz: ## Coverage-guided fuzz (needs nightly + cargo-fuzz; on-demand, NOT in `check`). TARGET=archive_container|archive_name|dsl_parse|render_markdown|highlight|word_wrap|expand_path|expand_percent, FUZZ_SECS=N, FUZZ_TOOLCHAIN=nightly-YYYY-MM-DD, FUZZ_TRIPLE=<host triple>.
 	@command -v cargo-fuzz >/dev/null 2>&1 || { \
 		echo "cargo-fuzz not found — install with: cargo install cargo-fuzz"; \
 		exit 1; \
@@ -146,6 +146,15 @@ fuzz: ## Coverage-guided fuzz (needs nightly + cargo-fuzz; on-demand, NOT in `ch
 		echo "nightly toolchain not found — install with: rustup toolchain install nightly"; \
 		exit 1; \
 	}
+        # Seed from the committed inputs before every run. The corpus itself is
+        # gitignored (CI restores it from cache), so without this a fresh clone
+        # — and every first CI run after a cache miss — would start from nothing
+        # and have to rediscover shapes we already know matter.
+	@if [ -d "fuzz/seeds/$(or $(TARGET),dsl_parse)" ]; then \
+		mkdir -p "fuzz/corpus/$(or $(TARGET),dsl_parse)"; \
+		cp -n fuzz/seeds/$(or $(TARGET),dsl_parse)/* \
+			"fuzz/corpus/$(or $(TARGET),dsl_parse)/" 2>/dev/null || true; \
+	fi
 	cargo +$(or $(FUZZ_TOOLCHAIN),nightly) fuzz run \
 		$(if $(FUZZ_TRIPLE),--target $(FUZZ_TRIPLE),) $(or $(TARGET),dsl_parse) \
 		-- -max_total_time=$(or $(FUZZ_SECS),30)

@@ -74,3 +74,10 @@ path = "fuzz_targets/archive_name.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "archive_container"
+path = "fuzz_targets/archive_container.rs"
+test = false
+doc = false
+bench = false

@@ -51,6 +51,8 @@ jobs:
       fail-fast: false
       matrix:
         target:
+          - archive_container
+          - archive_name
           - dsl_parse
           - expand_path
           - expand_percent
