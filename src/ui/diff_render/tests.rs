@@ -27,6 +27,11 @@ fn rem(text: &str) -> DiffLine {
     }
 }
 
+/// The substrings a set of highlight ranges selects, for readable assertions.
+fn picks<'a>(text: &'a str, ranges: &[std::ops::Range<usize>]) -> Vec<&'a str> {
+    ranges.iter().map(|r| &text[r.start..r.end]).collect()
+}
+
 /// A one-file modify diff (`c` → `C`) with surrounding context, in `f.txt`.
 fn modify_model() -> DiffModel {
     DiffModel {
@@ -397,26 +402,75 @@ fn lnum_width_floors_at_four_and_grows_with_digits() {
 }
 
 #[test]
-fn intra_change_range_trims_common_prefix_and_suffix() {
-    // Only the digit differs; prefix "let x = " + suffix ";" are shared.
-    let (old_r, new_r) = super::intra_change_range("let x = 1;", "let x = 2;").unwrap();
-    assert_eq!(&"let x = 1;"[old_r], "1");
-    assert_eq!(&"let x = 2;"[new_r], "2");
+fn intra_change_ranges_marks_only_the_changed_token() {
+    // Only the digit differs; "let x = " and ";" are shared.
+    let (old_r, new_r) = super::intraline::intra_change_ranges("let x = 1;", "let x = 2;");
+    assert_eq!(picks("let x = 1;", &old_r), vec!["1"]);
+    assert_eq!(picks("let x = 2;", &new_r), vec!["2"]);
 }
 
 #[test]
-fn intra_change_range_pure_insertion_is_empty_on_old_side() {
-    // "ab" → "aXb": shared prefix "a" + suffix "b"; "X" inserted.
-    let (old_r, new_r) = super::intra_change_range("ab", "aXb").unwrap();
+fn intra_change_ranges_pure_insertion_is_empty_on_old_side() {
+    // "a b" → "a X b": nothing removed, so the old side carries no highlight.
+    // (Was "ab" → "aXb"; with word tokens that pair is a single changed token
+    // spanning both whole lines, which is the deliberate no-highlight case.)
+    let (old_r, new_r) = super::intraline::intra_change_ranges("a b", "a X b");
     assert!(old_r.is_empty());
-    assert_eq!(&"aXb"[new_r], "X");
+    assert_eq!(picks("a X b", &new_r), vec!["X"]);
 }
 
 #[test]
-fn intra_change_range_none_when_identical_or_disjoint() {
-    assert!(super::intra_change_range("same", "same").is_none());
-    // No shared prefix or suffix → uniform wash, no word highlight.
-    assert!(super::intra_change_range("abc", "xyz").is_none());
+fn intra_change_ranges_empty_when_identical_or_wholly_different() {
+    assert_eq!(
+        super::intraline::intra_change_ranges("same", "same"),
+        (vec![], vec![])
+    );
+    // Nothing shared at either end → uniform wash, no word highlight.
+    assert_eq!(
+        super::intraline::intra_change_ranges("abc", "xyz"),
+        (vec![], vec![])
+    );
+}
+
+/// The #179 class, asserted through the real renderer: an unchanged token
+/// between two changed ones must not carry the word-highlight bg.
+#[test]
+fn word_highlight_does_not_bleed_across_an_unchanged_token() {
+    let theme = Theme::default();
+    let model = single_file(
+        FileStatus::Modified,
+        DiffKind::Text(vec![Hunk {
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 1,
+            lines: vec![rem("foo(a, b, c)"), add("foo(x, b, y)")],
+        }]),
+        Some("f.rs"),
+        Some("f.rs"),
+    );
+    let out = render_diff(&model, &theme, DiffLayout::Unified, 80);
+    for (prefix, bg, expect) in [
+        ('-', theme.diff_del_word_bg, vec!["a", "c"]),
+        ('+', theme.diff_add_word_bg, vec!["x", "y"]),
+    ] {
+        let row = out
+            .iter()
+            .find(|l| row_text(l).starts_with(prefix))
+            .expect("row present");
+        let marked: Vec<&str> = row
+            .spans
+            .iter()
+            .filter(|s| s.style.bg == Some(bg))
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert_eq!(marked, expect, "{prefix} row highlights each changed token");
+        // The shared `b` keeps the dim row wash, never the bright word bg.
+        assert!(
+            !marked.iter().any(|s| s.contains('b')),
+            "{prefix} row bled the unchanged `b` into the highlight"
+        );
+    }
 }
 
 #[test]
@@ -825,10 +879,12 @@ fn word_highlight_never_bleeds_into_same_row_padding() {
         .position(|s| s.content.contains('│'))
         .unwrap();
     let right = &change.spans[sep_idx + 1..];
+    // Word-level tokens mark the whole changed word (`bar`→`baz`), the way
+    // git's `--word-diff` does, not just the one differing char.
     let word = right
         .iter()
-        .find(|s| s.content.as_ref() == "z")
-        .expect("changed char carries its own span");
+        .find(|s| s.content.as_ref() == "baz")
+        .expect("changed word carries its own span");
     assert_eq!(word.style.bg, Some(theme.diff_add_word_bg));
     let pad = right
         .iter()
@@ -894,9 +950,9 @@ fn word_highlight_never_reaches_a_textless_continuation_row() {
 #[test]
 fn word_highlight_unchanged_for_a_simple_single_row_split_change() {
     // Regression: the ordinary case — no wrap, no pair-count mismatch — must
-    // render identically to before this fix. `modify_model()`'s `c`→`C`
-    // shares no prefix/suffix (`intra_change_range` returns `None` for it, no
-    // word highlight at all), so use a pair with a real word-level range.
+    // render identically to before this fix. `modify_model()`'s `c`→`C` is a
+    // wholly-changed single token (`intra_change_ranges` yields nothing for it,
+    // no word highlight at all), so use a pair with a real word-level range.
     let theme = Theme::default();
     let model = single_file(
         FileStatus::Modified,
@@ -959,8 +1015,8 @@ proptest::proptest! {
             Some("f.txt"),
         );
         let out = render_diff(&model, &theme, DiffLayout::SideBySide, width);
-        let expected: usize = super::intra_change_range(&old, &new)
-            .map_or(0, |(o, n)| (o.end - o.start) + (n.end - n.start));
+        let (o, n) = super::intraline::intra_change_ranges(&old, &new);
+        let expected: usize = o.iter().chain(n.iter()).map(|r| r.end - r.start).sum();
         let add_bg = theme.diff_add_word_bg;
         let del_bg = theme.diff_del_word_bg;
         let actual: usize = out

@@ -69,6 +69,19 @@ crossterm = "0.29"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 glob = "0.3"
+# `~` / `$VAR` / `${VAR}` expansion for jump targets (src/paths.rs). Pure-Rust.
+# `default-features = false` with only `base-0` is load-bearing, not tidiness:
+# the default `tilde` feature exists to auto-detect HOME via the `dirs` crate,
+# which spyc must not use — HOME comes from the `envset` overlay (`:setenv`), so
+# we pass our own home + var lookup to `full_with_context_no_errors`. Trimmed
+# this way the crate has ZERO dependencies of its own.
+shellexpand = { version = "3", default-features = false, features = ["base-0"] }
+# POSIX shell word quoting for `%` expansion and the hook/pager command strings
+# spyc builds for `sh -c` (src/shell/expand.rs). Pure-Rust, zero dependencies.
+# Quoting user-selected paths into a shell command is the one place where "small
+# and correct today" still argues for the widely-deployed implementation over
+# our own, so `shell_quote` routes through `shlex::try_quote`.
+shlex = { version = "2", default-features = false, features = ["std"] }
 # In-process three-way text merge for the `spyc --merge-driver` git merge
 # driver (src/merge_driver.rs). Pure-Rust, tiny — lets us resolve the
 # version-line Cargo.toml/Cargo.lock conflicts without shelling out to `git`
@@ -89,6 +102,14 @@ unicode-width = "0.2"
 # base char + U+FE0F) wider than the sum of its chars, so anything that
 # measures text incrementally has to advance by cluster to agree with it.
 unicode-segmentation = "1"
+# Cluster-safe truncation for the `src/ui` width helpers (`display_truncate`
+# and `_tail`, `truncate_middle`), which used to walk `char_indices()` and sum
+# per-char widths — measuring "❤️" (U+2764 U+FE0F) as 1 column where the
+# terminal draws 2, and a ZWJ emoji as 6 where it draws 2, while being free to
+# slice either in half. Not a new dependency at all: `ratatui-core` already
+# pulls it in for ratatui's own truncation, so this only promotes it to direct
+# (zero new crates, zero binary-size cost).
+unicode-truncate = { version = "2", default-features = false, features = ["std"] }
 libc = "0.2"
 ignore = "0.4"
 # Git plumbing — the gitoxide crate. Pure-Rust (zlib-rs is the default
