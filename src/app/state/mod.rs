@@ -441,6 +441,26 @@ pub enum VsplitMode {
     FullHeight,
 }
 
+impl VsplitMode {
+    /// The other mode — the `^s f` flip.
+    pub const fn flipped(self) -> Self {
+        match self {
+            Self::TopOnly => Self::FullHeight,
+            Self::FullHeight => Self::TopOnly,
+        }
+    }
+}
+
+/// `[layout] vsplit_mode` — the shape a fresh split opens in.
+impl From<crate::config::VsplitMode> for VsplitMode {
+    fn from(m: crate::config::VsplitMode) -> Self {
+        match m {
+            crate::config::VsplitMode::FullHeight => Self::FullHeight,
+            crate::config::VsplitMode::TopOnly => Self::TopOnly,
+        }
+    }
+}
+
 /// The vertical (left/right) split. Pure domain state: the right column's
 /// width share, the layout mode, and which column owns input. Held as
 /// `Option<VSplit>` on the Model — `None` is the single-column default. The

@@ -123,6 +123,23 @@ impl std::str::FromStr for ColorMode {
     }
 }
 
+/// The shape a vertical split opens in (`[layout] vsplit_mode`). `FullHeight`
+/// (the default) runs the divider the whole frame height, so the right column
+/// is a full-height reading surface and the pty pane confines itself to the
+/// left column; `TopOnly` splits only the file-list region, leaving the pane
+/// full-width below both columns. `^s f` flips an open split either way.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VsplitMode {
+    /// Accepts the `full` spelling.
+    #[default]
+    #[serde(alias = "full")]
+    FullHeight,
+    /// Accepts the `half` / `half_height` / `top` spellings.
+    #[serde(alias = "half", alias = "half_height", alias = "top")]
+    TopOnly,
+}
+
 #[derive(Debug, Clone)]
 pub struct LayoutConfig {
     /// `"top"` (default) or `"bottom"`. With `"bottom"` the prompt
@@ -134,6 +151,9 @@ pub struct LayoutConfig {
     pub chord_hint_delay_ms: u64,
     /// Color depth: `auto` (default), `truecolor`, or `256`. See [`ColorMode`].
     pub color_depth: ColorMode,
+    /// Shape a `^s |` / `^a |` preview split opens in: `full_height` (default)
+    /// or `top_only`. See [`VsplitMode`].
+    pub vsplit_mode: VsplitMode,
 }
 
 impl Default for LayoutConfig {
@@ -142,6 +162,7 @@ impl Default for LayoutConfig {
             status_position: StatusPosition::default(),
             chord_hint_delay_ms: 300,
             color_depth: ColorMode::default(),
+            vsplit_mode: VsplitMode::default(),
         }
     }
 }
@@ -159,6 +180,8 @@ struct FileLayout {
     chord_hint_delay_ms: Option<u64>,
     #[serde(default)]
     color_depth: Option<ColorMode>,
+    #[serde(default)]
+    vsplit_mode: Option<VsplitMode>,
 }
 
 /// Working directory a freshly-spawned pane tab opens in (the `^a c`
@@ -850,6 +873,9 @@ impl Config {
         }
         if let Some(cd) = file.layout.color_depth {
             self.layout.color_depth = cd;
+        }
+        if let Some(m) = file.layout.vsplit_mode {
+            self.layout.vsplit_mode = m;
         }
 
         // Pane: per-field merge for the same reason.

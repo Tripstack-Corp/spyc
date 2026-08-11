@@ -31,6 +31,8 @@ use crate::git::model::{CommitMeta, DiffKind, DiffModel, FileDiff, FileStatus, H
 use crate::ui::display_width;
 use crate::ui::theme::Theme;
 
+mod intraline;
+
 /// How a diff is laid out in the pager.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffLayout {
@@ -299,7 +301,7 @@ fn render_file_unified(
                     unified_row(' ', Style::default(), None, content)
                 }
                 LineOrigin::Add => {
-                    let word = word_hl(intra[j].as_ref(), theme.diff_word_bg(true));
+                    let word = word_hl(&intra[j], theme.diff_word_bg(true));
                     let content = styled_content(
                         pick(new_ref, ni, &line.text, theme, Some(true)),
                         theme.diff_row_bg(true),
@@ -314,7 +316,7 @@ fn render_file_unified(
                     )
                 }
                 LineOrigin::Remove => {
-                    let word = word_hl(intra[j].as_ref(), theme.diff_word_bg(false));
+                    let word = word_hl(&intra[j], theme.diff_word_bg(false));
                     let content = styled_content(
                         pick(old_ref, oi, &line.text, theme, Some(false)),
                         theme.diff_row_bg(false),
@@ -427,7 +429,7 @@ fn render_file_split(
                 let has_left = r_lo + k < r_hi;
                 let has_right = a_lo + k < a_hi;
                 let left_rows = if has_left {
-                    let word = word_hl(intra[r_lo + k].as_ref(), theme.diff_word_bg(false));
+                    let word = word_hl(&intra[r_lo + k], theme.diff_word_bg(false));
                     let content = styled_content(
                         pick(old_ref, oi, &lines[r_lo + k].text, theme, Some(false)),
                         theme.diff_row_bg(false),
@@ -449,7 +451,7 @@ fn render_file_split(
                     vec![blank_cell_row(col_w)]
                 };
                 let right_rows = if has_right {
-                    let word = word_hl(intra[a_lo + k].as_ref(), theme.diff_word_bg(true));
+                    let word = word_hl(&intra[a_lo + k], theme.diff_word_bg(true));
                     let content = styled_content(
                         pick(new_ref, ni, &lines[a_lo + k].text, theme, Some(true)),
                         theme.diff_row_bg(true),
@@ -804,12 +806,12 @@ fn apply_bg(style: Style, bg: Option<Color>) -> Style {
 }
 
 /// Style a line's content spans for display: overlay the dim `row_bg` wash on
-/// every span, then (for a modified line) overlay the brighter `word` bg on the
+/// every span, then (for a modified line) overlay the brighter `word` bg on each
 /// changed byte range. The caller prepends the gutter / line-number prefix.
 fn styled_content(
     content: Vec<Span<'static>>,
     row_bg: Option<Color>,
-    word: Option<(Range<usize>, Color)>,
+    word: Option<(&[Range<usize>], Color)>,
 ) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = content
         .into_iter()
@@ -818,15 +820,19 @@ fn styled_content(
             sp
         })
         .collect();
-    if let Some((range, bg)) = word {
-        spans = overlay_range_bg(spans, &range, bg);
+    if let Some((ranges, bg)) = word {
+        // Ranges are disjoint and ascending, and each overlay preserves total
+        // byte length, so they compose without disturbing each other's offsets.
+        for range in ranges {
+            spans = overlay_range_bg(spans, range, bg);
+        }
     }
     spans
 }
 
 /// Overlay background `bg` on the byte sub-`range` of a styled span run,
 /// splitting spans at the range boundaries. `range` must be on char
-/// boundaries (it comes from [`intra_change_range`], which trims on chars).
+/// boundaries (it comes from [`intraline`], whose tokens split on chars).
 fn overlay_range_bg(
     spans: Vec<Span<'static>>,
     range: &Range<usize>,
@@ -860,22 +866,23 @@ fn overlay_range_bg(
     out
 }
 
-/// Pair a changed-range with a word-highlight color into the `word` arg
-/// `styled_content` wants — `Some` only when both are present (no range, or
+/// Pair a line's changed-ranges with a word-highlight color into the `word` arg
+/// `styled_content` wants — `Some` only when both are present (no ranges, or
 /// `mono` dropping the color, yields `None`).
-fn word_hl(range: Option<&Range<usize>>, bg: Option<Color>) -> Option<(Range<usize>, Color)> {
-    match (range, bg) {
-        (Some(r), Some(c)) => Some((r.clone(), c)),
+const fn word_hl(ranges: &[Range<usize>], bg: Option<Color>) -> Option<(&[Range<usize>], Color)> {
+    match bg {
+        Some(c) if !ranges.is_empty() => Some((ranges, c)),
         _ => None,
     }
 }
 
 /// Per-line changed byte-ranges for a hunk: for each modified line (a removed
 /// line paired with its added counterpart within a change region), the byte
-/// range of the differing middle in *that line's own text*. Context and
-/// unpaired add/remove lines get `None`. Drives the word-level highlight.
-fn compute_intra(lines: &[crate::git::model::DiffLine]) -> Vec<Option<Range<usize>>> {
-    let mut out = vec![None; lines.len()];
+/// ranges that differ in *that line's own text* — one per changed word, so an
+/// unchanged token between two changed ones stays unhighlighted. Context and
+/// unpaired add/remove lines get an empty list. Drives the word-level highlight.
+fn compute_intra(lines: &[crate::git::model::DiffLine]) -> Vec<Vec<Range<usize>>> {
+    let mut out = vec![Vec::new(); lines.len()];
     let mut i = 0;
     while i < lines.len() {
         if lines[i].origin == LineOrigin::Context {
@@ -892,59 +899,15 @@ fn compute_intra(lines: &[crate::git::model::DiffLine]) -> Vec<Option<Range<usiz
             i += 1;
         }
         let a_hi = i;
-        // Pair removes with adds 1:1; only paired lines get a word range.
+        // Pair removes with adds 1:1; only paired lines get word ranges.
         for k in 0..(r_hi - r_lo).min(a_hi - a_lo) {
-            if let Some((old_r, new_r)) =
-                intra_change_range(&lines[r_lo + k].text, &lines[a_lo + k].text)
-            {
-                out[r_lo + k] = Some(old_r);
-                out[a_lo + k] = Some(new_r);
-            }
+            let (old_r, new_r) =
+                intraline::intra_change_ranges(&lines[r_lo + k].text, &lines[a_lo + k].text);
+            out[r_lo + k] = old_r;
+            out[a_lo + k] = new_r;
         }
     }
     out
-}
-
-/// The changed byte-ranges between a removed line `old` and its added
-/// counterpart `new`: trim the longest common char prefix + suffix; the middle
-/// is what changed. `None` when the lines are identical or share no
-/// prefix/suffix at all (a uniform brighter line adds nothing over the wash).
-fn intra_change_range(old: &str, new: &str) -> Option<(Range<usize>, Range<usize>)> {
-    if old == new {
-        return None;
-    }
-    let prefix = common_prefix_len(old, new);
-    let suffix = common_suffix_len(&old[prefix..], &new[prefix..]);
-    if prefix == 0 && suffix == 0 {
-        return None;
-    }
-    let old_hi = (old.len() - suffix).max(prefix);
-    let new_hi = (new.len() - suffix).max(prefix);
-    Some((prefix..old_hi, prefix..new_hi))
-}
-
-/// Byte length of the longest common char prefix of `a` and `b`.
-fn common_prefix_len(a: &str, b: &str) -> usize {
-    let mut len = 0;
-    for (ca, cb) in a.char_indices().zip(b.char_indices()) {
-        if ca.1 != cb.1 {
-            break;
-        }
-        len = ca.0 + ca.1.len_utf8();
-    }
-    len
-}
-
-/// Byte length of the longest common char suffix of `a` and `b`.
-fn common_suffix_len(a: &str, b: &str) -> usize {
-    let mut len = 0;
-    for (ca, cb) in a.chars().rev().zip(b.chars().rev()) {
-        if ca != cb {
-            break;
-        }
-        len += ca.len_utf8();
-    }
-    len
 }
 
 /// The path to use for syntax detection: the new path, else the old.
