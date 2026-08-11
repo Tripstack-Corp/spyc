@@ -1317,6 +1317,24 @@ mod mouse_reporting_tests {
         }
     }
 
+    /// True when `banned` appears in `src` outside a comment.
+    ///
+    /// The whole-file exemption this replaces existed so `lib.rs` could *name*
+    /// the constant in prose — at the cost of blinding the guard to the only file
+    /// holding `setup_terminal` / `restore_terminal` / `resume_tui`, the three
+    /// places that could reintroduce the storm. Ignoring comments keeps the prose
+    /// and the coverage.
+    fn code_mentions(src: &str, banned: &str) -> bool {
+        src.lines()
+            .map(|line| {
+                if line.trim_start().starts_with("//") {
+                    return "";
+                }
+                line.split_once("//").map_or(line, |(code, _)| code)
+            })
+            .any(|code| code.contains(banned))
+    }
+
     /// Source-scan guard: nothing in `src/` may use crossterm's own
     /// `EnableMouseCapture`.
     ///
@@ -1338,12 +1356,11 @@ mod mouse_reporting_tests {
                 let path = entry.expect("dir entry").path();
                 if path.is_dir() {
                     scan(&path, banned, offenders);
-                } else if path.extension().is_some_and(|e| e == "rs")
-                    && std::fs::read_to_string(&path)
-                        .expect("read .rs")
-                        .contains(banned)
-                {
-                    offenders.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    let src = std::fs::read_to_string(&path).expect("read .rs");
+                    if code_mentions(&src, banned) {
+                        offenders.push(path);
+                    }
                 }
             }
         }
@@ -1354,14 +1371,52 @@ mod mouse_reporting_tests {
             &banned,
             &mut offenders,
         );
-        // This file legitimately names it in prose (the doc comment on
-        // `EnableWheelReporting` explains why spyc doesn't use it).
-        offenders.retain(|p| p.file_name().is_none_or(|n| n != "lib.rs"));
+        // Built from `banned` rather than spelled out: this line is code, and the
+        // scan is now honest enough to flag its own failure message.
         assert!(
             offenders.is_empty(),
-            "crossterm's EnableMouseCapture emits ?1003h (any-motion) — use \
+            "crossterm's {banned} emits ?1003h (any-motion) — use \
              EnableWheelReporting instead. Offenders: {offenders:?}"
         );
+    }
+
+    /// The guard above has to survive its own exemption being needed.
+    ///
+    /// It previously dropped every file named `lib.rs`, so the prose reference in
+    /// `EnableWheelReporting`'s doc comment could coexist with it — at the cost of
+    /// blinding it to `setup_terminal`, `restore_terminal` and `resume_tui`, all
+    /// of which live in that file. Injecting the call there and watching the guard
+    /// stay green is how that was found, so the injection is the test.
+    #[test]
+    fn the_capture_guard_sees_code_in_the_file_that_sets_the_terminal_up() {
+        let banned = ["Enable", "MouseCapture"].concat();
+        let lib = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
+        )
+        .expect("read lib.rs");
+
+        // As it stands: named in prose, so a naive substring scan flags it...
+        assert!(
+            lib.contains(&banned),
+            "this file is supposed to mention it in prose"
+        );
+        // ...but the scan the guard actually uses does not.
+        assert!(
+            !code_mentions(&lib, &banned),
+            "a comment must not read as a violation"
+        );
+        // And a real call in this file does.
+        let injected = format!("    execute!(out, {banned})?;\n");
+        assert!(
+            code_mentions(&injected, &banned),
+            "an actual call must be caught wherever it lives"
+        );
+        // Including one with a trailing comment, the shape a scan splitting on
+        // `//` could drop.
+        assert!(code_mentions(
+            &format!("    execute!(out, {banned})?; // needed for X\n"),
+            &banned
+        ));
     }
 }
 

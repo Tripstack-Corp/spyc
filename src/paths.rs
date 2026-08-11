@@ -147,6 +147,77 @@ fn expand_env_vars(input: &str, lookup: impl Fn(&str) -> Option<String>) -> Stri
     out
 }
 
+/// Whether `candidate` resolves to `root` or somewhere inside it.
+///
+/// `None` when either side can't be canonicalized, because that question has
+/// two right answers and only the caller knows which it wants. A reader
+/// checking a path the user typed can fall back to a literal compare — a
+/// non-existent path fails at `open` anyway. An *extractor* cannot: its
+/// destination doesn't exist yet by definition, and a lexical compare on an
+/// unresolved path is what let a symlink chain out of the archive staging root
+/// (`starts_with` is happy to call `root/x/..` contained). Callers that must
+/// judge a path which doesn't exist yet resolve its parent first and ask about
+/// that.
+///
+/// Canonical on both sides so a symlinked root doesn't false-reject, and
+/// component-wise via `starts_with` so `/a/bc` is not inside `/a/b`.
+pub fn canonical_contains(root: &std::path::Path, candidate: &std::path::Path) -> Option<bool> {
+    let root = std::fs::canonicalize(root).ok()?;
+    let candidate = std::fs::canonicalize(candidate).ok()?;
+    Some(candidate == root || candidate.starts_with(&root))
+}
+
+#[cfg(test)]
+mod containment_tests {
+    use super::canonical_contains;
+
+    #[test]
+    fn a_path_inside_the_root_is_contained() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let inner = tmp.path().join("a/b");
+        std::fs::create_dir_all(&inner).expect("mkdir");
+        assert_eq!(canonical_contains(tmp.path(), &inner), Some(true));
+        assert_eq!(canonical_contains(tmp.path(), tmp.path()), Some(true));
+    }
+
+    #[test]
+    fn a_sibling_sharing_a_name_prefix_is_not_contained() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("b");
+        let sibling = tmp.path().join("bc");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        std::fs::create_dir_all(&sibling).expect("mkdir");
+        assert_eq!(canonical_contains(&root, &sibling), Some(false));
+    }
+
+    /// The property the archive extractor depends on: a `..` that climbs out is
+    /// caught even though the unresolved path lexically starts with the root.
+    #[test]
+    fn a_symlink_climbing_out_is_not_contained() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("root");
+        std::fs::create_dir_all(root.join("d")).expect("mkdir");
+        std::fs::create_dir_all(tmp.path().join("outside")).expect("mkdir");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("../../outside", root.join("d/out")).expect("symlink");
+        #[cfg(unix)]
+        {
+            let escaped = root.join("d/out");
+            assert!(escaped.starts_with(&root), "lexically it looks contained");
+            assert_eq!(canonical_contains(&root, &escaped), Some(false));
+        }
+    }
+
+    #[test]
+    fn an_unresolvable_path_is_none_not_a_guess() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        assert_eq!(
+            canonical_contains(tmp.path(), &tmp.path().join("does/not/exist")),
+            None
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
