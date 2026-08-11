@@ -18,6 +18,14 @@ BINARY   := spyc
 VERSION  := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
 DIST_DIR := dist
 
+# Where cargo actually writes build output. `target/` by default, but a shared
+# `CARGO_TARGET_DIR` / `[build] target-dir` redirects it — worth doing when a
+# worktree-per-PR layout would otherwise carry a ~4 GB `target/` each. Ask cargo
+# rather than assuming, or `make install` silently installs nothing. Recursive
+# `=`, so only the rules that need a built binary pay the `cargo metadata` call.
+TARGET_DIR = $(or $(CARGO_TARGET_DIR),$(shell cargo metadata --no-deps --format-version 1 \
+  | python3 -c 'import json,sys;print(json.load(sys.stdin)["target_directory"])' 2>/dev/null),target)
+
 # Rust flags shared across release builds.
 RELEASE_FLAGS := --locked --release
 
@@ -127,13 +135,13 @@ demos: ## Re-record the README demo GIFs (needs vhs; TAPE=spyc|pager|vsplit|lua|
 		echo "vhs not found — install with: brew install vhs"; \
 		exit 1; \
 	}
-	@test -x target/release/spyc || { \
+	@test -x $(TARGET_DIR)/release/spyc || { \
 		echo "no release binary — run: cargo build --release"; \
 		exit 1; \
 	}
 	@for tape in $(or $(TAPE),spyc pager vsplit lua review agents); do \
 		echo "── recording $$tape ──"; \
-		PATH="$(CURDIR)/target/release:$$PATH" vhs docs/assets/demo/$$tape.tape || exit 1; \
+		PATH="$(abspath $(TARGET_DIR))/release:$$PATH" vhs docs/assets/demo/$$tape.tape || exit 1; \
 	done
 
 .PHONY: fuzz
@@ -195,15 +203,15 @@ aislop-baseline: ## Regenerate .aislop/baseline.json from the current scan
 release: ## Optimized release for the current platform
 	@echo "building $(BINARY) v$(VERSION) (release — final crate is the linker, may take a moment)…"
 	cargo build $(RELEASE_FLAGS)
-	@echo "→ target/release/$(BINARY)"
-	@ls -lh target/release/$(BINARY)
+	@echo "→ $(TARGET_DIR)/release/$(BINARY)"
+	@ls -lh $(TARGET_DIR)/release/$(BINARY)
 
 .PHONY: release-debug
 release-debug: ## Optimized build with debug symbols (for `sample`, `lldb`, `perf`)
 	@echo "building $(BINARY) v$(VERSION) (release-debug — symbols included)…"
 	cargo build --locked --profile release-debug
-	@echo "→ target/release-debug/$(BINARY)"
-	@ls -lh target/release-debug/$(BINARY)
+	@echo "→ $(TARGET_DIR)/release-debug/$(BINARY)"
+	@ls -lh $(TARGET_DIR)/release-debug/$(BINARY)
 
 # --- Changelog & release tagging (git-cliff) ---------------------------------
 # CHANGELOG.md is git-cliff-generated from v1.57.0 onward (older entries are
@@ -403,7 +411,7 @@ PREFIX ?= $(HOME)/.local
 .PHONY: install
 install: release ## Install to ~/.local/bin (builds release first; override with PREFIX=/usr/local)
 	install -d $(PREFIX)/bin
-	install -m 755 target/release/$(BINARY) $(PREFIX)/bin/$(BINARY)
+	install -m 755 $(TARGET_DIR)/release/$(BINARY) $(PREFIX)/bin/$(BINARY)
 ifeq ($(shell uname),Darwin)
 	codesign -s - -v $(PREFIX)/bin/$(BINARY)
 endif
@@ -417,7 +425,7 @@ endif
 .PHONY: install-debug
 install-debug: release-debug ## Install symbolicated build as $(PREFIX)/bin/spyc.debug (for profiling)
 	install -d $(PREFIX)/bin
-	install -m 755 target/release-debug/$(BINARY) $(PREFIX)/bin/$(BINARY).debug
+	install -m 755 $(TARGET_DIR)/release-debug/$(BINARY) $(PREFIX)/bin/$(BINARY).debug
 ifeq ($(shell uname),Darwin)
 	codesign -s - -v $(PREFIX)/bin/$(BINARY).debug
 endif
