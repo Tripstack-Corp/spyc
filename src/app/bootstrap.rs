@@ -378,14 +378,15 @@ impl App {
         // would see a flash from any visible-error path; failures
         // here are uncommon disk/permissions issues that don't
         // need to interrupt startup).
+        // `cascade_until_under` owns the under-cap check and returns `(0, 0)`
+        // without evicting, so asking first with our own `load()` only bought a
+        // second walk of the directory on every single launch.
         let cap = crate::state::graveyard::GRAVEYARD_CAP_BYTES;
-        if crate::state::graveyard::Graveyard::load().total_bytes() > cap {
-            let (trashed, _errors) = crate::state::graveyard::Graveyard::cascade_until_under(cap);
-            if trashed > 0 {
-                app.state.flash_info(format!(
-                    "graveyard: {trashed} item(s) moved to system trash (cap reached)"
-                ));
-            }
+        let (trashed, _errors) = crate::state::graveyard::Graveyard::cascade_until_under(cap);
+        if trashed > 0 {
+            app.state.flash_info(format!(
+                "graveyard: {trashed} item(s) moved to system trash (cap reached)"
+            ));
         }
 
         if resume {
