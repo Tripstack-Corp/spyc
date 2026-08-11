@@ -396,9 +396,15 @@ pub enum ClipMsg {
     /// `"yanked prompt: {preview}{…}"` — preview = `text.chars().take(60)`,
     /// `…` iff `text.len() > 60` (byte length).
     Prompt,
-    /// `"copied: {preview}{…}"` — a drag-selected substring of a single-line chrome
+    /// `"{preview}{…} (copied)"` — a drag-selected substring of a single-line chrome
     /// surface (status bar, pane divider). Echoes what was taken, because the whole
     /// point is picking one item out of the line and the user should see which.
+    ///
+    /// The confirmation is a **suffix**: what was selected is usually whatever the
+    /// status bar was already saying, so a `copied: ` prefix produced a line nearly
+    /// identical to the one it replaced — `copied: <path>: not a regular file` reads
+    /// as a copy that failed, not as a successful copy of an error message. Trailing
+    /// it leaves the echo starting where the user's eye already is.
     StatusLine,
     /// `"copied {count} name(s)"` / `"copied {count} path(s)"` — a file-list row
     /// selection. `count` is carried because a name may contain a newline, so it
@@ -407,8 +413,7 @@ pub enum ClipMsg {
 }
 
 impl ClipMsg {
-    /// Render the success flash for a completed copy of `text`,
-    /// byte-for-byte identical to the former inline yank sites.
+    /// Render the success flash for a completed copy of `text`.
     fn success(&self, text: &str) -> String {
         match self {
             Self::PaneLines => format!("yanked {} lines from pane", text.lines().count()),
@@ -422,7 +427,7 @@ impl ClipMsg {
             Self::StatusLine => {
                 let preview: String = text.chars().take(60).collect();
                 let ellipsis = if text.chars().count() > 60 { "…" } else { "" };
-                format!("copied: {preview}{ellipsis}")
+                format!("{preview}{ellipsis} (copied)")
             }
             Self::ListNames { count, paths } => {
                 let unit = if *paths { "path" } else { "name" };
@@ -1279,6 +1284,38 @@ mod tests {
         assert_eq!(
             ClipMsg::SinglePath.success(&p),
             format!("yanked path: {preview}…")
+        );
+    }
+
+    /// A chrome selection echoes what was taken with the confirmation **trailing**
+    /// it. A `copied: ` prefix put the marker where the user's eye starts, on a line
+    /// that is usually whatever the status bar was already saying — so copying an
+    /// error off it produced `copied: <path>: not a regular file`, which reads as a
+    /// copy that failed rather than a successful copy of a failure message.
+    #[test]
+    fn clip_status_line_echo_trails_the_confirmation() {
+        assert_eq!(
+            ClipMsg::StatusLine.success("/Users/me/src/spyc/docs: not a regular file"),
+            "/Users/me/src/spyc/docs: not a regular file (copied)"
+        );
+        // The echo is not prefixed, so it still begins with the selected text.
+        assert!(
+            !ClipMsg::StatusLine
+                .success("anything")
+                .starts_with("copied"),
+            "the marker trails"
+        );
+    }
+
+    /// Over the preview limit the `…` stays attached to the text it truncated,
+    /// ahead of the confirmation — `<preview>… (copied)`, never `<preview> (copied)…`.
+    #[test]
+    fn clip_status_line_ellipsis_precedes_the_confirmation() {
+        let long = "z".repeat(75);
+        let preview: String = long.chars().take(60).collect();
+        assert_eq!(
+            ClipMsg::StatusLine.success(&long),
+            format!("{preview}… (copied)")
         );
     }
 
