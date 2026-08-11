@@ -630,12 +630,21 @@ fn handle_tools_call(
             };
             // A member of a mounted archive, before `canonicalize` gets a chance
             // to fail on it: the mount root is a *file*, so every path beneath it
-            // is ENOTDIR on disk. Also try the user's cwd, which is where an agent
-            // reading "the file I'm looking at" points a relative path.
-            let member = read_member_content(&resolved, ctx_path).or_else(|| {
+            // is ENOTDIR on disk. Scoped to `root` like every other read — the
+            // check lands on the container, which is a real file.
+            //
+            // The cwd fallback is where an agent reading "the file I'm looking
+            // at" points a relative path, so it only applies when the agent did
+            // NOT name a root. With an explicit root the agent has said which
+            // worktree it means, and answering from the user's cwd instead
+            // returns a different file than the one it asked for.
+            let member = read_member_content(&resolved, ctx_path, &root).or_else(|| {
+                if args.get("root").is_some() {
+                    return None;
+                }
                 let alt = read_cwd_from_context(ctx_path).join(path_str);
                 (!Path::new(path_str).is_absolute() && alt != resolved)
-                    .then(|| read_member_content(&alt, ctx_path))
+                    .then(|| read_member_content(&alt, ctx_path, &root))
                     .flatten()
             });
             if let Some(result) = member {

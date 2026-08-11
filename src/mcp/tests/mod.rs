@@ -1389,11 +1389,13 @@ fn a_traversing_path_is_not_treated_as_a_member() {
     std::fs::write(staging.join("../leaked.txt"), b"outside the mount\n").unwrap();
 
     assert!(
-        super::readers::read_member_content(&archive.join("../leaked.txt"), &ctx_path).is_none(),
+        super::readers::read_member_content(&archive.join("../leaked.txt"), &ctx_path, tmp.path())
+            .is_none(),
         "`..` must not resolve as a member"
     );
     assert!(
-        super::readers::read_member_content(&archive.join("README.md"), &ctx_path).is_some(),
+        super::readers::read_member_content(&archive.join("README.md"), &ctx_path, tmp.path())
+            .is_some(),
         "while an ordinary member still does"
     );
 }
@@ -1441,4 +1443,36 @@ fn searching_inside_a_mount_is_refused_rather_than_answered_emptily() {
             "{tool} should refuse a mount: {resp}"
         );
     }
+}
+
+/// The archive branch of `get_file_content` used to answer before the root
+/// check, so "spyc has this mounted" was the only bound on it — and a mount can
+/// be anywhere. The member path can't be canonicalized (the mount root is a
+/// file, so everything under it is ENOTDIR), but the container is an ordinary
+/// file and that is what has to be inside the root.
+#[test]
+fn a_member_of_an_archive_outside_the_root_is_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let elsewhere = tmp.path().join("elsewhere");
+    let project = tmp.path().join("project");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    let staging = tmp.path().join("staging");
+    let (archive, ctx_path) = mounted_zip(&elsewhere, &staging);
+
+    let refused =
+        super::readers::read_member_content(&archive.join("README.md"), &ctx_path, &project)
+            .expect("the path is recognised as a member");
+    let err = refused.expect_err("but reading it must be refused");
+    assert!(
+        err.contains("outside the project root"),
+        "the refusal must name the reason: {err}"
+    );
+
+    // And the same member read against a root that does contain it still works.
+    let allowed =
+        super::readers::read_member_content(&archive.join("README.md"), &ctx_path, &elsewhere)
+            .expect("recognised")
+            .expect("and served");
+    assert!(!allowed.is_empty());
 }

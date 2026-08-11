@@ -1253,6 +1253,71 @@ mod purity_guard {
             }
         }
     }
+
+    /// Interior mutability the draw pass reaches for, and why each is allowed.
+    ///
+    /// `&self` is what the compiler checks; it does not stop a `RefCell` from
+    /// making the draw pass write. Every such write is a place "render is pure"
+    /// stops being enforced by the type system, so each one is named here with
+    /// its justification rather than discovered later.
+    const DRAW_TIME_CACHES: &[(&str, &str)] = &[(
+        "chrome_rows",
+        "Where each chrome row was painted, for the mouse hit-test. Genuinely \
+         draw-time knowledge — the spans come from the lines actually laid out, \
+         so computing it in `prepare_*` would mean running the same layout twice \
+         and keeping the two in step. Cleared at the top of every frame \
+         (`render/mod.rs`), so it is a per-frame record, never accumulated state.",
+    )];
+
+    /// Tokens that mean "this `&self` function mutates".
+    ///
+    /// The OS list above describes *what the draw pass may reach*; it says
+    /// nothing about *what it may change*, so the one interior-mutability write
+    /// in these modules was invisible to it. A new one now has to be justified
+    /// in `DRAW_TIME_CACHES` — which is the point: not to ban the technique, but
+    /// to stop it spreading silently.
+    #[test]
+    fn draw_time_mutation_is_named_and_justified() {
+        const MUTATORS: &[&str] = &["borrow_mut()", "RefCell", "Cell::", "set(", "replace("];
+
+        let mut seen = 0usize;
+        for (label, src) in PURE_DRAW {
+            let lines: Vec<&str> = src.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                let code = line.split_once("//").map_or(*line, |(c, _)| c);
+                if code.trim_start().starts_with("//") {
+                    continue;
+                }
+                let Some(pat) = MUTATORS.iter().find(|p| code.contains(**p)) else {
+                    continue;
+                };
+                seen += 1;
+                // rustfmt splits `self.view.chrome_rows.borrow_mut()` across
+                // lines, so the field name can sit a few lines above the token.
+                let window = &lines[i.saturating_sub(4)..=i];
+                let justified = DRAW_TIME_CACHES
+                    .iter()
+                    .any(|(name, _)| window.iter().any(|l| l.contains(name)));
+                assert!(
+                    justified,
+                    "`{label}:{}` mutates through `{pat}` in a pure draw module. \
+                     The draw pass is `&self` by contract; interior mutability is the \
+                     one way around that, so either move this to a `prepare_*` settle \
+                     step (&mut) or add the field to DRAW_TIME_CACHES with why it has \
+                     to happen at draw time.",
+                    i + 1
+                );
+            }
+        }
+        // A guard that matches nothing passes for the wrong reason. The draw pass
+        // does contain interior mutability today (the `chrome_rows` record), so
+        // zero hits means the token list stopped describing the code.
+        assert!(
+            seen > 0,
+            "no interior mutability found in the pure draw modules — MUTATORS no \
+             longer matches how they're written, so this guard is checking nothing"
+        );
+    }
 }
 
 #[cfg(test)]

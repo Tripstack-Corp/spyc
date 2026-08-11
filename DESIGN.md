@@ -154,6 +154,10 @@ build-checked contract, not just a convention.
   `H` / `[`/`]` chords (list focus only).
 - **PANE** (`Tier::Pane`) — the pty pane + vertical split: tabs, focus,
   zoom, scroll, send. Home: the `^a` (`^w`) prefix (fires from any focus).
+  The vertical split has its own sub-namespace, **`^s`** — `|` open/close,
+  `f` flip the height, `n`/`x` the second commander — because the split is
+  a family of related shapes rather than one key; `^a |` stays as an alias
+  for the open/close, the one member with long-standing muscle memory.
 - `Tier::Meta` (help, version, redraw) is allowed in any namespace.
 
 Vi where it fits, screen/tmux where it doesn't: movement / marks / prompt

@@ -158,20 +158,28 @@ pub fn stream_mount(
         let (name, draft) = tar_draft(&entry, Locator::Staged, &mut builder.facts);
         let Some(draft) = draft else { continue };
         if let Ok(clean) = normalize(&name) {
-            written = written.saturating_add(draft.size);
+            // Budgeted on bytes that actually arrive, not on what the header
+            // claims. A tar header's size field is attacker input: declaring 0
+            // and then streaming gigabytes used to walk straight past this gate,
+            // because the gate added up the declarations. `write_member` reports
+            // what it really wrote and stops at the remaining allowance, so a
+            // member can overshoot by at most one byte before this fires.
+            let allowance = budget.saturating_sub(written);
+            let wrote = write_member(
+                &mut entry,
+                &draft,
+                &clean.inner,
+                staging_root,
+                allowance,
+                &mut builder.facts,
+            )?;
+            written = written.saturating_add(wrote);
             if written > budget {
                 bail!(
                     "over the {} extract budget — raise [archive] extract_budget_mb to mount it",
                     crate::fs::ops::format_size(budget)
                 );
             }
-            write_member(
-                &mut entry,
-                &draft,
-                &clean.inner,
-                staging_root,
-                &mut builder.facts,
-            )?;
         }
         if !builder.push(&name, draft) {
             break;
@@ -227,7 +235,17 @@ pub fn restage_missing(
         if staging_root.join(&clean.inner).exists() {
             continue;
         }
-        write_member(&mut entry, &draft, &clean.inner, staging_root, &mut facts)?;
+        // Refilling a member that was already admitted at mount time — the
+        // budget was spent then, so there is no allowance left to re-charge it
+        // against.
+        write_member(
+            &mut entry,
+            &draft,
+            &clean.inner,
+            staging_root,
+            u64::MAX,
+            &mut facts,
+        )?;
         restored += 1;
     }
     Ok(restored)
@@ -239,16 +257,21 @@ pub fn restage_missing(
 /// counted and skipped rather than written — see [`contained_dest`]. Skipping is
 /// not an error: one hostile member must not abandon the mount, and the count is
 /// what makes the refusal visible in the mount's warnings.
+/// Returns how many bytes actually reached disk, which is what the caller's
+/// extract budget is measured in — a header's declared size is a claim, not a
+/// measurement. Reads at most `allowance + 1` bytes so the caller can tell "fit"
+/// from "overshot" without the overshoot itself being unbounded.
 fn write_member<R: Read>(
     entry: &mut tar::Entry<'_, R>,
     draft: &Draft,
     inner: &str,
     staging_root: &Path,
+    allowance: u64,
     facts: &mut IndexFacts,
-) -> Result<()> {
+) -> Result<u64> {
     let Ok(dest) = contained_dest(staging_root, inner) else {
         facts.link_traversals += 1;
-        return Ok(());
+        return Ok(0);
     };
     match draft.kind {
         ArchiveEntryKind::Dir => {
@@ -271,13 +294,16 @@ fn write_member<R: Read>(
             create_parent(&dest)?;
             let mut out =
                 File::create(&dest).with_context(|| format!("writing {}", dest.display()))?;
-            std::io::copy(entry, &mut out)
+            // One byte past the allowance: enough for the caller to see the
+            // budget was exceeded, without copying the rest of a bomb to find out.
+            let wrote = std::io::copy(&mut entry.take(allowance.saturating_add(1)), &mut out)
                 .with_context(|| format!("writing {}", dest.display()))?;
             out.flush()?;
             apply_mode(&dest, draft.mode);
+            return Ok(wrote);
         }
     }
-    Ok(())
+    Ok(0)
 }
 
 /// Extract one member's bytes into the staging tree and return where they
@@ -356,11 +382,25 @@ pub fn member_bytes(archive: &Path, entry: &IndexEntry) -> Result<Vec<u8>> {
     }
 }
 
+/// How much of a declared size we are willing to reserve before seeing a byte.
+///
+/// A container's size field is attacker input. Handing it to `with_capacity` is
+/// how a 2 KB tar asks for 64 GB — and an allocation that large *aborts* the
+/// process rather than unwinding, so the panic hook never runs and the terminal
+/// is left in raw mode. Reserve a modest amount and let `read_to_end` grow on
+/// bytes that actually arrived: the declared size may bound a read, never an
+/// allocation.
+const RESERVE_CAP: u64 = 1 << 20;
+
+fn reserve_for(declared: u64) -> usize {
+    usize::try_from(declared.min(RESERVE_CAP)).unwrap_or(0)
+}
+
 fn read_zip_member(archive: &Path, pos: usize) -> Result<Vec<u8>> {
     let file = File::open(archive).with_context(|| format!("opening {}", archive.display()))?;
     let mut zip = zip::ZipArchive::new(BufReader::new(file))?;
     let mut member = zip.by_index(pos)?;
-    let mut bytes = Vec::with_capacity(usize::try_from(member.size()).unwrap_or(0));
+    let mut bytes = Vec::with_capacity(reserve_for(member.size()));
     member.read_to_end(&mut bytes)?;
     Ok(bytes)
 }
@@ -368,7 +408,10 @@ fn read_zip_member(archive: &Path, pos: usize) -> Result<Vec<u8>> {
 fn read_tar_member(archive: &Path, offset: u64, size: u64) -> Result<Vec<u8>> {
     let mut file = File::open(archive).with_context(|| format!("opening {}", archive.display()))?;
     file.seek(SeekFrom::Start(offset))?;
-    let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+    let mut bytes = Vec::with_capacity(reserve_for(size));
+    // `take(size)` still bounds the read by the declaration, which is safe in the
+    // other direction: a header claiming more than the file holds simply stops at
+    // EOF, and one claiming less can't over-read.
     file.take(size).read_to_end(&mut bytes)?;
     Ok(bytes)
 }
