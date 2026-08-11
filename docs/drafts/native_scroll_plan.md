@@ -507,6 +507,15 @@ branch (a 4 MB tail-read + per-line parse + markdown render), and the vt100 bran
 stalls the loop `3 × 10 ms` per mount — at ~30 ticks/s that's a hang. The wheel
 must never mount anything.
 
+> **Amended (2026-08-11).** Both stalls this paragraph names are gone, and the
+> wheel does mount — under `[mouse] pane_scroll_view = "spyc_history"`, gated on
+> three consecutive up-ticks. The transcript branch reads and renders off-thread
+> (`spawn_pager_stream`); the vt100 branch's settle is a `Deadline`, waited out
+> on the loop instead of slept through. What the paragraph was really asserting
+> — *the wheel must not block the loop* — still holds, and is now pinned by
+> `opening_the_scrollback_pager_does_not_sleep_on_the_loop`. The rejection of
+> mounting *itself* was a consequence of the stalls, not a separate rule.
+
 ### Deferred: wheel-burst coalescing
 
 Summing same-direction wheel events before applying them. Two reasons this is no

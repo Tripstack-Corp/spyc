@@ -80,6 +80,12 @@ pub enum Deadline {
     /// Re-armed on output; disarmed when scan fires or no dirty tab remains.
     /// PRE-recv (`settle_scrape_quiet`).
     ScrapeQuiet,
+    /// Deferred vt100 scrollback snapshot: wake `SCROLL_SETTLE` after `^a v`
+    /// (or a `spyc_history` wheel gesture) so in-flight pty bytes land before
+    /// the snapshot. Replaces three inline 10 ms sleeps that stalled the loop
+    /// from an input event. Armed only while a snapshot is pending. PRE-recv
+    /// (`settle_pane_scroll`).
+    PaneScrollSettle,
     /// P2 `wait_for_scope_clear`: wake at the earliest parked scope-waiter's
     /// deadline so a timeout fires with no other activity. Armed only while a
     /// waiter is parked, disarmed when none remain — idle stays 0 dps. PRE-recv

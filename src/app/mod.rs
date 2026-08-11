@@ -518,6 +518,14 @@ struct Runtime {
     /// only while a change awaits its save; cleared on save / when clean. An
     /// OS-ish clock value, correctly in `Runtime` (never the pure Model).
     autosave_due: Option<std::time::Instant>,
+    /// A deferred vt100 scrollback snapshot: when to take it, and which tab
+    /// asked for it. `Some` only between `open_pane_scroll_pager` arming the
+    /// settle and `settle_pane_scroll` taking the shot, so idle stays 0 dps.
+    ///
+    /// The tab index is part of it because the settle window is real time the
+    /// user can act in — switching tabs mid-window must abandon the snapshot
+    /// rather than mount a different pane's history.
+    pane_scroll_settle: Option<(std::time::Instant, usize)>,
     /// When the agent status-hook drift check may next run
     /// (`settle_status_hooks`). A throttle, not a deadline — nothing wakes the
     /// loop for it, so idle stays 0 dps. `None` = due now (startup).
