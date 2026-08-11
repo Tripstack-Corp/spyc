@@ -60,6 +60,9 @@ tab_width = 4                  # columns a tab expands to (min 1)
 [markdown]
 open_as_rendered = true        # open .md in rendered view (m toggles source)
 
+[diff]
+intraline = "char"             # intra-line highlight granularity: "char" | "word"
+
 [delete]
 confirm = true                 # y/N prompt before R / dd; false = yolo (still recoverable in the graveyard)
 ```
@@ -224,6 +227,29 @@ visual = false
 
 Run **`:notify test`** to fire every channel on demand — verify your setup
 without waiting for a real agent transition.
+
+---
+
+## Diff — `[diff]`
+
+`intraline` sets how finely a modified line pair is marked up on top of the
+row wash, in `gd` / `gD` / a commit opened from `gl`.
+
+| value | marks | reads as |
+| --- | --- | --- |
+| `"char"` *(default)* | just the characters that differ — `value` → `values` brightens the `s` | precise; tells you exactly what moved |
+| `"word"` | the whole changed token, like `git --word-diff` — brightens all of `values` | calmer on dense code; hides which characters moved |
+
+Both granularities mark **every** changed region on the line, so an unchanged
+token sitting between two changed ones is never swept into the highlight.
+
+Pick `"word"` if per-character marking on tightly-packed code reads as
+confetti to you; `"char"` is the default because saying precisely which
+characters changed is what an intra-line highlight is for.
+
+A very long line (roughly 4000+ characters, or 500+ words) gets no intra-line
+highlight at all — on a minified or generated line it would be unreadable
+noise, and the row wash still shows the line changed.
 
 ---
 

@@ -138,13 +138,13 @@ fn render_model(
     theme: &Theme,
     layout: DiffLayout,
     width: usize,
-    tab_width: usize,
+    opts: diff_render::DiffOpts,
 ) -> Rendered {
     match content {
         GitViewContent::Diff(m, hl) => {
             let eff = effective_layout(layout, width);
             Rendered {
-                lines: diff_render::render_diff_highlighted(m, hl, theme, eff, width, tab_width),
+                lines: diff_render::render_diff_highlighted(m, hl, theme, eff, width, opts),
                 line_numbers: false,
                 wrap: matches!(eff, DiffLayout::Unified),
             }
@@ -153,7 +153,7 @@ fn render_model(
             let eff = effective_layout(layout, width);
             Rendered {
                 lines: diff_render::render_show_highlighted(
-                    &b.0, &b.1, &b.2, theme, eff, width, tab_width,
+                    &b.0, &b.1, &b.2, theme, eff, width, opts,
                 ),
                 line_numbers: false,
                 wrap: matches!(eff, DiffLayout::Unified),
@@ -219,7 +219,16 @@ impl GitViewStream {
     /// fixed-width side-by-side rows wrap into stray tinted bars.
     fn render_into(&self, view: &mut PagerView, ctx: &RenderCtx) {
         let width = git_view_body_width(ctx.full_width);
-        let rendered = render_model(&self.content, &ctx.theme, self.layout, width, ctx.tab_width);
+        let rendered = render_model(
+            &self.content,
+            &ctx.theme,
+            self.layout,
+            width,
+            diff_render::DiffOpts {
+                tab_width: ctx.tab_width,
+                intraline: ctx.intraline,
+            },
+        );
         view.lines = rendered.lines;
         view.show_line_numbers = rendered.line_numbers;
         view.wrap = rendered.wrap;
@@ -373,6 +382,7 @@ impl App {
             theme: self.view.theme.clone(),
             full_width,
             tab_width: self.state.config.pager.tab_width,
+            intraline: self.state.config.diff.intraline,
         };
         if let Some(view) = self.view.pager.as_mut() {
             stream.render_into(view, &ctx);

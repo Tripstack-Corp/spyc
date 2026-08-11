@@ -108,8 +108,12 @@ do from here?", modeled on Neovim's which-key.
 ## Git views — diff / show / blame
 
 In-house, gix-backed git pager views (v1.56) — built in-process (no
-`git` subprocess), syntax-highlighted, with word-level intra-line
-change highlighting on modified lines.
+`git` subprocess), syntax-highlighted, with intra-line change
+highlighting on modified lines — every changed region is marked, so an
+unchanged token between two changed ones is never swept in. `[diff]
+intraline` picks the granularity: `"char"` (default) marks just the
+characters that differ, `"word"` marks the whole changed token the way
+`git --word-diff` does.
 
 - **gd** — diff vs HEAD for the selection (cursor file or picks):
   staged + unstaged + new files, everything different from HEAD

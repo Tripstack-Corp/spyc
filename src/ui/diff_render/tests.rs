@@ -1,7 +1,9 @@
 //! Tests for the diff/show renderers (`super::render_diff` / `render_show`).
 //! Split out of `diff_render.rs` verbatim during the 800-LoC decomposition.
 
+use super::DiffOpts;
 use super::{DiffLayout, TEST_TAB_WIDTH, render_diff, render_show};
+use crate::config::Intraline;
 use crate::git::model::{
     CommitMeta, DiffKind, DiffLine, DiffModel, FileDiff, FileStatus, Hunk, LineOrigin,
 };
@@ -404,7 +406,7 @@ fn lnum_width_floors_at_four_and_grows_with_digits() {
 #[test]
 fn intra_change_ranges_marks_only_the_changed_token() {
     // Only the digit differs; "let x = " and ";" are shared.
-    let (old_r, new_r) = super::intraline::intra_change_ranges("let x = 1;", "let x = 2;");
+    let (old_r, new_r) = super::intraline::intra_change_ranges_word("let x = 1;", "let x = 2;");
     assert_eq!(picks("let x = 1;", &old_r), vec!["1"]);
     assert_eq!(picks("let x = 2;", &new_r), vec!["2"]);
 }
@@ -414,7 +416,7 @@ fn intra_change_ranges_pure_insertion_is_empty_on_old_side() {
     // "a b" → "a X b": nothing removed, so the old side carries no highlight.
     // (Was "ab" → "aXb"; with word tokens that pair is a single changed token
     // spanning both whole lines, which is the deliberate no-highlight case.)
-    let (old_r, new_r) = super::intraline::intra_change_ranges("a b", "a X b");
+    let (old_r, new_r) = super::intraline::intra_change_ranges_word("a b", "a X b");
     assert!(old_r.is_empty());
     assert_eq!(picks("a X b", &new_r), vec!["X"]);
 }
@@ -422,12 +424,12 @@ fn intra_change_ranges_pure_insertion_is_empty_on_old_side() {
 #[test]
 fn intra_change_ranges_empty_when_identical_or_wholly_different() {
     assert_eq!(
-        super::intraline::intra_change_ranges("same", "same"),
+        super::intraline::intra_change_ranges_word("same", "same"),
         (vec![], vec![])
     );
     // Nothing shared at either end → uniform wash, no word highlight.
     assert_eq!(
-        super::intraline::intra_change_ranges("abc", "xyz"),
+        super::intraline::intra_change_ranges_word("abc", "xyz"),
         (vec![], vec![])
     );
 }
@@ -471,6 +473,55 @@ fn word_highlight_does_not_bleed_across_an_unchanged_token() {
             "{prefix} row bled the unchanged `b` into the highlight"
         );
     }
+}
+
+/// `[diff] intraline` has to reach the rendered spans, not just the pure
+/// helper — the whole point of the flag. `value` → `values` is the pair the two
+/// granularities disagree about.
+#[test]
+fn the_intraline_setting_changes_what_the_renderer_brightens() {
+    let theme = Theme::default();
+    let model = single_file(
+        FileStatus::Modified,
+        DiffKind::Text(vec![Hunk {
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 1,
+            lines: vec![rem("let value = 1;"), add("let values = 1;")],
+        }]),
+        Some("f.rs"),
+        Some("f.rs"),
+    );
+    let marked = |intraline| {
+        let out = super::render_diff_opts(
+            &model,
+            &theme,
+            DiffLayout::Unified,
+            80,
+            DiffOpts {
+                intraline,
+                ..DiffOpts::default()
+            },
+        );
+        let row = out
+            .iter()
+            .find(|l| row_text(l).starts_with('+'))
+            .expect("add row");
+        row.spans
+            .iter()
+            .filter(|s| s.style.bg == Some(theme.diff_add_word_bg))
+            .map(|s| s.content.to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(marked(Intraline::Char), vec!["s"], "char marks the suffix");
+    assert_eq!(
+        marked(Intraline::Word),
+        vec!["values"],
+        "word marks the whole token"
+    );
+    // And the default is char, so an unconfigured spyc gets the finer signal.
+    assert_eq!(marked(Intraline::default()), marked(Intraline::Char));
 }
 
 #[test]
@@ -650,7 +701,17 @@ fn cached_highlight_render_matches_inline_render() {
     for layout in [DiffLayout::Unified, DiffLayout::SideBySide] {
         for width in [40usize, 80, 137] {
             let inline = render_diff(&model, &theme, layout, width);
-            let cached = super::render_diff_highlighted(&model, &hl, &theme, layout, width, 4);
+            let cached = super::render_diff_highlighted(
+                &model,
+                &hl,
+                &theme,
+                layout,
+                width,
+                DiffOpts {
+                    tab_width: 4,
+                    ..DiffOpts::default()
+                },
+            );
             assert_eq!(
                 styled_fingerprint(&inline),
                 styled_fingerprint(&cached),
@@ -691,8 +752,28 @@ fn cached_highlight_relayout_reflows_at_new_width() {
             .max()
             .unwrap_or(0)
     };
-    let narrow = super::render_diff_highlighted(&model, &hl, &theme, DiffLayout::SideBySide, 80, 4);
-    let wide = super::render_diff_highlighted(&model, &hl, &theme, DiffLayout::SideBySide, 160, 4);
+    let narrow = super::render_diff_highlighted(
+        &model,
+        &hl,
+        &theme,
+        DiffLayout::SideBySide,
+        80,
+        DiffOpts {
+            tab_width: 4,
+            ..DiffOpts::default()
+        },
+    );
+    let wide = super::render_diff_highlighted(
+        &model,
+        &hl,
+        &theme,
+        DiffLayout::SideBySide,
+        160,
+        DiffOpts {
+            tab_width: 4,
+            ..DiffOpts::default()
+        },
+    );
     // Rows are sized to the body width, so a wider render produces wider rows…
     assert!(
         widest(&wide) > widest(&narrow),
@@ -879,12 +960,13 @@ fn word_highlight_never_bleeds_into_same_row_padding() {
         .position(|s| s.content.contains('│'))
         .unwrap();
     let right = &change.spans[sep_idx + 1..];
-    // Word-level tokens mark the whole changed word (`bar`→`baz`), the way
-    // git's `--word-diff` does, not just the one differing char.
+    // Default (char) granularity marks just the differing char. `[diff]
+    // intraline = "word"` would mark the whole `baz` instead; either way the
+    // padding below must stay on the row wash.
     let word = right
         .iter()
-        .find(|s| s.content.as_ref() == "baz")
-        .expect("changed word carries its own span");
+        .find(|s| s.content.as_ref() == "z")
+        .expect("changed char carries its own span");
     assert_eq!(word.style.bg, Some(theme.diff_add_word_bg));
     let pad = right
         .iter()
@@ -1015,7 +1097,10 @@ proptest::proptest! {
             Some("f.txt"),
         );
         let out = render_diff(&model, &theme, DiffLayout::SideBySide, width);
-        let (o, n) = super::intraline::intra_change_ranges(&old, &new);
+        // `render_diff` renders at the default granularity, so the expected
+        // byte count has to be computed at that same granularity — measuring
+        // one mode against the other's render is how this test would lie.
+        let (o, n) = super::intraline::intra_change_ranges(&old, &new, Intraline::default());
         let expected: usize = o.iter().chain(n.iter()).map(|r| r.end - r.start).sum();
         let add_bg = theme.diff_add_word_bg;
         let del_bg = theme.diff_del_word_bg;

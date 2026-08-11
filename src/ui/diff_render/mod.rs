@@ -27,6 +27,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::config::Intraline;
 use crate::git::model::{CommitMeta, DiffKind, DiffModel, FileDiff, FileStatus, Hunk, LineOrigin};
 use crate::ui::display_width;
 use crate::ui::theme::Theme;
@@ -124,16 +125,38 @@ fn highlight_file(file: &FileDiff) -> FileHighlight {
     }
 }
 
-/// Render a whole diff to styled lines, highlighting inline. A test convenience
-/// that pairs [`highlight_diff`] with [`render_diff_highlighted`] in one call;
-/// production always splits the two so the highlight is computed once off-thread
-/// and the layout (width/`layout`-dependent) re-runs cheaply (see
-/// [`crate::app::git_view_session`]).
+/// Render-time knobs the app threads in from config. Bundled rather than passed
+/// as loose parameters: `render_show_highlighted` was already at seven
+/// arguments, so a second scalar would have pushed the whole chain over
+/// `clippy::too_many_arguments`.
+#[derive(Debug, Clone, Copy)]
+pub struct DiffOpts {
+    /// `[pager] tab_width` — columns a `\t` expands to.
+    pub tab_width: usize,
+    /// `[diff] intraline` — granularity of the changed-region highlight.
+    pub intraline: Intraline,
+}
+
 /// `[pager] tab_width`'s default, used by the test-only render helpers so the
 /// existing cases don't all have to name it.
 #[cfg(test)]
 const TEST_TAB_WIDTH: usize = 4;
 
+#[cfg(test)]
+impl Default for DiffOpts {
+    fn default() -> Self {
+        Self {
+            tab_width: TEST_TAB_WIDTH,
+            intraline: Intraline::default(),
+        }
+    }
+}
+
+/// Render a whole diff to styled lines, highlighting inline. A test convenience
+/// that pairs [`highlight_diff`] with [`render_diff_highlighted`] in one call;
+/// production always splits the two so the highlight is computed once off-thread
+/// and the layout (width/`layout`-dependent) re-runs cheaply (see
+/// [`crate::app::git_view_session`]).
 #[cfg(test)]
 pub fn render_diff(
     model: &DiffModel,
@@ -154,14 +177,29 @@ pub fn render_diff_tw(
     width: usize,
     tab_width: usize,
 ) -> Vec<Line<'static>> {
-    render_diff_highlighted(
+    render_diff_opts(
         model,
-        &highlight_diff(model),
         theme,
         layout,
         width,
-        tab_width,
+        DiffOpts {
+            tab_width,
+            ..DiffOpts::default()
+        },
     )
+}
+
+/// [`render_diff`] with explicit [`DiffOpts`] — for the cases where tab
+/// expansion or intraline granularity is the thing under test.
+#[cfg(test)]
+pub fn render_diff_opts(
+    model: &DiffModel,
+    theme: &Theme,
+    layout: DiffLayout,
+    width: usize,
+    opts: DiffOpts,
+) -> Vec<Line<'static>> {
+    render_diff_highlighted(model, &highlight_diff(model), theme, layout, width, opts)
 }
 
 /// Lay out a diff at `width`/`layout` using a precomputed [`DiffHighlight`].
@@ -173,7 +211,7 @@ pub fn render_diff_highlighted(
     theme: &Theme,
     layout: DiffLayout,
     width: usize,
-    tab_width: usize,
+    opts: DiffOpts,
 ) -> Vec<Line<'static>> {
     let mut out = Vec::new();
     if model.files.is_empty() {
@@ -186,9 +224,9 @@ pub fn render_diff_highlighted(
         }
         let fhl = hl.files.get(i);
         match layout {
-            DiffLayout::Unified => render_file_unified(file, fhl, theme, &mut out),
+            DiffLayout::Unified => render_file_unified(file, fhl, theme, opts, &mut out),
             DiffLayout::SideBySide => {
-                render_file_split(file, fhl, theme, width, tab_width, &mut out);
+                render_file_split(file, fhl, theme, width, opts, &mut out);
             }
         }
     }
@@ -221,7 +259,7 @@ pub fn render_show(
         theme,
         layout,
         width,
-        TEST_TAB_WIDTH,
+        DiffOpts::default(),
     )
 }
 
@@ -233,11 +271,11 @@ pub fn render_show_highlighted(
     theme: &Theme,
     layout: DiffLayout,
     width: usize,
-    tab_width: usize,
+    opts: DiffOpts,
 ) -> Vec<Line<'static>> {
     let mut out = commit_header(meta, theme);
     out.extend(render_diff_highlighted(
-        model, hl, theme, layout, width, tab_width,
+        model, hl, theme, layout, width, opts,
     ));
     out
 }
@@ -280,6 +318,7 @@ fn render_file_unified(
     file: &FileDiff,
     hl: Option<&FileHighlight>,
     theme: &Theme,
+    opts: DiffOpts,
     out: &mut Vec<Line<'static>>,
 ) {
     let Some(prep) = prepare_file(file, hl, theme, out) else {
@@ -290,7 +329,7 @@ fn render_file_unified(
     let (mut oi, mut ni) = (0usize, 0usize);
     for h in prep.hunks {
         out.push(hunk_header_line(h, theme));
-        let intra = compute_intra(&h.lines);
+        let intra = compute_intra(&h.lines, opts.intraline);
         for (j, line) in h.lines.iter().enumerate() {
             let row = match line.origin {
                 LineOrigin::Context => {
@@ -360,9 +399,10 @@ fn render_file_split(
     hl: Option<&FileHighlight>,
     theme: &Theme,
     width: usize,
-    tab_width: usize,
+    opts: DiffOpts,
     out: &mut Vec<Line<'static>>,
 ) {
+    let tab_width = opts.tab_width;
     let Some(prep) = prepare_file(file, hl, theme, out) else {
         return;
     };
@@ -375,7 +415,7 @@ fn render_file_split(
     let (mut oi, mut ni) = (0usize, 0usize);
     for h in prep.hunks {
         out.push(hunk_header_line(h, theme));
-        let intra = compute_intra(&h.lines);
+        let intra = compute_intra(&h.lines, opts.intraline);
         let mut old_no = h.old_start;
         let mut new_no = h.new_start;
         let lines = &h.lines;
@@ -881,7 +921,7 @@ const fn word_hl(ranges: &[Range<usize>], bg: Option<Color>) -> Option<(&[Range<
 /// ranges that differ in *that line's own text* — one per changed word, so an
 /// unchanged token between two changed ones stays unhighlighted. Context and
 /// unpaired add/remove lines get an empty list. Drives the word-level highlight.
-fn compute_intra(lines: &[crate::git::model::DiffLine]) -> Vec<Vec<Range<usize>>> {
+fn compute_intra(lines: &[crate::git::model::DiffLine], mode: Intraline) -> Vec<Vec<Range<usize>>> {
     let mut out = vec![Vec::new(); lines.len()];
     let mut i = 0;
     while i < lines.len() {
@@ -902,7 +942,7 @@ fn compute_intra(lines: &[crate::git::model::DiffLine]) -> Vec<Vec<Range<usize>>
         // Pair removes with adds 1:1; only paired lines get word ranges.
         for k in 0..(r_hi - r_lo).min(a_hi - a_lo) {
             let (old_r, new_r) =
-                intraline::intra_change_ranges(&lines[r_lo + k].text, &lines[a_lo + k].text);
+                intraline::intra_change_ranges(&lines[r_lo + k].text, &lines[a_lo + k].text, mode);
             out[r_lo + k] = old_r;
             out[a_lo + k] = new_r;
         }
