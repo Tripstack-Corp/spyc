@@ -69,6 +69,148 @@ pub mod fuzz {
         }
     }
 
+    /// Drive a whole container through the mount path and assert nothing it
+    /// writes lands outside the staging root.
+    ///
+    /// [`normalize_archive_name`] covers one member *name*; this covers the
+    /// parsers that eat bytes — zip central directories, tar headers, and the
+    /// gz/zst streams — plus the extraction those parsers feed. Names are only
+    /// half the containment story: a member is also free to be a *symlink*, and
+    /// a link the extractor creates redirects where a later member physically
+    /// lands. That composition is invisible to any check that reasons about one
+    /// name at a time, so the property asserted here is positional — where the
+    /// bytes ended up — not lexical.
+    ///
+    /// The first input byte picks the container flavor and the rest is its
+    /// content, so one corpus serves all four formats.
+    pub fn archive_container(data: &[u8]) {
+        use crate::archive::ArchiveFormat;
+
+        // Small enough to keep executions fast; large enough that the entry cap
+        // and the extract budget are both reachable rather than theoretical.
+        const CAP: usize = 512;
+        const BUDGET: u64 = 1 << 20;
+
+        let Some((&flavor, body)) = data.split_first() else {
+            return;
+        };
+        let name = match flavor % 4 {
+            0 => "input.zip",
+            1 => "input.tar",
+            2 => "input.tar.gz",
+            _ => "input.tar.zst",
+        };
+        let Some(format) = crate::archive::detect(name, body) else {
+            return;
+        };
+        let Ok(sandbox) = tempfile::tempdir() else {
+            return;
+        };
+        let root = sandbox.path();
+        let archive = root.join(name);
+        if std::fs::write(&archive, body).is_err() {
+            return;
+        }
+        // Staging sits several levels down so a `..` escape lands back inside
+        // the sandbox, where the walk below can see it. Rooting staging at the
+        // sandbox top would let the interesting case climb out unobserved.
+        let staging = root.join("mnt/a/b/staging");
+
+        match format {
+            ArchiveFormat::Zip | ArchiveFormat::Tar => {
+                // Indexing writes nothing; materializing each member is where a
+                // seekable container touches the filesystem.
+                if let Ok(indexed) = crate::archive::read::index_seekable(&archive, format, CAP) {
+                    for entry in &indexed.index.entries {
+                        let _ = crate::archive::read::materialize(&archive, entry, &staging);
+                    }
+                }
+            }
+            _ => {
+                let cancel = std::sync::atomic::AtomicBool::new(false);
+                let _ = crate::archive::read::stream_mount(
+                    &archive, format, &staging, BUDGET, CAP, &cancel,
+                );
+            }
+        }
+
+        assert_contained(root, &staging, &archive);
+    }
+
+    /// Every path under `root` must be the archive itself or sit inside
+    /// `staging` — anything else was written through an escape.
+    ///
+    /// Walks with `symlink_metadata` so a link is judged by where it *is*, not
+    /// by what it points at, and reports the link target when one escapes: a
+    /// contained link aimed outside the mount is the step before a later member
+    /// is written through it, so it is worth failing on in its own right.
+    fn assert_contained(
+        root: &std::path::Path,
+        staging: &std::path::Path,
+        archive: &std::path::Path,
+    ) {
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                    continue;
+                };
+                if meta.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path == archive {
+                    continue;
+                }
+                assert!(
+                    path.starts_with(staging),
+                    "member escaped the staging root: {} (staging {})",
+                    path.display(),
+                    staging.display()
+                );
+                if meta.is_symlink() {
+                    let target = std::fs::read_link(&path).unwrap_or_default();
+                    assert!(
+                        !target.is_absolute(),
+                        "staged symlink points at an absolute path: {} -> {}",
+                        path.display(),
+                        target.display()
+                    );
+                    // Resolve against the link's *canonical* parent, then fold
+                    // `..` away. Comparing the unfolded join with `starts_with`
+                    // would call `staging/x/..` contained — which is the exact
+                    // lexical mistake this target exists to catch.
+                    let base = path
+                        .parent()
+                        .and_then(|p| std::fs::canonicalize(p).ok())
+                        .unwrap_or_else(|| staging.to_path_buf());
+                    let mut resolved = base;
+                    for part in target.components() {
+                        match part {
+                            std::path::Component::ParentDir => {
+                                resolved.pop();
+                            }
+                            std::path::Component::CurDir => {}
+                            other => resolved.push(other),
+                        }
+                    }
+                    let canonical_staging =
+                        std::fs::canonicalize(staging).unwrap_or_else(|_| staging.to_path_buf());
+                    assert!(
+                        resolved.starts_with(&canonical_staging),
+                        "staged symlink points outside the staging root: {} -> {}",
+                        path.display(),
+                        target.display()
+                    );
+                }
+            }
+        }
+    }
+
     /// Parse one keymap-DSL line and discard the result. See
     /// `fuzz/fuzz_targets/dsl_parse.rs`.
     pub fn parse_keymap_line(line: &str) {
@@ -1220,5 +1362,55 @@ mod mouse_reporting_tests {
             "crossterm's EnableMouseCapture emits ?1003h (any-motion) — use \
              EnableWheelReporting instead. Offenders: {offenders:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod fuzz_target_registration_tests {
+    use std::collections::BTreeSet;
+    use std::path::Path;
+
+    fn repo() -> &'static Path {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    fn on_disk() -> BTreeSet<String> {
+        std::fs::read_dir(repo().join("fuzz/fuzz_targets"))
+            .expect("read fuzz_targets")
+            .flatten()
+            .filter_map(|e| {
+                let p = e.path();
+                (p.extension()? == "rs").then(|| p.file_stem()?.to_str().map(String::from))?
+            })
+            .collect()
+    }
+
+    /// A target absent from `fuzz/Cargo.toml` builds nowhere; one absent from the
+    /// weekly matrix builds but never runs.
+    ///
+    /// Both failures are silent — `archive_name` sat outside the matrix from the
+    /// day it was added, so the one target covering attacker-controlled archive
+    /// names had never executed in CI. Three lists, one source of truth.
+    #[test]
+    fn every_fuzz_target_is_registered_and_scheduled() {
+        let targets = on_disk();
+        assert!(!targets.is_empty(), "no fuzz targets found");
+
+        let manifest =
+            std::fs::read_to_string(repo().join("fuzz/Cargo.toml")).expect("read fuzz/Cargo.toml");
+        let workflow = std::fs::read_to_string(repo().join(".github/workflows/fuzz.yml"))
+            .expect("read fuzz.yml");
+
+        for target in &targets {
+            assert!(
+                manifest.contains(&format!("name = \"{target}\"")),
+                "fuzz target {target} has no [[bin]] in fuzz/Cargo.toml"
+            );
+            assert!(
+                workflow.contains(&format!("- {target}")),
+                "fuzz target {target} is missing from the fuzz.yml matrix — it \
+                 would build but never run"
+            );
+        }
     }
 }
