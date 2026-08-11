@@ -716,22 +716,11 @@ impl App {
                 Effect::SetTerminalTitle { title } => {
                     let _ = crate::term_title::set(&title);
                 }
-                // Middle-click paste. Reads the system clipboard, then hands the
-                // text to `handle_paste` so routing and bracketed-paste gating are
-                // inherited rather than duplicated.
-                Effect::PasteFromClipboard => match crate::clipboard::paste() {
-                    Ok(text) if text.is_empty() => {
-                        self.state.flash_info("paste: clipboard is empty");
-                    }
-                    Ok(text) => {
-                        // Reuse the paste path rather than sending bytes: routing,
-                        // bracketed-paste wrapping, and prompt handling are all
-                        // already decided there.
-                        let fx = self.handle_paste(text);
-                        self.run_effects(fx, terminal, fg);
-                    }
-                    Err(e) => self.state.flash_error(format!("paste: {e:#}")),
-                },
+                // Middle-click paste. The read spawns a helper and waits on it, so
+                // it runs on a detached worker — never here; `spawn_clipboard_read`
+                // documents why. `apply_clipboard_pastes` hands the text to
+                // `handle_paste` when it lands.
+                Effect::PasteFromClipboard => self.spawn_clipboard_read(),
                 Effect::SetMouseMode { capture } => {
                     // Mutually exclusive with 1007 alternate-scroll: a terminal
                     // honoring both could deliver one wheel tick twice.

@@ -322,6 +322,7 @@ impl App {
                 archive_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 archive_mount_then: None,
                 file_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                clipboard_paste_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 listing_refresh_inflight: false,
                 listing_refresh_dirty: false,
                 inventory_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
