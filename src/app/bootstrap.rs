@@ -372,22 +372,9 @@ impl App {
         if !health_warnings.is_empty() {
             app.state.flash_error(health_warnings.join("; "));
         }
-        // Graveyard cascade: if total exceeds the cap, push the
-        // oldest entries to the system trash (FIFO) until under
-        // the cap. Best-effort and silent on failure (the user
-        // would see a flash from any visible-error path; failures
-        // here are uncommon disk/permissions issues that don't
-        // need to interrupt startup).
-        // `cascade_until_under` owns the under-cap check and returns `(0, 0)`
-        // without evicting, so asking first with our own `load()` only bought a
-        // second walk of the directory on every single launch.
-        let cap = crate::state::graveyard::GRAVEYARD_CAP_BYTES;
-        let (trashed, _errors) = crate::state::graveyard::Graveyard::cascade_until_under(cap);
-        if trashed > 0 {
-            app.state.flash_info(format!(
-                "graveyard: {trashed} item(s) moved to system trash (cap reached)"
-            ));
-        }
+        // The graveyard cap cascade is deliberately NOT here: it is an
+        // `Effect::Graveyard` kicked from `App::run`, so its disk IO stays off
+        // the startup path. See that call site.
 
         if resume {
             app.show_session_picker();
