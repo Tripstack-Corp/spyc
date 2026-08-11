@@ -1340,7 +1340,11 @@ Claude can query and control the workspace through these tools:
   `navigate_to` / search / `pick_files` act on `b`. An agent-opened
   column `b` does **not** steal keyboard focus: the user keeps typing to
   the pane where the conversation is (only `^s n`, the user's own open,
-  moves the keyboard into `b`).
+  moves the keyboard into `b`). Nor does it destroy a **preview** you were
+  reading there: the right column hosts one thing, so the preview is set
+  aside with its split shape and `^s x` puts it straight back (re-read from
+  disk, in case it changed meanwhile). Your own `^s n` over a preview is an
+  explicit replace — nothing is owed back.
 
 A column is never left stranded in a **deleted worktree**: if its
 directory is removed out from under it by *any* means -- spyc's own

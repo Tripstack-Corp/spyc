@@ -162,6 +162,9 @@ impl App {
     /// worktree create/open) use [`Self::open_second_commander_at_background`],
     /// which makes `b` active without pulling the user out of the pane.
     pub(super) fn open_second_commander_at(&mut self, dir: &std::path::Path) {
+        // The user asking for `b` takes ownership of the column: any preview an
+        // agent displaced earlier stops being owed back.
+        self.view.displaced_preview = None;
         self.open_second_commander_at_inner(dir, true);
     }
 
@@ -172,7 +175,14 @@ impl App {
     /// shouldn't be yanked out of it. Differs from the `^s n` open only when the
     /// pane is focused (then focus stays on the pane); from a file column the two
     /// coincide, since a `cur() == b` file column necessarily owns the keyboard.
+    ///
+    /// A preview open in that column is **set aside, not discarded**: the user
+    /// was reading it and never asked for the commander, so closing `b` puts the
+    /// file (and the split shape it had) straight back.
     pub(super) fn open_second_commander_at_background(&mut self, dir: &std::path::Path) {
+        if let (Some(shape), Some(preview)) = (self.state.vsplit, self.view.right_pager.take()) {
+            self.view.displaced_preview = Some((shape, preview));
+        }
         self.open_second_commander_at_inner(dir, false);
     }
 
@@ -181,7 +191,9 @@ impl App {
     /// agent opening `b` in the background doesn't steal the pane from the user.
     /// Either way `b` becomes the active/`cur()` column (`vsplit.focus = Right`).
     /// The right region hosts a real commander (`state.right`) — mutually
-    /// exclusive with the `^s |` preview, so any open preview is dropped.
+    /// exclusive with the `^s |` preview, so an open preview yields the column
+    /// (the agent path stashes it first; the user path discards it, having been
+    /// asked for).
     /// Opens **top-only** regardless of `[layout] vsplit_mode`: full-height
     /// clamps the bottom pane to the left column (pane under `a` only), which is
     /// rarely what two peer browsers sharing one pane want — so the pane stays
@@ -227,25 +239,45 @@ impl App {
         // Build the right column's rows — `cur()` now resolves to it.
         self.state.rebuild_rows();
         self.state
-            .flash_info("second commander (^s x / ^d to close)");
+            .flash_info(if self.view.displaced_preview.is_some() {
+                "second commander (^s x closes it, restoring your preview)"
+            } else {
+                "second commander (^s x / ^d to close)"
+            });
         self.view.needs_full_repaint = true;
     }
 
     /// `^s x` — close the second commander: drop `state.right` and the split,
-    /// returning to a single (left) column with focus on it.
+    /// returning to a single (left) column with focus on it. A preview an agent
+    /// displaced (`open_second_commander_at_background`) comes back instead,
+    /// with the shape and focus it had — the user's reading position survives a
+    /// worktree the agent opened over it.
     pub(super) fn close_second_commander(&mut self) {
         if self.state.right.is_none() {
             self.state.flash_info("no second commander");
             return;
         }
         self.state.right = None;
-        self.state.vsplit = None;
         // Drop any `V`/`D` overlay open in `b` along with its column — otherwise
         // the editor PTY / pager would linger with no column to render into.
         self.runtime.top_overlay_right = None;
         self.view.pager_right = None;
-        self.state.focus = state::Focus::FileList;
         self.view.needs_full_repaint = true;
+        if let Some((shape, preview)) = self.view.displaced_preview.take() {
+            self.state.vsplit = Some(shape);
+            self.view.right_pager = Some(preview);
+            // `shape.focus` carries the column the user was in; `FileList` hands
+            // the keyboard back to it (the a/b axis lives on the shape).
+            self.state.focus = state::Focus::FileList;
+            // The file may have changed while the commander covered it — the
+            // fs-watch reload no-ops on a stashed preview, so re-read it now.
+            self.kick_preview_reload();
+            self.state
+                .flash_info("second commander closed — preview restored");
+            return;
+        }
+        self.state.vsplit = None;
+        self.state.focus = state::Focus::FileList;
         self.state.flash_info("second commander closed");
     }
 
