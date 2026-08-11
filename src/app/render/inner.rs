@@ -444,6 +444,7 @@ impl App {
             .push(crate::app::mouse::ChromeRow {
                 y: area.y,
                 x: area.x,
+                width: area.width,
                 line: line.clone(),
             });
         let painted = match self.view.chrome_selection {

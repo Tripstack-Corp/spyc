@@ -143,10 +143,17 @@ pub struct PaneScrollStreak {
 }
 
 /// One chrome line as drawn, recorded by the renderer for a later mouse copy.
+///
+/// Carries the drawn `width` because chrome does NOT always span the frame: a
+/// full-height vsplit clamps the status and prompt rects to the left column
+/// while the right column spans the same rows. Without it the hit-test has no
+/// right edge, and a row that stops at column 60 answers for column 90 —
+/// which is another region's.
 #[derive(Debug, Clone)]
 pub struct ChromeRow {
     pub y: u16,
     pub x: u16,
+    pub width: u16,
     pub line: ratatui::text::Line<'static>,
 }
 
