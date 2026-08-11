@@ -299,7 +299,10 @@ impl App {
         }
         let raw = std::path::PathBuf::from(path);
         let target = if raw.is_relative() {
-            self.state.cur().listing.dir.join(&raw)
+            // Not the raw column dir: inside an archive mount that is a path
+            // *within the container*, so a relative worktree path would resolve
+            // to somewhere that cannot exist.
+            self.state.worktree_anchor().join(&raw)
         } else {
             raw
         };
@@ -440,7 +443,7 @@ impl App {
                 }
                 let raw = std::path::PathBuf::from(path);
                 let target = if raw.is_relative() {
-                    self.state.cur().listing.dir.join(&raw)
+                    self.state.worktree_anchor().join(&raw)
                 } else {
                     raw
                 };

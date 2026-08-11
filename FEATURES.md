@@ -544,7 +544,10 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   inside a mount, reading the container in memory (or your not-yet-written edit,
   if there is one), so asking the agent in the pane about the file you're looking
   at works in here as well. `search_content` / `search_paths` say why they can't
-  instead of reporting "no matches" from walking a single binary file.
+  instead of reporting "no matches" from walking a single binary file. The
+  worktree tools keep working too: they anchor on the project rather than on the
+  container, so an agent can still set up and tear down worktrees while you read a
+  tarball.
 - **`:archive`** — `info` (this mount, or what's mounted when you're outside one),
   `list` (every mounted archive, dirty ones marked), `write` / `discard`,
   `unmount` (drop it and its staged bytes), `cancel`. `write` and `discard` work
