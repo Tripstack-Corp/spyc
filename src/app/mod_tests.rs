@@ -68,10 +68,29 @@ mod guard_tests {
         let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut offenders = Vec::new();
         scan_rs(&app, &mut |path, src| {
-            for (i, line) in src.lines().enumerate() {
+            let lines: Vec<&str> = src.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
                 let flashes =
                     line.contains("flash_error(format!(") || line.contains("flash_info(format!(");
-                if flashes && line.contains(&needle) {
+                if !flashes {
+                    continue;
+                }
+                // Scan the whole call, not just its first line. rustfmt breaks a
+                // long flash across lines, which put the opener and the `{e}` on
+                // different lines — and a line-at-a-time check saw neither half
+                // as a violation. One did exactly that in `effect.rs` while this
+                // guard passed.
+                let mut depth = 0i32;
+                let mut span = String::new();
+                for next in &lines[i..] {
+                    span.push_str(next);
+                    depth += next.chars().filter(|c| *c == '(').count() as i32;
+                    depth -= next.chars().filter(|c| *c == ')').count() as i32;
+                    if depth <= 0 {
+                        break;
+                    }
+                }
+                if span.contains(&needle) {
                     offenders.push(format!(
                         "{}:{}",
                         path.file_name().and_then(|n| n.to_str()).unwrap_or("?"),
