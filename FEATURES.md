@@ -326,13 +326,19 @@ spyc's workflow: browse files above, talk to Claude below.
   - **`:notify test`** fires every channel on demand (bell + visual + both desktop
     mechanisms), bypassing the config gating — to verify your setup without waiting
     for a real agent transition.
-- **^a |** vertical (left/right) split of the file area. Opens (50/50) with a
-  **preview of the file under the cursor** (markdown rendered) in the right
-  column. Press it again **on a different file** to swap the preview to that
-  file, keeping the layout; **on the same file** it cycles the shape:
-  *top-only* (splits just the list; pane stays full-width below) → *full-height*
-  (divider runs the whole height; pane confined under the left column) → off. A
-  directory isn't previewable (it warns). `^a a` / `^a h` focus the left pane
+- **^s |** (alias **^a |**) vertical (left/right) split of the file area. Opens
+  (50/50) with a **preview of the file under the cursor** (markdown rendered) in
+  the right column. Press it again **on a different file** to swap the preview to
+  that file, keeping the layout; **on the same file** it closes. A directory
+  isn't previewable (it warns).
+- **^s f** (alias **^a f**) flips the open split's **height**: *full-height* (divider runs the
+  whole frame height; the pane is confined under the left column) ⇄ *top-only*
+  (splits just the list; the pane stays full-width below both columns). Width and
+  focused column carry across. The shape a split *opens* in is
+  **`[layout] vsplit_mode`** — `"full_height"` by default, `"top_only"` for the
+  old half-height open. The `^a |` / `^a f` aliases exist because the **pane**
+  intercepts only `^a`-family keys, so `^s` alone would leave the split
+  unreachable while you're typing to an agent. `^a a` / `^a h` focus the left pane
   (a), `^a b` / `^a l` the right (b); `^a + / ^a -` resize the split width when
   a column is focused. Opinionated: exactly two file panes, labelled a/b
   (numbers stay for PTY tabs). The preview **live-reloads**: edit the file
@@ -341,7 +347,9 @@ spyc's workflow: browse files above, talk to Claude below.
   scroll position, and re-wraps when you resize the column.
 - **^s n** open a **second full file-commander** in the right column
   (`b`) — a complete browser, not just a preview: its own cwd, listing,
-  picks, filter, sort, git markers, and harpoon. **^s x** closes it.
+  picks, filter, sort, git markers, and harpoon. It opens *top-only*
+  whatever `vsplit_mode` says (the pane stays full-width below two peer
+  browsers); `^s f` makes it full-height. **^s x** closes it.
   (`^d` does *not* close it — it quits, so `^d^d` with `b` open lets the
   session save + `-r` restore the split.)
   `^a a`/`^a h` focus the left commander (a), `^a b`/`^a l` the right
@@ -1337,7 +1345,11 @@ Claude can query and control the workspace through these tools:
   `navigate_to` / search / `pick_files` act on `b`. An agent-opened
   column `b` does **not** steal keyboard focus: the user keeps typing to
   the pane where the conversation is (only `^s n`, the user's own open,
-  moves the keyboard into `b`).
+  moves the keyboard into `b`). Nor does it destroy a **preview** you were
+  reading there: the right column hosts one thing, so the preview is set
+  aside with its split shape and `^s x` puts it straight back (re-read from
+  disk, in case it changed meanwhile). Your own `^s n` over a preview is an
+  explicit replace — nothing is owed back.
 
 A column is never left stranded in a **deleted worktree**: if its
 directory is removed out from under it by *any* means -- spyc's own

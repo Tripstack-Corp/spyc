@@ -151,14 +151,14 @@ fn ctrl_a_plain_a_focuses_left_pane() {
     );
 }
 
-/// The vertical-split chords: `|` cycles, `a`/`h` focus left, `b`/`l` right,
-/// `d` toggles the focus-dim.
+/// The vertical-split chords: `|` opens/closes, `a`/`h` focus left, `b`/`l`
+/// right, `d` toggles the focus-dim.
 #[test]
 fn vsplit_chords_bind_to_their_actions() {
     let mut r = Resolver::new();
     let user = empty_keymap();
     for (k, want) in [
-        ('|', Action::VsplitCycle),
+        ('|', Action::VsplitToggle),
         ('a', Action::VsplitFocusLeft),
         ('h', Action::VsplitFocusLeft),
         ('b', Action::VsplitFocusRight),
