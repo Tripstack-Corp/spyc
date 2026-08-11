@@ -357,4 +357,51 @@ mod tests {
             );
         });
     }
+
+    /// **`[mouse] invert_scroll` reaches a mouse-aware child too.**
+    ///
+    /// The knob exists for one user: the wheel reads backwards on their
+    /// OS/terminal combination. Inverting spyc's own surfaces but not the report
+    /// forwarded to claude/vim/htop leaves that user with a *half*-inverted spyc
+    /// — the pane scrolling one way and the list beside it the other — which is
+    /// worse than either setting.
+    ///
+    /// Asserted as an equivalence rather than against a button number, so it
+    /// pins the contract ("an inverted tick reaches the child as the tick it
+    /// means") and not the xterm encoding.
+    #[test]
+    fn inverting_the_wheel_inverts_what_the_child_receives() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            crate::set_mouse_capture_for_test(true);
+            let (mut app, (col, row)) = app_with_a_mouse_pane(tmp.path());
+            let mut bytes_for = |invert: bool, kind| {
+                app.state.config.mouse.invert_scroll = invert;
+                let fx = app.handle_mouse(at(kind, col, row));
+                sent(&fx)
+                    .expect("a wheel tick over a mouse-aware pane reaches the child")
+                    .to_vec()
+            };
+
+            let plain_up = bytes_for(false, MouseEventKind::ScrollUp);
+            let plain_down = bytes_for(false, MouseEventKind::ScrollDown);
+            assert_ne!(
+                plain_up, plain_down,
+                "the two directions must differ, or this test proves nothing"
+            );
+
+            assert_eq!(
+                bytes_for(true, MouseEventKind::ScrollUp),
+                plain_down,
+                "an inverted wheel-up must reach the child as a wheel-down"
+            );
+            assert_eq!(
+                bytes_for(true, MouseEventKind::ScrollDown),
+                plain_up,
+                "and an inverted wheel-down as a wheel-up"
+            );
+            crate::set_mouse_capture_for_test(false);
+        });
+    }
 }

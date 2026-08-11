@@ -151,8 +151,8 @@
 # further into the content — the "scroll down = toward the end" mapping
 # shared by browsers and `less`. Set true if that reads backwards on your
 # OS/terminal combination (which direction is "natural" depends on both).
-# Applies uniformly to the file list, the pager, and an agent pane's
-# synthesized scroll keys — they always agree with each other either way.
+# Applies uniformly: the file list, the pager, an agent pane's synthesized
+# scroll keys, and the wheel report forwarded to a mouse-aware child.
 # invert_scroll = false
 
 # ── markdown ──────────────────────────────────────────────────────────

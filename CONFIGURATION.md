@@ -326,9 +326,12 @@ and `less`. Set it to `true` if that reads backwards for you.
 It's named for the mechanism rather than for a convention on purpose: whether
 "down" *should* move the content or the cursor depends on your OS trackpad
 setting and your terminal, so a `natural_scroll`-style flag would be ambiguous
-in precisely the situation you'd reach for it. The flip is applied once, where
-the wheel delta is computed, so the file list, the pager, and an agent pane's
-synthesized scroll keys move together and never disagree with each other.
+in precisely the situation you'd reach for it. The flip is applied once, to the
+event itself, before anything branches on it — so the file list, the pager, an
+agent pane's synthesized scroll keys **and the wheel report forwarded to a
+mouse-aware child** (claude, vim, htop) all move together. Half-inverting spyc
+would be worse than either setting: the pane scrolling one way and the column
+beside it the other.
 
 > [!WARNING]
 > **Capture takes native click-drag text selection away from your terminal.**
