@@ -69,6 +69,13 @@ crossterm = "0.29"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 glob = "0.3"
+# `~` / `$VAR` / `${VAR}` expansion for jump targets (src/paths.rs). Pure-Rust.
+# `default-features = false` with only `base-0` is load-bearing, not tidiness:
+# the default `tilde` feature exists to auto-detect HOME via the `dirs` crate,
+# which spyc must not use — HOME comes from the `envset` overlay (`:setenv`), so
+# we pass our own home + var lookup to `full_with_context_no_errors`. Trimmed
+# this way the crate has ZERO dependencies of its own.
+shellexpand = { version = "3", default-features = false, features = ["base-0"] }
 # In-process three-way text merge for the `spyc --merge-driver` git merge
 # driver (src/merge_driver.rs). Pure-Rust, tiny — lets us resolve the
 # version-line Cargo.toml/Cargo.lock conflicts without shelling out to `git`
