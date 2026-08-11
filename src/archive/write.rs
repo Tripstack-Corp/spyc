@@ -948,8 +948,9 @@ mod tests {
         );
     }
 
-    /// Verification is what catches a plan the writer couldn't honor. A plan
-    /// naming a member the index doesn't have fails before anything is replaced.
+    /// A plan naming a member the index doesn't have fails before anything is
+    /// replaced. Caught by `write_zip`'s index lookup, not by `verify` — which is
+    /// what `a_write_only_verify_can_catch_leaves_the_original_alone` covers.
     #[test]
     fn a_plan_referencing_an_unknown_member_is_refused() {
         let tmp = tempfile::tempdir().unwrap();
@@ -966,6 +967,90 @@ mod tests {
         }];
         assert!(repack(&indexed.index, &steps, tmp.path(), &opts()).is_err());
         assert_eq!(std::fs::read(&archive).unwrap(), before);
+    }
+
+    /// **The verify step earns its keep.** A plan whose stored name the archive
+    /// reads back differently — here `./a.txt`, which the zip stores verbatim and
+    /// [`crate::archive::index::normalize`] resolves to `a.txt` — is written
+    /// without complaint by every layer *except* verify. So this is the one shape
+    /// only verify can refuse, and it must: the alternative is an archive whose
+    /// member the user can no longer address.
+    ///
+    /// Asserts the refusal came from verify by name, because the neighbouring
+    /// unknown-member test is caught earlier and reads as if it covered this.
+    #[test]
+    fn a_write_only_verify_can_catch_leaves_the_original_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("pkg.zip");
+        zip_at(&archive, &[("a.txt", b"alpha", 0o644)]);
+        let before = std::fs::read(&archive).unwrap();
+        let indexed = read::index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+
+        let steps = vec![RepackStep {
+            out: "./a.txt".to_string(),
+            source: StepSource::Archived {
+                inner: "a.txt".to_string(),
+            },
+        }];
+        let err = repack(&indexed.index, &steps, tmp.path(), &opts()).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("doesn't match the plan"),
+            "the refusal must come from verify, not an earlier guard: {msg}"
+        );
+        assert_eq!(
+            std::fs::read(&archive).unwrap(),
+            before,
+            "a repack that fails verification never touches the original"
+        );
+    }
+
+    /// **Verify runs before the rename, and before the snapshot.** Both of those
+    /// orderings are the safety property `repack`'s docstring names, and neither
+    /// is visible in a passing write: only a write that verify *rejects* can tell
+    /// the difference. A doomed repack must leave the original in place AND leave
+    /// the graveyard empty — filling it with snapshots of writes that never
+    /// happened is how the undo affordance stops being one.
+    #[test]
+    fn a_rejected_write_neither_replaces_the_original_nor_snapshots_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let archive = tmp.path().join("pkg.zip");
+            zip_at(&archive, &[("a.txt", b"alpha", 0o644)]);
+            let before = std::fs::read(&archive).unwrap();
+            let indexed = read::index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+
+            let steps = vec![RepackStep {
+                out: "./a.txt".to_string(),
+                source: StepSource::Archived {
+                    inner: "a.txt".to_string(),
+                },
+            }];
+            assert!(
+                repack(
+                    &indexed.index,
+                    &steps,
+                    tmp.path(),
+                    &RepackOptions {
+                        snapshot_original: true,
+                        free_space_margin: 0,
+                    },
+                )
+                .is_err()
+            );
+            assert_eq!(
+                std::fs::read(&archive).unwrap(),
+                before,
+                "verify has to run while the original is still the original"
+            );
+            assert!(
+                crate::state::graveyard::Graveyard::load()
+                    .entries
+                    .iter()
+                    .all(|e| e.filename != "pkg.zip"),
+                "a write that never happened must not be snapshotted"
+            );
+        });
     }
 
     /// No temp files left behind, whether the write succeeded or failed — the
