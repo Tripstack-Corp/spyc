@@ -938,6 +938,75 @@ fn declining_the_write_unmounts_and_discards() {
     });
 }
 
+/// **An archive that genuinely earns read-only gets it, end to end.**
+///
+/// The sibling test below hand-writes the demotion into the mount, so it proves
+/// the refusal honors a `ReadOnly` capability but not that anything ever *sets*
+/// one. Here the archive earns it: a `..` member is skipped on the way in, and a
+/// repack that silently dropped it would hand the user a lossy archive with no
+/// warning. The reason string is asserted as the one `assess` produces, and the
+/// status bar's `ro` marker with it — a capability nothing surfaces is one the
+/// user can't act on.
+#[test]
+fn an_archive_with_a_skipped_member_mounts_read_only_and_says_so() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        {
+            let file = std::fs::File::create(&archive).unwrap();
+            let mut w = zip::ZipWriter::new(file);
+            let opts = zip::write::SimpleFileOptions::default().unix_permissions(0o644);
+            w.start_file("README.md", opts).unwrap();
+            w.write_all(b"# pkg\n").unwrap();
+            // Rejected by `index::normalize` on the way in — the member exists in
+            // the container and cannot exist in the mount.
+            w.start_file("../escape.txt", opts).unwrap();
+            w.write_all(b"nope\n").unwrap();
+            w.finish().unwrap();
+        }
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+
+        let mount = app.state.mounts.get(&archive).expect("mounted");
+        assert!(
+            !mount.capability.is_writable(),
+            "a skipped member must demote the mount, got {:?}",
+            mount.capability
+        );
+        match &mount.capability {
+            crate::archive::Capability::ReadOnly(why) => assert!(
+                why.contains("unsafe paths"),
+                "the reason has to be the one assess derived: {why}"
+            ),
+            crate::archive::Capability::ReadWrite => panic!("expected ReadOnly, got ReadWrite"),
+        }
+
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 24)).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
+        assert!(
+            rendered.contains("zip ro"),
+            "the status bar has to show the mount is read-only"
+        );
+
+        // And the demotion is load-bearing: the write is refused.
+        if let Some(mount) = app.state.mounts.get_mut(&archive) {
+            mount.journal.delete("README.md");
+        }
+        let before = std::fs::read(&archive).unwrap();
+        assert!(app.cmd_archive("write").is_empty(), "no write is attempted");
+        assert_eq!(std::fs::read(&archive).unwrap(), before);
+    });
+}
+
 /// A read-only archive refuses the write rather than producing a lossy one.
 #[test]
 fn a_read_only_mount_refuses_to_be_written() {
