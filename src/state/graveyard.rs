@@ -29,6 +29,11 @@
 //! is unpacked and its paths handed to `trash::delete`, then the spyc artifacts
 //! removed (flash: "N items moved to system trash"). Legacy pre-v1.41.0 entries
 //! the new reader can't unpack are cascaded the same way.
+//!
+//! The cascade walks the directory **once** and tracks the running total in
+//! memory. It used to re-derive the total from disk per eviction, which is
+//! quadratic in filesystem work and — running synchronously in `App::new` —
+//! reached the user as a launch that appeared to hang.
 
 use std::path::{Path, PathBuf};
 
@@ -266,19 +271,37 @@ impl Graveyard {
     /// since they're a transient soft-delete cache and major
     /// version bumps can lose their contents). Returns
     /// `(trash_count, error_count)`.
+    /// Also the *decision*: returns `(0, 0)` without evicting anything when the
+    /// graveyard is already under `cap_bytes`, so callers need not (and must
+    /// not) pre-check with their own [`load`](Self::load) — that second walk is
+    /// pure cost.
     pub fn cascade_until_under(cap_bytes: u64) -> (usize, usize) {
+        // ONE directory walk. The running total is then kept in memory and
+        // decremented per successful eviction. Re-deriving it from disk each
+        // iteration made this quadratic in filesystem work, and since it runs
+        // synchronously in `App::new` that landed on the user as a startup that
+        // never finished: measured on a release build with trivial 1 KiB
+        // entries, 800 of them took 25s and 801 directory walks.
         let mut g = Self::load();
         let mut trashed = 0usize;
         let mut errors = 0usize;
+        let mut total = g.total_bytes();
         // Sort oldest-first for the cascade so users keep their
         // most recent (and most likely undo-target) deletions.
         g.entries.sort_by_key(|e| e.timestamp);
         for entry in g.entries {
-            if g_total_under(cap_bytes) {
+            if total < cap_bytes {
                 break;
             }
             match Self::cascade_entry_to_trash(&entry) {
-                Ok(()) => trashed += 1,
+                Ok(()) => {
+                    // Only a *successful* eviction frees bytes. A failed one
+                    // leaves us over cap, so we move on to the next-oldest
+                    // rather than stopping — matching the previous behavior,
+                    // which re-read the unchanged total and kept going.
+                    total = total.saturating_sub(entry.compressed_size);
+                    trashed += 1;
+                }
                 Err(_) => errors += 1,
             }
         }
@@ -290,7 +313,32 @@ fn graveyard_dir() -> Option<PathBuf> {
     crate::state::state_root().map(|r| r.join("graveyard"))
 }
 
+// Counts `read_entries` calls so tests can assert how many times a code path
+// walks the graveyard directory. A full walk is `read_dir` plus one file read
+// and one `exists` per entry, so "how many walks" is the cost that matters.
+//
+// Thread-local, not a global: the test binary runs cases in parallel, and a
+// shared counter would mix one test's walks into another's assertion. Pairs with
+// the thread-local state-root override these tests already use.
+#[cfg(test)]
+thread_local! {
+    pub static DIR_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Walks counted on this thread since [`reset_dir_scans`].
+#[cfg(test)]
+pub fn dir_scans() -> usize {
+    DIR_SCANS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub fn reset_dir_scans() {
+    DIR_SCANS.with(|c| c.set(0));
+}
+
 fn read_entries(dir: &Path) -> Vec<Entry> {
+    #[cfg(test)]
+    DIR_SCANS.with(|c| c.set(c.get() + 1));
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -342,14 +390,6 @@ fn walk_size_inner(p: &Path, count: &mut u64, bytes: &mut u64) {
             walk_size_inner(&ent.path(), count, bytes);
         }
     }
-}
-
-/// Re-load and sum to check the live cap state (the cascade caller
-/// can't rely on stale in-memory totals after handing entries off
-/// to the system trash).
-fn g_total_under(cap: u64) -> bool {
-    let g = Graveyard::load();
-    g.total_bytes() < cap
 }
 
 #[cfg(test)]
@@ -518,6 +558,102 @@ mod tests {
             std::fs::write(dir.join("orphan.tar.zst"), b"not really a tar").unwrap();
             let g = Graveyard::load();
             assert!(g.entries.is_empty());
+        });
+    }
+
+    // ── cascade cost ──────────────────────────────────────────────
+    //
+    // Reported by a user: "my graveyard got filled up and it super broke the
+    // load times … had to manually delete them from outside spyc cause it
+    // wasn't booting up". The cascade runs synchronously in `App::new`, so
+    // anything superlinear there is startup latency with no UI to explain it.
+
+    /// Plant `n` entries whose metadata claims `bytes_each` compressed bytes.
+    ///
+    /// The tarball is deliberately **invalid** so `cascade_entry_to_trash`
+    /// fails at its `restore` step, which happens *before* `trash::delete_all`.
+    /// That keeps this test off the developer's real system trash while still
+    /// driving the full cascade loop: nothing is deleted, so the running total
+    /// never drops and every entry is visited.
+    fn plant_undeletable_entries(n: usize, bytes_each: u64) {
+        let dir = graveyard_dir().unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..n {
+            let id = format!("00000000-0000-4000-8000-{i:012}");
+            let entry = Entry {
+                id: id.clone(),
+                filename: format!("f{i}.txt"),
+                orig_path: PathBuf::from(format!("/tmp/f{i}.txt")),
+                timestamp: i as u64,
+                kind: EntryKind::File,
+                file_count: 1,
+                uncompressed_size: bytes_each,
+                compressed_size: bytes_each,
+            };
+            std::fs::write(
+                dir.join(format!("{id}.json")),
+                serde_json::to_string(&entry).unwrap(),
+            )
+            .unwrap();
+            // Present (so the reader keeps the entry) but not a real zstd
+            // stream (so restore refuses and we never reach the trash).
+            std::fs::write(dir.join(format!("{id}.tar.zst")), b"not a zstd stream").unwrap();
+        }
+    }
+
+    /// The reported bug: the cascade re-walked the whole graveyard directory on
+    /// **every iteration**, so evicting N entries cost N directory walks —
+    /// N read_dir calls plus N² file reads. One walk is enough: the total is
+    /// known up front and each eviction's size is known.
+    #[test]
+    fn cascade_walks_the_directory_once_not_once_per_entry() {
+        let root = fresh_root();
+        crate::state::with_state_root(root.path(), || {
+            const N: usize = 40;
+            plant_undeletable_entries(N, 1024);
+
+            reset_dir_scans();
+            // Cap 0 ⇒ every entry is over budget, so the loop visits all N.
+            let (trashed, errors) = Graveyard::cascade_until_under(0);
+            let scans = dir_scans();
+
+            assert_eq!(trashed, 0, "the planted tarballs are not restorable");
+            assert_eq!(errors, N, "so every entry should report an error");
+            assert!(
+                scans <= 2,
+                "cascade walked the graveyard {scans} times for {N} entries; \
+                 that is the O(N^2) startup stall (expected at most 2)"
+            );
+        });
+    }
+
+    /// The startup check itself must not pay for the directory twice: bootstrap
+    /// asks whether the graveyard is over cap, and the cascade then re-derived
+    /// the same answer from disk.
+    #[test]
+    fn deciding_to_cascade_and_cascading_share_one_walk() {
+        let root = fresh_root();
+        crate::state::with_state_root(root.path(), || {
+            plant_undeletable_entries(8, 1024);
+            reset_dir_scans();
+            let _ = Graveyard::cascade_until_under(0);
+            let scans = dir_scans();
+            assert!(scans <= 2, "expected at most 2 walks, got {scans}");
+        });
+    }
+
+    /// An under-cap graveyard must cost exactly one walk and evict nothing —
+    /// the common case on every launch.
+    #[test]
+    fn an_under_cap_graveyard_evicts_nothing() {
+        let root = fresh_root();
+        crate::state::with_state_root(root.path(), || {
+            plant_undeletable_entries(5, 10);
+            reset_dir_scans();
+            let (trashed, errors) = Graveyard::cascade_until_under(GRAVEYARD_CAP_BYTES);
+            let scans = dir_scans();
+            assert_eq!((trashed, errors), (0, 0), "nothing to do under cap");
+            assert!(scans <= 1, "expected 1 walk for a no-op, got {scans}");
         });
     }
 }
