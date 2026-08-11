@@ -29,20 +29,26 @@ impl std::fmt::Display for NonUtf8Path {
     }
 }
 
-/// Single-quote a string for POSIX shells. Any embedded single quote is
-/// escaped as `'\''` (close, escaped, reopen). Always safe.
+/// Quote `s` as a single POSIX-shell word, via `shlex`.
+///
+/// Not always literally quoted: `shlex` leaves a word bare when every byte is
+/// already safe (`/usr/bin/ls`) and switches to double quotes when the content
+/// holds a single quote, concatenating segments (`"it's "'$HOME'`) so `$`,
+/// backtick and `!` still land inside single quotes. All three forms are one
+/// shell word — what callers depend on — not a fixed output shape.
+///
+/// # Panics
+///
+/// If `s` contains an interior NUL, the one input `shlex::try_quote` rejects.
+/// No POSIX path can contain one, and every caller derives `s` from a path, so
+/// reaching this means a deliberately synthesized string. `sh -c` takes a C
+/// string and would truncate at the NUL, so no quoting can represent it:
+/// panicking loudly beats handing the shell a silently shortened command.
 pub fn shell_quote(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('\'');
-    for ch in s.chars() {
-        if ch == '\'' {
-            out.push_str("'\\''");
-        } else {
-            out.push(ch);
-        }
-    }
-    out.push('\'');
-    out
+    shlex::try_quote(s)
+        // Invariant: callers pass path-derived strings; POSIX paths hold no NUL.
+        .expect("shell_quote input contains an interior NUL")
+        .into_owned()
 }
 
 /// Substitute `%` in `template` with a space-separated, shell-quoted list
@@ -90,19 +96,34 @@ mod tests {
         PathBuf::from(s)
     }
 
+    /// The words a shell would parse the built command into. These tests assert
+    /// *this* rather than the exact quoted bytes: `shlex` leaves already-safe
+    /// words bare and uses double quotes around an embedded `'`, so pinning the
+    /// output shape would test the quoter's style instead of the requirement —
+    /// that each path arrives as exactly one word, whatever it contains.
+    fn words(cmd: &str) -> Vec<String> {
+        shlex::split(cmd).expect("built command must parse as shell words")
+    }
+
     #[test]
     fn quotes_plain_name() {
-        assert_eq!(shell_quote("foo.txt"), "'foo.txt'");
+        assert_eq!(words(&shell_quote("foo.txt")), vec!["foo.txt"]);
     }
 
     #[test]
     fn quotes_spaces() {
-        assert_eq!(shell_quote("two words"), "'two words'");
+        // The load-bearing case: a space must not split the path into two args.
+        assert_eq!(words(&shell_quote("two words")), vec!["two words"]);
     }
 
     #[test]
     fn escapes_embedded_single_quote() {
-        assert_eq!(shell_quote("it's"), "'it'\\''s'");
+        assert_eq!(words(&shell_quote("it's")), vec!["it's"]);
+        // A quote must not let the rest of the name escape into shell syntax.
+        assert_eq!(
+            words(&shell_quote("it's; rm -rf /")),
+            vec!["it's; rm -rf /"]
+        );
     }
 
     #[test]
@@ -110,8 +131,8 @@ mod tests {
         let files = [p("foo bar.txt")];
         let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
         assert_eq!(
-            expand_percent("ls -la %", &refs).unwrap(),
-            "ls -la 'foo bar.txt'"
+            words(&expand_percent("ls -la %", &refs).unwrap()),
+            vec!["ls", "-la", "foo bar.txt"]
         );
     }
 
@@ -120,8 +141,8 @@ mod tests {
         let files = [p("a.txt"), p("b c.txt")];
         let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
         assert_eq!(
-            expand_percent("cat %", &refs).unwrap(),
-            "cat 'a.txt' 'b c.txt'"
+            words(&expand_percent("cat %", &refs).unwrap()),
+            vec!["cat", "a.txt", "b c.txt"]
         );
     }
 
@@ -130,8 +151,8 @@ mod tests {
         let files = [p("x")];
         let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
         assert_eq!(
-            expand_percent("printf '%%s\\n' %", &refs).unwrap(),
-            "printf '%s\\n' 'x'"
+            words(&expand_percent("printf '%%s\\n' %", &refs).unwrap()),
+            vec!["printf", "%s\\n", "x"]
         );
     }
 
@@ -139,9 +160,22 @@ mod tests {
     fn multiple_occurrences() {
         let files = [p("x")];
         let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+        // `%.bak` appends OUTSIDE the quoting, so the suffix joins the same word.
         assert_eq!(
-            expand_percent("cp % %.bak", &refs).unwrap(),
-            "cp 'x' 'x'.bak"
+            words(&expand_percent("cp % %.bak", &refs).unwrap()),
+            vec!["cp", "x", "x.bak"]
+        );
+    }
+
+    /// The suffix-joins-the-word property with a path that must be quoted — the
+    /// case where the old always-quote and shlex's bare form could diverge.
+    #[test]
+    fn a_suffix_after_a_quoted_path_stays_one_word() {
+        let files = [p("a b")];
+        let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+        assert_eq!(
+            words(&expand_percent("cp % %.bak", &refs).unwrap()),
+            vec!["cp", "a b", "a b.bak"]
         );
     }
 
@@ -175,51 +209,101 @@ mod tests {
 
     // ── property tests ────────────────────────────────────────────
     //
-    // Round-trip: for any input string `s`, parsing the output of
-    // `shell_quote(s)` back through a small POSIX single-quoted-string
-    // parser must yield `s` exactly. This is the property a shell
-    // would observe when invoked with the quoted form.
+    // Round-trip: for any input `s`, splitting `shell_quote(s)` back into words
+    // must yield exactly one word equal to `s`. That is the property a shell
+    // observes when invoked with the quoted form.
+    //
+    // The decoder used to be a hand-written POSIX single-quoted-string parser,
+    // valid only because the old `shell_quote` ALWAYS wrapped in `'…'`. `shlex`
+    // emits three shapes (bare / single-quoted / double-quoted-and-concatenated),
+    // so re-implementing a shell word-splitter to decode them would be a bigger
+    // hand-roll than the one this PR removes. `shlex::split` is that parser.
 
-    /// Parse a string produced by `shell_quote` back into the original
-    /// content. Returns `None` for malformed input — `shell_quote`'s
-    /// output should never trigger that path. POSIX single-quoted-string
-    /// rules: outer `'…'`, no escape inside *except* the four-char
-    /// sequence `'\''` which encodes a literal single quote
-    /// (close-quote, backslash, quote, reopen-quote).
+    /// One shell word, or `None` if the quoting didn't survive splitting.
     fn parse_shell_quoted(encoded: &str) -> Option<String> {
-        let chars: Vec<char> = encoded.chars().collect();
-        if chars.first() != Some(&'\'') || chars.last() != Some(&'\'') || chars.len() < 2 {
-            return None;
+        match shlex::split(encoded)?.as_slice() {
+            [only] => Some(only.clone()),
+            _ => None,
         }
-        let mut out = String::new();
-        let mut i = 1;
-        let end = chars.len() - 1;
-        while i < end {
-            if chars[i] == '\'' {
-                // Must be the start of `'\''` — close, escaped, reopen.
-                if chars.get(i + 1) == Some(&'\\')
-                    && chars.get(i + 2) == Some(&'\'')
-                    && chars.get(i + 3) == Some(&'\'')
-                {
-                    out.push('\'');
-                    i += 4;
-                    continue;
-                }
-                // Bare `'` inside the body is malformed for shell_quote output.
-                return None;
-            }
-            out.push(chars[i]);
-            i += 1;
-        }
-        Some(out)
     }
 
     proptest::proptest! {
         #[test]
-        fn shell_quote_round_trips(s in proptest::string::string_regex(".{0,40}").unwrap()) {
+        // `[^\x00]` rather than `.`: an interior NUL is the one input
+        // `shell_quote` refuses (see its docs — `sh -c` takes a C string and
+        // would truncate there, so no quoting represents it). Its domain is
+        // path-derived strings and no POSIX path holds a NUL; the refusal is
+        // pinned by `a_nul_is_refused_not_silently_truncated` below rather than
+        // smuggled into this property's alphabet.
+        fn shell_quote_round_trips(s in proptest::string::string_regex("[^\u{0}]{0,40}").unwrap()) {
             let encoded = shell_quote(&s);
             let decoded = parse_shell_quoted(&encoded);
             proptest::prop_assert_eq!(decoded.as_deref(), Some(s.as_str()));
+        }
+    }
+
+    /// A NUL must fail loudly. The old hand-rolled quoter accepted it and
+    /// embedded it, producing a command `sh` silently truncated at the NUL —
+    /// i.e. it ran against a *different, shorter* path than the one selected.
+    #[test]
+    #[should_panic(expected = "interior NUL")]
+    fn a_nul_is_refused_not_silently_truncated() {
+        let _ = shell_quote("safe\u{0}; rm -rf /");
+    }
+
+    /// The assertion that actually pins the contract: hand the quoted form to a
+    /// real `sh` and require the original bytes back. `shlex::split` agreeing
+    /// with `shlex::try_quote` only proves they are mutual inverses; this proves
+    /// the quoting means what we need it to mean to the program that runs it.
+    #[test]
+    #[cfg(unix)]
+    fn shell_quote_survives_a_real_sh() {
+        let cases = [
+            "/usr/bin/ls",
+            "plain",
+            "two words",
+            "it's",
+            "it's $HOME",
+            "it's `id`",
+            "it's $(id)",
+            "don't; rm -rf /",
+            "a'b'c",
+            "$HOME",
+            "`id`",
+            "$(id)",
+            "a|b",
+            "a&b",
+            "a;b",
+            "a>b",
+            "*",
+            "?",
+            "~/x",
+            "#h",
+            "a!b",
+            "a{b}",
+            "a\"b",
+            "a\\b",
+            "a\nb",
+            "\t",
+            "  lead",
+            "trail  ",
+            "",
+            "«ü»",
+        ];
+        for s in cases {
+            let quoted = shell_quote(s);
+            // `printf %s` so no trailing newline and no escape interpretation of
+            // our own is folded into the comparison.
+            let out = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(format!("printf %s {quoted}"))
+                .output()
+                .expect("spawn sh");
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout),
+                s,
+                "sh did not round-trip {s:?} quoted as {quoted}"
+            );
         }
     }
 }
