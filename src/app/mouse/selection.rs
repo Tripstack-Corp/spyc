@@ -119,9 +119,17 @@ impl super::super::App {
     /// Matched on the recorded row's `y`, which is its identity — each chrome
     /// surface is exactly one screen row. Reads what the renderer actually drew, so
     /// the column the user pressed maps to the character they saw.
+    ///
+    /// Bounded on BOTH x edges. `route_mouse` tests this ahead of the region so
+    /// chrome painted over the layout wins, which makes a missing right edge a
+    /// silent mis-route rather than a cosmetic one: in a full-height vsplit the
+    /// status row stops at the left column's width and column `b` occupies the
+    /// rest of that same row.
     pub(super) fn chrome_col_at(&self, ev: MouseEvent) -> Option<(u16, u16)> {
         let rows = self.view.chrome_rows.borrow();
-        let row = rows.iter().find(|r| r.y == ev.row && ev.column >= r.x)?;
+        let row = rows
+            .iter()
+            .find(|r| r.y == ev.row && (r.x..r.x.saturating_add(r.width)).contains(&ev.column))?;
         Some((row.y, ev.column - row.x))
     }
 
@@ -785,13 +793,15 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir").keep();
         crate::state::with_state_root(&tmp, || {
             let mut app = App::test_app(tmp.clone());
-            // Stand in for what the renderer records: one chrome row at y=0, x=0.
+            // Stand in for what the renderer records: one chrome row at y=0, x=0,
+            // spanning a full-width frame.
             app.view
                 .chrome_rows
                 .borrow_mut()
                 .push(crate::app::mouse::ChromeRow {
                     y: 0,
                     x: 0,
+                    width: 80,
                     line: ratatui::text::Line::from(vec![
                         ratatui::text::Span::raw("spyc"),
                         ratatui::text::Span::raw("|"),
@@ -960,6 +970,7 @@ mod tests {
                 .push(crate::app::mouse::ChromeRow {
                     y: 0,
                     x: 0,
+                    width: 80,
                     line: ratatui::text::Line::from(vec![ratatui::text::Span::raw("spyc|main*")]),
                 });
             let at = |kind| MouseEvent {
@@ -975,6 +986,103 @@ mod tests {
                 app.view.chrome_selection.is_none(),
                 "and leaves no highlight"
             );
+        });
+    }
+
+    /// A chrome row's hit area is the rectangle it drew — both edges, not just the
+    /// left one.
+    ///
+    /// In a full-height vsplit the status bar is width-clamped to the left column
+    /// while column `b` spans the whole frame height, so the two genuinely share
+    /// row 0. Matching on `ev.column >= r.x` alone therefore made the status row
+    /// answer for every column on its row, including the ones `b` had drawn: a
+    /// press on `b`'s first row anchored a status-bar selection instead of the
+    /// column, and dragging from there replaced the clipboard with status-bar
+    /// columns from a gesture meant as a row selection.
+    ///
+    /// Driven through `handle_mouse` rather than `chrome_col_at` directly, because
+    /// the consequence is which *sink* the press reaches — `over_chrome_row` is
+    /// region-independent by design, so a wrong hit-test outranks the region
+    /// silently.
+    #[test]
+    fn a_press_on_the_right_column_is_not_a_press_on_the_status_bar() {
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir").keep();
+        crate::state::with_state_root(&tmp, || {
+            let mut app = App::test_app(tmp.clone());
+            app.view.term_size = (120, 24);
+            // The user's own path to this shape: `^s n` opens `b` top-only, `^s f`
+            // makes it full-height. `^a a` puts the keyboard back on `a`, so a
+            // press landing in `b` has somewhere to move focus FROM.
+            app.open_second_commander_at(&tmp);
+            app.toggle_vsplit_height();
+            app.vsplit_focus(Side::Left);
+
+            let mut terminal = Terminal::new(TestBackend::new(120, 24)).expect("backend");
+            terminal.draw(|f| app.render(f)).expect("draw");
+
+            let layout = app.frame_layout(Rect::new(0, 0, 120, 24));
+            let right = layout.right.expect("a second commander occupies column b");
+            // The premise, asserted rather than assumed: a chrome row really does
+            // sit on `b`'s first row, starting to its left. Without this the test
+            // could pass by drawing no chrome there at all.
+            {
+                let rows = app.view.chrome_rows.borrow();
+                assert!(
+                    rows.iter().any(|r| r.y == right.y && r.x < right.x),
+                    "no chrome row shares column b's first row — the geometry \
+                     changed and this test no longer reproduces anything: {:?}",
+                    rows.iter().map(|r| (r.y, r.x)).collect::<Vec<_>>()
+                );
+            }
+
+            crate::set_mouse_capture_for_test(true);
+            let press = |col, row| MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: col,
+                row,
+                modifiers: KeyModifiers::NONE,
+            };
+
+            let inside_b = press(right.x + 2, right.y);
+            assert!(
+                app.chrome_col_at(inside_b).is_none(),
+                "column b's own cells are not part of the status bar's row"
+            );
+            app.handle_mouse(inside_b);
+            assert!(
+                app.view.chrome_selection.is_none(),
+                "a press in column b must not anchor a chrome selection"
+            );
+            assert_eq!(
+                app.state.vsplit.map(|v| v.focus),
+                Some(Side::Right),
+                "the press focuses the column it landed in"
+            );
+
+            // And the surface still works where it was actually drawn — the fix
+            // must bound the row, not disable it. Same row, a column the status
+            // bar really did draw.
+            app.vsplit_focus(Side::Left);
+            let on_the_status_bar = press(right.x.saturating_sub(2), right.y);
+            assert!(
+                app.chrome_col_at(on_the_status_bar).is_some(),
+                "the status bar still answers for its own columns"
+            );
+            app.handle_mouse(on_the_status_bar);
+            assert_eq!(
+                app.view.mouse_selection,
+                Some(crate::app::mouse::MouseDragTarget::Chrome),
+                "a press on the status bar still anchors a chrome selection"
+            );
+            assert_eq!(
+                app.state.vsplit.map(|v| v.focus),
+                Some(Side::Left),
+                "and selecting chrome doesn't move the keyboard"
+            );
+            crate::set_mouse_capture_for_test(false);
         });
     }
 }
