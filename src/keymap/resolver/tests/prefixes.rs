@@ -163,7 +163,7 @@ fn quote_nonletter_is_ignored() {
 
 // ── Ctrl-W pane commands ──────────────────────────────────────
 
-// ── Ctrl-s second-commander chord ─────────────────────────────
+// ── Ctrl-s vertical-split chord ───────────────────────────────
 
 #[test]
 fn ctrl_s_enters_pending() {
@@ -189,6 +189,29 @@ fn ctrl_s_x_closes_second_commander() {
     assert_eq!(
         feed(&mut r, key('x')),
         ResolverOutcome::Action(Action::CloseSecondCommander)
+    );
+}
+
+/// `^s |` is the split's own open/close key (`^a |` is the alias), and `^s f`
+/// flips its height — the two halves the old single cycling key conflated.
+#[test]
+fn ctrl_s_hosts_the_split_toggles() {
+    let mut r = Resolver::new();
+    feed(&mut r, ctrl('s'));
+    assert_eq!(
+        feed(&mut r, key('|')),
+        ResolverOutcome::Action(Action::VsplitToggle)
+    );
+    feed(&mut r, ctrl('s'));
+    assert_eq!(
+        feed(&mut r, key('f')),
+        ResolverOutcome::Action(Action::VsplitToggleHeight)
+    );
+    // The long-standing `^a |` still opens/closes.
+    feed(&mut r, ctrl('a'));
+    assert_eq!(
+        feed(&mut r, key('|')),
+        ResolverOutcome::Action(Action::VsplitToggle)
     );
 }
 

@@ -1,38 +1,96 @@
 use super::*;
 
-/// `^a |` cycles the vertical split off → top-only → full-height → off, and
+/// `^s |` is a plain open/close on one file — no mode cycling in between — and
 /// closing clears the right-region preview.
 #[test]
-fn vsplit_cycle_opens_flips_and_closes() {
+fn vsplit_toggle_opens_and_closes() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let dir = tmp.path().join("work");
         std::fs::create_dir(&dir).unwrap();
         // A real file under the cursor so the preview loads (its source_path
-        // drives the same-file mode-cycle vs different-file swap decision).
+        // drives the same-file close vs different-file swap decision).
         std::fs::write(dir.join("a.md"), "# A\n\nbody").unwrap();
         let mut app = App::test_app(dir);
-        app.open_pane_tab("cat"); // a pane is open → open defaults to top-only
+        app.open_pane_tab("cat"); // a pane open must not change the shape
         app.seed_rows(&["a.md"]);
         assert!(app.state.vsplit.is_none());
 
-        app.apply(&Action::VsplitCycle).unwrap();
-        assert_eq!(
-            app.state.vsplit.map(|v| v.mode),
-            Some(state::VsplitMode::TopOnly),
-            "first ^a | opens top-only (a pane is open)"
-        );
-        app.apply(&Action::VsplitCycle).unwrap();
+        app.apply(&Action::VsplitToggle).unwrap();
         assert_eq!(
             app.state.vsplit.map(|v| v.mode),
             Some(state::VsplitMode::FullHeight),
-            "second ^a | flips to full-height"
+            "^s | opens at the configured default (full-height), pane or not"
         );
-        app.apply(&Action::VsplitCycle).unwrap();
-        assert!(app.state.vsplit.is_none(), "third ^a | closes the split");
+        app.apply(&Action::VsplitToggle).unwrap();
+        assert!(
+            app.state.vsplit.is_none(),
+            "a second ^s | on the same file closes it — no mode step between"
+        );
         assert!(
             app.view.right_pager.is_none(),
             "closing clears the right-region preview"
+        );
+    });
+}
+
+/// `[layout] vsplit_mode = "top_only"` opens the split as the half-height
+/// variant instead — the pane stays full-width below both columns.
+#[test]
+fn vsplit_open_honors_the_top_only_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.md"), "# A").unwrap();
+        let mut app = App::test_app(dir);
+        app.state.config.layout.vsplit_mode = crate::config::VsplitMode::TopOnly;
+        app.seed_rows(&["a.md"]);
+
+        app.apply(&Action::VsplitToggle).unwrap();
+        assert_eq!(
+            app.state.vsplit.map(|v| v.mode),
+            Some(state::VsplitMode::TopOnly),
+            "the config decides the opening height"
+        );
+    });
+}
+
+/// `^s f` flips an open split's height both ways, carrying the width and the
+/// focused column across; with nothing open it's inert.
+#[test]
+fn vsplit_height_toggle_flips_and_carries_shape() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("a.md"), "# A").unwrap();
+        let mut app = App::test_app(dir);
+        app.seed_rows(&["a.md"]);
+
+        // No split: nothing to flip.
+        app.apply(&Action::VsplitToggleHeight).unwrap();
+        assert!(app.state.vsplit.is_none(), "^s f alone opens nothing");
+
+        app.apply(&Action::VsplitToggle).unwrap(); // full-height by default
+        if let Some(v) = app.state.vsplit.as_mut() {
+            v.width_pct = 60;
+            v.focus = state::Side::Right;
+        }
+        app.apply(&Action::VsplitToggleHeight).unwrap();
+        let flipped = app.state.vsplit.expect("split still open");
+        assert_eq!(flipped.mode, state::VsplitMode::TopOnly, "^s f flips down");
+        assert_eq!(flipped.width_pct, 60, "width carries across the flip");
+        assert_eq!(
+            flipped.focus,
+            state::Side::Right,
+            "the focused column carries across the flip"
+        );
+        app.apply(&Action::VsplitToggleHeight).unwrap();
+        assert_eq!(
+            app.state.vsplit.map(|v| v.mode),
+            Some(state::VsplitMode::FullHeight),
+            "^s f flips back up"
         );
     });
 }
@@ -53,7 +111,7 @@ fn vsplit_focus_toggles_the_active_column() {
         app.apply(&Action::VsplitFocusRight).unwrap();
         assert!(!app.right_column_focused());
 
-        app.apply(&Action::VsplitCycle).unwrap(); // open (focus defaults to left)
+        app.apply(&Action::VsplitToggle).unwrap(); // open (focus defaults to left)
         assert!(
             !app.right_column_focused(),
             "opens with the left column active"
@@ -71,10 +129,10 @@ fn vsplit_focus_toggles_the_active_column() {
     });
 }
 
-/// `^a |` with the cursor on a *different* file swaps the preview to that file
+/// `^s |` with the cursor on a *different* file swaps the preview to that file
 /// and keeps the split's shape (mode/width) — "send this file to the split".
 #[test]
-fn vsplit_cycle_swaps_preview_keeping_shape() {
+fn vsplit_toggle_swaps_preview_keeping_shape() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let dir = tmp.path().join("work");
@@ -82,10 +140,10 @@ fn vsplit_cycle_swaps_preview_keeping_shape() {
         std::fs::write(dir.join("a.md"), "# A").unwrap();
         std::fs::write(dir.join("b.md"), "# B").unwrap();
         let mut app = App::test_app(dir);
-        app.open_pane_tab("cat"); // a pane is open → open defaults to top-only
+        app.state.config.layout.vsplit_mode = crate::config::VsplitMode::TopOnly;
         app.seed_rows(&["a.md", "b.md"]);
 
-        app.apply(&Action::VsplitCycle).unwrap(); // open on a.md (top-only)
+        app.apply(&Action::VsplitToggle).unwrap(); // open on a.md (top-only)
         assert_eq!(
             app.state.vsplit.map(|v| v.mode),
             Some(state::VsplitMode::TopOnly)
@@ -100,11 +158,11 @@ fn vsplit_cycle_swaps_preview_keeping_shape() {
         );
 
         app.state.left.cursor.index = 1; // move to b.md
-        app.apply(&Action::VsplitCycle).unwrap();
+        app.apply(&Action::VsplitToggle).unwrap();
         assert_eq!(
             app.state.vsplit.map(|v| v.mode),
             Some(state::VsplitMode::TopOnly),
-            "swap keeps the shape (no mode cycle)"
+            "swapping the previewed file keeps the height"
         );
         assert!(
             app.view
@@ -222,8 +280,8 @@ fn vsplit_pane_descend_remembers_the_right_column() {
     });
 }
 
-/// With no lower pane open, `^a |` opens the split **full-height** (top-only
-/// would reserve a strip for a pane that isn't there).
+/// With no lower pane open, `^s |` opens the split full-height — the same shape
+/// it takes with a pane, since the config alone decides the height.
 #[test]
 fn vsplit_opens_full_height_without_a_pane() {
     let tmp = tempfile::tempdir().unwrap();
@@ -233,7 +291,7 @@ fn vsplit_opens_full_height_without_a_pane() {
         std::fs::write(dir.join("a.md"), "# A").unwrap();
         let mut app = App::test_app(dir);
         app.seed_rows(&["a.md"]); // no pane open
-        app.apply(&Action::VsplitCycle).unwrap();
+        app.apply(&Action::VsplitToggle).unwrap();
         assert_eq!(
             app.state.vsplit.map(|v| v.mode),
             Some(state::VsplitMode::FullHeight),
@@ -311,7 +369,7 @@ fn q_on_focused_preview_closes_the_split() {
         let mut app = App::test_app(dir);
         app.seed_rows(&["a.md"]);
 
-        app.apply(&Action::VsplitCycle).unwrap(); // open
+        app.apply(&Action::VsplitToggle).unwrap(); // open
         app.apply(&Action::VsplitFocusRight).unwrap(); // focus the preview
         assert!(app.right_column_focused());
 
@@ -324,9 +382,9 @@ fn q_on_focused_preview_closes_the_split() {
     });
 }
 
-/// `^a |` on a directory warns and stays closed — a dir isn't previewable.
+/// `^s |` on a directory warns and stays closed — a dir isn't previewable.
 #[test]
-fn vsplit_cycle_on_directory_warns_and_stays_closed() {
+fn vsplit_toggle_on_directory_warns_and_stays_closed() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let dir = tmp.path().join("work");
@@ -340,10 +398,10 @@ fn vsplit_cycle_on_directory_warns_and_stays_closed() {
         }];
         app.state.left.cursor.index = 0;
 
-        app.apply(&Action::VsplitCycle).unwrap();
+        app.apply(&Action::VsplitToggle).unwrap();
         assert!(
             app.state.vsplit.is_none(),
-            "^a | on a directory stays closed"
+            "^s | on a directory stays closed"
         );
         assert!(app.view.right_pager.is_none());
     });

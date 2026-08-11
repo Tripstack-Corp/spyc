@@ -76,17 +76,19 @@ commander you spend the day in.
 Markdown renders — headings, tables, fenced code — source arrives
 syntax-highlighted, and a binary falls back to a hex dump. Same key every time,
 no editor, and the file list is still right there. Images open as actual
-pictures on a terminal with a graphics protocol, and `^a |` puts any of it in a
+pictures on a terminal with a graphics protocol, and `^s |` puts any of it in a
 live-reloading side column.
 
 ### Keep a file open beside the list
 
-<img src="docs/assets/demo-vsplit.gif" alt="^a | opening a preview column on a markdown file, swapping it to a Rust file, growing it full-height, then cycling it off" width="820">
+<img src="docs/assets/demo-vsplit.gif" alt="A preview column opening full-height beside the file list with an agent pane below, flipping to top-only and back, swapping to a Rust file, scrolling and widening it, then a second full file-commander in the same column" width="820">
 
-`^a |` opens a preview column on the cursor file. Press it on a *different*
-file and the preview swaps to that one; press it again on the same file and it
-grows full-height, then cycles off. The previewed file re-renders when it
-changes on disk, so it doubles as a watch window while something else writes.
+`^s |` (or `^a |`) opens a preview column on the cursor file, full-height by
+default — set `[layout] vsplit_mode = "top_only"` to keep the agent pane
+full-width below instead, and `^s f` flips an open split either way. Press the
+key on a *different* file and the preview swaps to that one; press it again on
+the same file and it closes. The previewed file re-renders when it changes on
+disk, so it doubles as a watch window while something else writes.
 
 ### Review it where you are
 
