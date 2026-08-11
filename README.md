@@ -57,6 +57,18 @@ commander exposes a local MCP socket the agent connects to. Everything else
 expect from a keyboard-driven file manager — the MCP bridge is what sets spyc
 apart from Yazi, Broot, or Ranger.
 
+<img src="docs/assets/screenshot.png" alt="spyc mid-task: two file columns browsing a worktree's src/ and its repo root, the activity HUD in the top right, three agent tabs on the divider with per-tab activity dots, and the active agent's output filling the lower pane" width="820">
+
+A real session, mid-task. Two file columns browse the same worktree (`^s n`) —
+`src/` on the left, the repo root on the right — while the status bar names the
+project, the session, the branch, and the agent pinned to the pane. Three agent
+tabs sit on the divider, each carrying its own activity dot; the boxed one is
+active. Top right is the `A` monitor: draws per second, git/fs/MCP throughput,
+pid and uptime, the running version, and a tally of every MCP tool the agents
+have called this session. Two bands are blurred out of the capture: the agent's
+own status line along the bottom, and one command echo that carried an absolute
+home path.
+
 **The name.** Say it *"spy-see"* — near enough to *spicy*, which is where the
 chili comes from. It carries a lineage too: `spy` and the keyboard-driven file
 commanders that came before it, rebuilt from scratch in Rust for the age of
