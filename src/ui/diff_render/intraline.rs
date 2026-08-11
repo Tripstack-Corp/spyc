@@ -1,27 +1,54 @@
-//! Word-level (intraline) highlight ranges for a modified line pair.
+//! Intra-line highlight ranges for a modified line pair.
 //!
-//! A removed line and its added counterpart are tokenized into word /
-//! whitespace / punctuation runs and diffed with the same `imara-diff` engine
+//! A removed line and its added counterpart are tokenized and diffed with the
+//! same `imara-diff` engine
 //! that built the hunks upstream ([`crate::git::diff_model`]), so **every**
 //! changed region is reported. Trimming a common prefix and suffix — the cheap
 //! approach — yields exactly one region, which collapses
 //! `foo(a, b, c)` → `foo(x, b, y)` into the single blob `a, b, c` / `x, b, y`
 //! and washes the unchanged `b` in the highlight color.
 //!
-//! **Word tokens, not chars.** Char-level diffs of code lines scatter into
-//! confetti. Punctuation is one token per char, so the argument list above
-//! breaks at every delimiter and highlights `a`→`x` and `c`→`y` separately;
-//! that puts the tokenizer between git's whitespace-only `--word-diff` default
-//! and `--word-diff-regex=.`, matching `--word-diff-regex='\w+|[^[:space:]]'`.
+//! **Granularity is a user choice** ([`Intraline`], `[diff] intraline`):
+//!
+//! * [`Intraline::Char`] (default) — one token per grapheme cluster, so
+//!   `value`→`values` brightens just the `s`. Finest signal; on dense code it
+//!   can read as confetti.
+//! * [`Intraline::Word`] — one token per word / whitespace / punctuation run,
+//!   marking the whole changed token like `git --word-diff`. Punctuation is one
+//!   token per char, so the argument list above still breaks at every delimiter
+//!   (i.e. `--word-diff-regex='\w+|[^[:space:]]'`, finer than git's
+//!   whitespace-only default).
+//!
+//! Char mode tokenizes **grapheme clusters, not `char`s**. A highlight range is
+//! handed to `overlay_range_bg`, which splits spans at its bounds — a boundary
+//! inside a cluster would paint half of `❤️` and leave the variation selector
+//! behind it unstyled. Clusters make that structurally impossible.
 
+use crate::config::Intraline;
 use gix::diff::blob::{Algorithm, Diff, InternedInput};
 use std::ops::Range;
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Token ceiling per side, above which a line pair gets no highlight. Bounds
-/// the per-pair diff cost for minified/generated lines, where a word highlight
-/// is unreadable noise anyway — every paired line in a hunk pays this, and a
-/// hunk set runs to [`MAX_DIFF_LINES`](crate::git::diff_model::MAX_DIFF_LINES).
-const MAX_TOKENS: usize = 512;
+/// the per-pair diff cost for minified/generated lines, where an intraline
+/// highlight is unreadable noise anyway — every paired line in a hunk pays
+/// this, and a hunk set runs to
+/// [`MAX_DIFF_LINES`](crate::git::diff_model::MAX_DIFF_LINES).
+///
+/// Per-mode, because a token means a different amount of line in each: 512
+/// words is a line no one writes, while 512 *clusters* is an ordinary long
+/// markdown paragraph or JSON blob that should still get marked up.
+///
+/// Release-measured cost of a pair sitting exactly at its cap: 0.12ms for char
+/// (4096), 0.01ms for word (512). Char is the pricier mode, but it is paid once
+/// per paired line at diff-build time — not per frame — so even a hunk set full
+/// of capped pairs stays well inside a single frame's budget.
+const fn max_tokens(mode: Intraline) -> usize {
+    match mode {
+        Intraline::Char => 4096,
+        Intraline::Word => 512,
+    }
+}
 
 /// Character class driving tokenization.
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -41,10 +68,19 @@ fn class_of(c: char) -> Class {
     }
 }
 
-/// Byte ranges of `s`'s tokens: runs of word chars, runs of whitespace, and one
-/// range per punctuation char. Contiguous and covering, so a token-index range
+/// Byte ranges of `s`'s tokens, contiguous and covering, so a token-index range
 /// maps back to a byte range exactly.
-fn tokenize(s: &str) -> Vec<Range<usize>> {
+///
+/// [`Intraline::Char`] yields one range per grapheme cluster;
+/// [`Intraline::Word`] yields runs of word chars, runs of whitespace, and one
+/// range per punctuation char.
+fn tokenize(s: &str, mode: Intraline) -> Vec<Range<usize>> {
+    if mode == Intraline::Char {
+        return s
+            .grapheme_indices(true)
+            .map(|(i, g)| i..i + g.len())
+            .collect();
+    }
     let mut out = Vec::new();
     let mut it = s.char_indices().peekable();
     while let Some((start, c)) = it.next() {
@@ -69,13 +105,18 @@ fn tokenize(s: &str) -> Vec<Range<usize>> {
 ///
 /// Empty on both sides for identical lines, and when *everything* changed — a
 /// uniformly brighter line adds nothing over the row wash.
-pub(super) fn intra_change_ranges(old: &str, new: &str) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
+pub(super) fn intra_change_ranges(
+    old: &str,
+    new: &str,
+    mode: Intraline,
+) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
     let empty = || (Vec::new(), Vec::new());
     if old == new {
         return empty();
     }
-    let (old_toks, new_toks) = (tokenize(old), tokenize(new));
-    if old_toks.len() > MAX_TOKENS || new_toks.len() > MAX_TOKENS {
+    let (old_toks, new_toks) = (tokenize(old, mode), tokenize(new, mode));
+    let cap = max_tokens(mode);
+    if old_toks.len() > cap || new_toks.len() > cap {
         return empty();
     }
 
@@ -100,6 +141,16 @@ pub(super) fn intra_change_ranges(old: &str, new: &str) -> (Vec<Range<usize>>, V
         return empty();
     }
     (old_out, new_out)
+}
+
+/// Word-granularity [`intra_change_ranges`], for the sibling tests that were
+/// authored against that mode and assert its coarser output.
+#[cfg(test)]
+pub(super) fn intra_change_ranges_word(
+    old: &str,
+    new: &str,
+) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
+    intra_change_ranges(old, new, Intraline::Word)
 }
 
 /// Translate one hunk's token-index `span` into a byte range, trim
@@ -137,7 +188,12 @@ fn spans_whole(ranges: &[Range<usize>], len: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{intra_change_ranges, tokenize};
+    use super::{Intraline, UnicodeSegmentation, intra_change_ranges, tokenize};
+
+    /// Word mode, the granularity these cases were written against.
+    const W: Intraline = Intraline::Word;
+    /// Char mode, the default.
+    const C: Intraline = Intraline::Char;
 
     /// Render `ranges` as the substrings they select, for readable assertions.
     fn picks<'a>(text: &'a str, ranges: &[std::ops::Range<usize>]) -> Vec<&'a str> {
@@ -148,7 +204,7 @@ mod tests {
     fn tokenize_splits_words_space_and_each_punct_char() {
         let s = "foo(a, b)";
         assert_eq!(
-            picks(s, &tokenize(s)),
+            picks(s, &tokenize(s, W)),
             vec!["foo", "(", "a", ",", " ", "b", ")"]
         );
     }
@@ -156,7 +212,7 @@ mod tests {
     #[test]
     fn tokenize_is_contiguous_and_covering() {
         for s in ["", "a", "  ", "a  b", "ünïcödé(x)", "\t\tif x:"] {
-            let toks = tokenize(s);
+            let toks = tokenize(s, W);
             assert_eq!(toks.first().map_or(0, |t| t.start), 0, "{s:?} starts at 0");
             assert_eq!(
                 toks.last().map_or(0, |t| t.end),
@@ -174,7 +230,7 @@ mod tests {
     #[test]
     fn unchanged_middle_is_not_swept_into_the_highlight() {
         let (old, new) = ("foo(a, b, c)", "foo(x, b, y)");
-        let (o, n) = intra_change_ranges(old, new);
+        let (o, n) = intra_change_ranges(old, new, W);
         assert_eq!(picks(old, &o), vec!["a", "c"], "two regions, not one blob");
         assert_eq!(picks(new, &n), vec!["x", "y"]);
         // The unchanged token must fall outside every highlight range.
@@ -188,7 +244,7 @@ mod tests {
     #[test]
     fn changes_at_both_ends_keep_the_middle_clean() {
         let (old, new) = ("aaa keep zzz", "bbb keep yyy");
-        let (o, n) = intra_change_ranges(old, new);
+        let (o, n) = intra_change_ranges(old, new, W);
         assert_eq!(picks(old, &o), vec!["aaa", "zzz"]);
         assert_eq!(picks(new, &n), vec!["bbb", "yyy"]);
     }
@@ -196,7 +252,7 @@ mod tests {
     #[test]
     fn single_changed_token_is_the_only_highlight() {
         let (old, new) = ("let x = 1;", "let x = 2;");
-        let (o, n) = intra_change_ranges(old, new);
+        let (o, n) = intra_change_ranges(old, new, W);
         assert_eq!(picks(old, &o), vec!["1"]);
         assert_eq!(picks(new, &n), vec!["2"]);
     }
@@ -204,21 +260,21 @@ mod tests {
     #[test]
     fn pure_insertion_leaves_the_old_side_unhighlighted() {
         let (old, new) = ("a b", "a X b");
-        let (o, n) = intra_change_ranges(old, new);
+        let (o, n) = intra_change_ranges(old, new, W);
         assert!(o.is_empty(), "nothing was removed, so nothing to mark");
         assert_eq!(picks(new, &n), vec!["X"], "and the space is trimmed off");
     }
 
     #[test]
     fn identical_lines_get_no_highlight() {
-        assert_eq!(intra_change_ranges("same", "same"), (vec![], vec![]));
+        assert_eq!(intra_change_ranges("same", "same", W), (vec![], vec![]));
     }
 
     #[test]
     fn wholly_different_lines_get_no_highlight() {
         // A uniformly brighter line adds nothing over the row wash.
         for (old, new) in [("abc", "xyz"), ("", "abc"), ("abc", "")] {
-            let (o, n) = intra_change_ranges(old, new);
+            let (o, n) = intra_change_ranges(old, new, W);
             assert!(
                 o.is_empty() && n.is_empty(),
                 "{old:?} -> {new:?} should not highlight"
@@ -231,7 +287,7 @@ mod tests {
         // Trailing-whitespace and indent changes are invisible without it, so
         // the edge-trim must not erase a change that is ENTIRELY whitespace.
         let (old, new) = ("x = 1", "x  = 1");
-        let (o, n) = intra_change_ranges(old, new);
+        let (o, n) = intra_change_ranges(old, new, W);
         assert!(!n.is_empty(), "the added whitespace must be marked");
         assert!(
             picks(new, &n).iter().all(|s| s.trim().is_empty()),
@@ -251,7 +307,7 @@ mod tests {
             ("a(b)c(d)e", "a(z)c(w)e"),
         ];
         for (old, new) in cases {
-            let (o, n) = intra_change_ranges(old, new);
+            let (o, n) = intra_change_ranges(old, new, W);
             for (text, ranges) in [(old, &o), (new, &n)] {
                 for w in ranges.windows(2) {
                     assert!(w[0].end < w[1].start, "{text:?} ranges touch/overlap");
@@ -264,10 +320,82 @@ mod tests {
         }
     }
 
+    // ── char granularity (the default) ────────────────────────────
+
+    #[test]
+    fn char_mode_marks_only_the_characters_that_differ() {
+        // The case that separates the two modes: a suffix added to a word.
+        // Char mode brightens the `s`; word mode brightens all of `values`.
+        let (old, new) = ("let value = 1;", "let values = 1;");
+        let (o, n) = intra_change_ranges(old, new, C);
+        assert!(o.is_empty(), "nothing was removed from the old side");
+        assert_eq!(picks(new, &n), vec!["s"]);
+
+        let (wo, wn) = intra_change_ranges(old, new, W);
+        assert_eq!(picks(old, &wo), vec!["value"], "word mode is coarser");
+        assert_eq!(picks(new, &wn), vec!["values"]);
+    }
+
+    #[test]
+    fn char_mode_still_leaves_an_unchanged_middle_alone() {
+        // The #179 property has to hold at both granularities.
+        let (old, new) = ("foo(a, b, c)", "foo(x, b, y)");
+        let (o, n) = intra_change_ranges(old, new, C);
+        assert_eq!(picks(old, &o), vec!["a", "c"]);
+        assert_eq!(picks(new, &n), vec!["x", "y"]);
+    }
+
+    #[test]
+    fn char_mode_tokenizes_grapheme_clusters_not_chars() {
+        // A range boundary inside a cluster would let `overlay_range_bg` paint
+        // the base char and leave its variation selector unstyled. Tokens are
+        // clusters, so every boundary is a cluster boundary by construction.
+        let heart = "\u{2764}\u{FE0F}"; // ❤️
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"; // 👨‍👩‍👧
+        let (old, new) = (format!("a{heart}b"), format!("a{family}b"));
+        let (o, n) = intra_change_ranges(&old, &new, C);
+        assert_eq!(picks(&old, &o), vec![heart], "whole cluster, not half");
+        assert_eq!(picks(&new, &n), vec![family]);
+        for (text, ranges) in [(&old, &o), (&new, &n)] {
+            let bounds: Vec<usize> = text
+                .grapheme_indices(true)
+                .map(|(i, _)| i)
+                .chain(std::iter::once(text.len()))
+                .collect();
+            for r in ranges {
+                assert!(bounds.contains(&r.start), "{text:?} start mid-cluster");
+                assert!(bounds.contains(&r.end), "{text:?} end mid-cluster");
+            }
+        }
+    }
+
+    #[test]
+    fn char_mode_keeps_the_no_highlight_policies() {
+        assert_eq!(intra_change_ranges("same", "same", C), (vec![], vec![]));
+        // Wholly different: a uniformly brighter line adds nothing over the wash.
+        for (old, new) in [("abc", "xyz"), ("", "abc"), ("abc", "")] {
+            let (o, n) = intra_change_ranges(old, new, C);
+            assert!(o.is_empty() && n.is_empty(), "{old:?} -> {new:?}");
+        }
+    }
+
+    #[test]
+    fn char_mode_tolerates_a_line_that_word_mode_would_refuse() {
+        // 512 word tokens is the word cap, but the same line is only ~1000
+        // clusters — well inside char mode's, so it still gets marked up.
+        let old = "a,".repeat(400);
+        let new = format!("{old}z");
+        assert_eq!(intra_change_ranges(&old, &new, W), (vec![], vec![]));
+        let (_, n) = intra_change_ranges(&old, &new, C);
+        assert_eq!(picks(&new, &n), vec!["z"], "char mode still marks it");
+    }
+
+    /// Char mode's own ceiling: a minified line gets no highlight in either
+    /// mode, it just takes more of a line to get there.
     #[test]
     fn absurdly_long_lines_fall_back_to_no_highlight() {
-        let old = "a,".repeat(super::MAX_TOKENS);
+        let old = "a,".repeat(super::max_tokens(W));
         let new = format!("{old}b");
-        assert_eq!(intra_change_ranges(&old, &new), (vec![], vec![]));
+        assert_eq!(intra_change_ranges(&old, &new, W), (vec![], vec![]));
     }
 }

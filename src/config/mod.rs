@@ -45,6 +45,9 @@ pub struct Config {
     /// Markdown viewer behavior knobs.
     pub markdown: MarkdownConfig,
 
+    /// Git diff/show view knobs (`[diff]`).
+    pub diff: DiffConfig,
+
     /// Delete-action behavior knobs.
     pub delete: DeleteConfig,
 
@@ -696,6 +699,40 @@ struct FileMarkdown {
     open_as_rendered: Option<bool>,
 }
 
+/// `[diff]` — the in-house git diff/show views.
+#[derive(Debug, Clone, Default)]
+pub struct DiffConfig {
+    /// Granularity of the intra-line change highlight on a modified line pair.
+    pub intraline: Intraline,
+}
+
+/// `[diff] intraline` — how finely a changed line pair is marked up.
+///
+/// `Char` (the default) marks the individual characters that differ, so
+/// `value`→`values` brightens just the `s`. `Word` marks the whole changed
+/// token the way `git --word-diff` does, which reads calmer on dense code at
+/// the cost of hiding exactly which characters moved.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Intraline {
+    /// Per-character (strictly: per grapheme cluster — see
+    /// `ui::diff_render::intraline`, which must not split one).
+    #[default]
+    #[serde(alias = "character", alias = "chars")]
+    Char,
+    /// Per word / punctuation run, like `git --word-diff`.
+    #[serde(alias = "words")]
+    Word,
+}
+
+/// On-disk shape of `[diff]`. `Option` for "didn't set" disambig.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileDiff {
+    #[serde(default)]
+    intraline: Option<Intraline>,
+}
+
 /// Define `ColorOverrides` and its `merge` from a single field list, so a
 /// new color can't be added to the struct but forgotten in the merge (which
 /// silently dropped `delete_warning` before — the field existed but was never
@@ -761,6 +798,8 @@ struct FileConfig {
     mouse: FileMouse,
     #[serde(default)]
     markdown: FileMarkdown,
+    #[serde(default)]
+    diff: FileDiff,
     #[serde(default)]
     delete: FileDelete,
     #[serde(default)]
@@ -930,6 +969,11 @@ impl Config {
         // Markdown: per-field merge.
         if let Some(b) = file.markdown.open_as_rendered {
             self.markdown.open_as_rendered = b;
+        }
+
+        // Diff: per-field merge.
+        if let Some(g) = file.diff.intraline {
+            self.diff.intraline = g;
         }
 
         // Delete: per-field merge.
@@ -1108,6 +1152,58 @@ mod tests {
         assert!(file.pane.new_tab_cwd.is_none());
         assert!(file.yank.include_pager_title.is_none());
         assert!(file.markdown.open_as_rendered.is_none());
+        assert!(file.diff.intraline.is_none());
+    }
+
+    #[test]
+    fn diff_intraline_defaults_to_char() {
+        // Char is the default granularity: it says exactly which characters
+        // moved, which is the whole point of an intra-line highlight.
+        assert_eq!(Config::default().diff.intraline, Intraline::Char);
+    }
+
+    #[test]
+    fn parses_diff_intraline_word() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[diff]\nintraline = \"word\"\n").unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert_eq!(cfg.diff.intraline, Intraline::Word);
+    }
+
+    #[test]
+    fn diff_intraline_accepts_the_plural_and_long_spellings() {
+        for (token, want) in [
+            ("char", Intraline::Char),
+            ("chars", Intraline::Char),
+            ("character", Intraline::Char),
+            ("word", Intraline::Word),
+            ("words", Intraline::Word),
+        ] {
+            let tmp = tempdir().unwrap();
+            let path = tmp.path().join("rc.toml");
+            std::fs::write(&path, format!("[diff]\nintraline = \"{token}\"\n")).unwrap();
+            let cfg = Config::load_from(&[Some(&path)]).unwrap();
+            assert_eq!(cfg.diff.intraline, want, "token {token:?}");
+        }
+    }
+
+    /// An unknown token is reported, not silently swallowed into a default —
+    /// otherwise a typo looks like the setting simply not working. Surfaces as
+    /// a parse error naming the key, the same as every other enum-valued
+    /// setting (`status_position`, `new_tab_cwd`, `write_back`).
+    #[test]
+    fn diff_intraline_rejects_an_unknown_token() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[diff]\nintraline = \"letter\"\n").unwrap();
+        let err = Config::load_from(&[Some(&path)])
+            .expect_err("an unknown granularity must not load silently")
+            .to_string();
+        assert!(
+            err.contains("intraline"),
+            "error should name the key: {err}"
+        );
     }
 
     #[test]
