@@ -157,6 +157,12 @@ make release-tag VERSION=x.y.z        # step 2, on main after that PR merged: ve
 
 **Crate shape: lib + bin.** `src/lib.rs` owns every module + the `run()` entry point; `src/main.rs` is a thin shim. The split lets `fuzz/` (a standalone workspace; nightly, on-demand) link the lib. New fuzz entry points go through the `pub mod fuzz` facade in `lib.rs`, not by widening module visibility.
 
+**Leave no `target/` behind — `cargo clean` when you're done with a worktree.** One gate run leaves ~4 GB of build cache and the worktree-per-PR layout multiplies it: thirteen parked worktrees reached **57 GB**. The rebuild is worth the disk, so clean eagerly rather than banking the cache — and `remove_worktree` as soon as a PR merges, which takes the cache with it. **`fuzz/` is a separate workspace, so the root `cargo clean` doesn't touch `fuzz/target`** — another ~2.6 GB per worktree, surviving the obvious command:
+
+```sh
+cargo clean && cargo clean --manifest-path fuzz/Cargo.toml
+```
+
 ## Roadmap
 
 See [`ROADMAP.md`](ROADMAP.md).
