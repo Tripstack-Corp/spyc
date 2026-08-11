@@ -20,6 +20,9 @@ pub struct IndexFacts {
     pub absolute_names: usize,
     /// Members whose `\` separators were reinterpreted as `/`.
     pub backslash_names: usize,
+    /// Members whose name claimed [`crate::archive::index::STAGING_RESERVED`],
+    /// the staging directory spyc keeps its own copies under.
+    pub reserved_names: usize,
     /// Members whose name collided with an earlier one (last won).
     pub duplicates: usize,
     /// Directories the archive omitted and we synthesized.
@@ -50,12 +53,13 @@ impl IndexFacts {
             Reject::Traversal => self.traversal_names += 1,
             Reject::Empty => self.empty_names += 1,
             Reject::Nul => self.nul_names += 1,
+            Reject::Reserved => self.reserved_names += 1,
         }
     }
 
     /// Members that never made it into the index at all.
     pub const fn skipped(&self) -> usize {
-        self.traversal_names + self.empty_names + self.nul_names
+        self.traversal_names + self.empty_names + self.nul_names + self.reserved_names
     }
 
     /// tar members whose shape a rebuilt header can't reproduce.
@@ -143,6 +147,13 @@ pub fn warnings(facts: &IndexFacts, index: &ArchiveIndex) -> Vec<String> {
         out.push(format!(
             "{} member(s) skipped: unusable name",
             facts.empty_names + facts.nul_names
+        ));
+    }
+    if facts.reserved_names > 0 {
+        out.push(format!(
+            "{} member(s) skipped: named spyc's reserved `{}` staging directory",
+            facts.reserved_names,
+            crate::archive::index::STAGING_RESERVED
         ));
     }
     if facts.absolute_names > 0 {
@@ -309,6 +320,7 @@ mod tests {
             traversal_names: 1,
             empty_names: 1,
             nul_names: 1,
+            reserved_names: 1,
             absolute_names: 1,
             backslash_names: 1,
             duplicates: 1,
@@ -323,9 +335,10 @@ mod tests {
         };
         let notes = warnings(&facts, &index);
         // Empty + NUL names share a line; implied dirs are normal and silent.
-        assert_eq!(notes.len(), 11, "{notes:#?}");
+        assert_eq!(notes.len(), 12, "{notes:#?}");
         assert!(notes.iter().any(|n| n.contains("traversal")));
         assert!(notes.iter().any(|n| n.contains("unusable name")));
+        assert!(notes.iter().any(|n| n.contains("reserved")));
         assert!(notes.iter().any(|n| n.contains("only by case")));
         assert!(notes.iter().any(|n| n.contains("encrypted")));
         assert!(

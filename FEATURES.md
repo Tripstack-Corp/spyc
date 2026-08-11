@@ -495,7 +495,8 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   `[archive] extract_budget_mb` (default 512) is the ceiling; past it the mount
   is refused rather than filling the disk, and `:archive cancel` abandons one
   that is taking too long.
-- **It says what's odd** — unsafe member paths (`../…`), symlinks pointing out
+- **It says what's odd** — unsafe member paths (`../…`, or one claiming spyc's
+  own `.spyc` staging directory), symlinks pointing out
   of the archive, duplicate or case-colliding names, encrypted members and a
   capped index are all reported when the mount opens, in full under
   `:archive info`.

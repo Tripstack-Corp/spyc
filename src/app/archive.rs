@@ -499,17 +499,17 @@ impl App {
             .iter()
             .find(|m| real.starts_with(&m.staging_root))?;
         let rel = real.strip_prefix(&mount.staging_root).ok()?;
-        // A case-colliding member stages under its own prefix, so strip that
-        // before reading the path back as a member.
+        // A case-colliding member stages under the reserved directory
+        // (`<reserved>/case-N/<inner>`), so strip both of those components before
+        // reading the path back as a member. No member name can start with the
+        // reserved component — `index::normalize` refuses it — so a match here is
+        // spyc's own escape and never the archive's.
         let rel = rel
-            .components()
-            .next()
-            .and_then(|first| {
-                first
-                    .as_os_str()
-                    .to_str()
-                    .filter(|s| s.starts_with(".spyc-case-"))
-                    .and_then(|_| rel.strip_prefix(first).ok())
+            .strip_prefix(crate::archive::index::STAGING_RESERVED)
+            .ok()
+            .and_then(|after| {
+                let rank = after.components().next()?;
+                after.strip_prefix(rank).ok()
             })
             .unwrap_or(rel);
         Some(mount.archive().join(rel))
@@ -531,7 +531,7 @@ impl App {
         };
         // Keyed by **journal path**, which is what every reader of this map uses.
         // The staging-relative path is not the same string: a case-colliding member
-        // stages under a `.spyc-case-N/` prefix, so recording its location gave one
+        // stages under the reserved directory, so recording its location gave one
         // member two names and its edits were never noticed.
         let Some((archive, inner)) = self.staged_owner(real) else {
             return;
@@ -1462,6 +1462,65 @@ mod tests {
                 "the pid scopes it: {name}"
             );
             assert!(a.starts_with(tmp.path().join("archives")));
+        });
+    }
+
+    /// Every member's staged path maps back to the member it stands in for —
+    /// including a case-ranked one, whose bytes live under the reserved directory
+    /// rather than at its own name.
+    ///
+    /// This is the inverse of `ArchiveMount::staging_path`, and the two are
+    /// derived independently: the forward direction asks the entry, the reverse
+    /// direction strips a prefix. A round trip is the only thing that keeps them
+    /// agreeing, and getting it wrong hands one member another's journal path —
+    /// which is how edits stop being noticed.
+    #[test]
+    fn a_staged_path_maps_back_to_its_own_member_at_every_rank() {
+        use crate::archive::ArchiveFormat;
+        use crate::archive::index::{Draft, IndexBuilder, Locator};
+        use crate::archive::scan::Capability;
+
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut b = IndexBuilder::new(100);
+            for (i, name) in ["a/README", "a/readme"].iter().enumerate() {
+                b.push(name, Draft::file(1, Locator::Zip { index: i }));
+            }
+            let (index, _) = b.finish(PathBuf::from("/src/pkg.zip"), ArchiveFormat::Zip, 10);
+
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            let staging_root = tmp.path().join("staging");
+            app.state.mounts.insert(
+                ArchiveMount {
+                    index: index.clone(),
+                    journal: Journal::default(),
+                    staged: StagedStats::new(),
+                    capability: Capability::ReadWrite,
+                    warnings: Vec::new(),
+                    staging_root: staging_root.clone(),
+                    last_used: 0,
+                    depth: 0,
+                    editing: Vec::new(),
+                },
+                &[],
+            );
+
+            let mut ranks = Vec::new();
+            for entry in &index.entries {
+                ranks.push(entry.case_rank);
+                let staged = staging_root.join(entry.staging_rel());
+                assert_eq!(
+                    app.mount_path_for_staged(&staged),
+                    Some(PathBuf::from("/src/pkg.zip").join(&entry.inner)),
+                    "{} staged at {}",
+                    entry.inner,
+                    entry.staging_rel().display()
+                );
+            }
+            assert!(
+                ranks.contains(&0) && ranks.iter().any(|r| *r > 0),
+                "the fixture must cover both an unranked and a ranked member: {ranks:?}"
+            );
         });
     }
 

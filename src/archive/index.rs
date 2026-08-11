@@ -62,6 +62,16 @@ pub struct IndexEntry {
     pub readable: bool,
 }
 
+/// The one staging directory that is spyc's rather than the archive's.
+///
+/// Reserved in [`normalize`], which is what makes it unreachable: a member
+/// *named* into the escape namespace would otherwise resolve to the same staging
+/// path as a case-ranked member, and `materialize` returns early on an existing
+/// destination — so whichever landed first served both. Reserving one component
+/// beats matching the escape spelling, because it also leaves room for anything
+/// else spyc needs to keep beside a mount's member tree.
+pub const STAGING_RESERVED: &str = ".spyc";
+
 /// Where a member's bytes live under the mount's staging root, from its inner
 /// path and case rank.
 ///
@@ -73,7 +83,9 @@ pub fn staging_rel_for(inner: &str, case_rank: u32) -> PathBuf {
     if case_rank == 0 {
         PathBuf::from(inner)
     } else {
-        PathBuf::from(format!(".spyc-case-{case_rank}")).join(inner)
+        Path::new(STAGING_RESERVED)
+            .join(format!("case-{case_rank}"))
+            .join(inner)
     }
 }
 
@@ -144,6 +156,9 @@ pub enum Reject {
     Traversal,
     /// An interior NUL, which no filesystem accepts.
     Nul,
+    /// The name claims [`STAGING_RESERVED`], the staging directory spyc uses for
+    /// its own bookkeeping.
+    Reserved,
 }
 
 impl Reject {
@@ -152,6 +167,7 @@ impl Reject {
             Self::Empty => "empty name",
             Self::Traversal => "`..` path traversal",
             Self::Nul => "NUL in name",
+            Self::Reserved => "claims spyc's reserved staging directory",
         }
     }
 }
@@ -171,7 +187,8 @@ pub struct Normalized {
 /// written by Windows tools do use `\`, and reading them as one long filename
 /// would flatten the tree. A leading `/` is stripped rather than refused (it's
 /// merely sloppy), while `..` is refused outright — that one is how an archive
-/// escapes its mount.
+/// escapes its mount. [`STAGING_RESERVED`] is refused for a related reason: a
+/// member may not name the directory spyc stages its own copies under.
 pub fn normalize(raw: &str) -> Result<Normalized, Reject> {
     if raw.contains('\0') {
         return Err(Reject::Nul);
@@ -193,6 +210,11 @@ pub fn normalize(raw: &str) -> Result<Normalized, Reject> {
     }
     if parts.is_empty() {
         return Err(Reject::Empty);
+    }
+    // The FIRST component only: `a/.spyc/b` stages harmlessly under the member
+    // tree, and refusing it would drop a legal name for nothing.
+    if parts[0] == STAGING_RESERVED {
+        return Err(Reject::Reserved);
     }
     Ok(Normalized {
         inner: parts.join("/"),
@@ -666,10 +688,21 @@ mod tests {
         assert_eq!(first.case_rank, 0);
         assert_eq!(first.staging_rel(), PathBuf::from("a/README"));
         assert_eq!(second.case_rank, 1);
-        assert_eq!(
+        assert_ne!(
             second.staging_rel(),
-            PathBuf::from(".spyc-case-1/a/readme"),
+            first.staging_rel(),
             "the colliding entry stages somewhere it cannot clobber the first"
+        );
+        // Under the reserved directory specifically, which is what makes the
+        // escape unreachable from a member name (`normalize` refuses it).
+        assert!(
+            second.staging_rel().starts_with(STAGING_RESERVED),
+            "{}",
+            second.staging_rel().display()
+        );
+        assert!(
+            normalize(&format!("{STAGING_RESERVED}/anything")).is_err(),
+            "a member may not name the escape namespace"
         );
     }
 
