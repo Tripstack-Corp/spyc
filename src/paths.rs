@@ -4,13 +4,14 @@
 //! who needs more power can invoke the shell (`$`, `!`). This just makes
 //! jump targets ergonomic (`~/src`, `$HOME/bin`).
 
-use std::fmt::Write as _;
 use std::path::PathBuf;
 
 /// Expand `~` at the start and `$VAR` / `${VAR}` everywhere, then return
 /// the result as a `PathBuf`.
 ///
 /// - `~` at the very start expands to `$HOME` (followed by `/rest` if any).
+///   `~user` names *another* user's home, which we don't resolve, so it is
+///   left verbatim rather than mangled into `$HOME/user`.
 /// - `$VAR` and `${VAR}` expand to the corresponding environment value;
 ///   unset vars are left as-is so the user sees what they typed.
 pub fn expand(input: &str) -> PathBuf {
@@ -19,23 +20,35 @@ pub fn expand(input: &str) -> PathBuf {
     // environment — otherwise an overridden HOME applied everywhere else was
     // silently ignored by tilde expansion.
     let home = crate::envset::var("HOME")
-        .or_else(|| std::env::var_os("HOME").map(|h| h.to_string_lossy().into_owned()));
+        .or_else(|| std::env::var_os("HOME").map(|h| h.to_string_lossy().into_owned()))
+        // An empty HOME can't name a directory; treat it as unset so `~` is
+        // left verbatim (matching how an unset `$VAR` is handled, and the same
+        // guard `display_tilde` applies on the way back out) rather than
+        // expanding `~/foo` to the relative `foo`.
+        .filter(|h| !h.is_empty());
     expand_with(input, home.as_deref(), crate::envset::var)
 }
 
 /// Pure variant of `expand` that takes the HOME value and an env
 /// lookup function as parameters. Tests use this directly so they
 /// don't need to mutate the process-global env.
+///
+/// `shellexpand` does the parsing. It is driven through the `*_with_context`
+/// API rather than the convenience wrappers because HOME and every other
+/// variable must come from the `envset` overlay (`:setenv`), not from the
+/// process environment or the `dirs` crate.
 fn expand_with(
     input: &str,
     home: Option<&str>,
     lookup: impl Fn(&str) -> Option<String>,
 ) -> PathBuf {
-    let tilde_done = expand_tilde(input, home);
-    PathBuf::from(expand_env_vars(&tilde_done, lookup))
+    // `_no_errors` because our lookup is infallible: a miss is `None`, which
+    // shellexpand renders as the original `$VAR` text — the documented
+    // "unset vars are left as-is" behavior, not an error.
+    PathBuf::from(shellexpand::full_with_context_no_errors(input, || home, lookup).into_owned())
 }
 
-/// Inverse of `expand_tilde` for *display*: if `path` starts with `$HOME`,
+/// Inverse of [`expand`]'s tilde step, for *display*: if `path` starts with `$HOME`,
 /// replace that prefix with `~`. Otherwise return the path verbatim.
 ///
 /// Matches at directory boundaries so `/Users/xx` is not rewritten
@@ -59,92 +72,6 @@ pub fn display_tilde(path: &std::path::Path) -> String {
         }
     }
     s.into_owned()
-}
-
-fn expand_tilde(s: &str, home: Option<&str>) -> String {
-    let Some(rest) = s.strip_prefix('~') else {
-        return s.to_string();
-    };
-    // Only a bare `~` or `~/…` expands to $HOME. `~user` (tilde followed by
-    // anything other than `/`) names *another* user's home, which we don't
-    // resolve — leave it verbatim rather than mangling it into `$HOME/user`.
-    if !rest.is_empty() && !rest.starts_with('/') {
-        return s.to_string();
-    }
-    let Some(home) = home else {
-        return s.to_string();
-    };
-    let mut out = PathBuf::from(home);
-    // Strip the separator — PathBuf::push replaces its argument when it
-    // starts with `/`.
-    let rest = rest.strip_prefix('/').unwrap_or(rest);
-    if !rest.is_empty() {
-        out.push(rest);
-    }
-    out.to_string_lossy().into_owned()
-}
-
-fn expand_env_vars(input: &str, lookup: impl Fn(&str) -> Option<String>) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch != '$' {
-            out.push(ch);
-            continue;
-        }
-        // `${VAR}` form.
-        if chars.peek() == Some(&'{') {
-            chars.next();
-            let mut name = String::new();
-            let mut closed = false;
-            while let Some(&nc) = chars.peek() {
-                if nc == '}' {
-                    chars.next();
-                    closed = true;
-                    break;
-                }
-                name.push(nc);
-                chars.next();
-            }
-            if closed {
-                if let Some(val) = lookup(&name) {
-                    out.push_str(&val);
-                } else {
-                    // Unset — keep the literal so the user sees the typo.
-                    let _ = write!(out, "${{{name}}}");
-                }
-            } else {
-                // Unterminated — emit literally.
-                let _ = write!(out, "${{{name}");
-            }
-            continue;
-        }
-        // `$VAR` form — consume [A-Za-z_][A-Za-z0-9_]*.
-        if chars
-            .peek()
-            .is_some_and(|c| c.is_ascii_alphabetic() || *c == '_')
-        {
-            let mut name = String::new();
-            while let Some(&nc) = chars.peek() {
-                if nc.is_ascii_alphanumeric() || nc == '_' {
-                    name.push(nc);
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-            if let Some(val) = lookup(&name) {
-                out.push_str(&val);
-            } else {
-                out.push('$');
-                out.push_str(&name);
-            }
-            continue;
-        }
-        // Lone `$` — keep as-is.
-        out.push('$');
-    }
-    out
 }
 
 /// Whether `candidate` resolves to `root` or somewhere inside it.
@@ -278,11 +205,24 @@ mod tests {
     fn tilde_user_is_left_verbatim_not_mangled() {
         // `~user` names another user's home, which we don't resolve — it must
         // be returned unchanged, never rewritten to `$HOME/user`.
-        assert_eq!(expand_tilde("~alice/foo", Some("/home/me")), "~alice/foo");
-        assert_eq!(expand_tilde("~root", Some("/home/me")), "~root");
+        // (Asserted through `expand_with` rather than the former private
+        // `expand_tilde` helper, which shellexpand replaced; same expectations.)
+        let no_vars = |_: &str| -> Option<String> { None };
+        let expand = |s: &str| expand_with(s, Some("/home/me"), no_vars);
+        assert_eq!(expand("~alice/foo"), PathBuf::from("~alice/foo"));
+        assert_eq!(expand("~root"), PathBuf::from("~root"));
         // Bare `~` and `~/…` still expand.
-        assert_eq!(expand_tilde("~", Some("/home/me")), "/home/me");
-        assert_eq!(expand_tilde("~/foo", Some("/home/me")), "/home/me/foo");
+        assert_eq!(expand("~"), PathBuf::from("/home/me"));
+        assert_eq!(expand("~/foo"), PathBuf::from("/home/me/foo"));
+    }
+
+    #[test]
+    fn empty_home_leaves_tilde_verbatim() {
+        // An empty HOME can't name a directory. Leaving `~/foo` alone matches
+        // the unset-var rule (the user sees what they typed); expanding it
+        // would silently produce the *relative* path `foo`.
+        let no_vars = |_: &str| -> Option<String> { None };
+        assert_eq!(expand_with("~/foo", None, no_vars), PathBuf::from("~/foo"));
     }
 
     #[test]
