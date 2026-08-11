@@ -94,7 +94,8 @@ trash so OS-native recovery still works.
 
 In-house gix-backed diff / show / blame pager views (in-process, no
 `git` subprocess) — syntax-highlighted, side-by-side or unified (`|`
-toggles), word-level intra-line change highlighting.
+toggles), intra-line change highlighting (per-character by default;
+`[diff] intraline = "word"` for whole-token marking).
 
 | Key | Action |
 |-----|--------|
