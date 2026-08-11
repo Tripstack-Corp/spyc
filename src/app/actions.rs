@@ -343,7 +343,8 @@ impl App {
             | Action::HarpoonOpenMenu
             | Action::PanePipeContent
             | Action::PanePipeInventory
-            | Action::VsplitCycle
+            | Action::VsplitToggle
+            | Action::VsplitToggleHeight
             | Action::VsplitFocusLeft
             | Action::VsplitFocusRight
             | Action::ToggleDim
@@ -372,7 +373,8 @@ impl App {
             // bottom pane's height.
             Action::PaneGrow => self.resize_focused_split(5),
             Action::PaneShrink => self.resize_focused_split(-5),
-            Action::VsplitCycle => self.cycle_vsplit(),
+            Action::VsplitToggle => self.toggle_vsplit(),
+            Action::VsplitToggleHeight => self.toggle_vsplit_height(),
             Action::VsplitFocusLeft => self.vsplit_focus(state::Side::Left),
             Action::VsplitFocusRight => self.vsplit_focus(state::Side::Right),
             Action::OpenSecondCommander => self.open_second_commander(),

@@ -130,11 +130,12 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a i` | Pipe inventory file contents to pane |
 | `^a z` | Zoom the active region — list or bottom pane (fullscreen toggle) |
 | `^a +` / `^a -` | Grow / shrink the focused split (pane height or vsplit width) |
-| `^a \|` | Vertical split — cycle off / top-only / full-height (live-reloading preview of the cursor file) |
+| `^s \|` / `^a \|` | Vertical split — open / close (live-reloading preview of the cursor file; on another file it swaps the preview) |
+| `^s f` | Vertical split — flip the height: full-height ⇄ top-only (opens per `[layout] vsplit_mode`) |
 | `^a a` / `^a h` | Focus the left file pane (a) |
 | `^a b` / `^a l` | Focus the right file pane (b) |
 | `^a d` | Toggle dimming of the inactive split column / list |
-| `^s n` | Open a second file-commander (column b, at PROJECT_HOME) |
+| `^s n` | Open a second file-commander (column b, at PROJECT_HOME; top-only, `^s f` for full-height) |
 | `^s x` | Close the second file-commander (`^d` quits, keeping `b` open for `-r`) |
 | `^a u` | Quick Select — labeled picker for URL/path/SHA/IP |
 | `^a v` | Pane scrollback in the in-app pager (search, jump, visual yank) |

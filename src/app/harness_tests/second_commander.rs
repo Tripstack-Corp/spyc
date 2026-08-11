@@ -110,11 +110,11 @@ fn background_open_keeps_pane_focus_while_user_open_grabs_it() {
     });
 }
 
-/// `^a |` is disabled while a second commander occupies the right column —
-/// the two are mutually exclusive, so the cycle no-ops (no preview opens) and
-/// the commander stays put.
+/// `^s |` is disabled while a second commander occupies the right column —
+/// the two are mutually exclusive, so it no-ops (no preview opens) and the
+/// commander stays put. `^s f` still flips the commander split's height.
 #[test]
-fn vsplit_cycle_disabled_with_second_commander() {
+fn vsplit_toggle_disabled_with_second_commander() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let dir = tmp.path().join("work");
@@ -126,16 +126,30 @@ fn vsplit_cycle_disabled_with_second_commander() {
         app.open_second_commander_at(&d);
         let shape = app.state.vsplit;
 
-        app.apply(&Action::VsplitCycle).unwrap();
+        app.apply(&Action::VsplitToggle).unwrap();
         assert!(
             app.state.right.is_some(),
-            "^a | must not tear down the commander"
+            "^s | must not tear down the commander"
         );
         assert!(
             app.view.right_pager.is_none(),
-            "^a | must not open a preview over the commander"
+            "^s | must not open a preview over the commander"
         );
         assert_eq!(app.state.vsplit, shape, "the split shape is unchanged");
+
+        // `^s n` opens top-only; `^s f` is how you get a full-height `b`.
+        assert_eq!(
+            shape.map(|v| v.mode),
+            Some(state::VsplitMode::TopOnly),
+            "a second commander opens top-only whatever the config default"
+        );
+        app.apply(&Action::VsplitToggleHeight).unwrap();
+        assert_eq!(
+            app.state.vsplit.map(|v| v.mode),
+            Some(state::VsplitMode::FullHeight),
+            "^s f flips the commander split to full-height"
+        );
+        assert!(app.state.right.is_some(), "the commander survives the flip");
     });
 }
 

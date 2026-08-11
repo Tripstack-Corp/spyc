@@ -142,10 +142,11 @@ pub enum Action {
     PanePipeInventory,  // ^W i — send file contents of inventory to pane
 
     // Vertical (left/right) split — file panes labelled a/b.
-    VsplitCycle,      // ^a | — cycle off → top-only → full-height → off (opens a preview)
-    VsplitFocusLeft,  // ^a a / ^a h — focus the left region (a)
-    VsplitFocusRight, // ^a b / ^a l — focus the right region (b)
-    ToggleDim,        // ^a d — toggle the focus-dim of the inactive column / list
+    VsplitToggle,       // ^s | / ^a | — open (a preview) or close the split
+    VsplitToggleHeight, // ^s f — flip an open split full-height ⇄ top-only
+    VsplitFocusLeft,    // ^a a / ^a h — focus the left region (a)
+    VsplitFocusRight,   // ^a b / ^a l — focus the right region (b)
+    ToggleDim,          // ^a d — toggle the focus-dim of the inactive column / list
     // Second file-commander in the right column (^s chord family).
     OpenSecondCommander,  // ^s n — open a second commander (at PROJECT_HOME)
     CloseSecondCommander, // ^s x — close the second commander
@@ -274,7 +275,8 @@ impl Action {
             | Self::PaneRestartTab
             | Self::PanePipeContent
             | Self::PanePipeInventory
-            | Self::VsplitCycle
+            | Self::VsplitToggle
+            | Self::VsplitToggleHeight
             | Self::VsplitFocusLeft
             | Self::VsplitFocusRight
             | Self::ToggleDim
@@ -374,7 +376,8 @@ impl Action {
             Self::PaneRestartTab => "restart pane tab command",
             Self::PanePipeContent => "pipe file contents to pane",
             Self::PanePipeInventory => "pipe inventory contents to pane",
-            Self::VsplitCycle => "vertical split: off / top-only / full-height",
+            Self::VsplitToggle => "vertical split: open / close",
+            Self::VsplitToggleHeight => "vertical split: full-height / top-only",
             Self::VsplitFocusLeft => "focus left pane (a)",
             Self::VsplitFocusRight => "focus right pane (b)",
             Self::ToggleDim => "toggle dimming of the inactive pane",
@@ -540,7 +543,8 @@ impl Action {
             Self::PanePipeContent => "pane_pipe_content",
             Self::PanePipeInventory => "pane_pipe_inventory",
             // Vertical split.
-            Self::VsplitCycle => "vsplit_cycle",
+            Self::VsplitToggle => "vsplit_toggle",
+            Self::VsplitToggleHeight => "vsplit_toggle_height",
             Self::VsplitFocusLeft => "vsplit_focus_left",
             Self::VsplitFocusRight => "vsplit_focus_right",
             Self::ToggleDim => "toggle_dim",
@@ -700,8 +704,10 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         "pane_restart_tab" => Action::PaneRestartTab,
         "pane_pipe_content" => Action::PanePipeContent,
         "pane_pipe_inventory" => Action::PanePipeInventory,
-        // Vertical split.
-        "vsplit_cycle" => Action::VsplitCycle,
+        // Vertical split. `vsplit_cycle` was the pre-toggle name for the same
+        // key; kept so an existing `map KEY vsplit_cycle` still binds.
+        "vsplit_toggle" | "vsplit_cycle" => Action::VsplitToggle,
+        "vsplit_toggle_height" => Action::VsplitToggleHeight,
         "vsplit_focus_left" => Action::VsplitFocusLeft,
         "vsplit_focus_right" => Action::VsplitFocusRight,
         "toggle_dim" => Action::ToggleDim,
