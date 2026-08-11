@@ -24,10 +24,18 @@
 # truecolor), else 24-bit truecolor when $COLORTERM advertises it, else 256.
 # "truecolor" / "256" force it — e.g. set "truecolor" if you've enabled
 # `truecolor on` in a modern screen. `--color` overrides this for one run.
+#
+# vsplit_mode (default "full_height"): the shape `^s |` / `^a |` opens a
+# vertical split in. "full_height" runs the divider the whole frame height, so
+# the right column is a full-height reading surface and the pty pane confines
+# itself to the left column; "top_only" (aliases "half", "top") splits just the
+# file-list region and leaves the pane full-width below both columns. `^s f`
+# flips an open split either way, whatever it opened as.
 [layout]
 # status_position = "top"
 # chord_hint_delay_ms = 300
 # color_depth = "auto"
+# vsplit_mode = "full_height"
 
 # ── pane ──────────────────────────────────────────────────────────────
 # Default command pre-filled into the `^a c` (new pane tab) prompt.
