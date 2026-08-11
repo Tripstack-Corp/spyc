@@ -462,6 +462,27 @@ impl App {
                 .clone(),
         };
 
+        // Enforce the graveyard cap OFF the startup path. The single directory
+        // walk plus each eviction's decompress + system-trash call is disk IO
+        // proportional to the graveyard's size, and running it inside
+        // `App::new` meant a full graveyard reached the user as a launch that
+        // appeared to hang — no TUI yet, so nothing on screen explained it.
+        //
+        // Emitted here rather than in `bootstrap` for the same reason as
+        // `load_init_lua` above: the worker wakes the loop through the channel
+        // `run_setup` installs, and `run_effects` needs the `foreground_exec`
+        // built just above. The op decides for itself whether there is anything
+        // to evict, so the main thread never touches the directory.
+        self.run_effects(
+            vec![Effect::Graveyard(
+                super::graveyard_ops::GraveyardOp::CascadeToCap {
+                    cap: crate::state::graveyard::GRAVEYARD_CAP_BYTES,
+                },
+            )],
+            terminal,
+            &foreground_exec,
+        );
+
         // (Pre-v1.50.84 the loop carried `last_pane_render` and
         // `last_active_drain` timestamps to throttle pane renders /
         // parses while the user was typing. Both became unnecessary

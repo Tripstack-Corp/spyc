@@ -34,6 +34,14 @@ pub enum GraveyardOp {
     Restore { entry: Box<Entry>, dest: PathBuf },
     /// graveyard `Z`: cascade every entry to the system trash.
     PurgeAll { entries: Vec<Entry> },
+    /// Startup cap enforcement: walk the graveyard once and, if it is over
+    /// `cap`, evict oldest-first until under.
+    ///
+    /// The *decision* runs on the worker too — unlike the other variants, the
+    /// main thread doesn't even walk the directory to find out whether there is
+    /// work, because that walk is itself the cost we are moving off the startup
+    /// path.
+    CascadeToCap { cap: u64 },
 }
 
 /// The result of a [`GraveyardOp`], applied by [`App::apply_graveyard_outcomes`].
@@ -49,6 +57,12 @@ pub enum GraveyardOutcome {
         result: Result<(), String>,
     },
     Purged {
+        trashed: usize,
+        errors: usize,
+    },
+    /// Result of the startup cap cascade. `(0, 0)` — under cap, nothing to do —
+    /// is the overwhelmingly common case and is applied silently.
+    Cascaded {
         trashed: usize,
         errors: usize,
     },
@@ -97,6 +111,10 @@ pub fn run_graveyard_op(op: GraveyardOp) -> GraveyardOutcome {
                 }
             }
             GraveyardOutcome::Purged { trashed, errors }
+        }
+        GraveyardOp::CascadeToCap { cap } => {
+            let (trashed, errors) = Graveyard::cascade_until_under(cap);
+            GraveyardOutcome::Cascaded { trashed, errors }
         }
     }
 }
@@ -159,6 +177,28 @@ impl App {
                 } else {
                     self.state
                         .flash_info(format!("graveyard: trashed {trashed} item(s)"));
+                }
+                self.reload_graveyard_rows();
+            }
+            GraveyardOutcome::Cascaded { trashed, errors } => {
+                // Under cap: nothing happened, so say nothing. This is the path
+                // every ordinary launch takes.
+                if trashed == 0 && errors == 0 {
+                    return;
+                }
+                if errors > 0 {
+                    // The pre-move code discarded this count, so a cascade that
+                    // could never succeed (no system trash, unrestorable legacy
+                    // entries) retried every entry on every launch in silence.
+                    // Name it, because the user has to act to clear it.
+                    self.state.flash_error(format!(
+                        "graveyard: {trashed} moved to system trash, {errors} failed \
+                         — still over cap (see :graveyard)"
+                    ));
+                } else {
+                    self.state.flash_info(format!(
+                        "graveyard: {trashed} item(s) moved to system trash (cap reached)"
+                    ));
                 }
                 self.reload_graveyard_rows();
             }
@@ -259,5 +299,93 @@ mod tests {
         assert!(app.apply_graveyard_outcomes());
         assert!(app.flash_text().unwrap().contains("removed 3"));
         assert!(!app.apply_graveyard_outcomes());
+    }
+
+    // ── startup cap cascade, off-thread ───────────────────────────
+
+    /// Under cap — what every ordinary launch does. The worker still runs, but
+    /// it evicts nothing, and the user must not be told about a non-event.
+    #[test]
+    fn cascade_to_cap_under_cap_is_a_silent_no_op() {
+        let root = tempdir().unwrap();
+        crate::state::with_state_root(root.path(), || {
+            let work = tempdir().unwrap();
+            let src = work.path().join("small.txt");
+            writeln!(std::fs::File::create(&src).unwrap(), "tiny").unwrap();
+            let _ = run_graveyard_op(GraveyardOp::Archive { paths: vec![src] });
+
+            let out = run_graveyard_op(GraveyardOp::CascadeToCap {
+                cap: crate::state::graveyard::GRAVEYARD_CAP_BYTES,
+            });
+            let GraveyardOutcome::Cascaded { trashed, errors } = out else {
+                panic!("expected Cascaded");
+            };
+            assert_eq!((trashed, errors), (0, 0), "one tiny file is under cap");
+
+            let mut app = App::test_app(std::env::temp_dir());
+            app.runtime
+                .graveyard_results
+                .lock()
+                .unwrap()
+                .push(GraveyardOutcome::Cascaded {
+                    trashed: 0,
+                    errors: 0,
+                });
+            assert!(app.apply_graveyard_outcomes(), "outcome is still drained");
+            assert!(
+                app.flash_text().is_none(),
+                "a no-op cascade must not flash: {:?}",
+                app.flash_text()
+            );
+            // The entry is untouched — nothing was evicted.
+            assert_eq!(Graveyard::load().entries.len(), 1);
+        });
+    }
+
+    /// A cascade whose evictions all fail must SAY so. The pre-move code
+    /// discarded the error count, so a graveyard that could never drain below
+    /// cap retried every entry on every launch with no way for the user to tell.
+    #[test]
+    fn a_failing_cascade_reports_instead_of_failing_silently() {
+        let mut app = App::test_app(std::env::temp_dir());
+        app.runtime
+            .graveyard_results
+            .lock()
+            .unwrap()
+            .push(GraveyardOutcome::Cascaded {
+                trashed: 2,
+                errors: 5,
+            });
+        assert!(app.apply_graveyard_outcomes());
+        let flash = app.flash_text().expect("a failing cascade must flash");
+        assert!(
+            flash.contains('5'),
+            "should name the failure count: {flash}"
+        );
+        assert!(
+            flash.contains("still over cap"),
+            "should say the state persists: {flash}"
+        );
+    }
+
+    /// A successful cascade names what it moved, so the user can find the files
+    /// in the OS trash.
+    #[test]
+    fn a_successful_cascade_names_what_it_moved() {
+        let mut app = App::test_app(std::env::temp_dir());
+        app.runtime
+            .graveyard_results
+            .lock()
+            .unwrap()
+            .push(GraveyardOutcome::Cascaded {
+                trashed: 3,
+                errors: 0,
+            });
+        assert!(app.apply_graveyard_outcomes());
+        let flash = app.flash_text().expect("flash expected");
+        assert!(
+            flash.contains('3') && flash.contains("system trash"),
+            "{flash}"
+        );
     }
 }
