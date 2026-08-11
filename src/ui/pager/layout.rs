@@ -6,6 +6,8 @@ use ratatui::{
     layout::Rect,
     text::{Line, Span},
 };
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use super::{Mount, PagerView};
 
@@ -14,14 +16,15 @@ pub(super) fn line_plain_text(line: &Line) -> String {
     line.spans.iter().map(|s| s.content.as_ref()).collect()
 }
 
-/// Terminal columns a rendered row occupies. Per-char `unicode_width` summed
-/// the same way `wrap_line_capped` budgets, so padding and wrap agree on where
-/// a row ends.
+/// Terminal columns a rendered row occupies. Summed per grapheme cluster, the
+/// same way `wrap_line_capped` budgets, so padding and wrap agree on where a row
+/// ends — summing per *char* instead disagrees with the renderer on any cluster
+/// whose width isn't its chars' sum (a U+FE0F pair, a ZWJ emoji).
 pub(super) fn line_display_width(line: &Line) -> usize {
     line.spans
         .iter()
-        .flat_map(|s| s.content.chars())
-        .map(|ch| unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0))
+        .flat_map(|s| s.content.graphemes(true))
+        .map(UnicodeWidthStr::width)
         .sum()
 }
 
@@ -136,11 +139,16 @@ pub(super) fn visual_rows(line: &Line<'_>, width: usize, tab_width: usize) -> us
     }
     let mut rows = 1usize;
     let mut col = 0usize;
-    for ch in line.spans.iter().flat_map(|s| s.content.chars()) {
+    // Per grapheme cluster, matching `wrap_line_capped`'s advance exactly — a
+    // char-by-char count here would disagree with the renderer on clusters whose
+    // width isn't their chars' sum (a U+FE0F pair, a ZWJ emoji), which is the
+    // undercount this function exists to avoid.
+    // (A tab is a Control, so it is always its own cluster — GB4/GB5.)
+    for g in line.spans.iter().flat_map(|s| s.content.graphemes(true)) {
         // A tab expands to `tab_width` width-1 cells (see `expand_tabs`), and
         // those cells can break across rows like any spaces — count it that way
         // so the scroll-clamp math matches the rendered (expanded) line.
-        if ch == '\t' {
+        if g == "\t" {
             for _ in 0..tab_width.max(1) {
                 if col > 0 && col + 1 > width {
                     rows += 1;
@@ -151,7 +159,7 @@ pub(super) fn visual_rows(line: &Line<'_>, width: usize, tab_width: usize) -> us
             }
             continue;
         }
-        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        let w = g.width();
         if w == 0 {
             continue; // zero-width (combining marks, controls): no advance
         }
@@ -213,22 +221,22 @@ pub(super) fn wrap_line_capped(
             }
             let mut consumed_bytes = 0usize;
             let mut visual = 0usize;
-            for (idx, ch) in rest.char_indices() {
-                let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+            for (idx, g) in rest.grapheme_indices(true) {
+                let w = g.width();
                 if visual + w > remaining {
                     break;
                 }
-                consumed_bytes = idx + ch.len_utf8();
+                consumed_bytes = idx + g.len();
                 visual += w;
             }
-            // Force at least one char even if it's wider than the
+            // Force at least one cluster even if it's wider than the
             // remaining budget (tiny pager boxes shouldn't infinite
             // loop on a 2-col emoji in a 1-col viewport).
             if consumed_bytes == 0
-                && let Some(first) = rest.chars().next()
+                && let Some(first) = rest.graphemes(true).next()
             {
-                consumed_bytes = first.len_utf8();
-                visual = unicode_width::UnicodeWidthChar::width(first).unwrap_or(1);
+                consumed_bytes = first.len();
+                visual = first.width().max(1);
             }
             let chunk = rest[..consumed_bytes].to_string();
             rest = &rest[consumed_bytes..];
