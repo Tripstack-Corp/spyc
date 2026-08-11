@@ -234,6 +234,11 @@ pub fn restage_missing(
 }
 
 /// Put one streamed member on disk under `staging_root`.
+///
+/// A member whose destination can't be reached without traversing a symlink is
+/// counted and skipped rather than written — see [`contained_dest`]. Skipping is
+/// not an error: one hostile member must not abandon the mount, and the count is
+/// what makes the refusal visible in the mount's warnings.
 fn write_member<R: Read>(
     entry: &mut tar::Entry<'_, R>,
     draft: &Draft,
@@ -241,7 +246,10 @@ fn write_member<R: Read>(
     staging_root: &Path,
     facts: &mut IndexFacts,
 ) -> Result<()> {
-    let dest = staging_root.join(inner);
+    let Ok(dest) = contained_dest(staging_root, inner) else {
+        facts.link_traversals += 1;
+        return Ok(());
+    };
     match draft.kind {
         ArchiveEntryKind::Dir => {
             std::fs::create_dir_all(&dest)
@@ -249,8 +257,8 @@ fn write_member<R: Read>(
         }
         ArchiveEntryKind::Symlink => {
             let target = draft.link_target.as_deref().unwrap_or_default();
-            if link_stays_inside(parent_of(inner), target) {
-                create_parent(&dest)?;
+            create_parent(&dest)?;
+            if link_target_contained(staging_root, &dest, target) {
                 let _ = std::fs::remove_file(&dest);
                 symlink(target, &dest)?;
             } else {
@@ -275,7 +283,11 @@ fn write_member<R: Read>(
 /// Extract one member's bytes into the staging tree and return where they
 /// landed. Idempotent: an already-materialized member is left alone.
 pub fn materialize(archive: &Path, entry: &IndexEntry, staging_root: &Path) -> Result<PathBuf> {
-    let dest = staging_root.join(entry.staging_rel());
+    // Same containment rule as the streamed path: a destination reachable only
+    // through a symlink is refused. Here it *is* an error rather than a silent
+    // skip — materialize is called for one member the user asked for, so the
+    // refusal has somewhere to be reported.
+    let dest = contained_dest(staging_root, entry.staging_rel())?;
     if dest.exists() {
         return Ok(dest);
     }
@@ -301,7 +313,7 @@ pub fn materialize(archive: &Path, entry: &IndexEntry, staging_root: &Path) -> R
             .link_target
             .clone()
             .unwrap_or_else(|| String::from_utf8_lossy(&bytes).into_owned());
-        if !link_stays_inside(entry.parent(), &target) {
+        if !link_target_contained(staging_root, &dest, &target) {
             bail!("{}: symlink points outside the archive", entry.inner);
         }
         symlink(&target, &dest)?;
@@ -404,39 +416,152 @@ fn tar_draft<R: Read>(
     (name, Some(draft))
 }
 
-/// Whether a symlink stored at `link_dir` pointing at `target` stays within the
-/// mount.
+/// Where member `inner` may be written under `staging_root`, or an error naming
+/// why it may not be.
 ///
-/// This is the tar-slip check: a member is free to name `../../../etc/passwd` as
-/// a link target, and creating that link would hand a later read or write a path
-/// on the real filesystem. Absolute targets are out by definition; relative ones
-/// are walked to see whether they ever climb above the mount root.
-fn link_stays_inside(link_dir: &str, target: &str) -> bool {
-    if target.is_empty() || target.starts_with('/') {
-        return false;
-    }
-    let mut depth = if link_dir.is_empty() {
-        0i64
-    } else {
-        link_dir.split('/').count() as i64
-    };
-    for part in target.split('/') {
+/// Containment is decided against the **filesystem**, one component at a time,
+/// not by counting `..` in the name. Counting cannot work: it reasons about where
+/// a member's name *says* it goes, while an earlier symlink member decides where
+/// the write *lands*. Two links that each look contained on their own —
+/// `d/link1 -> ..`, then `d/link1/link2 -> ..` — compose into one that points
+/// above the root, and a later file member written through it leaves the mount
+/// entirely. That composition is invisible to any per-name check, which is why
+/// this walks instead.
+///
+/// The rule is therefore: **extraction never traverses a symlink.** Any existing
+/// component of the destination that is a link makes the member unreachable and
+/// it is refused. That is stronger than "the resolved path is inside the root",
+/// and deliberately so — it is a property of each step rather than of the final
+/// answer, so there is no ordering of members that can arrange an escape. It also
+/// costs nothing real: an archive that needs to write *through* a symlinked
+/// directory is pathological, and its members are still listed and readable from
+/// the container.
+///
+/// The alternative — per-component `openat`/`O_NOFOLLOW` — is airtight against a
+/// concurrent attacker racing the walk, but needs directory descriptors threaded
+/// through every write site and a new dependency for the `*at` family. Staging
+/// lives in spyc's own private directory, so the race needs local write access
+/// there; refusing links closes the archive-controlled hazard with std alone.
+fn contained_dest(staging_root: &Path, inner: impl AsRef<Path>) -> Result<PathBuf> {
+    let inner = inner.as_ref();
+    let shown = inner.display();
+    // The root has to exist before it can be canonicalized, and for a seekable
+    // container nothing has created it yet — the old code brought it into being
+    // as a side effect of `create_parent`. Creating it here keeps that, and it is
+    // the one directory in the walk we know is ours rather than the archive's.
+    std::fs::create_dir_all(staging_root)
+        .with_context(|| format!("creating staging dir {}", staging_root.display()))?;
+    let root = std::fs::canonicalize(staging_root)
+        .with_context(|| format!("resolving staging root {}", staging_root.display()))?;
+
+    // Only plain names may participate. `normalize` already rejects `..` and a
+    // leading `/` on the way in; re-checking here keeps this function correct on
+    // its own terms rather than on a caller's.
+    let mut names = Vec::new();
+    for part in inner.components() {
         match part {
-            "" | "." => {}
-            ".." => {
-                depth -= 1;
-                if depth < 0 {
-                    return false;
-                }
-            }
-            _ => depth += 1,
+            std::path::Component::Normal(n) => names.push(n),
+            std::path::Component::CurDir => {}
+            _ => bail!("{shown}: unsafe path component"),
         }
     }
-    true
+
+    // Walked in the CALLER's spelling of the root, not the canonical one, because
+    // the returned path is a key: the app layer looks a staged member up by the
+    // path it built from its own `staging_root`. Handing back a canonicalized
+    // path silently stops matching wherever a path component is a symlink —
+    // `/var` on macOS is one — so containment is decided canonically below while
+    // the path itself stays in the caller's namespace.
+    let mut cur = staging_root.to_path_buf();
+    let mut parts = names.into_iter().peekable();
+    while let Some(part) = parts.next() {
+        let next = cur.join(part);
+        match std::fs::symlink_metadata(&next) {
+            Ok(md) if md.file_type().is_symlink() => {
+                bail!("{shown}: path traverses a symlink at {}", next.display());
+            }
+            Ok(md) if md.is_dir() => cur = next,
+            Ok(_) => {
+                // A file where a directory is needed. Legal only as the last
+                // component — that's the member itself being replaced.
+                if parts.peek().is_some() {
+                    bail!("{shown}: {} is not a directory", next.display());
+                }
+                cur = next;
+            }
+            Err(_) => {
+                // Nothing exists from here down, so no remaining component can
+                // be a link. Join the rest and stop walking.
+                cur = next;
+                cur.extend(parts);
+                break;
+            }
+        }
+    }
+
+    // Belt and braces against the walk above ever being loosened: resolve the
+    // deepest part of the result that exists and confirm it is still inside.
+    // Every component was proven not to be a symlink, so this must agree — it is
+    // here to fail loudly if that stops being true.
+    let mut probe = cur.as_path();
+    loop {
+        match crate::paths::canonical_contains(&root, probe) {
+            Some(true) => break,
+            Some(false) => bail!("{shown}: resolves outside the staging root"),
+            None => match probe.parent() {
+                Some(p) => probe = p,
+                None => bail!("{shown}: cannot resolve a containing directory"),
+            },
+        }
+    }
+    Ok(cur)
 }
 
-fn parent_of(inner: &str) -> &str {
-    inner.rsplit_once('/').map_or("", |(p, _)| p)
+/// Whether the symlink about to be created at `dest` points somewhere inside the
+/// mount.
+///
+/// Resolved against `dest`'s **canonical** parent — the directory the link will
+/// really sit in — and then folded, so the answer is about where the link points
+/// on disk rather than about how its target is spelled. The old spelling-based
+/// version accepted `..` from a link whose parent had itself been relocated by an
+/// earlier link.
+///
+/// `dest`'s parent exists by the time this is called ([`create_parent`] runs
+/// first), so a `None` from [`crate::paths::canonical_contains`] means the root
+/// itself is unresolvable — refuse, rather than guess.
+fn link_target_contained(staging_root: &Path, dest: &Path, target: &str) -> bool {
+    if target.is_empty() || Path::new(target).is_absolute() {
+        return false;
+    }
+    let Some(parent) = dest.parent() else {
+        return false;
+    };
+    let Ok(parent) = std::fs::canonicalize(parent) else {
+        return false;
+    };
+    let mut resolved = parent;
+    for part in Path::new(target).components() {
+        match part {
+            std::path::Component::ParentDir => {
+                resolved.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => resolved.push(other),
+        }
+    }
+    // The link's target need not exist (a dangling link is legal in an archive),
+    // so ask about the deepest ancestor that does — that is the directory the
+    // link would actually reach through.
+    let mut probe = resolved.as_path();
+    loop {
+        if let Some(contained) = crate::paths::canonical_contains(staging_root, probe) {
+            return contained;
+        }
+        match probe.parent() {
+            Some(p) => probe = p,
+            None => return false,
+        }
+    }
 }
 
 fn create_parent(dest: &Path) -> Result<()> {
