@@ -1,0 +1,12 @@
+# rust-analyzer, per project — read by the server itself, so it applies whatever
+# spawns it (an editor, or `claude`, which starts one per agent session).
+#
+# `cargo.targetDir` gives rust-analyzer's own `cargo check` a subdirectory of the
+# build directory instead of the build directory itself. Without it the server
+# and every build contend for cargo's exclusive lock on that directory, and each
+# blocks the other — visible as "Blocking waiting for file lock on build
+# directory" mid-build, or an editor whose diagnostics stall for a whole compile.
+# That contention is mild with one checkout and one server; it is not with
+# several worktrees, several agent sessions, and a shared `[build] target-dir`.
+[cargo]
+targetDir = true

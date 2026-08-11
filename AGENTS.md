@@ -157,11 +157,12 @@ make release-tag VERSION=x.y.z        # step 2, on main after that PR merged: ve
 
 **Crate shape: lib + bin.** `src/lib.rs` owns every module + the `run()` entry point; `src/main.rs` is a thin shim. The split lets `fuzz/` (a standalone workspace; nightly, on-demand) link the lib. New fuzz entry points go through the `pub mod fuzz` facade in `lib.rs`, not by widening module visibility.
 
-**Leave no `target/` behind — `cargo clean` when you're done with a worktree.** One gate run leaves ~4 GB of build cache and the worktree-per-PR layout multiplies it: thirteen parked worktrees reached **57 GB**. The rebuild is worth the disk, so clean eagerly rather than banking the cache — and `remove_worktree` as soon as a PR merges, which takes the cache with it. **`fuzz/` is a separate workspace, so the root `cargo clean` doesn't touch `fuzz/target`** — another ~2.6 GB per worktree, surviving the obvious command:
+**Build output is disk-expensive: one gate run leaves ~4 GB, and worktree-per-PR multiplies it** — thirteen parked worktrees reached **57 GB**. Two rules follow, and which one applies depends on whether the machine shares a build directory (`[build] target-dir` in `~/.cargo/config.toml`, or `CARGO_TARGET_DIR`; `make` asks cargo via `TARGET_DIR`, so never hardcode `target/` in a recipe):
 
-```sh
-cargo clean && cargo clean --manifest-path fuzz/Cargo.toml
-```
+- **Sharing one** (recommended, and what this developer runs): dependencies compile once for every worktree. `cargo clean` there wipes the cache out from under every other worktree and agent — **prune by age instead**, `cargo sweep --time 7`. Cargo holds an exclusive lock on the directory, so concurrent builds serialize; that's the accepted trade, and `rust-analyzer.toml` keeps the language server out of the same lock.
+- **Per-worktree `target/`**: `cargo clean` when you're done with a worktree — the rebuild is worth the disk. **`fuzz/` is a separate workspace, so the root clean doesn't touch `fuzz/target`**, another ~2.6 GB that survives the obvious command: `cargo clean && cargo clean --manifest-path fuzz/Cargo.toml`.
+
+Either way, `remove_worktree` as soon as a PR merges — thirteen live worktrees is the anomaly no cache layout fixes.
 
 ## Roadmap
 
