@@ -183,7 +183,8 @@ impl Resolver {
                 Act("k", A::PaneFocusUp),
                 Act("a h", A::VsplitFocusLeft),
                 Act("b l", A::VsplitFocusRight),
-                Act("|", A::VsplitCycle),
+                Act("|", A::VsplitToggle),
+                Act("f", A::VsplitToggleHeight),
                 Act("d", A::ToggleDim),
                 Act("n ]", A::PaneNextTab),
                 Act("p [", A::PanePrevTab),
@@ -205,6 +206,8 @@ impl Resolver {
                 Sub("Space", "global menu"),
             ],
             PendingSeq::CtrlS => vec![
+                Act("|", A::VsplitToggle),
+                Act("f", A::VsplitToggleHeight),
                 Act("n", A::OpenSecondCommander),
                 Act("x", A::CloseSecondCommander),
             ],
@@ -297,10 +300,15 @@ impl Resolver {
                 KeyCode::Char('j' | 'J') => ResolverOutcome::Action(Action::PaneFocusDown),
                 KeyCode::Char('k') => ResolverOutcome::Action(Action::PaneFocusUp),
                 // Horizontal file-pane focus (vertical split): a/h → left (a),
-                // b/l → right (b). `^a |` cycles the split open/mode/closed.
+                // b/l → right (b). `^a |` / `^a f` alias `^s |` / `^s f`: while
+                // the pane owns the keyboard only `^a`/`^w`/`^\` are intercepted
+                // (`is_spyc_meta_when_pane_focused`), so without these two the
+                // split couldn't be opened or reshaped from the pane at all.
+                // `^s` still hosts the whole family for a focused file column.
                 KeyCode::Char('a' | 'A' | 'h') => ResolverOutcome::Action(Action::VsplitFocusLeft),
                 KeyCode::Char('b' | 'B' | 'l') => ResolverOutcome::Action(Action::VsplitFocusRight),
-                KeyCode::Char('|') => ResolverOutcome::Action(Action::VsplitCycle),
+                KeyCode::Char('|') => ResolverOutcome::Action(Action::VsplitToggle),
+                KeyCode::Char('f' | 'F') => ResolverOutcome::Action(Action::VsplitToggleHeight),
                 KeyCode::Char('d' | 'D') => ResolverOutcome::Action(Action::ToggleDim),
                 // Tab navigation (screen-style + vim bracket style).
                 KeyCode::Char('n' | ']') => ResolverOutcome::Action(Action::PaneNextTab),
@@ -334,12 +342,16 @@ impl Resolver {
             return out;
         }
 
-        // Mid-sequence: `^s` (second-commander) prefix waiting for a sub-command.
-        // Matches on the key *code* regardless of Ctrl (so `^s ^n` fires the same
-        // as `^s n`), mirroring the `W` block above. Runs before the generic Ctrl
-        // block, which would otherwise eat a held-Ctrl second key.
+        // Mid-sequence: `^s` (vertical-split) prefix waiting for a sub-command —
+        // the whole split family: `|` open/close the preview, `f` flip its
+        // height, `n`/`x` the second commander. Matches on the key *code*
+        // regardless of Ctrl (so `^s ^n` fires the same as `^s n`), mirroring the
+        // `W` block above. Runs before the generic Ctrl block, which would
+        // otherwise eat a held-Ctrl second key.
         if self.pending == PendingSeq::CtrlS {
             let out = match ev.code {
+                KeyCode::Char('|') => ResolverOutcome::Action(Action::VsplitToggle),
+                KeyCode::Char('f' | 'F') => ResolverOutcome::Action(Action::VsplitToggleHeight),
                 KeyCode::Char('n' | 'N') => ResolverOutcome::Action(Action::OpenSecondCommander),
                 KeyCode::Char('x' | 'X') => ResolverOutcome::Action(Action::CloseSecondCommander),
                 _ => ResolverOutcome::Ignored,

@@ -42,6 +42,7 @@ untrusted clone can't bind a key to run code. Lua scripts load only from
 status_position = "top"        # or "bottom" (vim/tmux convention; prompt sits above)
 chord_hint_delay_ms = 300      # ms holding a chord (g, ^a, H) before the which-key popup; 0 disables
 color_depth = "auto"           # "auto" (truecolor if $COLORTERM says so, else 256), "truecolor", or "256"
+vsplit_mode = "full_height"    # shape `^s |` opens a vertical split in; or "top_only" (pane stays full-width below)
 
 [pane]
 default_command = "claude"     # pre-filled into the `^a c` new-tab prompt
@@ -94,6 +95,21 @@ truecolor.
 In any non-truecolor mode spyc also swaps the 🌶️ header glyph for a spice-red
 block — old screen mangles the 2-cell emoji, so the block keeps the header
 looking intentional rather than broken.
+
+### Vertical-split height — `[layout] vsplit_mode`
+
+The shape `^s |` (alias `^a |`) opens a vertical split in.
+
+| value | behavior |
+|-------|----------|
+| `full_height` (default) | the divider runs the whole frame height; the right column is a full-height reading surface and the pty pane is confined under the left column |
+| `top_only` | only the file-list region splits; the pane stays full-width below both columns |
+
+Aliases: `full` for the first, `half` / `half_height` / `top` for the second.
+`^s f` flips an *open* split either way, so this only sets where it starts. A
+second commander (`^s n`) ignores the setting and always opens `top_only` — two
+peer browsers normally want one full-width pane beneath them — and `^s f` is how
+you make that one full-height too.
 
 ---
 

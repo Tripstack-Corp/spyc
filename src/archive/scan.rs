@@ -37,6 +37,11 @@ pub struct IndexFacts {
     /// Symlink members whose target escapes the mount, listed but never created
     /// on disk.
     pub escaping_links: usize,
+    /// Members whose destination was only reachable by traversing a symlink, so
+    /// nothing was written for them. Distinct from [`Self::escaping_links`]: that
+    /// counts a link we refused to *create*, this counts an ordinary member we
+    /// refused to write *through* one.
+    pub link_traversals: usize,
 }
 
 impl IndexFacts {
@@ -102,6 +107,17 @@ pub fn assess(facts: &IndexFacts, format: ArchiveFormat) -> Capability {
         return Capability::ReadOnly(format!(
             "{} duplicate member name(s) — rewriting would drop the shadowed copies",
             facts.duplicates
+        ));
+    }
+    // Same rule as a skipped name: we declined to extract these, so a repack
+    // can't be trusted to reproduce them. For a streamed mount the staged copy
+    // was the only one outside the container, which makes the loss certain
+    // rather than merely possible.
+    if facts.link_traversals > 0 {
+        return Capability::ReadOnly(format!(
+            "{} member(s) were reachable only through a symlink and were not \
+             extracted — rewriting would drop them",
+            facts.link_traversals
         ));
     }
     if format.is_tar() && facts.unrebuildable() > 0 {
@@ -172,6 +188,12 @@ pub fn warnings(facts: &IndexFacts, index: &ArchiveIndex) -> Vec<String> {
         out.push(format!(
             "{} symlink(s) point outside the archive and were not created",
             facts.escaping_links
+        ));
+    }
+    if facts.link_traversals > 0 {
+        out.push(format!(
+            "{} member(s) reachable only through a symlink and not extracted",
+            facts.link_traversals
         ));
     }
     if index.truncated {
@@ -297,14 +319,37 @@ mod tests {
             hardlinks: 1,
             specials: 1,
             escaping_links: 1,
+            link_traversals: 1,
         };
         let notes = warnings(&facts, &index);
         // Empty + NUL names share a line; implied dirs are normal and silent.
-        assert_eq!(notes.len(), 10, "{notes:#?}");
+        assert_eq!(notes.len(), 11, "{notes:#?}");
         assert!(notes.iter().any(|n| n.contains("traversal")));
         assert!(notes.iter().any(|n| n.contains("unusable name")));
         assert!(notes.iter().any(|n| n.contains("only by case")));
         assert!(notes.iter().any(|n| n.contains("encrypted")));
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.contains("reachable only through a symlink")),
+            "a refused member must be reported, not just counted"
+        );
+    }
+
+    /// A member we declined to extract is the same problem as one we dropped for
+    /// an unsafe name: the repack has nothing to reproduce it from.
+    #[test]
+    fn a_member_refused_for_traversing_a_link_blocks_write_back() {
+        let facts = IndexFacts {
+            link_traversals: 1,
+            ..IndexFacts::default()
+        };
+        let verdict = assess(&facts, ArchiveFormat::TarGz);
+        assert!(!verdict.is_writable());
+        assert!(
+            verdict.reason().is_some_and(|r| r.contains("symlink")),
+            "the refusal must say why: {verdict:?}"
+        );
     }
 
     #[test]

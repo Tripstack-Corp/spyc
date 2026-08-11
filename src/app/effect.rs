@@ -607,7 +607,7 @@ impl App {
                                     PaneTextKind::Scrollback(_) => "pane scrollback is empty",
                                 });
                             } else {
-                                match crate::clipboard::copy(&text) {
+                                match self.deliver_clipboard(&text) {
                                     Ok(()) => self.state.flash_info(ok.success(&text)),
                                     Err(e) => {
                                         self.state.flash_error(format!("yank failed: {e:#}"));
@@ -894,7 +894,7 @@ impl App {
                                         // behavior) silently discarded them. Tell
                                         // the user where to recover them.
                                         self.state.flash_error(format!(
-                                            "couldn't read back edits ({e}); preserved at {}",
+                                            "couldn't read back edits ({e:#}); preserved at {}",
                                             path.display()
                                         ));
                                     }

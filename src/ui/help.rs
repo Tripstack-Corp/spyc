@@ -294,8 +294,12 @@ const SECTIONS: &[Section] = &[
             ),
             ("^a z", "zoom the active region — list or bottom pane"),
             (
-                "^a |",
-                "vertical split: cycle off / top-only / full-height (cursor-file preview)",
+                "^s |  ^a |",
+                "vertical split: open / close (cursor-file preview)",
+            ),
+            (
+                "^s f  ^a f",
+                "vertical split: flip height — full-height / top-only ([layout] vsplit_mode)",
             ),
             ("^a a  ^a h", "focus the left file pane (a)"),
             ("^a b  ^a l", "focus the right file pane (b)"),

@@ -758,6 +758,13 @@ pub struct ViewState {
     /// `layout.right`. `None` until the vsplit keys (PR4) open a split; it is
     /// re-read + re-rendered off-thread when its `source_path` changes (PR5).
     pub right_pager: Option<PagerView>,
+    /// A preview an **agent** displaced: `create_worktree(open:true)` /
+    /// `open_worktree` put a commander in the right column while the user was
+    /// reading there. The right column hosts one thing, so the preview has to
+    /// yield — but the user didn't ask for that, so it's set aside with the
+    /// split shape it had and comes back when `b` closes. `None` when the user
+    /// opened `b` themselves (`^s n` IS the ask) or after a restore.
+    pub displaced_preview: Option<(state::VSplit, PagerView)>,
     /// Whether to fade the inactive split column / list (the focus dim). On by
     /// default; toggled by `^a d` for users who prefer both columns bright.
     pub dim_inactive: bool,
@@ -1017,6 +1024,7 @@ impl ViewState {
             scroll_pager: None,
             pager_right: None,
             right_pager: None,
+            displaced_preview: None,
             dim_inactive: true,
             preview_dirty: false,
             image_view: None,
