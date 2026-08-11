@@ -1138,3 +1138,63 @@ fn a_refill_puts_a_case_ranked_member_back_where_its_reader_looks() {
         "and with its own bytes"
     );
 }
+
+/// A member can't reach the namespace spyc escapes case collisions into.
+///
+/// Ranked copies stage under a reserved prefix. Nothing stopped an archive from
+/// containing a member *named* that prefix: its own (rank 0) staging path was
+/// then the same path the ranked member's reader consults, `materialize` returns
+/// early on `dest.exists()`, and whichever landed first served both. Contrived to
+/// build, but it is content substitution under the archive's control.
+///
+/// The demonstrated fixture: `a/README`, `a/readme`, and a decoy sitting where
+/// `a/readme` escapes to.
+#[test]
+fn a_member_cannot_squat_on_the_case_escape_namespace() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("decoy.zip");
+    let staging = tmp.path().join("staging");
+    // Aimed by asking where a rank-1 member escapes to, rather than by spelling
+    // the prefix out — so this keeps aiming at the escape namespace if the
+    // namespace is ever renamed, instead of quietly passing.
+    let decoy = crate::archive::index::staging_rel_for("a/readme", 1)
+        .to_str()
+        .expect("the escape path is utf-8")
+        .to_string();
+    zip_at(
+        &archive,
+        &[
+            (&decoy, b"DECOY", 0o644),
+            ("a/README", b"RANK0", 0o644),
+            ("a/readme", b"RANK1", 0o644),
+        ],
+    );
+
+    let indexed = index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+
+    // Every indexed member must own its staging path — no two entries may
+    // resolve to the same one, whatever the archive named them.
+    let mut seen = std::collections::HashMap::new();
+    for entry in &indexed.index.entries {
+        if let Some(other) = seen.insert(entry.staging_rel(), entry.inner.clone()) {
+            panic!(
+                "{} and {} both stage at {}",
+                other,
+                entry.inner,
+                entry.staging_rel().display()
+            );
+        }
+    }
+
+    // And the member that would have been shadowed reads its own bytes.
+    let ranked = indexed
+        .index
+        .get("a/readme")
+        .expect("the ranked member is indexed");
+    let at = materialize(&archive, ranked, &staging).unwrap();
+    assert_eq!(
+        std::fs::read(&at).unwrap(),
+        b"RANK1",
+        "a/readme must not be served the decoy's bytes"
+    );
+}

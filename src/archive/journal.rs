@@ -733,7 +733,10 @@ mod repack_tests {
         assert_eq!(
             staged.source,
             StepSource::Staging {
-                rel: PathBuf::from(".spyc-case-1/readme")
+                rel: index
+                    .get("readme")
+                    .expect("the colliding member is indexed")
+                    .staging_rel()
             }
         );
     }
