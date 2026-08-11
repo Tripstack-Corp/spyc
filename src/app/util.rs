@@ -190,23 +190,16 @@ fn hostname_best_effort() -> String {
 
 /// `uname(2)`'s `nodename` is the kernel's `gethostname` value — read it
 /// with a syscall instead of fork-execing the `hostname` binary.
-#[cfg(unix)]
+///
+/// Not cfg-gated: spyc targets unix + WSL only (Windows-native was explicitly
+/// rejected), so a non-unix build is expected to fail here the way it already
+/// fails on `uzers`, `rustix::termios` and the pty layer.
 fn system_nodename() -> Option<String> {
     rustix::system::uname()
         .nodename()
         .to_str()
         .ok()
         .map(str::to_owned)
-}
-
-/// Non-unix fallback: spyc ships only unix builds, but keep the binary
-/// shell-out so any non-unix compile retains its hostname behavior.
-#[cfg(not(unix))]
-fn system_nodename() -> Option<String> {
-    let out = std::process::Command::new("hostname").output().ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 /// Strip ANSI escape sequences from a string and drop remaining

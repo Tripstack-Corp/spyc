@@ -16,8 +16,10 @@
 //! Additional `.sublime-syntax` files can be layered on top by dropping
 //! them into one of these directories (first hit wins for a given scope):
 //!
-//! - `$XDG_CONFIG_HOME/spyc/syntaxes/` (XDG default)
-//! - `~/.config/spyc/syntaxes/` (fallback when `XDG_CONFIG_HOME` is unset)
+//! - `<config_root>/syntaxes/`, i.e. `$XDG_CONFIG_HOME/spyc/syntaxes/` or
+//!   `~/.config/spyc/syntaxes/` — resolved by [`crate::state::config_root`],
+//!   the single config-root resolver, so it honors the same precedence (and the
+//!   same test override) as `init.lua` and the `lua/` script dir.
 //!
 //! Files are best-effort; a malformed grammar is logged via
 //! `spyc_debug!` and the rest of the directory is still loaded.
@@ -60,19 +62,15 @@ fn build_syntax_set() -> SyntaxSet {
     builder.build()
 }
 
-/// Resolve the user syntaxes directory. Honors `XDG_CONFIG_HOME`,
-/// falls back to `~/.config/spyc/syntaxes/`. Returns `None` only on
-/// exotic systems where neither `XDG_CONFIG_HOME` nor `HOME` is set.
+/// Resolve the user syntaxes directory: `<config_root>/syntaxes/`.
+///
+/// Goes through [`crate::state::config_root`] — the single config-root resolver
+/// — rather than reading `XDG_CONFIG_HOME` / `HOME` again. Resolving it twice
+/// meant syntax loading silently ignored the resolver's thread-local test
+/// override, so a test that redirected the config root still read the real
+/// `~/.config/spyc/syntaxes`. `None` only where the resolver finds no root.
 fn user_syntaxes_dir() -> Option<PathBuf> {
-    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
-        return Some(PathBuf::from(xdg).join("spyc").join("syntaxes"));
-    }
-    std::env::var_os("HOME").map(|h| {
-        PathBuf::from(h)
-            .join(".config")
-            .join("spyc")
-            .join("syntaxes")
-    })
+    crate::state::config_root().map(|r| r.join("syntaxes"))
 }
 
 /// Theme name from syntect's bundled defaults. Dark theme that pairs
@@ -141,6 +139,31 @@ pub fn highlight_to_lines(filename: &str, content: &str) -> Option<Vec<Line<'sta
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The point of routing through `config_root`: the resolver's thread-local
+    /// test override now reaches syntax loading. Reading `XDG_CONFIG_HOME`
+    /// directly here meant an override was silently ignored, so a test that
+    /// redirected the config root still pointed at the real `~/.config/spyc`.
+    #[test]
+    fn syntaxes_dir_follows_the_config_root_override() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let got = crate::state::with_config_root(tmp.path(), user_syntaxes_dir);
+        assert_eq!(
+            got,
+            Some(tmp.path().join("syntaxes")),
+            "syntax loading must honor the shared resolver's override"
+        );
+    }
+
+    /// And it is the *same* root the rest of the config layer resolves, not a
+    /// parallel answer that happens to agree today.
+    #[test]
+    fn syntaxes_dir_hangs_off_the_shared_config_root() {
+        assert_eq!(
+            user_syntaxes_dir(),
+            crate::state::config_root().map(|r| r.join("syntaxes"))
+        );
+    }
 
     #[test]
     fn highlights_makefile_by_bare_filename() {
