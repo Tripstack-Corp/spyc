@@ -510,9 +510,11 @@ fn staging_path(member: &Path, mounts: &Mounts) -> Option<PathBuf> {
 fn graveyard_paths(op: &super::graveyard_ops::GraveyardOp) -> Vec<PathBuf> {
     match op {
         super::graveyard_ops::GraveyardOp::Archive { paths } => paths.clone(),
-        // Restoring or purging targets the graveyard's own store, never a mount.
+        // Restoring, purging, or enforcing the cap targets the graveyard's own
+        // store, never a mount.
         super::graveyard_ops::GraveyardOp::Restore { dest, .. } => vec![dest.clone()],
-        super::graveyard_ops::GraveyardOp::PurgeAll { .. } => Vec::new(),
+        super::graveyard_ops::GraveyardOp::PurgeAll { .. }
+        | super::graveyard_ops::GraveyardOp::CascadeToCap { .. } => Vec::new(),
     }
 }
 
