@@ -879,3 +879,160 @@ fn materialize_refuses_a_member_behind_a_planted_link() {
         "bytes escaped the staging root"
     );
 }
+
+// --- declared sizes are claims, not measurements ---
+
+/// A tar header's size field is attacker input. Reserving it aborts the process
+/// on a big enough lie — an abort, not an unwind, so the panic hook never runs
+/// and the terminal is left in raw mode.
+///
+/// Built by hand: `tar::Builder` writes an honest header, and the whole point is
+/// a dishonest one.
+fn tar_with_declared_size(path: &Path, name: &str, declared: &[u8; 12], body: &[u8]) {
+    let mut h = [0u8; 512];
+    h[..name.len()].copy_from_slice(name.as_bytes());
+    h[100..108].copy_from_slice(b"0000644\0");
+    h[108..116].copy_from_slice(b"0000000\0");
+    h[116..124].copy_from_slice(b"0000000\0");
+    h[124..136].copy_from_slice(declared);
+    h[136..148].copy_from_slice(b"00000000000\0");
+    h[156] = b'0';
+    h[257..263].copy_from_slice(b"ustar\0");
+    h[263..265].copy_from_slice(b"00");
+    h[148..156].copy_from_slice(b"        ");
+    let sum: u32 = h.iter().map(|b| u32::from(*b)).sum();
+    let chk = format!("{:06o}\0 ", sum & 0o777_777);
+    h[148..156].copy_from_slice(chk.as_bytes());
+
+    let mut out = Vec::from(h);
+    out.extend_from_slice(body);
+    out.resize(out.len().div_ceil(512) * 512, 0);
+    out.extend_from_slice(&[0u8; 1024]);
+    std::fs::write(path, out).unwrap();
+}
+
+/// The octal maximum (~64 GB) behind an empty body. Before the fix this reached
+/// `Vec::with_capacity(68719476735)`.
+#[test]
+fn a_declared_size_far_beyond_the_file_does_not_drive_an_allocation() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("liar.tar");
+    let staging = tmp.path().join("staging");
+    tar_with_declared_size(&archive, "big.bin", b"777777777777", b"");
+
+    let indexed = index_seekable(&archive, ArchiveFormat::Tar, 1000).unwrap();
+    let entry = indexed.index.get("big.bin").expect("indexed");
+    assert_eq!(entry.size, 0o777_777_777_777, "the claim is carried as-is");
+
+    // The read completes, bounded by what the file actually holds, instead of
+    // reserving what was claimed. (A lying header still yields whatever follows
+    // it — here the tar's own end-of-archive padding — which is garbage in and
+    // garbage out; the property under test is that it costs the file's size, not
+    // the claim's.)
+    let dest = materialize(&archive, entry, &staging).unwrap();
+    let got = std::fs::read(&dest).unwrap().len() as u64;
+    let on_disk = std::fs::metadata(&archive).unwrap().len();
+    assert!(
+        got <= on_disk,
+        "read {got} bytes from a {on_disk}-byte archive"
+    );
+    assert!(got < 0o777_777_777_777, "the claim was not honoured");
+}
+
+#[test]
+fn a_reservation_is_capped_however_large_the_claim() {
+    assert_eq!(reserve_for(0), 0);
+    assert_eq!(reserve_for(64), 64);
+    assert_eq!(reserve_for(u64::MAX), RESERVE_CAP as usize);
+    assert_eq!(reserve_for(RESERVE_CAP * 4096), RESERVE_CAP as usize);
+}
+
+/// The bomb gate has to measure what arrives. A header declaring 0 while the
+/// stream carries megabytes used to walk straight past it, because the gate
+/// added up declarations.
+#[test]
+fn the_extract_budget_counts_bytes_that_arrive_not_bytes_declared() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("bomb.tar.gz");
+    let staging = tmp.path().join("staging");
+
+    // A tar whose header says 0 bytes but whose data blocks hold 64 KB.
+    let mut raw = Vec::new();
+    {
+        let mut h = [0u8; 512];
+        let name = "lies.bin";
+        h[..name.len()].copy_from_slice(name.as_bytes());
+        h[100..108].copy_from_slice(b"0000644\0");
+        h[108..116].copy_from_slice(b"0000000\0");
+        h[116..124].copy_from_slice(b"0000000\0");
+        h[124..136].copy_from_slice(b"00000000000\0"); // declared: 0
+        h[136..148].copy_from_slice(b"00000000000\0");
+        h[156] = b'0';
+        h[257..263].copy_from_slice(b"ustar\0");
+        h[263..265].copy_from_slice(b"00");
+        h[148..156].copy_from_slice(b"        ");
+        let sum: u32 = h.iter().map(|b| u32::from(*b)).sum();
+        let chk = format!("{:06o}\0 ", sum & 0o777_777);
+        h[148..156].copy_from_slice(chk.as_bytes());
+        raw.extend_from_slice(&h);
+    }
+    let enc = flate2::write::GzEncoder::new(
+        File::create(&archive).unwrap(),
+        flate2::Compression::default(),
+    );
+    {
+        let mut enc = enc;
+        enc.write_all(&raw).unwrap();
+        enc.finish().unwrap();
+    }
+
+    // Budget of 1 KB. Whatever the header claims, at most a hair over that may
+    // reach disk before the mount is refused.
+    let outcome = stream_mount(
+        &archive,
+        ArchiveFormat::TarGz,
+        &staging,
+        1024,
+        1000,
+        &AtomicBool::new(false),
+    );
+    if outcome.is_ok() {
+        let staged: u64 = std::fs::read_dir(&staging).map_or(0, |rd| {
+            rd.flatten()
+                .filter_map(|e| e.metadata().ok())
+                .map(|m| m.len())
+                .sum()
+        });
+        assert!(
+            staged <= 1025,
+            "{staged} bytes reached disk against a 1024-byte budget"
+        );
+    }
+}
+
+/// The honest path must keep working: a member whose declared size is true is
+/// still extracted whole, and a mount inside its budget still mounts.
+#[test]
+fn an_honest_archive_still_extracts_completely() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("ok.tar.gz");
+    let staging = tmp.path().join("staging");
+    let body = vec![b'x'; 4096];
+    tar_gz_at(&archive, &[("big.txt", &body, 0o644)]);
+
+    stream_mount(
+        &archive,
+        ArchiveFormat::TarGz,
+        &staging,
+        1 << 20,
+        1000,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+
+    assert_eq!(
+        std::fs::read(staging.join("big.txt")).unwrap().len(),
+        4096,
+        "an in-budget member must arrive intact"
+    );
+}

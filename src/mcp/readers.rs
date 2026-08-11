@@ -207,11 +207,30 @@ pub(super) fn is_in_mount(path: &Path, ctx_path: &Path) -> bool {
 /// Prefers the staged copy: that's what the user is looking at, edits and all.
 /// Failing that the member is read straight out of the container, in memory —
 /// staging it here would tell the mount it extracted something it didn't.
-pub(super) fn read_member_content(path: &Path, ctx_path: &Path) -> Option<Result<String, String>> {
+/// `root` scopes the read the same way it scopes every other read tool. A mount
+/// is addressed at a path that is *not* a directory, so the caller's usual
+/// canonicalize-and-contain check can't be applied to the member path — but the
+/// container it comes out of is an ordinary file, and that is the thing that has
+/// to be inside the root. Without this the archive branch was an unscoped read:
+/// "spyc has this mounted" was the only bound, and a mount can be anywhere.
+pub(super) fn read_member_content(
+    path: &Path,
+    ctx_path: &Path,
+    root: &Path,
+) -> Option<Result<String, String>> {
     let mounts = archive_mounts(ctx_path);
     let (archive, staging, inner) = member_in_mount(path, &mounts)?;
+    if crate::paths::canonical_contains(root, &archive) != Some(true) {
+        return Some(Err(format!(
+            "{}: archive is outside the project root",
+            archive.display()
+        )));
+    }
     let staged = staging.join(&inner);
-    if staged.is_file() {
+    // `is_file` follows links, so confirm the staged copy is where it claims to
+    // be before reading it. Extraction refuses to traverse a symlink, which makes
+    // this belt-and-braces rather than the primary defence.
+    if staged.is_file() && crate::paths::canonical_contains(&staging, &staged) == Some(true) {
         return Some(read_file_content(&staged));
     }
     Some(read_member_from_archive(&archive, &inner))
