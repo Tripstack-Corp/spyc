@@ -403,19 +403,72 @@ fn a_symlink_escaping_the_mount_is_listed_but_never_created() {
     );
 }
 
+/// The same cases the old spelling-based check covered, now asked of the real
+/// filesystem — where the link would sit, not how its target reads.
+#[cfg(unix)]
 #[test]
 fn link_targets_are_judged_by_where_they_land() {
+    let tmp = tempfile::tempdir().unwrap();
+    let staging = tmp.path().join("staging");
+    std::fs::create_dir_all(staging.join("a/b")).unwrap();
+
+    let at = |rel: &str| staging.join(rel);
     // Inside the mount, at any depth.
-    assert!(link_stays_inside("", "sibling.txt"));
-    assert!(link_stays_inside("a/b", "../c.txt"));
-    assert!(link_stays_inside("a/b", "../../top.txt"));
-    assert!(link_stays_inside("a", "./b/c"));
+    assert!(link_target_contained(&staging, &at("l"), "sibling.txt"));
+    assert!(link_target_contained(&staging, &at("a/b/l"), "../c.txt"));
+    assert!(link_target_contained(
+        &staging,
+        &at("a/b/l"),
+        "../../top.txt"
+    ));
+    assert!(link_target_contained(&staging, &at("a/l"), "./b/c"));
     // Out of it.
-    assert!(!link_stays_inside("", "../escape"));
-    assert!(!link_stays_inside("a", "../../escape"));
-    assert!(!link_stays_inside("a/b", "../../../escape"));
-    assert!(!link_stays_inside("a", "/etc/passwd"));
-    assert!(!link_stays_inside("a", ""));
+    assert!(!link_target_contained(&staging, &at("l"), "../escape"));
+    assert!(!link_target_contained(&staging, &at("a/l"), "../../escape"));
+    assert!(!link_target_contained(
+        &staging,
+        &at("a/b/l"),
+        "../../../escape"
+    ));
+    assert!(!link_target_contained(&staging, &at("a/l"), "/etc/passwd"));
+    assert!(!link_target_contained(&staging, &at("a/l"), ""));
+}
+
+/// What the depth counter could not express: an identical target is contained or
+/// not depending on where its link physically sits, and a planted link moves it.
+#[cfg(unix)]
+#[test]
+fn the_same_target_is_judged_differently_once_a_link_relocates_its_parent() {
+    let tmp = tempfile::tempdir().unwrap();
+    let staging = tmp.path().join("staging");
+    std::fs::create_dir_all(staging.join("d")).unwrap();
+
+    // `..` from staging/d/ is staging — contained.
+    assert!(link_target_contained(&staging, &staging.join("d/l"), ".."));
+    // The identical target from a link that landed at the staging root is not.
+    assert!(!link_target_contained(&staging, &staging.join("l"), ".."));
+}
+
+/// `contained_dest` is the rule the whole fix rests on: any existing component
+/// that is a symlink makes the member unreachable.
+#[cfg(unix)]
+#[test]
+fn a_destination_behind_a_symlink_component_is_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let staging = tmp.path().join("staging");
+    std::fs::create_dir_all(staging.join("real/deep")).unwrap();
+    std::os::unix::fs::symlink("..", staging.join("real/up")).unwrap();
+
+    // A plain path through real directories resolves, and stays put.
+    let ok = contained_dest(&staging, "real/deep/file.txt").unwrap();
+    assert_eq!(ok, staging.join("real/deep/file.txt"));
+    // Nonexistent intermediate dirs are fine — they cannot be links.
+    assert!(contained_dest(&staging, "brand/new/path.txt").is_ok());
+    // Through the link, refused, even though the link points back inside.
+    let err = contained_dest(&staging, "real/up/file.txt").unwrap_err();
+    assert!(format!("{err:#}").contains("symlink"), "got: {err:#}");
+    // And a `..` component is refused on its own terms.
+    assert!(contained_dest(&staging, "../out.txt").is_err());
 }
 
 #[test]
@@ -470,4 +523,359 @@ fn an_impossible_date_does_not_panic() {
     // A corrupt DOS field can name day 0 or month 0; that must read as
     // "no timestamp", not a crash on the indexing worker.
     assert!(zip::DateTime::from_date_and_time(2026, 0, 0, 0, 0, 0).is_err());
+}
+
+// --- containment: a link may not decide where a later member lands ---
+
+/// Build a tar.gz from a script of members, using the raw writers so symlinks
+/// and ordering are under the test's control.
+///
+/// Ordering is the whole subject here — the hazard is member N+1 landing
+/// somewhere member N arranged — so these are appended exactly as given.
+#[cfg(unix)]
+fn linked_tar_gz_at(path: &Path, members: &[Member<'_>]) {
+    let enc =
+        flate2::write::GzEncoder::new(File::create(path).unwrap(), flate2::Compression::default());
+    let mut b = tar::Builder::new(enc);
+    for m in members {
+        let mut h = tar::Header::new_gnu();
+        h.set_mode(0o755);
+        h.set_mtime(1_000_000);
+        match m {
+            Member::Dir(name) => {
+                h.set_entry_type(tar::EntryType::Directory);
+                h.set_size(0);
+                b.append_data(&mut h, name, &[][..]).unwrap();
+            }
+            Member::Link { name, target } => {
+                h.set_entry_type(tar::EntryType::Symlink);
+                h.set_size(0);
+                b.append_link(&mut h, name, target).unwrap();
+            }
+            Member::File { name, data } => {
+                h.set_entry_type(tar::EntryType::Regular);
+                h.set_size(data.len() as u64);
+                b.append_data(&mut h, name, *data).unwrap();
+            }
+        }
+    }
+    b.into_inner().unwrap().finish().unwrap();
+}
+
+#[cfg(unix)]
+enum Member<'a> {
+    Dir(&'a str),
+    Link { name: &'a str, target: &'a str },
+    File { name: &'a str, data: &'a [u8] },
+}
+
+#[cfg(unix)]
+fn mount_linked(archive: &Path, staging: &Path) -> Indexed {
+    stream_mount(
+        archive,
+        ArchiveFormat::TarGz,
+        staging,
+        u64::MAX,
+        1000,
+        &AtomicBool::new(false),
+    )
+    .unwrap()
+}
+
+/// The 2.1 blocker, as reported: two links that each pass a per-name depth check
+/// compose into one pointing above the root, and a third member is written
+/// through it.
+///
+/// `d/link1 -> ..` sits at depth 1 and climbs to 0 — contained. `d/link1/link2
+/// -> ..` reads as depth 2 climbing to 1 — also contained — but it is *created*
+/// at `staging/link2`, because link1 already redirected its parent, so its `..`
+/// leaves the mount. Against the lexical check this test writes ESCAPED.txt
+/// outside the staging root.
+#[cfg(unix)]
+#[test]
+fn a_symlink_chain_cannot_walk_a_later_member_out_of_the_mount() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("chain.tar.gz");
+    let staging = tmp.path().join("deep/staging");
+    linked_tar_gz_at(
+        &archive,
+        &[
+            Member::Dir("d/"),
+            Member::Link {
+                name: "d/link1",
+                target: "..",
+            },
+            Member::Link {
+                name: "d/link1/link2",
+                target: "..",
+            },
+            Member::File {
+                name: "d/link1/link2/ESCAPED.txt",
+                data: b"pwned",
+            },
+        ],
+    );
+
+    let indexed = mount_linked(&archive, &staging);
+
+    // The escape target, one level above staging, and every other level up.
+    assert!(
+        !tmp.path().join("deep/ESCAPED.txt").exists(),
+        "a member escaped one level above the staging root"
+    );
+    assert!(
+        !tmp.path().join("ESCAPED.txt").exists(),
+        "a member escaped to the sandbox root"
+    );
+    assert!(
+        !staging.join("ESCAPED.txt").exists(),
+        "the second link must not have been created at staging root either"
+    );
+    // And the mount says so rather than reporting a clean archive.
+    assert!(
+        indexed.facts.link_traversals > 0,
+        "a refused member must be counted, got facts {:?}",
+        indexed.facts
+    );
+    assert!(
+        !crate::archive::scan::assess(&indexed.facts, ArchiveFormat::TarGz).is_writable(),
+        "an archive we declined to fully extract must not offer write-back"
+    );
+    assert!(
+        crate::archive::scan::warnings(&indexed.facts, &indexed.index)
+            .iter()
+            .any(|w| w.contains("symlink")),
+        "the refusal must surface in the mount warnings"
+    );
+}
+
+/// The same shape one hop longer, so a fix that only special-cases two links
+/// still fails.
+#[cfg(unix)]
+#[test]
+fn a_deep_symlink_chain_is_refused_at_every_hop() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("deepchain.tar.gz");
+    let staging = tmp.path().join("a/b/c/staging");
+    linked_tar_gz_at(
+        &archive,
+        &[
+            Member::Dir("x/"),
+            Member::Dir("x/y/"),
+            Member::Link {
+                name: "x/y/l1",
+                target: "..",
+            },
+            Member::Link {
+                name: "x/y/l1/l2",
+                target: "..",
+            },
+            Member::Link {
+                name: "x/y/l1/l2/l3",
+                target: "..",
+            },
+            Member::File {
+                name: "x/y/l1/l2/l3/OUT.txt",
+                data: b"pwned",
+            },
+        ],
+    );
+
+    let indexed = mount_linked(&archive, &staging);
+
+    for dir in ["a/b/c", "a/b", "a", ""] {
+        let candidate = tmp.path().join(dir).join("OUT.txt");
+        assert!(!candidate.exists(), "escaped to {}", candidate.display());
+    }
+    assert!(indexed.facts.link_traversals > 0);
+}
+
+/// A single link out, followed by a member written through it — the classic
+/// two-step, with the link itself already caught by the old check. Kept so the
+/// *pairing* is asserted, not just the link's rejection.
+#[cfg(unix)]
+#[test]
+fn a_member_written_through_an_escaping_link_lands_nowhere() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("twostep.tar.gz");
+    let staging = tmp.path().join("staging");
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    linked_tar_gz_at(
+        &archive,
+        &[
+            Member::Link {
+                name: "hop",
+                target: "../outside",
+            },
+            Member::File {
+                name: "hop/THROUGH.txt",
+                data: b"pwned",
+            },
+        ],
+    );
+
+    mount_linked(&archive, &staging);
+
+    assert!(
+        !outside.join("THROUGH.txt").exists(),
+        "a member was written through a refused link"
+    );
+    // `hop` does end up existing — as a real directory, created for the member
+    // that named it as a parent. That is the containment working: the member
+    // landed inside the mount instead of following the link out of it.
+    let hop = std::fs::symlink_metadata(staging.join("hop")).unwrap();
+    assert!(
+        !hop.file_type().is_symlink(),
+        "the link must not be created"
+    );
+    assert!(
+        staging.join("hop/THROUGH.txt").is_file(),
+        "and stays inside"
+    );
+}
+
+/// An absolute link target is out by definition — it needs no `..` at all.
+#[cfg(unix)]
+#[test]
+fn an_absolute_link_target_is_never_created() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("abs.tar.gz");
+    let staging = tmp.path().join("staging");
+    linked_tar_gz_at(
+        &archive,
+        &[
+            Member::Link {
+                name: "abs",
+                target: "/etc/passwd",
+            },
+            Member::File {
+                name: "abs/nope.txt",
+                data: b"x",
+            },
+        ],
+    );
+
+    let indexed = mount_linked(&archive, &staging);
+
+    assert!(
+        !std::fs::symlink_metadata(staging.join("abs"))
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "no link to an absolute path may be created"
+    );
+    assert!(!Path::new("/etc/passwd/nope.txt").exists());
+    assert_eq!(indexed.facts.escaping_links, 1);
+}
+
+/// A target that climbs out and comes back to a *different* tree nets an escape
+/// even though its component count balances — the arithmetic a depth counter
+/// does is not the question.
+#[cfg(unix)]
+#[test]
+fn a_mixed_target_that_nets_an_escape_is_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("mixed.tar.gz");
+    let staging = tmp.path().join("staging");
+    let sibling = tmp.path().join("sibling");
+    std::fs::create_dir_all(&sibling).unwrap();
+    linked_tar_gz_at(
+        &archive,
+        &[
+            Member::Dir("keep/"),
+            // From staging/keep/: up two (out of staging), down into sibling.
+            Member::Link {
+                name: "keep/sneak",
+                target: "../../sibling",
+            },
+            Member::File {
+                name: "keep/sneak/LANDED.txt",
+                data: b"pwned",
+            },
+        ],
+    );
+
+    mount_linked(&archive, &staging);
+
+    assert!(
+        !sibling.join("LANDED.txt").exists(),
+        "a balanced-looking target still escaped"
+    );
+}
+
+/// The other half of the contract: a link that genuinely stays inside is still
+/// created, and still resolves. Containment must not be bought by refusing
+/// everything.
+#[cfg(unix)]
+#[test]
+fn a_link_that_stays_inside_is_still_created_and_readable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("ok.tar.gz");
+    let staging = tmp.path().join("staging");
+    linked_tar_gz_at(
+        &archive,
+        &[
+            Member::File {
+                name: "real.txt",
+                data: b"hello",
+            },
+            Member::Dir("sub/"),
+            Member::Link {
+                name: "sub/back",
+                target: "../real.txt",
+            },
+        ],
+    );
+
+    let indexed = mount_linked(&archive, &staging);
+
+    let link = staging.join("sub/back");
+    assert!(
+        std::fs::symlink_metadata(&link).unwrap().is_symlink(),
+        "a contained link must still be created"
+    );
+    assert_eq!(std::fs::read_to_string(&link).unwrap(), "hello");
+    assert_eq!(indexed.facts.escaping_links, 0);
+    assert_eq!(indexed.facts.link_traversals, 0);
+    assert!(crate::archive::scan::assess(&indexed.facts, ArchiveFormat::TarGz).is_writable());
+}
+
+/// The seekable path reaches extraction through `materialize`, not
+/// `write_member`, so it needs its own proof — the fuzz target found the escape
+/// on a plain `.tar` as well as a `.tar.gz`.
+#[cfg(unix)]
+#[test]
+fn materialize_refuses_a_member_behind_a_planted_link() {
+    let tmp = tempfile::tempdir().unwrap();
+    let staging = tmp.path().join("staging");
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(staging.join("d")).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    // Stand in for the link an earlier member would have created.
+    std::os::unix::fs::symlink("../../outside", staging.join("d/hop")).unwrap();
+
+    let archive = tmp.path().join("seek.tar");
+    tar_into(
+        File::create(&archive).unwrap(),
+        &[("d/hop/x.txt", b"pwned", 0o644)],
+    );
+    let indexed = index_seekable(&archive, ArchiveFormat::Tar, 1000).unwrap();
+    let entry = indexed
+        .index
+        .entries
+        .iter()
+        .find(|e| e.inner == "d/hop/x.txt")
+        .expect("member indexed");
+
+    let err = materialize(&archive, entry, &staging)
+        .expect_err("materializing through a symlink must be refused");
+    assert!(
+        format!("{err:#}").contains("symlink"),
+        "the error must name the cause, got: {err:#}"
+    );
+    assert!(
+        !outside.join("x.txt").exists(),
+        "bytes escaped the staging root"
+    );
 }
