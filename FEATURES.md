@@ -537,9 +537,10 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   open — `spyc -r` puts you back where you left off, several directories deep in
   a tarball.
 - **Not yet supported inside an archive** — creating an empty directory or a new
-  file, moving across the archive boundary in one step, `:grep`, `F` and shell
-  commands are refused with a message rather than half-working. The suffix shows
-  `ro` when the archive can't be written back.
+  file, copying a whole directory *in* (only files, since the archive would keep
+  the name and lose what's under it), moving across the archive boundary in one
+  step, `:grep`, `F` and shell commands are refused with a message rather than
+  half-working. The suffix shows `ro` when the archive can't be written back.
 - **An agent can read a member too** — MCP `get_file_content` resolves a path
   inside a mount, reading the container in memory (or your not-yet-written edit,
   if there is one), so asking the agent in the pane about the file you're looking

@@ -74,19 +74,20 @@ pub enum PendingChange {
 
 /// Classify `effect` against the live mounts.
 ///
-/// `is_staged` answers "are this member's bytes already on disk?" — passed in
-/// rather than checked here so the routing itself stays testable without a
-/// filesystem.
+/// `is_staged` answers "are this member's bytes already on disk?" and `is_dir`
+/// "is this source a directory?" — both passed in rather than checked here so the
+/// routing itself stays testable without a filesystem.
 pub fn route_archive_effect(
     effect: Effect,
     mounts: &Mounts,
     is_staged: &dyn Fn(&Path) -> bool,
     inventory_names: &dyn Fn(&[String]) -> Vec<String>,
+    is_dir: &dyn Fn(&Path) -> bool,
 ) -> ArchiveSink {
     if mounts.is_empty() {
         return ArchiveSink::PassThrough(effect);
     }
-    match classify(&effect, mounts, is_staged, inventory_names) {
+    match classify(&effect, mounts, is_staged, inventory_names, is_dir) {
         Verdict::Pass => ArchiveSink::PassThrough(effect),
         // Substitute what's already on disk now, and let the extraction's own
         // result substitute the rest — an op must never see a mount path.
@@ -132,6 +133,7 @@ fn classify(
     mounts: &Mounts,
     is_staged: &dyn Fn(&Path) -> bool,
     inventory_names: &dyn Fn(&[String]) -> Vec<String>,
+    is_dir: &dyn Fn(&Path) -> bool,
 ) -> Verdict {
     match effect {
         // --- reads: extract, then run ---
@@ -154,7 +156,7 @@ fn classify(
                 if paths.iter().any(|p| mounts.holds_member(p)) {
                     return Verdict::Refuse("archive: copy out first, then in");
                 }
-                return bring_in(paths, dest, mounts);
+                return bring_in(paths, dest, mounts, is_dir);
             }
             need(paths, mounts, is_staged)
         }
@@ -311,7 +313,22 @@ fn classify(
 
 /// Copying real files into a container: point the op at the staging tree and
 /// record what it will have added.
-fn bring_in(paths: &[PathBuf], dest: &Path, mounts: &Mounts) -> Verdict {
+fn bring_in(
+    paths: &[PathBuf],
+    dest: &Path,
+    mounts: &Mounts,
+    is_dir: &dyn Fn(&Path) -> bool,
+) -> Verdict {
+    // A directory is recorded as ONE addition while the copy writes its whole
+    // subtree into staging, so the repack emits the name and drops everything
+    // under it — and the verify pass can't catch that, because it compares the
+    // new archive against the same plan the children were already missing from.
+    // Refusing beats a write-back that reports success and loses the contents.
+    if paths.iter().any(|p| is_dir(p)) {
+        return Verdict::Refuse(
+            "archive: copy files in, not directories — the contents would be lost",
+        );
+    }
     let Some((mount, inner_dir)) = mounts.resolve(dest) else {
         return Verdict::Pass;
     };
@@ -599,6 +616,11 @@ mod tests {
         Vec::new()
     }
 
+    /// Every copy-in source is a plain file unless a test says otherwise.
+    fn no_dirs(_: &Path) -> bool {
+        false
+    }
+
     fn all_staged(_: &Path) -> bool {
         true
     }
@@ -616,7 +638,13 @@ mod tests {
                 .collect(),
         });
         assert!(matches!(
-            route_archive_effect(effect, &Mounts::default(), &nothing_staged, &no_names),
+            route_archive_effect(
+                effect,
+                &Mounts::default(),
+                &nothing_staged,
+                &no_names,
+                &no_dirs
+            ),
             ArchiveSink::PassThrough(_)
         ));
     }
@@ -631,7 +659,7 @@ mod tests {
                 .collect(),
         });
         assert!(matches!(
-            route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs),
             ArchiveSink::PassThrough(_)
         ));
     }
@@ -647,7 +675,7 @@ mod tests {
                 .collect(),
         });
         let ArchiveSink::Materialize { members, then } =
-            route_archive_effect(effect, &mounts, &nothing_staged, &no_names)
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs)
         else {
             panic!("a member yank must be materialized first");
         };
@@ -667,7 +695,7 @@ mod tests {
                 .collect(),
         });
         assert!(matches!(
-            route_archive_effect(effect, &mounts, &all_staged, &no_names),
+            route_archive_effect(effect, &mounts, &all_staged, &no_names, &no_dirs),
             ArchiveSink::PassThrough(_)
         ));
     }
@@ -688,7 +716,7 @@ mod tests {
             .collect(),
         });
         let ArchiveSink::Materialize { members, .. } =
-            route_archive_effect(effect, &mounts, &staged, &no_names)
+            route_archive_effect(effect, &mounts, &staged, &no_names, &no_dirs)
         else {
             panic!("expected a materialize");
         };
@@ -703,7 +731,7 @@ mod tests {
             dest: PathBuf::from("/home/me"),
         });
         assert!(matches!(
-            route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs),
             ArchiveSink::Materialize { .. }
         ));
     }
@@ -718,7 +746,7 @@ mod tests {
             dest: member("d"),
         });
         let ArchiveSink::RewriteAndRecord { effect, changes } =
-            route_archive_effect(effect, &mounts, &nothing_staged, &no_names)
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs)
         else {
             panic!("a copy in must be staged and recorded");
         };
@@ -739,6 +767,54 @@ mod tests {
         );
     }
 
+    /// A directory copied in is recorded as ONE addition while the copy writes its
+    /// whole subtree into staging, so the repack emitted the bare name and dropped
+    /// everything under it — reporting a successful write. The verify pass can't
+    /// catch it either: it compares the new archive against the same plan the
+    /// children were already missing from.
+    #[test]
+    fn copying_a_directory_into_an_archive_is_refused() {
+        let mounts = mounts_with(&["a.txt", "d/keep.txt"]);
+        let is_dir = |p: &Path| p == Path::new("/real/docs");
+        let effect = Effect::FileOp(FileOp::Copy {
+            paths: vec![PathBuf::from("/real/docs")],
+            dest: member("d"),
+        });
+        let ArchiveSink::Refuse(why) =
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &is_dir)
+        else {
+            panic!("a directory copy-in must be refused, not silently flattened");
+        };
+        assert!(why.contains("not directories"), "{why}");
+
+        // One directory in the selection is enough — the rest would land while its
+        // contents were lost, which is the half-done outcome the refusals avoid.
+        let mixed = Effect::FileOp(FileOp::Copy {
+            paths: vec![PathBuf::from("/real/x.txt"), PathBuf::from("/real/docs")],
+            dest: member("d"),
+        });
+        assert!(matches!(
+            route_archive_effect(mixed, &mounts, &nothing_staged, &no_names, &is_dir),
+            ArchiveSink::Refuse(_)
+        ));
+    }
+
+    /// A directory copied *outside* any archive is an ordinary recursive copy and
+    /// is none of this screen's business.
+    #[test]
+    fn copying_a_directory_outside_an_archive_is_untouched() {
+        let mounts = mounts_with(&["a.txt"]);
+        let is_dir = |p: &Path| p == Path::new("/real/docs");
+        let effect = Effect::FileOp(FileOp::Copy {
+            paths: vec![PathBuf::from("/real/docs")],
+            dest: PathBuf::from("/home/me"),
+        });
+        assert!(matches!(
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &is_dir),
+            ArchiveSink::PassThrough(_)
+        ));
+    }
+
     /// Copying a member into the same archive would be a rename dressed as a
     /// copy, with the source's bytes not yet on disk. Two steps, deliberately.
     #[test]
@@ -749,7 +825,7 @@ mod tests {
             dest: member("d"),
         });
         assert!(matches!(
-            route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs),
             ArchiveSink::Refuse(_)
         ));
     }
@@ -764,7 +840,7 @@ mod tests {
             dest: member("d"),
         });
         let ArchiveSink::Record(changes) =
-            route_archive_effect(effect, &mounts, &nothing_staged, &no_names)
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs)
         else {
             panic!("a move within the archive is a rename");
         };
@@ -794,7 +870,7 @@ mod tests {
             }),
         ] {
             let ArchiveSink::Refuse(why) =
-                route_archive_effect(effect, &mounts, &nothing_staged, &no_names)
+                route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs)
             else {
                 panic!("a move across the boundary must be refused");
             };
@@ -812,7 +888,7 @@ mod tests {
             paths: vec![member("a.txt")],
         });
         let ArchiveSink::Record(changes) =
-            route_archive_effect(effect, &mounts, &nothing_staged, &no_names)
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs)
         else {
             panic!("a member delete must be recorded");
         };
@@ -835,7 +911,7 @@ mod tests {
             paths: vec![member("a.txt"), PathBuf::from("/real/x.txt")],
         });
         let ArchiveSink::Refuse(why) =
-            route_archive_effect(effect, &mounts, &nothing_staged, &no_names)
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs)
         else {
             panic!("a mixed selection must be refused");
         };
@@ -850,7 +926,7 @@ mod tests {
             paths: vec![PathBuf::from("/real/x.txt")],
         });
         assert!(matches!(
-            route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs),
             ArchiveSink::PassThrough(_)
         ));
     }
@@ -866,7 +942,7 @@ mod tests {
             generation: 1,
         });
         assert!(matches!(
-            route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs),
             ArchiveSink::Refuse(_)
         ));
     }
@@ -882,7 +958,7 @@ mod tests {
             err_prefix: "chdir",
         };
         assert!(matches!(
-            route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
+            route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs),
             ArchiveSink::PassThrough(_)
         ));
     }
@@ -1012,7 +1088,7 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    route_archive_effect(effect, &mounts, &nothing_staged, &no_names),
+                    route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs),
                     ArchiveSink::PassThrough(_)
                 ),
                 "a mounted archive is still an ordinary file to read"
@@ -1039,7 +1115,7 @@ mod tests {
                 is_move: false,
             }),
         ] {
-            let sink = route_archive_effect(effect, &mounts, &nothing_staged, &no_names);
+            let sink = route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs);
             let ArchiveSink::UnmountFirst { archives, .. } = sink else {
                 panic!("expected an unmount, got {sink:?}");
             };
@@ -1059,6 +1135,7 @@ mod tests {
             &mounts,
             &nothing_staged,
             &no_names,
+            &no_dirs,
         );
         assert!(matches!(sink, ArchiveSink::Refuse(_)), "got {sink:?}");
     }

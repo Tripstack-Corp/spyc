@@ -939,7 +939,16 @@ impl App {
                 .map(|item| item.filename.clone())
                 .collect()
         };
-        match route_archive_effect(effect, &self.state.mounts, &staged_check, &inventory_names) {
+        // The one fs question the pure router can't answer for itself: a copy-in
+        // source that is a directory can't round-trip through the journal.
+        let is_dir = |p: &Path| p.is_dir();
+        match route_archive_effect(
+            effect,
+            &self.state.mounts,
+            &staged_check,
+            &inventory_names,
+            &is_dir,
+        ) {
             ArchiveSink::PassThrough(effect) => Some(effect),
             ArchiveSink::Refuse(why) => {
                 self.state.flash_error(why);
