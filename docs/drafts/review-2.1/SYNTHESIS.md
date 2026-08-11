@@ -8,6 +8,26 @@
 
 ## 1. Verdict
 
+> **UPDATED 2026-08-11 (third pass) — the first four mediums.** `main` at
+> `6d5a0a2`:
+>
+> | PR | closes | what |
+> |---|---|---|
+> | #374 | MED-12 | the 2.1 release notes describe 2.1 — they were 75 commits and one whole campaign behind |
+> | #375 | MED-7 | a chrome row's hit area has a right edge, so column `b` keeps its clicks |
+> | #376 | MED-5 | a streamed member's bytes go where its own entry says |
+> | #377 | MED-6 | a member can't squat on the staging escape namespace |
+>
+> **Two of the four were live defects.** In the default full-height vsplit a
+> left-click on column `b`'s first row anchored a status-bar selection and a drag
+> from there silently replaced the clipboard; and on macOS a case-colliding pair
+> in a compressed tar served each other's bytes, with one of the two unreadable
+> *and* unwritable. See §7.
+>
+> **Severity tiers remaining: 16 mediums, 23 lows. Nothing above medium is open.**
+>
+> ---
+>
 > **UPDATED 2026-08-11 (second pass) — the blocker and ALL NINE highs are fixed
 > and merged.** `main` at `9067366`. The four highs left open by the first pass
 > closed in four further PRs:
@@ -26,7 +46,7 @@
 > still working at quit restored as `resume --last`, which attaches to whichever
 > rollout in the cwd was written last — including another spyc's.
 >
-> **Severity tiers remaining: 20 mediums, 23 lows. Nothing above medium is open.**
+> **Severity tiers remaining at the end of this pass: 20 mediums, 23 lows.**
 >
 > ---
 >
@@ -377,8 +397,25 @@ retires the "newest code is the least covered" observation above** for the two
 subsystems it named. The general point stands as a habit worth keeping: in every
 one of these four, the *pure decision* was tested and its wiring was not.
 
+### Third pass — the first four mediums (2026-08-11)
+
+| # | PR | What closing it showed |
+|---|---|---|
+| M12 | #374 | Worse than filed: 75 commits behind, not 47. The document's "two big things" predated the entire archive campaign, so the release's largest feature was missing from its own release notes. Rewritten to three, with new *Archives*, *Images*, *Mouse* and *Startup* sections and the review itself under *Under the hood*. Four claims in my own first draft were wrong on checking and corrected before commit — the four verbs in #350 (the pager's `y` was never one of them), `^z`'s widening being a fix and not an addition, the archive PR count, and the shape of the temp-dir fix. |
+| M7 | #375 | A **live defect**. `chrome_col_at` bounded `y` and a lower `x` and nothing else, and `route_mouse` tests `over_chrome_row` *ahead of* the region — so in the default full-height vsplit, where the status row is width-clamped to column `a` while `b` spans the frame, a press on `b`'s first row anchored a status-bar selection and a drag from there replaced the clipboard. Bite-checked twice: once on the hit-test, then again with that assertion removed so the consequence had to report for itself. |
+| M5 | #376 | A **live defect**, and a structural one: the rank a member stages under was assigned in `finish`, over the sorted table, but a compressed tar indexes and extracts in **one pass** — the writer could not have asked, whatever it wanted to do. Ranking moved to `push`, and `push` now returns the *path* rather than the rank, so the writer is handed the answer instead of re-deriving it. On macOS `a/README` had been reading back `a/readme`'s bytes, and `a/readme` was both unreadable and unwritable. |
+| M6 | #377 | Same file, opposite direction: a member *named* into the escape namespace resolved to a ranked member's staging path, and `materialize` returns early on an existing destination. Fixed by making the namespace un-namable — one reserved first component (`.spyc`), refused in `normalize` where `..` and NUL already are. The reverse map (`mount_path_for_staged`) had to move with it, and its new round-trip test is what caught that; two older tests that hardcoded the prefix now ask the entry instead, which is what let the spelling drift in the first place. |
+
+Two of the four were live defects rather than coverage gaps — the same ratio as
+the second pass. The recurring shape is different this time: **two derivations of
+one fact**, kept in agreement by nothing. `chrome_col_at` vs. what the renderer
+drew; the staging writer vs. every staging reader; the escape prefix vs. the
+reverse map that strips it. Each fix collapses the pair into one definition and
+pins the round trip with a test.
+
 ### Still open
 
-Nothing above **medium**. The 20 remaining mediums and 23 lows are in §3; the
-clusters are doc-contract drift (M12–M16, M23–M24) and the mouse behaviour set
-(M7, M9, M10, M11). None of them holds the tag.
+Nothing above **medium**. 16 mediums and 23 lows remain, in §3. The live-defect
+cluster left is the rest of the mouse set (M9, M10); the rest is doc-contract
+drift (M13–M16, M23–M24) and guard/test debt (M1–M4, M11, M20–M22). None of them
+holds the tag.
