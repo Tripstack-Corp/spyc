@@ -202,6 +202,91 @@ mod guard_tests {
         );
     }
 
+    /// A subdirectory the index documents **per file** must document all of them.
+    ///
+    /// The guard above skips every subdirectory of `src/app/`, which is what let
+    /// `mouse/tab_hit.rs` be added and never appear in the index — three reviewers
+    /// found it independently. Some groups are deliberately described as a whole
+    /// (`render/`, `state/`); others are enumerated file by file (`mouse/`), and
+    /// only the second kind can be checked this way.
+    ///
+    /// Inferring which is which from the doc does not work: the index mentions
+    /// files like `render/overlays.rs` and `state/archive.rs` incidentally in other
+    /// bullets, so "names any file" reads almost every group as per-file. Hence two
+    /// explicit lists — and every subdirectory must appear in exactly one, so a new
+    /// one fails this test until someone decides which style it follows. That is
+    /// the part that keeps the lists from rotting.
+    #[test]
+    fn a_per_file_documented_subdir_is_documented_completely() {
+        /// Enumerated file-by-file in the index; every file must be named.
+        const PER_FILE: &[&str] = &["mouse"];
+        /// Described as a whole; individual files are deliberately not listed.
+        const AS_GROUP: &[&str] = &[
+            "render",
+            "state",
+            "key_dispatch",
+            "pager_handler",
+            "harness_tests",
+        ];
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let agents = std::fs::read_to_string(root.join("AGENTS.md")).expect("read AGENTS.md");
+        let mut missing = Vec::new();
+        let mut unclassified = Vec::new();
+
+        for entry in std::fs::read_dir(root.join("src/app")).expect("read src/app") {
+            let dir = entry.expect("dir entry").path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let dir_name = dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            if AS_GROUP.contains(&dir_name.as_str()) {
+                continue;
+            }
+            if !PER_FILE.contains(&dir_name.as_str()) {
+                unclassified.push(dir_name);
+                continue;
+            }
+            for file in std::fs::read_dir(&dir).expect("read subdir") {
+                let path = file.expect("dir entry").path();
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if name == "tests.rs" || name.ends_with("_tests.rs") || name.starts_with("test_") {
+                    continue;
+                }
+                // Backticked with the extension, or path-qualified — the two forms
+                // the index uses for a module. A bare stem would let an unrelated
+                // prose mention vouch for a file.
+                if !agents.contains(&format!("`{name}`"))
+                    && !agents.contains(&format!("{dir_name}/{name}"))
+                {
+                    missing.push(format!("{dir_name}/{name}"));
+                }
+            }
+        }
+
+        missing.sort();
+        unclassified.sort();
+        assert!(
+            unclassified.is_empty(),
+            "new src/app/ subdirectories {unclassified:?} are in neither PER_FILE nor \
+             AS_GROUP. Decide how the AGENTS.md index documents them and add them to \
+             one — that decision is what this guard exists to force."
+        );
+        assert!(
+            missing.is_empty(),
+            "these files sit in a src/app/ subdirectory the AGENTS.md index enumerates \
+             file-by-file, but are not named in it: {missing:?}. Add each to its group's \
+             bullet, or the group stops being a map."
+        );
+    }
+
     /// Load-bearing "trap" anchors are a sparse, machine-checked
     /// *discoverability* signal — NOT a comment-style change. An ordinary "why"
     /// comment stays inline and dense (spyc runs ~22% comment density by
