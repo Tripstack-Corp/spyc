@@ -8,7 +8,38 @@
 
 ## 1. Verdict
 
-**No — not releasable as 2.1 today. Yes after fixing one blocker.**
+> **UPDATED 2026-08-11 — the blocker and all six highs are fixed and merged.**
+> **HEAD is releasable as 2.1.** Eight PRs, `main` at `5ce862d`:
+>
+> | PR | closes | what |
+> |---|---|---|
+> | #346 | — | container-parser fuzz target, landed **first**, red on the PoC |
+> | #347 | BLOCKER-1 | containment decided physically, per path component |
+> | #348 | HIGH-1/2/3 | declared sizes stop driving allocations, the bomb gate, and MCP scope |
+> | #349 | HIGH-7 | `EnableMouseCapture` guard sees `setup_terminal` |
+> | #350 | HIGH-4 | every yank through one delivery seam |
+> | #353 | MED-25 | flash guard reads the whole call (one live violation fixed) |
+> | #357 | MED-17 | module-index guard sees subdirectories |
+> | #359 | MED-8 | purity guard sees draw-pass mutation |
+>
+> Verified on `main` after merge: `=== GATE: PASS ===`, 2,331 tests, 0 ignored;
+> all 12 fuzz seeds green; 915k-execution exploratory fuzz run found nothing new.
+> HIGH-5, HIGH-6, HIGH-8 and HIGH-9 remain open — see §7.
+>
+> **Is the containment model now correct by construction?** Close, and honestly
+> stated: extraction refuses to *traverse* a symlink at all, which is a property
+> of each step rather than of the final path, so no ordering of members can
+> arrange an escape — that part is structural, not PoC-negative. What is not
+> structural: the walk is TOCTOU-exposed to a local attacker who can write into
+> spyc's staging directory between the check and the write. Closing that needs
+> per-component `openat`/`O_NOFOLLOW`, which was declined deliberately (it needs
+> directory descriptors threaded through every write site plus a new dependency,
+> and the race already requires local write access to spyc's private directory).
+> Against the archive-controlled hazard — the one this review found — it is
+> correct by construction. Against a local attacker racing it, it is not, and
+> that is a known, bounded gap rather than an unexamined one.
+
+**Original verdict (pre-fix): No — not releasable as 2.1 today. Yes after fixing one blocker.**
 
 > **BLOCKER-1 — `src/archive/read/mod.rs:414` (`link_stays_inside`), consumed at `:252` and `:304`.**
 > A chain of symlink members, each individually passing the containment check,
@@ -255,3 +286,67 @@ the pattern the repo already established six targets ago.
 
 Gate status on HEAD at review time: `=== GATE: PASS ===`, 2,303 unit + 15
 integration tests, 0 failed, 0 ignored.
+
+---
+
+## 7. Remediation record (2026-08-11)
+
+Eight PRs, one finding per PR except HIGH-1/2/3 (one file, one mistake in three
+places). Every fix carries red-before/green-after evidence; the fuzz target
+landed first, deliberately, so it was written against the broken parsers rather
+than alongside the fixes.
+
+### What the fuzz-first ordering actually bought
+
+It found both known crash shapes on its first run, and it caught a fix that
+wasn't one. Mid-AB1 the target reported **every seed passing** — including the
+OOM that was still unfixed. Cause: `contained_dest` canonicalized a staging root
+that doesn't exist yet for seekable containers (the old code created it as a side
+effect of `create_parent`), so `materialize` errored out before doing anything
+and the whole zip/tar path silently did nothing. A green board produced by the
+code under test not running. Nothing in the unit suite would have shown that.
+
+### Near-misses worth keeping
+
+- **Canonicalization leaking into a returned path.** AB1's first version returned
+  the canonical destination; on macOS `/var` → `/private/var`, which broke nine
+  app-layer tests that key staged members by the caller's path shape. Containment
+  is decided canonically; the path is returned in the caller's namespace.
+- **An assertion wrong rather than the code.** Two of AB1's new tests asserted a
+  refused link's *name* wouldn't exist. It does — as a real directory, created for
+  the member that named it as a parent. That is containment working, and the tests
+  now assert the path's type.
+- **A bite-check that didn't run.** MED-8's second injection referenced a field
+  that doesn't exist, so the build failed and the test never executed — read as a
+  pass until checked. Same false-green family as the one above.
+- **An existing guard caught the fixer.** HIGH-4's new flashes were written with
+  `{e}`; `flashed_errors_render_their_whole_chain` failed them. Worth recording
+  because MED-25 is that same guard being *too narrow* elsewhere — narrow in one
+  dimension, working in another.
+
+### Standards trajectory, revisited
+
+The pre-fix reading was "the craft held; the verification did not." That is now
+materially better where it was worst. The archive parsers have a fuzz target in
+the weekly matrix, seeded with the shapes that broke them. Four guards that
+reported green while their invariant was violated now fail on an injected
+violation, each with that injection kept as a test. Two of those (MED-25, MED-8)
+found a live violation the moment they were widened — which is the argument for
+fixing a guard rather than only the thing it missed.
+
+What has not changed: the newest code is still the least covered. HIGH-9 (zero
+tests on `mouse/mod.rs`, `forward.rs`, `scroll.rs`) and HIGH-8 (three archive
+write-back safety properties gutable with the suite green) are open, and they are
+the same shape as the blocker — a safety property whose *pure decision* is tested
+while its wiring is not.
+
+### Still open
+
+| # | Site | Finding |
+|---|---|---|
+| H5 | `clipboard.rs:176` ← `effect.rs:722` | middle-click paste blocks the loop, no timeout |
+| H6 | `session.rs:122-133` | live codex tab saves `agent_session_id: None` |
+| H8 | `archive/write.rs:340`, `:106`, `archive_ops.rs:391` | write-back safety properties untested |
+| H9 | `mouse/mod.rs`, `forward.rs`, `scroll.rs` | zero tests on the mouse dispatch seam |
+
+Plus the 25 mediums and 23 lows in §3. None of these hold the tag.
