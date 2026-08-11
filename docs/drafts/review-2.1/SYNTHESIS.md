@@ -8,8 +8,29 @@
 
 ## 1. Verdict
 
-> **UPDATED 2026-08-11 — the blocker and all six highs are fixed and merged.**
-> **HEAD is releasable as 2.1.** Eight PRs, `main` at `5ce862d`:
+> **UPDATED 2026-08-11 (second pass) — the blocker and ALL NINE highs are fixed
+> and merged.** `main` at `9067366`. The four highs left open by the first pass
+> closed in four further PRs:
+>
+> | PR | closes | what |
+> |---|---|---|
+> | #362 | HIGH-5 | the middle-click clipboard read runs off the loop, and is bounded |
+> | #363 | HIGH-6 | a live codex tab saves the rollout it was pinned to |
+> | #365 | HIGH-8 | the three archive write-back safety properties are pinned |
+> | #368 | HIGH-9 | `handle_mouse`, `forward.rs`, `scroll.rs` covered |
+>
+> Verified on `main` after merge: `=== GATE: PASS ===`, **2,389 tests, 0 ignored**.
+> Every mutation the F-report used as a bite check now fails. Two of these were
+> live defects, not just coverage: a wedged clipboard helper froze spyc for as
+> long as it took (30.21s measured against a stub), and a codex tab that was
+> still working at quit restored as `resume --last`, which attaches to whichever
+> rollout in the cwd was written last — including another spyc's.
+>
+> **Severity tiers remaining: 20 mediums, 23 lows. Nothing above medium is open.**
+>
+> ---
+>
+> **UPDATED 2026-08-11 (first pass) — the blocker and six highs.** Eight PRs, `main` at `5ce862d`:
 >
 > | PR | closes | what |
 > |---|---|---|
@@ -24,7 +45,8 @@
 >
 > Verified on `main` after merge: `=== GATE: PASS ===`, 2,331 tests, 0 ignored;
 > all 12 fuzz seeds green; 915k-execution exploratory fuzz run found nothing new.
-> HIGH-5, HIGH-6, HIGH-8 and HIGH-9 remain open — see §7.
+> HIGH-5, HIGH-6, HIGH-8 and HIGH-9 remained open at this point; all four
+> closed in the second pass above.
 >
 > **Is the containment model now correct by construction?** Close, and honestly
 > stated: extraction refuses to *traverse* a symlink at all, which is a property
@@ -336,17 +358,27 @@ fixing a guard rather than only the thing it missed.
 
 What has not changed: the newest code is still the least covered. HIGH-9 (zero
 tests on `mouse/mod.rs`, `forward.rs`, `scroll.rs`) and HIGH-8 (three archive
-write-back safety properties gutable with the suite green) are open, and they are
-the same shape as the blocker — a safety property whose *pure decision* is tested
-while its wiring is not.
+write-back safety properties gutable with the suite green) are open at the end of
+the first pass, and they are the same shape as the blocker — a safety property
+whose *pure decision* is tested while its wiring is not. Both closed in the
+second pass; see below.
+
+### The four highs the first pass left, and what closing them showed
+
+| # | PR | What it turned out to be |
+|---|---|---|
+| H5 | #362 | A **live defect**, worse than filed. A clipboard read that never answers held the loop for as long as it took — 30.21s measured against a `sleep 30` stub, then returning `Ok("")`: a silent empty paste after a half-minute freeze. Fixed in two halves, because the hang had two: the read moved to a worker (`graveyard_ops` template), and `capture` gained a deadline that kills the helper, so off-threading doesn't just relocate the hang onto a growing pile of stuck threads. Not fixed: the paste size cap the finding also mentions. Once off-thread, what reaches the loop is the same `String` a terminal bracketed paste already delivers, and capping middle-click alone would be an inconsistency rather than a fix. |
+| H6 | #363 | A **live defect**, and the interesting part is *why* it survived: `TabInfo::pinned_session_id()` already existed for exactly this, and three consumers used it — the transcript view, the image gallery, the status suffix. Save was the one that didn't. The judgement call is recorded in the PR: codex's pinned id is accepted without re-validation, because `codex_pin` read it out of a rollout file's name — the claim already *was* the observation. Claude still validates, because its id arrives from a hook payload that can name a conversation already deleted. |
+| H8 | #365 | Coverage only; the production code was right. All four F-report bites re-confirmed on `089a830` first (2,365 tests green under each). The test that closes it needed a repack that *only* verify can refuse — a step whose stored name the index reads back differently (`./a.txt` → `a.txt`) — because every earlier guard lets it through. Also corrected a docstring that claimed verify coverage its test didn't have. |
+| H9 | #368 | Coverage, plus a demonstration of the finding's real point. The existing route-level `one_flick_past_the_bottom_sends_the_close_key_once` re-implements its caller, so reverting the shipped fix leaves it **green**; the new caller-level test reports "the close key went out 3× on one flick". Both were run in the same pass to show it. Panes were made mouse-aware the way a real child does it — the DEC mode written to `cat`'s stdin and echoed back through the pty — rather than by poking the parser, so what the test exercises is the actual path. |
+
+**Both remaining verification-shaped highs (H8, H9) are now closed, which
+retires the "newest code is the least covered" observation above** for the two
+subsystems it named. The general point stands as a habit worth keeping: in every
+one of these four, the *pure decision* was tested and its wiring was not.
 
 ### Still open
 
-| # | Site | Finding |
-|---|---|---|
-| H5 | `clipboard.rs:176` ← `effect.rs:722` | middle-click paste blocks the loop, no timeout |
-| H6 | `session.rs:122-133` | live codex tab saves `agent_session_id: None` |
-| H8 | `archive/write.rs:340`, `:106`, `archive_ops.rs:391` | write-back safety properties untested |
-| H9 | `mouse/mod.rs`, `forward.rs`, `scroll.rs` | zero tests on the mouse dispatch seam |
-
-Plus the 25 mediums and 23 lows in §3. None of these hold the tag.
+Nothing above **medium**. The 20 remaining mediums and 23 lows are in §3; the
+clusters are doc-contract drift (M12–M16, M23–M24) and the mouse behaviour set
+(M7, M9, M10, M11). None of them holds the tag.
