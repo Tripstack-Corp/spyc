@@ -20,25 +20,27 @@ pub fn check(state_dir: &Path) -> HealthReport {
     let mut warnings = Vec::new();
     let mut cleaned = 0usize;
 
-    cleaned += check_paired_dir(
+    let (inv_cleaned, _inv_bytes) = check_paired_dir(
         &state_dir.join("inventory"),
         &mut warnings,
         "inventory",
         &["dat"],
     );
+    cleaned += inv_cleaned;
     // The graveyard payload is `<uuid>.tar.zst` (current) or `<uuid>.dat`
     // (pre-v1.41.0 legacy, migrated by the cascade). Both must be recognized
     // as the metadata json's partner — otherwise every valid entry's json is
     // mistaken for an orphan and deleted, permanently breaking undo.
-    cleaned += check_paired_dir(
+    let (gy_cleaned, gy_bytes) = check_paired_dir(
         &state_dir.join("graveyard"),
         &mut warnings,
         "graveyard",
         &["tar.zst", "dat"],
     );
+    cleaned += gy_cleaned;
     check_marks(&state_dir.join("marks.toml"), &mut warnings);
     check_sessions(&state_dir.join("sessions"), &mut warnings);
-    check_graveyard_size(&state_dir.join("graveyard"), &mut warnings);
+    warn_on_graveyard_size(gy_bytes, &mut warnings);
     check_frecency(&state_dir.join("frecency.json"), &mut warnings);
 
     HealthReport { warnings, cleaned }
@@ -54,35 +56,64 @@ pub fn check(state_dir: &Path) -> HealthReport {
 /// `zst` and stem `<uuid>.tar`, so naive extension/stem pairing would
 /// never match it against `<uuid>.json` and would delete every live
 /// entry as an "orphan".
+///
+/// **Opens nothing.** Pairing is decided from filenames, and a corrupt
+/// metadata file is detected from the size `read_dir` already reports. This
+/// used to `read_to_string` + `serde_json::from_str` *every* `<stem>.json` on
+/// every launch to prove it parsed, which cost 526ms of the 550ms this
+/// function took on a 5000-entry graveyard — 5000 file opens, on the
+/// synchronous startup path.
+///
+/// That validation was guarding a state that cannot occur: both writers
+/// ([`crate::state::graveyard::Graveyard::write_entry_as`] and
+/// [`crate::state::inventory`]) emit their json through
+/// [`crate::fs::write_atomic`], which writes a temp file and renames it. A
+/// rename is atomic, so a `<stem>.json` here is either absent or complete —
+/// never half-written. A zero-length one is still treated as corrupt, since
+/// that check is free.
+///
+/// Anything unparseable that does slip in (bit rot, a hand-edited file) is
+/// skipped by the readers rather than crashing them —
+/// `graveyard::read_entries` and the inventory loader both `.ok()?` the parse —
+/// so the cost of not catching it eagerly is a stale pair on disk, not a
+/// failure. The size warning below still counts its bytes.
+///
+/// Returns `(removed, total_bytes)`; the byte total is summed from the same
+/// walk so the caller doesn't need a second pass over the directory.
 fn check_paired_dir(
     dir: &Path,
     warnings: &mut Vec<String>,
     label: &str,
     payload_suffixes: &[&str],
-) -> usize {
+) -> (usize, u64) {
     let Ok(entries) = std::fs::read_dir(dir) else {
-        return 0; // directory missing is fine — first run
+        return (0, 0); // directory missing is fine — first run
     };
 
     let mut jsons = std::collections::HashSet::new();
     let mut payload_stems = std::collections::HashSet::new();
     let mut payload_files: Vec<(String, PathBuf)> = Vec::new();
     let mut corrupt_json = 0usize;
+    let mut total_bytes = 0u64;
 
     for entry in entries.filter_map(Result::ok) {
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
             continue;
         };
+        // One `stat` per entry, reused for both the corrupt check and the size
+        // total. `DirEntry::metadata` does not follow symlinks and on most
+        // platforms is served from the directory read itself.
+        let len = entry.metadata().map(|m| m.len()).unwrap_or_default();
+        total_bytes += len;
         if let Some(stem) = name.strip_suffix(".json") {
-            // Validate JSON is parseable.
-            if let Ok(text) = std::fs::read_to_string(&path) {
-                if serde_json::from_str::<serde_json::Value>(&text).is_err() {
-                    corrupt_json += 1;
-                    let _ = std::fs::remove_file(&path);
-                } else {
-                    jsons.insert(stem.to_string());
-                }
+            if len == 0 {
+                // An empty metadata file can never parse. Written atomically,
+                // so this should be unreachable; cheap to keep honest.
+                corrupt_json += 1;
+                let _ = std::fs::remove_file(&path);
+            } else {
+                jsons.insert(stem.to_string());
             }
         } else if let Some(stem) = payload_suffixes
             .iter()
@@ -123,7 +154,7 @@ fn check_paired_dir(
         warnings.push(format!("{label}: cleaned up {orphans} orphaned file(s)"));
     }
 
-    removed
+    (removed, total_bytes)
 }
 
 /// Check marks.toml — warn if it exists but can't be parsed.
@@ -168,17 +199,11 @@ fn check_sessions(dir: &Path, warnings: &mut Vec<String>) {
 }
 
 /// Warn if the graveyard is consuming significant disk space.
-fn check_graveyard_size(dir: &Path, warnings: &mut Vec<String>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-
-    let total_bytes: u64 = entries
-        .filter_map(Result::ok)
-        .filter_map(|e| e.metadata().ok())
-        .map(|m| m.len())
-        .sum();
-
+///
+/// Takes the total rather than deriving it, because [`check_paired_dir`] has
+/// already walked the directory and stat'd every entry — this used to be a
+/// second full walk for the same number.
+fn warn_on_graveyard_size(total_bytes: u64, warnings: &mut Vec<String>) {
     // Warn above 100 MB.
     if total_bytes > 100 * 1024 * 1024 {
         let mb = total_bytes / (1024 * 1024);
@@ -241,16 +266,80 @@ mod tests {
         assert!(!inv.join("abc123.json").exists());
     }
 
+    /// An empty metadata file is still cleaned. This is the reachable form of
+    /// "corrupt": the writers rename a complete temp file into place, so a
+    /// zero-length json is the only shape a broken write could leave, and the
+    /// size `read_dir` already reports is enough to spot it.
     #[test]
-    fn corrupt_json_removed() {
+    fn empty_json_removed() {
         let tmp = tempfile::tempdir().unwrap();
         let inv = tmp.path().join("inventory");
         std::fs::create_dir_all(&inv).unwrap();
-        std::fs::write(inv.join("bad.json"), "not json {{{").unwrap();
+        std::fs::write(inv.join("bad.json"), b"").unwrap();
         std::fs::write(inv.join("bad.dat"), b"data").unwrap();
         let report = check(tmp.path());
         assert!(report.cleaned > 0);
         assert!(report.warnings.iter().any(|w| w.contains("corrupt")));
+        assert!(!inv.join("bad.json").exists());
+    }
+
+    /// DELIBERATE NARROWING, recorded so it isn't mistaken for a regression.
+    ///
+    /// A non-empty but unparseable json is no longer removed. Detecting it meant
+    /// opening and parsing every metadata file on every launch — 526ms of a
+    /// 550ms startup check on a 5000-entry graveyard — to guard a state atomic
+    /// writes make impossible.
+    ///
+    /// The cost of tolerating it is a stale pair on disk, NOT a failure: the
+    /// readers skip an unparseable entry rather than choking on it, which this
+    /// test also pins.
+    #[test]
+    fn a_nonempty_unparseable_json_is_tolerated_not_removed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let grave = tmp.path().join("graveyard");
+        std::fs::create_dir_all(&grave).unwrap();
+        std::fs::write(grave.join("bad.json"), "not json {{{").unwrap();
+        std::fs::write(grave.join("bad.tar.zst"), b"payload").unwrap();
+
+        let report = check(tmp.path());
+        assert_eq!(report.cleaned, 0, "the pair is left alone");
+        assert!(grave.join("bad.json").exists());
+        assert!(
+            grave.join("bad.tar.zst").exists(),
+            "its payload is not an orphan while the json is present"
+        );
+
+        // And the reader tolerates it: the entry simply doesn't appear.
+        crate::state::with_state_root(tmp.path(), || {
+            assert!(
+                crate::state::graveyard::Graveyard::load()
+                    .entries
+                    .is_empty(),
+                "an unparseable entry must be skipped, not surfaced or fatal"
+            );
+        });
+    }
+
+    /// The size warning still fires — it now reads the total from the same walk
+    /// that does the pairing, instead of a second pass over the directory.
+    #[test]
+    fn size_warning_comes_from_the_pairing_walk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let grave = tmp.path().join("graveyard");
+        std::fs::create_dir_all(&grave).unwrap();
+        // One valid pair, payload just over the 100 MB warn threshold.
+        std::fs::write(grave.join("big.json"), br#"{"id":"big"}"#).unwrap();
+        let f = std::fs::File::create(grave.join("big.tar.zst")).unwrap();
+        f.set_len(101 * 1024 * 1024).unwrap();
+        drop(f);
+
+        let report = check(tmp.path());
+        assert_eq!(report.cleaned, 0, "a valid pair is untouched");
+        assert!(
+            report.warnings.iter().any(|w| w.contains("MB")),
+            "expected a size warning, got {:?}",
+            report.warnings
+        );
     }
 
     #[test]
