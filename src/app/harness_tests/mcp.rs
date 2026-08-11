@@ -317,6 +317,40 @@ fn worktree_arg_empty_errors_and_relative_resolves_against_cwd() {
             base.join("sub"),
             "relative path resolved against the focused column's cwd"
         );
+
+        // Inside an archive that cwd is the container *file's* path, so joining
+        // onto it would name a worktree inside a tarball. The project root is
+        // what a relative worktree path means there.
+        let archive = base.join("pkg.tar.gz");
+        let mut b = crate::archive::index::IndexBuilder::new(10);
+        b.push(
+            "member.txt",
+            crate::archive::index::Draft::file(1, crate::archive::index::Locator::Staged),
+        );
+        let (index, _) = b.finish(archive.clone(), crate::archive::ArchiveFormat::TarGz, 10);
+        app.state.mounts.insert(
+            crate::archive::ArchiveMount {
+                index,
+                journal: crate::archive::Journal::default(),
+                staged: crate::archive::journal::StagedStats::new(),
+                capability: crate::archive::Capability::ReadWrite,
+                warnings: Vec::new(),
+                staging_root: base.join("staging"),
+                last_used: 0,
+                depth: 0,
+                editing: Vec::new(),
+            },
+            &[],
+        );
+        app.state.project_home = Some(base.clone());
+        app.state.left.git_cache.current_repo_root = None;
+        app.state.left.listing.dir = archive;
+        assert_eq!(
+            app.resolve_worktree_arg("sub")
+                .expect("relative path still resolves"),
+            base.join("sub"),
+            "not a path inside the container"
+        );
     });
 }
 
@@ -622,6 +656,79 @@ fn wait_for_scope_clear_times_out_when_conflict_persists() {
         match rx.try_recv().expect("timed_out reply") {
             McpResponse::Ok { message } => assert!(message.contains("timed_out")),
             McpResponse::Error { message } => panic!("unexpected error: {message}"),
+        }
+    });
+}
+
+/// A live archive mount used to take every worktree tool down with it: the
+/// focused column's dir becomes the container *file's* path, and git discovery
+/// from there fails with `path is not a directory`. Browsing a tarball is no
+/// reason to lose `create_worktree`.
+#[test]
+fn mcp_create_worktree_works_while_the_column_is_inside_an_archive() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run_git = |dir: &std::path::Path, args: &[&str]| {
+        crate::git::test_support::run_git(dir, args);
+    };
+    crate::state::with_state_root(tmp.path(), || {
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let repo = root.join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("f.txt"), "v1\n").unwrap();
+        run_git(&repo, &["add", "f.txt"]);
+        run_git(&repo, &["commit", "-q", "-m", "v1"]);
+
+        let mut app = App::test_app(repo.clone());
+        app.state.update_repo_root(state::Side::Left, &repo);
+        app.state.project_home = Some(repo.clone());
+
+        // Stand the column inside an archive that lives *outside* the repo — the
+        // shape that broke: `~/src/pkg.tar.gz` while the project is `~/src/spyc`.
+        let archive = root.join("pkg.tar.gz");
+        let mut b = crate::archive::index::IndexBuilder::new(10);
+        b.push(
+            "sub/a.txt",
+            crate::archive::index::Draft::file(1, crate::archive::index::Locator::Staged),
+        );
+        let (index, _) = b.finish(archive.clone(), crate::archive::ArchiveFormat::TarGz, 10);
+        app.state.mounts.insert(
+            crate::archive::ArchiveMount {
+                index,
+                journal: crate::archive::Journal::default(),
+                staged: crate::archive::journal::StagedStats::new(),
+                capability: crate::archive::Capability::ReadWrite,
+                warnings: Vec::new(),
+                staging_root: root.join("staging"),
+                last_used: 0,
+                depth: 0,
+                editing: Vec::new(),
+            },
+            &[],
+        );
+        // A mount clears the column's git state, exactly as entering one does.
+        app.state.left.git_cache.current_repo_root = None;
+        app.state.left.listing.dir = archive.clone();
+        assert!(
+            !archive.is_dir(),
+            "the premise: the column is somewhere that is not a directory"
+        );
+
+        let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::CreateWorktree {
+            branch: "from-inside-a-mount".to_string(),
+            base: None,
+            open: false,
+        });
+        match resp {
+            crate::mcp_cmd::McpResponse::Ok { message } => {
+                let v: serde_json::Value = serde_json::from_str(&message).unwrap();
+                let path = std::path::PathBuf::from(v["path"].as_str().unwrap());
+                assert!(path.is_dir(), "worktree dir created: {path:?}");
+                assert!(path.join("f.txt").exists(), "off the project's repo");
+            }
+            crate::mcp_cmd::McpResponse::Error { message } => {
+                panic!("create_worktree from inside a mount errored: {message}")
+            }
         }
     });
 }

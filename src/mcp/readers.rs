@@ -394,11 +394,17 @@ pub(super) fn read_context_or_empty(ctx_path: &Path) -> String {
 /// can't be resolved — a bare/unborn entry, or a repo with no base branch),
 /// and `locked`/`lock_reason` (the `claim_worktree` lease — a cooperating
 /// session's `remove`/`clean` refuses a locked worktree).
-/// Runs on the socket thread — pure git + the context file's cwd, no `App`.
+/// Runs on the socket thread — pure git + the context file, no `App`.
 /// Returns `[]` outside a repo. (Column-`b` flags still need context the
 /// snapshot doesn't yet expose.)
+///
+/// Anchored on `search_root` (the focused column's worktree root) rather than the
+/// raw `cwd`, matching every other read tool. The two agree whenever the cursor is
+/// in a repo; where they differ, `cwd` is the worse answer — inside an archive
+/// mount it is the container *file's* path, which discovers no repo, so listing
+/// the worktrees of the project came back as an empty set rather than as an error.
 pub(super) fn list_worktrees_json(ctx_path: &Path) -> String {
-    list_worktrees_json_at(&read_cwd_from_context(ctx_path))
+    list_worktrees_json_at(&search_root(ctx_path))
 }
 
 /// Root-based core of [`list_worktrees_json`]: the same worktree inventory, but
@@ -463,7 +469,9 @@ fn resolve_worktree_path(ctx_path: &Path, path_arg: &str) -> PathBuf {
     if raw.is_absolute() {
         raw
     } else {
-        read_cwd_from_context(ctx_path).join(raw)
+        // `search_root`, not the raw cwd: inside an archive that cwd is the
+        // container file's path, and a worktree is never inside one.
+        search_root(ctx_path).join(raw)
     }
 }
 
@@ -698,6 +706,47 @@ fn hunk_header(h: &Hunk) -> String {
 mod tests {
     use super::*;
     use crate::git::test_support::run_git;
+
+    /// While a column is inside an archive the context's `cwd` is the container
+    /// *file's* path, which discovers no repo — so the worktree inventory came
+    /// back as `[]`, reading as "this project has no worktrees" rather than as a
+    /// failure. `search_root` still names the repo, so it is what this anchors on.
+    #[test]
+    fn the_inventory_survives_a_cwd_inside_an_archive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let repo = root.join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-q", "-m", "c1"]);
+
+        // The cursor is inside a tarball that isn't even in the repo.
+        let inside = root.join("pkg.tar.gz").join("sub");
+        let ctx = tmp.path().join("ctx.json");
+        std::fs::write(
+            &ctx,
+            json!({
+                "cwd": inside.display().to_string(),
+                "search_root": repo.display().to_string(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            list_worktrees_json_at(&inside),
+            "[]",
+            "the premise: nothing is discoverable from a path inside a container"
+        );
+        let v: Value = serde_json::from_str(&list_worktrees_json(&ctx)).unwrap();
+        assert_eq!(
+            v.as_array().map(Vec::len),
+            Some(1),
+            "but the project's own worktree is still listed: {v}"
+        );
+    }
 
     #[test]
     fn reports_inventory_dirty_and_current() {

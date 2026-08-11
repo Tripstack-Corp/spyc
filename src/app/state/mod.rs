@@ -855,6 +855,29 @@ impl AppState {
             .unwrap_or_else(|| self.col(side).listing.dir.clone())
     }
 
+    /// The directory a **worktree** operation anchors on: normally the focused
+    /// column's own dir, but the repo/project root when that dir is a place with
+    /// no directory behind it.
+    ///
+    /// Inside an archive mount the column's dir is the *container file's* path —
+    /// `~/src/pkg.tar.gz` — and git discovery from there fails outright
+    /// (`path is not a directory`), taking every worktree tool down with it while
+    /// the user browses an archive. A worktree op is about the repo, not about
+    /// where the cursor happens to be resting, so the mount case falls back to
+    /// [`Self::tool_root`]; a mount clears the column's git state, so that
+    /// resolves to `PROJECT_HOME` — the project the user is working on.
+    ///
+    /// Asked of the mount registry rather than by stat'ing the path: the Model
+    /// already knows which paths are virtual, and it can answer without IO.
+    pub fn worktree_anchor(&self) -> std::path::PathBuf {
+        let dir = &self.cur().listing.dir;
+        if self.mounts.contains(dir) {
+            self.tool_root(self.focused_side())
+        } else {
+            dir.clone()
+        }
+    }
+
     /// The anchor a column's **harpoon** list keys off: its worktree root when
     /// in a repo, else `PROJECT_HOME`. Unlike [`Self::tool_root`] there is *no*
     /// listing-dir fallback — harpoon stays disabled (`None`) outside a repo
