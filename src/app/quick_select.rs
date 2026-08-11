@@ -142,7 +142,7 @@ impl App {
     }
 
     fn yank_quick_select(&mut self, text: &str, kind_label: &str) {
-        match crate::clipboard::copy(text) {
+        match self.deliver_clipboard(text) {
             Ok(()) => {
                 let preview: String = text.chars().take(60).collect();
                 let ellipsis = if text.len() > 60 { "…" } else { "" };
