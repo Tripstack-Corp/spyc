@@ -231,6 +231,11 @@ impl StatusBar<'_> {
     }
 }
 
+/// Elide the middle of `s` to fit `max` display columns, keeping a third of the
+/// budget for the head and two thirds for the tail — a path's leaf identifies it
+/// better than its root does. Both halves cut on grapheme-cluster boundaries.
+/// (Deliberately not `unicode_truncate_centered`, which would split the budget
+/// evenly and lose that bias.)
 pub fn truncate_middle(s: &str, max: usize) -> String {
     if dw(s) <= max {
         return s.to_string();
@@ -248,20 +253,12 @@ pub fn truncate_middle(s: &str, max: usize) -> String {
     format!("{head}{ELLIPSIS}{tail}")
 }
 
-/// Take the last `max` display columns from a string.
+/// Take the last `max` display columns from a string. Thin owned wrapper over
+/// the shared [`super::display_truncate_tail`], which cuts on grapheme-cluster
+/// boundaries — this used to walk chars and could both mismeasure a cluster's
+/// width and slice one in half.
 fn display_take_tail(s: &str, max: usize) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let mut width = 0;
-    let mut start = chars.len();
-    for i in (0..chars.len()).rev() {
-        let cw = unicode_width::UnicodeWidthChar::width(chars[i]).unwrap_or(0);
-        if width + cw > max {
-            break;
-        }
-        width += cw;
-        start = i;
-    }
-    chars[start..].iter().collect()
+    super::display_truncate_tail(s, max).to_string()
 }
 
 /// Shorthand for `super::display_width(s)`.

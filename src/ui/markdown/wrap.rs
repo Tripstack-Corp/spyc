@@ -32,9 +32,9 @@ pub(super) fn slice_spans(spans: &[Span<'static>], start: usize, end: usize) -> 
         let lo = start.saturating_sub(span_start);
         let hi = (end - span_start).min(span.content.len());
         // Only keep slices that lie on UTF-8 char boundaries; if the
-        // wrap point happens to land mid-char (rare given we walk
-        // char_indices in word_wrap_ranges), back up to the nearest
-        // boundary by extending the chunk one byte at a time.
+        // wrap point happens to land mid-char (rare given
+        // word_wrap_ranges breaks on grapheme-cluster boundaries, which
+        // are char boundaries too), back up to the nearest boundary.
         let lo = floor_char_boundary(&span.content, lo);
         let hi = floor_char_boundary(&span.content, hi);
         if hi > lo {

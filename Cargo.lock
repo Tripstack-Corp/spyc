@@ -4393,6 +4393,7 @@ dependencies = [
  "trash",
  "two-face",
  "unicode-segmentation",
+ "unicode-truncate",
  "unicode-width",
  "uuid",
  "uzers",
