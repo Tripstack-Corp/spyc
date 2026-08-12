@@ -402,9 +402,9 @@ pub fn member_bytes(archive: &Path, entry: &IndexEntry) -> Result<Vec<u8>> {
 /// is left in raw mode. Reserve a modest amount and let `read_to_end` grow on
 /// bytes that actually arrived: the declared size may bound a read, never an
 /// allocation.
-const RESERVE_CAP: u64 = 1 << 20;
+pub(super) const RESERVE_CAP: u64 = 1 << 20;
 
-fn reserve_for(declared: u64) -> usize {
+pub(super) fn reserve_for(declared: u64) -> usize {
     usize::try_from(declared.min(RESERVE_CAP)).unwrap_or(0)
 }
 
