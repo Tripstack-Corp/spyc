@@ -1194,6 +1194,12 @@ impl App {
                     opts: crate::archive::write::RepackOptions {
                         snapshot_original: mount.index.compressed_size <= snapshot_limit,
                         free_space_margin: 8 * MB,
+                        verify_budget: self
+                            .state
+                            .config
+                            .archive
+                            .extract_budget_mb
+                            .saturating_mul(MB),
                     },
                 }))
             }
