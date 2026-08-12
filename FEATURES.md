@@ -565,7 +565,9 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   and the session you quit from can all point inside an archive. Jumping to one
   mounts the archive again on the way, so it doesn't matter that nothing has it
   open — `spyc -r` puts you back where you left off, several directories deep in
-  a tarball.
+  a tarball. A second commander (`b`) that was inside one is the exception: the
+  split comes back, but parked on the directory holding the container with the
+  cursor on it, and says so.
 - **Not yet supported inside an archive** — creating an empty directory or a new
   file, copying a whole directory *in* (only files, since the archive would keep
   the name and lose what's under it), moving across the archive boundary in one

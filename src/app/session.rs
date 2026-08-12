@@ -574,6 +574,45 @@ impl App {
             Side::Left
         };
         let width_pct = sv.width_pct.clamp(20, 80); // clamp a hand-edited / older width
+        // A column browsing a container has a cwd that is not a directory and
+        // never was, so it fails the filter below, falls through to the preview
+        // branch with no `preview_path`, and the blank-split guard drops the
+        // whole split — silently. Land it on the directory the container is in,
+        // cursor on the container itself: one `Enter` from where they were, and
+        // a split they still have. (The left column remounts instead, but it can
+        // afford to: `Effect::ChangeDir` acts on the focused column, so aiming
+        // one at `b` would need the effect to be able to name a column.)
+        let container = sv
+            .right_cwd
+            .as_ref()
+            .filter(|p| !p.is_dir())
+            .and_then(|p| super::archive::archive_ancestor_of(p))
+            .map(|(archive, _)| archive);
+        if let Some(archive) = container {
+            let Some(parent) = archive.parent() else {
+                return;
+            };
+            self.open_second_commander_at(parent);
+            if let Some(v) = self.state.vsplit.as_mut() {
+                v.width_pct = width_pct;
+                v.mode = mode;
+                v.focus = focus;
+            }
+            self.state.focus_on_path(&archive);
+            self.state.focus = if pane_focused {
+                Focus::Pane
+            } else {
+                Focus::FileList
+            };
+            self.state.flash_info(format!(
+                "b was inside {} — reopened beside it",
+                archive
+                    .file_name()
+                    .unwrap_or(archive.as_os_str())
+                    .to_string_lossy()
+            ));
+            return;
+        }
         if let Some(right_cwd) = sv.right_cwd.as_ref().filter(|p| p.is_dir()) {
             // PR G: reopen the second commander at its saved cwd (this sets
             // `state.right` + `vsplit` + git/harpoon + rows), then override the
