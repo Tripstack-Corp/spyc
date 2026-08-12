@@ -397,7 +397,9 @@ spyc's workflow: browse files above, talk to Claude below.
   capture and an agent's transcript, and (in an agent transcript)
   `t` toggles tool-call lines. The pty keeps running off-screen — output
   you miss while reading lands in scrollback for the next view. `Esc`
-  snaps back to live.
+  snaps back to live — and so does scrolling *down past the end*, so a
+  flick out the bottom returns you to the agent rather than parking you
+  at `[EOF]`.
   - The fundamental limit is that full-screen TUIs do *virtual
     scrolling* inside a fixed grid — old content lives in app
     memory, not the terminal — so even a parallel vt100 parser

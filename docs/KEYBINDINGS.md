@@ -180,7 +180,8 @@ in place:
   scrolled-back rather than live). On an agent tab it shows the
   agent's transcript instead whenever the terminal has nothing to
   show; `T` swaps between the two when both exist, `t` toggles
-  tool-call lines, `r` reloads.
+  tool-call lines, `r` reloads. Scrolling down past the end exits back
+  to the live pane, same as `Esc`.
 
 Inside the pager: `/` search with `n`/`N`, `:N` jump-to-line,
 `V` arms visual line mode — first `V` places a line cursor you
