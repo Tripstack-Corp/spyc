@@ -327,10 +327,17 @@ fn header_for(entry: &super::IndexEntry, size: u64) -> tar::Header {
     header
 }
 
+/// Read a tar member's stored bytes for the repack.
+///
+/// `size` is the member's **declared** size, straight off an attacker-supplied
+/// header, so it bounds the read (`take`) and must never bound the allocation —
+/// see [`read::reserve_for`]. A plain `.tar` is seekable, so mounting one costs
+/// no disk and the extract budget never looks at it: a header lying about its
+/// size sails through the mount and lands here on the first `:archive write`.
 fn read_at(archive: &Path, offset: u64, size: u64) -> Result<Vec<u8>> {
     let mut f = File::open(archive).with_context(|| format!("opening {}", archive.display()))?;
     f.seek(SeekFrom::Start(offset))?;
-    let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+    let mut bytes = Vec::with_capacity(read::reserve_for(size));
     f.take(size).read_to_end(&mut bytes)?;
     Ok(bytes)
 }

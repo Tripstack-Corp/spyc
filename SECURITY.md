@@ -53,7 +53,15 @@ log: agent harnesses commonly auto-approve MCP tool calls while gating
 shell execution behind per-command permission prompts, so an unvalidated
 `root` would bypass a boundary the *user* believes exists.
 
-**That set is not fixed, and the agent can widen it.** Two of its
+**The trusted anchor is spyc's launch directory, and every directory
+under it.** `is_within_allowed` accepts any descendant of the context
+root, which is where spyc was started. Launch it from `$HOME` — an
+ordinary thing to do with a file manager — and `~/.ssh` and `~/.aws` are
+inside an allowed root for every read tool. That follows from the design
+being about *scoping* rather than *confinement*, and it is what separates
+"validated against a set of roots" sounding tight from being tight.
+
+**That set is not fixed either, and the agent can widen it.** Two of its
 entries come from the cursor (`cwd`, `search_root`), and `navigate_to`
 sets `cwd` to any path the agent names — so `navigate_to("/etc")`
 followed by `search_content(…, root="/etc")` is allowed. `open_worktree`
