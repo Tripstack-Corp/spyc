@@ -434,6 +434,12 @@ impl App {
                 // borrow ends at the guard.)
                 self.toggle_scrollback_tool_calls();
             }
+            KeyCode::Char('T') if view.pane_scroll => {
+                // Flip this scrollback between the terminal capture and the
+                // agent's transcript. Capital `T` beside lowercase `t`: both are
+                // "change what this view shows", and the pair reads as one idea.
+                self.flip_scrollback_source();
+            }
             // Mermaid diagram on screen: `o` opens it full-res in the OS viewer
             // (Preview.app / xdg-open); `i` renders it as a full-screen image
             // overlay inside spyc (graphics terminals). Both render off-thread
