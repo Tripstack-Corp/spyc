@@ -20,10 +20,20 @@ mod guard_tests {
     /// See AGENTS.md → "Keep `src/app/` modularized".
     ///
     /// Ratcheted 4000 → 1500 after the impl-extraction sweep left mod.rs
-    /// at ~1076 lines (a guard that allows tripling isn't guarding).
+    /// at ~1076 lines (a guard that allows tripling isn't guarding), then
+    /// 1500 → 1350 after the pre-2.1 review caught it at **1495 of 1500** —
+    /// five lines of headroom, which turns the next feature into a
+    /// bump-or-extract decision taken under deadline. Extracting the pure
+    /// predicates (to `util.rs`) and the loop-scoped types (to `run.rs`)
+    /// brought it to 1278.
+    ///
+    /// What is left is close to the floor for the current design: 52% of the
+    /// file is `///` field docs on `Message`, `Runtime` and `ViewState`, which
+    /// is what this module is *for*. So the headroom is deliberately small —
+    /// enough for a new `Message` variant, not enough for a feature's logic.
     #[test]
     fn mod_rs_stays_decomposed() {
-        const CEILING: usize = 1_500;
+        const CEILING: usize = 1_350;
         let src = include_str!("mod.rs");
         let lines = src.lines().count();
         assert!(
@@ -576,7 +586,7 @@ mod guard_tests {
 
 #[cfg(test)]
 mod refresh_debounce_tests {
-    use super::super::should_fire_refresh;
+    use super::super::util::should_fire_refresh;
     use std::time::{Duration, Instant};
 
     const QUIET: Duration = Duration::from_millis(500);
@@ -713,7 +723,7 @@ mod refresh_debounce_tests {
 
 #[cfg(test)]
 mod post_chord_bounce_tests {
-    use super::super::{POST_CHORD_BOUNCE_WINDOW, is_post_chord_bounce};
+    use super::super::util::{POST_CHORD_BOUNCE_WINDOW, is_post_chord_bounce};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::time::{Duration, Instant};
 

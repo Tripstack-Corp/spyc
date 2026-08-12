@@ -4,7 +4,10 @@
 use super::*;
 use crate::app::effect::matchers::EffectSliceExt;
 use crate::keymap::Action;
-use crossterm::event::KeyModifiers;
+// `KeyEvent` used to arrive through `use super::*`, because mod.rs imported it
+// for the pure key predicates. Those moved to `util.rs`, so these fixtures name
+// it themselves rather than keeping a production-unused import alive upstream.
+use crossterm::event::{KeyEvent, KeyModifiers};
 
 fn key(c: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty())

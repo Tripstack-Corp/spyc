@@ -13,10 +13,7 @@ use crate::ui::pager;
 use crate::ui::prompt::PromptLine;
 use crate::ui::status::StatusBar;
 
-use crate::app::{
-    App, FlashKind, FrameLayout, Mode, View, path_basename_display, place_pty_cursor_from_screen,
-    state,
-};
+use crate::app::{App, FlashKind, FrameLayout, Mode, View, path_basename_display, state};
 
 impl App {
     pub(super) fn render_inner(&self, frame: &mut Frame, layout: FrameLayout) {
@@ -54,7 +51,7 @@ impl App {
                     overlay_area,
                 );
                 if want_overlay_cursor {
-                    place_pty_cursor_from_screen(frame, screen, overlay_area);
+                    crate::app::util::place_pty_cursor_from_screen(frame, screen, overlay_area);
                 }
             });
             // Show a dismiss prompt when the subprocess has exited.
@@ -304,7 +301,7 @@ impl App {
                     rect,
                 );
                 if focused && !suppress_cursor {
-                    place_pty_cursor_from_screen(frame, screen, rect);
+                    crate::app::util::place_pty_cursor_from_screen(frame, screen, rect);
                 }
             });
         }
@@ -553,7 +550,7 @@ impl App {
                         rect,
                     );
                     if right_focused {
-                        place_pty_cursor_from_screen(frame, screen, rect);
+                        crate::app::util::place_pty_cursor_from_screen(frame, screen, rect);
                     }
                 });
             } else if let Some(view) = self.view.pager_right.as_ref() {
