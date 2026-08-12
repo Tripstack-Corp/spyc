@@ -262,10 +262,14 @@ spyc's workflow: browse files above, talk to Claude below.
     **codex** writes inline `[[hooks.*]]` into the same `.codex/config.toml` that
     already holds the MCP entry (read once at startup, so for an already-consented
     repo the hooks are written *before* codex spawns); **agy** (Antigravity)
-    writes a `spyc-status` set into `.agents/hooks.json` and is **partial** — agy
-    exposes no user-approval event, so its hooks cover `working` + `done` only
-    and the red `blocked` "needs me" square comes from spyc reading agy's
-    approval prompt off the pane instead.
+    writes a `spyc-status` set into `.agents/hooks.json` and is **partial** — it
+    covers `working`, `done`, and `blocked` for agy's own `ask_question` tool
+    (a `PreToolUse` hook sees that one exactly when it's called). The *other*
+    way agy waits on you — its tool-permission prompt — fires no event in any
+    agy version, so that half of the red square is read off the pane instead.
+    `done` needs **agy ≥ 1.1.10**, which is where `Stop` hooks became reachable
+    at all; on an older agy that half falls back to output timing. Full
+    mechanics: [`docs/AGENT_ORCHESTRATION.md`](docs/AGENT_ORCHESTRATION.md).
     **It asks first**, once per project: the first `claude`/`codex`/`agy` launch
     in a repo pops a `[Y/n]` ("let spyc show this agent's live status? writes
     hooks to `<config>`, removed on exit"), and the answer is **saved per repo** —
