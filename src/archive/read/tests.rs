@@ -181,6 +181,65 @@ fn a_materialized_member_keeps_its_executable_bit() {
     assert!(mode & 0o111 != 0, "mode {mode:o} lost the executable bit");
 }
 
+/// spyc must be able to read what it just extracted.
+///
+/// A `0o000` member is legal and not rare — build systems produce them. Staging
+/// it at the archive's mode makes the pager, `y` and copy-out all fail EACCES on
+/// a member the container holds perfectly well.
+#[cfg(unix)]
+#[test]
+fn a_member_with_no_permissions_still_reads_back() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("pkg.zip");
+    let staging = tmp.path().join("staging");
+    zip_at(&archive, &[("locked.txt", b"secret", 0o000)]);
+    let indexed = index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+
+    let entry = indexed.index.get("locked.txt").unwrap();
+    assert_eq!(
+        entry.mode.map(|m| m & 0o777),
+        Some(0o000),
+        "the index keeps the archive's mode; without that this proves nothing"
+    );
+
+    let dest = materialize(&archive, entry, &staging).unwrap();
+    let mode = std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        std::fs::read(&dest).unwrap(),
+        b"secret",
+        "staged at mode {mode:o}, which spyc cannot read"
+    );
+}
+
+/// The staging tree is spyc's own cache, and `c` copy-out is `std::fs::copy`,
+/// which carries the source's permission bits. Staging a `0o777` member verbatim
+/// therefore lands a world-writable file in the user's tree — an archive
+/// deciding the permissions of a file outside it.
+#[cfg(unix)]
+#[test]
+fn a_world_writable_member_does_not_stage_world_writable() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("pkg.zip");
+    let staging = tmp.path().join("staging");
+    zip_at(&archive, &[("wide.sh", b"#!/bin/sh\n", 0o777)]);
+    let indexed = index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+
+    let entry = indexed.index.get("wide.sh").unwrap();
+    let dest = materialize(&archive, entry, &staging).unwrap();
+    let mode = std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode & 0o077,
+        0,
+        "staged {mode:o}: group/other bits survived"
+    );
+    assert!(
+        mode & 0o100 != 0,
+        "staged {mode:o}: lost the executable bit"
+    );
+}
+
 // --- plain tar ---
 
 #[test]

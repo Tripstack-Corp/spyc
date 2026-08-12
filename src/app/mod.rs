@@ -1030,6 +1030,13 @@ pub struct ViewState {
     /// re-rendered with the new value. Session-scoped (persists across
     /// re-opens), defaults to shown.
     pub transcript_show_tool_calls: bool,
+    /// The scrollback source the user flipped to with `T`, and the pane tab id it
+    /// was flipped on — ids are stable and never reused, so another tab's `^a v`
+    /// can't inherit this choice. Outlives a re-open (`r` reloads the flipped
+    /// source) and is dropped when the scrollback closes, which is the whole life
+    /// of the view the flip was made in. `None` = whatever
+    /// `decide_scroll_source` picks.
+    pub scroll_source_override: Option<(String, pane_scroll::ScrollSourcePick)>,
     /// Cached terminal dimensions (columns, rows). Read once at startup via
     /// `crossterm::terminal::size()` and refreshed on every `Event::Resize` in
     /// `handle_resize`. Handlers read this instead of calling `terminal::size()`
@@ -1066,6 +1073,7 @@ impl ViewState {
             input_went_to_pager: false,
             pager_help_stash: None,
             scroll_pager_help_stash: None,
+            scroll_source_override: None,
             pager_positions: crate::state::pager_positions::PagerPositions::load(),
             theme,
             needs_full_repaint: false,

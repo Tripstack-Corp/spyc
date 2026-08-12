@@ -2843,6 +2843,42 @@ fn put_a_file_into(app: &mut App, archive: &Path, staging: &Path, name: &str, bo
     );
 }
 
+/// A put file's row must describe the file, not a placeholder.
+///
+/// The row's size/mtime come from `mount.staged`, which is filled from the index
+/// (an addition isn't in it) and from the materialize outcome (a put goes through
+/// `Effect::FileOp(Copy)` and never produces one). So every put member listed as
+/// `size = 0`, `mtime = epoch` — indistinguishable from an empty file, in the one
+/// listing where the user has no on-disk row to compare against.
+#[test]
+fn a_put_member_lists_its_real_size_and_mtime() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let staging = tmp.path().join("staging");
+        let mut app = App::test_app(dir);
+        let body = b"payload with a length worth reporting";
+        put_a_file_into(&mut app, &archive, &staging, "brought.txt", body);
+
+        let entry = app
+            .state
+            .cur()
+            .listing
+            .entries
+            .iter()
+            .find(|e| e.name == "brought.txt")
+            .expect("the put file lists");
+        assert_eq!(entry.size, body.len() as u64, "size");
+        assert_ne!(
+            entry.mtime,
+            std::time::SystemTime::UNIX_EPOCH,
+            "mtime is the epoch placeholder"
+        );
+    });
+}
+
 /// The bug this fixes: a put file listed fine but refused every read, edit and
 /// delete with "no such member", because it lives in the journal and the staging
 /// tree while `entry_at` only ever asked the index.

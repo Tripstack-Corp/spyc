@@ -369,6 +369,9 @@ impl App {
                     Err(e) => self.state.flash_error(format!("error: {e:#}")),
                 }
                 self.state.cur_mut().picks.clear();
+                // A copy-in lands in staging, which is where an addition's row
+                // gets its size — before the listing is rebuilt, not after.
+                self.record_staged_additions();
                 self.state.refresh_listing();
             }
             FileOutcome::Moved {
