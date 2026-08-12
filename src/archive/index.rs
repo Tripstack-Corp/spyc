@@ -380,6 +380,16 @@ impl IndexBuilder {
         implied.dedup();
         self.facts.implied_dirs = implied.len();
         for inner in implied {
+            // The cap bounds the index, not just the walk. `push` stops at it;
+            // without the same check here a deeply-nested archive left it far
+            // behind (three members five deep produced eighteen entries against
+            // a cap of three), and the "capped at N members" warning then named
+            // a number that hadn't held for a while. Sorted, so the ancestors
+            // that do fit are the shallowest — the reachable prefix of the tree.
+            if self.entries.len() >= self.cap {
+                self.truncated = true;
+                break;
+            }
             // Through the same counter as a real member: a synthesized `a/`
             // beside a stored `A/` is still a collision on a case-insensitive
             // volume, and handing it rank 0 unconditionally would put two
@@ -671,6 +681,30 @@ mod tests {
         let (index, _) = b.finish(PathBuf::from("/a.zip"), ArchiveFormat::Zip, 10);
         assert!(index.truncated);
         assert_eq!(index.entries.len(), 2);
+    }
+
+    /// The cap has to bound the *index*, not just the walk.
+    ///
+    /// `push` stops at the cap, but `finish` then synthesized every implied
+    /// ancestor with no check — so deeply-nested members carried the index past
+    /// `[archive] max_entries` and the "capped at N members" warning named a
+    /// number the index had already left behind.
+    #[test]
+    fn the_entry_cap_bounds_the_directories_finish_synthesizes() {
+        let mut b = IndexBuilder::new(3);
+        // Three members, each five directories deep: 3 pushed + 15 implied
+        // ancestors, all synthesized at `finish`.
+        for name in ["p/q/r/s/t/1.txt", "u/v/w/x/y/2.txt", "d/e/f/g/h/3.txt"] {
+            assert_ne!(b.push(name, Draft::file(1, Locator::Staged)), Pushed::Full);
+        }
+        let (index, _) = b.finish(PathBuf::from("/a.zip"), ArchiveFormat::Zip, 10);
+        assert_eq!(
+            index.entries.len(),
+            3,
+            "the index grew past its own cap: {:?}",
+            index.entries.iter().map(|e| &e.inner).collect::<Vec<_>>()
+        );
+        assert!(index.truncated, "and must say the listing is short");
     }
 
     /// Two names differing only by case would overwrite each other on a

@@ -276,6 +276,14 @@ write_back = "ask"         # "ask" | "never" — offer to write pending changes
 snapshot_max_mb = 64       # graveyard-snapshot the original below this size
 ```
 
+`max_entries` bounds the index spyc builds — members walked plus the directories
+it synthesizes for them — and a listing that hit it says it is truncated. It does
+**not** bound what the container's own parser does first: `zip` materializes one
+record per central-directory entry before spyc sees any of them, so a zip with a
+genuinely huge central directory is fully resident whatever the cap says. (The
+crate does guard its pre-allocation against a lying entry count, so a small file
+can't force a large one.)
+
 `max_depth` is about disk, not correctness: a container inside a container has to
 be copied out whole before anything can read it, so every level costs its own
 size in staging. Set it to 0 to refuse nested archives entirely.
