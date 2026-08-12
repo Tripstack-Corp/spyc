@@ -265,21 +265,30 @@ pub fn status_all() -> Vec<(Host, Status)> {
 /// Write every asset + the manifest into `dir`, creating it if needed.
 /// Overwrites unconditionally — callers decide whether that is allowed (the
 /// startup prompt refuses to clobber a [`Status::Modified`] skill unprompted).
+/// Both halves go through [`crate::fs::write_atomic`], and the manifest is the
+/// one that matters: [`read_manifest`] returns `None` for anything it can't
+/// parse, [`status_in`] turns that into [`Status::NotInstalled`], and a
+/// `NotInstalled` skill is overwritten *unconditionally*. So a manifest torn by
+/// a crash or a full disk converts "locally edited, never clobbered unprompted"
+/// into "clobbered on next launch" — the user's own edits, discarded by the
+/// promise that was supposed to protect them.
 pub fn install_in(dir: &Path) -> std::io::Result<()> {
     for asset in ASSETS {
         let path = dir.join(asset.rel);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&path, asset.body)?;
+        crate::fs::write_atomic(&path, asset.body.as_bytes())?;
     }
     let manifest = serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "files": embedded_hashes(),
     });
-    std::fs::write(
-        dir.join(MANIFEST),
-        serde_json::to_string_pretty(&manifest).unwrap_or_default(),
+    crate::fs::write_atomic(
+        &dir.join(MANIFEST),
+        serde_json::to_string_pretty(&manifest)
+            .unwrap_or_default()
+            .as_bytes(),
     )
 }
 
