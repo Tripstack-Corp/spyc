@@ -178,7 +178,8 @@ pub fn warnings(facts: &IndexFacts, index: &ArchiveIndex) -> Vec<String> {
     }
     if facts.backslash_names > 0 {
         out.push(format!(
-            "{} member(s) used `\\` separators",
+            "{} member(s) had `\\` read as a path separator — a name that meant \
+             a literal backslash is shown split",
             facts.backslash_names
         ));
     }

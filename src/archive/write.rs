@@ -29,6 +29,12 @@ pub struct RepackOptions {
     /// Refuse when the filesystem holding the archive has less than this much
     /// room beyond the archive's own size.
     pub free_space_margin: u64,
+    /// Byte ceiling for the verification re-read of a compressed tar, which has
+    /// to be streamed out to a scratch dir to be read at all. The same
+    /// `[archive] extract_budget_mb` that governed the mount: content that fit
+    /// under it going in fits coming out, and an *addition* that pushes past it
+    /// is refused before the rename rather than after.
+    pub verify_budget: u64,
 }
 
 /// What a completed write-back did.
@@ -103,7 +109,7 @@ pub fn repack(
         _ => write_tar(index, steps, staging_root, tmp.path())?,
     }
 
-    verify(tmp.path(), index.format, steps)
+    verify(tmp.path(), index.format, steps, opts.verify_budget)
         .with_context(|| format!("verifying the new {}", archive.display()))?;
 
     let snapshot = if opts.snapshot_original {
@@ -346,19 +352,21 @@ fn mode_of(_md: &std::fs::Metadata) -> u32 {
 /// stream, a member that failed to compress, or a name the writer mangled all
 /// show up here — while the original is still in place and the temp file is still
 /// just a temp file.
-fn verify(written: &Path, format: ArchiveFormat, steps: &[RepackStep]) -> Result<()> {
+fn verify(written: &Path, format: ArchiveFormat, steps: &[RepackStep], budget: u64) -> Result<()> {
     let indexed = if format.is_seekable() {
         read::index_seekable(written, format, steps.len().saturating_add(1024))?
     } else {
         // A compressed tar can only be read by streaming it, and verification has
         // to read it anyway; extract to a throwaway directory that is dropped with
-        // the guard.
+        // the guard. Bounded by the configured budget rather than `u64::MAX` —
+        // this is a second full copy of the expanded tree, and the knob the user
+        // set to bound exactly that should not be ignored on the way out.
         let scratch = tempfile::tempdir()?;
         read::stream_mount(
             written,
             format,
             scratch.path(),
-            u64::MAX,
+            budget,
             steps.len().saturating_add(1024),
             &std::sync::atomic::AtomicBool::new(false),
         )?
@@ -405,6 +413,7 @@ mod tests {
         RepackOptions {
             snapshot_original: false,
             free_space_margin: 0,
+            verify_budget: u64::MAX,
         }
     }
 
@@ -1121,6 +1130,7 @@ mod tests {
             &RepackOptions {
                 snapshot_original: false,
                 free_space_margin: u64::MAX,
+                verify_budget: u64::MAX,
             },
         )
         .unwrap_err();
@@ -1137,6 +1147,67 @@ mod tests {
                 .flatten()
                 .all(|e| e.file_name() == "pkg.zip"),
             "leaving no temp file behind either"
+        );
+    }
+
+    /// The verification re-read of a compressed tar honours the extract budget.
+    ///
+    /// `verify` has to stream the whole archive back out to read it at all — a
+    /// second full copy of the expanded tree. It passed `u64::MAX`, so the one
+    /// knob the user set to bound exactly that (`[archive] extract_budget_mb`)
+    /// applied on the way in and was ignored on the way out.
+    ///
+    /// Refusing here is safe by construction: the refusal happens before the
+    /// rename, so the original is untouched — and content that fit under the
+    /// budget at mount time fits at write time, which leaves *additions* as the
+    /// only way to trip it.
+    #[test]
+    fn the_verify_re_read_is_bounded_by_the_extract_budget() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("pkg.tar.gz");
+        let staging = tmp.path().join("staging");
+        tar_at(
+            &archive,
+            &[("big.txt", &[b'x'; 4096], 0o644), ("keep.txt", b"k", 0o644)],
+            ArchiveFormat::TarGz,
+        );
+        let before = std::fs::read(&archive).unwrap();
+        let indexed = read::stream_mount(
+            &archive,
+            ArchiveFormat::TarGz,
+            &staging,
+            u64::MAX,
+            1000,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap();
+
+        let mut journal = Journal::default();
+        journal.delete("keep.txt");
+        let steps = plan_repack(
+            &indexed.index,
+            &journal,
+            &StagedStats::new(),
+            &StagedStats::new(),
+        );
+        let err = repack(
+            &indexed.index,
+            &steps,
+            &staging,
+            &RepackOptions {
+                snapshot_original: false,
+                free_space_margin: 0,
+                verify_budget: 1024, // below the 4 KiB member
+            },
+        )
+        .unwrap_err();
+
+        let msg = format!("{err:#}");
+        assert!(msg.contains("verifying"), "must name the stage: {msg}");
+        assert_eq!(
+            std::fs::read(&archive).unwrap(),
+            before,
+            "and a refused verification leaves the original byte-identical"
         );
     }
 
@@ -1226,6 +1297,7 @@ mod tests {
                     &RepackOptions {
                         snapshot_original: true,
                         free_space_margin: 0,
+                        verify_budget: u64::MAX,
                     },
                 )
                 .is_err()
@@ -1295,6 +1367,7 @@ mod tests {
                 &RepackOptions {
                     snapshot_original: true,
                     free_space_margin: 0,
+                    verify_budget: u64::MAX,
                 },
             )
             .unwrap();
