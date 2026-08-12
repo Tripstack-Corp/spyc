@@ -145,6 +145,11 @@ enum Message {
     /// wake of the same shape as `GraveyardDone`; `apply_clipboard_pastes`
     /// drains the slot in the pre-recv scan and feeds the text to `handle_paste`.
     ClipboardPasteDone,
+    /// An off-thread clipboard *write* finished and pushed its outcome onto
+    /// `runtime.clipboard_copy_results`. Payloadless, same shape as
+    /// `ClipboardPasteDone`; `apply_clipboard_writes` drains the slot in the
+    /// pre-recv scan and flashes anything that failed.
+    ClipboardCopyDone,
     /// An off-thread inventory op (`Effect::Inventory`) finished.
     InventoryDone,
     /// An off-thread MCP worktree op (create/remove/clean) finished and pushed
@@ -655,6 +660,13 @@ struct Runtime {
     /// drains it each pre-recv scan. A `Vec`, like `graveyard_results`: a middle
     /// click is cheap to repeat, so reads can overlap and must not clobber.
     clipboard_paste_results: std::sync::Arc<std::sync::Mutex<Vec<std::io::Result<String>>>>,
+    /// Landing slot for off-thread clipboard *writes*. One entry per dispatched
+    /// write: `None` succeeded, `Some(msg)` is what to flash.
+    ///
+    /// The write runs off the loop because the helpers legitimately outlive it —
+    /// `xclip`/`xsel` keep running to serve the X11 selection, so the reap poll
+    /// spends its whole budget on every yank. A `Vec` because yanks can overlap.
+    clipboard_copy_results: std::sync::Arc<std::sync::Mutex<Vec<Option<String>>>>,
     /// The watcher-driven listing refresh (`FileOp::RefreshListing`) reads the
     /// dir off-thread; `inflight` keeps a single read in flight at a time, and
     /// `dirty` records a refresh requested while one was running so the result

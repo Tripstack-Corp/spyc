@@ -91,6 +91,9 @@ pub fn coalesce_pending(
             // rides `runtime.clipboard_paste_results`, drained by
             // `apply_clipboard_pastes` in the pre-recv scan.
             | Message::ClipboardPasteDone
+            // Clipboard write done — the outcome rides
+            // `runtime.clipboard_copy_results`, drained by `apply_clipboard_writes`.
+            | Message::ClipboardCopyDone
             | Message::InventoryDone
             | Message::Tick(_) => {}
             Message::Input(ev) => return Some(ev),
