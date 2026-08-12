@@ -534,9 +534,15 @@ fn eviction_hands_back_the_staging_tree_to_clean() {
 
 /// Run whatever the screen produced, then whatever the drain produced, until the
 /// effects settle — the loop's behaviour, minus the threads.
+/// The hop limit is a runaway guard, not a budget — reaching it means the chain
+/// grew past what this driver models, and every assertion after the call would
+/// then run against half-applied state and fail somewhere unrelated. Say so here
+/// instead.
+const SETTLE_HOPS: usize = 4;
+
 fn settle(app: &mut App, effects: Vec<Effect>) {
     let mut queue = effects;
-    for _ in 0..4 {
+    for _ in 0..SETTLE_HOPS {
         if queue.is_empty() {
             return;
         }
@@ -582,6 +588,12 @@ fn settle(app: &mut App, effects: Vec<Effect>) {
         next.extend(file_fx);
         queue = next;
     }
+    assert!(
+        queue.is_empty(),
+        "effects still pending after {SETTLE_HOPS} hops: {queue:?}. The chain got \
+         longer than this driver models — raise SETTLE_HOPS deliberately rather \
+         than letting the caller assert against half-applied state."
+    );
 }
 
 /// The issue's headline for this PR: `y` on a member puts its *contents* in the
