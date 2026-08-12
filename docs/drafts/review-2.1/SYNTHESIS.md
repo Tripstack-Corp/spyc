@@ -8,6 +8,18 @@
 
 ## 1. Verdict
 
+> **UPDATED 2026-08-12 (fourth pass) — EVERY MEDIUM IS CLOSED.** `main` at
+> `07b69db`. Eleven further PRs (#378–#386, #388, #389) close the remaining
+> sixteen: M9, M10, M21, M22 (the last of the live defects — a half-inverted
+> wheel, a 30 ms loop stall from a wheel tick, an unbounded clipboard write, and
+> a 150 ms hitch on every Linux yank), then M13, M3, M1, M2, M4, M11, M14, M15,
+> M16, M20, M23, M24.
+>
+> **Severity tiers remaining: 0 blockers, 0 highs, 0 mediums, 23 lows.**
+> Full record in §7.
+>
+> ---
+>
 > **UPDATED 2026-08-11 (third pass) — the first four mediums.** `main` at
 > `6d5a0a2`:
 >
@@ -24,7 +36,7 @@
 > in a compressed tar served each other's bytes, with one of the two unreadable
 > *and* unwritable. See §7.
 >
-> **Severity tiers remaining: 16 mediums, 23 lows. Nothing above medium is open.**
+> **Severity tiers remaining at the end of this pass: 16 mediums, 23 lows.**
 >
 > ---
 >
@@ -413,9 +425,36 @@ drew; the staging writer vs. every staging reader; the escape prefix vs. the
 reverse map that strips it. Each fix collapses the pair into one definition and
 pins the round trip with a test.
 
+### Fourth pass — every remaining medium (2026-08-11/12)
+
+Eleven PRs, closing the other sixteen. Four more live defects, then the debt.
+
+| # | PR | What closing it showed |
+|---|---|---|
+| M9 | #378 | A **live defect**. `invert_scroll` was applied inside `gesture_and_delta`, which the forwarding path never calls — so the list, the pagers and agy's synthesized keys inverted while claude/vim/htop did not. The knob's whole audience is the user whose wheel reads backwards, and what they got was half an inverted spyc. Fixed by correcting the *event* at `handle_mouse`'s boundary rather than adding a second config-reading site. The bite-check is the finding's own point: with the per-consumer flip restored, **106 of 107 mouse tests still pass**. |
+| M10 | #379 | A **live defect**: `3 × sleep(10ms)` on the loop, reachable from a wheel tick, which `native_scroll_plan.md` had ruled out by name. The settle became a `Deadline` — same real 30 ms, spent on a loop that keeps running, and the loop's own per-iteration drain is a better flush than the sleep's thread yields ever were. Measured red-before at 35.48 ms; the test times the call rather than looking for a `sleep`, which would pass the moment the sleep moved one function along. Also revealed a case the finding didn't name: 30 ms is enough to switch tabs, so the pending snapshot carries the tab that asked and a switch abandons it. |
+| M21 | #380 | **Live**, and the same family as H5 one direction over: `write_all` ran before the deadline loop, so a helper that never reads stdin *and stays alive* blocked the loop past any budget. It hid because the adjacent case — such a helper that **exits** — is tested, and errors promptly via EPIPE. Bite-check: 28 of 29 clipboard tests still pass with the defect restored. |
+| M22 | #381 | The sibling: `xclip`/`xsel` never exit, so every yank spent the full budget on the loop (**156.77 ms** measured). Write moved off-thread on the `graveyard_ops` template; OSC 52 stays inline, being a stdout write rather than a spawn. The flash now precedes the outcome and a failure replaces it — the alternative traded a hitch for a silent wrong answer, which is what #350 closed. Both test seams had to go process-global: a thread-local cannot reach the worker, which is the property under test. |
+| M13 | #382 | The one doc that stated the *opposite* of HEAD. FEATURES said agy's hooks cover `working` + `done` only; `hooks.rs:493` has reported `blocked` for `ask_question` since #287, which updated `AGENT_ORCHESTRATION.md` and not FEATURES. |
+| M3 | #383 | The guard accepted a 1-of-9 strip and ten sites took it up. Fixed by requiring the *function that owns the list* rather than a spelling of one entry — naming the nine in the guard would have made a third copy of a list already kept in sync twice. **Nearly done wrong:** the first conversion attempt used a regex over Rust source and mangled two sites, one leaving a `git` spawn with no directory at all. Caught on the diff, redone by hand. |
+| M1+M2 | #384 | Taken together: correcting one false claim in a security document while leaving another one paragraph away is not a defensible half-measure. M1 fixed in the doc, not the code — freezing the allowed set at launch would break the ordinary "navigate, then ask about it" case, and it grants no reach an agent with shell access lacks. A third stale "fails CI" turned up in the license bullet. |
+| M4 | #385 | The drift was **live in this checkout** — the installed hook was ten lines behind, dated Aug 7. The check is a test rather than a line in the hook, because a staleness check inside the stale artifact can't detect its own absence. Two things the finding didn't name: `make install-hooks` didn't work from a worktree (`.git` is a *file* there), so the new failure message would have named a fix that fails where the reader is standing. |
+| M14–M16, M23–M24 | #386 | The doc-contract cluster, one pass. `KEYBINDINGS.md` called itself "the complete keymap" with zero mouse content while capture defaults on; two shipped mouse features sat inside enumerations that read as complete; the skill docs listed two of three hosts. M23's promised OSC-52 fallback was asserted in **four** places and performed in none — the fourth turned up only because finding three was a reason to grep for the rest. |
+| M11 | #389 | Amended rather than implemented: the plan's binding tokens were *dropped*, not deferred by accident, and the `Trust::Project` RCE warning marked "must be tested" read as a check someone had performed. Second amendment this plan has needed (#379 was the first) — both the same omission, written before the work and never revisited after. |
+| M20 | #388 | The clearest "asserts the mock" in the diff — and the finding's proposed fix turned out to be unreachable. My first replacement **didn't bite**: `zip` validates on parse, so `zip_mtime` is never handed an invalid date at all, and reaching its guard needs `unsafe`. The test now pins the requirement (a corrupt date lists with no mtime, not an invented one) instead of the function, asserts its own premise, and bites on the regression that matters. |
+
+**Four of the sixteen were live defects.** The fourth pass's recurring shape is
+the second pass's, one layer out: **the adjacent case is tested and the one that
+matters isn't** — a wedged helper that exits vs. one that stays alive; a delta
+consumer vs. the forwarding path; a plan's prose vs. its "Files touched" table.
+Where the third pass found two derivations of one fact, this one found one test
+standing in for two behaviours.
+
+**Two findings were wrong on contact and are recorded as such:** M20's suggested
+fix isn't reachable without `unsafe`, and M12 was 75 commits stale rather than
+47. Neither changes the finding; both change what closing it looks like.
+
 ### Still open
 
-Nothing above **medium**. 16 mediums and 23 lows remain, in §3. The live-defect
-cluster left is the rest of the mouse set (M9, M10); the rest is doc-contract
-drift (M13–M16, M23–M24) and guard/test debt (M1–M4, M11, M20–M22). None of them
-holds the tag.
+**Nothing above low.** All 25 mediums are closed. 23 lows remain, itemized in the
+six reports and summarized in §3. None of them holds the tag.
