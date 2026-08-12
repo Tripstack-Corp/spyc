@@ -218,7 +218,14 @@ mod guard_tests {
             if matches!(name, "mod.rs" | "mod_tests.rs" | "test_harness.rs") {
                 continue;
             }
-            if !agents.contains(name) {
+            // Delimited, not substring: a bare `contains` lets a LONGER sibling
+            // satisfy a shorter name. An undocumented `route.rs` would be
+            // covered by the string `archive_route.rs`, `tabs.rs` by
+            // `pane_tabs.rs`, `scroll.rs` by `pane_scroll.rs`, `ops.rs` by
+            // `file_ops.rs` — four real pairs in this tree, so the guard would
+            // fail open exactly where the names are most similar. Every bullet
+            // backticks its module, and a few name one by path.
+            if !agents.contains(&format!("`{name}`")) && !agents.contains(&format!("/{name}")) {
                 missing.push(name.to_string());
             }
         }
@@ -226,8 +233,9 @@ mod guard_tests {
         assert!(
             missing.is_empty(),
             "src/app/ feature modules missing from the AGENTS.md module index: {missing:?}. \
-             Add a bullet for each (AGENTS.md → \"Keep docs in sync\") — a module absent \
-             from the map is the worktree_clean.rs gap the June-2026 review caught."
+             Add a bullet for each, naming the module in backticks (AGENTS.md → \
+             \"Keep docs in sync\") — a module absent from the map is the \
+             worktree_clean.rs gap the June-2026 review caught."
         );
     }
 
