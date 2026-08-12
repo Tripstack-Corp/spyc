@@ -397,6 +397,23 @@ back *now*.
 
 #### Mouse bindings — customizable, including Lua
 
+> [!IMPORTANT]
+> **Not shipped. This subsection is a design, not a description.** As of
+> 2026-08-12 nothing in `src/` mentions `<LeftClick>` / `<MiddleClick>` /
+> `<RightClick>`: the three gestures are hard-wired in `route_mouse`
+> (`src/app/mouse/route.rs`), with no rebinding surface and no `unmap`. The
+> `Trust::Project` RCE analysis below — the part marked "must be **tested**, not
+> assumed" — was never tested, because there is nothing to test.
+>
+> It was dropped, not deferred by accident: the buttons shipped in PR 3 and the
+> capture flip went with them, which was the part of that PR's scope users were
+> waiting on. Reviving this means re-doing the trust analysis first, and the
+> `unmap` case is the one that needs an answer — unbinding right-click removes
+> the leader menu, which is the only mouse route to a large part of the keymap.
+>
+> Everything below is retained as the design to start from, not as a record of
+> the tree.
+
 Users must be able to rebind the buttons (and hang a Lua script off one). The
 cheap way to get this is to add **no new binding surface at all**: teach the
 existing chord representation to name a mouse button, and `map` / `unmap` /
@@ -537,7 +554,7 @@ existing `view.scroll_last` arrow throttle (`run.rs:183`).
 |---|---|
 | `src/lib.rs` | `Enable/DisableWheelReporting` commands; wire into `setup_terminal`, `restore_terminal`, `suspend_tui`, `resume_tui`, **panic hook** |
 | `src/config/mod.rs` | `MouseConfig { capture, scroll_lines }` + `DEFAULT_TEMPLATE` block |
-| `src/app/mouse.rs` | **new** — `MouseSnapshot` / `MouseSink` / `route_mouse` + hit-test + handler |
+| `src/app/mouse.rs` | **new** — `MouseSnapshot` / `MouseSink` / `route_mouse` + hit-test + handler. *(Shipped as the `src/app/mouse/` directory — `route`/`selection`/`scroll`/`forward`/`tab_hit` — after it outgrew one file.)* |
 | `src/app/mod.rs` | `ViewState.mouse_capture_on` |
 | `src/app/run.rs` | `Event::Mouse` arm → `handle_mouse` (thin — the decision lives in `mouse.rs`) |
 | `src/app/proc.rs` | drop `Moved`/`Drag` in the forward filter |
@@ -550,7 +567,7 @@ existing `view.scroll_last` arrow throttle (`run.rs:183`).
 | `src/app/effect.rs` | `Effect::PasteFromClipboard` beside `CopyToClipboard`, for middle-click |
 | `src/keymap/resolver/` | enter `PendingSeq::Leader` from a right-click, hint shown with no delay |
 | `src/keymap/user.rs` | let a chord name a mouse button, reusing `UserBinding`/`BoundAction`/`describe` |
-| `src/config/dsl.rs` | `<LeftClick>`/`<MiddleClick>`/`<RightClick>` tokens for `map`/`unmap` |
+| `src/config/dsl.rs` | ~~`<LeftClick>`/`<MiddleClick>`/`<RightClick>` tokens for `map`/`unmap`~~ — **not shipped**, see "Mouse bindings" |
 
 Docs, same commit (AGENTS.md "Keep docs in sync"): `AGENTS.md` (module index —
 guarded by `every_app_module_is_in_the_agents_index`), `FEATURES.md`,
@@ -592,8 +609,10 @@ avoids a half-wired intermediate state where the wheel works over one surface an
 silently dies over another.
 
 3. **Buttons + bindings, then flip** — Tier 3b: click-to-focus, middle-click
-   paste, right-click leader, and the `<…Click>` binding tokens. Genuinely
-   separable (different `MouseEventKind`s, no shared state with the wheel sinks),
+   paste, right-click leader, and the `<…Click>` binding tokens. *(Shipped
+   without the binding tokens — see the note under "Mouse bindings" above.)*
+   Genuinely separable (different `MouseEventKind`s, no shared state with the
+   wheel sinks),
    and it carries the plan's only new dependency (a clipboard read) plus its only
    security-sensitive surface (the `Trust::Project` gate on executing mouse
    bindings). **Final commit: `capture` → `true`**, with the discoverability docs
