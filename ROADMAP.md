@@ -42,8 +42,11 @@ guard in the tree is `mod_rs_stays_decomposed`, which caps `src/app/mod.rs`
 alone. Listing it above as a finished foundation read as compliance; roughly a
 dozen and a half files exceed 800 *production* lines (counting lines outside
 `#[cfg(test)]` modules — a raw `wc -l` badly overstates it, since the house
-convention keeps tests in the same file). `src/app/mouse.rs` is the outlier
-worth acting on.
+convention keeps tests in the same file). The `src/app/mouse.rs` outlier named
+here has since been decomposed into `src/app/mouse/` (`route`/`selection`/
+`scroll`/`forward`/`tab_hit`/`mod`, largest 621 production lines), so the
+remaining outliers are elsewhere — re-derive the list before acting on it rather
+than trusting this paragraph's count.
 
 Since then the **thesis work has largely shipped** — the differentiators the
 competitive review ([`docs/COMPETITIVE_REVIEW.md`](docs/COMPETITIVE_REVIEW.md))
@@ -266,9 +269,13 @@ and the roadmap committing to that saves a lot of drift.
 - **SLSA L3 / supply-chain theatre.** Minisign + SBOM + a
   reproducible-build job are proportionate. Full SLSA attestation is
   not.
-- **Mouse support beyond the pane forward.** Keyboard-first by
-  thesis; the pane forward (tracked as an issue) exists only because
-  the pane hosts third-party mouse-aware tools.
+- **A mouse-*first* UI.** Note the narrowing: real mouse reporting
+  **shipped and is on by default** (`[mouse] capture` — wheel scrolls
+  whatever is under the pointer, left/middle/right buttons, drag-select
+  in four surfaces, `:mouse on|off|auto`), so "mouse support" is no
+  longer a non-goal. What stays out of scope is mouse-first design —
+  every action keeps a keybinding, and no affordance is reachable only
+  by pointer. Keys remain the API.
 - **tmux command compatibility.** We have our own bindings.
 - **Persistent search index** (tantivy/ctags). Ripgrep on a 100K-file
   repo is sub-second cold; the maintenance burden isn't worth it.
