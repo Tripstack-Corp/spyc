@@ -118,15 +118,23 @@ So for codex and agy — and for claude in `/tui fullscreen` — `^a v` reads th
 agent's **own transcript file**, not the screen. That's strictly better than
 capture: real text, no grid or repaint artifacts, and searchable.
 
-**Inline claude is the exception**: it isn't alt-screen, so the bypass doesn't
-apply and its transcript stays behind `[pane] claude_transcript_scrollback`
-(default off) — `^a v` and the wheel both show vt100 capture instead. That
-capture is real (inline claude's output reaches the main buffer), and it carries
-what the transcript never will, like whatever the shell printed before the agent
-started. Set the key to `true` if you'd rather have the conversation.
+**Inline claude has both**, and that's the one case where the choice is real. Its
+capture is genuine (its output reaches the main buffer) and holds what the
+transcript never will, like whatever the shell printed before the agent started;
+the transcript holds real text where the grid has repaint artifacts. So the
+config gate decides which one `^a v` opens first
+(`[pane] claude_transcript_scrollback`, default off = the capture) and **`T`
+swaps** — no config edit, no relaunch. The flip sticks for that tab, so `r`
+reloads what you picked, and is dropped when the view closes.
+
+The gate only applies while a capture *exists*: a pane that hasn't scrolled
+anything off yet is in the same position as an alt-screen one, so it engages the
+transcript too rather than showing you an empty pager.
 
 Inside either view:
 
+- `T` — swap the source: terminal capture ⇄ agent transcript (says which one is
+  missing if the pane only has one)
 - `t` — toggle the agent's tool-call / tool-result lines (transcript scrollback
   only; a long tool-heavy session is much easier to read with them off)
 - `l` — toggle line numbers

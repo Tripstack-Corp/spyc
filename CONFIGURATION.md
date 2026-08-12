@@ -48,6 +48,8 @@ vsplit_mode = "full_height"    # shape `^s |` opens a vertical split in; or "top
 default_command = "claude"     # pre-filled into the `^a c` new-tab prompt
 new_tab_cwd = "worktree_root"  # focused column's worktree root (gw's target); or "project_home" (PROJECT_HOME), "browse_dir" (the focused column's dir)
 claude_transcript_scrollback = false  # `^a v` reads Claude's JSONL transcript instead of terminal scrollback
+                                      # (only decides which comes up FIRST — `T` swaps in the view, and the
+                                      #  transcript is used regardless when there's no terminal capture)
 codex_mcp = true               # register spyc's MCP server for codex panes
 preview_pasted_images = true   # keep a copy of images you paste into an agent pane, for `^a g`
 
