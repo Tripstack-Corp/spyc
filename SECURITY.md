@@ -47,13 +47,24 @@ is what `fuzz/fuzz_targets/` exists for — see the fuzzing caveat.
 
 The MCP read tools take an optional `root` argument to scope a query to
 a worktree. That argument is **validated against a set of roots spyc
-knows about**, so an agent cannot point a read tool at an arbitrary
-directory. The rationale is recorded in ROADMAP.md's decisions log:
-agent harnesses commonly auto-approve MCP tool calls while gating shell
-execution behind per-command permission prompts, so an unvalidated
+knows about**: the trusted context root, its worktrees, and the focused
+column's own chain. The rationale is recorded in ROADMAP.md's decisions
+log: agent harnesses commonly auto-approve MCP tool calls while gating
+shell execution behind per-command permission prompts, so an unvalidated
 `root` would bypass a boundary the *user* believes exists.
 
-That validation is a guardrail, not a sandbox. An agent with shell
+**That set is not fixed, and the agent can widen it.** Two of its
+entries come from the cursor (`cwd`, `search_root`), and `navigate_to`
+sets `cwd` to any path the agent names — so `navigate_to("/etc")`
+followed by `search_content(…, root="/etc")` is allowed. `open_worktree`
+is a quieter second path to the same widening. This is deliberate:
+freezing the set at launch would break the ordinary case of a user
+navigating somewhere and then asking the agent about it. Navigation is
+visible (a `[mcp] navigated to …` flash), and it grants no reach the
+agent didn't already have.
+
+So the validation is a guardrail, not a sandbox — it keeps an agent from
+*wandering*, not from *going somewhere on purpose*. An agent with shell
 access can read anything you can read, and spyc does not try to prevent
 it. Do not treat the MCP tool surface as a containment mechanism for an
 untrusted agent.
@@ -66,14 +77,26 @@ untrusted agent.
   builds pass `--locked` to cargo, so a CI-time `Cargo.lock` drift
   fails loudly. The Makefile and the GitHub Actions CI
   (`.github/workflows/ci.yml`) both enforce this.
-- **`cargo deny check`** runs on every CI build (advisories,
-  licenses, sources, bans). Configuration is checked in at `deny.toml`
-  with documented reasons for every advisory ignore — none are silent.
+- **`cargo deny check`** (advisories, licenses, sources, bans) runs
+  **weekly and on demand**, in `.github/workflows/audit.yml` — not on
+  every CI build. It re-fetches the RUSTSEC database on every
+  invocation, which is what makes the weekly run worth having (it
+  surfaces new advisories against unchanged deps) and what made it
+  unfit for the per-commit path, where it is network-dependent and has
+  segfaulted mid-run, failing PRs that touched no dependencies.
+  **The gap that buys:** a PR introducing a banned, wrongly-licensed or
+  duplicate dependency is not caught at PR time. It surfaces on the next
+  scheduled run, or from `make deny` locally. Dispatch it (`gh workflow
+  run audit.yml`) after merging anything that moves `Cargo.toml` /
+  `Cargo.lock`, and before cutting a release. Configuration is checked
+  in at `deny.toml` with documented reasons for every advisory ignore —
+  none are silent.
 - **License allow-list.** Only the licenses present in our actual
   dep graph are allowed; the list is reviewed against
   `cargo deny list` when deps change. Adding a dep with a license
-  outside that set fails CI; you read it, decide, and either add to
-  the allow-list (with a reason) or pick a different dep. Several deps
+  outside that set fails the audit run above (not the PR — same gap);
+  you read it, decide, and either add to the allow-list (with a reason)
+  or pick a different dep. Several deps
   are multi-licensed and offer a copyleft option (`self_cell`,
   `r-efi`, the `Unlicense OR MIT` BurntSushi crates); cargo-deny
   selects an allowed alternative, so no copyleft obligation attaches.
