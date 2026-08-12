@@ -370,47 +370,205 @@ fn demoted_g_chord_keys_are_unbound() {
     }
 }
 
+// ── the chord tree, walked rather than listed ─────────────────────────────
+
+/// Keys a chord state might bind: printable ASCII plus the arrows `^a ↓` needs.
+///
+/// Deliberately no ctrl-modified keys — inside a pending chord those re-enter a
+/// prefix rather than completing one, so feeding them would exercise a different
+/// transition than the popup describes.
+fn candidate_keys() -> Vec<crossterm::event::KeyEvent> {
+    let mut out: Vec<_> = (0x20u8..=0x7e).map(|b| key(b as char)).collect();
+    out.extend([KeyCode::Up, KeyCode::Down, KeyCode::Left, KeyCode::Right].map(special));
+    out
+}
+
+/// The single key a `ChordEntry` label stands for, when it names exactly one.
+fn hint_key(label: &str) -> Option<crossterm::event::KeyEvent> {
+    match label {
+        "Space" => Some(key(' ')),
+        "↓" => Some(special(KeyCode::Down)),
+        _ => {
+            let mut cs = label.chars();
+            let c = cs.next()?;
+            cs.next().is_none().then(|| key(c))
+        }
+    }
+}
+
+/// Every chord state whose popup shows something, found by walking the tree.
+///
+/// Depth 1 is any single key that leaves the resolver pending with a non-empty
+/// `continuations()`; deeper states come from following each `Sub` entry. Walked
+/// rather than listed because the tier guard below used to hardcode `Space w` as
+/// the only submenu it descended into — complete the day it was written, and
+/// silently incomplete for any submenu added afterwards.
+fn chord_states() -> Vec<(String, Vec<crossterm::event::KeyEvent>)> {
+    let mut out: Vec<(String, Vec<crossterm::event::KeyEvent>)> = Vec::new();
+    let mut queue: Vec<(String, Vec<crossterm::event::KeyEvent>)> = Vec::new();
+
+    for ev in candidate_keys() {
+        let mut r = Resolver::new();
+        if feed(&mut r, ev) != ResolverOutcome::Pending || r.continuations().is_empty() {
+            continue;
+        }
+        let label = match ev.code {
+            KeyCode::Char(c) => c.to_string(),
+            other => format!("{other:?}"),
+        };
+        queue.push((label, vec![ev]));
+    }
+    // `^a` and `^s` are ctrl-prefixed, so the depth-1 sweep can't reach them.
+    for (label, ev) in [("^a", ctrl('w')), ("^s", ctrl('s'))] {
+        let mut r = Resolver::new();
+        if feed(&mut r, ev) == ResolverOutcome::Pending && !r.continuations().is_empty() {
+            queue.push((label.to_string(), vec![ev]));
+        }
+    }
+
+    while let Some((label, entry)) = queue.pop() {
+        let mut r = Resolver::new();
+        for ev in &entry {
+            feed(&mut r, *ev);
+        }
+        for c in r.continuations() {
+            if let ChordEntry::Sub(k, _) = c
+                && let Some(ev) = hint_key(k)
+            {
+                let mut deeper = entry.clone();
+                deeper.push(ev);
+                // `^a Space` loops back to the leader; following it forever
+                // would not terminate.
+                if !out.iter().any(|(_, e)| *e == deeper)
+                    && !queue.iter().any(|(_, e)| *e == deeper)
+                {
+                    queue.push((format!("{label} {k}"), deeper));
+                }
+            }
+        }
+        out.push((label, entry));
+    }
+    out
+}
+
+/// A chord that BINDS an action must ADVERTISE it.
+///
+/// FEATURES.md sells the which-key popup as "the discovery surface for the dense
+/// keymap", which makes a bound-but-unlisted key a shipped feature the user
+/// cannot find. `^a g` — the image gallery — was exactly that: bound in the
+/// resolver, absent from the `PendingSeq::W` continuations, reachable only by
+/// reading the source.
+///
+/// Compared by action **variant**, so an alias needs no row of its own (`^a G`
+/// for `^a g`, `^a C` for `^a \`), and by discriminant rather than value so the
+/// `1-9` row's `PaneTabByIndex(0)` label covers `PaneTabByIndex(4)`.
+#[test]
+fn every_action_a_chord_binds_is_offered_in_its_hints() {
+    use std::mem::{Discriminant, discriminant};
+
+    let states = chord_states();
+    assert!(
+        states.len() >= 8,
+        "the walk found only {} chord states; it should reach the whole tree: {:?}",
+        states.len(),
+        states.iter().map(|(l, _)| l).collect::<Vec<_>>()
+    );
+
+    for (label, entry) in states {
+        let mut r = Resolver::new();
+        for ev in &entry {
+            feed(&mut r, *ev);
+        }
+        let hinted: Vec<Discriminant<Action>> = r
+            .continuations()
+            .into_iter()
+            .filter_map(|e| match e {
+                ChordEntry::Act(_, a) => Some(discriminant(&a)),
+                ChordEntry::Sub(..) => None,
+            })
+            .collect();
+
+        for cand in candidate_keys() {
+            let mut r = Resolver::new();
+            for ev in &entry {
+                feed(&mut r, *ev);
+            }
+            if let ResolverOutcome::Action(a) = feed(&mut r, cand)
+                && !hinted.contains(&discriminant(&a))
+            {
+                panic!(
+                    "`{label}` + {cand:?} fires {a:?}, which the which-key popup never \
+                     offers — add a ChordEntry for it, or unbind the key. The popup is \
+                     the documented discovery surface for this keymap."
+                );
+            }
+        }
+    }
+}
+
 /// The documented binding taxonomy (DESIGN.md): the leader namespace carries
-/// only Global/Meta actions, and the `^a` pane prefix only Pane/Meta. This
+/// only Global/Meta actions, and the pane prefixes only Pane/Meta. This
 /// guards against drift — e.g. a pane op accidentally added to the leader, or
 /// a frame/global op landing on `^a`. Drives it through the resolver's own
 /// `continuations()` so it tracks the real bindings.
+///
+/// Namespaces come from [`chord_states`], so every submenu under them is
+/// checked rather than the one that was hardcoded. `^s` is in scope as a pane
+/// prefix: AGENTS.md places the vertical split in the PANE tier, and all four of
+/// its actions are `Tier::Pane`.
 #[test]
 fn leader_and_pane_namespaces_respect_tiers() {
     use crate::keymap::Tier;
 
-    // The `Act` actions reachable after arming the keys in `entry`.
-    fn actions_after(entry: &[crossterm::event::KeyEvent]) -> Vec<Action> {
-        let mut r = Resolver::new();
-        for ev in entry {
-            feed(&mut r, *ev);
-        }
-        r.continuations()
-            .into_iter()
-            .filter_map(|e| match e {
-                ChordEntry::Act(_, a) => Some(a),
-                ChordEntry::Sub(..) => None,
+    let states = chord_states();
+    let actions_under = |root: crossterm::event::KeyEvent| -> Vec<(String, Action)> {
+        states
+            .iter()
+            .filter(|(_, entry)| entry.first() == Some(&root))
+            .flat_map(|(label, entry)| {
+                let mut r = Resolver::new();
+                for ev in entry {
+                    feed(&mut r, *ev);
+                }
+                r.continuations()
+                    .into_iter()
+                    .filter_map(|e| match e {
+                        ChordEntry::Act(_, a) => Some((label.clone(), a)),
+                        ChordEntry::Sub(..) => None,
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect()
-    }
+    };
 
-    // Leader (`Space`) and its worktree submenu (`Space w`) → Global/Meta only.
-    let mut leader = actions_after(&[key(' ')]);
-    leader.extend(actions_after(&[key(' '), key('w')]));
-    for a in leader {
+    // Leader (`Space`) and everything below it → Global/Meta only.
+    let leader = actions_under(key(' '));
+    assert!(
+        leader.len() > 5,
+        "the leader subtree looks empty: {leader:?}"
+    );
+    for (label, a) in leader {
         assert!(
             matches!(a.tier(), Tier::Global | Tier::Meta),
-            "leader action {a:?} is {:?}; the leader namespace is Global/Meta only",
+            "`{label}` action {a:?} is {:?}; the leader namespace is Global/Meta only",
             a.tier()
         );
     }
 
-    // Pane prefix (`^a`) → Pane/Meta only.
-    for a in actions_after(&[ctrl('w')]) {
-        assert!(
-            matches!(a.tier(), Tier::Pane | Tier::Meta),
-            "^a action {a:?} is {:?}; the pane namespace is Pane/Meta only",
-            a.tier()
-        );
+    // Pane prefixes (`^a`, `^s`) → Pane/Meta only. `^a Space` is the leader
+    // reached from the pane, so its contents are checked as the leader's above.
+    for root in [ctrl('w'), ctrl('s')] {
+        let under = actions_under(root);
+        assert!(!under.is_empty(), "{root:?} subtree looks empty");
+        for (label, a) in under {
+            if label.contains("Space") {
+                continue;
+            }
+            assert!(
+                matches!(a.tier(), Tier::Pane | Tier::Meta),
+                "`{label}` action {a:?} is {:?}; the pane namespace is Pane/Meta only",
+                a.tier()
+            );
+        }
     }
 }
