@@ -257,6 +257,61 @@ fn session_persists_and_restores_a_commander_split() {
     });
 }
 
+/// A column browsing an archive has a `right_cwd` that is not a directory and
+/// never was, so the `is_dir()` filter sent it down the *preview* branch — where
+/// `preview_path` is `None`, no pager loads, and the blank-split guard then set
+/// `vsplit = None`. The user's whole split vanished, with no message.
+///
+/// Asymmetric with the left column, which got this exact case handled in the
+/// same window (#317): `restore_session` detects an archive ancestor and lands
+/// the column back inside it.
+#[test]
+fn a_split_whose_column_was_inside_an_archive_still_restores() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        {
+            let mut w = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+            w.start_file("src/main.rs", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            std::io::Write::write_all(&mut w, b"fn main() {}").unwrap();
+            w.finish().unwrap();
+        }
+        let mut app = App::test_app(dir.clone());
+
+        let inside = crate::state::sessions::SavedVsplit {
+            width_pct: 42,
+            full_height: false,
+            focus_right: false,
+            preview_path: None,
+            right_cwd: Some(archive.join("src")),
+        };
+        app.restore_vsplit(&inside, false);
+
+        assert!(
+            app.state.vsplit.is_some(),
+            "the split must survive a column that was inside a container"
+        );
+        assert_eq!(
+            app.state.vsplit.map(|v| v.width_pct),
+            Some(42),
+            "and keep its saved shape"
+        );
+        assert_eq!(
+            app.state.right.as_ref().map(|c| c.listing.dir.clone()),
+            Some(dir),
+            "column b lands on the directory holding the container"
+        );
+        let flash = app.state.flash.as_ref().map(|f| f.text.clone());
+        assert!(
+            flash.is_some_and(|t| t.contains("pkg.zip")),
+            "and says why it isn't where it was: {:?}",
+            app.state.flash.as_ref().map(|f| f.text.clone())
+        );
+    });
+}
+
 /// restore_vsplit must not restore a *blank* preview split: a saved preview
 /// whose file vanished between sessions would otherwise open a carved, empty
 /// right column. And a present preview restores the split, re-loads the file,
