@@ -55,6 +55,47 @@ install -m 755 target/release/spyc ~/.local/bin/
 `make doctor` checks that the toolchain and cross-compile prerequisites
 are present before you start.
 
+## Running CURRENT (the development stream)
+
+Every channel in [INSTALL.md](INSTALL.md) installs a **RELEASE** — tagged,
+signed, frozen. `main` is spyc's **CURRENT** stream: every merged change
+lands there behind CI. It is what the author dog-foods daily, and where a
+fix reaches you first.
+
+It is also unreleased by definition — rolling, and it may break. There are
+no prebuilt binaries, so CURRENT is source-only and the clone + `make
+install` above *is* the install. Update by pulling and rebuilding:
+
+```sh
+git pull && make install
+```
+
+A CURRENT build says so: the version carries a `-CURRENT` suffix naming the
+minor it is heading for.
+
+```sh
+$ spyc --version
+spyc <x.y.z>-CURRENT (<sha>)
+```
+
+`2.1.0-CURRENT` is *on the way to* 2.1.0, never 2.1.0 itself. That suffix is
+static for the whole minor cycle, so the trailing SHA is the only thing that
+tells two CURRENT builds apart — quote it in a bug report. `--verbose` prints
+it alongside the toolchain and terminal spyc saw:
+
+```sh
+$ spyc --verbose
+🌶️ spyc 2.1.0-CURRENT
+  git:     69a5ff1
+  built:   …
+  rustc:   …
+```
+
+To go back to a release, install through any channel in
+[INSTALL.md](INSTALL.md) — a tagged build simply has no suffix. The full
+stream model (CURRENT, STABLE, RELEASE, and how releases are cut) is in
+[docs/RELEASE_ENGINEERING.md](docs/RELEASE_ENGINEERING.md).
+
 ## Development build
 
 For iterating on the code, a debug build is faster:
