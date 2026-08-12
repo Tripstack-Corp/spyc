@@ -163,8 +163,8 @@ fn write_zip(
                     out.raw_copy_file_rename(member, step.out.as_str())?;
                 }
             }
-            StepSource::Staging { rel } => {
-                write_from_staging_zip(&mut out, &staging_root.join(rel), &step.out)?;
+            StepSource::Staging { rel, mode } => {
+                write_from_staging_zip(&mut out, &staging_root.join(rel), &step.out, *mode)?;
             }
         }
     }
@@ -176,10 +176,12 @@ fn write_from_staging_zip<W: Write + Seek>(
     out: &mut zip::ZipWriter<W>,
     staged: &Path,
     name: &str,
+    archived_mode: Option<u32>,
 ) -> Result<()> {
     let md = std::fs::symlink_metadata(staged)
         .with_context(|| format!("reading {}", staged.display()))?;
-    let opts = zip::write::SimpleFileOptions::default().unix_permissions(mode_of(&md));
+    let opts = zip::write::SimpleFileOptions::default()
+        .unix_permissions(archived_mode.unwrap_or_else(|| mode_of(&md)));
     if md.is_dir() {
         out.add_directory(name, opts)?;
         return Ok(());
@@ -261,27 +263,34 @@ fn write_tar(
                     }
                 }
             }
-            StepSource::Staging { rel } => {
+            StepSource::Staging { rel, mode } => {
                 let staged = staging_root.join(rel);
                 let md = std::fs::symlink_metadata(&staged)
                     .with_context(|| format!("reading {}", staged.display()))?;
+                let out_mode = mode.unwrap_or_else(|| mode_of(&md)) & 0o777;
                 if md.file_type().is_symlink() {
                     let target = std::fs::read_link(&staged)?;
                     let mut header = tar::Header::new_gnu();
                     header.set_entry_type(tar::EntryType::Symlink);
-                    header.set_mode(mode_of(&md));
+                    header.set_mode(out_mode);
                     header.set_size(0);
                     builder.append_link(&mut header, &step.out, &target)?;
                 } else if md.is_dir() {
                     let mut header = tar::Header::new_gnu();
                     header.set_entry_type(tar::EntryType::Directory);
-                    header.set_mode(mode_of(&md));
+                    header.set_mode(out_mode);
                     header.set_size(0);
                     builder.append_data(&mut header, &step.out, std::io::empty())?;
                 } else {
+                    // `set_metadata` is what `append_file` does internally; doing
+                    // it here leaves room to override the one field that must not
+                    // come off the staged copy, which is spyc's cache.
                     let mut f = File::open(&staged)
                         .with_context(|| format!("reading {}", staged.display()))?;
-                    builder.append_file(&step.out, &mut f)?;
+                    let mut header = tar::Header::new_gnu();
+                    header.set_metadata(&md);
+                    header.set_mode(out_mode);
+                    builder.append_data(&mut header, &step.out, &mut f)?;
                 }
             }
         }
@@ -382,7 +391,7 @@ fn verify(written: &Path, format: ArchiveFormat, steps: &[RepackStep]) -> Result
 /// step's source before running a repack.
 pub fn staged_path(staging_root: &Path, step: &RepackStep) -> Option<PathBuf> {
     match &step.source {
-        StepSource::Staging { rel } => Some(staging_root.join(rel)),
+        StepSource::Staging { rel, .. } => Some(staging_root.join(rel)),
         StepSource::Archived { .. } => None,
     }
 }
@@ -611,6 +620,46 @@ mod tests {
             contents(&archive),
             [("a.txt".to_string(), b"edited by the user".to_vec())]
         );
+    }
+
+    /// Editing a member changes its bytes, not its permissions — `:chmod` inside
+    /// a mount is refused precisely because the archive owns them.
+    ///
+    /// The staged copy's mode is spyc's (owner-rw, so a repack can overwrite it),
+    /// so reading it back at write time publishes spyc's cache policy into the
+    /// user's archive: a `0o444` member came out `0o644`, and the only way to
+    /// trigger it was to edit the member — i.e. exactly when the user was least
+    /// looking at its permissions.
+    #[test]
+    fn editing_a_read_only_member_does_not_widen_its_mode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("pkg.zip");
+        let staging = tmp.path().join("staging");
+        zip_at(&archive, &[("locked.txt", b"original", 0o444)]);
+        let indexed = read::index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+
+        let entry = indexed.index.get("locked.txt").unwrap();
+        let real = read::materialize(&archive, entry, &staging).unwrap();
+        std::fs::write(&real, b"edited by the user").unwrap();
+
+        let mut journal = Journal::default();
+        journal.replace("locked.txt");
+        let steps = plan_repack(
+            &indexed.index,
+            &journal,
+            &StagedStats::new(),
+            &StagedStats::new(),
+        );
+        repack(&indexed.index, &steps, &staging, &opts()).unwrap();
+
+        let reread = read::index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+        let mode = reread
+            .index
+            .get("locked.txt")
+            .expect("still a member")
+            .mode
+            .expect("zip carries a unix mode");
+        assert_eq!(mode & 0o777, 0o444, "rewritten as {:o}", mode & 0o777);
     }
 
     #[test]
