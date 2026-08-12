@@ -8,6 +8,29 @@
 
 ## 1. Verdict
 
+> **UPDATED 2026-08-12 (sixth pass) — THE INFORMATIONAL TAIL IS CLOSED TOO.**
+> `main` at `20ad72a`. Six further PRs (#406–#411) close the eleven
+> informational items, plus the one that had stopped being informational:
+> **F18 was filed at 1448 of a 1500-line ceiling and was 1495 by the time it was
+> worked** — five lines, i.e. the next feature meets a bump-or-extract decision
+> under deadline. Fixed by extraction, twice: the pure predicates and loop-scoped
+> types out (#406), then `Runtime` and `ViewState` into their own modules with
+> their field docs (#407). **`app/mod.rs`: 1495 → 425**, ceiling 1500 → 600.
+>
+> That second step reversed a stated convention (AGENTS.md said mod.rs holds "the
+> three struct defs"), so AGENTS.md changed with it — the docs-in-the-same-commit
+> rule applied to a rule.
+>
+> **A third spliced doc block** turned up on the way: `Runtime`'s doc had been cut
+> in half by `PendingScopeWait` inserted into the middle of it. With F11 (#395)
+> and the two in #400, that is **three independent instances of one shape** in
+> this window — enough that it is a pattern, not a coincidence.
+>
+> **Severity tiers remaining: 0 blockers, 0 highs, 0 mediums, 0 lows, 0
+> informational.** 44 PRs, #346–#411.
+>
+> ---
+>
 > **UPDATED 2026-08-12 (fifth pass) — EVERY FINDING IS CLOSED.** `main` at
 > `b11edca`. Eleven further PRs (#392–#401, #403) close the lows. Five of the 23
 > filed were already closed as collateral by earlier passes (F12 by #383, F-E13
@@ -532,7 +555,28 @@ already failed open four times, and there was a regression test whose doc said
 silently." It recurred twice while that sentence sat there. **An instruction to a
 human is not a guard** — #402 removes the catch-all so the compiler enforces it.
 
+### Sixth pass — the informational tail (2026-08-12)
+
+`main` `b11edca` → `20ad72a`. Six PRs.
+
+| PR | closes | what closing it showed |
+|---|---|---|
+| #406 | F18 (part 1) | Filed at 1448/1500, found at **1495** — five lines. Extracted the five pure predicates to `util.rs` (whose own header already drew that line, and they were on the wrong side of it) and the loop-scoped `Draw`/`DispatchFlow`/`RunCtx` to `run.rs` (their own docs say they are `run()`-scoped). 1495 → 1278; ceiling → 1350. |
+| #407 | F18 (part 2) | Measured before deciding: **52% of mod.rs was `///` field docs** on `Runtime`/`ViewState`. So the fix was not to move comments to a README — that would have satisfied the count while the module still held the same thing, and detached docs from the fields they explain, which is the exact drift F11/#400 kept finding. Moved the *types*, docs attached. 1127 → 425; ceiling → 600. Fields `pub(super)` = the reachability they already had, so **no call site changed**. |
+| #408 | F-E15, F-E16, F16 | `^a g` was bound and absent from the popup FEATURES.md calls "the discovery surface"; `?` taught `Space` as "move right one column" when it has been the leader since the chord overhaul. Both are the two-derivations shape, so the fix is a guard: feed every key at every chord state and require anything resolving to an `Action` to be advertised. The tier guard now walks the same discovered tree instead of hardcoding `Space w`, which also brings `^s` into scope. |
+| #409 | F15, F17 | The index guard's `contains(name)` let a **longer sibling** satisfy a shorter module: `route.rs` covered by `archive_route.rs`, and three more real pairs — failing open exactly where names are most similar. Bite-checked both ways. |
+| #410 | INFO-1, INFO-2 | `verify` streamed the rewritten tar back out with `u64::MAX` — a second full copy of the expanded tree, ignoring the knob set to bound exactly that. Now the configured budget; refusal lands before the rename, so it fails safe. |
+| #411 | C-F12, D10, D11 | Three correct-but-unwritten decisions: the trusted root is spyc's launch dir *and every descendant*; `via = "both"` over SSH discards the OSC-52 error that was the informative one; a suspended tab restores running. The last is now pinned with an exhaustive `SavedTab` literal, so adding the field is a compile error rather than a passing assertion. |
+
+### What the informational tier turned out to contain
+
+Same lesson as the lows, one tier down. **F18 had drifted from "worth naming" to
+"five lines from blocking the next feature" in the two days between filing and
+fixing** — the only finding in the review whose severity moved on its own. The
+rest were correct decisions nobody had written down, which is the category that
+gets "fixed" later by someone reading them as bugs.
+
 ### Still open
 
-**Nothing.** All 58 findings are closed across five passes and 38 PRs
-(#346–#403). The 2.1 tag is unblocked on review grounds.
+**Nothing, at any tier.** All 58 findings are closed across six passes and 44 PRs
+(#346–#411). The 2.1 tag is unblocked on review grounds.
