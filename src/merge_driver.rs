@@ -283,14 +283,8 @@ mod tests {
     #[test]
     fn ensure_installed_writes_once_and_is_idempotent() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let ok = std::process::Command::new("git")
+        let ok = crate::git::test_support::git_command(tmp.path())
             .args(["init", "-q"])
-            .current_dir(tmp.path())
-            // `GIT_DIR` overrides the cwd, so a hook-launched test run would
-            // init/redirect at the real repo — see git::test_support.
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
             .status()
             .expect("git init")
             .success();

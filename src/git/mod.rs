@@ -114,13 +114,20 @@ mod no_subprocess_git_in_production {
     /// index corrupted, 99 tests failed). Scans ALL source, tests included:
     /// unlike the guard above, test code is precisely the subject here.
     ///
-    /// A site satisfies this by stripping `GIT_DIR` in its own chain, or by
+    /// A site satisfies this by going through `test_support::git_command`, or by
     /// carrying `GIT-ENV-EXEMPT` with a reason.
+    ///
+    /// It used to accept a hand-rolled `env_remove("GIT_DIR")` instead, which is
+    /// **one of the nine** variables `GIT_REDIRECT_ENV` names. Ten sites took it
+    /// up on that and stripped three; the guard passed all ten while
+    /// `GIT_OBJECT_DIRECTORY` and `GIT_ALTERNATE_OBJECT_DIRECTORIES` — which
+    /// apply independently of `GIT_DIR` and would send a scratch repo's writes
+    /// into the developer's real object store — went through untouched. Naming
+    /// the list here would just be a tenth copy of it, so the requirement is now
+    /// the *function* that owns it.
     fn spawn_sites_missing_env_hygiene(src_root: &Path) -> Vec<String> {
-        const WINDOW: usize = 900;
         const BEHIND: usize = 300;
         const EXEMPT: &str = concat!("GIT-ENV", "-EXEMPT");
-        let strip = concat!("env_remove(", "\"GIT_DIR\")");
         let mut offenders = Vec::new();
         let mut stack = vec![src_root.to_path_buf()];
         while let Some(dir) = stack.pop() {
@@ -141,8 +148,8 @@ mod no_subprocess_git_in_production {
                     // written as a comment above the spawn, and the stripping
                     // calls come after it.
                     let start = at.saturating_sub(BEHIND);
-                    let window = &text[start..text.len().min(at + WINDOW)];
-                    if !window.contains(strip) && !window.contains(EXEMPT) {
+                    let window = &text[start..at];
+                    if !window.contains(EXEMPT) {
                         let line = text[..at].matches('\n').count() + 1;
                         offenders.push(format!("{}:{line}", path.display()));
                     }
@@ -160,9 +167,10 @@ mod no_subprocess_git_in_production {
         let offenders = spawn_sites_missing_env_hygiene(&src);
         assert!(
             offenders.is_empty(),
-            "these git spawns can be retargeted by an inherited GIT_DIR — build them \
-             with `git::test_support::git_command`, add `.env_remove(\"GIT_DIR\")`, or \
-             mark the site GIT-ENV-EXEMPT with a reason. Offenders: {offenders:?}"
+            "these git spawns can be retargeted by an inherited git environment — \
+             build them with `git::test_support::git_command`, which strips all of \
+             GIT_REDIRECT_ENV, or mark the site GIT-ENV-EXEMPT with a reason. \
+             Offenders: {offenders:?}"
         );
     }
 }

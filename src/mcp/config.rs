@@ -1080,20 +1080,8 @@ mod tests {
     #[test]
     fn cleanup_skips_a_git_tracked_mcp_json() {
         let run_git = |dir: &std::path::Path, args: &[&str]| {
-            let ok = std::process::Command::new("git")
+            let ok = crate::git::test_support::git_command(dir)
                 .args(args)
-                .current_dir(dir)
-                .env("GIT_AUTHOR_NAME", "t")
-                .env("GIT_AUTHOR_EMAIL", "t@x")
-                .env("GIT_COMMITTER_NAME", "t")
-                .env("GIT_COMMITTER_EMAIL", "t@x")
-                .env("GIT_CONFIG_GLOBAL", "/dev/null")
-                .env("GIT_CONFIG_SYSTEM", "/dev/null")
-                // `GIT_DIR` overrides `-C`/cwd, so a hook-launched test run would
-                // retarget this at the real repo — see git::test_support.
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_INDEX_FILE")
                 .status()
                 .expect("spawn git")
                 .success();

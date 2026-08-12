@@ -681,22 +681,8 @@ fn refresh_listing_picks_up_edit_and_clears_after_commit() {
     let root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
 
     let run_git = |args: &[&str]| {
-        let status = std::process::Command::new("git")
+        let status = crate::git::test_support::git_command(&root)
             .args(args)
-            .current_dir(&root)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@x")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@x")
-            // Suppress any user-level .gitconfig so the test is
-            // hermetic on machines with unusual defaults.
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            // `GIT_DIR` overrides `-C`/cwd, so a hook-launched test run would
-            // retarget this at the real repo — see git::test_support.
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
             .status()
             .expect("spawn git");
         assert!(status.success(), "git {args:?} failed");
@@ -756,20 +742,8 @@ fn throttled_worktree_edit_converges_on_next_poll() {
     let tmp = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
     let run_git = |args: &[&str]| {
-        let status = std::process::Command::new("git")
+        let status = crate::git::test_support::git_command(&root)
             .args(args)
-            .current_dir(&root)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@x")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@x")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            // `GIT_DIR` overrides `-C`/cwd, so a hook-launched test run would
-            // retarget this at the real repo — see git::test_support.
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
             .status()
             .expect("spawn git");
         assert!(status.success(), "git {args:?} failed");
@@ -844,20 +818,8 @@ fn git_worker_available_enqueues_request_instead_of_spawning() {
     let tmp = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
     let run_git = |args: &[&str]| {
-        let status = std::process::Command::new("git")
+        let status = crate::git::test_support::git_command(&root)
             .args(args)
-            .current_dir(&root)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@x")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@x")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            // `GIT_DIR` overrides `-C`/cwd, so a hook-launched test run would
-            // retarget this at the real repo — see git::test_support.
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
             .status()
             .expect("spawn git");
         assert!(status.success(), "git {args:?} failed");
@@ -923,20 +885,8 @@ fn forced_rewalk_keeps_stale_markers_and_star_instead_of_blanking() {
     let tmp = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
     let run_git = |args: &[&str]| {
-        let status = std::process::Command::new("git")
+        let status = crate::git::test_support::git_command(&root)
             .args(args)
-            .current_dir(&root)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@x")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@x")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            // `GIT_DIR` overrides `-C`/cwd, so a hook-launched test run would
-            // retarget this at the real repo — see git::test_support.
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
             .status()
             .expect("spawn git");
         assert!(status.success(), "git {args:?} failed");
@@ -1116,20 +1066,8 @@ fn compute_git_info_fast_memoizes_branch_by_head_mtime() {
     let tmp = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
     let run_git = |args: &[&str]| {
-        let status = std::process::Command::new("git")
+        let status = crate::git::test_support::git_command(&root)
             .args(args)
-            .current_dir(&root)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@x")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@x")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            // `GIT_DIR` overrides `-C`/cwd, so a hook-launched test run would
-            // retarget this at the real repo — see git::test_support.
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
             .status()
             .expect("spawn git");
         assert!(status.success(), "git {args:?} failed");
