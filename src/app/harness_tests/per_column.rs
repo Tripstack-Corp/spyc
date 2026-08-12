@@ -205,20 +205,8 @@ fn dual_git_each_column_shows_its_own_repo() {
     use std::path::Path;
     let tmp = tempfile::tempdir().unwrap();
     let run_git = |dir: &Path, args: &[&str]| {
-        let ok = std::process::Command::new("git")
+        let ok = crate::git::test_support::git_command(dir)
             .args(args)
-            .current_dir(dir)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@x")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@x")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            // `GIT_DIR` overrides `-C`/cwd, so a hook-launched test run would
-            // retarget this at the real repo — see git::test_support.
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
             .status()
             .expect("spawn git")
             .success();
@@ -278,22 +266,8 @@ fn worktree_column_markers_clear_after_a_commit() {
     use std::path::Path;
     let tmp = tempfile::tempdir().unwrap();
     let run_git = |dir: &Path, args: &[&str]| {
-        let ok = std::process::Command::new("git")
-            .arg("-C")
-            .arg(dir)
+        let ok = crate::git::test_support::git_command(dir)
             .args(args)
-            .current_dir(std::env::temp_dir())
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@x")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@x")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            // `GIT_DIR` overrides `-C`/cwd, so a hook-launched test run would
-            // retarget this at the real repo — see git::test_support.
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
             .status()
             .expect("spawn git")
             .success();
@@ -369,22 +343,8 @@ fn why_git_dumps_per_column_refresh_state() {
     use std::path::Path;
     let tmp = tempfile::tempdir().unwrap();
     let run_git = |dir: &Path, args: &[&str]| {
-        std::process::Command::new("git")
-            .arg("-C")
-            .arg(dir)
+        crate::git::test_support::git_command(dir)
             .args(args)
-            .current_dir(std::env::temp_dir())
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@x")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@x")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            // `GIT_DIR` overrides `-C`/cwd, so a hook-launched test run would
-            // retarget this at the real repo — see git::test_support.
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
             .status()
             .expect("spawn git");
     };
