@@ -50,7 +50,7 @@ do from here?", modeled on Neovim's which-key.
   or, on a PNG / JPEG / GIF / WebP, show the picture full-screen (`s` save,
   `y` copy image, `Y` copy path, `b` base64, `o` external viewer, `q`
   dismiss). Detected by magic bytes, so an extensionless screenshot still
-  previews and a misnamed `.png` full of text still hex-dumps. Needs a
+  previews and a misnamed `.png` full of text opens as the text it is. Needs a
   terminal with a graphics protocol; without one, `o` still opens it.
 - **e / v** descend into a directory, or open a file in `$EDITOR` (suspends TUI)
 - **dd / Ndd** remove the cursor entry (+ N-1 below) to the graveyard,
