@@ -68,12 +68,11 @@ fn gesture_and_delta(kind: MouseEventKind, lines: usize) -> Option<(Gesture, i32
         MouseEventKind::Down(MouseButton::Left) => (Gesture::Left, 0),
         MouseEventKind::Down(MouseButton::Middle) => (Gesture::Middle, 0),
         MouseEventKind::Down(MouseButton::Right) => (Gesture::Right, 0),
-        // spyc asks the terminal only for 1000 (press/release), so `Moved`/`Drag`
-        // shouldn't arrive at all — `proc.rs` filters them for the terminals that
-        // send them anyway. Consequence, deliberate: click-drag selection INSIDE a
-        // child doesn't work. That needs 1002 (motion only while a button is
-        // held), which unlike 1003 wouldn't cost the idle-redraw invariant — a
-        // later change. Matched explicitly so adding one is a visible decision.
+        // `Up` and `Drag` never reach here — `handle_mouse` routes both to the
+        // child that took the press, before this. `Moved` is dropped in `proc.rs`
+        // (1002 reports motion only while a button is held, so a buttonless
+        // `Moved` is motion spyc never asked for). Horizontal wheel has no
+        // behaviour. All matched explicitly so adding one is a visible decision.
         MouseEventKind::Up(_)
         | MouseEventKind::Drag(_)
         | MouseEventKind::Moved
@@ -257,12 +256,8 @@ impl super::App {
         let lines = self.state.config.mouse.scroll_lines.max(1);
         // `delta` is only meaningful for a wheel gesture; buttons ignore it.
         let Some((gesture, delta)) = gesture_and_delta(ev.kind, lines) else {
-            // Drags, motion, horizontal wheel: no behaviour. spyc asks the terminal
-            // only for 1000 (press/release), so `Moved`/`Drag` shouldn't arrive at
-            // all — `proc.rs` filters them for the terminals that send them anyway.
-            // Consequence, deliberate: click-drag selection INSIDE a child doesn't
-            // work. That needs 1002 (motion only while a button is held), which
-            // unlike 1003 wouldn't cost the idle-redraw invariant — a later change.
+            // Motion or a horizontal wheel: no behaviour. Releases and drags are
+            // already gone — both returned above, to whoever took the press.
             return Vec::new();
         };
 

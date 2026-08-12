@@ -85,13 +85,6 @@ impl super::super::App {
 }
 
 impl super::super::App {
-    /// Give the keyboard to `region`, reusing the same entry points `^a j`/`^a k`
-    /// and `^a a`/`^a b` use.
-    ///
-    /// `set_pane_focus` is doing real work here, not just being tidy: it declines
-    /// while `^a z`-zoomed (the target region is collapsed off-screen) and, coming
-    /// back from the pane, restores whichever split column the user left from.
-    /// Assigning `state.focus` directly would lose both.
     /// Give the keyboard to the region that OWNS `slot`.
     ///
     /// Distinct from [`Self::focus_region`], which answers from layout geometry: a
@@ -114,6 +107,13 @@ impl super::super::App {
         }
     }
 
+    /// Give the keyboard to `region`, reusing the same entry points `^a j`/`^a k`
+    /// and `^a a`/`^a b` use.
+    ///
+    /// `set_pane_focus` is doing real work here, not just being tidy: it declines
+    /// while `^a z`-zoomed (the target region is collapsed off-screen) and, coming
+    /// back from the pane, restores whichever split column the user left from.
+    /// Assigning `state.focus` directly would lose both.
     pub(super) fn focus_region(&mut self, region: Option<Region>) {
         match region {
             Some(Region::Pane) => self.set_pane_focus(true),

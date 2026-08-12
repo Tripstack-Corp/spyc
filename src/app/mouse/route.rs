@@ -209,6 +209,16 @@ impl MouseSnapshot {
         self.pane_wants_mouse && !self.pane_closed && !self.has_scroll_pager
     }
 
+    /// Whether spyc should do the selecting over the pane itself.
+    ///
+    /// The complement of [`Self::can_forward_to_child`] on the mouse axis: a child
+    /// that speaks mouse draws its OWN selection (#224), and painting ours on top
+    /// would double it up. What's left — codex, a plain shell — has no other way to
+    /// be selected. Still requires a live, visible grid.
+    const fn pane_is_selectable(self) -> bool {
+        !self.pane_wants_mouse && !self.pane_closed && !self.has_scroll_pager
+    }
+
     /// Whether a pending chord set now would ever be seen by the resolver.
     ///
     /// A leader chord is only safe to arm if the NEXT key reaches
@@ -221,16 +231,6 @@ impl MouseSnapshot {
     /// A latch is not merely cosmetic: the popup stays on screen, and the first
     /// key that eventually reaches the resolver is consumed as a continuation —
     /// in the leader menu `p` is a chdir and `P` overwrites PROJECT_HOME.
-    /// Whether spyc should do the selecting over the pane itself.
-    ///
-    /// The complement of [`Self::can_forward_to_child`] on the mouse axis: a child
-    /// that speaks mouse draws its OWN selection (#224), and painting ours on top
-    /// would double it up. What's left — codex, a plain shell — has no other way to
-    /// be selected. Still requires a live, visible grid.
-    const fn pane_is_selectable(self) -> bool {
-        !self.pane_wants_mouse && !self.pane_closed && !self.has_scroll_pager
-    }
-
     const fn resolver_will_see_the_next_key(self) -> bool {
         !self.is_prompting && !matches!(self.pager_mount, Some(Mount::Overlay))
     }
