@@ -165,7 +165,9 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
 
     // Content layer.
     let is_meta = match kind {
-        InputKind::Key(key) => super::is_spyc_meta_when_pane_focused(key, snap.resolver_pending),
+        InputKind::Key(key) => {
+            super::util::is_spyc_meta_when_pane_focused(key, snap.resolver_pending)
+        }
         InputKind::Paste => false,
     };
     let pane_focused = matches!(snap.focus, Focus::Pane);

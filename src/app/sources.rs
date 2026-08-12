@@ -440,7 +440,7 @@ impl App {
             ),
             _ => ctx.scheduler.disarm(Deadline::RefreshQuiet),
         }
-        if super::should_fire_refresh(
+        if super::util::should_fire_refresh(
             ctx.last_event_at,
             ctx.last_refresh,
             ctx.first_event_after_refresh,

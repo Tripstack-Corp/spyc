@@ -4,8 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
-use ratatui::Frame;
+use crossterm::event::{Event, KeyCode, KeyEventKind};
 
 use crate::Tui;
 use crate::config::{Config, StatusPosition};
@@ -306,6 +305,10 @@ mod quick_select;
 mod render;
 mod route;
 mod run;
+/// The event loop's own scratch type. Defined in [`run`] with the loop it
+/// serves; re-exported because the `pub(crate)` loop-step methods across this
+/// module name it in their signatures.
+pub use run::RunCtx;
 mod scheduler;
 mod session;
 mod skill;
@@ -1199,131 +1202,6 @@ impl RowData {
     }
 }
 
-/// Per-iteration draw accumulator for the event loop. `dirty` is an OR
-/// across every step in an iteration; `reason` is last-writer-wins,
-/// matching the old `draw_reason = N` overwrite semantics. Reset by the
-/// render block each iteration.
-///
-/// `reason` codes: 0 = none, 1 = pane output, 2 = input/git, 3 = other
-/// (refresh / config / repaint / activity).
-#[derive(Default)]
-struct Draw {
-    dirty: bool,
-    reason: u8,
-}
-
-impl Draw {
-    /// Mark the frame dirty and set the reason (last writer wins).
-    const fn mark(&mut self, reason: u8) {
-        self.dirty = true;
-        self.reason = reason;
-    }
-
-    /// Mark dirty WITHOUT touching `reason` — for the activity-only
-    /// rollover redraw, which must not bump a real `draw_reason` (the
-    /// render-stats block reads `reason` and skips counting activity-only
-    /// frames).
-    const fn set_dirty(&mut self) {
-        self.dirty = true;
-    }
-}
-
-/// Outcome of dispatching one coalesced `effective` message (the result of
-/// `App::dispatch_effective`). Lets the dispatch logic live in a method while
-/// the loop keeps owning the actual control flow:
-/// - `Continue` → re-enter the loop top immediately (the scroll-throttle
-///   early-out), skipping this iteration's post-recv timers / render /
-///   context-write — exactly what the old inline `continue;` did.
-/// - `Proceed` → fall through to the post-recv timers + render.
-/// - `Exit(_)` → return from `run()` with this result: reader death, where
-///   `take_reader_result` distinguishes a clean stop (`Ok`) from a recorded
-///   fatal read error (`Err`). Kept distinct from `?`-propagated handler
-///   errors (which exit via the method's own `Result`).
-enum DispatchFlow {
-    Continue,
-    Proceed,
-    Exit(Result<()>),
-}
-
-/// Run()-scoped scratch for the event loop. Ephemeral: built by
-/// `App::run_setup`, dropped when `run()` returns. Deliberately NOT
-/// persistent App state (kept off `ViewState`/`Runtime`) so non-loop paths
-/// — `test_app`, `route_snapshot`, render, MCP execute — never see it.
-///
-/// Owns the fs watcher + its watch topology (so the watcher's notify thread
-/// is torn down with the run scope), the advisory `Scheduler`, the coalesce
-/// buffers, the debounce timers, the last-keypress instant, and the per-
-/// iteration `Draw` accumulator. It does NOT own the input reader handle,
-/// `foreground_exec`, or the channel: those stay bare `run()` locals so
-/// their Drop/borrow ordering is unchanged (the reader's `Drop` joins the
-/// thread; `RunCtx` — and thus the watcher — must drop AFTER that join, so
-/// `run()` declares `ctx` BEFORE `reader_handle`). The git/MCP forwarder
-/// threads are detached (no handle kept) and self-terminate on channel drop.
-///
-/// `pub` only because the `pub(crate)` loop-step methods name it in their
-/// signatures (`fn …(&mut self, ctx: &mut RunCtx)`); its fields stay
-/// module-private (the `app` module itself is private, so this is
-/// crate-internal in practice — matching `ViewState`/`App`).
-pub struct RunCtx {
-    /// Command sender to the off-thread watch worker (`watch::spawn_watch_worker`).
-    /// `None` if the watcher couldn't be created (degrades to poll-only).
-    watch_tx: Option<std::sync::mpsc::Sender<watch::WatchCommand>>,
-    /// Last listing dir we sent a watch command for; on chdir we send a new
-    /// `SyncListing` so the worker re-points its watches. Purely a send-dedup
-    /// key — the worker owns the actual watch topology.
-    watched_listing: Option<PathBuf>,
-    /// Last second-commander (column `b`) listing dir we sent a watch command
-    /// for. Re-sent when it changes (open / chdir / close `b`) so the worker
-    /// watches `b`'s tree + gitdir too — `b`'s git markers refresh on
-    /// fs-events, not just the ≤1 s poll.
-    watched_listing_right: Option<PathBuf>,
-    /// Last vertical-split preview file we sent a watch command for. The watch
-    /// topology is re-sent when this OR `watched_listing` changes, so opening /
-    /// swapping / closing the preview re-points the preview-parent watch.
-    watched_preview: Option<PathBuf>,
-    scheduler: Scheduler,
-    /// Coalesce buffers: the recv arm pushes here; the pre-recv drains process them.
-    fs_pending: Vec<notify::Event>,
-    git_pending: Vec<state::GitWorkerResult>,
-    mcp_pending: Vec<crate::mcp_cmd::McpRequest>,
-    last_context_write: std::time::Instant,
-    last_refresh: std::time::Instant,
-    last_git_poll: std::time::Instant,
-    /// Trailing-debounce: last listing event; refresh fires after `REFRESH_QUIET` of quiet.
-    last_event_at: Option<std::time::Instant>,
-    /// First listing event since the last refresh (fixed, not bumped) — caps refresh deferral.
-    first_event_after_refresh: Option<std::time::Instant>,
-    /// Last keypress instant — suppresses the MCP context-write for 300ms after a keystroke.
-    last_input_at: Option<std::time::Instant>,
-    draw: Draw,
-}
-
-#[cfg(test)]
-impl RunCtx {
-    /// Build a `RunCtx` with no fs watcher (the loop-step unit tests never
-    /// spawn one) and fresh empty scratch — so the step methods, which now
-    /// take `&mut RunCtx`, can be driven from tests.
-    fn for_test() -> Self {
-        Self {
-            watch_tx: None,
-            watched_listing: None,
-            watched_listing_right: None,
-            watched_preview: None,
-            scheduler: Scheduler::new(),
-            fs_pending: Vec::new(),
-            git_pending: Vec::new(),
-            mcp_pending: Vec::new(),
-            last_context_write: std::time::Instant::now(),
-            last_refresh: std::time::Instant::now(),
-            last_git_poll: std::time::Instant::now(),
-            last_event_at: None,
-            first_event_after_refresh: None,
-            last_input_at: None,
-            draw: Draw::default(),
-        }
-    }
-}
-
 impl App {
     // MVU Phase 5: `yank_pane_to_clipboard` / `yank_scrollback_to_clipboard`
     // are gone — their live-pane read + guards + clipboard IO moved into
@@ -1379,101 +1257,6 @@ impl App {
 /// cursor via DEC ?25l (vt100 surfaces this as `hide_cursor()`).
 /// Skips the call when the cursor would land outside the pane's
 /// drawable rect, which can happen briefly during a resize.
-fn place_pty_cursor_from_screen(
-    frame: &mut Frame,
-    screen: &vt100::Screen,
-    rect: ratatui::layout::Rect,
-) {
-    if screen.hide_cursor() {
-        return;
-    }
-    let (cy, cx) = screen.cursor_position();
-    if u32::from(cy) >= u32::from(rect.height) || u32::from(cx) >= u32::from(rect.width) {
-        return;
-    }
-    let x = rect.x + cx;
-    let y = rect.y + cy;
-    frame.set_cursor_position((x, y));
-}
-
-/// How long after a focus-switch chord (`^a-j` / `^a-k`) a same-key
-/// Press/Repeat is treated as a stray bounce and dropped. Covers
-/// system key-repeat (~30-50 ms) and kitty-keyboard Repeat events.
-const POST_CHORD_BOUNCE_WINDOW: std::time::Duration = std::time::Duration::from_millis(60);
-
-/// Whether `key` is a stray bounce of a just-completed focus-switch
-/// chord that should be swallowed (rather than leaked to the now-
-/// focused pane child).
-///
-/// `resolver_pending` is the resolver's state *before* this key is
-/// fed: when a chord is already mid-flight (the user pressed `^a`
-/// again), `key` is a legitimate chord completion, not a bounce — so
-/// we must not swallow it. Without this clause, rapid repeated
-/// `^a-j` / `^a-k` lost every chord after the first (the second `j`/`k`
-/// landed inside the bounce window and was dropped before reaching the
-/// resolver).
-fn is_post_chord_bounce(
-    stamp: Option<(std::time::Instant, KeyCode)>,
-    key: KeyEvent,
-    resolver_pending: bool,
-) -> bool {
-    let Some((at, code)) = stamp else {
-        return false;
-    };
-    at.elapsed() < POST_CHORD_BOUNCE_WINDOW
-        && key.code == code
-        && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-        && key.modifiers.is_empty()
-        && !resolver_pending
-}
-
-/// Decide whether the watcher-driven `refresh_listing` should fire
-/// this loop iteration.
-///
-/// A pure trailing-edge debounce (`now - last_event_at >= refresh_quiet`)
-/// gets starved under continuous fs activity — cargo writing into
-/// `target/`, claude/agent file streams, IDE autosave bursts — because
-/// every new event resets `last_event_at` and the quiet window never
-/// arrives. So we ALSO cap the wait at `max_defer` from the *first*
-/// event of the current busy stretch, ensuring per-file markers can't
-/// stay stale forever just because the FS won't go quiet.
-fn should_fire_refresh(
-    last_event_at: Option<std::time::Instant>,
-    last_refresh: std::time::Instant,
-    first_event_after_refresh: Option<std::time::Instant>,
-    now: std::time::Instant,
-    refresh_quiet: Duration,
-    max_defer: Duration,
-) -> bool {
-    let Some(at) = last_event_at else {
-        return false;
-    };
-    let trailing_quiet = now.duration_since(at) >= refresh_quiet;
-    let max_wait_exceeded =
-        first_event_after_refresh.is_some_and(|first| now.duration_since(first) >= max_defer);
-    let rate_ok = now.duration_since(last_refresh) >= refresh_quiet;
-    (trailing_quiet || max_wait_exceeded) && rate_ok
-}
-
-/// Keys we intercept even when the pane is focused.
-const fn is_spyc_meta_when_pane_focused(
-    key: crossterm::event::KeyEvent,
-    resolver_pending: bool,
-) -> bool {
-    use crossterm::event::{KeyCode, KeyModifiers};
-    // Continuation of a multi-key spyc sequence must stay with spyc.
-    if resolver_pending {
-        return true;
-    }
-    // Raw FS byte or F10 — always the pane toggle.
-    if matches!(key.code, KeyCode::F(10) | KeyCode::Char('\x1c')) {
-        return true;
-    }
-    // Ctrl-\ (toggle), Ctrl-W (vim pane prefix), Ctrl-A (screen prefix).
-    key.modifiers.contains(KeyModifiers::CONTROL)
-        && matches!(key.code, KeyCode::Char('\\' | 'w' | 'W' | 'a' | 'A'))
-}
-
 /// Build a `ForegroundExec` effect that runs `cmd` through `sh -c` so shell features
 /// (pipes, redirection, `$VAR`) work.
 fn sh_c(cmd: &str, pause_after: bool) -> Vec<Effect> {

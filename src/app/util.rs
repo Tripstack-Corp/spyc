@@ -1,8 +1,110 @@
 //! Leaf helper functions with no `App`/`Runtime` dependency: time/byte/text
-//! formatting, path + user/host display, a process-group kill, and an
-//! untracked-file diff. Relocated from `app/mod.rs` (800-LoC campaign); the
-//! app-domain glue (`sh_c` → `Effect`, `row_from_entry` → `RowData`) stays in
-//! mod.rs.
+//! formatting, path + user/host display, a process-group kill, an
+//! untracked-file diff, the pure key/refresh predicates the loop consults, and
+//! the pty cursor placement the render pass calls. Relocated from `app/mod.rs`
+//! (800-LoC campaign); the app-domain glue (`sh_c` → `Effect`,
+//! `row_from_entry` → `RowData`) stays in mod.rs.
+
+use std::time::Duration;
+
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use ratatui::Frame;
+
+/// Place the terminal cursor where a pty child put it, in frame coordinates.
+///
+/// Takes the child's screen and the rect it was drawn into rather than reaching
+/// for either, which is what lets the `&self` render pass call it.
+pub fn place_pty_cursor_from_screen(
+    frame: &mut Frame,
+    screen: &vt100::Screen,
+    rect: ratatui::layout::Rect,
+) {
+    if screen.hide_cursor() {
+        return;
+    }
+    let (cy, cx) = screen.cursor_position();
+    if u32::from(cy) >= u32::from(rect.height) || u32::from(cx) >= u32::from(rect.width) {
+        return;
+    }
+    let x = rect.x + cx;
+    let y = rect.y + cy;
+    frame.set_cursor_position((x, y));
+}
+
+/// How long after a focus-switch chord (`^a-j` / `^a-k`) a same-key
+/// Press/Repeat is treated as a stray bounce and dropped. Covers
+/// system key-repeat (~30-50 ms) and kitty-keyboard Repeat events.
+pub const POST_CHORD_BOUNCE_WINDOW: Duration = Duration::from_millis(60);
+
+/// Whether `key` is a stray bounce of a just-completed focus-switch
+/// chord that should be swallowed (rather than leaked to the now-
+/// focused pane child).
+///
+/// `resolver_pending` is the resolver's state *before* this key is
+/// fed: when a chord is already mid-flight (the user pressed `^a`
+/// again), `key` is a legitimate chord completion, not a bounce — so
+/// we must not swallow it. Without this clause, rapid repeated
+/// `^a-j` / `^a-k` lost every chord after the first (the second `j`/`k`
+/// landed inside the bounce window and was dropped before reaching the
+/// resolver).
+pub fn is_post_chord_bounce(
+    stamp: Option<(std::time::Instant, KeyCode)>,
+    key: KeyEvent,
+    resolver_pending: bool,
+) -> bool {
+    let Some((at, code)) = stamp else {
+        return false;
+    };
+    at.elapsed() < POST_CHORD_BOUNCE_WINDOW
+        && key.code == code
+        && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+        && key.modifiers.is_empty()
+        && !resolver_pending
+}
+
+/// Decide whether the watcher-driven `refresh_listing` should fire
+/// this loop iteration.
+///
+/// A pure trailing-edge debounce (`now - last_event_at >= refresh_quiet`)
+/// gets starved under continuous fs activity — cargo writing into
+/// `target/`, claude/agent file streams, IDE autosave bursts — because
+/// every new event resets `last_event_at` and the quiet window never
+/// arrives. So we ALSO cap the wait at `max_defer` from the *first*
+/// event of the current busy stretch, ensuring per-file markers can't
+/// stay stale forever just because the FS won't go quiet.
+pub fn should_fire_refresh(
+    last_event_at: Option<std::time::Instant>,
+    last_refresh: std::time::Instant,
+    first_event_after_refresh: Option<std::time::Instant>,
+    now: std::time::Instant,
+    refresh_quiet: Duration,
+    max_defer: Duration,
+) -> bool {
+    let Some(at) = last_event_at else {
+        return false;
+    };
+    let trailing_quiet = now.duration_since(at) >= refresh_quiet;
+    let max_wait_exceeded =
+        first_event_after_refresh.is_some_and(|first| now.duration_since(first) >= max_defer);
+    let rate_ok = now.duration_since(last_refresh) >= refresh_quiet;
+    (trailing_quiet || max_wait_exceeded) && rate_ok
+}
+
+/// Keys we intercept even when the pane is focused.
+pub const fn is_spyc_meta_when_pane_focused(key: KeyEvent, resolver_pending: bool) -> bool {
+    use crossterm::event::KeyModifiers;
+    // Continuation of a multi-key spyc sequence must stay with spyc.
+    if resolver_pending {
+        return true;
+    }
+    // Raw FS byte or F10 — always the pane toggle.
+    if matches!(key.code, KeyCode::F(10) | KeyCode::Char('\x1c')) {
+        return true;
+    }
+    // Ctrl-\ (toggle), Ctrl-W (vim pane prefix), Ctrl-A (screen prefix).
+    key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('\\' | 'w' | 'W' | 'a' | 'A'))
+}
 
 /// Format a `Duration` in seconds as a compact human string for
 /// the activity-monitor uptime field. Forms:

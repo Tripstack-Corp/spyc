@@ -8,9 +8,135 @@
 use super::sources::{coalesce_recv, take_reader_result};
 use super::watch::{WatchCommand, spawn_watch_worker};
 use super::{
-    App, DispatchFlow, Draw, Duration, Effect, Event, ForegroundExec, KeyCode, KeyEventKind,
-    Message, PathBuf, Result, RunCtx, Scheduler, Tui, spawn_input_reader,
+    App, Duration, Effect, Event, ForegroundExec, KeyCode, KeyEventKind, Message, PathBuf, Result,
+    Scheduler, Tui, spawn_input_reader,
 };
+
+/// Per-iteration draw accumulator for the event loop. `dirty` is an OR
+/// across every step in an iteration; `reason` is last-writer-wins,
+/// matching the old `draw_reason = N` overwrite semantics. Reset by the
+/// render block each iteration.
+///
+/// `reason` codes: 0 = none, 1 = pane output, 2 = input/git, 3 = other
+/// (refresh / config / repaint / activity).
+#[derive(Default)]
+pub(super) struct Draw {
+    dirty: bool,
+    reason: u8,
+}
+
+impl Draw {
+    /// Mark the frame dirty and set the reason (last writer wins).
+    pub(super) const fn mark(&mut self, reason: u8) {
+        self.dirty = true;
+        self.reason = reason;
+    }
+
+    /// Mark dirty WITHOUT touching `reason` — for the activity-only
+    /// rollover redraw, which must not bump a real `draw_reason` (the
+    /// render-stats block reads `reason` and skips counting activity-only
+    /// frames).
+    pub(super) const fn set_dirty(&mut self) {
+        self.dirty = true;
+    }
+}
+
+/// Outcome of dispatching one coalesced `effective` message (the result of
+/// `App::dispatch_effective`). Lets the dispatch logic live in a method while
+/// the loop keeps owning the actual control flow:
+/// - `Continue` → re-enter the loop top immediately (the scroll-throttle
+///   early-out), skipping this iteration's post-recv timers / render /
+///   context-write — exactly what the old inline `continue;` did.
+/// - `Proceed` → fall through to the post-recv timers + render.
+/// - `Exit(_)` → return from `run()` with this result: reader death, where
+///   `take_reader_result` distinguishes a clean stop (`Ok`) from a recorded
+///   fatal read error (`Err`). Kept distinct from `?`-propagated handler
+///   errors (which exit via the method's own `Result`).
+pub(super) enum DispatchFlow {
+    Continue,
+    Proceed,
+    Exit(Result<()>),
+}
+
+/// Run()-scoped scratch for the event loop. Ephemeral: built by
+/// `App::run_setup`, dropped when `run()` returns. Deliberately NOT
+/// persistent App state (kept off `ViewState`/`Runtime`) so non-loop paths
+/// — `test_app`, `route_snapshot`, render, MCP execute — never see it.
+///
+/// Owns the fs watcher + its watch topology (so the watcher's notify thread
+/// is torn down with the run scope), the advisory `Scheduler`, the coalesce
+/// buffers, the debounce timers, the last-keypress instant, and the per-
+/// iteration `Draw` accumulator. It does NOT own the input reader handle,
+/// `foreground_exec`, or the channel: those stay bare `run()` locals so
+/// their Drop/borrow ordering is unchanged (the reader's `Drop` joins the
+/// thread; `RunCtx` — and thus the watcher — must drop AFTER that join, so
+/// `run()` declares `ctx` BEFORE `reader_handle`). The git/MCP forwarder
+/// threads are detached (no handle kept) and self-terminate on channel drop.
+///
+/// `pub` only because the `pub(crate)` loop-step methods name it in their
+/// signatures (`fn …(&mut self, ctx: &mut RunCtx)`). Its fields are
+/// `pub(super)`, which from here is exactly the reachability they had as
+/// private items of `app`: the whole `app` subtree, which is what the sibling
+/// loop-step modules read them through.
+pub struct RunCtx {
+    /// Command sender to the off-thread watch worker (`watch::spawn_watch_worker`).
+    /// `None` if the watcher couldn't be created (degrades to poll-only).
+    pub(super) watch_tx: Option<std::sync::mpsc::Sender<WatchCommand>>,
+    /// Last listing dir we sent a watch command for; on chdir we send a new
+    /// `SyncListing` so the worker re-points its watches. Purely a send-dedup
+    /// key — the worker owns the actual watch topology.
+    pub(super) watched_listing: Option<PathBuf>,
+    /// Last second-commander (column `b`) listing dir we sent a watch command
+    /// for. Re-sent when it changes (open / chdir / close `b`) so the worker
+    /// watches `b`'s tree + gitdir too — `b`'s git markers refresh on
+    /// fs-events, not just the ≤1 s poll.
+    pub(super) watched_listing_right: Option<PathBuf>,
+    /// Last vertical-split preview file we sent a watch command for. The watch
+    /// topology is re-sent when this OR `watched_listing` changes, so opening /
+    /// swapping / closing the preview re-points the preview-parent watch.
+    pub(super) watched_preview: Option<PathBuf>,
+    pub(super) scheduler: Scheduler,
+    /// Coalesce buffers: the recv arm pushes here; the pre-recv drains process them.
+    pub(super) fs_pending: Vec<notify::Event>,
+    pub(super) git_pending: Vec<super::state::GitWorkerResult>,
+    pub(super) mcp_pending: Vec<crate::mcp_cmd::McpRequest>,
+    pub(super) last_context_write: std::time::Instant,
+    pub(super) last_refresh: std::time::Instant,
+    pub(super) last_git_poll: std::time::Instant,
+    /// Trailing-debounce: last listing event; refresh fires after `REFRESH_QUIET` of quiet.
+    pub(super) last_event_at: Option<std::time::Instant>,
+    /// First listing event since the last refresh (fixed, not bumped) — caps refresh deferral.
+    pub(super) first_event_after_refresh: Option<std::time::Instant>,
+    /// Last keypress instant — suppresses the MCP context-write for 300ms after a keystroke.
+    pub(super) last_input_at: Option<std::time::Instant>,
+    pub(super) draw: Draw,
+}
+
+#[cfg(test)]
+impl RunCtx {
+    /// Build a `RunCtx` with no fs watcher (the loop-step unit tests never
+    /// spawn one) and fresh empty scratch — so the step methods, which now
+    /// take `&mut RunCtx`, can be driven from tests.
+    pub(super) fn for_test() -> Self {
+        Self {
+            watch_tx: None,
+            watched_listing: None,
+            watched_listing_right: None,
+            watched_preview: None,
+            scheduler: Scheduler::new(),
+            fs_pending: Vec::new(),
+            git_pending: Vec::new(),
+            mcp_pending: Vec::new(),
+            last_context_write: std::time::Instant::now(),
+            last_refresh: std::time::Instant::now(),
+            last_git_poll: std::time::Instant::now(),
+            last_event_at: None,
+            first_event_after_refresh: None,
+            last_input_at: None,
+            draw: Draw::default(),
+        }
+    }
+}
 
 impl App {
     /// Build the run()-scoped scratch (`RunCtx`): fs watcher, scheduler,

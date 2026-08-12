@@ -21,10 +21,7 @@ use crate::shell;
 
 use super::route;
 use super::update::UiMsg;
-use super::{
-    App, Effect, Mode, POST_CHORD_BOUNCE_WINDOW, PaneInput, PaneTarget, View, is_post_chord_bounce,
-    sh_c, strip_ansi_escapes,
-};
+use super::{App, Effect, Mode, PaneInput, PaneTarget, View, sh_c, strip_ansi_escapes};
 
 /// Wrap `text` in bracketed-paste markers so the receiving child app (claude,
 /// an editor, …) sees it as one paste block rather than line-by-line.
@@ -159,7 +156,7 @@ impl App {
         // active, so it gets forwarded to the pane as raw input.
         // 60 ms covers system-key-repeat (~30-50 ms) and kitty-keyboard
         // Repeat events without affecting deliberate double-taps.
-        if is_post_chord_bounce(
+        if super::util::is_post_chord_bounce(
             self.view.focus_chord_completed,
             key,
             self.state.resolver.is_pending(),
@@ -172,7 +169,7 @@ impl App {
         if self
             .view
             .focus_chord_completed
-            .is_some_and(|(at, _)| at.elapsed() >= POST_CHORD_BOUNCE_WINDOW)
+            .is_some_and(|(at, _)| at.elapsed() >= super::util::POST_CHORD_BOUNCE_WINDOW)
         {
             self.view.focus_chord_completed = None;
         }
