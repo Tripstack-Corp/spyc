@@ -1085,6 +1085,61 @@ mod tests {
         );
     }
 
+    /// The write-time free-space precheck, which nothing exercised.
+    ///
+    /// Every other write test runs `free_space_margin: 0` against a roomy
+    /// tempdir, so the condition was never once true — `&& false` in it would
+    /// have failed nothing. The mount-time equivalent *is* well covered
+    /// (`budget::decide_mount` takes free space as data), which is exactly what
+    /// made this one look covered too.
+    ///
+    /// A margin larger than any disk is how the branch is reached without
+    /// faking a filesystem: `available_space` reports the truth and the margin
+    /// makes the truth insufficient. It also pins the saturating add — a plain
+    /// `+` would wrap here and turn the refusal into a pass.
+    #[test]
+    fn a_write_is_refused_when_the_disk_cannot_hold_the_archive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("pkg.zip");
+        zip_at(&archive, &[("a.txt", b"alpha", 0o644)]);
+        let before = std::fs::read(&archive).unwrap();
+
+        let indexed = read::index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+        let mut journal = Journal::default();
+        journal.delete("a.txt");
+        let steps = plan_repack(
+            &indexed.index,
+            &journal,
+            &StagedStats::new(),
+            &StagedStats::new(),
+        );
+
+        let err = repack(
+            &indexed.index,
+            &steps,
+            &tmp.path().join("staging"),
+            &RepackOptions {
+                snapshot_original: false,
+                free_space_margin: u64::MAX,
+            },
+        )
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("free"), "must name the reason: {msg}");
+        assert_eq!(
+            std::fs::read(&archive).unwrap(),
+            before,
+            "and refuse before touching the original"
+        );
+        assert!(
+            std::fs::read_dir(tmp.path())
+                .unwrap()
+                .flatten()
+                .all(|e| e.file_name() == "pkg.zip"),
+            "leaving no temp file behind either"
+        );
+    }
+
     /// A plan naming a member the index doesn't have fails before anything is
     /// replaced. Caught by `write_zip`'s index lookup, not by `verify` — which is
     /// what `a_write_only_verify_can_catch_leaves_the_original_alone` covers.
