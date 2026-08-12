@@ -379,6 +379,7 @@ impl super::App {
             }
             MouseSink::PaneForward => self.forward_to_child(ev, &layout),
             MouseSink::PaneScrollKeys => self.send_scroll_keys(delta),
+            MouseSink::PaneHistory => self.wheel_into_pane_history(delta),
 
             MouseSink::FocusAndSelect(slot) => {
                 // The pager's OWN region, not the one the layout says is under the
@@ -581,7 +582,11 @@ mod tests {
         );
         app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
         let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
-        let feed: String = (0..80).map(|i| format!("history line {i}\n")).collect();
+        let mut feed = String::new();
+        for i in 0..80 {
+            use std::fmt::Write as _;
+            let _ = writeln!(feed, "history line {i}");
+        }
         tabs.active_mut()
             .send_bytes(feed.as_bytes())
             .expect("write to the pty");
@@ -651,6 +656,49 @@ mod tests {
                 app.runtime.pane_scroll_settle.is_some() || app.view.scroll_pager.is_some(),
                 "a sustained wheel-up over an inline agent must reach for the pane's \
                  captured history; instead the tick vanished"
+            );
+        });
+    }
+
+    /// The two ways the same gesture must leave the pane alone: a DOWN tick,
+    /// because the live screen already IS the bottom (opening there is what put
+    /// the agent-view path into an open/close flicker loop), and
+    /// `[mouse] pane_scroll_view = "off"`, the documented way back to the old
+    /// silence for anyone who wants their wheel to do nothing here.
+    #[test]
+    fn a_down_tick_or_pane_scroll_view_off_leaves_the_pane_alone() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let dir = tmp.path().join("work");
+            std::fs::create_dir(&dir).unwrap();
+            let mut app = App::test_app(dir.clone());
+            app.view.term_size = (120, 24);
+            inline_agent_pane_with_history(&mut app, &dir);
+            crate::set_mouse_capture_for_test(true);
+            let layout = app.frame_layout(ratatui::layout::Rect::new(0, 0, 120, 24));
+            let pane_rect = layout.pane.expect("a pane is open");
+            let point = (pane_rect.x + 2, pane_rect.y + 1);
+            let reached_for_history =
+                |a: &App| a.runtime.pane_scroll_settle.is_some() || a.view.scroll_pager.is_some();
+
+            for _ in 0..(super::route::OPEN_AFTER_UP_TICKS * 2) {
+                app.handle_mouse(at(MouseEventKind::ScrollDown, point.0, point.1));
+            }
+            assert!(
+                !reached_for_history(&app),
+                "scrolling DOWN past the live screen must not open history"
+            );
+
+            app.view.pane_scroll_streak = None;
+            app.state.config.mouse.pane_scroll_view = crate::config::PaneScrollView::Off;
+            for _ in 0..(super::route::OPEN_AFTER_UP_TICKS * 2) {
+                app.handle_mouse(at(MouseEventKind::ScrollUp, point.0, point.1));
+            }
+            crate::set_mouse_capture_for_test(false);
+            assert!(
+                !reached_for_history(&app),
+                "pane_scroll_view = \"off\" must keep the wheel silent over the pane"
             );
         });
     }
