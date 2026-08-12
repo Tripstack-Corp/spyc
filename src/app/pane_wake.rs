@@ -1,7 +1,7 @@
 //! MVU Phase 3b: pane wake identity + closure construction.
 //!
 //! `SinkId` is a runtime-only, monotonically-allocated pane identifier
-//! carried by [`super::Message::PaneOutput`]. In 3b it only *labels* the
+//! carried by [`super::Wake::Pane`]. In 3b it only *labels* the
 //! wake — the loop re-scans every live pane on any `PaneOutput` rather than
 //! targeting by id — but it is the shared identity that 3c's
 //! `SinkOutput { sink }` (capture/task drains) and the later
@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use crate::pane::PaneWake;
 
-use super::{App, Message};
+use super::{App, Message, Wake};
 
 /// Runtime-only pane identifier. Never serialized (`SavedTab` carries no
 /// id; restored tabs respawn with fresh ones). `NonZero` reserves 0 and
@@ -38,7 +38,7 @@ impl App {
     }
 
     /// Mint a `SinkId` and build the pane's wake closure: a cheap
-    /// non-blocking send of `Message::PaneOutput { tab }` onto the unified
+    /// non-blocking send of `Wake::Pane { tab }` onto the unified
     /// channel. Before `run()` installs `pane_wake_tx` (the test harness and
     /// any pre-run spawn) this returns a no-op — harmless, because nothing is
     /// running the event loop yet, so there is no idle to service (the poll
@@ -50,7 +50,7 @@ impl App {
             Some(tx) => {
                 let tx = tx.clone();
                 Arc::new(move || {
-                    let _ = tx.send(Message::PaneOutput { tab });
+                    let _ = tx.send(Message::Wake(Wake::Pane { tab }));
                 })
             }
             None => Arc::new(|| {}),
@@ -58,7 +58,7 @@ impl App {
     }
 
     /// MVU Phase 3c: mint a `SinkId` and build a `Wake` for a main-loop-
-    /// drained capture/task. The fire closure sends `Message::SinkOutput`;
+    /// drained capture/task. The fire closure sends `Wake::Sink`;
     /// the fresh `pending` flag is the edge the `PtyHost` reader CASes and
     /// the main loop clears (`clear_wake_pending`). Install it on the host
     /// via `host.set_wake(...)`. No-op fire before `run()` installs the
@@ -70,7 +70,7 @@ impl App {
             Some(tx) => {
                 let tx = tx.clone();
                 Arc::new(move || {
-                    let _ = tx.send(Message::SinkOutput { sink });
+                    let _ = tx.send(Message::Wake(Wake::Sink { sink }));
                 })
             }
             None => Arc::new(|| {}),
@@ -82,7 +82,7 @@ impl App {
     }
 
     /// Build a pager-stream worker's wake — a payloadless
-    /// `Message::PagerStreamOutput` send (the payload rides the boxed stream's
+    /// `Message::Wake(Wake::PagerStream)` send (the payload rides the boxed stream's
     /// `rx`, re-drained by `drain_pager_stream`). Wrapped around the worker's
     /// data `Sender` by a `WakingSender`. The single wake for every pager
     /// stream (grep / git-view / transcript). No-op before `run()` installs the
@@ -92,7 +92,7 @@ impl App {
             Some(tx) => {
                 let tx = tx.clone();
                 Arc::new(move || {
-                    let _ = tx.send(Message::PagerStreamOutput);
+                    let _ = tx.send(Message::Wake(Wake::PagerStream));
                 })
             }
             None => Arc::new(|| {}),
@@ -100,14 +100,14 @@ impl App {
     }
 
     /// MVU Phase 3d: build the F-finder walker's wake — a payloadless
-    /// `Message::FindOutput` send (the candidates ride `FindPicker.walk_rx`,
+    /// `Message::Wake(Wake::Find)` send (the candidates ride `FindPicker.walk_rx`,
     /// re-drained by `drain_walk`). No-op before `run()` installs the sender.
     pub(crate) fn make_find_wake(&self) -> PaneWake {
         match &self.runtime.pane_wake_tx {
             Some(tx) => {
                 let tx = tx.clone();
                 Arc::new(move || {
-                    let _ = tx.send(Message::FindOutput);
+                    let _ = tx.send(Message::Wake(Wake::Find));
                 })
             }
             None => Arc::new(|| {}),
@@ -143,7 +143,7 @@ mod tests {
             let wake = app.make_pane_wake();
             wake();
             match rx.try_recv() {
-                Ok(Message::PaneOutput { .. }) => {}
+                Ok(Message::Wake(Wake::Pane { .. })) => {}
                 _ => panic!("expected a PaneOutput wake on the channel"),
             }
         });
@@ -159,7 +159,7 @@ mod tests {
             let wake = app.make_sink_wake();
             (wake.fire)();
             match rx.try_recv() {
-                Ok(Message::SinkOutput { .. }) => {}
+                Ok(Message::Wake(Wake::Sink { .. })) => {}
                 _ => panic!("expected a SinkOutput wake on the channel"),
             }
         });

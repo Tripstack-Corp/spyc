@@ -25,13 +25,13 @@
 //! share `plan_worktree_job` + `run_worktree_job` + `after_worktree_mutation`,
 //! so the IO logic can't diverge — only the completion (`WorktreeCompletion`)
 //! differs. Shape mirrors `preview_ops` / `mermaid_ops`: a landing slot
-//! (`runtime.worktree_results`) drained on a `Message::WorktreeJobDone` wake.
+//! (`runtime.worktree_results`) drained on a `Message::Wake(Wake::WorktreeJob)` wake.
 
 use std::sync::mpsc::Sender;
 
 use crate::mcp_cmd::{McpCommand, McpResponse};
 
-use super::{App, Message};
+use super::{App, Message, Wake};
 
 /// A fully-resolved worktree mutation, ready for the worker (absolute paths,
 /// validated). Built by [`App::plan_worktree_job`] on the main loop.
@@ -270,7 +270,7 @@ impl App {
                 .push(WorktreeOutcome { result, completion });
             // Wake AFTER the outcome is stored, so the pre-recv scan sees it.
             if let Some(tx) = wake {
-                let _ = tx.send(Message::WorktreeJobDone);
+                let _ = tx.send(Message::Wake(Wake::WorktreeJob));
             }
         });
     }

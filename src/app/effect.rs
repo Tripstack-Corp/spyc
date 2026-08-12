@@ -27,8 +27,8 @@ use crate::pane::Pane;
 use crate::ui::pager::PagerView;
 
 use super::{
-    App, ForegroundExec, Message, PagerReturn, PostAction, archive_ops, file_ops, graveyard_ops,
-    image_ops, inventory_ops, mermaid_ops, worktree_ops,
+    App, ForegroundExec, Message, PagerReturn, PostAction, Wake, archive_ops, file_ops,
+    graveyard_ops, image_ops, inventory_ops, mermaid_ops, worktree_ops,
 };
 
 /// A side effect for the run loop to execute. Producers (handlers) return
@@ -213,20 +213,20 @@ pub enum Effect {
     /// detached worker thread — its tar+zstd / trash IO is proportional to the
     /// tree size and must never block the event loop. The worker pushes a
     /// `GraveyardOutcome` onto `runtime.graveyard_results` and wakes the loop
-    /// with `Message::GraveyardDone`; `apply_graveyard_outcomes` (pre-recv
+    /// with `Message::Wake(Wake::Graveyard)`; `apply_graveyard_outcomes` (pre-recv
     /// scan) does the flash + listing/graveyard refresh. The cheap prep (which
     /// paths, which entry, the in-memory entry list) is done by the producer.
     Graveyard(graveyard_ops::GraveyardOp),
     /// Run an archive op (mount / materialize / clean staging) on a detached
     /// worker: indexing a compressed tar decompresses the whole stream, so it can
     /// never run on the event loop. The outcome lands in `runtime.archive_results`
-    /// and wakes with `Message::ArchiveDone`; `apply_archive_outcomes` applies it.
+    /// and wakes with `Message::Wake(Wake::Archive)`; `apply_archive_outcomes` applies it.
     Archive(archive_ops::ArchiveOp),
 
     /// Render a ` ```mermaid ` block to a PNG on a detached worker and open it in
     /// the OS image viewer — parse/layout/raster/font-load is far too heavy for
     /// the loop. The worker pushes an `ImageOutcome` onto
-    /// `runtime.image_results` and wakes with `Message::ImageDone`;
+    /// `runtime.image_results` and wakes with `Message::Wake(Wake::Image)`;
     /// `apply_image_outcomes` (pre-recv scan) surfaces it in the pager status
     /// line. See `docs/archive/MERMAID_PAGER_PLAN.md`.
     RenderMermaid(mermaid_ops::MermaidRenderOp),
@@ -257,13 +257,13 @@ pub enum Effect {
 
     /// Tier 5. Run a file operation (copy / move / pipe) on a detached worker
     /// thread to avoid blocking the event loop. The worker pushes its outcome
-    /// onto `runtime.file_results` and wakes with `Message::FileOpDone`.
+    /// onto `runtime.file_results` and wakes with `Message::Wake(Wake::FileOp)`.
     FileOp(file_ops::FileOp),
 
     /// Tier 5. Run an inventory mutation (yank / remove / clear / put) on a
     /// detached worker thread to avoid blocking the event loop. The worker
     /// pushes its outcome onto `runtime.inventory_results` and wakes with
-    /// `Message::InventoryDone`.
+    /// `Message::Wake(Wake::Inventory)`.
     Inventory(inventory_ops::InventoryOp),
 
     /// Tier 5. Interactive `W n`: create a worktree for `branch` off `base`,
@@ -956,7 +956,7 @@ impl App {
                         let outcome = graveyard_ops::run_graveyard_op(op);
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
-                            let _ = tx.send(Message::GraveyardDone);
+                            let _ = tx.send(Message::Wake(Wake::Graveyard));
                         }
                     });
                 }
@@ -970,7 +970,7 @@ impl App {
                         let outcome = archive_ops::run_archive_op(op);
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
-                            let _ = tx.send(Message::ArchiveDone);
+                            let _ = tx.send(Message::Wake(Wake::Archive));
                         }
                     });
                 }
@@ -988,7 +988,7 @@ impl App {
                         let outcome = mermaid_ops::render_mermaid_op(op, picker);
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
-                            let _ = tx.send(Message::ImageDone);
+                            let _ = tx.send(Message::Wake(Wake::Image));
                         }
                     });
                 }
@@ -1001,7 +1001,7 @@ impl App {
                         let outcome = image_ops::show_image_bytes(op, picker);
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
-                            let _ = tx.send(Message::ImageDone);
+                            let _ = tx.send(Message::Wake(Wake::Image));
                         }
                     });
                 }
@@ -1013,7 +1013,7 @@ impl App {
                         let outcome = image_ops::capture_clipboard_image(op);
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
-                            let _ = tx.send(Message::ImageDone);
+                            let _ = tx.send(Message::Wake(Wake::Image));
                         }
                     });
                 }
@@ -1026,7 +1026,7 @@ impl App {
                         let outcome = image_ops::index_transcript(op);
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
-                            let _ = tx.send(Message::ImageDone);
+                            let _ = tx.send(Message::Wake(Wake::Image));
                         }
                     });
                 }
@@ -1039,7 +1039,7 @@ impl App {
                         let outcome = image_ops::open_transcript_image(op, picker);
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
-                            let _ = tx.send(Message::ImageDone);
+                            let _ = tx.send(Message::Wake(Wake::Image));
                         }
                     });
                 }
@@ -1053,7 +1053,7 @@ impl App {
                         let outcome = image_ops::open_image_file(op, picker);
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
-                            let _ = tx.send(Message::ImageDone);
+                            let _ = tx.send(Message::Wake(Wake::Image));
                         }
                     });
                 }
@@ -1079,7 +1079,7 @@ impl App {
                         let outcome = inventory_ops::run_inventory_op(op);
                         results.lock().unwrap().push(outcome);
                         if let Some(tx) = wake {
-                            let _ = tx.send(Message::InventoryDone);
+                            let _ = tx.send(Message::Wake(Wake::Inventory));
                         }
                     });
                 }

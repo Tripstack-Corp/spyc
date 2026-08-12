@@ -11,7 +11,7 @@
 //! A stream is two halves:
 //! - **Producer** (on a worker thread): reads/parses/renders off the UI thread
 //!   and pushes payloads through a [`crate::fs::WakingSender`], waking the loop
-//!   with a payloadless [`super::Message::PagerStreamOutput`]. Spawned by
+//!   with a payloadless [`super::Message::Wake(Wake::PagerStream)`]. Spawned by
 //!   [`App::spawn_pager_stream`].
 //! - **Drain** (this module, on the main thread): [`App::drain_pager_stream`]
 //!   id-gates the live [`crate::ui::pager::PagerView`] against the active
@@ -22,7 +22,7 @@
 //!
 //! All three producers — `:grep`, git-view diff/show/blame, and the agent
 //! transcript reads — now ride this seam through the single `stream_id` /
-//! `Message::PagerStreamOutput`.
+//! `Message::Wake(Wake::PagerStream)`.
 
 use super::App;
 use crate::ui::pager::{self, PagerView};

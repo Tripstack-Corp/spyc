@@ -9,7 +9,7 @@
 //!
 //! Shape mirrors `agent_status` (and the graveyard/mermaid ops): a landing slot
 //! (`runtime.preview_results`), an in-flight flag (`runtime.preview_reloading`),
-//! and a detached worker that wakes the loop with `Message::PreviewReloadDone`
+//! and a detached worker that wakes the loop with `Message::Wake(Wake::PreviewReload)`
 //! on completion. The pre-recv scan drains the slot via
 //! [`App::apply_preview_reloads`]. Bursts coalesce: while a reload is in flight,
 //! further events set `view.preview_dirty` instead of spawning a second worker;
@@ -20,7 +20,7 @@ use std::path::PathBuf;
 
 use crate::ui::pager::PagerView;
 
-use super::{App, Message, pager_handler};
+use super::{App, Message, Wake, pager_handler};
 
 /// A reload request handed to the worker. Carries everything the pure builder
 /// needs so the worker touches no `App` state: the file, a clone of the theme,
@@ -114,7 +114,7 @@ impl App {
             // Wake AFTER the result + flag are stored, so the woken pre-recv
             // scan sees `preview_results` populated and forces a redraw.
             if let Some(tx) = wake {
-                let _ = tx.send(Message::PreviewReloadDone);
+                let _ = tx.send(Message::Wake(Wake::PreviewReload));
             }
         });
     }

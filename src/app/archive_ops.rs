@@ -4,7 +4,7 @@
 //! Indexing a `.tar.gz` means decompressing it end to end, so none of this may
 //! touch the event loop. Same shape as `graveyard_ops`: an [`ArchiveOp`] rides
 //! `Effect::Archive` out to a detached thread, the [`ArchiveOutcome`] lands in a
-//! `Runtime` slot, and `Message::ArchiveDone` wakes the loop to drain it.
+//! `Runtime` slot, and `Message::Wake(Wake::Archive)` wakes the loop to drain it.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

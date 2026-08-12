@@ -47,55 +47,13 @@ pub fn coalesce_pending(
             // be buffered (dropping it strands the client on its 5s timeout),
             // never join the no-op drop arm below.
             Message::Mcp(req) => mcp_pending.push(req),
-            // MVU Phase 3b: pane wakes carry no payload — drop them here;
-            // the loop re-enters the pre-recv pane scan regardless, so a
-            // wake burst collapses to a single re-scan (the worker-side
-            // 0→1 CAS is the primary firehose collapse; this is the second).
-            Message::PaneOutput { .. }
-            | Message::SinkOutput { .. }
-            | Message::PagerStreamOutput
-            | Message::FindOutput
-            | Message::ReaderExited
-            // MVU Phase 6: agent-status-resolved is a payloadless wake. Safe to
-            // drop while coalescing — the loop still iterates, and the pre-recv
-            // scan's pending-check (not this wake surviving) is what forces the
-            // redraw that applies the landed short-id.
-            | Message::AgentStatusReady
-            // Tier 5: graveyard-op-done is the same payloadless-wake shape —
-            // the outcome rides `runtime.graveyard_results`, drained
-            // unconditionally by `apply_graveyard_outcomes` in the pre-recv scan.
-            | Message::GraveyardDone
-            // Archive mount / materialize done — same payloadless wake; the
-            // outcome rides `runtime.archive_results`, drained by
-            // `apply_archive_outcomes` in the pre-recv scan.
-            | Message::ArchiveDone
-            // Mermaid render+open done — same payloadless wake; drained by
-            // `apply_image_outcomes` in the pre-recv scan.
-            | Message::ImageDone
-            // Vsplit preview reload done — same payloadless wake; the rebuilt
-            // view rides `runtime.preview_results`, drained by
-            // `apply_preview_reloads` in the pre-recv scan.
-            | Message::PreviewReloadDone
-            // MCP worktree op done — same payloadless wake; the outcome rides
-            // `runtime.worktree_results`, drained by `apply_worktree_outcomes`.
-            | Message::WorktreeJobDone
-            // Lua-script-done — same payloadless-wake shape; the outcomes ride
-            // the worker's buffer, drained by `handle_lua_done` in the pre-recv scan.
-            | Message::LuaDone
-            // Option B: codex-session-scan-done — same payloadless-wake shape;
-            // the snapshot rides `runtime.codex_pin_pending`, drained by
-            // `apply_codex_session_pins` in the pre-recv scan.
-            | Message::CodexSessionReady
-            | Message::FileOpDone
-            // Middle-click clipboard read done — same payloadless wake; the text
-            // rides `runtime.clipboard_paste_results`, drained by
-            // `apply_clipboard_pastes` in the pre-recv scan.
-            | Message::ClipboardPasteDone
-            // Clipboard write done — the outcome rides
-            // `runtime.clipboard_copy_results`, drained by `apply_clipboard_writes`.
-            | Message::ClipboardCopyDone
-            | Message::InventoryDone
-            | Message::Tick(_) => {}
+            // Every wake collapses to nothing here: the outcome rides a
+            // `runtime.*` slot (or the producer's own channel) and the pre-recv
+            // drains pick it up on re-entry, so a burst of them becomes a single
+            // re-scan. One arm for all seventeen kinds — see `Message::Wake`.
+            // A `Tick` is dropped for the same reason: `recv_timeout` returning
+            // Timeout IS the tick handler.
+            Message::Wake(_) | Message::Tick(_) => {}
             Message::Input(ev) => return Some(ev),
         }
     }
@@ -154,91 +112,18 @@ pub fn coalesce_recv(
             ctx.mcp_pending.push(req);
             coalesce_tail(rx, ctx)
         }
-        // MVU Phase 3b: a pane wake carries no payload to buffer —
-        // collapse any companion wakes/fs/git, then synthesize a
-        // Timeout so control re-enters the loop top and the pre-recv
-        // pane scan does the clear+drain. NEVER drained inline, NEVER
-        // surfaced as Input (except a coalesced real keystroke).
-        Ok(Message::PaneOutput { tab } | Message::SinkOutput { sink: tab }) => {
-            // A pane (3b) or capture/task (3c) wake. `tab`/`sink`
-            // labels which source woke us — logged for wake-path
-            // traceability; the pre-recv drains re-scan all sources,
-            // so the id isn't used to target. Collapse companions →
-            // synthesize Timeout so control re-enters the pre-recv
-            // drains (pane scan + capture/task drains).
-            spyc_debug!("sink wake: {tab:?}");
+        // Any wake: nothing to buffer, so collapse companions and synthesize a
+        // Timeout, which puts control back at the loop top where the pre-recv
+        // drains re-scan every source. One arm covers all seventeen kinds, and
+        // that is what makes this safe to extend — the previous shape listed
+        // them individually under a catch-all, so a missed variant surfaced as
+        // `effective` and panicked (#402: a yank killed spyc). `Wake::Pane` /
+        // `Wake::Sink` label which source woke us; logged for traceability, never
+        // used to target a drain, since the drains re-scan everything anyway.
+        Ok(Message::Wake(w)) => {
+            spyc_debug!("wake: {w:?}");
             coalesce_tail(rx, ctx)
         }
-        // MVU Phase 3d / Phase 6: a grep/finder wake, a reader
-        // death-wake, or an agent-status-resolved wake — all
-        // payloadless, collapse-to-Timeout. For grep/finder the
-        // pre-recv drains re-run; for ReaderExited the synthesized
-        // Timeout re-enters the loop, where the loop-top reader_done
-        // check exits; for AgentStatusReady the pre-recv scan's
-        // pending-check marks the frame dirty so render applies the landed
-        // short-id (the worker can't redraw, only wake — see the field
-        // doc on `agent_status_pending`).
-        Ok(
-            Message::PagerStreamOutput
-            | Message::FindOutput
-            | Message::ReaderExited
-            | Message::AgentStatusReady
-            // Tier 5: graveyard-op-done — payloadless, drained by the pre-recv
-            // scan's `apply_graveyard_outcomes`, so collapse-to-Timeout here.
-            | Message::GraveyardDone
-            // Archive op done — same payloadless-wake shape.
-            | Message::ArchiveDone
-            // Mermaid render+open done — same payloadless-wake shape.
-            | Message::ImageDone
-            // Vsplit preview reload done — payloadless, drained by
-            // `apply_preview_reloads` in the pre-recv scan.
-            | Message::PreviewReloadDone
-            // MCP worktree op done — payloadless, drained by
-            // `apply_worktree_outcomes` in the pre-recv scan.
-            | Message::WorktreeJobDone
-            // Option B: codex-session-scan-done — payloadless, drained by
-            // `apply_codex_session_pins` in the pre-recv scan.
-            | Message::CodexSessionReady
-            // Tier 5 (cluster 1, #514): off-thread file-op / inventory done —
-            // payloadless, the outcome rides `runtime.file_results` /
-            // `inventory_results` and is drained by `apply_file_outcomes` /
-            // `apply_inventory_outcomes` in the pre-recv scan. These were wired
-            // into `coalesce_pending` (the burst drain) and the
-            // `dispatch_effective` unreachable arm but MISSED here, so a
-            // FileOpDone/InventoryDone arriving as the FIRST message of a wakeup
-            // (the common case: a copy/move worker finishes and its wake is next
-            // off the channel) fell through to `other` and surfaced as
-            // `effective`, panicking on the unreachable. Collapse them like
-            // every other payloadless done-wake.
-            | Message::FileOpDone
-            | Message::InventoryDone
-            // Lua-worker done-wake (engine / init.lua / registered-fn run
-            // finished) — payloadless, drained by `handle_lua_done` in the
-            // pre-recv scan. Same trap as FileOpDone/InventoryDone above: wired
-            // into `coalesce_pending` + the `dispatch_effective` unreachable arm
-            // but MISSED here, so the first `LuaDone` of a wakeup fell through
-            // to `other` and panicked on the unreachable. Collapse it too.
-            | Message::LuaDone
-            // Clipboard write / middle-click read done — payloadless, the
-            // outcomes ride `runtime.clipboard_copy_results` /
-            // `clipboard_paste_results` and are drained by
-            // `apply_clipboard_writes` / `apply_clipboard_pastes`. Same trap
-            // again, and these two are why the catch-all below is gone: a yank
-            // on an otherwise-quiet spyc makes its own done-wake the FIRST
-            // message of the wakeup, so `deliver_clipboard` — the path EVERY
-            // text yank takes — panicked the loop outright.
-            | Message::ClipboardPasteDone
-            | Message::ClipboardCopyDone,
-        ) => coalesce_tail(rx, ctx),
-        // Surfaced to the dispatch match: a real keystroke, a timer tick, or a
-        // channel error.
-        //
-        // Enumerated rather than caught by `_`, so a new `Message` variant fails
-        // to COMPILE here instead of falling through to `dispatch_effective`'s
-        // `unreachable!` at runtime. That fall-through shipped four times —
-        // FileOpDone/InventoryDone (#514), LuaDone, then the clipboard pair
-        // above — because three lists have to agree and only two of them were
-        // exhaustively matched. This arm makes the third one the compiler's job.
         surfaced @ (Ok(Message::Input(_) | Message::Tick(_)) | Err(_)) => surfaced,
     }
 }
@@ -514,6 +399,9 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::super::scheduler::Deadline;
+    // `Wake` is only constructed in tests here — the production code matches
+    // `Message::Wake(..)`, which needs nothing imported.
+    use super::super::Wake;
     use super::*;
     use std::path::{Path, PathBuf};
     use std::sync::mpsc;
@@ -593,9 +481,9 @@ mod tests {
         tx.send(Message::Tick(Deadline::GitPoll)).unwrap();
         // MVU Phase 3d: pager-stream/finder wakes collapse to nothing buffered
         // (the data rides their own channels; the loop re-drains on re-entry).
-        tx.send(Message::PagerStreamOutput).unwrap();
-        tx.send(Message::PagerStreamOutput).unwrap();
-        tx.send(Message::FindOutput).unwrap();
+        tx.send(Message::Wake(Wake::PagerStream)).unwrap();
+        tx.send(Message::Wake(Wake::PagerStream)).unwrap();
+        tx.send(Message::Wake(Wake::Find)).unwrap();
         // MVU Phase 3d: an MCP request carries its reply Sender — it MUST be
         // buffered into mcp_pending, NEVER dropped (else the client strands).
         let (reply, _reply_rx) = mpsc::channel();
@@ -636,21 +524,21 @@ mod tests {
     #[test]
     fn coalesce_recv_collapses_all_payloadless_done_wakes() {
         let wakes = [
-            Message::PagerStreamOutput,
-            Message::FindOutput,
-            Message::ReaderExited,
-            Message::AgentStatusReady,
-            Message::GraveyardDone,
-            Message::ImageDone,
-            Message::ArchiveDone,
-            Message::PreviewReloadDone,
-            Message::WorktreeJobDone,
-            Message::CodexSessionReady,
-            Message::FileOpDone,
-            Message::InventoryDone,
-            Message::LuaDone,
-            Message::ClipboardPasteDone,
-            Message::ClipboardCopyDone,
+            Message::Wake(Wake::PagerStream),
+            Message::Wake(Wake::Find),
+            Message::Wake(Wake::ReaderExited),
+            Message::Wake(Wake::AgentStatus),
+            Message::Wake(Wake::Graveyard),
+            Message::Wake(Wake::Image),
+            Message::Wake(Wake::Archive),
+            Message::Wake(Wake::PreviewReload),
+            Message::Wake(Wake::WorktreeJob),
+            Message::Wake(Wake::CodexSession),
+            Message::Wake(Wake::FileOp),
+            Message::Wake(Wake::Inventory),
+            Message::Wake(Wake::Lua),
+            Message::Wake(Wake::ClipboardPaste),
+            Message::Wake(Wake::ClipboardCopy),
         ];
         for done in wakes {
             let (_tx, rx) = mpsc::channel::<Message>();

@@ -93,7 +93,7 @@ impl App {
 
         // MVU Phase 3b: install the channel sender so pane wake closures
         // (built by `make_pane_wake` at every spawn site) can push
-        // `Message::PaneOutput`. Set BEFORE the reader moves `msg_tx` and
+        // `Wake::Pane`. Set BEFORE the reader moves `msg_tx` and
         // before the loop processes any user action — so every pane spawned
         // during the session (including session-restore tabs) gets a live
         // wake, not the pre-run no-op.
@@ -250,29 +250,13 @@ impl App {
                 // propagate a recorded fatal error; else a clean stop.
                 return Ok(DispatchFlow::Exit(take_reader_result(read_err)));
             }
-            // Phase 3a: FsEvent/GitResult are buffered + coalesced in the
-            // pre-step above, never surfaced as `effective`.
+            // Buffered or collapsed by the coalesce pre-step, so never surfaced
+            // as `effective`: the payload variants ride `ctx.*_pending`, and every
+            // `Wake` kind becomes a synthesized Timeout. Four patterns instead of
+            // twenty — a new wake can't be missed here, because there is nothing
+            // per-kind left to miss.
             Ok(
-                Message::FsEvent(_)
-                | Message::GitResult(_)
-                | Message::Mcp(_)
-                | Message::PaneOutput { .. }
-                | Message::SinkOutput { .. }
-                | Message::PagerStreamOutput
-                | Message::FindOutput
-                | Message::ReaderExited
-                | Message::AgentStatusReady
-                | Message::GraveyardDone
-                | Message::ImageDone
-                | Message::ArchiveDone
-                | Message::FileOpDone
-                | Message::ClipboardPasteDone
-                | Message::ClipboardCopyDone
-                | Message::InventoryDone
-                | Message::PreviewReloadDone
-                | Message::WorktreeJobDone
-                | Message::CodexSessionReady
-                | Message::LuaDone,
+                Message::FsEvent(_) | Message::GitResult(_) | Message::Mcp(_) | Message::Wake(_),
             ) => {
                 unreachable!(
                     "buffered/collapsed message surfaced as `effective` from the coalesce pre-step"
@@ -543,7 +527,7 @@ impl App {
             }
 
             // MVU Phase 6: drain any off-thread agent-status resolve that
-            // landed (it woke us via `Message::AgentStatusReady`). Done HERE,
+            // landed (it woke us via `Message::Wake(Wake::AgentStatus)`). Done HERE,
             // in the always-run scan — not in `active_agent_status` — because
             // the status bar (and thus `active_agent_status`) is skipped on the
             // overlay / top-pager render paths; draining only there would leave
@@ -567,7 +551,7 @@ impl App {
             self.kick_codex_session_scan();
 
             // Tier 5: drain any off-thread graveyard op (archive / restore /
-            // purge-all) that landed (it woke us via `Message::GraveyardDone`).
+            // purge-all) that landed (it woke us via `Message::Wake(Wake::Graveyard)`).
             // Always drained here — the slot holds the outcome regardless of
             // which wake survived coalescing; the apply does the flash + refresh.
             if self.apply_graveyard_outcomes() {
@@ -595,10 +579,10 @@ impl App {
             }
 
             // A middle-click clipboard read that landed (woke us via
-            // `Message::ClipboardPasteDone`). Routing runs here, against the
+            // `Message::Wake(Wake::ClipboardPaste)`). Routing runs here, against the
             // focus of *now* — see `apply_clipboard_pastes`.
             // A clipboard write that landed (woke us via
-            // `Message::ClipboardCopyDone`). Only failures have anything to say.
+            // `Message::Wake(Wake::ClipboardCopy)`). Only failures have anything to say.
             if self.apply_clipboard_writes() {
                 ctx.draw.mark(3);
             }
@@ -611,7 +595,7 @@ impl App {
                 self.run_effects(paste_fx, terminal, &foreground_exec);
             }
 
-            // Drain finished Lua runs (woke via `Message::LuaDone`): apply the
+            // Drain finished Lua runs (woke via `Message::Wake(Wake::Lua)`): apply the
             // requests the script produced, running any effects they translate to.
             let (lua_draw, lua_fx) = self.handle_lua_done();
             if lua_draw {
@@ -626,20 +610,20 @@ impl App {
                 ctx.draw.mark(3);
             }
 
-            // Mermaid render+open results (woke us via `Message::ImageDone`) —
+            // Mermaid render+open results (woke us via `Message::Wake(Wake::Image)`) —
             // surface success/failure in the pager status line.
             if self.apply_image_outcomes() {
                 ctx.draw.mark(3);
             }
 
-            // Vsplit preview reloads (woke us via `Message::PreviewReloadDone`) —
+            // Vsplit preview reloads (woke us via `Message::Wake(Wake::PreviewReload)`) —
             // install the rebuilt right-column view, preserving scroll. Always
             // drained here; the apply re-kicks if a save landed mid-render.
             if self.apply_preview_reloads() {
                 ctx.draw.mark(3);
             }
 
-            // Off-thread MCP worktree ops (woke via `Message::WorktreeJobDone`) —
+            // Off-thread MCP worktree ops (woke via `Message::Wake(Wake::WorktreeJob)`) —
             // re-apply refresh+context on the loop, then reply to the client.
             if self.apply_worktree_outcomes() {
                 ctx.draw.mark(3);

@@ -6,7 +6,7 @@
 //!
 //! Holds only an `Arc<dyn Fn() + Send + Sync>` — never `app::Message` — so
 //! `crate::fs` gains no dependency on the app layer. The app builds the wake
-//! closure (sending `Message::FindOutput` / `Message::PagerStreamOutput`) and
+//! closure (sending `Message::Wake(Wake::Find)` / `Message::Wake(Wake::PagerStream)`) and
 //! hands it in at spawn; in tests / before `run()` it's `Arc::new(|| {})`.
 
 use std::sync::Arc;
