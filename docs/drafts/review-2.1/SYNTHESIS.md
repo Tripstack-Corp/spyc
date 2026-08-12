@@ -8,6 +8,39 @@
 
 ## 1. Verdict
 
+> **UPDATED 2026-08-12 (seventh pass) — THE RECORD WAS WRONG TWICE.**
+> `main` at `76f2091`. Verifying §7's closure claims against the *code* rather
+> than the record found **two findings marked closed that were still live**, both
+> `high`, both because the finding named several sites and the fix reached only
+> some:
+>
+> - **HIGH-1** named three allocation sites; `write.rs`'s `read_at` kept
+>   `Vec::with_capacity(declared)` for the whole campaign. Reachable — a plain
+>   `.tar` is seekable, so mounting one never consults the extract budget, and a
+>   lying header lands there on the first `:archive write`, where the allocation
+>   *aborts* rather than unwinding. Fixed #412, plus a guard requiring every
+>   `with_capacity` in `src/archive/` to go through `reserve_for`.
+> - **HIGH-2** named three consequences of trusting a zip's declared size; the
+>   MCP 100 KB read cap still checked the *claim*. Measured on HEAD: a member
+>   declaring 1 byte returned **300,000**. Fixed #414.
+>
+> Worse than the misses: **HIGH-1's own regression test never bit.** It asserts
+> bytes read, which `take(size)` bounds either way — it passes with `reserve_for`
+> removed from both sites. And the abort cannot be provoked from a tar fixture at
+> all (octal sizes cap at ~64 GB; overcommit absorbs it), so no end-to-end test
+> can pin that property. It had been giving false assurance since the first pass.
+>
+> The lesson is now in AGENTS.md (#415): *a test is evidence only once you've
+> watched it fail; a finding naming N sites is closed when N are fixed; when the
+> fix is a helper, pin the call site too.* That last clause is not hypothetical —
+> the HIGH-2 fix itself briefly shipped a bounded function nothing called, caught
+> only because its wiring had a separate test.
+>
+> **Severity tiers remaining: 0 at every tier, verified against code.**
+> 47 PRs, #346–#415.
+>
+> ---
+>
 > **UPDATED 2026-08-12 (sixth pass) — THE INFORMATIONAL TAIL IS CLOSED TOO.**
 > `main` at `20ad72a`. Six further PRs (#406–#411) close the eleven
 > informational items, plus the one that had stopped being informational:
@@ -576,7 +609,28 @@ fixing** — the only finding in the review whose severity moved on its own. The
 rest were correct decisions nobody had written down, which is the category that
 gets "fixed" later by someone reading them as bugs.
 
+### Seventh pass — verifying the record itself (2026-08-12)
+
+Prompted by the owner asking what was left. Rather than re-read §7, every
+finding was checked against the code. Twelve of the 35 table entries did not
+appear in §7 under their table IDs; eleven were genuinely fixed under other
+labels (B1's per-component containment, H7's guard now scanning `lib.rs`, M15's
+mouse keybindings, M18's `archive_name` in the fuzz matrix, M19's
+`archive_container` target, …). The twelfth was HIGH-1, and probing HIGH-2
+found the second.
+
+| PR | closes | what it showed |
+|---|---|---|
+| #412 | HIGH-1 (site 3/3) | The helper existed and was unit-tested; nothing tied it to its call sites. Replaced a non-biting end-to-end test with a structural guard, bite-checked against all three original sites. |
+| #414 | HIGH-2 (consequence 3/3) | A zip understating its size defeats a cap that reads the declaration. Two tests — the function and the wiring — because the wiring edit silently failed to apply and only the second caught it. |
+| #415 | — | The rule, in AGENTS.md. |
+
+**Multi-site findings are the risk class.** Every finding naming more than one
+site was re-verified: H4 (guard-enforced), H5, H6, H8 (five demotion tests), H9
+(all three modules), M1, M3 (guard-enforced), M5, M23. Those hold.
+
 ### Still open
 
-**Nothing, at any tier.** All 58 findings are closed across six passes and 44 PRs
-(#346–#411). The 2.1 tag is unblocked on review grounds.
+**Nothing, at any tier — and this time verified against the code rather than the
+record.** All 58 findings closed across seven passes and 47 PRs (#346–#415). The
+2.1 tag is unblocked on review grounds.
