@@ -298,15 +298,17 @@ pub fn build_scrollback_help(theme: &Theme) -> PagerView {
         "Scrollback shows the pane's history in the in-app pager.",
         "For an agent tab (Claude / codex / agy) it engages the agent's",
         "on-disk transcript JSONL instead — real text, searchable, not a",
-        "terminal-grid snapshot. Line numbers are on by default here so it",
-        "reads as scrolled-back, not live. The pty keeps running off-screen;",
-        "Esc snaps back to live.",
+        "terminal-grid snapshot — whenever the terminal has nothing to show,",
+        "and `T` swaps between the two whenever both exist. Line numbers are",
+        "on by default here so it reads as scrolled-back, not live. The pty",
+        "keeps running off-screen; Esc snaps back to live.",
     ];
 
     let sections: &[(&str, &[(&str, &str)])] = &[
         (
             "Transcript",
             &[
+                ("T", "swap source: terminal capture ⇄ agent transcript"),
                 ("t", "show / hide agent tool-use & tool-result lines"),
                 ("r", "reload (a full-screen agent keeps appending)"),
             ],

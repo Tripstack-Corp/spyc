@@ -70,6 +70,16 @@ pub enum MouseSink {
     /// so the translation can't degenerate into the wheel-to-arrows history
     /// cycling that `[mouse] capture` exists to avoid.
     PaneScrollKeys,
+    /// Scroll the history spyc itself captured for the pane, via `^a v`'s own
+    /// pager ([`crate::app::App::wheel_into_pane_history`]).
+    ///
+    /// For a child that neither speaks mouse nor has a verified scroll key —
+    /// claude in its default (inline) TUI mode, a plain shell. There is no
+    /// third party to ask: inside a pane spyc IS the terminal, so the scrollback
+    /// it captured is the only history the wheel can be asking for. Distinct
+    /// from [`Self::PaneScrollKeys`], which drives a view the CHILD owns and
+    /// spyc cannot see.
+    PaneHistory,
     /// Give the keyboard to the pane AND forward the event to its child — the
     /// left-click-through contract. Both halves, in one variant, because a sink
     /// that only forwarded was how the focus half came to be silently missing
@@ -536,17 +546,25 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
         Region::Pane => {
             if snap.can_forward_to_child() {
                 MouseSink::PaneForward
-            } else if snap.pane_scroll_keys && !snap.pane_closed && !snap.has_scroll_pager {
+            } else if snap.pane_closed || snap.has_scroll_pager {
+                // The same two guards forwarding uses, hoisted so every arm below
+                // inherits them: a dead child has nothing to scroll, and a `^a v`
+                // pager owns the pane's rect (its own wheel handling is claimed
+                // above by `covering_pager`), so anything here would move
+                // something the user cannot see.
+                MouseSink::Swallow
+            } else if snap.pane_scroll_keys {
                 // The child ignores mouse reports but scrolls on a keypress
-                // (agy). Same two guards forwarding uses: a dead child has
-                // nothing to scroll, and a `^a v` pager owns the pane's rect, so
-                // keys would scroll a child the user can't see.
+                // (agy, codex).
                 MouseSink::PaneScrollKeys
             } else {
-                // No verified scroll key and nothing to forward (codex): silence
-                // beats typing `\e[<64;20;5M` — or a history-recalling Up — into
-                // a child that never asked for either.
-                MouseSink::Swallow
+                // Nothing to forward and no verified scroll key: claude in its
+                // default inline TUI mode, or a plain shell. Forwarding is still
+                // out — it types `\e[<64;20;5M` into a child that never asked
+                // (the #170 class) — and so is synthesizing an Up that usually
+                // recalls prompt history. What's left is spyc's OWN capture of
+                // this pane, which is the history the wheel is reaching for.
+                MouseSink::PaneHistory
             }
         }
         // Chrome. Nothing to scroll, and clicking it is a later addition (tab
@@ -808,14 +826,16 @@ mod tests {
         assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::PaneForward);
     }
 
+    /// A child that never enabled mouse mode is never forwarded to — that's the
+    /// #170 class, `\e[<64;20;5M` typed into its prompt. With no verified scroll
+    /// key either (inline claude, a plain shell) the wheel scrolls the history
+    /// **spyc** captured for the pane; silence was the old answer, and it read as
+    /// "scrolling doesn't work".
     #[test]
-    fn pane_child_without_mouse_mode_swallows_never_forwards() {
-        // The #170 class: forwarding to a child that never enabled mouse mode
-        // types `\e[<64;20;5M` into its prompt. Silence is the correct answer for
-        // a child with no verified scroll key either (codex).
+    fn pane_child_without_mouse_mode_gets_spycs_history_never_a_forward() {
         let s = snap(Some(Region::Pane));
         assert!(!s.pane_wants_mouse && !s.pane_scroll_keys);
-        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::PaneHistory);
     }
 
     /// An agent that ignores mouse reports but scrolls on a keypress (agy) gets
@@ -844,21 +864,25 @@ mod tests {
 
     /// Same two guards forwarding uses. A dead child has nothing to scroll, and a
     /// `^a v` pager owns the pane's rect — scrolling the child behind it would move
-    /// something the user cannot see.
+    /// something the user cannot see. Covers both non-forward arms: with a verified
+    /// scroll key and without one (where the wheel would otherwise reach for
+    /// spyc's own capture), since both would act on a pane that isn't there.
     #[test]
-    fn scroll_keys_are_suppressed_for_a_dead_or_covered_child() {
-        for (closed, covered) in [(true, false), (false, true)] {
-            let s = MouseSnapshot {
-                pane_scroll_keys: true,
-                pane_closed: closed,
-                has_scroll_pager: covered,
-                ..snap(Some(Region::Pane))
-            };
-            assert_eq!(
-                route_mouse(s, Gesture::Wheel),
-                MouseSink::Swallow,
-                "closed={closed} covered={covered}"
-            );
+    fn wheel_over_the_pane_is_suppressed_for_a_dead_or_covered_child() {
+        for keys in [true, false] {
+            for (closed, covered) in [(true, false), (false, true)] {
+                let s = MouseSnapshot {
+                    pane_scroll_keys: keys,
+                    pane_closed: closed,
+                    has_scroll_pager: covered,
+                    ..snap(Some(Region::Pane))
+                };
+                assert_eq!(
+                    route_mouse(s, Gesture::Wheel),
+                    MouseSink::Swallow,
+                    "scroll_keys={keys} closed={closed} covered={covered}"
+                );
+            }
         }
     }
 
