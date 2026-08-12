@@ -202,7 +202,8 @@ impl Resolver {
                 Act("P", A::PanePipeContent),
                 Act("i", A::PanePipeInventory),
                 Act("u", A::QuickSelectOpen),
-                Act("\\", A::TogglePane),
+                Act("g", A::OpenImageGallery),
+                Act("\\ C", A::TogglePane),
                 Sub("Space", "global menu"),
             ],
             PendingSeq::CtrlS => vec![

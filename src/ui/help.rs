@@ -55,7 +55,7 @@ const SECTIONS: &[Section] = &[
             ("h  ←", "move left one column"),
             ("j  ↓", "move down one entry"),
             ("k  ↑", "move up one entry"),
-            ("l  →  Space", "move right one column"),
+            ("l  →", "move right one column"),
             ("gg", "first entry"),
             ("G", "last entry"),
             ("^B  PageUp", "previous page"),
