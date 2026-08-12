@@ -197,8 +197,11 @@
 #                        without decompressing it). Over this, the mount
 #                        is refused rather than filling the disk.
 #   warn_over_mb       (default 128)    confirm before extracting more.
-#   max_entries        (default 200000) cap on indexed members; past it
-#                        the listing shows itself as truncated.
+#   max_entries        (default 200000) cap on indexed members, including
+#                        the directories spyc synthesizes for them; past it
+#                        the listing shows itself as truncated. Bounds
+#                        spyc's index, not the zip parser's own read of
+#                        the central directory, which happens first.
 #   max_depth          (default 2)      how deep archives may nest. A
 #                        container inside a container has to be copied
 #                        out whole before it can be read, so each level
