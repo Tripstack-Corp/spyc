@@ -135,8 +135,11 @@ Locally it stays helper-first deliberately — OSC 52 is write-only with no repl
 spyc can't confirm the terminal honored it, and some terminals disable it on purpose
 (a remote host writing your clipboard is a real risk). Inside tmux it needs
 `set -g set-clipboard on`; spyc DCS-wraps the escape so tmux forwards it to the outer
-terminal. A selection too large for the escape falls back to the helper rather than
-risk a terminal truncating it silently.
+terminal. A selection too large for the escape (~75 KB of base64) is **refused with a
+message** rather than risking a terminal truncating it silently — it does not fall
+back to the helper, because under `auto` over SSH the helper isn't enabled and writing
+the server's clipboard wouldn't help you anyway. Only `via = "both"` has a second
+mechanism to reach.
 
 ```toml
 [clipboard]
