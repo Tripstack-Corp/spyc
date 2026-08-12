@@ -11,6 +11,24 @@ use crate::app::{App, Effect, PagerReturn, TaskStatus, sh_c};
 
 impl App {
     /// Fall-through: scroll / vi-motion / toggles / close / editor handoff.
+    /// A down-scroll in a `^a v` scrollback that had nowhere left to go: leave
+    /// scroll mode and snap back to the live pane.
+    ///
+    /// The same "scroll past the end and you're back" contract the raw vt100
+    /// scroll mode already has ([`crate::pane::Pane::scroll_down_or_exit`]), and
+    /// the one spyc gives codex's own overlay by sending it `q`. This pager is
+    /// spyc's, so there is no key to send — it just closes.
+    ///
+    /// Gated on `pane_scroll`: a `D` doc, a `:grep` overlay or the scrollback's
+    /// own `H` help (which deliberately carries `pane_scroll = false`) must sit
+    /// still at their end. The user didn't open those *over* something they are
+    /// trying to get back to.
+    fn exit_scrollback_past_the_end(&mut self) {
+        if self.active_pager_ref().is_some_and(|v| v.pane_scroll) {
+            self.close_pane_scroll_pager();
+        }
+    }
+
     pub(super) fn handle_pager_motion(&mut self, key: KeyEvent, viewport: u16) -> Vec<Effect> {
         let Some(view) = active_pager_mut!(self) else {
             return Vec::new();
@@ -155,21 +173,33 @@ impl App {
                     self.view.pager_pending_bracket = Some(c);
                 }
             }
-            KeyCode::Char('j') | KeyCode::Down => view.scroll_by(1, viewport),
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !scrolled_down(view, 1, viewport) {
+                    self.exit_scrollback_past_the_end();
+                }
+            }
             KeyCode::Char('k') | KeyCode::Up => view.scroll_by(-1, viewport),
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                view.scroll_by(i32::from(viewport) / 2, viewport);
+                if !scrolled_down(view, i32::from(viewport) / 2, viewport) {
+                    self.exit_scrollback_past_the_end();
+                }
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 view.scroll_by(-i32::from(viewport) / 2, viewport);
             }
             KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                view.scroll_by(i32::from(viewport), viewport);
+                if !scrolled_down(view, i32::from(viewport), viewport) {
+                    self.exit_scrollback_past_the_end();
+                }
             }
             KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 view.scroll_by(-i32::from(viewport), viewport);
             }
-            KeyCode::PageDown | KeyCode::Char(' ') => view.scroll_by(i32::from(viewport), viewport),
+            KeyCode::PageDown | KeyCode::Char(' ') => {
+                if !scrolled_down(view, i32::from(viewport), viewport) {
+                    self.exit_scrollback_past_the_end();
+                }
+            }
             KeyCode::PageUp | KeyCode::Char('b') => view.scroll_by(-i32::from(viewport), viewport),
             KeyCode::Char('g') | KeyCode::Home => view.scroll_to_top(),
             KeyCode::Char('G') | KeyCode::End => view.scroll_to_bottom(viewport),
@@ -477,5 +507,96 @@ impl App {
             _ => {}
         }
         Vec::new()
+    }
+}
+
+/// Scroll `view` down by `delta` and report whether it actually moved.
+///
+/// `false` means it was already at the end. Deliberately derived from the scroll
+/// position rather than from a separate "am I at the bottom?" computation:
+/// `scroll_by` already clamps against `scroll_max`, and a second derivation of
+/// where the bottom is would be free to disagree with the first — which is how a
+/// view ends up either refusing to exit or exiting one line early.
+pub(super) fn scrolled_down(
+    view: &mut crate::ui::pager::PagerView,
+    delta: i32,
+    viewport: u16,
+) -> bool {
+    let before = view.scroll;
+    view.scroll_by(delta, viewport);
+    view.scroll != before
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::App;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn down() -> KeyEvent {
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)
+    }
+
+    fn fifty_lines() -> Vec<ratatui::text::Line<'static>> {
+        (0..50).map(|i| format!("line {i}").into()).collect()
+    }
+
+    /// **Scrolling down past the end of a `^a v` scrollback returns you to the
+    /// live pane.** The same contract the raw vt100 scroll mode has, and the one
+    /// spyc gives codex's own overlay by sending it `q` — this pager is spyc's, so
+    /// it just closes. Without it the user is parked at `[EOF]` hunting for `Esc`.
+    #[test]
+    fn scrolling_past_the_end_of_a_scrollback_returns_to_the_live_pane() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let dir = tmp.path().join("work");
+            std::fs::create_dir(&dir).unwrap();
+            let mut app = App::test_app(dir);
+            app.open_pane_tab("cat");
+            app.install_lower_pane_scroll_view(" pane (history)".to_string(), fifty_lines(), None);
+            assert!(app.view.scroll_pager.is_some(), "the scrollback mounted");
+
+            // Mid-history: the scroll moves, so it must NOT close.
+            app.handle_pager_motion(down(), 10);
+            assert!(
+                app.view.scroll_pager.is_some(),
+                "a scroll with somewhere to go must not exit"
+            );
+
+            // Park at the very end, then one more down.
+            if let Some(v) = app.view.scroll_pager.as_mut() {
+                v.scroll_by(1000, 10);
+            }
+            app.handle_pager_motion(down(), 10);
+            assert!(
+                app.view.scroll_pager.is_none(),
+                "a down-scroll with nowhere to go exits back to the live pane"
+            );
+        });
+    }
+
+    /// The gate: a pager that is NOT a pane scrollback (a `D` doc, a `:grep`
+    /// overlay, the scrollback's own `H` help) sits still at its end. Nothing
+    /// behind it is being reached for, so closing on a stray down-scroll would
+    /// only lose the user's place.
+    #[test]
+    fn a_non_scrollback_pager_stays_open_at_its_end() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let dir = tmp.path().join("work");
+            std::fs::create_dir(&dir).unwrap();
+            let mut app = App::test_app(dir);
+            let mut view =
+                crate::ui::pager::PagerView::new_styled("doc".to_string(), fifty_lines());
+            view.mount = crate::ui::pager::Mount::TopPane;
+            assert!(!view.pane_scroll, "a `D` doc is not a pane scrollback");
+            view.scroll_by(1000, 10);
+            app.view.pager = Some(view);
+
+            app.handle_pager_motion(down(), 10);
+            assert!(
+                app.view.pager.is_some(),
+                "only a pane scrollback exits on a down-scroll past the end"
+            );
+        });
     }
 }
