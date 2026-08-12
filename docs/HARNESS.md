@@ -154,7 +154,7 @@ resumes differs, and the differences leak:
 |---|---|
 | **claude** | spyc spawns fresh, then **types `/resume <id>` into stdin** once the banner settles. The `--resume` CLI flag has a mount-crash regression, so the stdin route is deliberate, not a workaround for convenience. |
 | **codex** | baked into the spawn command — `codex resume <uuid>`, or `resume --last`. The uuid comes from the tab's *pinned* rollout claim, not from codex's exit banner, so a tab that was still running at quit resumes exactly too. |
-| **agy** | `--continue` (resumes the most recent for this cwd). |
+| **agy** | baked into the spawn command — `--conversation <uuid>` when spyc has a pinned session id for the tab, falling back to `--continue` (the most recent for this cwd) when it does not. |
 | **zot** | `--continue`. spyc doesn't capture a specific session path yet, so restore always continues the most recent. |
 
 ### The codex quirk that confuses everyone

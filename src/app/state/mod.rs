@@ -238,8 +238,8 @@ pub enum Focus {
 /// and routing the recompute sites through [`GitState::set`] makes the
 /// pair atomic: top-bar and per-file markers always reflect the same
 /// `git status` snapshot. (The git *caches* — `raw_cache`, `repo_root`,
-/// `generation`, … — stay as `AppState` fields for now; clustering them
-/// is pure relocation, not a bug, and is deferred.)
+/// `generation`, … — are `AppState` fields; clustering them would be pure
+/// relocation, not a fix.)
 /// Archives currently mounted (`docs/drafts/ARCHIVE_BROWSING_PLAN.md`). Pure
 /// data — an index plus the user's pending changes — so it belongs in the Model
 /// even though the bytes it describes live on disk.

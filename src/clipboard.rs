@@ -1,17 +1,29 @@
-//! Cross-platform clipboard helper for spyc's yank features.
+//! Cross-platform clipboard helpers for spyc's yank features.
 //!
-//! `copy(text)` writes to the system clipboard and `paste()` reads back from it,
-//! each fanning out to a platform-appropriate helper:
+//! `copy(text)` / `paste()` are the **local-helper** tier: a subprocess that
+//! owns the clipboard of the machine spyc is running on. The platform cascade:
 //!
-//! - macOS → `pbcopy` (built-in).
+//! - macOS → `pbcopy` / `pbpaste` (built-in).
 //! - Linux → `wl-copy` if `$WAYLAND_DISPLAY` is set, then
-//!   `xclip -selection clipboard`, then `xsel -ib`. Returns a clear
-//!   `NotFound` error mentioning the installable helpers when none
-//!   succeed.
+//!   `xclip -selection clipboard`, then `xsel -ib`. The X11 pair is gated on
+//!   `$DISPLAY`: without it they exit non-zero after spawning, so the cascade
+//!   would report an unhelpful failure instead of moving on. Returns a clear
+//!   `NotFound` error naming the installable helpers when none succeed.
 //! - Other platforms → `Unsupported`.
 //!
-//! No external crate dependency — mirrors spyc's in-tree fork-exec
-//! pattern (see `src/sysinfo.rs` for the same `cfg(target_os)` shape).
+//! Both are bounded by `HELPER_REAP_BUDGET`, because `xclip`/`xsel`
+//! legitimately outlive a successful copy — that is how they serve the X11
+//! selection.
+//!
+//! Two other tiers live here and are NOT this cascade:
+//!
+//! - **OSC 52** (`osc52_copy`), which reaches the terminal the user is actually
+//!   sitting at rather than the host spyc runs on. Over SSH that is the only
+//!   tier that can work, which is why `app::clipboard::deliver_clipboard` — not
+//!   this module — decides which tiers run.
+//! - **Images** (`arboard` + `image`), for `y` on a picture and the paste-capture
+//!   ring. So this module does have external crate dependencies, unlike the
+//!   fork-exec-only version it started as.
 
 use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
