@@ -19,21 +19,25 @@ mod guard_tests {
     /// something that should be its own module landed here instead.
     /// See AGENTS.md → "Keep `src/app/` modularized".
     ///
-    /// Ratcheted 4000 → 1500 after the impl-extraction sweep left mod.rs
-    /// at ~1076 lines (a guard that allows tripling isn't guarding), then
-    /// 1500 → 1350 after the pre-2.1 review caught it at **1495 of 1500** —
-    /// five lines of headroom, which turns the next feature into a
-    /// bump-or-extract decision taken under deadline. Extracting the pure
-    /// predicates (to `util.rs`) and the loop-scoped types (to `run.rs`)
-    /// brought it to 1278.
+    /// Ratcheted 4000 → 1500 after the impl-extraction sweep left mod.rs at
+    /// ~1076 lines (a guard that allows tripling isn't guarding), then 1500 →
+    /// 1350 when the pre-2.1 review caught it at **1495 of 1500** — five lines
+    /// of headroom, which turns the next feature into a bump-or-extract
+    /// decision taken under deadline.
     ///
-    /// What is left is close to the floor for the current design: 52% of the
-    /// file is `///` field docs on `Message`, `Runtime` and `ViewState`, which
-    /// is what this module is *for*. So the headroom is deliberately small —
-    /// enough for a new `Message` variant, not enough for a feature's logic.
+    /// Then 1350 → 600, once the reason the file was large got addressed rather
+    /// than accommodated: over half of it was `///` field docs on `Runtime` and
+    /// `ViewState`, so those two moved to `runtime.rs` / `view_state.rs` and
+    /// took their documentation with them. 1127 → 444.
+    ///
+    /// The ceiling is now generous relative to the file (444 of 600) because
+    /// what remains is a genuine module root — the mod graph, the shared
+    /// enums, `App` itself, and the glue — and a root should have room to
+    /// declare a new module without ceremony. It is still far below what would
+    /// let a feature's logic land here.
     #[test]
     fn mod_rs_stays_decomposed() {
-        const CEILING: usize = 1_350;
+        const CEILING: usize = 600;
         let src = include_str!("mod.rs");
         let lines = src.lines().count();
         assert!(
