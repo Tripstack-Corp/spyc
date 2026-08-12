@@ -1051,6 +1051,61 @@ fn tar_with_declared_size(path: &Path, name: &str, declared: &[u8; 12], body: &[
 /// and `every_declared_size_allocation_is_capped` is what ties the two together
 /// by requiring the call sites to use it — which is how `write.rs` kept a raw
 /// `with_capacity` through HIGH-1's fix.
+/// HIGH-2's PoC, in the direction that stayed live: a member **understating**
+/// its size.
+///
+/// The finding named three consequences of trusting a zip's declared size. Two
+/// were fixed — the allocation (`reserve_for`) and the decompression-bomb gate
+/// (`size_is_exact`). The third, the MCP 100 KB read cap, checked the declaration
+/// and nothing checked the bytes: a central directory claiming `size: 1` for a
+/// 300 KB member sailed past the cap and `member_bytes` returned all 300 KB.
+/// Measured, before this fix, at exactly that.
+///
+/// A tar can't do this (its stored bytes end where the next header begins, so a
+/// lie under-reads), which is part of why the zip half was easy to miss.
+#[test]
+fn an_understated_zip_size_cannot_smuggle_bytes_past_a_read_cap() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("liar.zip");
+    let body = vec![b'A'; 300_000];
+    {
+        let mut w = zip::ZipWriter::new(File::create(&archive).unwrap());
+        w.start_file("big.txt", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        w.write_all(&body).unwrap();
+        w.finish().unwrap();
+    }
+    // Patch the central directory's uncompressed-size field to 1. `ZipWriter`
+    // writes an honest header; the whole point is a dishonest one.
+    let mut raw = std::fs::read(&archive).unwrap();
+    let cd = raw
+        .windows(4)
+        .rposition(|w| w == [0x50, 0x4b, 0x01, 0x02])
+        .expect("central directory header");
+    raw[cd + 24..cd + 28].copy_from_slice(&1u32.to_le_bytes());
+    std::fs::write(&archive, &raw).unwrap();
+
+    let indexed = index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+    let entry = indexed.index.get("big.txt").expect("indexed");
+    assert_eq!(
+        entry.size, 1,
+        "the index must carry the LIE; without that this test proves nothing"
+    );
+
+    // A 100 KB ceiling, the same one `mcp::readers` applies.
+    let cap = 100 * 1024;
+    let err = member_bytes_within(&archive, entry, cap)
+        .expect_err("300 KB must not come back under a 100 KB cap");
+    assert!(
+        format!("{err:#}").contains("read limit"),
+        "must say why: {err:#}"
+    );
+
+    // The uncapped path is unchanged — this is a ceiling, not a new refusal.
+    let all = member_bytes(&archive, entry).expect("uncapped read still works");
+    assert_eq!(all.len(), 300_000, "and still returns the real bytes");
+}
+
 #[test]
 fn a_declared_size_far_beyond_the_file_does_not_drive_an_allocation() {
     let tmp = tempfile::tempdir().unwrap();

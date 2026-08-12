@@ -338,7 +338,9 @@ pub fn materialize(archive: &Path, entry: &IndexEntry, staging_root: &Path) -> R
     }
     create_parent(&dest)?;
     let bytes = match entry.locator {
-        Locator::Zip { index: pos } => read_zip_member(archive, pos)?,
+        // Materialize wants the whole member — the mount budget is what bounds
+        // this path, not a per-read ceiling.
+        Locator::Zip { index: pos } => read_zip_member(archive, pos, u64::MAX)?,
         Locator::TarData { offset } => read_tar_member(archive, offset, entry.size)?,
         // Already on disk (a streamed mount, or the user's own file) — if it
         // isn't there, it was removed behind our back.
@@ -380,18 +382,44 @@ pub fn materialize(archive: &Path, entry: &IndexEntry, staging_root: &Path) -> R
 /// extracted, so a read from outside the event loop that staged its own copy
 /// would make the archive read as changed.
 pub fn member_bytes(archive: &Path, entry: &IndexEntry) -> Result<Vec<u8>> {
+    member_bytes_within(archive, entry, u64::MAX)
+}
+
+/// A member's bytes, refusing anything past `cap`.
+///
+/// The **declared** size cannot enforce a ceiling. For a zip the crate
+/// decompresses the real stream, so a central directory claiming `size: 1` for a
+/// 300 KB member hands back all 300 KB — measured, and it is how the MCP read cap
+/// was bypassed (HIGH-2's PoC). A caller with a byte limit has to count what
+/// ARRIVES, and stop there rather than after.
+///
+/// (A tar is safe in that direction on its own: the stored bytes end where the
+/// next header begins, so `take(size)` under-reads on a lie rather than
+/// over-reading. The cap applies to both anyway — one rule beats two.)
+pub fn member_bytes_within(archive: &Path, entry: &IndexEntry, cap: u64) -> Result<Vec<u8>> {
     if !entry.readable {
         bail!("{}: encrypted or unsupported compression", entry.inner);
     }
-    match entry.locator {
-        Locator::Zip { index: pos } => read_zip_member(archive, pos),
-        Locator::TarData { offset } => read_tar_member(archive, offset, entry.size),
+    // One byte past the cap, so "exactly at the limit" is allowed and "over" is
+    // detectable without reading the rest of it.
+    let probe = cap.saturating_add(1);
+    let bytes = match entry.locator {
+        Locator::Zip { index: pos } => read_zip_member(archive, pos, probe),
+        Locator::TarData { offset } => read_tar_member(archive, offset, entry.size.min(probe)),
         // Only a streamed mount produces these, and its bytes are already on
         // disk — there is nothing in the container to re-read them from.
         Locator::Staged | Locator::Implied => {
             bail!("{}: staged bytes are missing", entry.inner)
         }
+    }?;
+    if bytes.len() as u64 > cap {
+        bail!(
+            "{}: larger than the {} KB read limit",
+            entry.inner,
+            cap / 1024
+        );
     }
+    Ok(bytes)
 }
 
 /// How much of a declared size we are willing to reserve before seeing a byte.
@@ -408,12 +436,15 @@ pub(super) fn reserve_for(declared: u64) -> usize {
     usize::try_from(declared.min(RESERVE_CAP)).unwrap_or(0)
 }
 
-fn read_zip_member(archive: &Path, pos: usize) -> Result<Vec<u8>> {
+fn read_zip_member(archive: &Path, pos: usize, limit: u64) -> Result<Vec<u8>> {
     let file = File::open(archive).with_context(|| format!("opening {}", archive.display()))?;
     let mut zip = zip::ZipArchive::new(BufReader::new(file))?;
-    let mut member = zip.by_index(pos)?;
-    let mut bytes = Vec::with_capacity(reserve_for(member.size()));
-    member.read_to_end(&mut bytes)?;
+    let member = zip.by_index(pos)?;
+    let mut bytes = Vec::with_capacity(reserve_for(member.size().min(limit)));
+    // Bounded on the way in, not checked on the way out: the caller's ceiling is
+    // there to keep an oversized member out of memory, so reading it all and
+    // then complaining would have already paid the cost.
+    member.take(limit).read_to_end(&mut bytes)?;
     Ok(bytes)
 }
 

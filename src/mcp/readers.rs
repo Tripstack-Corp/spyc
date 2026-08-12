@@ -258,8 +258,10 @@ fn read_member_from_archive(archive: &Path, inner: &str) -> Result<String, Strin
     if entry.kind == crate::archive::index::ArchiveEntryKind::Dir {
         return Err(format!("{inner}: is a directory"));
     }
-    // Checked before reading, so an enormous member costs an index lookup rather
-    // than the allocation.
+    // A cheap short-circuit on the DECLARED size: an honestly-large member is
+    // refused for the cost of an index lookup. It is NOT the enforcement — the
+    // declaration is the archive's claim, and a zip understating it hands back
+    // the real stream regardless (HIGH-2). `member_bytes_within` bounds the bytes.
     if entry.size > MAX_READ_BYTES {
         return Err(format!(
             "{inner}: file too large ({} KB, limit {} KB)",
@@ -267,7 +269,7 @@ fn read_member_from_archive(archive: &Path, inner: &str) -> Result<String, Strin
             MAX_READ_BYTES / 1024
         ));
     }
-    let bytes = crate::archive::read::member_bytes(archive, entry)
+    let bytes = crate::archive::read::member_bytes_within(archive, entry, MAX_READ_BYTES)
         .map_err(|e| format!("{inner}: {e:#}"))?;
     let check_len = bytes.len().min(8192);
     if bytes[..check_len].contains(&0) {

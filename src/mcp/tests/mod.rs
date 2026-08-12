@@ -1457,6 +1457,78 @@ fn searching_inside_a_mount_is_refused_rather_than_answered_emptily() {
 /// The archive branch of `get_file_content` used to answer before the root
 /// check, so "spyc has this mounted" was the only bound on it — and a mount can
 /// be anywhere. The member path can't be canonicalized (the mount root is a
+/// HIGH-2 at the layer that owns the ceiling.
+///
+/// `read_member_content` refuses a member over `MAX_READ_BYTES` by testing
+/// `entry.size` — the archive's own claim. A zip understating it walks straight
+/// through that check, and the crate then decompresses the real stream. This
+/// pins the WIRING: the sibling test in `archive::read` covers
+/// `member_bytes_within` itself, and the whole finding is that a bounded
+/// function nobody calls bounds nothing.
+#[test]
+fn an_understated_member_size_does_not_defeat_the_mcp_read_cap() {
+    use std::io::Write as _;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("project");
+    std::fs::create_dir_all(&dir).unwrap();
+    let staging = tmp.path().join("staging");
+
+    // A zip whose central directory claims 1 byte for a 300 KB member.
+    let archive = dir.join("liar.zip");
+    {
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+        let opts = zip::write::SimpleFileOptions::default();
+        w.start_file("big.txt", opts).unwrap();
+        w.write_all(&vec![b'A'; 300_000]).unwrap();
+        w.start_file("small.txt", opts).unwrap();
+        w.write_all(b"honest\n").unwrap();
+        w.finish().unwrap();
+    }
+    let mut raw = std::fs::read(&archive).unwrap();
+    let cd = raw
+        .windows(4)
+        .position(|w| w == [0x50, 0x4b, 0x01, 0x02])
+        .expect("central directory header");
+    raw[cd + 24..cd + 28].copy_from_slice(&1u32.to_le_bytes());
+    std::fs::write(&archive, &raw).unwrap();
+
+    let ctx = context::SpycContext {
+        cwd: archive.clone(),
+        cursor_file: None,
+        picks: vec![],
+        inventory: vec![],
+        filter: None,
+        git_branch: None,
+        project_home: Some(dir.clone()),
+        search_root: Some(dir.clone()),
+        session_name: String::new(),
+        pid: 0,
+        version: String::new(),
+        archive_mounts: vec![context::ArchiveMountRef {
+            root: archive.clone(),
+            staging,
+            source: None,
+        }],
+    };
+    let ctx_path = context::context_path(&dir);
+    context::write_context_file(&ctx_path, &ctx).unwrap();
+
+    let out = super::readers::read_member_content(&archive.join("big.txt"), &ctx_path, &dir)
+        .expect("recognised as a member");
+    let err = out.expect_err("300 KB must not come back under a 100 KB cap");
+    assert!(
+        err.contains("read limit") || err.contains("too large"),
+        "the refusal must name the limit: {err}"
+    );
+
+    // The honest member in the same archive is unaffected — a ceiling, not a
+    // new refusal.
+    let ok = super::readers::read_member_content(&archive.join("small.txt"), &ctx_path, &dir)
+        .expect("recognised")
+        .expect("and served");
+    assert!(ok.contains("honest"), "{ok:?}");
+}
+
 /// file, so everything under it is ENOTDIR), but the container is an ordinary
 /// file and that is what has to be inside the root.
 #[test]
