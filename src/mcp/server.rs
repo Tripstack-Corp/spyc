@@ -156,7 +156,7 @@ fn write_root_marker(state_dir: &Path, ctx_path: &Path) {
     let path = root_marker_path_in(state_dir, std::process::id());
     // A non-UTF-8 root would be stored lossily and later fail the
     // canonical compare → refuse; an acceptable (and safe) edge.
-    if std::fs::write(&path, canon.to_string_lossy().as_bytes()).is_ok() {
+    if crate::fs::write_atomic(&path, canon.to_string_lossy().as_bytes()).is_ok() {
         // Match the socket's owner-only posture: the file only holds a
         // directory path, but no reason to expose project roots to other
         // local users.
