@@ -452,13 +452,22 @@ impl App {
     /// over, not the focused one, so the wheel scrolls what you are looking at.
     pub(super) fn scroll_pager_in_slot(&mut self, slot: PagerSlot, delta: i32) {
         let viewport = self.pager_viewport();
-        if let Some(view) = self.pager_in_slot_mut(slot) {
+        // A wheel-down that can't move in a `^a v` scrollback exits it, the same as
+        // the keyboard's `j` — see `exit_scrollback_past_the_end`. Decided against
+        // THIS slot rather than the focused pager: the wheel follows the pointer, so
+        // the view under it is the one that gets to close.
+        let exit_scrollback = self.pager_in_slot_mut(slot).is_some_and(|view| {
             // Prefer the height the renderer recorded for THIS pager; `pager_viewport`
             // reports the focused one, which is a different box when the pointer is
             // over the other column.
             let h = view.last_viewport_h.get();
             let h = if h >= 2 { h } else { viewport };
-            view.scroll_by(delta, h);
+            let is_scrollback = view.pane_scroll;
+            let moved = motion::scrolled_down(view, delta, h);
+            is_scrollback && delta > 0 && !moved
+        });
+        if exit_scrollback {
+            self.close_pane_scroll_pager();
         }
     }
 

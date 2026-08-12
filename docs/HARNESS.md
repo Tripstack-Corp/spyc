@@ -139,6 +139,9 @@ Inside either view:
   only; a long tool-heavy session is much easier to read with them off)
 - `l` — toggle line numbers
 - `/` — search, `r` — reload
+- scrolling **down past the end** leaves scroll mode and snaps back to the live
+  pane — the same as `Esc`, so a flick out the bottom returns you to the agent
+  instead of parking you at `[EOF]`
 
 Transcript sources per agent live under `src/state/` (`claude_transcript.rs`,
 `codex_transcript.rs`, `agy_transcript.rs`). zot has none yet.
