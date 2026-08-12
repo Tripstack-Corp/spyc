@@ -567,6 +567,94 @@ mod tests {
         panic!("the pane never reported mouse mode");
     }
 
+    /// An inline-agent pane carrying real captured history. `cat` is the child
+    /// so it spawns in a test; the tab's command reads `claude`, which is all
+    /// `agent::detect` consults. The echoed lines overflow the grid, so rows
+    /// genuinely leave the screen and land in the emulator's scrollback.
+    fn inline_agent_pane_with_history(app: &mut App, dir: &std::path::Path) {
+        let wake = app.make_pane_wake();
+        let pane = crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.context_path, wake)
+            .expect("spawn cat");
+        let entry = crate::pane::tabs::TabEntry::new(
+            pane,
+            crate::pane::tabs::TabInfo::new("claude", dir.to_path_buf()),
+        );
+        app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
+        let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+        let feed: String = (0..80).map(|i| format!("history line {i}\n")).collect();
+        tabs.active_mut()
+            .send_bytes(feed.as_bytes())
+            .expect("write to the pty");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            tabs.active_mut().drain_output();
+            if tabs
+                .active_mut()
+                .with_screen_mut(crate::ui::scrollback::scrollback_len)
+                > 0
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("the pane never captured any scrollback");
+    }
+
+    /// **A wheel tick over an inline agent's pane has to move the history spyc
+    /// captured.** claude in its default TUI mode takes no alternate screen and
+    /// requests no mouse modes (both verified in a pty), and spyc has no
+    /// verified scroll key for it — so `route_mouse`'s `Region::Pane` ladder
+    /// fell through to `Swallow`: nothing moved, and nothing said why. That
+    /// reached us as "scrolling doesn't work with claude". Inside a pane spyc IS
+    /// the terminal, so its own scrollback is the surface the wheel is asking
+    /// for — and unlike codex there IS one, because inline claude sets no
+    /// DECSTBM region and its completed output reaches the main buffer.
+    #[test]
+    fn a_sustained_wheel_up_over_an_inline_agent_reaches_spycs_history() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let dir = tmp.path().join("work");
+            std::fs::create_dir(&dir).unwrap();
+            let mut app = App::test_app(dir.clone());
+            app.view.term_size = (120, 24);
+            inline_agent_pane_with_history(&mut app, &dir);
+
+            // The two conditions that make this the swallowed case, asserted so
+            // the test keeps naming its own premise: if claude ever starts
+            // speaking mouse inline, this must fail loudly here rather than pass
+            // for a reason it isn't testing.
+            assert!(
+                !app.runtime
+                    .pane_tabs
+                    .as_ref()
+                    .expect("a pane tab")
+                    .active()
+                    .wants_mouse(),
+                "inline claude requests no mouse modes"
+            );
+            assert!(
+                app.active_pane_wheel_scroll().is_none(),
+                "and spyc has no verified scroll key to synthesize for it"
+            );
+
+            crate::set_mouse_capture_for_test(true);
+            let layout = app.frame_layout(ratatui::layout::Rect::new(0, 0, 120, 24));
+            let pane_rect = layout.pane.expect("a pane is open");
+            let point = (pane_rect.x + 2, pane_rect.y + 1);
+            for _ in 0..super::route::OPEN_AFTER_UP_TICKS {
+                app.handle_mouse(at(MouseEventKind::ScrollUp, point.0, point.1));
+            }
+            crate::set_mouse_capture_for_test(false);
+
+            assert!(
+                app.runtime.pane_scroll_settle.is_some() || app.view.scroll_pager.is_some(),
+                "a sustained wheel-up over an inline agent must reach for the pane's \
+                 captured history; instead the tick vanished"
+            );
+        });
+    }
+
     /// **The capture gate.** A terminal or multiplexer can report the mouse when
     /// spyc never asked — a foreground child that died without resetting, for
     /// one. Acting on those with the feature off is how a stray middle click
