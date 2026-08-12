@@ -6,7 +6,8 @@ not vendor marketing. Every quote below was fetched from its source and checked
 for verbatim text and correct attribution. spyc straddles two lanes — the
 agent-manager category (§1, §1a–§1c) and the TUI **file-commander** lane, whose
 incumbent Yazi is covered in §1d (folded in 2026-07-01 from the standalone Yazi
-review; the raw original is archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md`).
+review; the raw original is archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md`)
+and whose minimalist counterweight lf is covered in §1e.
 
 > **Method.** Two deep-research passes. The first (v1) drew only on vendor
 > primary sources (GitHub READMEs, changelogs, marketing pages) and produced a
@@ -17,6 +18,14 @@ review; the raw original is archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md
 > attribution**. 78 evidence items were mined → **71 verified real, 6 killed as
 > misattributed** (real quote, wrong author), 1 partial. Star/version counts are
 > mid-June 2026 and drift; this space moves weekly.
+>
+> **Third pass (2026-08-12)** added §1e (lf) on the same standard: repo counts,
+> releases, contributors and per-author commit history from the GitHub API; the
+> feature surface read from lf's own `doc.md`/`CHANGELOG.md` at master rather than
+> a summary; and **every quote re-fetched from HN's Firebase item API** for author
+> and timestamp, because a search-engine snippet is not attribution. Two stale
+> spyc-side rows in §1d were corrected in the same pass (mouse support, Yazi's
+> star count).
 
 ---
 
@@ -65,7 +74,8 @@ lane** is where spyc lives — and it already has occupants.
 | **agent-deck** | TUI · cross-plat | 338★ · Go · MIT. Feature-maximalist: MCP socket pooling (claims 85–90% memory reduction), status-transition notifications, cost dashboard, "conductor" agents. |
 | **psmux** | TUI · **Windows** | Rust · "the native Windows tmux" (ConPTY, reads `.tmux.conf`, 83 tmux commands). A **multiplexer**, not a manager — its one agent feature renders Claude Code teammate agents into panes. No file manager, MCP, git, or context-sharing. Different lane (Windows) + different layer. See §1b. |
 | **claude-code-ide.el** | editor plugin | 1.6k★ · 109 forks · Emacs. The closest **architectural** twin outside the TUI-manager space: Claude Code runs in a hosted terminal pane (vterm/eat/ghostty) behind a **bidirectional MCP bridge** that pushes live editor context (file, selection, diagnostics, project) to Claude automatically. Different host (a 40-year-old editor, not a file commander) and different center of gravity — the buffer/editor is the noun, dired is a visited mode, not the driving UI. See §1c. |
-| **Yazi** | TUI · cross-plat · **file manager** | ~39.9k★ · Rust · the gold-standard TUI file commander (image preview, plugins + package manager, async scheduler). A *different lane* — no agent concept, no MCP; it sets the bar for the file-manager half of spyc's identity, not the agent half. See §1d. |
+| **Yazi** | TUI · cross-plat · **file manager** | ~41.3k★ (2026-08-12) · Rust · the gold-standard TUI file commander (image preview, plugins + package manager, async scheduler). A *different lane* — no agent concept, no MCP; it sets the bar for the file-manager half of spyc's identity, not the agent half. See §1d. |
+| **lf** | TUI · cross-plat · **file manager** | 9.5k★ · Go · MIT · ranger-inspired minimalist, now **community-maintained** (founder's last commit 2024-03-31). Ships the lane's only external **read+write** control surface (`lf -remote send`/`query`) — yet zero agent framing, and its README *Non-Features* (no tabs, no builtin pager/editor, no builtin file ops) are the precise inverse of spyc's integration bet. See §1e. |
 | **long tail** | mixed | Chorus · Vibetunnel · VibeKanban · Mux · Happy · AutoClaude · Codirigent · Centurion · AgentWire · Baton … |
 | **spyc** | TUI · cross-plat | Rust/ratatui · in-process gix worktrees · MCP bridge · vi-keyboard **file+process+agent manager** (not just a multiplexer). |
 
@@ -304,8 +314,9 @@ without the Lisp tax.
 
 The sections above cover the *agent-manager* lane. spyc also lives in a second
 lane — the **TUI file commander** — and its closest neighbour there is
-**[Yazi](https://github.com/sxyazi/yazi)** (~39.9k★, Rust; latest stable
-v26.5.6 / 2026-05-05, no significant release since the 2026-05-28 pass — this
+**[Yazi](https://github.com/sxyazi/yazi)** (~41.3k★ as of 2026-08-12, Rust; latest
+stable **still v26.5.6 / 2026-05-05** — re-verified 2026-08-12, so no significant
+release since the 2026-05-28 pass despite the star growth — this
 fold tracks *spyc-side* changes: Lua scripting, mermaid rendering, and
 agent-awareness all shipped since). `ROADMAP.md` already cites Yazi as the
 gold-standard "reputable, install-and-rely-on TUI tool" we benchmark launch
@@ -354,7 +365,7 @@ Roadmap pointers cite `ROADMAP.md` by file only (line numbers go stale fast).
 | Cwd export on quit                     | Yes (`y` wrapper) | Roadmap (Foundations queue)  |
 | Drag and drop (OSC 72)                 | Yes (PR #4005) | Roadmap, stale — see above    |
 | `fzf`/`fd`/`ripgrep`/`zoxide` integration | Yes  | `F` finder, `:grep`, frecency `J` (homegrown) |
-| Mouse support                          | Yes     | Limited; explicit non-goal beyond current |
+| Mouse support                          | Yes     | Yes — **default on** (`[mouse] capture`): wheel scrolls whatever is under the pointer, left/middle/right buttons, drag-select in four surfaces, `:mouse on\|off\|auto` *(row corrected 2026-08-12 — the previous "explicit non-goal" predated the mouse campaign)* |
 
 **Extensibility**
 
@@ -428,7 +439,13 @@ Roadmap pointers cite `ROADMAP.md` by file only (line numbers go stale fast).
 - **Plugin *package ecosystem*.** spyc shipped Lua *scripting* — but not a
   plugin *marketplace* like Yazi's. The extensibility surface is in-process
   scripting + the MCP bridge, not a third-party plugin API to version.
-- **Mouse beyond current** — non-goal; keyboard-first by thesis.
+- ~~**Mouse beyond current** — non-goal; keyboard-first by thesis.~~ **No longer a
+  non-goal** (corrected 2026-08-12): real mouse reporting shipped and is *default
+  on* — wheel, buttons, drag-select, `:mouse` controls. Keyboard-first remains the
+  thesis (every mouse action has a keyboard path), but "mouse is a non-goal" is a
+  stale claim. `ROADMAP.md`'s non-goal entry and `DESIGN.md`'s "mouse is a
+  courtesy" line were corrected in the same pass — the surviving non-goal is a
+  mouse-**first** UI, not mouse support.
 - **Event publishing (`ya pub` equivalent)** — non-goal; the consumer ecosystem
   we care about is agent-flavoured, not a generic automation bus, and accepting
   arbitrary publishes from anywhere on the box isn't worth the attack surface.
@@ -452,6 +469,235 @@ Roadmap pointers cite `ROADMAP.md` by file only (line numbers go stale fast).
    terminal adopts OSC 72 (whichever comes first). The four Yazi-inspired
    `ROADMAP.md` entries stay as the per-feature design notes; this section is
    the synoptic view.
+
+---
+
+## 1e. lf — the delegation-lane minimalist (and the lane's only external control surface)
+
+[lf](https://github.com/gokcehan/lf) ("list files") — a Go terminal file manager
+with, in its own words, *"a heavy inspiration from `ranger`"*. MIT, **9,459★** /
+374 forks, created 2016-08-13, **1,574 commits**, latest release **r42
+(2026-07-31)**, 57 open issues / 25 open PRs. Counts verified 2026-08-12 via the
+GitHub API; the feature surface below is read from lf's own `doc.md` (2,309 lines)
+and `CHANGELOG.md` at master.
+
+lf is emphatically **not** an agent tool — a grep for `mcp|llm|AI|claude|agent`
+across `doc.md` + `CHANGELOG.md` returns **zero hits**. It earns a section anyway
+for two reasons the Yazi fold doesn't cover: it is the only tool in the
+file-manager lane that already ships an external **read+write control surface**,
+and its explicit **Non-Features** list is the precise philosophical inverse of
+spyc — which makes it the cleanest available argument for *why* spyc integrates
+instead of delegating.
+
+### The governance story: it survived its founder going quiet
+
+The most transferable fact about lf has nothing to do with features.
+**gokcehan's last commit was 2024-03-31** — zero commits in the past 12 months —
+while the repo took **333 commits since 2025-08-01** and shipped r42 twelve days
+ago. Day-to-day maintenance sits with collaborators (joelim-work 306 commits,
+CatsDeservePets 110, valoq 49), releases are cut by `github-actions[bot]`, and
+issues get collaborator answers within days.
+
+That is a useful correction to how this doc has been reading bus-factor risk. §1
+dings supacode and herdr for being single-maintainer projects; lf shows the risk
+isn't *"one maintainer"* — it's *"no succession path"*. lf still carries its
+founder's name, but an in-repo `CONTRIBUTING.md`, commit rights handed to two
+active contributors, and CI-cut releases were enough to keep it shipping through a
+two-year founder absence. **spyc is a single-developer project with none of those
+three.** Cheap insurance, and it belongs in launch hygiene rather than the someday
+pile.
+
+*(Coincidence worth noting so nobody "corrects" it later: lf's 1,574 commits is the
+same figure as supacode's in §1. Both verified independently; lf's via the API's
+`Link: rel="last"` page count.)*
+
+### `lf -remote` — the closest analogue to spyc's MCP bridge in this lane
+
+lf is **server/client**: clients connect to a server on startup (`--single` opts
+out), and any process can drive a running instance.
+
+| Surface | What it does |
+|---|---|
+| `lf -remote 'send [id] <command>'` | run any lf command in one client or all — **write** |
+| `lf -remote "query $id <type>"` | dump `maps`, `nmaps`, `vmaps`, `cmaps`, `cmds`, `jumps`, `history`, `files` — **read** |
+| `lf -remote 'list' \| 'quit' \| 'quit!'` | enumerate clients; shut the server down |
+| `-print-selection` · `-print-last-dir` · `-last-dir-path` · `-command` | one-shot use as a file picker / cwd exporter for a wrapper script |
+
+That is a bidirectional surface, and Yazi has no equivalent (`ya pub` is an event
+bus, not a state read). **An agent could drive lf today** — a thin MCP shim over
+`lf -remote` is roughly a weekend's work, and it is the cheapest path anyone has
+into spyc's lane. Better to name it plainly here than to discover it later.
+
+Why MCP still wins, specifically:
+
+- **Discovery.** MCP tools are self-describing; Claude Code and Codex enumerate
+  them from `initialize` with zero user setup. `-remote` is a shell-string
+  vocabulary the *user* must teach the agent, per project, forever.
+- **Types.** `query` returns pager-shaped text meant for a human —
+  `cmd maps $lf -remote "query $id maps" | $PAGER` is the documented usage. spyc
+  returns structured results the agent consumes without a scraper.
+- **The wrong nouns.** `query` exposes keymaps, command definitions, the jump
+  list, history and the file list. It cannot answer *where is the cursor*, *what
+  is picked*, *what is the git state*, *which worktree*, *what is `PROJECT_HOME`* —
+  the questions `get_spyc_context` exists to answer. lf's surface is built to
+  **synchronize lf instances**, not to ground an outside reader in a human's view.
+- **No thesis.** Zero agent/MCP/LLM mentions anywhere in its docs. The primitive
+  exists; the intent doesn't.
+
+**Moat read:** the socket was never the moat — the *integrated* surface behind it
+is (git gutter, worktree lifecycle, review loop, picks semantics, agent status). An
+MCP-shimmed lf would give an agent a cursor it can move and a file list it can
+read. It would not give it a review loop.
+
+### Non-Features: delegation vs integration — the actual strategic core
+
+lf's README lists three **Non-Features**, verbatim:
+
+> "Tabs or windows (better handled by window manager or terminal multiplexer)
+> - Builtin pager/editor (better handled by your pager/editor of choice)
+> - Builtin commands for file operations (better handled by the underlying shell tools)"
+
+All three are things spyc deliberately **has**: pane tabs plus a second commander,
+an in-app pager (ANSI / hex / syntax / markdown / mermaid / diff), and built-in
+file ops with a graveyard. Read as a design disagreement, lf is right on classical
+Unix grounds and spyc looks like scope creep. Read against the thesis, it inverts —
+and this is the sharpest way to state spyc's position anywhere in this document:
+
+> **Every delegation boundary is state that leaves the file manager's model, and a
+> context bridge can only expose what the model knows.** Hand the pager to
+> `$PAGER` and no bridge can tell an agent what the user is reading. Hand file ops
+> to `cp` and there is no operation to report, undo, or scope-claim. Hand tabs to
+> tmux and "which agent needs you" belongs to a process spyc doesn't own.
+
+spyc's integration is therefore not feature-maximalism — it is the **precondition**
+for the MCP bridge. lf's Non-Features are precisely the seams where an agent bridge
+goes blind. It also pays off defensively: because spyc reviews in its own pager, it
+structurally avoids herdr's *"`less`/`man` unusable inside panes"* bug class
+([#816](https://github.com/ogulcancelik/herdr/issues/816), §1a).
+
+**One precision note, since lf's README overstates it:** the third non-feature has
+drifted from lf's own reference. `doc.md` documents a built-in copy/move — a custom
+`paste` command is *"called when it is defined instead of the built-in
+implementation"* — so lf's real position is "built-in ops, overridable by shell",
+not "no built-in ops". `delete` is genuinely unbound by default, and deliberately:
+*"By default, lf does not assign `delete` command to a key to protect new users."*
+No trash tier either way.
+
+### Feature standing (only where they meaningfully differ)
+
+| Capability | lf | spyc |
+|---|---|---|
+| Inline image preview | **Yes — sixel, on by default** (the opt-in `sixel` option was *removed* as no longer required, CHANGELOG #2109); previewer-produced, cached in memory | No inline preview; full-screen **view** of PNG/JPEG/GIF/WebP by magic bytes, plus mermaid diagrams rendered as images |
+| Multi-column layout | `ratios` (default `1:2:3`) — ranger-style parent/current/preview | vsplit preview + optional second commander (`^s`) — a different shape, not a port |
+| Tabs | **Non-goal** (delegated to the multiplexer) | Pane tabs |
+| In-app pager | **Non-goal** (delegated to `$PAGER`) | Yes — and load-bearing, see above |
+| Archive browsing | **No — [#170](https://github.com/gokcehan/lf/issues/170) open since 2019-05-22** | Shipped — a mount is an *index, not a directory* (`src/archive/`) |
+| Trash / undo | None; `delete` unbound by default | Two-tier graveyard → system trash, `p`/`P` restore, `:undo` |
+| Bulk rename | Via an external tool (users reach for `edir`) | Roadmap |
+| Cwd export on quit | **Yes** — `-print-last-dir` / `-last-dir-path` + `lfcd` wrappers | Roadmap (post-2.0 papercut queue) |
+| Selection → outside consumer | `-print-selection` → a script's stdout | Picks → an **agent**, via `get_spyc_context` |
+| External control surface | `-remote send`/`query`/`list` — untyped text | MCP — typed, discoverable, agent-native |
+| Hook / event surface | **9 hooks**: `on-init`, `on-cd`, `pre-cd`, `on-load`, `on-select`, `on-redraw`, `on-focus-gained`, `on-focus-lost`, `on-quit` | 4 Lua events: `spyc.on(startup\|dir_changed\|project_changed\|agent_status)` |
+| Mouse | `mouse` bool, **default false** | **Default on**; wheel + buttons + drag-select |
+| Config model | `lfrc` — a shell-command DSL (`cmd`, `map`, and `$`/`&`/`%`/`!` command types) | `.spycrc.toml` + Lua scripting |
+| Windows | **Native** | WSL only |
+| Agent / MCP | **None** | Core thesis |
+
+### Where lf leads
+
+1. **Windows-native**, which spyc is not — and a documented reason people pick it:
+   > "Unfortunately nnn and Ranger don't work on Windows … edit: Looks like lf
+   > works on Windows" — rahen,
+   > [HN](https://news.ycombinator.com/item?id=32436331)
+2. **Hook surface breadth** — nine events to spyc's four. `on-quit`, `on-select`
+   and focus-gained/lost have no spyc equivalent. Cheap to steal; see below.
+3. **Sixel previews on by default**, where spyc has no inline preview at all.
+4. **Startup and footprint**, consistently the user framing:
+   > "It's a lot faster in all aspects, has mostly the same features and is pretty
+   > much a standalone binary." — thworp,
+   > [HN](https://news.ycombinator.com/item?id=40298792)
+   >
+   > "Then learned about lf, a ranger clone written in go, which is much faster.
+   > That is what I use now." — 29athrowaway,
+   > [HN](https://news.ycombinator.com/item?id=25127212)
+5. **Proven succession** (above) — something spyc has not demonstrated.
+
+### Where spyc leads
+
+Archive browsing (lf's own seven-year-old open request), the in-process review
+loop, the graveyard, worktree lifecycle + git-status gutter, agent-status
+awareness, and the MCP thesis. Against lf the delta is *wider* than against Yazi:
+lf declines by design most of what spyc integrates, so the comparison is a
+disagreement about scope rather than a feature gap either side is racing to close.
+
+### Mindshare: lf is being displaced by Yazi in the very threads that recommend it
+
+Worth tracking, because it runs on the same lever §5 identifies. lf's discovery is
+organic recommendation inside adjacent shell-workflow threads — which is exactly
+where the lead for this section came from ("A shell exclamation mark is not for
+yelling. Be lazy", 2026-08-06):
+
+> "If you really want to be lazy, use a terminal file manager (I prefer lf) it
+> helps avoiding the cd && ls dance. That way, your history only contains commands
+> you actually would want to rerun." — RMPR,
+> [HN](https://news.ycombinator.com/item?id=49268693)
+
+But in threads where lf gets named, Yazi is increasingly the reply:
+
+> "> Also lf. … Check out yazi, its the nicest TUI file manager I have used" —
+> ac29, [HN](https://news.ycombinator.com/item?id=43419584)
+>
+> "my favorite is yazi since it has great preview capabilities out of the box and
+> **requires zero config**, but other alternatives are nnn, ranger, walk and lf."
+> — yuvadam, [HN](https://news.ycombinator.com/item?id=45272749)
+
+**"Requires zero config" is the knock, and it is the actionable one.** lf's ethos —
+*"Extendable and configurable with shell commands"* — means a new user wires up a
+previewer before the tool feels good, and it visibly costs lf recommendations to a
+peer that works on first run. spyc's shipped defaults + chord-hint discovery are
+the right instinct; **protect first-run quality as a launch requirement, not a
+polish item.** The counter-voice is real and also verified — minimalism is a
+feature to some users:
+
+> "This looks neat, but has a lot going on. I really like how minimalist yet
+> extensible lf is and just use edir to rename files in bulk." — monopoliessuck,
+> on the superfile thread,
+> [HN](https://news.ycombinator.com/item?id=40323990)
+
+### The rest of the lane, in one line
+
+So the "what about X?" question doesn't stay open. Star counts verified 2026-08-12:
+**superfile** 22.5k★ (Go), **nnn** 21.8k★ (C), **ranger** 17.3k★ (Python — the
+ancestor), **broot** 12.9k★ (Rust, tree-oriented), **lf** 9.5k★, **joshuto** 3.7k★
+(Rust), **walk** 3.6k★ (Go, last pushed 2026-01-06). Yazi (41.3k★) leads the lane
+on polish; lf leads it on external control; **none of them ship an agent bridge.**
+The file-manager lane is crowded and mature, which is exactly why spyc's wedge is
+the agent axis (§4) and not file-manager feature parity.
+
+### Recommendations (lf-specific)
+
+1. **Steal the hook vocabulary.** `on-quit`, `on-select`, `on-focus-gained` /
+   `on-focus-lost` are cheap additions to `spyc.on`, and lf has already proven the
+   naming. Focus events pair naturally with agent-status ("the user looked away"
+   is a meaningful input to notification gating).
+2. **Promote cwd-export out of the papercut bucket.** Both peers ship it (Yazi's
+   `y` wrapper, lf's `-print-last-dir`) and it is the single most-cited lf
+   integration in user voices:
+   > "I have it integrated into zsh so the current directory is whatever dir I was
+   > in when exiting lf." — nvllsvm,
+   > [HN](https://news.ycombinator.com/item?id=41797442)
+3. **Do not build a `-remote`-style generic socket.** Consistent with the `ya pub`
+   non-goal in §1d: MCP is the same surface with discovery and types, and a second
+   untyped control plane is attack surface for no thesis gain.
+4. **Add lf to the migration page beside Yazi.** The honest pitch to an lf user:
+   *keep* vi keys and a single static binary; *gain* worktrees, review, graveyard,
+   archive browsing and the agent bridge; *give up* Windows-native and inline sixel
+   previews.
+5. **Fix the bus factor.** lf is the working model — CONTRIBUTING in-repo, a second
+   committer, CI-cut releases. Fold into launch hygiene.
+6. **Re-run this section** when lf cuts r43, or the moment anyone publishes an MCP
+   shim over `lf -remote`. That shim is the entry vector into spyc's lane, and it
+   would show up on GitHub well before it shows up in an HN thread.
 
 ---
 
@@ -837,6 +1083,26 @@ Primary sources, all fetched and verified:
   This Week in Rust + Terminal Trove + awesome-ratatui/awesome-tuis submission
   docs.
 - **Review:** [rywalker.com/research/supacode](https://rywalker.com/research/supacode).
+- **lf (§1e, added 2026-08-12):** [repo](https://github.com/gokcehan/lf) · README
+  *Features* / *Non-Features*, `doc.md` (2,309 lines) and `CHANGELOG.md` read at
+  master · counts, releases, contributors and per-author history via the GitHub API
+  (`repos/gokcehan/lf`, `/releases`, `/contributors`, `/commits?author=gokcehan`;
+  commit total from the `Link: rel="last"` page count) · issues
+  [#170](https://github.com/gokcehan/lf/issues/170) (archive browsing, open since
+  2019-05-22), #1903, #2076, #2563, #2581, #1620, #777 · sixel-on-by-default via
+  CHANGELOG #2109 — **MIT; ideas only, no code reused.** Verified user voices, each
+  re-fetched from HN's Firebase item API for author + timestamp rather than a
+  search snippet: [49268693](https://news.ycombinator.com/item?id=49268693) (RMPR,
+  2026-08-12 — the lead for this section, via the "shell exclamation mark" thread),
+  [40298792](https://news.ycombinator.com/item?id=40298792) (thworp),
+  [25127212](https://news.ycombinator.com/item?id=25127212) (29athrowaway),
+  [41797442](https://news.ycombinator.com/item?id=41797442) (nvllsvm),
+  [40323990](https://news.ycombinator.com/item?id=40323990) (monopoliessuck),
+  [43419584](https://news.ycombinator.com/item?id=43419584) (ac29),
+  [45272749](https://news.ycombinator.com/item?id=45272749) (yuvadam),
+  [32436331](https://news.ycombinator.com/item?id=32436331) (rahen). Wider-lane
+  star counts (superfile / nnn / ranger / broot / joshuto / walk) from the same API
+  pass.
 - **Yazi (§1d):** [repo](https://github.com/sxyazi/yazi) + [docs site](https://yazi-rs.github.io)
   (the canonical feature list; the README bullets are a subset) · PR #4005
   (OSC 72 drag-and-drop, merged 2026-05-28). Snapshot last refreshed 2026-07-01,

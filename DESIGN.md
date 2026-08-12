@@ -130,10 +130,19 @@ exempt** — consumers expect absolute paths.
 
 ### Keys are the API
 
-Mouse is a courtesy (DEC 1007 alternate scroll for wheel, native
-text selection works). Every action has a keybinding; every
-keybinding maps to an `Action` enum variant. New features add a
-variant, a default binding in the resolver, and a help-table row.
+Every action has a keybinding; every keybinding maps to an `Action`
+enum variant. New features add a variant, a default binding in the
+resolver, and a help-table row.
+
+The mouse is **fully bound and on by default** (`[mouse] capture`) —
+the wheel scrolls whatever is under the *pointer*, buttons focus /
+paste / open the leader popup, and drag selects text in the pager, a
+non-mouse pane, chrome rows, or the file list. That does not soften
+this rule: nothing is reachable by pointer alone, so the keyboard
+remains sufficient for everything. One consequence to keep in mind
+when documenting: with capture on, the terminal's *own* text
+selection needs the Shift bypass (Option/Fn on iTerm2) or
+`:mouse off` — it is no longer simply "native selection works."
 
 ### Binding taxonomy — global / frame / pane
 
