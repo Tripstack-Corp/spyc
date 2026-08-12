@@ -8,6 +8,34 @@
 
 ## 1. Verdict
 
+> **UPDATED 2026-08-12 (fifth pass) — EVERY FINDING IS CLOSED.** `main` at
+> `b11edca`. Eleven further PRs (#392–#401, #403) close the lows. Five of the 23
+> filed were already closed as collateral by earlier passes (F12 by #383, F-E13
+> by #357, and C-F5/C-F6/C-F8 by the H3 and SECURITY.md work) — verified on HEAD
+> before any were worked, per the standing rule.
+>
+> **Three of the lows were live user-visible defects**, not the prose or coverage
+> the tier suggests: a `0o000` member staged unreadable so the pager, `y` and
+> copy-out all failed EACCES on a member the container held fine (A-LOW-2); every
+> file put into an archive listing as size 0 / mtime epoch (A-LOW-3); and a vsplit
+> whose column was inside a container losing **the entire split**, silently, on
+> `spyc -r` (D7). A fourth had teeth of its own: a torn skill manifest read back
+> as `NotInstalled`, which is overwritten unconditionally — so the file whose job
+> was to protect the user's edits was the one that could discard them (C-F7).
+>
+> **One low was wrong on contact.** A-LOW-1 proposed demoting a mount containing
+> an escaping symlink to read-only. Measured first: with `escaping_links = 1` the
+> repack succeeds and the link returns byte-identical, rebuilt from the index that
+> never lost it. `assess`'s rule is about *reproducing*, not extracting, so the
+> exemption was correct — but undefended, and #392 had just shown this same file
+> reads `symlink_metadata` for a staged member's mode. #397 pins the round trip
+> instead of changing the behaviour.
+>
+> **Severity tiers remaining: 0 blockers, 0 highs, 0 mediums, 0 lows.**
+> Full record in §7.
+>
+> ---
+>
 > **UPDATED 2026-08-12 (fourth pass) — EVERY MEDIUM IS CLOSED.** `main` at
 > `07b69db`. Eleven further PRs (#378–#386, #388, #389) close the remaining
 > sixteen: M9, M10, M21, M22 (the last of the live defects — a half-inverted
@@ -454,7 +482,57 @@ standing in for two behaviours.
 fix isn't reachable without `unsafe`, and M12 was 75 commits stale rather than
 47. Neither changes the finding; both change what closing it looks like.
 
+### Fifth pass — every low (2026-08-12)
+
+`main` `07b69db` → `b11edca`. Eleven PRs. Five findings were already closed as
+collateral and verified so on HEAD before anything was worked.
+
+| PR | closes | what closing it showed |
+|---|---|---|
+| #392 | A-LOW-2 | One mode field served two masters and got both wrong. A `0o000` member staged unreadable (EACCES from the pager, `y`, copy-out) and a `0o777` one staged world-writable, which `c` carried into the user's tree verbatim. **And in the other direction** — the repack read the mode back *off the staged copy*, so editing a `0o444` member published it as `0o644`. Split: staging carries spyc's permissions, the index carries the archive's. Bite: 257/258. |
+| #393 | A-LOW-3 | Every put member listed as size 0, mtime epoch. `mount.staged` has exactly two fillers and a copy-in reaches neither — `current_staged_stats` walks the index (an addition isn't in it) and `record_staged` needs a materialize outcome (a copy produces none). Bite: 255/256, with `a_put_member_can_be_opened_yanked_and_deleted` green throughout — it exercises the same put and never looks at the row. |
+| #394 | D7 | A `right_cwd` inside a container fails `is_dir()`, falls to the preview branch with no `preview_path`, and the blank-split guard drops the split. Asymmetric with the left column, which #317 handled *and tested*. Restored beside the container with a flash; full remount would need `Effect::ChangeDir` to name a column, which is its own change. |
+| #395 | F10, F11 | `chrome.rs` sat in the per-column allowlist as "deliberately anchored to the primary column" — reversed by #322 **in this same window**, which removed the read and added a test pinning the opposite. So the one file just fixed for this bug was the one file free to reintroduce it. Bite both ways: HEAD's guard passes an injected regression, the fixed one names `render/chrome.rs`. F11 (a doc block spliced onto the wrong guard) is why the sentence naming `chrome.rs` was nowhere near the constant listing it. |
+| #396 | A-LOW-4, A-LOW-5 | The cap bounded the walk, not the index: three members five deep produced **eighteen** entries against a cap of three, while the "capped at N" warning named 3. Bite: 259/260, with `the_entry_cap_truncates_and_stops_the_walk` green — it covers the other half of the same cap. |
+| #397 | A-LOW-1 | The finding was wrong; the exemption was undefended. See §1. Bite: 259/260 with the symlink branch reading the target off disk. |
+| #398 | F13, F14, F12e | Three assertions satisfied by the outcome their own names exclude. F13 never read `isError`, so a refusal and an empty answer were indistinguishable — bite both ways. F14's column half had no premise and `pane.x == 0` everywhere, so `report.col == 5` held whether the origin was subtracted or ignored: arithmetic, not subtlety. F12e's driver gave up after four hops silently. |
+| #399 | F12d | The write-time free-space refusal had never once been true. Reached with a margin larger than any disk — no injection seam needed, and it pins the `saturating_add` too. Bite: the finding's own `&& false`, 261/262. |
+| #400 | E comment audit | **Four** copies of "spyc asks the terminal only for 1000", one of them thirteen lines below the string that emits `?1002h`. `proc.rs` was the single copy updated when 1002 landed. Plus two doc blocks attached to the wrong function, the same splice as F11. |
+| #401 | C-F7 | `read_manifest` → `None` → `NotInstalled` → overwritten unconditionally, so a torn manifest converted "never clobbered unprompted" into "clobbered". The guard scanned `src/state/` only and could see neither this nor the MCP sidecar; widened, and its one-literal limit written down rather than left to read as coverage. |
+| #403 | C-F9, D8, D9, F-E8, F-E9, F-E10, F-E11, F-E12 | The doc-contract remainder. F-E12 resolved by strengthening where possible and narrowing where not: `"for now"` joins the guard (catching three sites that had been "for now" for over a year), while "until X lands" / "with the Y PR" stay convention — no needle separates them from legitimate prose about when a value settles. F-E9's header is now byte-identical to what `cliff.toml` renders, asserted by diffing the two. |
+
+### What the low tier turned out to contain
+
+The lows were not the leftovers the tier implies. **Three were live user-visible
+defects and a fourth was a data-loss path** — the same ratio as the mediums, where
+eight of twenty were live. The tier tracked how *hard the finding was to notice*,
+not how much it cost once noticed: a `0o000` member is rare, a put row is a
+glance, a vsplit inside an archive is a narrow habit, and a torn write needs a
+crash. None of that made them cosmetic.
+
+The recurring shapes held too. **Two derivations of one fact** (staging's mode vs
+the index's) and **the adjacent case is tested** (the exiting helper, the walk's
+half of the cap, the `Archived` path's mode, the row half of the coordinate
+translation) both reappeared. And a new one: **a claim updated in one copy and
+left in three** — `proc.rs` learned about 1002 while `mouse/mod.rs` and `lib.rs`
+did not, which is the same failure as M23's four instances found by grepping after
+fixing the filed three.
+
+### One regression this campaign introduced
+
+#381 (M22) moved the clipboard write off the loop and added
+`Message::ClipboardCopyDone`. It was wired into two of the three matches that must
+agree about a payloadless done-wake — the third had a catch-all and could only
+fail open. Result: a select-and-copy on a **quiet** spyc panics the loop. Found by
+hand-driving `main`, never released, fixed in #402.
+
+Worth recording because of what it says about the fix pattern: that catch-all had
+already failed open four times, and there was a regression test whose doc said
+"Add every new payloadless done-wake to this list so the trap can't recur
+silently." It recurred twice while that sentence sat there. **An instruction to a
+human is not a guard** — #402 removes the catch-all so the compiler enforces it.
+
 ### Still open
 
-**Nothing above low.** All 25 mediums are closed. 23 lows remain, itemized in the
-six reports and summarized in §3. None of them holds the tag.
+**Nothing.** All 58 findings are closed across five passes and 38 PRs
+(#346–#403). The 2.1 tag is unblocked on review grounds.
