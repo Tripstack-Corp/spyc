@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use super::{
     AGENT_STATUS_TTL, AgentKind, AgentStatusCache, App, Deadline, Effect, Message, RunCtx,
-    VisualBell,
+    VisualBell, Wake,
 };
 use crate::config::{DesktopVia, NotifyConfig};
 use crate::pane::{AgentActivity, ReportedStatus};
@@ -350,7 +350,7 @@ impl App {
             // Wake AFTER the result + flag are stored, so the woken pre-recv
             // scan sees `agent_status_pending` populated and forces a redraw.
             if let Some(tx) = wake {
-                let _ = tx.send(Message::AgentStatusReady);
+                let _ = tx.send(Message::Wake(Wake::AgentStatus));
             }
         });
     }

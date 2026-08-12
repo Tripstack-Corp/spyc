@@ -268,7 +268,7 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    use crate::app::{Effect, Message};
+    use crate::app::{Effect, Message, Wake};
 
     /// Attach a REAL Lua worker to `app` (the test harness has none) wired to a
     /// wake channel the test can block on, so an integration test drives a real
@@ -277,7 +277,7 @@ mod tests {
         let (tx, rx) = mpsc::channel::<Message>();
         app.runtime.pane_wake_tx = Some(tx.clone());
         app.runtime.lua = Some(LuaWorker::spawn(move || {
-            let _ = tx.send(Message::LuaDone);
+            let _ = tx.send(Message::Wake(Wake::Lua));
         }));
         rx
     }

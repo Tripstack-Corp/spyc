@@ -4,7 +4,7 @@
 //! One channel serves every producer of a displayable image. A mermaid diagram
 //! ([`mermaid_ops`](crate::app::mermaid_ops)) rasterizes its SVG first and an
 //! image file is read off disk here, but both land as an [`ImageOutcome`] on
-//! `runtime.image_results` and wake the loop with `Message::ImageDone`;
+//! `runtime.image_results` and wake the loop with `Message::Wake(Wake::Image)`;
 //! [`App::apply_image_outcomes`] installs whichever arrives. What the overlay's
 //! verbs do with the result is driven by [`ImageOrigin`], not by which producer
 //! ran.

@@ -2,7 +2,7 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use super::state::{PagerRequest, Side};
-use super::{App, Effect, Message, PaneInput, PaneTarget, pager_handler};
+use super::{App, Effect, Message, PaneInput, PaneTarget, Wake, pager_handler};
 use crate::fs::listing::Listing;
 use crate::state::inventory::Inventory;
 use crate::ui::pager::PagerView;
@@ -521,7 +521,7 @@ impl App {
             let outcome = run_file_op(op);
             results.lock().unwrap().push(outcome);
             if let Some(tx) = wake {
-                let _ = tx.send(Message::FileOpDone);
+                let _ = tx.send(Message::Wake(Wake::FileOp));
             }
         });
     }

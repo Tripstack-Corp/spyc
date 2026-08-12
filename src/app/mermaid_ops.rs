@@ -10,7 +10,7 @@
 //! Both are far too heavy (parse → layout → SVG → resvg raster → font load) for
 //! the loop, so they run on a detached worker like the graveyard ops. The
 //! worker pushes an [`ImageOutcome`] onto `runtime.image_results` and wakes the
-//! loop with `Message::ImageDone`; `App::apply_image_outcomes` (pre-recv scan)
+//! loop with `Message::Wake(Wake::Image)`; `App::apply_image_outcomes` (pre-recv scan)
 //! opens/installs the result and flashes status — this module owns only the
 //! mermaid-specific half (source → raster), with the display last mile shared
 //! with every other image producer in [`image_ops`](super::image_ops). All

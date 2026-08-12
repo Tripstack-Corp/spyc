@@ -9,7 +9,7 @@
 //! app with no redraw, no input, no flash). They now emit `Effect::Graveyard`;
 //! `run_effects` runs the op on a detached worker (the same one-shot off-thread
 //! pattern as the agent-status / live-cwd resolvers) and wakes the loop with
-//! `Message::GraveyardDone`. `apply_graveyard_outcomes` drains the landed
+//! `Message::Wake(Wake::Graveyard)`. `apply_graveyard_outcomes` drains the landed
 //! outcomes in the pre-recv scan and does the flash + listing / graveyard
 //! refresh — re-deriving the current view, since it may have changed since the
 //! op was kicked.
