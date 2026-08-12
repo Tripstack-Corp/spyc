@@ -212,10 +212,12 @@ procedure is stated here but has never been rehearsed.
   prove origin and would not survive notarization. A real Developer ID
   requires Apple Developer enrollment and is out of scope; the
   provenance attestation is the origin proof instead.
-- **MCP socket permissions are filesystem-default.** Anyone running
-  as your user on the same machine can read the per-PID socket and
-  exercise the MCP tool surface. We rely on user-process isolation,
-  not stricter ACLs.
+- **The MCP socket is owner-only, and that is the whole boundary.**
+  `start_socket_server` wraps the bind in `umask(0o077)` so the socket
+  lands 0700, and refuses to serve at all rather than fall back to a
+  world-writable `/tmp`. But anyone running as your user on the same
+  machine can still open it and exercise the MCP tool surface: we rely
+  on user-process isolation, not on stricter ACLs.
 
 ## Reporting a vulnerability
 

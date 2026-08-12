@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to spyc. Entries from v1.57.0 onward are generated from the conventional-commit history by [git-cliff](https://git-cliff.org) (config in `cliff.toml`); regenerate the pending section with `make changelog` and cut a release with `make release-tag VERSION=x.y.z`. Entries at v1.56.0 and earlier are the original hand-written log, kept verbatim.
+All notable changes to spyc. Entries from v1.57.0 onward are generated from the conventional-commit history by [git-cliff](https://git-cliff.org) (config in `cliff.toml`); regenerate the pending section with `make changelog` and cut a release with `make release-prep` then `make release-tag` (see `docs/RELEASE_ENGINEERING.md`). Entries at v1.56.0 and earlier are the original hand-written log, kept verbatim.
 
 ## [2.0.3] - 2026-07-28
 

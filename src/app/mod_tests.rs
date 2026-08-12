@@ -473,6 +473,14 @@ mod guard_tests {
             "so basically",
             "to be honest",
             "honestly,",
+            // The temporal shape AGENTS.md names first. It rots the fastest: the
+            // three sites this caught all described a "for now" that had been the
+            // permanent answer for over a year. The sibling shapes AGENTS.md
+            // lists ("until X lands", "with the Y PR") are NOT here — they can't
+            // be matched without false-tripping legitimate prose about when a
+            // value settles ("holds steady until the fresh result lands"), so
+            // that bullet says which half is machine-checked.
+            "for now",
         ];
         let manifest = env!("CARGO_MANIFEST_DIR");
         let root = std::path::Path::new(manifest).join("src");
