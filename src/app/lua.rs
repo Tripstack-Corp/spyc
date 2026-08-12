@@ -17,7 +17,7 @@ use crate::lua::{LuaJob, LuaOutcome, LuaRequest, LuaWorker, RegKind, Registratio
 use crate::mcp_cmd::{McpCommand, McpResponse};
 
 use super::lua_events::{EV_STARTUP, LuaEventState};
-use super::{App, Deadline, Effect, Message, Mode, Prompt, PromptKind, RunCtx};
+use super::{App, Deadline, Effect, Message, Mode, Prompt, PromptKind, RunCtx, Wake};
 
 /// Cap on how many times `spyc.action(name, count)` re-applies an action — the
 /// requests run on the main thread, so an enormous count would block the loop.
@@ -104,7 +104,7 @@ impl App {
             return false;
         };
         self.runtime.lua = Some(LuaWorker::spawn(move || {
-            let _ = tx.send(Message::LuaDone);
+            let _ = tx.send(Message::Wake(Wake::Lua));
         }));
         true
     }

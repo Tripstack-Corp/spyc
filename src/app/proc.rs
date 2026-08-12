@@ -12,7 +12,7 @@ use crossterm::event::{self, Event, KeyEventKind, MouseEventKind};
 use crate::spyc_debug;
 use crate::{Tui, resume_tui, suspend_tui};
 
-use super::Message;
+use super::{Message, Wake};
 
 /// Owns the parkable crossterm input-reader thread (MVU Phase 1). The
 /// reader becomes the SOLE caller of `event::poll`/`event::read`. Modeled
@@ -128,7 +128,7 @@ pub(super) fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> Reader
                                 // MVU Phase 3d death-wake: store THEN send, so
                                 // the loop-top Acquire-load sees the error. With
                                 // no poll floor, this kicks the blocking recv.
-                                let _ = tx.send(Message::ReaderExited);
+                                let _ = tx.send(Message::Wake(Wake::ReaderExited));
                                 return;
                             }
                         },
@@ -136,7 +136,7 @@ pub(super) fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> Reader
                         Err(e) => {
                             *read_err.lock().expect("read_err mutex poisoned") = Some(e);
                             reader_done.store(true, Release);
-                            let _ = tx.send(Message::ReaderExited); // death-wake (see above)
+                            let _ = tx.send(Message::Wake(Wake::ReaderExited)); // death-wake (see above)
                             return;
                         }
                     }

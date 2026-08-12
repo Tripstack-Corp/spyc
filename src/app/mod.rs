@@ -14,166 +14,15 @@ use crate::pane::{Pane, PaneTabs, TabEntry, TabInfo};
 use crate::state::IgnoreMasks;
 use crate::state::sessions::AgentKind;
 use crate::ui::line_edit::LineEditor;
+// The loop's message vocabulary lives in its own module; re-exported here so
+// every `super::Message` path in the app layer keeps resolving.
 use crate::ui::{
     help,
     list_view::Row,
     pager::{self, PagerView},
     theme::Theme,
 };
-
-/// Unified message stream consumed by `App::run` (MVU Phase 1,
-/// `docs/MVU_PLAN.md`). As of Phase 3d the loop is **fully event-driven** —
-/// every source wakes this one channel and `run()` blocks on `recv()` with
-/// no poll floor: the parkable crossterm reader feeds `Input` (+ `ReaderExited`
-/// on death); the notify watcher closure feeds `FsEvent`; the git forwarder
-/// feeds `GitResult` (3a); pane parser workers feed `PaneOutput` (3b); capture/
-/// task reader threads feed `SinkOutput` (3c); the MCP forwarder feeds `Mcp`;
-/// the finder feeds `FindOutput`; and pager-stream workers (grep / git-view /
-/// transcript) feed `PagerStreamOutput` (3d). The only
-/// remaining timed wakes are armed `Tick` deadlines (git poll, activity
-/// rollover, capture-timer, …) — and they only SHORTEN the wait; nothing armed
-/// means an unbounded block until a real message.
-enum Message {
-    /// A crossterm input event. The reader Press-filters `Key` events
-    /// (only `Press`/`Repeat` are forwarded); `Paste`/`Resize`/`Focus`/
-    /// `Mouse` pass through unchanged.
-    Input(Event),
-    /// MVU Phase 3a: a filesystem change from the notify watcher closure.
-    /// Carries a bare `notify::Event` — the closure drops `Err` at the
-    /// boundary, preserving the prior Ok-only drain contract. The recv arm
-    /// only *buffers* it into `fs_pending`; the unchanged pre-recv drain
-    /// stamps the debounce against `now_pre` (see `ingest_fs_event`).
-    FsEvent(notify::Event),
-    /// MVU Phase 3a: a git-worker result, routed via the forwarder thread
-    /// onto the unified channel. The recv arm only *buffers* it into
-    /// `git_pending`; the unchanged pre-recv drain applies it
-    /// (generation-gated) via `ingest_git_result`.
-    GitResult(state::GitWorkerResult),
-    /// MVU Phase 3b: a pane PTY output WAKEUP — never carries bytes. A
-    /// lost-wakeup-safe edge from a parser worker's 0→1 `wake_pending` CAS
-    /// (the worker bumps `parser_gen` first). The loop treats it purely as
-    /// "wake and re-scan": it re-enters the pre-recv pane scan, which clears
-    /// each `wake_pending` and re-reads `parser_gen` via `drain_output`. The
-    /// `tab` labels which pane woke us (carried for 3c/Phase-5; in 3b the
-    /// scan re-drains all panes, so a stale id self-discards). Buffered +
-    /// collapsed in the coalesce pre-step, NEVER surfaced as `Input`.
-    PaneOutput { tab: SinkId },
-    /// MVU Phase 3c: a foreground `!` capture or a background task produced
-    /// output or hit EOF — the same lost-wakeup-safe edge as `PaneOutput`,
-    /// fired by the shared `PtyHost` reader thread (captures/tasks have no
-    /// parser worker; the main loop drains them). Carries no bytes and no
-    /// exit status: the woken pre-recv drain re-scans the capture + all
-    /// running tasks and observes `newly_closed`, harvesting exit inline
-    /// (the reader can't call `child.wait()` — `portable_pty` needs
-    /// `&mut self`). `sink` is a trace label only (the drain re-scans all,
-    /// so a stale id after a `:fg`/`^Z`/demote/promote self-discards).
-    /// Buffered/collapsed; never surfaced as `Input`.
-    SinkOutput { sink: SinkId },
-    /// MVU Phase 3d: the F-finder walker produced a candidate batch or
-    /// completed. Payloadless wake — the candidates ride `FindPicker.walk_rx`,
-    /// re-drained by `drain_walk` (a wake after the picker closed no-ops at
-    /// the `if let Some(picker)` guard). Collapsed in the coalesce pre-step;
-    /// never surfaced as `Input`.
-    FindOutput,
-    /// A pager-stream worker (the unified `pager_stream` abstraction — grep /
-    /// git-view / transcript collapse onto it) produced a batch / its one-shot
-    /// model. Payloadless wake — the payload rides the boxed stream's `rx`,
-    /// re-drained by `drain_pager_stream` (id-gated against the live pager's
-    /// `stream_id`, so a wake for a replaced/closed stream self-discards).
-    /// Collapsed in the coalesce pre-step; never surfaced as `Input`.
-    PagerStreamOutput,
-    /// MVU Phase 3d: a writable MCP request forwarded from the socket server.
-    /// Unlike the wake variants, this carries a payload (the command + its
-    /// one-shot reply Sender). Buffered into `mcp_pending` by the recv
-    /// pre-step + the coalesce drain; executed + replied at the pre-recv MCP
-    /// drain (`execute_mcp_command` writes the context file synchronously,
-    /// then `reply.send` — preserving single-connection read-after-write).
-    /// MUST NOT be dropped in coalesce (the reply Sender would strand the
-    /// client). Never surfaced as `Input`.
-    Mcp(crate::mcp_cmd::McpRequest),
-    /// MVU Phase 3d: the input reader thread exited (fatal read/poll error or
-    /// clean stop). Payloadless death-wake, sent AFTER `reader_done.store`
-    /// (store-then-send → the loop-top Acquire-load sees the error). With the
-    /// poll floor gone, this is what kicks a blocking `recv()`; the loop-top
-    /// `reader_done` check then exits. Collapses to a Timeout like the other
-    /// wakes; never surfaced as `Input`.
-    ReaderExited,
-    /// MVU Phase 2: a timer/deadline elapsed. Derived by the loop's own
-    /// `Scheduler`, NOT a thread. The loop never actually sends itself a
-    /// `Tick` — `recv_timeout` returning `Err(Timeout)` IS the tick handler
-    /// (it re-evaluates every timer predicate against the fresh `now`). The
-    /// variant exists so later subscriptions can push real `Tick`s onto the
-    /// single channel without re-touching the enum.
-    #[allow(dead_code)]
-    Tick(Deadline),
-    /// MVU Phase 6: an off-thread `active_agent_status` resolve landed a result
-    /// in `agent_status_pending`. Like the git/MCP forwarders, the worker must
-    /// WAKE the loop — the event-driven loop blocks on a bare `recv()` at idle,
-    /// so a landed result would otherwise sit unread (and unrendered) until an
-    /// unrelated event. Payloadless: collapses to a Timeout like the other
-    /// re-scan wakes (drop-safe in coalesce). The redraw + apply both happen
-    /// in the pre-recv scan: `apply_landed_agent_status` drains the slot into
-    /// the cache and `kick_agent_status_refresh` re-arms — NOT in the draw
-    /// (`active_agent_status` is a pure `&self` cache read since #346). Driven
-    /// by the scan, not by this message surviving coalesce.
-    AgentStatusReady,
-    /// Tier 5: an off-thread graveyard op (archive / restore / purge-all,
-    /// `Effect::Graveyard`) finished and pushed its outcome onto
-    /// `runtime.graveyard_results`. Payloadless wake — the outcome rides the
-    /// slot, drained unconditionally by `apply_graveyard_outcomes` in the
-    /// pre-recv scan. Collapses to a Timeout like the other re-scan wakes
-    /// (drop-safe in coalesce); the redraw is driven by the drain, not by this
-    /// message surviving. Same shape as `AgentStatusReady`.
-    GraveyardDone,
-    /// An off-thread image render (`Effect::RenderMermaid` / `Effect::OpenImage`)
-    /// finished and pushed its outcome onto `runtime.image_results`. Payloadless
-    /// wake — `apply_image_outcomes` drains the slot in the pre-recv scan. Same
-    /// shape as `GraveyardDone`. One message for every producer: what the render
-    /// *was* rides `ImageOrigin` on the outcome, not the wake.
-    ImageDone,
-    /// An off-thread archive op (`Effect::Archive`) finished and pushed its
-    /// outcome onto `runtime.archive_results` — a mount, a materialized member,
-    /// or a staging cleanup. Payloadless wake of the same shape as
-    /// `GraveyardDone`; `apply_archive_outcomes` drains the slot in the pre-recv
-    /// scan.
-    ArchiveDone,
-    /// An off-thread file op (`Effect::FileOp`) finished and pushed its outcome.
-    FileOpDone,
-    /// A middle-click clipboard read (`Effect::PasteFromClipboard`) finished and
-    /// pushed its result onto `runtime.clipboard_paste_results`. Payloadless
-    /// wake of the same shape as `GraveyardDone`; `apply_clipboard_pastes`
-    /// drains the slot in the pre-recv scan and feeds the text to `handle_paste`.
-    ClipboardPasteDone,
-    /// An off-thread clipboard *write* finished and pushed its outcome onto
-    /// `runtime.clipboard_copy_results`. Payloadless, same shape as
-    /// `ClipboardPasteDone`; `apply_clipboard_writes` drains the slot in the
-    /// pre-recv scan and flashes anything that failed.
-    ClipboardCopyDone,
-    /// An off-thread inventory op (`Effect::Inventory`) finished.
-    InventoryDone,
-    /// An off-thread MCP worktree op (create/remove/clean) finished and pushed
-    /// its outcome onto `runtime.worktree_results`. Payloadless wake —
-    /// `apply_worktree_outcomes` drains it in the pre-recv scan, re-applies the
-    /// listing/context update, then answers the MCP client. Same shape as
-    /// `ImageDone`.
-    WorktreeJobDone,
-    /// A Lua script finished on the worker thread (`runtime.lua`). Payloadless
-    /// wake — `handle_lua_done` drains the worker's outcome buffer in the
-    /// pre-recv scan and translates the requests into effects/actions. Same
-    /// shape as `WorktreeJobDone`, except the outcomes ride the worker's own
-    /// buffer (`LuaWorker::drain_outcomes`), not a `runtime.*_results` slot.
-    LuaDone,
-    /// An off-thread vertical-split preview reload (`kick_preview_reload`)
-    /// finished and pushed its outcome onto `runtime.preview_results`.
-    /// Payloadless wake — `apply_preview_reloads` drains the slot in the
-    /// pre-recv scan. Same shape as `ImageDone`.
-    PreviewReloadDone,
-    /// Option B (`codex_pin`): an off-thread `~/.codex/sessions` scan landed a
-    /// rollout snapshot in `codex_pin_pending`. Payloadless wake — the snapshot
-    /// rides the slot, drained by `apply_codex_session_pins` in the pre-recv
-    /// scan. Collapses to a Timeout like the other re-scan wakes.
-    CodexSessionReady,
-}
+use message::{Message, Wake};
 
 /// How long to wait after spawning a restored Claude pane before
 /// typing `/resume <sid>`. Banner / version-check / MCP-auth lines
@@ -285,6 +134,7 @@ mod lua_events;
 mod matcher;
 mod mcp;
 mod mermaid_ops;
+mod message;
 #[cfg(test)]
 mod mod_tests;
 mod modal;
@@ -333,7 +183,6 @@ pub use effect::{ClipMsg, Effect, PaneInput, PaneTarget, PaneTextKind, PaneTextS
 use find_picker::FindPicker;
 pub use matcher::Matcher;
 use pager_history::PagerHistory;
-use pane_wake::SinkId;
 use proc::{ForegroundExec, spawn_input_reader};
 pub use prompt::{Prompt, PromptKind};
 use scheduler::{Deadline, Scheduler, arm_resume_deadlines};
@@ -514,7 +363,7 @@ struct Runtime {
     /// thread which re-sends each as `Message::Mcp`.
     mcp_cmd_rx: Option<std::sync::mpsc::Receiver<crate::mcp_cmd::McpRequest>>,
     /// Clone of the unified-channel sender; pane wake closures clone it to push
-    /// `Message::PaneOutput`. `None` before `run()` / in the test harness.
+    /// `Wake::Pane`. `None` before `run()` / in the test harness.
     pane_wake_tx: Option<std::sync::mpsc::Sender<Message>>,
     /// Monotonic `SinkId` allocator (never reused).
     next_sink_id: u64,
@@ -624,26 +473,26 @@ struct Runtime {
     agent_status_refreshing: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Option B (`codex_pin`): off-thread `~/.codex/sessions` scan landing slot
     /// (with an in-flight flag). A worker dumps a rollout snapshot here and wakes
-    /// the loop with `Message::CodexSessionReady`; `apply_codex_session_pins`
+    /// the loop with `Message::Wake(Wake::CodexSession)`; `apply_codex_session_pins`
     /// assigns session uuids to unpinned codex tabs.
     codex_pin_pending:
         std::sync::Arc<std::sync::Mutex<Option<Vec<crate::state::codex_transcript::RolloutMeta>>>>,
     codex_scan_in_flight: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Tier 5: landing slot for off-thread graveyard ops (archive / restore /
     /// purge-all). Each `Effect::Graveyard` worker pushes its
-    /// `GraveyardOutcome` here and wakes the loop with `Message::GraveyardDone`;
+    /// `GraveyardOutcome` here and wakes the loop with `Message::Wake(Wake::Graveyard)`;
     /// `apply_graveyard_outcomes` drains it every pre-recv scan (a `Vec` so
     /// concurrent ops never clobber each other — no in-flight guard needed).
     graveyard_results: std::sync::Arc<std::sync::Mutex<Vec<graveyard_ops::GraveyardOutcome>>>,
     /// Landing slot for every off-thread image render — a mermaid diagram
     /// (`Effect::RenderMermaid`) and an image file (`Effect::OpenImage`) share
     /// it. The worker pushes an `ImageOutcome` here and wakes with
-    /// `Message::ImageDone`; `apply_image_outcomes` drains it each pre-recv scan
+    /// `Message::Wake(Wake::Image)`; `apply_image_outcomes` drains it each pre-recv scan
     /// and installs or flashes the result. Same shape as `graveyard_results`.
     image_results: std::sync::Arc<std::sync::Mutex<Vec<image_ops::ImageOutcome>>>,
     /// Landing slot for off-thread archive ops (`Effect::Archive`): mount,
     /// materialize, clean. Same shape as `graveyard_results` — the worker pushes
-    /// and wakes with `Message::ArchiveDone`, `apply_archive_outcomes` drains.
+    /// and wakes with `Message::Wake(Wake::Archive)`, `apply_archive_outcomes` drains.
     archive_results: std::sync::Arc<std::sync::Mutex<Vec<archive_ops::ArchiveOutcome>>>,
     /// Cancel flag handed to the in-flight streamed mount, so a long tarball can
     /// be abandoned with `:archive cancel`. Replaced per mount, so cancelling one
@@ -659,7 +508,7 @@ struct Runtime {
     file_results: std::sync::Arc<std::sync::Mutex<Vec<file_ops::FileOutcome>>>,
     /// Landing slot for the off-thread middle-click clipboard read
     /// (`Effect::PasteFromClipboard`). The worker pushes the read's result here
-    /// and wakes with `Message::ClipboardPasteDone`; `apply_clipboard_pastes`
+    /// and wakes with `Message::Wake(Wake::ClipboardPaste)`; `apply_clipboard_pastes`
     /// drains it each pre-recv scan. A `Vec`, like `graveyard_results`: a middle
     /// click is cheap to repeat, so reads can overlap and must not clobber.
     clipboard_paste_results: std::sync::Arc<std::sync::Mutex<Vec<std::io::Result<String>>>>,
@@ -680,13 +529,13 @@ struct Runtime {
     inventory_results: std::sync::Arc<std::sync::Mutex<Vec<inventory_ops::InventoryOutcome>>>,
     /// Landing slot for off-thread MCP worktree create/remove/clean ops. The
     /// worker pushes a `WorktreeOutcome` (result + the MCP reply channel) here
-    /// and wakes with `Message::WorktreeJobDone`; `apply_worktree_outcomes`
+    /// and wakes with `Message::Wake(Wake::WorktreeJob)`; `apply_worktree_outcomes`
     /// drains it each pre-recv scan, re-applies refresh+context, then replies.
     worktree_results: std::sync::Arc<std::sync::Mutex<Vec<worktree_ops::WorktreeOutcome>>>,
     /// Landing slot for the off-thread vertical-split preview reload
     /// (`kick_preview_reload`). The worker stores its `PreviewOutcome` here
     /// (last-wins `Option` — one preview, so no `Vec` is needed) and wakes the
-    /// loop with `Message::PreviewReloadDone`; `apply_preview_reloads` drains it
+    /// loop with `Message::Wake(Wake::PreviewReload)`; `apply_preview_reloads` drains it
     /// each pre-recv scan. `preview_reloading` is the in-flight guard that
     /// collapses a burst of saves to one trailing re-render (see `preview_ops`).
     preview_results: std::sync::Arc<std::sync::Mutex<Option<preview_ops::PreviewOutcome>>>,

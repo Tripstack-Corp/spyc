@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::shell;
 
-use super::{App, ClipMsg, Effect, Message, PaneInput, PaneTarget};
+use super::{App, ClipMsg, Effect, Message, PaneInput, PaneTarget, Wake};
 
 impl App {
     /// yf — yank the cursor file's absolute path to the system
@@ -501,7 +501,7 @@ impl super::App {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(outcome);
             if let Some(tx) = wake {
-                let _ = tx.send(Message::ClipboardCopyDone);
+                let _ = tx.send(Message::Wake(Wake::ClipboardCopy));
             }
         });
     }
@@ -552,7 +552,7 @@ impl super::App {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(read);
             if let Some(tx) = wake {
-                let _ = tx.send(Message::ClipboardPasteDone);
+                let _ = tx.send(Message::Wake(Wake::ClipboardPaste));
             }
         });
     }

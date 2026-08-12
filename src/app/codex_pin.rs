@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 
-use super::{App, Message};
+use super::{App, Message, Wake};
 use crate::state::codex_transcript::RolloutMeta;
 use crate::state::sessions::AgentKind;
 
@@ -148,7 +148,7 @@ impl App {
 
     /// Kick an off-thread `~/.codex/sessions` scan when a codex tab still needs
     /// pinning and none is in flight. The snapshot lands in `codex_pin_pending`
-    /// and wakes the loop (`Message::CodexSessionReady`); `apply_codex_session_pins`
+    /// and wakes the loop (`Message::Wake(Wake::CodexSession)`); `apply_codex_session_pins`
     /// does the assignment. The scan reads every rollout's first line, so it runs
     /// OFF the loop — never on the render/input path.
     //
@@ -176,7 +176,7 @@ impl App {
             *pending.lock().expect("codex_pin_pending never poisoned") = Some(snapshot);
             flight.store(false, Ordering::Release);
             if let Some(tx) = wake {
-                let _ = tx.send(Message::CodexSessionReady);
+                let _ = tx.send(Message::Wake(Wake::CodexSession));
             }
         });
     }

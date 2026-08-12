@@ -765,7 +765,7 @@ impl App {
             BoundAction::Lua(name) => {
                 // Run a $HOME-config Lua script off-thread (gated by
                 // `is_executing`). Submits a job and returns; results land via
-                // `Message::LuaDone` → `handle_lua_done`.
+                // `Message::Wake(Wake::Lua)` → `handle_lua_done`.
                 return Ok(self.apply_lua_binding(name));
             }
             BoundAction::ToggleMaskFixed(n) => {

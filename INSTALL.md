@@ -4,6 +4,18 @@ Pre-built, signed binaries are the easy path — Homebrew, `apt`, or a
 Release tarball, no Rust toolchain required. To compile spyc yourself
 (to hack on it or run unreleased changes), see [BUILD.md](BUILD.md).
 
+## Platforms
+
+**macOS** and **Linux**, on `x86_64` and `aarch64`. macOS ships as a
+universal binary; Linux binaries are static (musl), so they run on any
+distro regardless of its glibc.
+
+**Windows is supported through WSL**, not natively — run spyc inside a
+WSL2 distro and it behaves like any other Linux install. Native Windows
+is a stated non-goal (see [ROADMAP.md](ROADMAP.md)); `portable-pty`
+technically works there, but the terminal and pty failure modes aren't
+a cost the project is paying.
+
 ## Install
 
 ### Homebrew (macOS and Linux)
