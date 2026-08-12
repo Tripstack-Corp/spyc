@@ -886,6 +886,94 @@ mod tests {
         );
     }
 
+    /// A member spyc refused to create on disk still has to come back.
+    ///
+    /// `assess` lets an archive containing an escaping symlink stay `ReadWrite`,
+    /// and that is only defensible because the repack rebuilds the link from the
+    /// **index** — which never lost it — rather than from the staging tree, where
+    /// it was deliberately never created. Nothing tested that, so the exemption
+    /// rested entirely on a reading of the code: a later change routing the
+    /// symlink branch through `symlink_metadata` (as the mode already is, for
+    /// staged members) would drop the link silently and turn the `ReadWrite`
+    /// verdict into data loss.
+    #[cfg(unix)]
+    #[test]
+    fn an_escaping_link_survives_a_repack_it_was_never_extracted_for() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("links.tar.gz");
+        let staging = tmp.path().join("staging");
+        {
+            let enc = flate2::write::GzEncoder::new(
+                File::create(&archive).unwrap(),
+                flate2::Compression::default(),
+            );
+            let mut b = tar::Builder::new(enc);
+            let mut h = tar::Header::new_gnu();
+            h.set_entry_type(tar::EntryType::Symlink);
+            h.set_size(0);
+            h.set_mode(0o777);
+            b.append_link(&mut h, "escape", "../../../etc/passwd")
+                .unwrap();
+            let mut h2 = tar::Header::new_gnu();
+            h2.set_size(4);
+            h2.set_mode(0o644);
+            b.append_data(&mut h2, "drop.txt", &b"gone"[..]).unwrap();
+            b.into_inner().unwrap().finish().unwrap();
+        }
+        let indexed = read::stream_mount(
+            &archive,
+            ArchiveFormat::TarGz,
+            &staging,
+            u64::MAX,
+            1000,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap();
+
+        // The premises, so this can't pass for the wrong reason.
+        assert_eq!(indexed.facts.escaping_links, 1, "the link was refused");
+        assert!(
+            !staging.join("escape").exists(),
+            "and really is absent from staging"
+        );
+        assert_eq!(
+            crate::archive::scan::assess(&indexed.facts, ArchiveFormat::TarGz),
+            crate::archive::scan::Capability::ReadWrite,
+            "an escaping link does not demote the mount — this test is why"
+        );
+
+        // Write something else, so the link is a member carried across untouched.
+        let mut journal = Journal::default();
+        journal.delete("drop.txt");
+        let steps = plan_repack(
+            &indexed.index,
+            &journal,
+            &StagedStats::new(),
+            &StagedStats::new(),
+        );
+        repack(&indexed.index, &steps, &staging, &opts()).unwrap();
+
+        let after = read::stream_mount(
+            &archive,
+            ArchiveFormat::TarGz,
+            &tmp.path().join("staging2"),
+            u64::MAX,
+            1000,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap();
+        let link = after
+            .index
+            .get("escape")
+            .expect("the link is still a member");
+        assert_eq!(link.kind, ArchiveEntryKind::Symlink);
+        assert_eq!(
+            link.link_target.as_deref(),
+            Some("../../../etc/passwd"),
+            "and points where it always did"
+        );
+    }
+
     /// The refill must not undo the change being written: an edited staged copy is
     /// the pending change, so a member that IS there is left alone.
     #[test]
