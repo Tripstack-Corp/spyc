@@ -432,12 +432,26 @@ impl super::App {
     /// `[clipboard].command` / `$SPYC_CLIPBOARD` is an exclusive top-priority tier,
     /// not one more mechanism to also try: when set, it's the ONLY thing run —
     /// `via`/OSC-52 are skipped entirely rather than layered underneath.
+    ///
+    /// **Anything that spawns a helper is dispatched, not awaited.** `xclip` and
+    /// `xsel` legitimately stay alive after a successful copy — that is how they
+    /// serve the X11 selection — so `try_wait` never answers and the reap poll
+    /// spends its entire budget. Awaiting that put 150 ms of fully blocked event
+    /// loop on *every single yank* on the platform where most non-macOS users
+    /// are. So the helper runs on a worker (`spawn_clipboard_write`) and this
+    /// returns as soon as the payload is on its way; a failure arrives later and
+    /// `apply_clipboard_writes` flashes it, replacing the confirmation.
+    ///
+    /// OSC 52 stays inline — it is a write to spyc's own stdout, not a spawn.
     pub(super) fn deliver_clipboard(&self, text: &str) -> Result<(), String> {
         if let Some(cmd) =
             crate::clipboard::resolve_override(self.state.config.clipboard.command.as_deref())
         {
-            return crate::clipboard::copy_via_user_command(&cmd, text)
-                .map_err(|e| format!("{e:#}"));
+            let text = text.to_string();
+            self.spawn_clipboard_write(move || {
+                crate::clipboard::copy_via_user_command(&cmd, &text).map_err(|e| format!("{e:#}"))
+            });
+            return Ok(());
         }
         let (local, osc52) = clipboard_delivery(self.state.config.clipboard.via, self.view.is_ssh);
         let mut errs: Vec<String> = Vec::new();
@@ -449,10 +463,17 @@ impl super::App {
             }
         }
         if local {
-            match crate::clipboard::copy(text) {
-                Ok(()) => ok = true,
-                Err(e) => errs.push(format!("{e:#}")),
-            }
+            // Whether OSC 52 already delivered it decides whether a later helper
+            // failure is worth interrupting the user for: with `Both`, the text
+            // IS on their clipboard, and the local helper failing is spyc's
+            // problem rather than theirs.
+            let already = ok;
+            let text = text.to_string();
+            self.spawn_clipboard_write(move || match crate::clipboard::copy(&text) {
+                Err(e) if !already => Err(format!("{e:#}")),
+                _ => Ok(()),
+            });
+            ok = true;
         }
         if ok {
             return Ok(());
@@ -462,6 +483,50 @@ impl super::App {
         } else {
             errs.join("; ")
         })
+    }
+
+    /// Run a clipboard write on a detached worker (the `graveyard_ops`
+    /// template), landing its outcome on `runtime.clipboard_copy_results` and
+    /// waking the loop.
+    ///
+    /// `pane_wake_tx` is `None` only before `run()` / in the test harness, where
+    /// there is no loop to wake — the outcome still lands in the slot.
+    fn spawn_clipboard_write(&self, write: impl FnOnce() -> Result<(), String> + Send + 'static) {
+        let results = std::sync::Arc::clone(&self.runtime.clipboard_copy_results);
+        let wake = self.runtime.pane_wake_tx.clone();
+        std::thread::spawn(move || {
+            let outcome = write().err();
+            results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(outcome);
+            if let Some(tx) = wake {
+                let _ = tx.send(Message::ClipboardCopyDone);
+            }
+        });
+    }
+
+    /// Drain every landed clipboard write and flash whichever failed. Called
+    /// each pre-recv scan, so the slot is always emptied whichever wake survived
+    /// coalescing. Returns whether the frame is dirty.
+    ///
+    /// A failure arrives *after* the verb already flashed its confirmation, so it
+    /// replaces one — which is the right way round: the last thing on screen is
+    /// what actually happened.
+    pub(crate) fn apply_clipboard_writes(&mut self) -> bool {
+        let landed: Vec<Option<String>> = std::mem::take(
+            &mut *self
+                .runtime
+                .clipboard_copy_results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        let mut dirty = false;
+        for err in landed.into_iter().flatten() {
+            self.state.flash_error(format!("clipboard: {err}"));
+            dirty = true;
+        }
+        dirty
     }
 
     /// Kick the middle-click clipboard read onto a detached worker
@@ -669,6 +734,128 @@ mod paste_tests {
                     std::thread::sleep(Duration::from_millis(10));
                 }
                 assert!(app.apply_clipboard_pastes().0);
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod copy_tests {
+    use super::App;
+    use std::time::{Duration, Instant};
+
+    /// A helper that reads the payload and then keeps running, the way
+    /// `xclip`/`xsel` do to serve the X11 selection until another app claims it.
+    #[cfg(unix)]
+    fn persisting_helper(dir: &std::path::Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let stub = dir.join("stub-persist.sh");
+        std::fs::write(&stub, "#!/bin/sh\ncat > /dev/null\nsleep 10\n").expect("write stub");
+        let mut perms = std::fs::metadata(&stub).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&stub, perms).unwrap();
+        stub
+    }
+
+    /// **A write that fails still reaches the user, after the fact.**
+    ///
+    /// Dispatching instead of awaiting means the verb's "yanked" flash goes up
+    /// before the outcome is known. That is only honest if a failure arrives and
+    /// **replaces** it — otherwise this trades a 150 ms hitch for a silent
+    /// wrong answer, which is the defect #350 closed.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_write_flashes_its_reason_after_the_confirmation() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            let stub = tmp.path().join("stub-fail.sh");
+            std::fs::write(&stub, "#!/bin/sh\ncat > /dev/null\nexit 3\n").expect("write stub");
+            let mut perms = std::fs::metadata(&stub).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&stub, perms).unwrap();
+
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            crate::clipboard::with_reap_budget(Duration::from_secs(10), || {
+                crate::clipboard::with_clipboard_override(&stub, || {
+                    app.deliver_clipboard("hello")
+                        .expect("dispatch reports no error of its own");
+                    // The verb's own confirmation is already on screen at this
+                    // point; production flashes it from `run_effects`.
+                    app.state.flash_info("yanked 1 line");
+
+                    let deadline = Instant::now() + Duration::from_secs(20);
+                    while Instant::now() < deadline {
+                        if app.apply_clipboard_writes() {
+                            let flash = app.flash_text().unwrap_or_default().to_string();
+                            assert!(
+                                flash.contains("clipboard:") && flash.contains("exited"),
+                                "the failure must replace the confirmation, got {flash:?}"
+                            );
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    panic!("a failed clipboard write never surfaced");
+                });
+            });
+        });
+    }
+
+    /// **A yank must not stall the loop while a helper persists.**
+    ///
+    /// `xclip`/`xsel` legitimately stay alive after a successful copy, so
+    /// `try_wait` never answers and the reap poll runs its whole budget — 150 ms
+    /// of fully blocked event loop on *every single yank*, which on Linux is the
+    /// common case rather than an edge one. `HELPER_REAP_BUDGET`'s own comment
+    /// says the fix is moving the write off-thread.
+    ///
+    /// Measured, not structural: what matters is that dispatching a yank returns
+    /// promptly, wherever the waiting ends up living.
+    #[cfg(unix)]
+    #[test]
+    fn a_yank_does_not_wait_out_a_persisting_helper_on_the_loop() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            let stub = persisting_helper(tmp.path());
+            let app = App::test_app(tmp.path().to_path_buf());
+
+            crate::clipboard::with_reap_budget(Duration::from_millis(150), || {
+                crate::clipboard::with_clipboard_override(&stub, || {
+                    let start = Instant::now();
+                    app.deliver_clipboard("hello")
+                        .expect("the yank is accepted");
+                    let spent = start.elapsed();
+                    assert!(
+                        spent < Duration::from_millis(50),
+                        "the yank blocked the loop for {spent:?}"
+                    );
+
+                    // …and the write still really happens, reported from wherever
+                    // it ran. A dispatch that returns fast by doing nothing would
+                    // pass the assertion above.
+                    let deadline = Instant::now() + Duration::from_secs(20);
+                    loop {
+                        let landed = app
+                            .runtime
+                            .clipboard_copy_results
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .pop();
+                        if let Some(outcome) = landed {
+                            assert_eq!(
+                                outcome, None,
+                                "a helper that read the payload and persisted is a success"
+                            );
+                            return;
+                        }
+                        assert!(
+                            Instant::now() < deadline,
+                            "the clipboard write never reported back"
+                        );
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                });
             });
         });
     }

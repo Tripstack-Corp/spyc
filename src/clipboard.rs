@@ -17,15 +17,20 @@ use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// Test-only override: when set, `copy` spawns this binary instead of resolving
+/// a platform clipboard helper, so unit tests can inject a stub without mutating
+/// process-global env vars.
+///
+/// Process-global rather than a thread-local, and for the same reason
+/// [`PASTE_STUB`] is: the write it stands in for runs on a **worker thread**,
+/// which is exactly the property under test. A thread-local cannot reach there.
 #[cfg(test)]
-thread_local! {
-    /// Test-only override: when set, `copy` spawns this binary
-    /// instead of resolving a platform clipboard helper. Lets unit
-    /// tests inject a stub without mutating process-global env vars
-    /// (the same trick `with_state_root` uses in `src/state/mod.rs`).
-    static CLIPBOARD_OVERRIDE: std::cell::RefCell<Option<std::path::PathBuf>> =
-        const { std::cell::RefCell::new(None) };
-}
+static CLIPBOARD_OVERRIDE: std::sync::RwLock<Option<std::path::PathBuf>> =
+    std::sync::RwLock::new(None);
+
+/// Serializes clipboard-stub installation, so two tests can't read each other's.
+#[cfg(test)]
+static CLIPBOARD_OVERRIDE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Test-only stand-in for the clipboard: `paste` sleeps `delay`, then returns
 /// `text` instead of spawning a helper. `delay` is what lets a test watch the
@@ -81,27 +86,41 @@ pub fn with_paste_override<R>(text: &str, body: impl FnOnce() -> R) -> R {
 }
 
 #[cfg(test)]
-thread_local! {
-    /// Test-only override for [`HELPER_REAP_BUDGET`]. Production's budget is
-    /// deliberately far too short to wait out a `/bin/sh` stub's fork+exec,
-    /// which is right for a yank and useless for a test that has to observe the
-    /// helper's exit status or the file it wrote. Third seam in this file's
-    /// existing thread-local pattern.
-    static REAP_BUDGET_OVERRIDE: std::cell::RefCell<Option<std::time::Duration>> =
-        const { std::cell::RefCell::new(None) };
-}
+/// Test-only override for [`HELPER_REAP_BUDGET`]. Production's budget is
+/// deliberately far too short to wait out a `/bin/sh` stub's fork+exec, which is
+/// right for a yank and useless for a test that has to observe the helper's exit
+/// status or the file it wrote.
+///
+/// Process-global for the same reason [`CLIPBOARD_OVERRIDE`] is — the budget is
+/// consumed on the worker thread that runs the write.
+static REAP_BUDGET_OVERRIDE: std::sync::RwLock<Option<std::time::Duration>> =
+    std::sync::RwLock::new(None);
+
+/// Serializes reap-budget installation.
+#[cfg(test)]
+static REAP_BUDGET_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Test-only: run `body` with the reap budget pinned to `budget`.
 #[cfg(test)]
 pub fn with_reap_budget<R>(budget: std::time::Duration, body: impl FnOnce() -> R) -> R {
-    struct Guard;
+    struct Guard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
     impl Drop for Guard {
         fn drop(&mut self) {
-            REAP_BUDGET_OVERRIDE.with(|c| *c.borrow_mut() = None);
+            *REAP_BUDGET_OVERRIDE
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         }
     }
-    REAP_BUDGET_OVERRIDE.with(|c| *c.borrow_mut() = Some(budget));
-    let _g = Guard;
+    // The guard takes the lock BEFORE the override is installed and holds it for
+    // the whole body, so a concurrent test can neither see nor replace it.
+    let _g = Guard(
+        REAP_BUDGET_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    *REAP_BUDGET_OVERRIDE
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(budget);
     body()
 }
 
@@ -115,7 +134,8 @@ const fn reap_budget() -> Duration {
 #[cfg(test)]
 fn reap_budget() -> Duration {
     REAP_BUDGET_OVERRIDE
-        .with(|c| *c.borrow())
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .unwrap_or(HELPER_REAP_BUDGET)
 }
 
@@ -123,14 +143,22 @@ fn reap_budget() -> Duration {
 /// The override is unwound when `body` returns *or panics* (RAII).
 #[cfg(test)]
 pub fn with_clipboard_override<R>(bin: &std::path::Path, body: impl FnOnce() -> R) -> R {
-    struct Guard;
+    struct Guard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
     impl Drop for Guard {
         fn drop(&mut self) {
-            CLIPBOARD_OVERRIDE.with(|c| *c.borrow_mut() = None);
+            *CLIPBOARD_OVERRIDE
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         }
     }
-    CLIPBOARD_OVERRIDE.with(|c| *c.borrow_mut() = Some(bin.to_path_buf()));
-    let _g = Guard;
+    let _g = Guard(
+        CLIPBOARD_OVERRIDE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    *CLIPBOARD_OVERRIDE
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(bin.to_path_buf());
     body()
 }
 
@@ -458,7 +486,11 @@ pub fn copy_via_user_command(cmd: &str, text: &str) -> io::Result<()> {
 pub fn copy(text: &str) -> io::Result<()> {
     #[cfg(test)]
     {
-        if let Some(p) = CLIPBOARD_OVERRIDE.with(|c| c.borrow().clone()) {
+        let stub = CLIPBOARD_OVERRIDE
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(p) = stub {
             // Route the override through `/bin/sh <script>` rather
             // than execve'ing the script directly. Direct exec of a
             // just-written file intermittently trips

@@ -267,6 +267,7 @@ impl App {
                 | Message::ArchiveDone
                 | Message::FileOpDone
                 | Message::ClipboardPasteDone
+                | Message::ClipboardCopyDone
                 | Message::InventoryDone
                 | Message::PreviewReloadDone
                 | Message::WorktreeJobDone
@@ -596,6 +597,12 @@ impl App {
             // A middle-click clipboard read that landed (woke us via
             // `Message::ClipboardPasteDone`). Routing runs here, against the
             // focus of *now* — see `apply_clipboard_pastes`.
+            // A clipboard write that landed (woke us via
+            // `Message::ClipboardCopyDone`). Only failures have anything to say.
+            if self.apply_clipboard_writes() {
+                ctx.draw.mark(3);
+            }
+
             let (paste_draw, paste_fx) = self.apply_clipboard_pastes();
             if paste_draw {
                 ctx.draw.mark(3);
