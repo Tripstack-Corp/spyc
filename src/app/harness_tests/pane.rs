@@ -267,14 +267,16 @@ fn empty_scrollback_flashes_hint_and_stays_live() {
     });
 }
 
-/// An inline agent pane (claude/agy) whose transcript scrollback is toggled
-/// off reaches the same empty-scrollback path — but its history *is*
-/// recoverable via the transcript hook, so the hint must point there, not
-/// claim the history is lost. The tab's command detects as `claude` (→ a
-/// transcript spec, default-off) while actually running `cat` so it spawns
-/// in a test.
+/// An inline agent pane with nothing captured shows its **transcript** — the
+/// config gate is bypassed for the same reason the alt screen bypasses it: there
+/// is nothing else to show. Previously this flashed a hint naming
+/// `[pane] claude_transcript_scrollback` and displayed nothing, which left the
+/// user's history sitting on disk behind a config key and a relaunch.
+///
+/// The tab's command detects as `claude` (→ a transcript spec, default-off) while
+/// actually running `cat`, so it spawns in a test.
 #[test]
-fn empty_scrollback_agent_pane_points_to_transcript() {
+fn empty_scrollback_agent_pane_opens_its_transcript() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let dir = tmp.path().join("work");
@@ -287,18 +289,121 @@ fn empty_scrollback_agent_pane_points_to_transcript() {
             crate::pane::tabs::TabEntry::new(pane, crate::pane::tabs::TabInfo::new("claude", dir));
         app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
         app.open_pane_scroll_pager();
-        app.mount_vt100_scrollback();
-        assert_eq!(
-            app.flash_text(),
-            Some(
-                "no terminal scrollback — claude keeps its history in a transcript (toggle it on)"
-            ),
-            "an inline agent with transcript off should point at its transcript"
+        let view = app
+            .view
+            .scroll_pager
+            .as_ref()
+            .expect("an inline agent with no capture mounts its transcript view");
+        assert!(
+            view.title.contains("(transcript)"),
+            "the mounted view should be the transcript, not terminal capture: {:?}",
+            view.title
         );
         assert!(
-            app.view.scroll_pager.is_none(),
-            "empty scrollback must not enter scroll mode, agent or not"
+            app.runtime.pane_scroll_settle.is_none(),
+            "and no vt100 snapshot should be armed — there is nothing to snapshot"
         );
+    });
+}
+
+/// A claude-labelled pane (running `cat`, so it spawns in a test) holding real
+/// captured scrollback: the echoed lines overflow the grid, so rows genuinely
+/// leave the screen and land in the emulator's scrollback.
+fn agent_pane_with_capture(app: &mut App, dir: &std::path::Path) {
+    let wake = app.make_pane_wake();
+    let pane = crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.context_path, wake)
+        .expect("spawn cat");
+    let entry = crate::pane::tabs::TabEntry::new(
+        pane,
+        crate::pane::tabs::TabInfo::new("claude", dir.to_path_buf()),
+    );
+    app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
+    let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+    let mut feed = String::new();
+    for i in 0..80 {
+        use std::fmt::Write as _;
+        let _ = writeln!(feed, "captured line {i}");
+    }
+    tabs.active_mut()
+        .send_bytes(feed.as_bytes())
+        .expect("write to the pty");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        tabs.active_mut().drain_output();
+        if tabs
+            .active_mut()
+            .with_screen_mut(crate::ui::scrollback::scrollback_len)
+            > 0
+        {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("the pane never captured any scrollback");
+}
+
+/// **`T` flips a scrollback between the terminal capture and the agent's
+/// transcript, both ways.** Inline claude is why: both sources are real there, so
+/// spyc's automatic pick can only ever be right about one of them, and the user
+/// gets the other without editing config and relaunching.
+#[test]
+fn capital_t_flips_the_scrollback_source_both_ways() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        agent_pane_with_capture(&mut app, &dir);
+
+        // With a capture present and the config gate off, `^a v` snapshots vt100
+        // — the deferred settle is what the loop drives, so drive it here.
+        app.open_pane_scroll_pager();
+        app.mount_vt100_scrollback();
+        let title = |a: &App| {
+            a.view
+                .scroll_pager
+                .as_ref()
+                .map(|v| v.title.clone())
+                .unwrap_or_default()
+        };
+        assert!(
+            title(&app).contains("(history)"),
+            "expected terminal capture first: {:?}",
+            title(&app)
+        );
+
+        app.flip_scrollback_source();
+        assert_eq!(app.flash_text(), Some("scrollback: agent transcript"));
+        assert!(
+            title(&app).contains("(transcript)"),
+            "T should have swapped in the transcript: {:?}",
+            title(&app)
+        );
+
+        app.flip_scrollback_source();
+        // Flash asserted BEFORE the mount, which flashes its own "scroll: on".
+        assert_eq!(app.flash_text(), Some("scrollback: terminal capture"));
+        app.mount_vt100_scrollback();
+        assert!(
+            title(&app).contains("(history)"),
+            "and T again should come back to the capture: {:?}",
+            title(&app)
+        );
+    });
+}
+
+/// `T` on a pane with only one source says which one is missing. Doing nothing
+/// silently is what sent a user hunting through the config in the first place.
+#[test]
+fn capital_t_on_a_plain_pane_names_the_missing_source() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat"); // plain child — no transcript spec
+        app.flip_scrollback_source();
+        assert_eq!(app.flash_text(), Some("no agent transcript for this pane"));
     });
 }
 

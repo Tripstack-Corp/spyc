@@ -684,12 +684,12 @@ impl crossterm::Command for DisableWheelReporting {
         // Reverse order of the enable, so a terminal that tracks a mode stack
         // unwinds cleanly.
         //
-        // Clears 1002/1003 too, which spyc never ENABLES: a foreground child
-        // (vim, htop) sets its own motion reporting, and one that dies without
-        // resetting — SIGKILL, a crash — hands the tty back with 1002/1003 still
-        // on. Clearing only our own pair would then leave motion reporting live,
-        // which both defeats the 1007 exclusivity `resume_tui` re-establishes and
-        // leaks motion events into the user's shell after spyc exits.
+        // Clears 1003, which spyc never enables: a foreground child (vim, htop)
+        // sets its own any-motion reporting, and one that dies without resetting
+        // — SIGKILL, a crash — hands the tty back with it still on. Clearing only
+        // what spyc turned on would leave motion reporting live, which both
+        // defeats the 1007 exclusivity `resume_tui` re-establishes and leaks
+        // motion events into the user's shell after spyc exits.
         f.write_str("\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l")
     }
     #[cfg(windows)]
@@ -1077,11 +1077,13 @@ pub fn resume_tui(terminal: &mut Tui) -> Result<()> {
         // the tty back with its own 1000/1002/1003 still live; enabling 1007 on
         // top of that is the both-modes-on state the pairing exists to prevent,
         // and the terminal may then deliver one wheel tick twice.
+        //
+        // Resuming therefore comes back with mouse reporting OFF, deliberately:
+        // `settle_mouse_mode` re-enables it on the next loop iteration if
+        // `[mouse] capture` says so, which keeps one path deciding it.
         DisableWheelReporting,
         EnableAlternateScroll
     )?;
-    // `suspend_tui` already cleared this; the reconcile re-enables per config on
-    // the next iteration if the user wants capture.
     terminal.hide_cursor()?;
     force_full_repaint(terminal)?;
     Ok(())

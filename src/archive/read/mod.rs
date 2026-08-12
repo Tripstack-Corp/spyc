@@ -639,15 +639,25 @@ fn symlink(_target: &str, _dest: &Path) -> Result<()> {
     bail!("symlinks are not supported on this platform")
 }
 
-/// Restore an archived mode, ignoring failure — a member that lands without its
-/// executable bit is a cosmetic loss, not a reason to fail the mount.
+/// Give a staged member the permissions **spyc** needs, not the archive's.
+///
+/// Staging is spyc's private cache; the archive's own mode is kept in the index,
+/// which is what a repack writes back. Conflating the two made the mode serve
+/// two masters and got both wrong: a `0o000` member staged unreadable, so the
+/// pager and `y` failed EACCES on a member the container holds fine, and a
+/// `0o777` one staged world-writable, which `c` copy-out then carried into the
+/// user's tree verbatim (`std::fs::copy` takes the source's bits) — an archive
+/// deciding the permissions of a file outside it.
+///
+/// So: owner-only, always readable and writable (the repack has to be able to
+/// overwrite a staged copy), with execute the one bit carried across — a staged
+/// script that lost it would be a visible loss on copy-out. Ignoring failure is
+/// deliberate; a mode is not worth failing a mount over.
 #[cfg(unix)]
 fn apply_mode(dest: &Path, mode: Option<u32>) {
     use std::os::unix::fs::PermissionsExt;
     let Some(mode) = mode else { return };
-    // Mask to the permission bits and force owner-write: a read-only member has
-    // to stay replaceable, or a repack couldn't overwrite its staged copy.
-    let perms = std::fs::Permissions::from_mode((mode & 0o777) | 0o200);
+    let perms = std::fs::Permissions::from_mode((mode & 0o700) | 0o600);
     let _ = std::fs::set_permissions(dest, perms);
 }
 

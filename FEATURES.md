@@ -50,7 +50,7 @@ do from here?", modeled on Neovim's which-key.
   or, on a PNG / JPEG / GIF / WebP, show the picture full-screen (`s` save,
   `y` copy image, `Y` copy path, `b` base64, `o` external viewer, `q`
   dismiss). Detected by magic bytes, so an extensionless screenshot still
-  previews and a misnamed `.png` full of text still hex-dumps. Needs a
+  previews and a misnamed `.png` full of text opens as the text it is. Needs a
   terminal with a graphics protocol; without one, `o` still opens it.
 - **e / v** descend into a directory, or open a file in `$EDITOR` (suspends TUI)
 - **dd / Ndd** remove the cursor entry (+ N-1 below) to the graveyard,
@@ -393,8 +393,9 @@ spyc's workflow: browse files above, talk to Claude below.
   glance as scrolled-back rather than live; `l` toggles). All pager
   keys work: `/` search with `n` / `N`, `:N` jump, `V` visual line,
   `^v` visual block, `y` yanks the selection, `l` toggles line
-  numbers, `w` whitespace markers, and (in an agent transcript) `t`
-  toggles tool-call lines. The pty keeps running off-screen — output
+  numbers, `w` whitespace markers, `T` swaps between terminal
+  capture and an agent's transcript, and (in an agent transcript)
+  `t` toggles tool-call lines. The pty keeps running off-screen — output
   you miss while reading lands in scrollback for the next view. `Esc`
   snaps back to live.
   - The fundamental limit is that full-screen TUIs do *virtual
@@ -418,14 +419,23 @@ spyc's workflow: browse files above, talk to Claude below.
     session), and **`r`** reloads it — the agent keeps appending
     while you read. If no transcript exists yet (brand-new
     session), spyc flashes a hint.
-  - **Alt-screen agents always use the transcript.** When an
-    agent with a transcript runs on the alternate screen (e.g.
-    Claude Code's full-screen mode), `^a v` auto-engages the
-    transcript view unconditionally — there's no usable vt100
-    capture to fall back to, so the config gate is bypassed.
+  - **The transcript wins whenever the terminal has nothing.** An
+    agent with a transcript running on the alternate screen (e.g.
+    Claude Code's full-screen mode) has no vt100 capture at all,
+    and neither does one whose pane hasn't scrolled anything off
+    yet — same situation, so `^a v` engages the transcript in
+    both, config gate bypassed.
+  - **`T` swaps the source.** With both available, `T` flips the
+    open scrollback between the terminal capture and the agent's
+    transcript, and back; the choice sticks for that tab (so `r`
+    reloads what you picked) and is dropped when the view closes.
+    This is what inline Claude Code needs: both sources are real
+    there, and only the capture holds what the shell printed
+    before the agent started.
   - **Inline panes are config-gated.** When the agent runs inline
-    (output scrolls into the main buffer), the verbatim terminal
-    capture works, so the transcript view is a per-agent choice:
+    (output scrolls into the main buffer) *and* a capture exists,
+    the verbatim terminal capture works, so which one `^a v`
+    opens first is a per-agent choice:
     `[pane] claude_transcript_scrollback` (off by default —
     inline claude captures fine from the terminal) and
     `[pane] agy_transcript_scrollback` (on by default). Codex
@@ -555,7 +565,9 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   and the session you quit from can all point inside an archive. Jumping to one
   mounts the archive again on the way, so it doesn't matter that nothing has it
   open — `spyc -r` puts you back where you left off, several directories deep in
-  a tarball.
+  a tarball. A second commander (`b`) that was inside one is the exception: the
+  split comes back, but parked on the directory holding the container with the
+  cursor on it, and says so.
 - **Not yet supported inside an archive** — creating an empty directory or a new
   file, copying a whole directory *in* (only files, since the archive would keep
   the name and lose what's under it), moving across the archive boundary in one

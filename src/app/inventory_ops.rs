@@ -4,10 +4,11 @@ use super::App;
 use crate::state::inventory::Inventory;
 
 /// Tier 5: Inventory operations that involve filesystem IO.
-/// Note: These operations currently run on detached worker threads without
-/// serialization. This means rapid concurrent operations (like double-yanking)
-/// can race during the read-modify-write cache update. This is an accepted
-/// race condition for now, as inventory ops are usually human-driven and sparse.
+///
+/// These run on detached worker threads without serialization, so rapid
+/// concurrent operations (double-yanking) can race during the read-modify-write
+/// cache update. Accepted: inventory ops are human-driven and sparse, and the
+/// loss is one cache entry rather than a file.
 /// One file to yank: where its bytes are, and the path the inventory should
 /// remember it by.
 ///
@@ -191,6 +192,9 @@ impl App {
         let row_count = self.state.cur().rows.len();
         self.state.cur_mut().cursor.clamp(row_count);
         if is_put {
+            // A put into a mount lands in staging, which is where an addition's
+            // row gets its size — before the listing is rebuilt, not after.
+            self.record_staged_additions();
             self.state.refresh_listing(); // Only Put updates the directory listing
         }
     }

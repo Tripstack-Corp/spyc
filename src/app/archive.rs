@@ -549,6 +549,52 @@ impl App {
         );
     }
 
+    /// Stat every pending addition into its mount's `staged` map.
+    ///
+    /// An addition's bytes arrive by a *copy* the effect layer runs, so neither
+    /// filler of that map ever sees one: `current_staged_stats` walks the index,
+    /// which an addition is by definition not in, and `record_staged` runs off a
+    /// materialize outcome, which a copy doesn't produce. The listing reads the
+    /// map, so every put member listed as `size = 0, mtime = epoch` — an empty
+    /// file, in the one listing with no on-disk row to compare it against.
+    ///
+    /// Re-stat rather than insert-once: a put member can be edited afterwards, and
+    /// there is no reason for its row to keep describing the file it arrived as.
+    /// Additions are user puts, so this is a handful of stats, not a walk.
+    pub(super) fn record_staged_additions(&mut self) {
+        if self.state.mounts.is_empty() {
+            return;
+        }
+        let archives: Vec<PathBuf> = self
+            .state
+            .mounts
+            .iter()
+            .map(|m| m.archive().to_path_buf())
+            .collect();
+        for archive in archives {
+            let Some(mount) = self.state.mounts.get_mut(&archive) else {
+                continue;
+            };
+            let additions: Vec<String> =
+                mount.journal.additions().map(ToString::to_string).collect();
+            for inner in additions {
+                // An addition stages at its journal path directly — it has no
+                // index entry to carry a case rank.
+                let Ok(md) = std::fs::metadata(mount.staging_root.join(&inner)) else {
+                    continue;
+                };
+                mount.staged.insert(
+                    inner,
+                    crate::archive::journal::StagedStat {
+                        size: md.len(),
+                        mtime: md.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+                        is_dir: md.is_dir(),
+                    },
+                );
+            }
+        }
+    }
+
     /// Move the focused column to a mount's root.
     fn enter_mount(&mut self, archive: &Path) {
         self.state.mounts.touch(archive);

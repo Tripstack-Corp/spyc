@@ -170,7 +170,10 @@ impl App {
             // repeated kicks poll at ~SCAN_DELAY rather than spin.
             std::thread::sleep(SCAN_DELAY);
             let snapshot = crate::state::codex_transcript::scan_rollout_metas();
-            *pending.lock().unwrap() = Some(snapshot);
+            // The mutex guards a plain `Option` and nothing between lock and store
+            // can panic, so it is only poisonable by a panic in `apply_codex_session_pins`
+            // — which would have taken the whole loop with it.
+            *pending.lock().expect("codex_pin_pending never poisoned") = Some(snapshot);
             flight.store(false, Ordering::Release);
             if let Some(tx) = wake {
                 let _ = tx.send(Message::CodexSessionReady);
@@ -184,7 +187,12 @@ impl App {
     /// forces a redraw. Called from the pre-recv scan.
     pub(crate) fn apply_codex_session_pins(&mut self) -> bool {
         let snapshot = {
-            let mut slot = self.runtime.codex_pin_pending.lock().unwrap();
+            // Same invariant as the writer above: nothing under this lock panics.
+            let mut slot = self
+                .runtime
+                .codex_pin_pending
+                .lock()
+                .expect("codex_pin_pending never poisoned");
             match slot.take() {
                 Some(s) => s,
                 None => return false,

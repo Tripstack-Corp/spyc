@@ -1438,9 +1438,18 @@ fn searching_inside_a_mount_is_refused_rather_than_answered_emptily() {
             .as_str()
             .or_else(|| resp["result"]["content"][0]["text"].as_str())
             .unwrap_or_default();
+        // `isError` is the discriminating bit. Without it the assertion below
+        // is satisfied by an empty *answer* whose message merely names the
+        // archive path — which is the exact outcome this test's name exists to
+        // exclude, so the test could not tell a refusal from the bug.
+        assert_eq!(
+            resp["result"]["isError"],
+            json!(true),
+            "{tool} answered instead of refusing: {resp}"
+        );
         assert!(
-            msg.contains("archive") || msg.contains("not a directory"),
-            "{tool} should refuse a mount: {resp}"
+            msg.contains("mounted archive") && msg.contains("get_file_content"),
+            "{tool}'s refusal must say what to do instead: {resp}"
         );
     }
 }

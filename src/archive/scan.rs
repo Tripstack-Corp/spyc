@@ -37,8 +37,11 @@ pub struct IndexFacts {
     pub hardlinks: usize,
     /// tar members that are neither file, dir, nor symlink (fifo, device).
     pub specials: usize,
-    /// Symlink members whose target escapes the mount, listed but never created
-    /// on disk.
+    /// Symlink members whose target escapes the mount: listed, never created on
+    /// disk, and rebuilt from this index on write-back — see [`assess`] for why
+    /// that last part is what keeps the mount writable. Only ever nonzero for a
+    /// *streamed* mount; a seekable container extracts nothing at index time, so
+    /// no link is attempted and none is refused.
     pub escaping_links: usize,
     /// Members whose destination was only reachable by traversing a symlink, so
     /// nothing was written for them. Distinct from [`Self::escaping_links`]: that
@@ -100,6 +103,17 @@ impl Capability {
 /// survive verbatim even though spyc can't read them. tar has no such escape:
 /// its members are rebuilt from captured header fields, so a hardlink or device
 /// node — which those fields can't express — makes the archive read-only.
+///
+/// [`IndexFacts::escaping_links`] does not fail it either, which reads at first
+/// like an inconsistency with `skipped()`: both are members spyc declined to
+/// create on disk. The difference is that the rule is about **reproducing**, not
+/// about extracting. A rejected name never entered the index, so a repack has
+/// nothing to write; an escaping link is a full index entry — kind, mode,
+/// `link_target` — and `write_tar` rebuilds it from exactly that, never from the
+/// staging tree it was kept out of. So it round-trips, and refusing to write the
+/// archive would cost the user their edits to protect a member that was never at
+/// risk. Pinned by `an_escaping_link_survives_a_repack_it_was_never_extracted_for`;
+/// the day that stops holding, this exemption has to go with it.
 pub fn assess(facts: &IndexFacts, format: ArchiveFormat) -> Capability {
     if facts.skipped() > 0 {
         return Capability::ReadOnly(format!(

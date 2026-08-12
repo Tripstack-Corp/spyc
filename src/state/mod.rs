@@ -380,11 +380,27 @@ mod state_writes_are_atomic {
     //! what stops the next straggler. It found three on the day it was written
     //! (`inventory`, `harpoon`, `skill_prompt`) that a hand-audit had missed.
     //!
-    //! Scoped to `src/state/`, where the writers of the XDG state root live.
+    //! Scoped to the directories that hold persistent-state writers, which is
+    //! **not** just `src/state/`: it was, and two writers then landed outside it
+    //! that the scan could not see — `src/skill/` (the assets and the
+    //! `.spyc-skill.json` manifest) and `src/mcp/server.rs` (the trusted-root
+    //! sidecar). The skill one had teeth: `read_manifest` returns `None` for an
+    //! unparseable manifest, `status_in` turns that into `NotInstalled`, and a
+    //! `NotInstalled` skill is overwritten unconditionally — so a torn write
+    //! converted "never clobbered unprompted" into "clobbered".
+    //!
     //! Test fixtures legitimately use `fs::write` to build scratch files, so —
     //! following `no_subprocess_git_in_production` — only the portion of each
     //! file before its first `#[cfg(test)]` is scanned, and whole-file test
     //! modules are skipped.
+    //!
+    //! Known limit, recorded so it isn't mistaken for coverage: the scan matches
+    //! one literal. A module writing through `File::create` + `write_all`,
+    //! `OpenOptions`, or `serde_json::to_writer` passes silently.
+    //! `state/graveyard.rs` already does exactly that for its `.tar.zst` payload
+    //! — deliberate and documented there (metadata written last, orphans reaped
+    //! by the health check), but it means "empty ALLOWED is the healthy state"
+    //! describes a narrower property than it reads as.
     use std::path::Path;
 
     /// Deliberate exceptions: relative paths under `src/`, each with the
@@ -433,11 +449,16 @@ mod state_writes_are_atomic {
         }
     }
 
+    /// Directories whose production code persists state the user would miss.
+    const ROOTS: &[&str] = &["state", "skill", "mcp"];
+
     #[test]
     fn persistent_state_is_written_atomically() {
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut offenders = Vec::new();
-        scan(&src.join("state"), &src, &mut offenders);
+        for root in ROOTS {
+            scan(&src.join(root), &src, &mut offenders);
+        }
         offenders.sort();
         assert!(
             offenders.is_empty(),

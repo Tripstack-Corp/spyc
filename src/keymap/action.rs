@@ -192,9 +192,9 @@ pub enum Action {
     Redraw, // ^L
     Quit,   // ^D / Q / :q
 
-    // Reserved for a future vim-style macro recording feature
-    // (qa ... q ... @a). For now, flashes a hint so an accidental `q`
-    // press doesn't quit the app.
+    // `q` is claimed so an accidental press can't quit: it flashes a hint
+    // instead. The name records what the key is being held for (vim-style macro
+    // recording, `qa … q … @a`) — nothing implements it.
     MacroRecordReserved,
 
     /// `gB` from the file list -- open the task viewer for the

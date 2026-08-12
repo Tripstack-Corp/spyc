@@ -48,6 +48,8 @@ vsplit_mode = "full_height"    # shape `^s |` opens a vertical split in; or "top
 default_command = "claude"     # pre-filled into the `^a c` new-tab prompt
 new_tab_cwd = "worktree_root"  # focused column's worktree root (gw's target); or "project_home" (PROJECT_HOME), "browse_dir" (the focused column's dir)
 claude_transcript_scrollback = false  # `^a v` reads Claude's JSONL transcript instead of terminal scrollback
+                                      # (only decides which comes up FIRST — `T` swaps in the view, and the
+                                      #  transcript is used regardless when there's no terminal capture)
 codex_mcp = true               # register spyc's MCP server for codex panes
 preview_pasted_images = true   # keep a copy of images you paste into an agent pane, for `^a g`
 
@@ -273,6 +275,14 @@ max_depth = 2              # how deep archives may nest (0 = no nesting)
 write_back = "ask"         # "ask" | "never" — offer to write pending changes
 snapshot_max_mb = 64       # graveyard-snapshot the original below this size
 ```
+
+`max_entries` bounds the index spyc builds — members walked plus the directories
+it synthesizes for them — and a listing that hit it says it is truncated. It does
+**not** bound what the container's own parser does first: `zip` materializes one
+record per central-directory entry before spyc sees any of them, so a zip with a
+genuinely huge central directory is fully resident whatever the cap says. (The
+crate does guard its pre-allocation against a lying entry count, so a small file
+can't force a large one.)
 
 `max_depth` is about disk, not correctness: a container inside a container has to
 be copied out whole before anything can read it, so every level costs its own

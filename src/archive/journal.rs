@@ -480,7 +480,13 @@ pub enum StepSource {
     /// I/O-bound instead of a re-zip.
     Archived { inner: String },
     /// A file in the staging tree, `staging_root`-relative.
-    Staging { rel: PathBuf },
+    ///
+    /// `mode` is the **archive's** mode for a member the index still knows, and
+    /// `None` for an addition, whose only mode is the one on disk. Staging's own
+    /// permissions are spyc's (see `read::apply_mode`), so reading them back
+    /// here would write spyc's cache policy into the user's archive — editing a
+    /// `0o444` member would silently publish it as writable.
+    Staging { rel: PathBuf, mode: Option<u32> },
 }
 
 /// The exact content list of the archive a write-back would produce.
@@ -515,6 +521,7 @@ pub fn plan_repack(
         let source = if takes_from_staging(&entry.inner, journal, recorded, now) {
             StepSource::Staging {
                 rel: entry.staging_rel(),
+                mode: entry.mode,
             }
         } else {
             StepSource::Archived {
@@ -528,6 +535,7 @@ pub fn plan_repack(
             out: journal.effective(added),
             source: StepSource::Staging {
                 rel: PathBuf::from(added),
+                mode: None,
             },
         });
     }
@@ -676,7 +684,8 @@ mod repack_tests {
         assert_eq!(
             steps[0].source,
             StepSource::Staging {
-                rel: PathBuf::from("a.txt")
+                rel: PathBuf::from("a.txt"),
+                mode: index.get("a.txt").expect("indexed").mode,
             }
         );
     }
@@ -712,7 +721,10 @@ mod repack_tests {
         assert_eq!(
             steps[1].source,
             StepSource::Staging {
-                rel: PathBuf::from("notes.md")
+                rel: PathBuf::from("notes.md"),
+                // An addition has no index entry, so the file on disk is the only
+                // thing that knows its mode.
+                mode: None,
             }
         );
     }
@@ -736,7 +748,11 @@ mod repack_tests {
                 rel: index
                     .get("readme")
                     .expect("the colliding member is indexed")
-                    .staging_rel()
+                    .staging_rel(),
+                mode: index
+                    .get("readme")
+                    .expect("the colliding member is indexed")
+                    .mode,
             }
         );
     }

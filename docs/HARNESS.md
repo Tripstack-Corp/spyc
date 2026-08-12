@@ -67,7 +67,8 @@ pty, not inferred.
 
 | agent | screen | mouse reporting | wheel behavior in spyc |
 |---|---|---|---|
-| **claude** | alternate screen (`?1049h`) | `?1000h ?1002h ?1003h ?1006h` | Forwarded verbatim — claude scrolls and selects natively. A real mouse report carries coordinates a synthesized key can't, so forwarding always wins. |
+| **claude** — `/tui fullscreen` | alternate screen (`?1049h`) | `?1000h ?1002h ?1003h ?1006h` | Forwarded verbatim — claude scrolls and selects natively. A real mouse report carries coordinates a synthesized key can't, so forwarding always wins. |
+| **claude** — `/tui default` | inline, **no** scroll region | **none** | Nothing to forward and no verified scroll key, so a sustained wheel-up opens **spyc's own** captured history (`^a v`'s pager). Inline claude's completed output reaches the main buffer, so unlike codex there genuinely is a capture to show. |
 | **codex** | inline, with a DECSTBM scroll region | **none** | codex discards mouse events outright, so spyc synthesizes arrows to drive its own `^T` transcript overlay. |
 | **agy** | configurable; default `native terminal (inline)` | none (inline) / `ButtonMotion` (altscreen) | Inline: spyc sends **Shift+Arrow**, agy's own scroll affordance. Altscreen: agy requests motion reporting, so it scrolls natively. |
 | **zot** | — | — | No transcript or scroll integration yet; treated as a plain child. |
@@ -77,6 +78,13 @@ agy's own settings UI frames the trade-off well, and it applies generally:
 selection; **inline** preserves terminal behavior but may truncate long
 conversations.
 
+claude's own mode is `/tui`, persisted as `"tui": "default" | "fullscreen"` in
+`~/.claude/settings.json` — `default` (inline) is what you get out of the box, and
+an invalid value there makes claude skip the whole settings file. spyc doesn't
+read that key: it branches on what the pty actually did (`?1049h` observed, and
+whether the child asked for mouse reporting), which stays right when you flip the
+mode mid-session.
+
 ### The consequence people hit
 
 An **alternate-screen** agent's history never enters the terminal's main buffer,
@@ -84,6 +92,12 @@ so it is never in spyc's vt100 scrollback. codex's history isn't either — its
 scroll region keeps completed turns off the main buffer, so **zero** rows reach
 spyc's emulator. In both cases "just scroll up" cannot work, no matter what spyc
 does. Section 3 is what does work.
+
+Text selection follows the same fork, and needs nothing extra: a child that asked
+for mouse reporting draws its **own** selection (fullscreen claude), and a child
+that didn't gets **spyc's** drag-select over the pane grid, copied to the
+clipboard on release. Only the wheel needed the third answer above, because it
+has somewhere else to go — spyc's capture — when neither side owns it.
 
 ---
 
@@ -100,10 +114,27 @@ does. Section 3 is what does work.
 That's `decide_scroll_source` in `src/app/pane_scroll.rs` — a pure function, if
 you want to read the exact ladder.
 
-So for claude, codex and agy, `^a v` reads the agent's **own transcript file**,
-not the screen. That's strictly better than capture: real text, no grid or
-repaint artifacts, and searchable. Inside that view:
+So for codex and agy — and for claude in `/tui fullscreen` — `^a v` reads the
+agent's **own transcript file**, not the screen. That's strictly better than
+capture: real text, no grid or repaint artifacts, and searchable.
 
+**Inline claude has both**, and that's the one case where the choice is real. Its
+capture is genuine (its output reaches the main buffer) and holds what the
+transcript never will, like whatever the shell printed before the agent started;
+the transcript holds real text where the grid has repaint artifacts. So the
+config gate decides which one `^a v` opens first
+(`[pane] claude_transcript_scrollback`, default off = the capture) and **`T`
+swaps** — no config edit, no relaunch. The flip sticks for that tab, so `r`
+reloads what you picked, and is dropped when the view closes.
+
+The gate only applies while a capture *exists*: a pane that hasn't scrolled
+anything off yet is in the same position as an alt-screen one, so it engages the
+transcript too rather than showing you an empty pager.
+
+Inside either view:
+
+- `T` — swap the source: terminal capture ⇄ agent transcript (says which one is
+  missing if the pane only has one)
 - `t` — toggle the agent's tool-call / tool-result lines (transcript scrollback
   only; a long tool-heavy session is much easier to read with them off)
 - `l` — toggle line numbers
@@ -123,7 +154,7 @@ resumes differs, and the differences leak:
 |---|---|
 | **claude** | spyc spawns fresh, then **types `/resume <id>` into stdin** once the banner settles. The `--resume` CLI flag has a mount-crash regression, so the stdin route is deliberate, not a workaround for convenience. |
 | **codex** | baked into the spawn command — `codex resume <uuid>`, or `resume --last`. The uuid comes from the tab's *pinned* rollout claim, not from codex's exit banner, so a tab that was still running at quit resumes exactly too. |
-| **agy** | `--continue` (resumes the most recent for this cwd). |
+| **agy** | baked into the spawn command — `--conversation <uuid>` when spyc has a pinned session id for the tab, falling back to `--continue` (the most recent for this cwd) when it does not. |
 | **zot** | `--continue`. spyc doesn't capture a specific session path yet, so restore always continues the most recent. |
 
 ### The codex quirk that confuses everyone

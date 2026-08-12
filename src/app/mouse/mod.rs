@@ -68,12 +68,11 @@ fn gesture_and_delta(kind: MouseEventKind, lines: usize) -> Option<(Gesture, i32
         MouseEventKind::Down(MouseButton::Left) => (Gesture::Left, 0),
         MouseEventKind::Down(MouseButton::Middle) => (Gesture::Middle, 0),
         MouseEventKind::Down(MouseButton::Right) => (Gesture::Right, 0),
-        // spyc asks the terminal only for 1000 (press/release), so `Moved`/`Drag`
-        // shouldn't arrive at all — `proc.rs` filters them for the terminals that
-        // send them anyway. Consequence, deliberate: click-drag selection INSIDE a
-        // child doesn't work. That needs 1002 (motion only while a button is
-        // held), which unlike 1003 wouldn't cost the idle-redraw invariant — a
-        // later change. Matched explicitly so adding one is a visible decision.
+        // `Up` and `Drag` never reach here — `handle_mouse` routes both to the
+        // child that took the press, before this. `Moved` is dropped in `proc.rs`
+        // (1002 reports motion only while a button is held, so a buttonless
+        // `Moved` is motion spyc never asked for). Horizontal wheel has no
+        // behaviour. All matched explicitly so adding one is a visible decision.
         MouseEventKind::Up(_)
         | MouseEventKind::Drag(_)
         | MouseEventKind::Moved
@@ -257,12 +256,8 @@ impl super::App {
         let lines = self.state.config.mouse.scroll_lines.max(1);
         // `delta` is only meaningful for a wheel gesture; buttons ignore it.
         let Some((gesture, delta)) = gesture_and_delta(ev.kind, lines) else {
-            // Drags, motion, horizontal wheel: no behaviour. spyc asks the terminal
-            // only for 1000 (press/release), so `Moved`/`Drag` shouldn't arrive at
-            // all — `proc.rs` filters them for the terminals that send them anyway.
-            // Consequence, deliberate: click-drag selection INSIDE a child doesn't
-            // work. That needs 1002 (motion only while a button is held), which
-            // unlike 1003 wouldn't cost the idle-redraw invariant — a later change.
+            // Motion or a horizontal wheel: no behaviour. Releases and drags are
+            // already gone — both returned above, to whoever took the press.
             return Vec::new();
         };
 
@@ -379,6 +374,7 @@ impl super::App {
             }
             MouseSink::PaneForward => self.forward_to_child(ev, &layout),
             MouseSink::PaneScrollKeys => self.send_scroll_keys(delta),
+            MouseSink::PaneHistory => self.wheel_into_pane_history(delta),
 
             MouseSink::FocusAndSelect(slot) => {
                 // The pager's OWN region, not the one the layout says is under the
@@ -565,6 +561,141 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         panic!("the pane never reported mouse mode");
+    }
+
+    /// An inline-agent pane carrying real captured history. `cat` is the child
+    /// so it spawns in a test; the tab's command reads `claude`, which is all
+    /// `agent::detect` consults. The echoed lines overflow the grid, so rows
+    /// genuinely leave the screen and land in the emulator's scrollback.
+    fn inline_agent_pane_with_history(app: &mut App, dir: &std::path::Path) {
+        let wake = app.make_pane_wake();
+        let pane = crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.context_path, wake)
+            .expect("spawn cat");
+        let entry = crate::pane::tabs::TabEntry::new(
+            pane,
+            crate::pane::tabs::TabInfo::new("claude", dir.to_path_buf()),
+        );
+        app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
+        let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+        let mut feed = String::new();
+        for i in 0..80 {
+            use std::fmt::Write as _;
+            let _ = writeln!(feed, "history line {i}");
+        }
+        tabs.active_mut()
+            .send_bytes(feed.as_bytes())
+            .expect("write to the pty");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            tabs.active_mut().drain_output();
+            if tabs
+                .active_mut()
+                .with_screen_mut(crate::ui::scrollback::scrollback_len)
+                > 0
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("the pane never captured any scrollback");
+    }
+
+    /// **A wheel tick over an inline agent's pane has to move the history spyc
+    /// captured.** claude in its default TUI mode takes no alternate screen and
+    /// requests no mouse modes (both verified in a pty), and spyc has no
+    /// verified scroll key for it — so `route_mouse`'s `Region::Pane` ladder
+    /// fell through to `Swallow`: nothing moved, and nothing said why. That
+    /// reached us as "scrolling doesn't work with claude". Inside a pane spyc IS
+    /// the terminal, so its own scrollback is the surface the wheel is asking
+    /// for — and unlike codex there IS one, because inline claude sets no
+    /// DECSTBM region and its completed output reaches the main buffer.
+    #[test]
+    fn a_sustained_wheel_up_over_an_inline_agent_reaches_spycs_history() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let dir = tmp.path().join("work");
+            std::fs::create_dir(&dir).unwrap();
+            let mut app = App::test_app(dir.clone());
+            app.view.term_size = (120, 24);
+            inline_agent_pane_with_history(&mut app, &dir);
+
+            // The two conditions that make this the swallowed case, asserted so
+            // the test keeps naming its own premise: if claude ever starts
+            // speaking mouse inline, this must fail loudly here rather than pass
+            // for a reason it isn't testing.
+            assert!(
+                !app.runtime
+                    .pane_tabs
+                    .as_ref()
+                    .expect("a pane tab")
+                    .active()
+                    .wants_mouse(),
+                "inline claude requests no mouse modes"
+            );
+            assert!(
+                app.active_pane_wheel_scroll().is_none(),
+                "and spyc has no verified scroll key to synthesize for it"
+            );
+
+            crate::set_mouse_capture_for_test(true);
+            let layout = app.frame_layout(ratatui::layout::Rect::new(0, 0, 120, 24));
+            let pane_rect = layout.pane.expect("a pane is open");
+            let point = (pane_rect.x + 2, pane_rect.y + 1);
+            for _ in 0..super::route::OPEN_AFTER_UP_TICKS {
+                app.handle_mouse(at(MouseEventKind::ScrollUp, point.0, point.1));
+            }
+            crate::set_mouse_capture_for_test(false);
+
+            assert!(
+                app.runtime.pane_scroll_settle.is_some() || app.view.scroll_pager.is_some(),
+                "a sustained wheel-up over an inline agent must reach for the pane's \
+                 captured history; instead the tick vanished"
+            );
+        });
+    }
+
+    /// The two ways the same gesture must leave the pane alone: a DOWN tick,
+    /// because the live screen already IS the bottom (opening there is what put
+    /// the agent-view path into an open/close flicker loop), and
+    /// `[mouse] pane_scroll_view = "off"`, the documented way back to the old
+    /// silence for anyone who wants their wheel to do nothing here.
+    #[test]
+    fn a_down_tick_or_pane_scroll_view_off_leaves_the_pane_alone() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let dir = tmp.path().join("work");
+            std::fs::create_dir(&dir).unwrap();
+            let mut app = App::test_app(dir.clone());
+            app.view.term_size = (120, 24);
+            inline_agent_pane_with_history(&mut app, &dir);
+            crate::set_mouse_capture_for_test(true);
+            let layout = app.frame_layout(ratatui::layout::Rect::new(0, 0, 120, 24));
+            let pane_rect = layout.pane.expect("a pane is open");
+            let point = (pane_rect.x + 2, pane_rect.y + 1);
+            let reached_for_history =
+                |a: &App| a.runtime.pane_scroll_settle.is_some() || a.view.scroll_pager.is_some();
+
+            for _ in 0..(super::route::OPEN_AFTER_UP_TICKS * 2) {
+                app.handle_mouse(at(MouseEventKind::ScrollDown, point.0, point.1));
+            }
+            assert!(
+                !reached_for_history(&app),
+                "scrolling DOWN past the live screen must not open history"
+            );
+
+            app.view.pane_scroll_streak = None;
+            app.state.config.mouse.pane_scroll_view = crate::config::PaneScrollView::Off;
+            for _ in 0..(super::route::OPEN_AFTER_UP_TICKS * 2) {
+                app.handle_mouse(at(MouseEventKind::ScrollUp, point.0, point.1));
+            }
+            crate::set_mouse_capture_for_test(false);
+            assert!(
+                !reached_for_history(&app),
+                "pane_scroll_view = \"off\" must keep the wheel silent over the pane"
+            );
+        });
     }
 
     /// **The capture gate.** A terminal or multiplexer can report the mouse when

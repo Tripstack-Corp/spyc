@@ -534,9 +534,15 @@ fn eviction_hands_back_the_staging_tree_to_clean() {
 
 /// Run whatever the screen produced, then whatever the drain produced, until the
 /// effects settle — the loop's behaviour, minus the threads.
+/// The hop limit is a runaway guard, not a budget — reaching it means the chain
+/// grew past what this driver models, and every assertion after the call would
+/// then run against half-applied state and fail somewhere unrelated. Say so here
+/// instead.
+const SETTLE_HOPS: usize = 4;
+
 fn settle(app: &mut App, effects: Vec<Effect>) {
     let mut queue = effects;
-    for _ in 0..4 {
+    for _ in 0..SETTLE_HOPS {
         if queue.is_empty() {
             return;
         }
@@ -582,6 +588,12 @@ fn settle(app: &mut App, effects: Vec<Effect>) {
         next.extend(file_fx);
         queue = next;
     }
+    assert!(
+        queue.is_empty(),
+        "effects still pending after {SETTLE_HOPS} hops: {queue:?}. The chain got \
+         longer than this driver models — raise SETTLE_HOPS deliberately rather \
+         than letting the caller assert against half-applied state."
+    );
 }
 
 /// The issue's headline for this PR: `y` on a member puts its *contents* in the
@@ -2841,6 +2853,42 @@ fn put_a_file_into(app: &mut App, archive: &Path, staging: &Path, name: &str, bo
             },
         )],
     );
+}
+
+/// A put file's row must describe the file, not a placeholder.
+///
+/// The row's size/mtime come from `mount.staged`, which is filled from the index
+/// (an addition isn't in it) and from the materialize outcome (a put goes through
+/// `Effect::FileOp(Copy)` and never produces one). So every put member listed as
+/// `size = 0`, `mtime = epoch` — indistinguishable from an empty file, in the one
+/// listing where the user has no on-disk row to compare against.
+#[test]
+fn a_put_member_lists_its_real_size_and_mtime() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let staging = tmp.path().join("staging");
+        let mut app = App::test_app(dir);
+        let body = b"payload with a length worth reporting";
+        put_a_file_into(&mut app, &archive, &staging, "brought.txt", body);
+
+        let entry = app
+            .state
+            .cur()
+            .listing
+            .entries
+            .iter()
+            .find(|e| e.name == "brought.txt")
+            .expect("the put file lists");
+        assert_eq!(entry.size, body.len() as u64, "size");
+        assert_ne!(
+            entry.mtime,
+            std::time::SystemTime::UNIX_EPOCH,
+            "mtime is the epoch placeholder"
+        );
+    });
 }
 
 /// The bug this fixes: a put file listed fine but refused every read, edit and

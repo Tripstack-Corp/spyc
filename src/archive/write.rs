@@ -163,8 +163,8 @@ fn write_zip(
                     out.raw_copy_file_rename(member, step.out.as_str())?;
                 }
             }
-            StepSource::Staging { rel } => {
-                write_from_staging_zip(&mut out, &staging_root.join(rel), &step.out)?;
+            StepSource::Staging { rel, mode } => {
+                write_from_staging_zip(&mut out, &staging_root.join(rel), &step.out, *mode)?;
             }
         }
     }
@@ -176,10 +176,12 @@ fn write_from_staging_zip<W: Write + Seek>(
     out: &mut zip::ZipWriter<W>,
     staged: &Path,
     name: &str,
+    archived_mode: Option<u32>,
 ) -> Result<()> {
     let md = std::fs::symlink_metadata(staged)
         .with_context(|| format!("reading {}", staged.display()))?;
-    let opts = zip::write::SimpleFileOptions::default().unix_permissions(mode_of(&md));
+    let opts = zip::write::SimpleFileOptions::default()
+        .unix_permissions(archived_mode.unwrap_or_else(|| mode_of(&md)));
     if md.is_dir() {
         out.add_directory(name, opts)?;
         return Ok(());
@@ -261,27 +263,34 @@ fn write_tar(
                     }
                 }
             }
-            StepSource::Staging { rel } => {
+            StepSource::Staging { rel, mode } => {
                 let staged = staging_root.join(rel);
                 let md = std::fs::symlink_metadata(&staged)
                     .with_context(|| format!("reading {}", staged.display()))?;
+                let out_mode = mode.unwrap_or_else(|| mode_of(&md)) & 0o777;
                 if md.file_type().is_symlink() {
                     let target = std::fs::read_link(&staged)?;
                     let mut header = tar::Header::new_gnu();
                     header.set_entry_type(tar::EntryType::Symlink);
-                    header.set_mode(mode_of(&md));
+                    header.set_mode(out_mode);
                     header.set_size(0);
                     builder.append_link(&mut header, &step.out, &target)?;
                 } else if md.is_dir() {
                     let mut header = tar::Header::new_gnu();
                     header.set_entry_type(tar::EntryType::Directory);
-                    header.set_mode(mode_of(&md));
+                    header.set_mode(out_mode);
                     header.set_size(0);
                     builder.append_data(&mut header, &step.out, std::io::empty())?;
                 } else {
+                    // `set_metadata` is what `append_file` does internally; doing
+                    // it here leaves room to override the one field that must not
+                    // come off the staged copy, which is spyc's cache.
                     let mut f = File::open(&staged)
                         .with_context(|| format!("reading {}", staged.display()))?;
-                    builder.append_file(&step.out, &mut f)?;
+                    let mut header = tar::Header::new_gnu();
+                    header.set_metadata(&md);
+                    header.set_mode(out_mode);
+                    builder.append_data(&mut header, &step.out, &mut f)?;
                 }
             }
         }
@@ -382,7 +391,7 @@ fn verify(written: &Path, format: ArchiveFormat, steps: &[RepackStep]) -> Result
 /// step's source before running a repack.
 pub fn staged_path(staging_root: &Path, step: &RepackStep) -> Option<PathBuf> {
     match &step.source {
-        StepSource::Staging { rel } => Some(staging_root.join(rel)),
+        StepSource::Staging { rel, .. } => Some(staging_root.join(rel)),
         StepSource::Archived { .. } => None,
     }
 }
@@ -613,6 +622,46 @@ mod tests {
         );
     }
 
+    /// Editing a member changes its bytes, not its permissions — `:chmod` inside
+    /// a mount is refused precisely because the archive owns them.
+    ///
+    /// The staged copy's mode is spyc's (owner-rw, so a repack can overwrite it),
+    /// so reading it back at write time publishes spyc's cache policy into the
+    /// user's archive: a `0o444` member came out `0o644`, and the only way to
+    /// trigger it was to edit the member — i.e. exactly when the user was least
+    /// looking at its permissions.
+    #[test]
+    fn editing_a_read_only_member_does_not_widen_its_mode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("pkg.zip");
+        let staging = tmp.path().join("staging");
+        zip_at(&archive, &[("locked.txt", b"original", 0o444)]);
+        let indexed = read::index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+
+        let entry = indexed.index.get("locked.txt").unwrap();
+        let real = read::materialize(&archive, entry, &staging).unwrap();
+        std::fs::write(&real, b"edited by the user").unwrap();
+
+        let mut journal = Journal::default();
+        journal.replace("locked.txt");
+        let steps = plan_repack(
+            &indexed.index,
+            &journal,
+            &StagedStats::new(),
+            &StagedStats::new(),
+        );
+        repack(&indexed.index, &steps, &staging, &opts()).unwrap();
+
+        let reread = read::index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+        let mode = reread
+            .index
+            .get("locked.txt")
+            .expect("still a member")
+            .mode
+            .expect("zip carries a unix mode");
+        assert_eq!(mode & 0o777, 0o444, "rewritten as {:o}", mode & 0o777);
+    }
+
     #[test]
     fn an_added_file_lands_in_the_archive() {
         let tmp = tempfile::tempdir().unwrap();
@@ -837,6 +886,94 @@ mod tests {
         );
     }
 
+    /// A member spyc refused to create on disk still has to come back.
+    ///
+    /// `assess` lets an archive containing an escaping symlink stay `ReadWrite`,
+    /// and that is only defensible because the repack rebuilds the link from the
+    /// **index** — which never lost it — rather than from the staging tree, where
+    /// it was deliberately never created. Nothing tested that, so the exemption
+    /// rested entirely on a reading of the code: a later change routing the
+    /// symlink branch through `symlink_metadata` (as the mode already is, for
+    /// staged members) would drop the link silently and turn the `ReadWrite`
+    /// verdict into data loss.
+    #[cfg(unix)]
+    #[test]
+    fn an_escaping_link_survives_a_repack_it_was_never_extracted_for() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("links.tar.gz");
+        let staging = tmp.path().join("staging");
+        {
+            let enc = flate2::write::GzEncoder::new(
+                File::create(&archive).unwrap(),
+                flate2::Compression::default(),
+            );
+            let mut b = tar::Builder::new(enc);
+            let mut h = tar::Header::new_gnu();
+            h.set_entry_type(tar::EntryType::Symlink);
+            h.set_size(0);
+            h.set_mode(0o777);
+            b.append_link(&mut h, "escape", "../../../etc/passwd")
+                .unwrap();
+            let mut h2 = tar::Header::new_gnu();
+            h2.set_size(4);
+            h2.set_mode(0o644);
+            b.append_data(&mut h2, "drop.txt", &b"gone"[..]).unwrap();
+            b.into_inner().unwrap().finish().unwrap();
+        }
+        let indexed = read::stream_mount(
+            &archive,
+            ArchiveFormat::TarGz,
+            &staging,
+            u64::MAX,
+            1000,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap();
+
+        // The premises, so this can't pass for the wrong reason.
+        assert_eq!(indexed.facts.escaping_links, 1, "the link was refused");
+        assert!(
+            !staging.join("escape").exists(),
+            "and really is absent from staging"
+        );
+        assert_eq!(
+            crate::archive::scan::assess(&indexed.facts, ArchiveFormat::TarGz),
+            crate::archive::scan::Capability::ReadWrite,
+            "an escaping link does not demote the mount — this test is why"
+        );
+
+        // Write something else, so the link is a member carried across untouched.
+        let mut journal = Journal::default();
+        journal.delete("drop.txt");
+        let steps = plan_repack(
+            &indexed.index,
+            &journal,
+            &StagedStats::new(),
+            &StagedStats::new(),
+        );
+        repack(&indexed.index, &steps, &staging, &opts()).unwrap();
+
+        let after = read::stream_mount(
+            &archive,
+            ArchiveFormat::TarGz,
+            &tmp.path().join("staging2"),
+            u64::MAX,
+            1000,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap();
+        let link = after
+            .index
+            .get("escape")
+            .expect("the link is still a member");
+        assert_eq!(link.kind, ArchiveEntryKind::Symlink);
+        assert_eq!(
+            link.link_target.as_deref(),
+            Some("../../../etc/passwd"),
+            "and points where it always did"
+        );
+    }
+
     /// The refill must not undo the change being written: an edited staged copy is
     /// the pending change, so a member that IS there is left alone.
     #[test]
@@ -945,6 +1082,61 @@ mod tests {
             std::fs::read(&archive).unwrap(),
             before,
             "the original is byte-identical after a failed write"
+        );
+    }
+
+    /// The write-time free-space precheck, which nothing exercised.
+    ///
+    /// Every other write test runs `free_space_margin: 0` against a roomy
+    /// tempdir, so the condition was never once true — `&& false` in it would
+    /// have failed nothing. The mount-time equivalent *is* well covered
+    /// (`budget::decide_mount` takes free space as data), which is exactly what
+    /// made this one look covered too.
+    ///
+    /// A margin larger than any disk is how the branch is reached without
+    /// faking a filesystem: `available_space` reports the truth and the margin
+    /// makes the truth insufficient. It also pins the saturating add — a plain
+    /// `+` would wrap here and turn the refusal into a pass.
+    #[test]
+    fn a_write_is_refused_when_the_disk_cannot_hold_the_archive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("pkg.zip");
+        zip_at(&archive, &[("a.txt", b"alpha", 0o644)]);
+        let before = std::fs::read(&archive).unwrap();
+
+        let indexed = read::index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+        let mut journal = Journal::default();
+        journal.delete("a.txt");
+        let steps = plan_repack(
+            &indexed.index,
+            &journal,
+            &StagedStats::new(),
+            &StagedStats::new(),
+        );
+
+        let err = repack(
+            &indexed.index,
+            &steps,
+            &tmp.path().join("staging"),
+            &RepackOptions {
+                snapshot_original: false,
+                free_space_margin: u64::MAX,
+            },
+        )
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("free"), "must name the reason: {msg}");
+        assert_eq!(
+            std::fs::read(&archive).unwrap(),
+            before,
+            "and refuse before touching the original"
+        );
+        assert!(
+            std::fs::read_dir(tmp.path())
+                .unwrap()
+                .flatten()
+                .all(|e| e.file_name() == "pkg.zip"),
+            "leaving no temp file behind either"
         );
     }
 
