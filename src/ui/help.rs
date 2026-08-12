@@ -308,7 +308,7 @@ const SECTIONS: &[Section] = &[
             ("^s x", "close the second file-commander"),
             (
                 "^a v",
-                "scroll pane history in the in-app pager (/ ? n/N, :N, V, ^v, y; t toggles transcript tool calls; H transcript help)",
+                "scroll pane history in the in-app pager (/ ? n/N, :N, V, ^v, y; T swaps capture/transcript, t toggles transcript tool calls; H transcript help)",
             ),
             ("^a u", "quick select — pick URL/path/SHA/IP from pane"),
             (

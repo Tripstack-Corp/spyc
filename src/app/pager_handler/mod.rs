@@ -238,6 +238,9 @@ impl App {
         // The scrollback lives in its own region slot; the top/overlay pager
         // (if any) stays put.
         self.view.scroll_pager = None;
+        // A `T` flip lives exactly as long as the view it was made in, so the
+        // next `^a v` starts from the automatic source choice again.
+        self.view.scroll_source_override = None;
         self.view.needs_full_repaint = true;
         self.recompute_focus();
         self.state.flash_info("scroll: off");
