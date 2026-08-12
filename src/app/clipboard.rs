@@ -425,6 +425,12 @@ impl super::App {
     /// error carries every attempt's reason, since "yank failed" with no cause is
     /// the report that wastes an afternoon.
     ///
+    /// The cost of that rule, deliberate and worth knowing: under `Both` over
+    /// SSH, an oversized selection's OSC-52 refusal is discarded when the local
+    /// helper succeeds — so the text reached the *server's* clipboard only, and
+    /// the user is told "yanked". `Both` + SSH is exactly the configuration where
+    /// the swallowed error is the one they needed; `via = "osc52"` reports it.
+    ///
     /// OSC 52 is attempted first under `Both`: it can fail *knowably* (payload over
     /// the size limit), and a real error beats the local helper's silent
     /// success-on-the-wrong-machine.
