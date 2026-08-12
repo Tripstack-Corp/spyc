@@ -1249,16 +1249,33 @@ mod tests {
     /// with the status row. Frame row `R` inside a pane starting at row `Y` must
     /// reach the child as pane row `R - Y`; skipping this makes clicks land
     /// `pane.y` rows off, which reads as the child's bug rather than ours.
+    ///
+    /// Run over an offset frame origin as well as `0,0`. `compute_layout` gives
+    /// the pane `x == area.x`, which is 0 for every layout production reaches
+    /// today — so the column assertion below held equally whether `mouse_report`
+    /// subtracted the origin or ignored it, and dropping the subtraction was a
+    /// green change. The row half has had its `pane.y > 0` premise since it was
+    /// written; this is the same premise on the other axis.
     #[test]
     fn mouse_report_translates_into_the_panes_coordinate_space() {
         use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
 
-        for pos in [StatusPosition::Top, StatusPosition::Bottom] {
-            let layout = App::compute_layout(Rect::new(0, 0, 80, 24), true, 40, pos);
+        for (pos, origin_x) in [
+            (StatusPosition::Top, 0u16),
+            (StatusPosition::Top, 7),
+            (StatusPosition::Bottom, 0),
+            (StatusPosition::Bottom, 7),
+        ] {
+            let layout = App::compute_layout(Rect::new(origin_x, 0, 80, 24), true, 40, pos);
             let pane = layout.pane.expect("pane_open = true");
             assert!(
                 pane.y > 0,
                 "{pos:?}: pane must be offset for this to prove anything"
+            );
+            assert_eq!(
+                pane.x, origin_x,
+                "{pos:?}: the frame origin must reach the pane, or the column \
+                 assertions below prove nothing"
             );
 
             // Two rows into the pane, five columns in.
