@@ -218,9 +218,28 @@ pub fn coalesce_recv(
             // into `coalesce_pending` + the `dispatch_effective` unreachable arm
             // but MISSED here, so the first `LuaDone` of a wakeup fell through
             // to `other` and panicked on the unreachable. Collapse it too.
-            | Message::LuaDone,
+            | Message::LuaDone
+            // Clipboard write / middle-click read done — payloadless, the
+            // outcomes ride `runtime.clipboard_copy_results` /
+            // `clipboard_paste_results` and are drained by
+            // `apply_clipboard_writes` / `apply_clipboard_pastes`. Same trap
+            // again, and these two are why the catch-all below is gone: a yank
+            // on an otherwise-quiet spyc makes its own done-wake the FIRST
+            // message of the wakeup, so `deliver_clipboard` — the path EVERY
+            // text yank takes — panicked the loop outright.
+            | Message::ClipboardPasteDone
+            | Message::ClipboardCopyDone,
         ) => coalesce_tail(rx, ctx),
-        other => other,
+        // Surfaced to the dispatch match: a real keystroke, a timer tick, or a
+        // channel error.
+        //
+        // Enumerated rather than caught by `_`, so a new `Message` variant fails
+        // to COMPILE here instead of falling through to `dispatch_effective`'s
+        // `unreachable!` at runtime. That fall-through shipped four times —
+        // FileOpDone/InventoryDone (#514), LuaDone, then the clipboard pair
+        // above — because three lists have to agree and only two of them were
+        // exhaustively matched. This arm makes the third one the compiler's job.
+        surfaced @ (Ok(Message::Input(_) | Message::Tick(_)) | Err(_)) => surfaced,
     }
 }
 
@@ -597,15 +616,23 @@ mod tests {
         assert_eq!(mcp_pending.len(), 1, "MCP request buffered, not dropped");
     }
 
-    /// Regression + guard: EVERY payloadless done-wake must collapse to a
+    /// Regression net: EVERY payloadless done-wake must collapse to a
     /// synthesized Timeout in `coalesce_recv` (its outcome rides a `runtime.*`
-    /// slot / the worker buffer, drained by the pre-recv scan). A variant wired
-    /// into `coalesce_pending` + the `dispatch_effective` unreachable arm but
-    /// MISSED in `coalesce_recv`'s collapse list falls through `other => other`,
-    /// surfaces as `effective`, and panics on the unreachable — this bit
-    /// FileOpDone/InventoryDone (#514) and again LuaDone (the Lua-worker wake).
-    /// **Add every new payloadless done-wake to this list** so the trap can't
-    /// recur silently.
+    /// slot / the worker buffer, drained by the pre-recv scan).
+    ///
+    /// This list is no longer the guard — it *was*, and it failed twice while
+    /// saying so. A variant wired into `coalesce_pending` + the
+    /// `dispatch_effective` unreachable arm but missed in `coalesce_recv` used to
+    /// fall through a `other => other` catch-all, surface as `effective`, and
+    /// panic on the unreachable: FileOpDone/InventoryDone (#514), then LuaDone,
+    /// then ClipboardPasteDone/ClipboardCopyDone — each time by a human not
+    /// adding a line to a list, including to the very list this comment used to
+    /// tell them to update.
+    ///
+    /// `coalesce_recv` now enumerates what it surfaces instead, so a new
+    /// `Message` variant is a compile error in all three places that must agree.
+    /// What's left for a test is the behavior itself, which exhaustiveness can't
+    /// express: that these particular variants collapse rather than surface.
     #[test]
     fn coalesce_recv_collapses_all_payloadless_done_wakes() {
         let wakes = [
@@ -622,6 +649,8 @@ mod tests {
             Message::FileOpDone,
             Message::InventoryDone,
             Message::LuaDone,
+            Message::ClipboardPasteDone,
+            Message::ClipboardCopyDone,
         ];
         for done in wakes {
             let (_tx, rx) = mpsc::channel::<Message>();
