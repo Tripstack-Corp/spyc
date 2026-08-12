@@ -5,6 +5,8 @@
 //! `term_title_effect` helper. `App::new` (the constructor) lives in
 //! `bootstrap.rs`.
 
+use crate::spyc_debug;
+
 use super::sources::{coalesce_recv, take_reader_result};
 use super::watch::{WatchCommand, spawn_watch_worker};
 use super::{
@@ -258,9 +260,24 @@ impl App {
             Ok(
                 Message::FsEvent(_) | Message::GitResult(_) | Message::Mcp(_) | Message::Wake(_),
             ) => {
-                unreachable!(
-                    "buffered/collapsed message surfaced as `effective` from the coalesce pre-step"
-                )
+                // Loud in tests, survivable in production.
+                //
+                // This is spyc's event loop, and a panic here takes the whole
+                // session with it: the user's pane children, their place in a
+                // scrollback, an unsaved prompt. That is a brutal price for a
+                // condition whose safe answer is obvious — this iteration has
+                // nothing to do, so fall through and let the next `recv` proceed,
+                // costing one wasted wakeup. An unreachable! here is what turned a
+                // missed match arm into "spyc dies when you copy text" (#402).
+                //
+                // The message is still dropped either way, so nothing is owed: a
+                // panic didn't reply to a stranded MCP client either.
+                if cfg!(debug_assertions) {
+                    unreachable!(
+                        "buffered/collapsed message surfaced as `effective` from the coalesce pre-step"
+                    );
+                }
+                spyc_debug!("coalesce leak: a buffered/collapsed message reached dispatch");
             }
         }
         Ok(DispatchFlow::Proceed)
