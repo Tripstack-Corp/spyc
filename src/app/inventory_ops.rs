@@ -191,6 +191,9 @@ impl App {
         let row_count = self.state.cur().rows.len();
         self.state.cur_mut().cursor.clamp(row_count);
         if is_put {
+            // A put into a mount lands in staging, which is where an addition's
+            // row gets its size — before the listing is rebuilt, not after.
+            self.record_staged_additions();
             self.state.refresh_listing(); // Only Put updates the directory listing
         }
     }
