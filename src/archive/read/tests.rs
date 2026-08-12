@@ -1012,7 +1012,7 @@ fn materialize_refuses_a_member_behind_a_planted_link() {
 ///
 /// Built by hand: `tar::Builder` writes an honest header, and the whole point is
 /// a dishonest one.
-fn tar_with_declared_size(path: &Path, name: &str, declared: &[u8; 12], body: &[u8]) {
+fn tar_header_with_declared_size(name: &str, declared: &[u8; 12], body: &[u8]) -> Vec<u8> {
     let mut h = [0u8; 512];
     h[..name.len()].copy_from_slice(name.as_bytes());
     h[100..108].copy_from_slice(b"0000644\0");
@@ -1031,12 +1031,26 @@ fn tar_with_declared_size(path: &Path, name: &str, declared: &[u8; 12], body: &[
     let mut out = Vec::from(h);
     out.extend_from_slice(body);
     out.resize(out.len().div_ceil(512) * 512, 0);
+    out
+}
+
+fn tar_with_declared_size(path: &Path, name: &str, declared: &[u8; 12], body: &[u8]) {
+    let mut out = tar_header_with_declared_size(name, declared, body);
     out.extend_from_slice(&[0u8; 1024]);
     std::fs::write(path, out).unwrap();
 }
 
 /// The octal maximum (~64 GB) behind an empty body. Before the fix this reached
 /// `Vec::with_capacity(68719476735)`.
+///
+/// **What this pins is the READ, not the allocation.** `take(size).read_to_end`
+/// bounds the bytes either way, so these assertions hold with `reserve_for`
+/// removed — verified. The allocation half cannot be reproduced end-to-end here:
+/// a tar's octal size field tops out at ~64 GB, and a 64 GB reservation does not
+/// abort on a 64-bit host that overcommits. `reserve_for` is unit-tested below,
+/// and `every_declared_size_allocation_is_capped` is what ties the two together
+/// by requiring the call sites to use it — which is how `write.rs` kept a raw
+/// `with_capacity` through HIGH-1's fix.
 #[test]
 fn a_declared_size_far_beyond_the_file_does_not_drive_an_allocation() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1069,6 +1083,66 @@ fn a_reservation_is_capped_however_large_the_claim() {
     assert_eq!(reserve_for(64), 64);
     assert_eq!(reserve_for(u64::MAX), RESERVE_CAP as usize);
     assert_eq!(reserve_for(RESERVE_CAP * 4096), RESERVE_CAP as usize);
+}
+
+/// Every declared-size allocation in `src/archive/` goes through
+/// [`reserve_for`].
+///
+/// HIGH-1 named three sites. Two were fixed and `reserve_for` was unit-tested,
+/// and `write.rs`'s `read_at` kept `Vec::with_capacity(usize::try_from(size))`
+/// for the whole campaign — reachable, because a plain `.tar` is seekable, so
+/// mounting one extracts nothing and the extract budget never inspects it: a
+/// header lying about its size mounts fine and lands there on the first
+/// `:archive write`.
+///
+/// Nothing caught it. The end-to-end test pins the *read* (which `take` bounds
+/// anyway) and the unit test pins the *function* — neither connects the function
+/// to its call sites, and the allocation itself can't be provoked from a tar
+/// header on a 64-bit host (octal sizes cap at ~64 GB, which overcommit absorbs).
+///
+/// So the property has to be checked structurally. A raw `with_capacity` on a
+/// container's declared size is the one shape this whole finding is about.
+#[test]
+fn every_declared_size_allocation_is_capped() {
+    // Split so this guard's own source can't match the needle.
+    let needle = ["with_", "capacity("].concat();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/archive");
+    let mut offenders = Vec::new();
+
+    fn scan(dir: &std::path::Path, needle: &str, offenders: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).expect("read archive dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                scan(&path, needle, offenders);
+                continue;
+            }
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("read .rs");
+            let production = crate::guard_support::production_half(&text);
+            for (i, line) in production.lines().enumerate() {
+                // Comments about the hazard are not the hazard.
+                if line.trim_start().starts_with("//") || !line.contains(needle) {
+                    continue;
+                }
+                if !line.contains("reserve_for(") {
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                    offenders.push(format!("{name}:{}", i + 1));
+                }
+            }
+        }
+    }
+    scan(&root, &needle, &mut offenders);
+    offenders.sort();
+
+    assert!(
+        offenders.is_empty(),
+        "these reserve a container's declared size before seeing a byte — route \
+         them through `read::reserve_for`, which caps it. A big enough lie \
+         *aborts* the process rather than unwinding, so the panic hook never \
+         restores the terminal. Offenders: {offenders:?}"
+    );
 }
 
 /// The bomb gate has to measure what arrives. A header declaring 0 while the
