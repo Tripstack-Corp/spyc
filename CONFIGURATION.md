@@ -482,6 +482,12 @@ One string per binding in a `keymap = [ ... ]` array. Forms:
 `<KEY>` is a single char (`f`), a Ctrl-combo (`^P`), or a named key (`<F2>`). The
 DSL binds single keys — for multi-key chords, use `init.lua`'s `spyc.map`.
 
+> **`^a` and `^w` are reserved.** spyc intercepts both as chord prefixes, so a
+> shell (or tmux) running inside the pane never sees readline's
+> `beginning-of-line` / `unix-word-rubout`. If you run an interactive shell as the
+> pane child, rebind the prefixes here; inside tmux, keep spyc's `^a` distinct
+> from tmux's own prefix (and `set -s escape-time 0` for snappy input).
+
 Several low-frequency features ship as `:` commands **without** a default key so
 the keymap stays uncluttered — bind the ones you use:
 
