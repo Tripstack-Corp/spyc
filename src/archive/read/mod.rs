@@ -657,6 +657,13 @@ fn apply_mode(_dest: &Path, _mode: Option<u32>) {}
 /// A zip's DOS timestamp carries no timezone; every tool reads it as local wall
 /// time. We take it as UTC so the same archive lists identically everywhere,
 /// which matters more here than agreeing with the machine that wrote it.
+///
+/// The `.ok()?` chain is belt-and-braces, not the live guard: `zip` validates on
+/// parse (`try_from_msdos(..).ok()`), so a corrupt DOS field reaches this as
+/// `last_modified() == None` and never gets here. Reaching it would take
+/// `DateTime::from_msdos_unchecked`, which is `unsafe`. The user-visible half —
+/// a corrupt date lists with no mtime rather than an invented one — is pinned by
+/// `an_impossible_date_reads_as_no_timestamp`.
 fn zip_mtime(dt: zip::DateTime) -> Option<SystemTime> {
     let date = jiff::civil::Date::new(
         i16::try_from(dt.year()).ok()?,

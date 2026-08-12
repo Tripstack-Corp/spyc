@@ -518,11 +518,76 @@ fn a_dos_timestamp_converts_to_a_real_instant() {
     );
 }
 
+/// **A member with a corrupt DOS timestamp still lists, with no timestamp.**
+///
+/// The requirement is about the archive, not about one function: month 0 / day 0
+/// is not a date, so the row must show no mtime rather than a crash or an
+/// invented one.
+///
+/// The old version of this test asserted
+/// `zip::DateTime::from_date_and_time(2026, 0, 0, …).is_err()` — the `zip`
+/// crate's own constructor, never touching spyc. Driven end to end instead,
+/// which is the only way the shape occurs for real: every checked constructor
+/// refuses an impossible date, so one can arrive only by being *parsed* out of
+/// an archive.
+///
+/// Worth knowing where the guard actually is: `zip` validates on parse
+/// (`try_from_msdos(..).ok()`), so `last_modified()` answers `None` and
+/// [`zip_mtime`] is never reached with an invalid date at all. Its own
+/// `.ok()?` chain is belt-and-braces against that changing, and this test does
+/// not — cannot — exercise it; reaching it needs `DateTime::from_msdos_unchecked`,
+/// which is `unsafe`. What this pins is the user-visible half.
 #[test]
-fn an_impossible_date_does_not_panic() {
-    // A corrupt DOS field can name day 0 or month 0; that must read as
-    // "no timestamp", not a crash on the indexing worker.
-    assert!(zip::DateTime::from_date_and_time(2026, 0, 0, 0, 0, 0).is_err());
+fn an_impossible_date_reads_as_no_timestamp() {
+    let tmp = tempfile::tempdir().unwrap();
+    let intact = tmp.path().join("intact.zip");
+    zip_at(&intact, &[("a.txt", b"hi", 0o644)]);
+    // The premise: an untouched archive of the same shape DOES carry a
+    // timestamp. Without this the assertion below could pass on a build that
+    // never reads mtimes at all.
+    assert!(
+        index_seekable(&intact, ArchiveFormat::Zip, 1000)
+            .unwrap()
+            .index
+            .get("a.txt")
+            .and_then(|e| e.mtime)
+            .is_some(),
+        "the fixture must have a timestamp to lose"
+    );
+
+    let archive = tmp.path().join("corrupt-date.zip");
+    zip_at(&archive, &[("a.txt", b"hi", 0o644)]);
+    zero_dos_timestamps(&archive);
+
+    let indexed = index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+    let entry = indexed.index.get("a.txt").expect("the member still lists");
+    assert_eq!(
+        entry.mtime, None,
+        "month 0 / day 0 is not a date — drop the timestamp, don't invent one"
+    );
+}
+
+/// Zero the DOS mod-time/mod-date fields in every local header and central
+/// directory record, giving month 0 and day 0 — what a truncated or corrupt
+/// archive carries, and what no `zip` constructor will build.
+fn zero_dos_timestamps(path: &Path) {
+    let mut bytes = std::fs::read(path).expect("read the zip");
+    // Local file header: PK, then version/flags/method (6 bytes),
+    // then modtime+moddate. Central directory: PK, with two extra
+    // version fields ahead of the same pair.
+    for i in 0..bytes.len().saturating_sub(4) {
+        let off = match &bytes[i..i + 4] {
+            [0x50, 0x4b, 0x03, 0x04] => Some(i + 10),
+            [0x50, 0x4b, 0x01, 0x02] => Some(i + 12),
+            _ => None,
+        };
+        if let Some(o) = off
+            && o + 4 <= bytes.len()
+        {
+            bytes[o..o + 4].fill(0);
+        }
+    }
+    std::fs::write(path, bytes).expect("write the patched zip");
 }
 
 // --- containment: a link may not decide where a later member lands ---
