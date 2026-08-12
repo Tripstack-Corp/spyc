@@ -130,6 +130,12 @@ pub struct TabInfo {
     /// (`App::toggle_pane_suspend`); a `SIGCONT` resumes it. App-controlled, so
     /// it stays accurate without probing process state. Every tab but a shell
     /// one reaches this (a shell's `^z` is forwarded for its own job control).
+    ///
+    /// **Not persisted.** `SavedTab` has no counterpart, so a suspended tab
+    /// restores running — correctly: a `SIGSTOP` is a property of a process that
+    /// no longer exists after a restart, and re-creating the flag would show 💤
+    /// over a live child nothing had stopped. Pinned by
+    /// `a_restored_tab_is_not_suspended`.
     pub suspended: bool,
     /// Latest semantic self-report from the agent (`report_status` MCP tool),
     /// or `None`. Overrides output timing per the [`ReportedStatus`] authority
@@ -711,6 +717,38 @@ mod tests {
             tabs.push(dummy_tab());
         }
         tabs
+    }
+
+    /// A `^z`-suspended tab comes back running, and nothing carries the flag.
+    ///
+    /// `SIGSTOP` is a property of a process that doesn't survive the restart, so
+    /// re-creating `suspended` on restore would paint 💤 over a live child
+    /// nothing had stopped. That is the right call and it was undocumented and
+    /// unpinned — the same decision `a_restored_pane_starts_in_normal_cursor_mode`
+    /// pins for DECCKM.
+    #[test]
+    fn a_restored_tab_is_not_suspended() {
+        let info = TabInfo::new("claude", std::env::temp_dir());
+        assert!(!info.suspended, "a freshly built tab is not suspended");
+
+        // The save format is the other half: a field it doesn't carry cannot come
+        // back, whatever the tab looked like at quit time.
+        // Fields listed exhaustively on purpose: adding `suspended` to the save
+        // format would break this line before it reached the assertion.
+        let saved = serde_json::to_value(crate::state::sessions::SavedTab {
+            command: "claude".to_string(),
+            label: "claude".to_string(),
+            cwd: std::env::temp_dir(),
+            agent_kind: crate::state::sessions::AgentKind::Claude,
+            agent_session_id: None,
+            agent_session_name: None,
+            claim_owner: String::new(),
+        })
+        .expect("SavedTab serializes");
+        assert!(
+            saved.get("suspended").is_none(),
+            "SavedTab must not persist the suspend flag: {saved}"
+        );
     }
 
     #[test]
