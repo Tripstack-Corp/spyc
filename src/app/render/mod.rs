@@ -447,13 +447,6 @@ impl App {
         self.render_image_overlay(frame, frame_area);
     }
 
-    /// Pre-draw pass: compute the frame layout and settle the derived list
-    /// state (rows cache + the `view_top`↔grid stabilization) before any
-    /// drawing, so `render_inner` draws from already-settled state. Returns
-    /// the layout the draw reuses (computed once). The list settle runs only
-    /// on the file-list path — when a top-overlay owns the screen the list
-    /// isn't drawn and its derived state isn't consulted, matching
-    /// `render_inner`'s overlay early-return.
     /// The frame's geometry for `area` — **the single source of truth**.
     ///
     /// `&self` and side-effect-free, so anything that needs to know where a rect
@@ -498,6 +491,13 @@ impl App {
         layout
     }
 
+    /// Pre-draw pass: compute the frame layout and settle the derived list
+    /// state (rows cache + the `view_top`↔grid stabilization) before any
+    /// drawing, so `render_inner` draws from already-settled state. Returns
+    /// the layout the draw reuses (computed once). The list settle runs only
+    /// on the file-list path — when a top-overlay owns the screen the list
+    /// isn't drawn and its derived state isn't consulted, matching
+    /// `render_inner`'s overlay early-return.
     fn prepare_frame(&mut self, area: ratatui::layout::Rect) -> FrameLayout {
         let layout = self.frame_layout(area);
         if self.runtime.top_overlay.is_none() {

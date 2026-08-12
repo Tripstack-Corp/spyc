@@ -712,10 +712,14 @@ end).
   **Ctrl** while pressing to copy absolute paths instead. The highlight stays up
   after the copy. Distinct from picks: a drag never changes what the next file
   operation acts on.
-  **Drag across the status line or the divider/tab line to select part of it** —
-  release copies exactly those columns, so you can take just a branch name, an
-  agent session id, or a custom tab name without the rest of the line. A click
-  that doesn't move copies nothing.
+  **Click a pane tab to switch to it** — the tab bar looked clickable and wasn't,
+  so the one part of that row meaning "go here" behaved like static text.
+  **Drag across any chrome row to select part of it** — the status line, the
+  divider/tab line, the prompt row (a flash, the `:` command line, an armed
+  chord) and the activity HUD. Release copies exactly those columns, so you can
+  take just a branch name, an agent session id, a custom tab name or an error
+  message without the rest of the line. A click that doesn't move copies nothing,
+  and copying part of a flash leaves the message intact.
   **Drag in a pager to select text; release copies it** and the pager title
   reports the line count. Works the same full-screen or popped-up, and copies the
   content only — never the line-number gutter, the whitespace/line-break markers,
@@ -1227,17 +1231,18 @@ spyc auto-saves your workspace on quit and can restore it on startup.
 
 ```sh
 spyc --install-skill
-#  → ~/.claude/skills/spyc/     (Claude Code)
-#  → ~/.codex/skills/spyc/      (codex; honors $CODEX_HOME)
+#  → ~/.claude/skills/spyc/          (Claude Code)
+#  → ~/.codex/skills/spyc/           (codex; honors $CODEX_HOME)
+#  → ~/.gemini/config/skills/spyc/   (agy / Antigravity)
 ```
 
 Writes an embedded usage guide into each agent's **personal** skills directory,
 so it applies in every project without touching any repo.
 
-Claude Code and codex independently converged on the same format —
-`<skills-dir>/<name>/SKILL.md` with YAML frontmatter plus optional `references/`
-sub-files — so one embedded copy serves both **verbatim**; only the directory
-differs. Adding another host is one `Host` variant and its directory.
+All three hosts converged on the same format — `<skills-dir>/<name>/SKILL.md`
+with YAML frontmatter plus optional `references/` sub-files — so one embedded
+copy serves them **verbatim**; only the directory differs. Adding another host is
+one `Host` variant and its directory.
 
 Contents:
 

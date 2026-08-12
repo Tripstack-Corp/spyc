@@ -9,10 +9,23 @@ workflow, standards, and conventions for the project.
 # Use single-branch to avoid downloading the heavy gh-pages branch
 git clone --single-branch --branch main git@github.com:Tripstack-Corp/spyc.git
 cd spyc
-make doctor    # check prerequisites (rustc, cargo, zig, etc.)
-cargo build    # dev build
-cargo test     # run all tests
+make doctor         # check prerequisites (rustc, cargo, zig, etc.)
+make install-hooks  # pre-commit hook — see below
+cargo build         # dev build
+cargo test          # run all tests
 ```
+
+**Install the pre-commit hook.** It runs `make check` before each commit, and
+it does one thing nothing else can: it `unset`s git's redirect environment
+(`GIT_DIR` and friends) before the gate runs, so every tool the gate invokes is
+covered — not just spyc's own git calls. Skipping that once cost a multi-day
+investigation, after `cargo-deny`'s advisory-db refresh inherited `GIT_DIR` from
+the hook and hard-reset the branch under it.
+
+Re-run `make install-hooks` whenever the template changes; the installed copy is
+a snapshot, not a link. You don't have to track that yourself — `make check`
+fails if the two have drifted (`git::commit_hook_is_current`). Bypass a single
+commit with `git commit --no-verify`; don't make a habit of it.
 
 See [BUILD.md](BUILD.md) for the full toolchain, build, and
 cross-compilation reference, and [INSTALL.md](INSTALL.md) for terminal

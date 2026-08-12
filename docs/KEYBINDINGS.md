@@ -6,7 +6,8 @@ overlay; this file is the browsable version. The survival subset lives in the
 
 Binding tiers (see [DESIGN.md](../DESIGN.md) → "Binding taxonomy"): **frame**
 keys drive the file view (letters / `g` / `H` / `[`/`]`); **pane** keys use the
-`^a` prefix; **global** workspace ops are on the `Space` leader.
+`^a` prefix; **global** workspace ops are on the `Space` leader. The mouse is
+bound too, and on by default — see [Mouse](#mouse).
 
 ## Navigation
 
@@ -301,3 +302,40 @@ to open them in the current listing dir.
 | `:lua` | Lua engine: `status` / `on` / `off` / `reload` |
 | `:notify test` | Fire every notification channel to verify setup |
 | `:date` | Show date/time (UTC) |
+
+## Mouse
+
+Real mouse reporting, **on by default** (`[mouse] capture`). Not keys, but part
+of the keymap in the sense that matters: these are bindings you can hit without
+meaning to.
+
+The wheel scrolls **whatever is under the pointer**, not whatever has keyboard
+focus.
+
+| Gesture | Action |
+|-----|--------|
+| Wheel | Scroll the region under the pointer — file list, pager, or pane |
+| Wheel over a pane | Whatever that agent can receive: forwarded to a mouse-aware child, else its own scroll keys; over codex it drives the `^T` transcript |
+| Left click | Focus that region — and click *through* to a mouse-aware child |
+| Left click on a pane tab | Switch to that tab |
+| Left drag | Select text: pager content, a non-mouse pane's grid, any chrome row, or file-list rows. Release copies |
+| `Ctrl` + left drag (list) | Copy absolute paths instead of names |
+| Middle click | Paste the clipboard |
+| Right click | Open the leader menu |
+| `Shift` + drag | Your terminal's own selection, bypassing spyc (Option/Fn on iTerm2) |
+
+**Capture costs your terminal's native click-drag selection while it's on** —
+inherent, not a spyc choice: the terminal can't both report the drag and handle
+it. `Shift` is the per-drag bypass; `:mouse off` gives it back immediately with
+no restart and survives a config reload; `:mouse auto` returns to following the
+config; `capture = false` turns it off permanently. `^a u` quick-select and `y`
+in the pager are the mouse-free yank paths.
+
+| Command | Does |
+|-----|--------|
+| `:mouse on` / `off` | Turn reporting on/off for this session |
+| `:mouse auto` | Follow `[mouse] capture` again |
+
+Config: `[mouse] capture`, `scroll_lines`, `pane_scroll_lines`,
+`pane_scroll_view`, `invert_scroll` — see
+[CONFIGURATION.md](../CONFIGURATION.md#mouse--mouse).

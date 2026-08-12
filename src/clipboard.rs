@@ -390,8 +390,13 @@ pub fn read_image() -> Result<Option<ClipboardImage>, String> {
 /// xterm's own limit is ~74 994 bytes of base64 and several terminals inherit it;
 /// tmux caps at 1 MB only with `set-clipboard on`. A payload over the limit is
 /// silently *truncated* by some terminals and dropped entirely by others, and a
-/// half-pasted selection is worse than a clear failure — so past this we fall back
-/// to the local helper rather than gamble.
+/// half-pasted selection is worse than a clear failure — so past this the yank is
+/// refused with a message rather than gambling.
+///
+/// Refused, NOT fallen back to the local helper. Under `via = "auto"` over SSH —
+/// the case OSC 52 exists for — the local helper isn't enabled, and writing the
+/// *server's* clipboard would not be a useful fallback anyway. Only
+/// `via = "both"` has a second mechanism to reach.
 const OSC52_MAX_BASE64: usize = 74_994;
 
 /// Ask the TERMINAL to set the clipboard, via OSC 52.
@@ -402,7 +407,8 @@ const OSC52_MAX_BASE64: usize = 74_994;
 /// host spyc runs on, which over SSH is the *server* — text the user can never
 /// paste.
 ///
-/// `Err` when the payload is too large to send safely; the caller falls back.
+/// `Err` when the payload is too large to send safely ([`OSC52_MAX_BASE64`]) — the
+/// caller reports it; there is no fallback unless `via = "both"` enabled one.
 /// Success here means "the sequence was written", not "the terminal honored it":
 /// OSC 52 is write-only with no reply, and support varies (kitty/WezTerm/iTerm2/
 /// Ghostty/Alacritty yes; tmux needs `set -g set-clipboard on`; some terminals gate
@@ -1137,7 +1143,7 @@ mod osc52_tests {
 
     /// Over-limit payloads must ERROR rather than be sent: several terminals
     /// silently truncate an oversized OSC 52, and half a selection on the clipboard
-    /// is worse than a reported failure (the caller falls back to the local helper).
+    /// is worse than a reported failure the user can act on.
     #[test]
     fn an_oversized_payload_is_refused_not_truncated() {
         // 3 bytes -> 4 base64 chars, so this comfortably exceeds the cap.
