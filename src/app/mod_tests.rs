@@ -35,20 +35,6 @@ mod guard_tests {
         );
     }
 
-    /// `state.left`/`right` address a SPECIFIC column (render draws both
-    /// explicitly; the fs-watch dedup-keys per column). "Where the user is
-    /// working" — a spawn cwd, a restore target, the dir an op acts on — must
-    /// use `cur()`/`cur_mut()` so a focused second commander is honored. The
-    /// June-2026 vsplit review found six spawn/restore sites stranded on
-    /// `state.left.listing.dir` (`:;`, the bare pane spawn, pager-edit,
-    /// graveyard restore, …). A new read outside the allowlist is that smell —
-    /// route it through `cur()`, or (if it's genuinely the left column) add the
-    /// file to ALLOW with a why. See AGENTS.md → per-column scoping.
-    ///
-    /// Allowlisted: the left-column fs-watch dedup keys (`run.rs`; the right
-    /// column has its own `watched_listing_right`), the startup `initial_cwd`
-    /// (`bootstrap.rs`, pre-split), and the status-bar header (`chrome.rs`,
-    /// deliberately anchored to the primary column).
     /// A user-visible error must carry its CAUSE, not just its context line.
     ///
     /// anyhow's plain `Display` (`{e}`) prints only the OUTERMOST context and
@@ -107,9 +93,30 @@ mod guard_tests {
         );
     }
 
+    /// `state.left`/`right` address a SPECIFIC column (render draws both
+    /// explicitly; the fs-watch dedup-keys per column). "Where the user is
+    /// working" — a spawn cwd, a restore target, the dir an op acts on — must
+    /// use `cur()`/`cur_mut()` so a focused second commander is honored. The
+    /// June-2026 vsplit review found six spawn/restore sites stranded on
+    /// `state.left.listing.dir` (`:;`, the bare pane spawn, pager-edit,
+    /// graveyard restore, …). A new read outside the allowlist is that smell —
+    /// route it through `cur()`, or (if it's genuinely the left column) add the
+    /// file to ALLOW with a why. See AGENTS.md → per-column scoping.
+    ///
+    /// Allowlisted: the left-column fs-watch dedup keys (`run.rs`; the right
+    /// column has its own `watched_listing_right`) and the startup `initial_cwd`
+    /// (`bootstrap.rs`, pre-split). **Not** the status bar — `render/chrome.rs`
+    /// was exempted as "deliberately anchored to the primary column", which
+    /// stopped being true when #322 made the status bar describe the focused
+    /// column and `the_status_bar_describes_the_focused_column` pinned it. An
+    /// exemption outliving its reason is worse than none: it pre-approves the
+    /// regression in the one file that had just been fixed for it.
+    ///
+    /// Entries are matched on the path relative to `src/app`, not the bare file
+    /// name — `chrome.rs` exempted every file so named at any depth.
     #[test]
     fn state_left_listing_dir_uses_are_allowlisted() {
-        const ALLOW: &[&str] = &["run.rs", "bootstrap.rs", "chrome.rs"];
+        const ALLOW: &[&str] = &["run.rs", "bootstrap.rs"];
         // Split so this guard's own source can't match the needle.
         let needle = format!("{}{}", "state.left", ".listing.dir");
         let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app");
@@ -118,9 +125,13 @@ mod guard_tests {
             // Production portion only — a `#[cfg(test)]` block may legitimately
             // poke `state.left` to set up a fixture.
             let production = crate::guard_support::production_half(src);
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if production.contains(&needle) && !ALLOW.contains(&name) {
-                offenders.push(name.to_string());
+            let rel = path
+                .strip_prefix(&app)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .into_owned();
+            if production.contains(&needle) && !ALLOW.contains(&rel.as_str()) {
+                offenders.push(rel);
             }
         });
         offenders.sort();
@@ -153,9 +164,13 @@ mod guard_tests {
         let mut offenders = Vec::new();
         scan_rs(&app, &mut |path, src| {
             let production = crate::guard_support::production_half(src);
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if production.contains(&needle) && !ALLOW.contains(&name) {
-                offenders.push(name.to_string());
+            let rel = path
+                .strip_prefix(&app)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .into_owned();
+            if production.contains(&needle) && !ALLOW.contains(&rel.as_str()) {
+                offenders.push(rel);
             }
         });
         offenders.sort();
