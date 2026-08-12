@@ -9,8 +9,8 @@
 
 use super::super::Effect;
 use super::route::{
-    AgentViewAction, AgentViewInputs, PendingViewIntent, TOGGLE_SETTLE, decide_agent_view_action,
-    pending_view_confirmed, scroll_streak_step,
+    AgentViewAction, AgentViewInputs, OPEN_AFTER_UP_TICKS, PendingViewIntent, TOGGLE_SETTLE,
+    decide_agent_view_action, pending_view_confirmed, scroll_streak_step,
 };
 
 impl super::super::App {
@@ -18,6 +18,56 @@ impl super::super::App {
     pub(super) fn active_pane_wheel_scroll(&self) -> Option<crate::agent::WheelScroll> {
         let tabs = self.runtime.pane_tabs.as_ref()?;
         crate::agent::detect(&tabs.active_info().command).wheel_scroll()
+    }
+
+    /// A wheel tick over a pane whose child neither speaks mouse nor has a
+    /// verified scroll key: show the history **spyc** captured for it, through
+    /// `^a v`'s own pager.
+    ///
+    /// This is claude in its default (inline) TUI mode and any plain child. There
+    /// is no third party to delegate to — inside a pane spyc IS the terminal, so
+    /// its capture is the only history that exists, and swallowing the tick (the
+    /// old answer) reads as "scrolling doesn't work".
+    ///
+    /// Gated exactly as an agent's own view is: only a sustained scroll UP opens
+    /// history, since one stray tick shouldn't swap the pane out from under the
+    /// user, and `[mouse] pane_scroll_view = "off"` keeps the old silence. A DOWN
+    /// tick has nowhere to go — the live screen already is the bottom.
+    ///
+    /// Empty scrollback is deliberately NOT checked here:
+    /// [`Self::open_pane_scroll_pager`] routes to an agent's transcript when
+    /// there is one, and otherwise flashes why the capture is empty — the same
+    /// outcome with the reason attached, which is what silence was missing.
+    pub(super) fn wheel_into_pane_history(&mut self, delta: i32) -> Vec<Effect> {
+        if matches!(
+            self.state.config.mouse.pane_scroll_view,
+            crate::config::PaneScrollView::Off
+        ) {
+            return Vec::new();
+        }
+        // Already showing (or about to show) this pane's history: the mounted
+        // pager claims the wheel itself via `covering_pager`, and re-entering
+        // during the snapshot's settle window would respawn a transcript worker
+        // per tick.
+        if self.view.scroll_pager.is_some() || self.runtime.pane_scroll_settle.is_some() {
+            return Vec::new();
+        }
+        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+            return Vec::new();
+        };
+        let dir: i8 = if delta < 0 { -1 } else { 1 };
+        let (streak, _) = scroll_streak_step(
+            self.view.pane_scroll_streak,
+            tabs.active_index(),
+            dir,
+            std::time::Instant::now(),
+        );
+        self.view.pane_scroll_streak = Some(streak);
+        if dir >= 0 || streak.ticks < OPEN_AFTER_UP_TICKS {
+            return Vec::new();
+        }
+        self.open_pane_scroll_pager();
+        Vec::new()
     }
 
     /// Translate a wheel tick into the child's own scroll keys.

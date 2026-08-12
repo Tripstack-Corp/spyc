@@ -67,7 +67,8 @@ pty, not inferred.
 
 | agent | screen | mouse reporting | wheel behavior in spyc |
 |---|---|---|---|
-| **claude** | alternate screen (`?1049h`) | `?1000h ?1002h ?1003h ?1006h` | Forwarded verbatim — claude scrolls and selects natively. A real mouse report carries coordinates a synthesized key can't, so forwarding always wins. |
+| **claude** — `/tui fullscreen` | alternate screen (`?1049h`) | `?1000h ?1002h ?1003h ?1006h` | Forwarded verbatim — claude scrolls and selects natively. A real mouse report carries coordinates a synthesized key can't, so forwarding always wins. |
+| **claude** — `/tui default` | inline, **no** scroll region | **none** | Nothing to forward and no verified scroll key, so a sustained wheel-up opens **spyc's own** captured history (`^a v`'s pager). Inline claude's completed output reaches the main buffer, so unlike codex there genuinely is a capture to show. |
 | **codex** | inline, with a DECSTBM scroll region | **none** | codex discards mouse events outright, so spyc synthesizes arrows to drive its own `^T` transcript overlay. |
 | **agy** | configurable; default `native terminal (inline)` | none (inline) / `ButtonMotion` (altscreen) | Inline: spyc sends **Shift+Arrow**, agy's own scroll affordance. Altscreen: agy requests motion reporting, so it scrolls natively. |
 | **zot** | — | — | No transcript or scroll integration yet; treated as a plain child. |
@@ -77,6 +78,13 @@ agy's own settings UI frames the trade-off well, and it applies generally:
 selection; **inline** preserves terminal behavior but may truncate long
 conversations.
 
+claude's own mode is `/tui`, persisted as `"tui": "default" | "fullscreen"` in
+`~/.claude/settings.json` — `default` (inline) is what you get out of the box, and
+an invalid value there makes claude skip the whole settings file. spyc doesn't
+read that key: it branches on what the pty actually did (`?1049h` observed, and
+whether the child asked for mouse reporting), which stays right when you flip the
+mode mid-session.
+
 ### The consequence people hit
 
 An **alternate-screen** agent's history never enters the terminal's main buffer,
@@ -84,6 +92,12 @@ so it is never in spyc's vt100 scrollback. codex's history isn't either — its
 scroll region keeps completed turns off the main buffer, so **zero** rows reach
 spyc's emulator. In both cases "just scroll up" cannot work, no matter what spyc
 does. Section 3 is what does work.
+
+Text selection follows the same fork, and needs nothing extra: a child that asked
+for mouse reporting draws its **own** selection (fullscreen claude), and a child
+that didn't gets **spyc's** drag-select over the pane grid, copied to the
+clipboard on release. Only the wheel needed the third answer above, because it
+has somewhere else to go — spyc's capture — when neither side owns it.
 
 ---
 
@@ -100,9 +114,18 @@ does. Section 3 is what does work.
 That's `decide_scroll_source` in `src/app/pane_scroll.rs` — a pure function, if
 you want to read the exact ladder.
 
-So for claude, codex and agy, `^a v` reads the agent's **own transcript file**,
-not the screen. That's strictly better than capture: real text, no grid or
-repaint artifacts, and searchable. Inside that view:
+So for codex and agy — and for claude in `/tui fullscreen` — `^a v` reads the
+agent's **own transcript file**, not the screen. That's strictly better than
+capture: real text, no grid or repaint artifacts, and searchable.
+
+**Inline claude is the exception**: it isn't alt-screen, so the bypass doesn't
+apply and its transcript stays behind `[pane] claude_transcript_scrollback`
+(default off) — `^a v` and the wheel both show vt100 capture instead. That
+capture is real (inline claude's output reaches the main buffer), and it carries
+what the transcript never will, like whatever the shell printed before the agent
+started. Set the key to `true` if you'd rather have the conversation.
+
+Inside either view:
 
 - `t` — toggle the agent's tool-call / tool-result lines (transcript scrollback
   only; a long tool-heavy session is much easier to read with them off)
