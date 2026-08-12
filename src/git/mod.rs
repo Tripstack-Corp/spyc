@@ -47,6 +47,58 @@ pub fn error_chain(e: &dyn std::error::Error) -> String {
 }
 
 #[cfg(test)]
+mod commit_hook_is_current {
+    //! The other half of the 2026-08-07 defenses (see
+    //! [`super::no_subprocess_git_in_production`]): the installed pre-commit
+    //! hook is what `unset`s `GIT_REDIRECT_ENV` before `exec make check`, so
+    //! *every* tool the gate invokes is covered — not just spyc's own git
+    //! spawns. A checkout whose installed copy predates that line has no
+    //! protection and no way to tell.
+    //!
+    //! Nothing compared the two: `make install-hooks` is a bare `install -m
+    //! 755` with no stamp, `make check` didn't look, and the only instruction
+    //! was a sentence of prose in AGENTS.md. The drift was live in this
+    //! repository's own checkout when this test was written — comment-only, and
+    //! therefore harmless, but a missing `unset` would have looked identical.
+    use std::path::{Path, PathBuf};
+
+    /// Where git keeps this repository's hooks, or `None` when that can't be
+    /// answered — an unpacked source tree with no `.git`, or a `core.hooksPath`
+    /// pointing somewhere else. Resolved through the **common** dir so the test
+    /// finds the one installed hook from a linked worktree too.
+    fn hooks_dir() -> Option<PathBuf> {
+        let repo = gix::discover(Path::new(env!("CARGO_MANIFEST_DIR"))).ok()?;
+        Some(repo.common_dir().join("hooks"))
+    }
+
+    /// A hook is installed and is **byte-identical** to the tracked template.
+    ///
+    /// Skipped when none is installed: a fresh clone and CI are both legitimate
+    /// states, and failing there would make `make check` unrunnable before the
+    /// first `make install-hooks`. What it catches is the state that has no
+    /// other signal — an installed hook that has since fallen behind.
+    #[test]
+    fn the_installed_hook_matches_its_template() {
+        let template = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/git-hooks/pre-commit");
+        let Some(installed) = hooks_dir().map(|d| d.join("pre-commit")) else {
+            return;
+        };
+        let Ok(have) = std::fs::read(&installed) else {
+            return; // no hook installed — see the doc comment
+        };
+        let want = std::fs::read(&template).expect("the tracked hook template");
+        assert!(
+            have == want,
+            "{} has drifted from scripts/git-hooks/pre-commit — re-run \
+             `make install-hooks` (from the main checkout or any worktree). \
+             The hook is what strips the ambient git environment before the \
+             gate runs; a stale copy silently removes that protection.",
+            installed.display()
+        );
+    }
+}
+
+#[cfg(test)]
 mod no_subprocess_git_in_production {
     //! Strangler-fig closing guard: production code must never spawn the `git`
     //! binary — every git operation runs in-process via gix. Test fixtures may

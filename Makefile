@@ -443,10 +443,17 @@ uninstall-debug: ## Remove spyc.debug from $(PREFIX)/bin
 
 # ---------- Git hooks --------------------------------------------------------
 
+# Ask git where the hooks live rather than assuming `.git/hooks`: from a linked
+# worktree `.git` is a FILE, so the literal path doesn't exist and the install
+# fails — in the layout this project actually works in. There is one hooks dir
+# per repository (the common dir), which is also what
+# `git::commit_hook_is_current` compares against.
+HOOKS_DIR = $(shell git rev-parse --git-common-dir 2>/dev/null)/hooks
+
 .PHONY: install-hooks
 install-hooks: ## Install pre-commit hook (runs `make check` before each commit)
-	@install -m 755 scripts/git-hooks/pre-commit .git/hooks/pre-commit
-	@echo "✓ installed .git/hooks/pre-commit — runs 'make check' on each commit"
+	@install -m 755 scripts/git-hooks/pre-commit $(HOOKS_DIR)/pre-commit
+	@echo "✓ installed $(HOOKS_DIR)/pre-commit — runs 'make check' on each commit"
 	@echo "  bypass with 'git commit --no-verify' (don't make a habit)"
 
 # ---------- Doctor (preflight checks) ----------------------------------------
