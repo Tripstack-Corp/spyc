@@ -1040,17 +1040,6 @@ fn tar_with_declared_size(path: &Path, name: &str, declared: &[u8; 12], body: &[
     std::fs::write(path, out).unwrap();
 }
 
-/// The octal maximum (~64 GB) behind an empty body. Before the fix this reached
-/// `Vec::with_capacity(68719476735)`.
-///
-/// **What this pins is the READ, not the allocation.** `take(size).read_to_end`
-/// bounds the bytes either way, so these assertions hold with `reserve_for`
-/// removed — verified. The allocation half cannot be reproduced end-to-end here:
-/// a tar's octal size field tops out at ~64 GB, and a 64 GB reservation does not
-/// abort on a 64-bit host that overcommits. `reserve_for` is unit-tested below,
-/// and `every_declared_size_allocation_is_capped` is what ties the two together
-/// by requiring the call sites to use it — which is how `write.rs` kept a raw
-/// `with_capacity` through HIGH-1's fix.
 /// HIGH-2's PoC, in the direction that stayed live: a member **understating**
 /// its size.
 ///
@@ -1106,6 +1095,17 @@ fn an_understated_zip_size_cannot_smuggle_bytes_past_a_read_cap() {
     assert_eq!(all.len(), 300_000, "and still returns the real bytes");
 }
 
+/// The octal maximum (~64 GB) behind an empty body. Before the fix this reached
+/// `Vec::with_capacity(68719476735)`.
+///
+/// **What this pins is the READ, not the allocation.** `take(size).read_to_end`
+/// bounds the bytes either way, so these assertions hold with `reserve_for`
+/// removed — verified. The allocation half cannot be reproduced end-to-end here:
+/// a tar's octal size field tops out at ~64 GB, and a 64 GB reservation does not
+/// abort on a 64-bit host that overcommits. `reserve_for` is unit-tested below,
+/// and `every_declared_size_allocation_is_capped` is what ties the two together
+/// by requiring the call sites to use it — which is how `write.rs` kept a raw
+/// `with_capacity` through HIGH-1's fix.
 #[test]
 fn a_declared_size_far_beyond_the_file_does_not_drive_an_allocation() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1155,48 +1155,97 @@ fn a_reservation_is_capped_however_large_the_claim() {
 /// to its call sites, and the allocation itself can't be provoked from a tar
 /// header on a 64-bit host (octal sizes cap at ~64 GB, which overcommit absorbs).
 ///
-/// So the property has to be checked structurally. A raw `with_capacity` on a
-/// container's declared size is the one shape this whole finding is about.
+/// So the property has to be checked structurally — across **every** shape that
+/// sizes an allocation from a number, not just `with_capacity`. Checking one
+/// spelling while claiming to check the class is how the `write.rs` site
+/// survived a whole campaign: `vec![0u8; declared]`, `.reserve(declared)` and
+/// `.reserve_exact(declared)` allocate exactly the same way and were invisible.
 #[test]
 fn every_declared_size_allocation_is_capped() {
     // Split so this guard's own source can't match the needle.
-    let needle = ["with_", "capacity("].concat();
+    let with_capacity = ["with_", "capacity("].concat();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/archive");
     let mut offenders = Vec::new();
 
-    fn scan(dir: &std::path::Path, needle: &str, offenders: &mut Vec<String>) {
+    /// The one production allocation under `src/archive/` sized by a spyc
+    /// constant rather than by something an archive said. `read_head` fills a
+    /// `SNIFF_BYTES` buffer to look at magic numbers.
+    const CONSTANT_SIZED: &[&str] = &["vec![0u8; cap]"];
+
+    /// Does this line allocate a caller-supplied count?
+    fn allocates_a_count(line: &str, with_capacity: &str) -> bool {
+        if line.contains(with_capacity)
+            || line.contains(".reserve(")
+            || line.contains(".reserve_exact(")
+        {
+            return true;
+        }
+        // `vec![elem; count]` allocates `count`; a plain `vec![a, b]` list does
+        // not, and the trailing `;` of the statement must not be mistaken for
+        // the repeat separator — so look only *inside* the brackets.
+        if let Some((_, rest)) = line.split_once("vec![")
+            && let Some((inside, _)) = rest.split_once(']')
+        {
+            return inside.contains(';');
+        }
+        false
+    }
+
+    fn scan(
+        dir: &std::path::Path,
+        with_capacity: &str,
+        offenders: &mut Vec<String>,
+        allocates: fn(&str, &str) -> bool,
+        allowed: &[&str],
+    ) {
         for entry in std::fs::read_dir(dir).expect("read archive dir") {
             let path = entry.expect("dir entry").path();
             if path.is_dir() {
-                scan(&path, needle, offenders);
+                scan(&path, with_capacity, offenders, allocates, allowed);
                 continue;
             }
             if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            // A standalone `tests.rs` is test code end to end, and
+            // `production_half` can only strip an *inline* `#[cfg(test)]` block
+            // — handed this file it returns the whole thing, so a fixture
+            // building `vec![b'A'; 300_000]` reads as a production allocation.
+            if path.file_name().is_some_and(|n| n == "tests.rs") {
                 continue;
             }
             let text = std::fs::read_to_string(&path).expect("read .rs");
             let production = crate::guard_support::production_half(&text);
             for (i, line) in production.lines().enumerate() {
                 // Comments about the hazard are not the hazard.
-                if line.trim_start().starts_with("//") || !line.contains(needle) {
+                if line.trim_start().starts_with("//") || !allocates(line, with_capacity) {
                     continue;
                 }
-                if !line.contains("reserve_for(") {
-                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-                    offenders.push(format!("{name}:{}", i + 1));
+                if line.contains("reserve_for(") || allowed.iter().any(|a| line.contains(a)) {
+                    continue;
                 }
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                offenders.push(format!("{name}:{}", i + 1));
             }
         }
     }
-    scan(&root, &needle, &mut offenders);
+    scan(
+        &root,
+        &with_capacity,
+        &mut offenders,
+        allocates_a_count,
+        CONSTANT_SIZED,
+    );
     offenders.sort();
 
     assert!(
         offenders.is_empty(),
-        "these reserve a container's declared size before seeing a byte — route \
-         them through `read::reserve_for`, which caps it. A big enough lie \
-         *aborts* the process rather than unwinding, so the panic hook never \
-         restores the terminal. Offenders: {offenders:?}"
+        "these size an allocation from a count before seeing a byte — route the \
+         ones fed by a container's declared size through `read::reserve_for`, \
+         which caps it. A big enough lie *aborts* the process rather than \
+         unwinding, so the panic hook never restores the terminal. (A genuinely \
+         constant size goes in this guard's CONSTANT_SIZED list, with the \
+         reason.) Offenders: {offenders:?}"
     );
 }
 

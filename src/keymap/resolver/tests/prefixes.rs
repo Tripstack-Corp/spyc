@@ -231,9 +231,10 @@ fn ctrl_s_unknown_key_is_ignored() {
 /// continuation key on a fresh resolver and compare against `continuations()` —
 /// an `Act` entry must resolve to its action, a `Sub` entry must open a submenu
 /// (`Pending`). If a `feed` arm is re-bound without updating `continuations()`
-/// (or vice-versa), this fails. Multi-byte display strings — ranges (`"1-9"`),
-/// sets (`"a h"`), non-char keys (`"↓"`), and word keys (`"Space"`) — are listed
-/// for the popup but not feed-verified here.
+/// (or vice-versa), this fails. A label naming several keys (`"a h"`, `"\\ C"`)
+/// has each of them fed, so an alias can't ride along unverified; what stays
+/// unverified is a label with no single key to feed — a range (`"1-9"`, `"a-z"`),
+/// a non-char key (`"↓"`), or a word key (`"Space"`).
 #[test]
 fn chord_continuations_resolve_to_their_actions() {
     let prefixes: &[(KeyEvent, &str)] = &[
@@ -267,27 +268,36 @@ fn chord_continuations_resolve_to_their_actions() {
             let keys = match &row {
                 ChordEntry::Act(k, _) | ChordEntry::Sub(k, _) => *k,
             };
-            // Only single-byte ASCII keys correspond to a `Char` we can feed.
-            if keys.len() != 1 {
-                continue;
-            }
-            let Some(ch) = keys.chars().next() else {
-                continue;
-            };
-            let mut r2 = Resolver::new();
-            feed(&mut r2, *entry);
-            let got = feed(&mut r2, key(ch));
-            match row {
-                ChordEntry::Act(_, action) => assert_eq!(
-                    got,
-                    ResolverOutcome::Action(action),
-                    "{name}{keys} should resolve to the action the popup advertises"
-                ),
-                ChordEntry::Sub(_, _) => assert_eq!(
-                    got,
-                    ResolverOutcome::Pending,
-                    "{name}{keys} should open the submenu the popup advertises"
-                ),
+            // A label may name SEVERAL keys for one action (`"\\ C"` for the
+            // pane toggle, `"a h"` for vsplit-focus-left), and every one of them
+            // is a promise the popup makes. Each single-byte ASCII token is
+            // fed, so an alias can't drift unverified just by sharing a row —
+            // which is what happened when `"\\"` grew a `C` and silently left
+            // the set this guard checks. A range (`"1-9"`), a word key
+            // (`"Space"`) or a non-ASCII key (`"↓"`) is one token with no
+            // `Char` to feed, and is skipped as before.
+            for tok in keys.split_whitespace() {
+                if tok.len() != 1 {
+                    continue;
+                }
+                let Some(ch) = tok.chars().next() else {
+                    continue;
+                };
+                let mut r2 = Resolver::new();
+                feed(&mut r2, *entry);
+                let got = feed(&mut r2, key(ch));
+                match &row {
+                    ChordEntry::Act(_, action) => assert_eq!(
+                        got,
+                        ResolverOutcome::Action(action.clone()),
+                        "{name}{tok} should resolve to the action the popup advertises"
+                    ),
+                    ChordEntry::Sub(_, _) => assert_eq!(
+                        got,
+                        ResolverOutcome::Pending,
+                        "{name}{tok} should open the submenu the popup advertises"
+                    ),
+                }
             }
         }
     }
@@ -467,11 +477,36 @@ fn every_action_a_chord_binds_is_offered_in_its_hints() {
     use std::mem::{Discriminant, discriminant};
 
     let states = chord_states();
-    assert!(
-        states.len() >= 8,
-        "the walk found only {} chord states; it should reach the whole tree: {:?}",
-        states.len(),
-        states.iter().map(|(l, _)| l).collect::<Vec<_>>()
+    // The tree, named — not a floor. `>= 8` against sixteen real states let the
+    // walk lose half of them and still pass, which is the one failure a
+    // completeness check exists to prevent: the guard below would go on
+    // reporting "every bound action is advertised" about a shrinking share of
+    // the keymap, and say nothing about the rest. Adding a chord prefix or a
+    // submenu is *supposed* to fail this line — that is the prompt to confirm
+    // the walk reached it.
+    let mut found: Vec<&str> = states.iter().map(|(l, _)| l.as_str()).collect();
+    found.sort_unstable();
+    assert_eq!(
+        found,
+        [
+            " ",   // leader
+            "  w", // leader → worktree submenu
+            "'",
+            "H",
+            "W",
+            "Z",
+            "[",
+            "]",
+            "^a",         // pane prefix
+            "^a Space",   // pane → leader
+            "^a Space w", // pane → leader → worktree
+            "^s",         // vertical split
+            "d",
+            "g",
+            "m",
+            "y",
+        ],
+        "the chord-state walk no longer reaches the tree it used to"
     );
 
     for (label, entry) in states {
