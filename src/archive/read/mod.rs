@@ -606,48 +606,83 @@ fn contained_dest(staging_root: &Path, inner: impl AsRef<Path>) -> Result<PathBu
 /// Whether the symlink about to be created at `dest` points somewhere inside the
 /// mount.
 ///
-/// Resolved against `dest`'s **canonical** parent — the directory the link will
-/// really sit in — and then folded, so the answer is about where the link points
-/// on disk rather than about how its target is spelled. The old spelling-based
-/// version accepted `..` from a link whose parent had itself been relocated by an
-/// earlier link.
+/// Walked component by component from `dest`'s **canonical** parent, resolving
+/// each one against the filesystem, so the answer is about where the link points
+/// on disk rather than about how its target is spelled.
+///
+/// **`..` is never cancelled on paper.** Folding it against the preceding
+/// component is wrong the moment that component is itself a link: `d/link1/../x`
+/// reads as `d/x` lexically, but `open()` follows `link1` first and the `..` then
+/// climbs from wherever *that* landed. With `d/link1 -> ..` — contained, since it
+/// lands on the staging root — the pair composes into a link pointing out of the
+/// mount. So a link component is followed here, and `..` is applied to the real
+/// directory it reached.
+///
+/// **A component that does not exist yet is fatal to any `..` behind it.** The
+/// target need not exist (a dangling link is legal in an archive), but the
+/// missing component can be created by a *later* member, and if that member is a
+/// link then every remaining `..` climbs from somewhere unknowable now — the same
+/// escape, just reordered. A remainder that only descends is safe to judge
+/// against the deepest resolved directory; a remainder containing `..` is
+/// refused. That is what makes this answer ordering-independent, which is the
+/// property the whole containment design rests on.
 ///
 /// `dest`'s parent exists by the time this is called ([`create_parent`] runs
-/// first), so a `None` from [`crate::paths::canonical_contains`] means the root
-/// itself is unresolvable — refuse, rather than guess.
+/// first), so failing to canonicalize it means refusing rather than guessing.
 fn link_target_contained(staging_root: &Path, dest: &Path, target: &str) -> bool {
+    use std::path::Component;
+
     if target.is_empty() || Path::new(target).is_absolute() {
         return false;
     }
     let Some(parent) = dest.parent() else {
         return false;
     };
-    let Ok(parent) = std::fs::canonicalize(parent) else {
+    let Ok(mut at) = std::fs::canonicalize(parent) else {
         return false;
     };
-    let mut resolved = parent;
-    for part in Path::new(target).components() {
+
+    let parts: Vec<Component<'_>> = Path::new(target).components().collect();
+    for (i, part) in parts.iter().enumerate() {
         match part {
-            std::path::Component::ParentDir => {
-                resolved.pop();
+            Component::CurDir => {}
+            // `at` is always a real, fully-resolved directory, so `..` is simply
+            // its parent — no link can be hiding in it.
+            Component::ParentDir => {
+                if !at.pop() {
+                    return false;
+                }
             }
-            std::path::Component::CurDir => {}
-            other => resolved.push(other),
+            Component::Normal(name) => {
+                at.push(name);
+                match std::fs::symlink_metadata(&at) {
+                    // Follow it: where it LANDS is what a later `..` climbs from.
+                    Ok(md) if md.file_type().is_symlink() => {
+                        let Ok(real) = std::fs::canonicalize(&at) else {
+                            return false;
+                        };
+                        at = real;
+                    }
+                    Ok(_) => {}
+                    Err(_) => {
+                        if parts[i + 1..]
+                            .iter()
+                            .any(|p| matches!(p, Component::ParentDir))
+                        {
+                            return false;
+                        }
+                        // Only descent left, so the deepest resolved directory
+                        // decides it.
+                        at.pop();
+                        return crate::paths::canonical_contains(staging_root, &at) == Some(true);
+                    }
+                }
+            }
+            // Root/prefix are absolute, rejected above.
+            _ => return false,
         }
     }
-    // The link's target need not exist (a dangling link is legal in an archive),
-    // so ask about the deepest ancestor that does — that is the directory the
-    // link would actually reach through.
-    let mut probe = resolved.as_path();
-    loop {
-        if let Some(contained) = crate::paths::canonical_contains(staging_root, probe) {
-            return contained;
-        }
-        match probe.parent() {
-            Some(p) => probe = p,
-            None => return false,
-        }
-    }
+    crate::paths::canonical_contains(staging_root, &at) == Some(true)
 }
 
 fn create_parent(dest: &Path) -> Result<()> {

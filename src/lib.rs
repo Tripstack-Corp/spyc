@@ -180,28 +180,39 @@ pub mod fuzz {
                         path.display(),
                         target.display()
                     );
-                    // Resolve against the link's *canonical* parent, then fold
-                    // `..` away. Comparing the unfolded join with `starts_with`
-                    // would call `staging/x/..` contained — which is the exact
-                    // lexical mistake this target exists to catch.
+                    // Resolve against the link's *canonical* parent and then let
+                    // the filesystem answer. Joined, NOT folded: cancelling `..`
+                    // against the preceding component is a paper operation, and
+                    // it is wrong exactly when that component is itself a link —
+                    // `d/link1/../x` reads as `d/x` on paper while `open()`
+                    // follows `link1` first and the `..` climbs out of wherever
+                    // that landed. Folding here would reproduce the production
+                    // bug inside the assertion and certify the escape this
+                    // target exists to catch.
                     let base = path
                         .parent()
                         .and_then(|p| std::fs::canonicalize(p).ok())
                         .unwrap_or_else(|| staging.to_path_buf());
-                    let mut resolved = base;
-                    for part in target.components() {
-                        match part {
-                            std::path::Component::ParentDir => {
-                                resolved.pop();
-                            }
-                            std::path::Component::CurDir => {}
-                            other => resolved.push(other),
-                        }
-                    }
                     let canonical_staging =
                         std::fs::canonicalize(staging).unwrap_or_else(|_| staging.to_path_buf());
+                    // A dangling target is legal in an archive, so ask the
+                    // deepest ancestor that resolves — the directory the link
+                    // would actually reach through.
+                    let joined = base.join(&target);
+                    let mut probe = joined.as_path();
+                    let landed = loop {
+                        if let Ok(real) = std::fs::canonicalize(probe) {
+                            break Some(real);
+                        }
+                        match probe.parent() {
+                            Some(p) => probe = p,
+                            None => break None,
+                        }
+                    };
                     assert!(
-                        resolved.starts_with(&canonical_staging),
+                        landed
+                            .as_ref()
+                            .is_some_and(|r| r.starts_with(&canonical_staging)),
                         "staged symlink points outside the staging root: {} -> {}",
                         path.display(),
                         target.display()

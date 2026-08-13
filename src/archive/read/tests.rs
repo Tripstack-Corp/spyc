@@ -773,6 +773,126 @@ fn a_symlink_chain_cannot_walk_a_later_member_out_of_the_mount() {
     );
 }
 
+/// A `..` sitting *behind a link component* is not the same as no `..` at all.
+///
+/// `d/link1 -> ..` is contained and correctly created: from `staging/d` it lands
+/// on the staging root. But a second link spelled `d/link1/../ESCAPED` cancels to
+/// `staging/d/ESCAPED` on paper, while `open()` follows `link1` first and the
+/// `..` then climbs out of the staging root. Against the folding version this
+/// reads `secret` back through a link that lives inside the mount — and the fuzz
+/// target could not catch it either, because `assert_contained` folded the same
+/// way and so agreed with the bug it exists to find.
+///
+/// Both member orderings are pinned below. They fail for *different* reasons,
+/// which is the point: with `link1` first the composed path resolves and lands
+/// outside; with `link1` last the target is dangling at creation time, so the
+/// `..` behind the not-yet-existing component is what has to be refused. A fix
+/// that only resolves the filesystem passes the first and ships the second.
+#[cfg(unix)]
+#[test]
+fn a_target_that_climbs_through_a_link_cannot_leave_the_mount() {
+    for (order, members) in [
+        (
+            "link first",
+            vec![
+                Member::Dir("d"),
+                Member::Link {
+                    name: "d/link1",
+                    target: "..",
+                },
+                Member::Link {
+                    name: "L",
+                    target: "d/link1/../ESCAPED",
+                },
+            ],
+        ),
+        (
+            "link last",
+            vec![
+                Member::Dir("d"),
+                Member::Link {
+                    name: "L",
+                    target: "d/link1/../ESCAPED",
+                },
+                Member::Link {
+                    name: "d/link1",
+                    target: "..",
+                },
+            ],
+        ),
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("climb.tar.gz");
+        let staging = tmp.path().join("deep/staging");
+        // The prize: outside the mount, one level above the staging root.
+        std::fs::create_dir_all(tmp.path().join("deep")).unwrap();
+        std::fs::write(tmp.path().join("deep/ESCAPED"), b"secret").unwrap();
+
+        linked_tar_gz_at(&archive, &members);
+        let _ = mount_linked(&archive, &staging);
+
+        let planted = staging.join("L");
+        assert!(
+            std::fs::read_to_string(&planted).is_err(),
+            "{order}: a file outside the mount is readable through the staging tree"
+        );
+        assert!(
+            std::fs::symlink_metadata(&planted).is_err(),
+            "{order}: a link resolving outside the mount must never be created"
+        );
+        // The contained half is untouched — landing ON the staging root is legal,
+        // so this is a ceiling on composition, not a ban on `..`.
+        assert!(
+            std::fs::symlink_metadata(staging.join("d/link1")).is_ok(),
+            "{order}: a link that lands on the staging root is still created"
+        );
+    }
+}
+
+/// A dangling target that only ever descends stays legal.
+///
+/// The ordering rule above refuses a `..` behind a component that doesn't exist
+/// yet. It must not also refuse the ordinary case it sits next to: a relative
+/// link whose `..` applies to a directory that *does* exist, pointing at a member
+/// the archive simply hasn't extracted yet. Tarballs are full of these
+/// (`bin/tool -> ../lib/tool`), and refusing them would trade a security fix for
+/// a broken mount.
+#[cfg(unix)]
+#[test]
+fn a_link_pointing_at_a_not_yet_extracted_sibling_is_still_created() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("order.tar.gz");
+    let staging = tmp.path().join("deep/staging");
+    linked_tar_gz_at(
+        &archive,
+        &[
+            Member::Dir("bin"),
+            // `..` resolves against `staging/bin`, which exists; `lib/tool` does
+            // not exist yet and only descends from the staging root.
+            Member::Link {
+                name: "bin/tool",
+                target: "../lib/tool",
+            },
+            Member::Dir("lib"),
+            Member::File {
+                name: "lib/tool",
+                data: b"#!/bin/sh\n",
+            },
+        ],
+    );
+    let _ = mount_linked(&archive, &staging);
+
+    assert!(
+        std::fs::symlink_metadata(staging.join("bin/tool")).is_ok(),
+        "a forward reference inside the mount must still be linked"
+    );
+    assert_eq!(
+        std::fs::read_to_string(staging.join("bin/tool")).unwrap(),
+        "#!/bin/sh\n",
+        "and it resolves once its target arrives"
+    );
+}
+
 /// The same shape one hop longer, so a fix that only special-cases two links
 /// still fails.
 #[cfg(unix)]
