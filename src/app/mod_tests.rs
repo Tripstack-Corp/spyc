@@ -28,9 +28,9 @@ mod guard_tests {
     /// Then 1350 → 600, once the reason the file was large got addressed rather
     /// than accommodated: over half of it was `///` field docs on `Runtime` and
     /// `ViewState`, so those two moved to `runtime.rs` / `view_state.rs` and
-    /// took their documentation with them. 1127 → 444.
+    /// took their documentation with them. 1127 → 425.
     ///
-    /// The ceiling is now generous relative to the file (444 of 600) because
+    /// The ceiling is now generous relative to the file (425 of 600) because
     /// what remains is a genuine module root — the mod graph, the shared
     /// enums, `App` itself, and the glue — and a root should have room to
     /// declare a new module without ceremony. It is still far below what would
@@ -218,14 +218,23 @@ mod guard_tests {
             if matches!(name, "mod.rs" | "mod_tests.rs" | "test_harness.rs") {
                 continue;
             }
-            // Delimited, not substring: a bare `contains` lets a LONGER sibling
-            // satisfy a shorter name. An undocumented `route.rs` would be
-            // covered by the string `archive_route.rs`, `tabs.rs` by
-            // `pane_tabs.rs`, `scroll.rs` by `pane_scroll.rs`, `ops.rs` by
-            // `file_ops.rs` — four real pairs in this tree, so the guard would
-            // fail open exactly where the names are most similar. Every bullet
-            // backticks its module, and a few name one by path.
-            if !agents.contains(&format!("`{name}`")) && !agents.contains(&format!("/{name}")) {
+            // The index BULLET, not any mention of the name. Three ways this
+            // fails open, in increasing subtlety — each one seen in this tree:
+            //
+            // - a bare `contains` lets a LONGER sibling satisfy a shorter name:
+            //   an undocumented `route.rs` is covered by the string
+            //   `archive_route.rs` appearing anywhere. So the name is delimited.
+            // - a *prose* mention then still counts as documentation. AGENTS.md
+            //   names "the `route.rs` template" twice in passages about
+            //   `paste_capture.rs` and about pure decisions in general, so
+            //   deleting `route.rs`'s own bullet left the guard green. Hence the
+            //   bold bullet form, which prose doesn't use.
+            // - a same-named module in a SUBDIRECTORY satisfies the top-level
+            //   one regardless, because only the basename is compared. The one
+            //   live collision (`mouse/route.rs`) is therefore written with its
+            //   directory in AGENTS.md; a new one has to be spelled that way too
+            //   or it will hold this guard open for its top-level namesake.
+            if !agents.contains(&format!("**`{name}`**")) {
                 missing.push(name.to_string());
             }
         }
@@ -233,9 +242,10 @@ mod guard_tests {
         assert!(
             missing.is_empty(),
             "src/app/ feature modules missing from the AGENTS.md module index: {missing:?}. \
-             Add a bullet for each, naming the module in backticks (AGENTS.md → \
-             \"Keep docs in sync\") — a module absent from the map is the \
-             worktree_clean.rs gap the June-2026 review caught."
+             Add a bullet for each, naming the module in BOLD backticks — **`name.rs`**, \
+             the form every index bullet uses (AGENTS.md → \"Keep docs in sync\"). A \
+             passing mention in prose deliberately does not count, and a module absent \
+             from the map is the worktree_clean.rs gap the June-2026 review caught."
         );
     }
 

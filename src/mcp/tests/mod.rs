@@ -1454,9 +1454,6 @@ fn searching_inside_a_mount_is_refused_rather_than_answered_emptily() {
     }
 }
 
-/// The archive branch of `get_file_content` used to answer before the root
-/// check, so "spyc has this mounted" was the only bound on it — and a mount can
-/// be anywhere. The member path can't be canonicalized (the mount root is a
 /// HIGH-2 at the layer that owns the ceiling.
 ///
 /// `read_member_content` refuses a member over `MAX_READ_BYTES` by testing
@@ -1529,6 +1526,9 @@ fn an_understated_member_size_does_not_defeat_the_mcp_read_cap() {
     assert!(ok.contains("honest"), "{ok:?}");
 }
 
+/// The archive branch of `get_file_content` used to answer before the root
+/// check, so "spyc has this mounted" was the only bound on it — and a mount can
+/// be anywhere. The member path can't be canonicalized (the mount root is a
 /// file, so everything under it is ENOTDIR), but the container is an ordinary
 /// file and that is what has to be inside the root.
 #[test]

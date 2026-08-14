@@ -81,6 +81,12 @@ pub mod fuzz {
     /// name at a time, so the property asserted here is positional — where the
     /// bytes ended up — not lexical.
     ///
+    /// Containment is not the only lie an archive tells. A seekable member is
+    /// also read back under a byte ceiling, because a zip understating its
+    /// declared size defeated a cap that trusted the declaration — a property
+    /// about *how many* bytes arrive, which no amount of asserting where they
+    /// land can reach.
+    ///
     /// The first input byte picks the container flavor and the rest is its
     /// content, so one corpus serves all four formats.
     pub fn archive_container(data: &[u8]) {
@@ -90,6 +96,9 @@ pub mod fuzz {
         // and the extract budget are both reachable rather than theoretical.
         const CAP: usize = 512;
         const BUDGET: u64 = 1 << 20;
+        // A per-read ceiling in the same spirit as the MCP tools' 100 KB, small
+        // enough that a modest corpus entry can reach it.
+        const READ_CAP: u64 = 64 * 1024;
 
         let Some((&flavor, body)) = data.split_first() else {
             return;
@@ -123,6 +132,24 @@ pub mod fuzz {
                 if let Ok(indexed) = crate::archive::read::index_seekable(&archive, format, CAP) {
                     for entry in &indexed.index.entries {
                         let _ = crate::archive::read::materialize(&archive, entry, &staging);
+                        // A read cap bounds the BYTES, not the archive's claim
+                        // about them. A zip understating its uncompressed size
+                        // walked straight past the MCP 100 KB ceiling and handed
+                        // back the real stream (HIGH-2), and nothing here would
+                        // have noticed: this target asserted where bytes LAND
+                        // and never how many arrive. `materialize` is uncapped
+                        // by design — the mount budget is its ceiling — so the
+                        // question goes to the function the readers call.
+                        if let Ok(bytes) =
+                            crate::archive::read::member_bytes_within(&archive, entry, READ_CAP)
+                        {
+                            assert!(
+                                bytes.len() as u64 <= READ_CAP,
+                                "{}: {} bytes came back under a {READ_CAP}-byte cap",
+                                entry.inner,
+                                bytes.len()
+                            );
+                        }
                     }
                 }
             }

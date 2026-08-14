@@ -143,9 +143,11 @@ impl Resolver {
     /// that every listed single-byte key actually resolves to its action, so
     /// the popup can't silently drift from the real bindings.
     ///
-    /// Multi-key display strings (`"a h"`, `"1-9"`, `"a-z"`, `"↓"`) name a
-    /// set/range/non-char key; only single-byte ASCII entries are
-    /// feed-verified. A [`ChordEntry::Sub`] names a key that opens a nested
+    /// A display string may name several keys for one action (`"a h"`,
+    /// `"\\ C"`); each single-byte ASCII one among them is feed-verified, so an
+    /// alias listed in a shared row is checked like any other key. A range
+    /// (`"1-9"`, `"a-z"`) or a non-char key (`"↓"`) names no key that can be
+    /// fed and is not. A [`ChordEntry::Sub`] names a key that opens a nested
     /// submenu rather than firing an action.
     pub fn continuations(&self) -> Vec<ChordEntry> {
         use Action as A;
