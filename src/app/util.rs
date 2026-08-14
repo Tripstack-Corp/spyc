@@ -14,7 +14,7 @@ use ratatui::Frame;
 ///
 /// Takes the child's screen and the rect it was drawn into rather than reaching
 /// for either, which is what lets the `&self` render pass call it.
-pub fn place_pty_cursor_from_screen(
+pub(super) fn place_pty_cursor_from_screen(
     frame: &mut Frame,
     screen: &vt100::Screen,
     rect: ratatui::layout::Rect,
@@ -34,7 +34,7 @@ pub fn place_pty_cursor_from_screen(
 /// How long after a focus-switch chord (`^a-j` / `^a-k`) a same-key
 /// Press/Repeat is treated as a stray bounce and dropped. Covers
 /// system key-repeat (~30-50 ms) and kitty-keyboard Repeat events.
-pub const POST_CHORD_BOUNCE_WINDOW: Duration = Duration::from_millis(60);
+pub(super) const POST_CHORD_BOUNCE_WINDOW: Duration = Duration::from_millis(60);
 
 /// Whether `key` is a stray bounce of a just-completed focus-switch
 /// chord that should be swallowed (rather than leaked to the now-
@@ -47,7 +47,7 @@ pub const POST_CHORD_BOUNCE_WINDOW: Duration = Duration::from_millis(60);
 /// `^a-j` / `^a-k` lost every chord after the first (the second `j`/`k`
 /// landed inside the bounce window and was dropped before reaching the
 /// resolver).
-pub fn is_post_chord_bounce(
+pub(super) fn is_post_chord_bounce(
     stamp: Option<(std::time::Instant, KeyCode)>,
     key: KeyEvent,
     resolver_pending: bool,
@@ -72,7 +72,7 @@ pub fn is_post_chord_bounce(
 /// arrives. So we ALSO cap the wait at `max_defer` from the *first*
 /// event of the current busy stretch, ensuring per-file markers can't
 /// stay stale forever just because the FS won't go quiet.
-pub fn should_fire_refresh(
+pub(super) fn should_fire_refresh(
     last_event_at: Option<std::time::Instant>,
     last_refresh: std::time::Instant,
     first_event_after_refresh: Option<std::time::Instant>,
@@ -91,7 +91,7 @@ pub fn should_fire_refresh(
 }
 
 /// Keys we intercept even when the pane is focused.
-pub const fn is_spyc_meta_when_pane_focused(key: KeyEvent, resolver_pending: bool) -> bool {
+pub(super) const fn is_spyc_meta_when_pane_focused(key: KeyEvent, resolver_pending: bool) -> bool {
     use crossterm::event::KeyModifiers;
     // Continuation of a multi-key spyc sequence must stay with spyc.
     if resolver_pending {
