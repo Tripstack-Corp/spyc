@@ -115,7 +115,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 
 | Key | Action |
 |-----|--------|
-| `^\` / `F10` | Toggle pane |
+| `^\` / `F10` / `^a \` / `^a C` | Toggle pane |
 | `F9` | Open pane with `claude --resume` |
 | `^a j` / `^a k` | Switch focus |
 | `^a c` | New tab |
