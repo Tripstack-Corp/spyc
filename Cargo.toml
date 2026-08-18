@@ -14,7 +14,13 @@ categories = ["command-line-utilities", "filesystem"]
 # README, LICENSE, CHANGELOG. Drop the dev/CI/media bulk (`docs/` alone is ~5 MB
 # of assets + archives) so `cargo package` stays small and `cargo install` fast.
 exclude = [
-    "/docs",
+    # `/docs` as a whole is not shipped, but `docs/ABOUT.md` is compiled INTO the
+    # binary (`src/app/about.rs` include_str!s it), so excluding it makes the
+    # published crate fail to build. That is invisible until `cargo publish`
+    # runs, which only happens on a tag — it broke the v2.1.0 release.
+    # Guarded by `about_md_is_packaged`.
+    "/docs/**",
+    "!/docs/ABOUT.md",
     "/.github",
     "/.aislop",
     "/fuzz",
