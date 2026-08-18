@@ -593,6 +593,93 @@ mod guard_tests {
     /// Walk every `.rs` under `dir`, INCLUDING test files — comment slop in a
     /// test is still slop (the offender that prompted the guard was a test).
     /// `scan_rs`'s sibling without the production-only skip list.
+    /// Every file compiled INTO the binary has to survive `cargo package`.
+    ///
+    /// `src/app/about.rs` does `include_str!("../../docs/ABOUT.md")` while
+    /// `Cargo.toml` excluded `/docs` from the published crate, so the packaged
+    /// tarball could not compile — `couldn't read src/app/../../docs/ABOUT.md`.
+    /// Nothing caught it: `cargo publish` runs only on a tag, so the feature
+    /// merged in June and the failure surfaced at the v2.1.0 release, after the
+    /// tag was public, with crates.io skipping that version entirely.
+    ///
+    /// Checked structurally because the real check is a full build
+    /// (`cargo publish --dry-run`): a bundled path that escapes `src/` must not
+    /// be swept up by an `exclude` entry unless a `!` re-include names it back.
+    #[test]
+    fn every_bundled_file_survives_cargo_package() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest = std::fs::read_to_string(root.join("Cargo.toml")).expect("read Cargo.toml");
+        let start = manifest
+            .find("exclude = [")
+            .expect("Cargo.toml carries an exclude list");
+        let end = start + manifest[start..].find(']').expect("exclude list closes");
+        let patterns: Vec<&str> = manifest[start..end]
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .filter_map(|l| l.split('"').nth(1))
+            .collect();
+
+        let mut offenders = Vec::new();
+        scan_all_rs(&root.join("src"), &mut |path, src| {
+            for line in src.lines() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("//") {
+                    continue;
+                }
+                for macro_call in ["include_str!(", "include_bytes!("] {
+                    let Some((_, rest)) = trimmed.split_once(macro_call) else {
+                        continue;
+                    };
+                    let Some(literal) = rest.split('"').nth(1) else {
+                        continue;
+                    };
+                    // A path that stays inside `src/` is packaged either way.
+                    if !literal.contains("../") {
+                        continue;
+                    }
+                    let mut at = path.parent().expect("a file has a parent").to_path_buf();
+                    for part in std::path::Path::new(literal).components() {
+                        match part {
+                            std::path::Component::ParentDir => {
+                                at.pop();
+                            }
+                            std::path::Component::CurDir => {}
+                            other => at.push(other),
+                        }
+                    }
+                    let Ok(rel) = at.strip_prefix(root) else {
+                        continue;
+                    };
+                    let rel = rel.to_string_lossy().replace('\\', "/");
+                    let re_included = patterns
+                        .iter()
+                        .any(|p| p.starts_with('!') && p.trim_start_matches(['!', '/']) == rel);
+                    let excluded = patterns.iter().any(|p| {
+                        if p.starts_with('!') {
+                            return false;
+                        }
+                        let base = p.trim_start_matches('/').trim_end_matches("/**");
+                        let base = base.trim_end_matches('/');
+                        !base.is_empty() && (rel == base || rel.starts_with(&format!("{base}/")))
+                    });
+                    if excluded && !re_included {
+                        let by = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                        offenders.push(format!("{rel} (bundled by {by})"));
+                    }
+                }
+            }
+        });
+        offenders.sort();
+
+        assert!(
+            offenders.is_empty(),
+            "these are compiled into the binary but excluded from the published crate, so \
+             `cargo publish` fails its verification build — and only on a tag, once the \
+             release is already public. Add a `\"!/<path>\"` re-include beside the exclude \
+             entry that swallows it. Offenders: {offenders:?}"
+        );
+    }
+
     fn scan_all_rs(dir: &std::path::Path, f: &mut dyn FnMut(&std::path::Path, &str)) {
         for entry in std::fs::read_dir(dir).expect("read dir") {
             let path = entry.expect("dir entry").path();
