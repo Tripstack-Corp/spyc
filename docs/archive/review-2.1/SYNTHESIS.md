@@ -8,6 +8,32 @@
 
 ## 1. Verdict
 
+> **UPDATED 2026-08-14 (eighth pass) — THE BLOCKER HAD A THIRD CONSEQUENCE.**
+> `main` at `77d6826`. An adversarial read of #406–#415 — the seventh pass's own
+> output — found a **tag-blocking escape in the containment code that pass had
+> just verified**. `link_target_contained` canonicalized the link's *parent* and
+> folded `..` in the *target* on paper, so `d/link1 -> ..` (contained) composed
+> with `L -> d/link1/../ESCAPED` into a staged link resolving outside the mount.
+> A file beside the mount was read through it. Fixed #417; four guards green on
+> less than they claimed, #418.
+>
+> **B1 and HIGH-3 were both closed correctly.** B1 named the escape's *write*
+> consequence, HIGH-3 its *MCP read*; both fixes hold. The third consequence —
+> the **TUI** readers, three of which follow a staged link, one of them
+> persisting the bytes to disk — was never filed, and the primitive survived in
+> the direction nobody probed: the link *target*, not the member *destination*.
+> §7 records "a finding naming N sites is closed when N are fixed" twice at HIGH.
+> This is that shape applied to *consequences*, where no guard can enumerate for
+> you.
+>
+> **No advisory.** Archive browsing has never shipped — absent from v2.0.3, #301
+> in no tag — so the whole surface lived only on the unreleased stream. v2.1.0 is
+> its first release and carries the fix.
+>
+> **Severity tiers remaining: 0 at every tier.** 49 PRs, #346–#418.
+>
+> ---
+>
 > **UPDATED 2026-08-12 (seventh pass) — THE RECORD WAS WRONG TWICE.**
 > `main` at `76f2091`. Verifying §7's closure claims against the *code* rather
 > than the record found **two findings marked closed that were still live**, both
@@ -629,8 +655,53 @@ found the second.
 site was re-verified: H4 (guard-enforced), H5, H6, H8 (five demotion tests), H9
 (all three modules), M1, M3 (guard-enforced), M5, M23. Those hold.
 
+### Eighth pass — an adversary on the seventh pass's own output (2026-08-14)
+
+The seventh pass closed with "nothing still open, verified against the code."
+An independent adversarial read of #406–#415 — the ten commits that pass
+produced — found a **tag-blocking escape in the containment code the pass had
+just verified**, plus four guards green on less than they claimed.
+
+| PR | closes | what it showed |
+|---|---|---|
+| #417 | a staged link resolving outside the mount | `link_target_contained` canonicalized the link's *parent* and folded `..` in the *target* lexically. `d/link1 -> ..` is contained; `L -> d/link1/../ESCAPED` folds to a path inside staging while `open()` follows `link1` first and climbs out. Read a file outside the mount through a link inside it. |
+| #418 | four guards | The module index was satisfied by a *prose* mention; the declared-size guard checked one spelling of "allocate"; the chord walk asserted a floor of 8 against 16 states; a popup alias sharing a row was never fed. |
+
+**B1 and HIGH-3 were both closed correctly, and that is the finding.** The
+review filed the escape's two *known* consequences separately — B1 as arbitrary
+file **write**, HIGH-3 as the **MCP read**, the latter explicitly noting that
+`is_file()` follows staging symlinks. Both fixes hold: `contained_dest` still
+refuses to traverse a link component, and the MCP read still canonicalizes
+against the mount. What no finding named was the third consequence — the **TUI**
+readers — and the escape primitive itself survived in a direction nobody had
+probed: the link *target* rather than the member *destination*.
+
+Traced afterwards, three of the six effects routed through the staging tree
+follow a staged link: inventory yank (`fs::copy`, which persists the target's
+bytes into the on-disk cache), pager open (`fs::metadata`), and pipe
+(`fs::read_to_string`). Copy-out, `:longlist` and `:filetype` use
+`symlink_metadata` and do not.
+
+**The recurring shape, one tier up.** §7 records it twice at HIGH: a finding
+naming N *sites* is closed when N are fixed. B1 is the same shape applied to
+*consequences* — and unlike sites, which a structural guard can enumerate for
+you, the consequence list is the part no test can check. Nothing was wrong with
+either fix; the enumeration was short by one, and "verified against the code"
+answered only the questions the record already knew to ask.
+
+**No advisory is needed.** Archive browsing has never shipped: `src/archive/` is
+absent from v2.0.3 and #301 is contained in no tag. The whole mount surface —
+the pre-#347 spelling check, the fold that replaced it, and every consumer above
+— has only ever existed on the unreleased CURRENT stream. v2.1.0 is the first
+release to carry the feature, and it carries the fix.
+
 ### Still open
 
-**Nothing, at any tier — and this time verified against the code rather than the
-record.** All 58 findings closed across seven passes and 47 PRs (#346–#415). The
-2.1 tag is unblocked on review grounds.
+**Nothing, at any tier.** All 58 original findings closed, plus the two the
+eighth pass added, across eight passes and 49 PRs (#346–#418). The 2.1 tag is
+unblocked on review grounds.
+
+Stated once, plainly, because the seventh pass phrased it more strongly than it
+had earned: this is a claim about every question asked so far, not about the
+code. The eighth pass exists because the seventh forgot that distinction, and
+the eighth is not exempt from it.
