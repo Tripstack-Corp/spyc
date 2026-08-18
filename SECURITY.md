@@ -77,6 +77,32 @@ access can read anything you can read, and spyc does not try to prevent
 it. Do not treat the MCP tool surface as a containment mechanism for an
 untrusted agent.
 
+**Attribution is not authorization, and no per-pane scheme would change
+that.** A recurring proposal is to narrow the allowed set to *the calling
+pane's own worktree*, which needs the server to know which pane a call
+came from. Every mechanism for that is forgeable by the agent itself:
+
+- An env-supplied pane id (`SPYC_PANE_ID`, whether sent in the
+  `initialize` handshake or as a tool argument) is set in an environment
+  the agent controls, so it can claim a sibling's id before the proxy
+  starts.
+- A socket per pane is forgeable too, just less obviously. The sockets
+  are listable and `0600`-owned by **the same uid the agent runs as**,
+  so nothing stops it connecting to another pane's.
+
+Per-pane roots would therefore stop an *accident*, not an *attempt* —
+and the threat this section describes is the deliberate one, a
+prompt-injected agent under a harness that auto-approves MCP calls.
+Precisely the actor who would forge an id.
+
+That is not an argument against building attribution: it would make
+`get_spyc_context` answer for the caller instead of the focused column,
+let a scope claim bind to a pane, and make `mcp_log` able to say which
+pane read what. Those are ergonomics and auditability, which are worth
+having. It is an argument against describing it as a boundary once it
+exists. Real containment needs OS-level isolation — a separate uid, a
+container — which is outside spyc's scope.
+
 ## Supply-chain controls (what we do)
 
 - **`Cargo.lock` is committed.** Every build resolves the same set
