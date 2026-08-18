@@ -2,6 +2,14 @@
 
 All notable changes to spyc. Entries from v1.57.0 onward are generated from the conventional-commit history by [git-cliff](https://git-cliff.org) (config in `cliff.toml`); regenerate the pending section with `make changelog` and cut a release with `make release-prep` then `make release-tag` (see `docs/RELEASE_ENGINEERING.md`). Entries at v1.56.0 and earlier are the original hand-written log, kept verbatim.
 
+## [2.1.1] - 2026-08-18
+
+### Bug Fixes
+- **package**: Ship docs/ABOUT.md, which the binary compiles in (#426)
+
+### Miscellaneous
+- **ci**: Bump taiki-e/install-action from 2.85.10 to 2.85.13 in the github-actions group (#419)
+
 ## [2.1.0] - 2026-08-18
 
 ### Features
