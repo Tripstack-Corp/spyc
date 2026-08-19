@@ -10,16 +10,13 @@ this document's proposal.
 ## Thesis
 
 2.2 hardens the daily-driver loop and lands the prerequisites Projects needs,
-so 2.3 starts on an approved design instead of a refactor swamp.
+so 2.3 starts on an approved design rather than a refactor.
 
-Those two halves are not a compromise between features and hygiene. 2.1 was
-the release where the tool got used, and using it produced both lists: the
-bugs are the ones a person hits weekly, and the refactors are the ones 2.3
-would otherwise have to do while also designing Projects. Doing them first
-means the Projects PR series argues about state ownership rather than about
-`state.left`.
+Both lists came out of daily-driving 2.1: the bugs are the ones a person hits
+weekly, and the refactors are the ones 2.3 would otherwise do while also
+designing Projects.
 
-No Projects implementation code lands in 2.2. The Projects *design doc* does.
+No Projects implementation code lands in 2.2 — only the design doc.
 
 ## Scope
 
@@ -43,73 +40,67 @@ the `spyc --mcp` proxy reads `$SPYC_PANE_ID` from its own environment and
 sends it in the `initialize` handshake; the server binds it to that connection
 for the connection's lifetime.
 
-The pieces are already in place on both ends. `open_pane_tab_into`
-(`src/app/pane_tabs.rs`) builds `TabInfo` before the spawn precisely so
-`info.id` can go into the child's env as `SPYC_PANE_ID`, and the proxy — which
-the agent re-execs — inherits it. What is missing is that `mcp::run` →
-`run_proxy` forwards JSONL verbatim, and read-tool dispatch resolves context
-through the PID-scoped `.spyc-context-<pid>.json` file, which carries no pane
-identity.
+Both ends already carry the id. `open_pane_tab_into` (`src/app/pane_tabs.rs`)
+builds `TabInfo` before the spawn so `info.id` can go into the child's env as
+`SPYC_PANE_ID`, and the proxy — re-exec'd by the agent — inherits it. What is
+missing: `mcp::run` → `run_proxy` forwards JSONL verbatim, and read-tool
+dispatch resolves context through the PID-scoped `.spyc-context-<pid>.json`
+file, which carries no pane identity.
 
 What this closes:
 
 - **The F1 target design.** The decisions-log entry names per-pane root
-  validation as where the MCP `root` override should end up, blocked on
-  exactly this transport. With attribution, the session-wide allowed set stays
-  as the fallback and per-pane roots *narrow* it.
+  validation as where the MCP `root` override should end up, blocked on this
+  transport. With attribution, the session-wide allowed set stays as the
+  fallback and per-pane roots narrow it.
 - **`get_spyc_context` answering for the caller.** Today it reports the focused
-  column, so an agent working in worktree X is told about worktree Y the moment
-  the user browses elsewhere. This is the change a user notices tomorrow.
+  column, so an agent working in worktree X is told about worktree Y whenever
+  the user browses elsewhere.
 - **Scope-registry ownership.** `register_scope` claims are owner-labelled by
-  convention; attribution lets a claim bind to a pane and `release_scope`
+  convention. Attribution lets a claim bind to a pane, and `release_scope`
   refuse one the caller doesn't own.
 
-The proposal's four conditions on B are requirements, not suggestions: bind the
-id to the connection and never re-read it per call; validate it against live
-tabs on receipt and drop it if unknown; keep every unattributed path working;
-and say in SECURITY.md that this is attribution, not authorization. That last
-one is already written — #429 added it — so this work must not contradict it.
+The proposal's four conditions on B all hold: bind the id to the connection and
+never re-read it per call; validate it against live tabs on receipt and drop it
+if unknown; keep every unattributed path working; and say in SECURITY.md that
+this is attribution, not authorization. #429 already wrote that last paragraph,
+so this work must not contradict it.
 
-**Migration.** Non-breaking by construction. An older `spyc --mcp` proxy — one
-launched from a `.mcp.json` written by a previous release, or a binary the user
-hasn't updated — omits the field, and the server treats that connection exactly
-as it does today. Older proxies stay unattributed through at least one release;
-nothing may require the field.
+**Migration.** An older `spyc --mcp` proxy — launched from a `.mcp.json`
+written by a previous release, or an un-updated binary — omits the field, and
+the server treats that connection as it does today. Older proxies stay
+unattributed through at least one release; nothing may require the field.
 
 ## 2. #40 — one spyc per agent
 
 Abstract away the hardcoded `left`/`right` column references so what a column
-holds can change. The `Commander` extraction (vsplit Stage 2) already did the
-hard half: per-column browser state — `listing`, `cursor`, `rows`, `picks`,
+holds can change. The `Commander` extraction (vsplit Stage 2) did most of the
+work: per-column browser state — `listing`, `cursor`, `rows`, `picks`,
 `masks`, `temp_filter`, `view`, sort, `list_generation`, `git_cache`, harpoon —
 is one struct, and `cur()` / `cur_mut()` / `col(side)` are the accessors. What
 remains is the naming: `state.left` and `state.right` appear **~67 times in
-production modules** — `#[cfg(test)]` tails stripped with
-`guard_support::production_half`, the test harness excluded — `Side` is a
+production modules** (`#[cfg(test)]` tails stripped with
+`guard_support::production_half`, the test harness excluded), `Side` is a
 two-variant enum (`Left`, `Right`), and `right: Option<Commander>` encodes
 "there may be a second one" in the type.
 
 Derive that number the same way before acting on it. `grep -c` over `src/`
-returns 204, threefold the production surface, because the house convention
-keeps tests in the same file: ~50 of those sit in in-file `#[cfg(test)]` tails
-and ~87 more in `harness_tests/` and `test_harness.rs`. Quoting the raw count
-is the exact trap the
-800-LoC paragraph this plan's ROADMAP section replaced was written about.
+returns 204 — threefold the production surface, because the house convention
+keeps tests in the same file. About 50 of those sit in in-file `#[cfg(test)]`
+tails and ~87 in `harness_tests/` and `test_harness.rs`.
 
-The existing guard `state_left_listing_dir_uses_are_allowlisted`
-(`src/app/mod_tests.rs`) already enforces the rule for the one case that bit —
-a spawn/restore cwd must go through `cur()`. It allowlists `run.rs` and
-`bootstrap.rs` and covers only `state.left.listing.dir`. Widening its needle is
-the cheap way to measure progress here, and a way to make the refactor stick.
+The guard `state_left_listing_dir_uses_are_allowlisted` (`src/app/mod_tests.rs`)
+already enforces the rule for the case that bit: a spawn/restore cwd must go
+through `cur()`. It allowlists `run.rs` and `bootstrap.rs`, and covers only
+`state.left.listing.dir`. Widening its needle measures progress and keeps the
+refactor from eroding.
 
-Render and fs-watch legitimately name a specific column, so this is not a
-"remove every mention" exercise. The target is that *addressing* a column is
-always by handle, so a future `Vec<Commander>` (or a per-project column set) is
-a change to one place rather than 114.
+Render and fs-watch legitimately name a specific column, so not every mention
+goes. The target is that *addressing* a column is always by handle, so a future
+`Vec<Commander>` or per-project column set changes one place.
 
-Standalone value even if 2.3 never happens: the guard's own message describes
-the class of bug this prevents — an op targeting column a while the user works
-in column b.
+This has value on its own: the guard's message describes the bug it prevents —
+an op targeting column a while the user works in column b.
 
 ## 3. #58 — configurable startup pane tabs
 
@@ -120,86 +111,82 @@ grid.
 
 **Step zero is re-resolving the plan's file pointers**, which predate the MVU
 decomposition and resolve nowhere. `open_pane_tab` is now `src/app/pane_tabs.rs`
-(not `src/app/mod.rs:4646`), `App::new` is `src/app/bootstrap.rs` (not
-`:875`); `PaneConfig` (`src/config/mod.rs`) and `Action::PaneTabByIndex`
+(not `src/app/mod.rs:4646`), `App::new` is `src/app/bootstrap.rs` (not `:875`);
+`PaneConfig` (`src/config/mod.rs`) and `Action::PaneTabByIndex`
 (`src/keymap/action.rs`) kept their homes but not their line numbers. The plan
-now carries this warning in its own header — do the pass before writing code,
-not while.
+carries this warning in its own header. Do the pass first.
 
-Two things the plan predates and should be reconciled with:
+Two things the plan predates:
 
 - **`[pane] new_tab_cwd`** already decides a new tab's default cwd
-  (`AppState::default_pane_cwd`). A per-tab `cwd` in config is an override of
-  that, not a parallel mechanism.
-- **Session restore** already round-trips a multi-tab pane. Startup tabs must
-  not fight it: a `-r` resume restores what was saved; the config set is what
-  you get on a *fresh* launch.
+  (`AppState::default_pane_cwd`). A per-tab `cwd` in config overrides that
+  rather than running beside it.
+- **Session restore** already round-trips a multi-tab pane. A `-r` resume
+  restores what was saved; the config set applies to a fresh launch.
 
 **Why it is projects-prep.** A declarative tab set — commands plus cwds, named
-and reproducible — is the config half of a 2.3 project definition. Getting the
-schema right once here is cheaper than migrating it later.
+and reproducible — is the config half of a 2.3 project definition, so the
+schema is worth getting right here.
 
 ## 4. #8 — session forking (`^a f`)
 
 Duplicate a pane tab so an agent conversation can branch without losing the
-prior line of inquiry. The issue's own assessment — "implementable on current
-plumbing" — still holds; the plumbing has grown since.
+prior line of inquiry. The issue's assessment — "implementable on current
+plumbing" — still holds.
 
 What exists: `TabInfo` carries the command, the cwd and the pinned session id;
 `open_pane_tab_into` takes a `TabSlot` so a spawn can append or replace; each
 agent profile owns its resume mechanics (`ResumeAction::ClaudeStdin` types
 `/resume <sid>` into a fresh spawn with verify-and-retry, codex resumes by
-UUID, agy by `--conversation`, zot by `--continue`); and `-r` already drives
-all four. A fork is that same restore path aimed at a *live* tab's session id
-instead of a saved one.
+UUID, agy by `--conversation`, zot by `--continue`); and `-r` drives all four.
+A fork is that restore path aimed at a live tab's session id rather than a
+saved one.
 
-The two questions the implementation has to answer:
+Two questions the implementation has to answer:
 
-- **What "fork" means per agent.** Claude's `/resume` continues a conversation;
-  two panes on the same session id are two clients of one conversation, not two
-  branches of it. Whether spyc can offer a true branch depends on the agent, and
-  where it can't, the honest behaviour is a second view that says so rather than
-  a silent shared session.
+- **What "fork" means per agent.** Claude's `/resume` continues a conversation,
+  so two panes on the same session id are two clients of one conversation
+  rather than two branches. Whether a true branch is available depends on the
+  agent; where it isn't, say so in the UI instead of presenting a shared
+  session as a fork.
 - **Scrollback.** The issue asks for scrollback replayed. Where the history
   lives differs per agent and per mode — `docs/HARNESS.md` §3 is the map, and
   `^a v`'s source selection (capture vs on-disk transcript, `T` to swap) is the
-  existing machinery to reuse rather than duplicate.
+  existing machinery.
 
 `^a f` is a **pane-tier** binding, so it belongs on the `^a` prefix and its
-`Action::tier()` must be `Pane` — the guard
+`Action::tier()` must be `Pane`. The guard
 `leader_and_pane_namespaces_respect_tiers` fails the build otherwise.
 
 ## 5. #71 — prompt templates in `.spycrc.toml`
 
 User-defined macros that send a pre-composed prompt to the focused agent with
-picks / inventory / cursor substituted — the thing that turns spyc into a
-keyboard-driven launcher for repeated workflows ("review these", "explain this
-diff").
+picks / inventory / cursor substituted — a keyboard-driven launcher for
+repeated workflows ("review these", "explain this diff").
 
-The two mechanisms to build on, both already load-bearing:
+Two mechanisms to build on:
 
-- **`shell::expand_percent`** is the substitution engine the `unix` DSL verb
-  uses (`%` expands to the target paths, `%%` is a literal percent, and it
-  *refuses* rather than silently mis-expanding a non-UTF-8 path). A prompt
-  template wants the same expander, possibly a wider token set.
+- **`shell::expand_percent`** is the substitution engine behind the `unix` DSL
+  verb: `%` expands to the target paths, `%%` is a literal percent, and it
+  refuses rather than silently mis-expanding a non-UTF-8 path. A prompt
+  template wants the same expander, possibly with a wider token set.
 - **`send_selection_to_pane`** (`src/app/clipboard.rs`) is the existing
-  spyc→pane text path. Its anchoring is decided rather than ambiguous, because
-  §6 lands Option A first: **relative under the target pane's live cwd,
-  absolute otherwise**. A template that emits paths uses that policy — it does
-  not get to invent a second one. This is why the two are sequenced: an ad hoc
-  anchor call inside #71 would become de facto handoff policy without the
-  design work behind it.
+  spyc→pane text path. Its anchoring is settled by §6 landing Option A first:
+  **relative under the target pane's live cwd, absolute otherwise**. A template
+  that emits paths uses that policy. This is why the two are sequenced — an ad
+  hoc anchor chosen inside #71 would become handoff policy without the design
+  work behind it.
 
 **Binding shape.** This is a new DSL verb alongside `unix` / `command` / `lua` /
-`jump`. Every one of those is `is_executing` — only `$HOME/.spycrc.toml` may
-bind them — and a prompt template that can be triggered by a project-local
-config would let a repo dictate what gets typed at an agent. Decide that
-explicitly, and default to `is_executing`.
+`jump`. All four are `is_executing`, so only `$HOME/.spycrc.toml` may bind
+them. A prompt template triggered by a project-local config would let a repo
+dictate what gets typed at an agent, so decide this explicitly and default to
+`is_executing`.
 
 ## 6. The daily-driver bug set
 
-Six issues. Each paragraph below is orientation — where the behaviour lives
-and what is already known — not a fix design.
+Six issues. Each paragraph says where the behaviour lives and what is already
+known. None of them is a fix design.
 
 ### #326 — the first keystrokes into a fresh pane are dropped
 
@@ -211,21 +198,20 @@ child's own banner, all lost the same 10 characters), not focus, and not the
 child's `clear` (an instrumented `read -r` received the truncated string, so the
 bytes never reached the pty).
 
-A *fixed* prefix that no delay changes points at something that **consumes**
-bytes rather than something that isn't ready yet. The spawn path is
-`open_pane_tab_into` (`src/app/pane_tabs.rs`) → `Pane::spawn_with_env`
-(`src/pane/mod.rs`) → `PtyHost::spawn` with `exec_replace: true`, and
-`shell::pane_invocation` turns that into `$SHELL -i -c 'exec <cmd>'`. That
-wrapper is an **interactive** shell doing a full rc pass on the pty before it
-`exec`s — and an interactive shell's line editor flushing or reading pending
-input is exactly a "consumes N bytes" mechanism. `pane_invocation` already
-drops the `-i` when the pane command is itself an rc-sourcing shell (SPYC-TRAP
+A fixed prefix that no delay changes suggests something is consuming the bytes
+rather than not being ready for them. The spawn path is `open_pane_tab_into`
+(`src/app/pane_tabs.rs`) → `Pane::spawn_with_env` (`src/pane/mod.rs`) →
+`PtyHost::spawn` with `exec_replace: true`, and `shell::pane_invocation` turns
+that into `$SHELL -i -c 'exec <cmd>'`. That wrapper is an interactive shell
+doing a full rc pass on the pty before it `exec`s, and an interactive shell's
+line editor can flush or read pending input. `pane_invocation` already drops
+the `-i` when the pane command is itself an rc-sourcing shell (SPYC-TRAP
 `pane-shell-rc-double-source`), so the invocation policy is one pure function
 and cheap to vary in a test.
 
-That is a hypothesis, not a diagnosis. The discriminating experiment is cheap:
-spawn a pane running `cat > /tmp/q.txt`, type immediately, and compare the byte
-count under `-i` and without it. Land the failing test first.
+That is a hypothesis. The discriminating experiment: spawn a pane running
+`cat > /tmp/q.txt`, type immediately, and compare the byte count with and
+without `-i`. Land the failing test first.
 
 ### #327 — a partially-failed `remove_worktree` strands the worktree
 
@@ -239,199 +225,190 @@ unlinked the `.git` gitfile, which is the marker both retry paths key on:
 `safe_remove_worktree` (`src/app/worktree_clean.rs`) refuses with "not a git
 worktree (no .git)", and `git worktree remove` refuses with "validation failed".
 The branch deletion never runs either, because `safe_remove_worktree` does it
-*after* `remove_force`.
+after `remove_force`.
 
-So the operation is not resumable — the first failure destroys the marker a
-retry would need. The issue's suggested direction (rename the worktree dir
-aside first, so a failed delete leaves orphaned bytes rather than a half
-worktree) is a starting point; the minimum is that a missing `.git` beside a
-live admin-dir entry reads as "finish the removal", not "this was never a
-worktree".
+The operation is therefore not resumable: the first failure destroys the marker
+a retry needs. The issue's suggested direction — rename the worktree dir aside
+first, so a failed delete leaves orphaned bytes rather than a half worktree —
+is a starting point. The minimum is that a missing `.git` beside a live
+admin-dir entry reads as "finish the removal".
 
-This one is worse than its frequency suggests, because
-`create_worktree`/`remove_worktree` is the workflow AGENTS.md tells every agent
-to use, and recovery is three manual git commands.
+Frequency understates it: `create_worktree`/`remove_worktree` is the workflow
+AGENTS.md tells every agent to use, and recovery is three manual git commands.
 
 ### #9 — `^a s` anchors paths on PROJECT_HOME, not on the pane's cwd
 
-Option A of [`PATH_HANDOFF_PLAN.md`](PATH_HANDOFF_PLAN.md), and only Option A.
-`send_selection_to_pane` (`src/app/clipboard.rs`) makes each selected path
-relative to `project_home` and leaves everything else absolute. When the pane's
-agent is working in a worktree rather than at the project root, the relative
-path it receives resolves against the wrong directory: the plan records
-spyc pasting `book-org/client-api-20-contract/docs`, the agent running
-`cd book-org/… ` from `~/src/tripstack_platform`, and getting
+Option A of [`PATH_HANDOFF_PLAN.md`](PATH_HANDOFF_PLAN.md), and nothing else
+from it. `send_selection_to_pane` (`src/app/clipboard.rs`) makes each selected
+path relative to `project_home` and leaves everything else absolute. When the
+pane's agent is working in a worktree rather than at the project root, the
+relative path resolves against the wrong directory. The plan records spyc
+pasting `book-org/client-api-20-contract/docs`, the agent running
+`cd book-org/…` from `~/src/tripstack_platform`, and getting
 `no such file or directory`.
 
-It is in the bug set, not the feature list, for the same reason #327 is: it
-breaks in exactly the workflow AGENTS.md prescribes — an agent in its own
-worktree, driven from a spyc column browsing somewhere else.
+It sits in the bug set for the same reason #327 does: it breaks in the workflow
+AGENTS.md prescribes — an agent in its own worktree, driven from a spyc column
+browsing somewhere else.
 
-The infrastructure is already there. `TabEntry::live_cwd` (`src/pane/tabs.rs`)
-tracks the pane's actual cwd, refreshed off-thread behind a cache via
+The infrastructure exists. `TabEntry::live_cwd` (`src/pane/tabs.rs`) tracks the
+pane's actual cwd, refreshed off-thread behind a cache via
 `proc_cwd::cwd_for_pid` (`readlink /proc/<pid>/cwd` on Linux, in-process
-`sysinfo` on macOS since #356, `None` elsewhere). So the change is an anchor
-swap plus the plan's no-`~`-collapse rule — claude's `Read` wants real
-absolute paths and won't reliably expand `~`, and the in-tree relative path
-already carries the terseness.
+`sysinfo` on macOS since #356, `None` elsewhere). The change is an anchor swap
+plus the plan's no-`~`-collapse rule — claude's `Read` wants real absolute
+paths and won't reliably expand `~`, and the in-tree relative path already
+carries the terseness.
 
-The property that makes this a fix rather than a design question is how it
-degrades: an unknown or stale `live_cwd` falls through to the absolute tier,
-which is verbose but correct. Nothing silently resolves to the wrong file.
+It degrades safely: an unknown or stale `live_cwd` falls through to the
+absolute tier, which is verbose but correct.
 
-Everything else in that document — the terse-token expansion, the hooks, the
-four-channel topology argument, the consumer-aware `^a s`/`^a S` split — stays
-under [#59](https://github.com/Tripstack-Corp/spyc/issues/59) and out of 2.2.
+The rest of that document — terse-token expansion, the hooks, the four-channel
+topology argument, the consumer-aware `^a s`/`^a S` split — stays under
+[#59](https://github.com/Tripstack-Corp/spyc/issues/59) and out of 2.2.
 
 ### #34 — Claude PTY scrollback artifacts
 
-Half of this is already answered and the issue predates the answer.
-`docs/HARNESS.md` §3 documents that **inline** claude is the one agent with two
-history sources — spyc's vt100 capture (the grid, which accumulates repaint
+Half of this is already answered, and the issue predates the answer.
+`docs/HARNESS.md` §3 documents that inline claude is the one agent with two
+history sources: spyc's vt100 capture (the grid, which accumulates repaint
 artifacts from progress bars, spinners and cursor repositioning) and claude's
 own on-disk transcript (real text, searchable). #391 shipped `T` to swap
-between them, and `[pane] claude_transcript_scrollback` picks the default. For
-*reading* history, the artifact-free source exists.
+between them, and `[pane] claude_transcript_scrollback` picks the default. So
+an artifact-free source for reading history already exists.
 
 What remains is the live view: the CLI scrolling halfway up the pane, and `^L`
-redrawing the visible screen without being able to repair the grid. The issue's
-own suggestion — pin the CLI to the bottom — is a display question about
-`src/pane/widget.rs` (vt100 → ratatui) and the 10,000-row parser in
-`Pane::spawn_with_env`, not a scrollback-source question. Scope it to that, and
-say in the issue that the reading half is closed.
+redrawing the visible screen without repairing the grid. The issue's suggestion
+— pin the CLI to the bottom — is a display question about `src/pane/widget.rs`
+(vt100 → ratatui) and the 10,000-row parser in `Pane::spawn_with_env`. Scope it
+to that, and say in the issue that the reading half is closed.
 
 ### #22 + #11 — MCP takeover and multi-instance coexistence
 
-These are one investigation. The takeover prompt
-(`prompt_mcp_takeover_if_needed`, `src/lib.rs`) runs **once, at startup, before
-`App::new`**, and only when `detect_existing_spyc*` finds a config in the launch
-cwd already naming another PID. If nothing is found it returns `true` —
-takeover permitted — and that value is stashed as `view.mcp_takeover_allowed`
-for the rest of the process's life.
+One investigation. The takeover prompt (`prompt_mcp_takeover_if_needed`,
+`src/lib.rs`) runs once, at startup, before `App::new`, and only when
+`detect_existing_spyc*` finds a config in the launch cwd already naming another
+PID. If nothing is found it returns `true` — takeover permitted — and that
+value is stashed as `view.mcp_takeover_allowed` for the rest of the process's
+life.
 
-But agent MCP configs are written **lazily, on agent-pane launch**, not at
-startup. So a second instance started in a directory with no `.mcp.json` yet is
-never prompted; later it opens an agent pane, `ensure_mcp_json` runs with
-`takeover_allowed: true`, and takes over silently. The instance that learns
-about it is the *first* one, via the `McpCommand::TakenOver` flash
-("MCP taken over by spyc PID N…", `src/app/mcp.rs`). That asymmetry is exactly
-what #22 reports.
+Agent MCP configs are written lazily, on agent-pane launch, not at startup. So
+a second instance started in a directory with no `.mcp.json` yet is never
+prompted; it later opens an agent pane, `ensure_mcp_json` runs with
+`takeover_allowed: true`, and it takes over silently. The instance that learns
+about it is the first one, via the `McpCommand::TakenOver` flash ("MCP taken
+over by spyc PID N…", `src/app/mcp.rs`). That is what #22 reports.
 
-#11 is the test. `src/mcp/config.rs`'s test module covers only the deterministic
-branches of `decide_takeover` — own socket, dead socket — and its comment says
-the live-socket `TookOver` / `Skipped` branches "are exercised by the end-to-end
-takeover behavior". There is no such test. Write it, watch it fail against the
-behaviour above, then fix the prompt.
+#11 is the test. `src/mcp/config.rs`'s test module covers only the
+deterministic branches of `decide_takeover` — own socket, dead socket — and its
+comment says the live-socket `TookOver` / `Skipped` branches "are exercised by
+the end-to-end takeover behavior". No such test exists. Write it, confirm it
+fails against the behaviour above, then fix the prompt.
 
 ## 7. Author `docs/drafts/PROJECTS_PLAN.md`
 
-A tracked 2.2 deliverable, design only. It is listed here because 2.3's scope
-depends on it existing *and being approved* before any code lands — that is the
-whole point of doing prep first.
+A tracked 2.2 deliverable, design only. 2.3's scope depends on it being written
+and approved before any code lands.
 
-The questions it must answer. **This plan does not answer them**; listing them
-is the deliverable's acceptance criteria, not its content.
+The questions it must answer are listed below as its acceptance criteria. This
+plan does not answer them.
 
 1. **Per-project Model state inventory.** Which `AppState` fields lift into a
    project struct and which stay global. `Commander` is the obvious per-project
-   unit and takes its per-column state (`harpoon` included) with it; the flat
+   unit and takes its per-column state (`harpoon` included) with it. The flat
    `AppState` fields — `marks`, `inventory`, `graveyard`, `project_home`, the
-   pane/tab set, `mounts`, `frecency`, the pager history — each need a call,
-   with a reason.
+   pane/tab set, `mounts`, `frecency`, the pager history — each need a call and
+   a reason.
 2. **MCP socket topology for N project homes behind one process.** Today the
    socket is PID-scoped and one instance owns MCP for a directory. With several
    project homes in one process: one socket or several, how takeover and the
    orphan sweep change, and how the trusted-root sidecar (`write_root_marker`)
-   works per project. Builds on the pane-identity attribution from §1 — a
-   connection knows its pane, and a pane knows its project.
-3. **Recovery manifest shape.** The existing session save/restore and the
-   debounced crash-sufficient autosave (`Deadline::Autosave`, `autosave_action`,
-   stable per-process id, `fs::write_atomic`) already round-trip one session.
-   What a multi-project manifest looks like on top of that, and what `spyc -r`
-   offers when several projects were open.
+   works per project. Builds on §1's attribution — a connection knows its pane,
+   and a pane knows its project.
+3. **Recovery manifest shape.** Session save/restore and the debounced
+   crash-sufficient autosave (`Deadline::Autosave`, `autosave_action`, stable
+   per-process id, `fs::write_atomic`) already round-trip one session. What a
+   multi-project manifest looks like on top of that, and what `spyc -r` offers
+   when several projects were open.
 4. **Keymap-tier placement for project switching.** The taxonomy is
    guard-enforced (`leader_and_pane_namespaces_respect_tiers`): workspace
    operations live on the leader, so project switching is `Tier::Global` and
    belongs under `Space`. Which keys, and what happens to `Space p` / `Space P`
-   (today PROJECT_HOME jump and set), needs deciding rather than assuming.
+   (today PROJECT_HOME jump and set).
 5. **The `projects` status-bar segment.** The bar is
-   `🌶️ | PROJECT_HOME | SESSION | path | git | suffix` and it is already
-   crowded. What the segment shows, what it displaces, and what happens at
-   narrow widths.
+   `🌶️ | PROJECT_HOME | SESSION | path | git | suffix` and is already crowded.
+   What the segment shows, what it displaces, and what happens at narrow
+   widths.
 6. **Attention/notification aggregation.** What it reuses from the shipped
    agent-awareness channel — `report_status`, the per-agent status hooks, the
    `Blocked`/`Done` transition, `Effect::Notify`, the visual bell — and what
-   genuinely has to be new to answer "which agent, in which project, needs me".
+   has to be new to answer "which agent, in which project, needs me".
 
 ## Non-goals for 2.2
 
-- **No Projects implementation code.** The design doc, and nothing else.
+- **No Projects implementation code** — the design doc only.
 - **No CounterTop revival.** `docs/archive/V1_60_PLAN.md` stays archived
   design-history.
 - **No frame mirroring, no input forwarding, no headless or `--detached`
-  peers.** These are the parts that fight the single-process core; window
-  elimination makes them unnecessary rather than deferred.
+  peers.** These are the parts that fight the single-process core, and one
+  process makes them unnecessary.
 - **No cross-process discovery files.** Nothing that has one spyc enumerate
   another.
 - **No general path handoff.**
   [#59](https://github.com/Tripstack-Corp/spyc/issues/59) stays out — terse
   tokens, the `UserPromptSubmit` hook, bracketed-paste expansion, the
   consumer-aware `^a s` / `^a S` split. Option A
-  ([#9](https://github.com/Tripstack-Corp/spyc/issues/9)) is in, as a bug fix,
+  ([#9](https://github.com/Tripstack-Corp/spyc/issues/9)) is in as a bug fix,
   and §5's templates use its anchor.
 
 ## Staging
 
 One PR per numbered item unless the tree argues otherwise. Three hard
-dependencies, the rest is scheduling.
+dependencies; the rest is scheduling.
 
 | PR | Item | Depends on | Why here |
 |---|---|---|---|
-| 1 | #326 — dropped first keystrokes | — | Highest-frequency bug on the dog-fooding path, and the investigation is independent of everything else. Failing test first. |
-| 2 | #327 — stranded worktree | — | Same: independent, and it breaks the workflow every agent is told to use. |
-| 3 | #40 — abstract the column references | — | Early, because it touches shared surfaces. Every later PR that reads a column rebases onto it rather than the reverse. |
-| 4 | Pane-identity transport | — | Before anything that wants attribution. Ships the handshake field plus per-connection binding; per-pane roots and `get_spyc_context`-answers-for-the-caller can be the same PR or the next, but not before this. |
-| 5 | #22 + #11 — takeover prompt + coexistence test | 4 (shared MCP surface) | The test lands red first. Sequenced after 4 so it is written against the attributed server rather than twice. |
-| 6 | #58 — startup pane tabs | 3 | Config schema plus startup wiring. The pointer re-resolution is step zero *inside* this PR, not a separate one. |
+| 1 | #326 — dropped first keystrokes | — | Highest-frequency bug on the dog-fooding path, and independent of everything else. Failing test first. |
+| 2 | #327 — stranded worktree | — | Also independent, and it breaks the workflow every agent is told to use. |
+| 3 | #40 — abstract the column references | — | Early, because it touches shared surfaces. Later PRs that read a column rebase onto it. |
+| 4 | Pane-identity transport | — | Before anything that wants attribution. Ships the handshake field plus per-connection binding; per-pane roots and `get_spyc_context`-answers-for-the-caller can follow in the same PR or the next. |
+| 5 | #22 + #11 — takeover prompt + coexistence test | 4 (shared MCP surface) | The test lands red first. After 4 so it is written once, against the attributed server. |
+| 6 | #58 — startup pane tabs | 3 | Config schema plus startup wiring. The pointer re-resolution happens inside this PR. |
 | 7 | #8 — session forking | 3 | Pane-tier binding, tab duplication, per-agent resume. |
-| 8 | #9 — anchor `^a s` on the pane's live cwd | — | Small and otherwise independent, but it must precede #71 so templates inherit a decided anchor instead of making one. |
+| 8 | #9 — anchor `^a s` on the pane's live cwd | — | Small and otherwise independent, but must precede #71 so templates inherit a settled anchor. |
 | 9 | #71 — prompt templates | 8 | New DSL verb. Uses PR 8's anchor policy. |
-| 10 | #34 — pin the CLI to the bottom | — | Display-layer work, unblocked, but the least certain scope of the six bugs — it may resolve to "documented, not fixed". |
+| 10 | #34 — pin the CLI to the bottom | — | Display-layer work, unblocked, and the least certain scope of the six bugs — it may resolve to "documented, not fixed". |
 | — | `PROJECTS_PLAN.md` | 4 (informs §2) | Written across the release, reviewed at the end. Not a PR in the sequence; a deliverable gating 2.3. |
 
-Bugs are interleaved deliberately: 1 and 2 open the release so a daily driver
-feels the difference immediately, and 10 sits last because its scope is the one
-that might shrink on contact.
+Bugs are interleaved on purpose. 1 and 2 open the release so a daily driver
+sees the difference early, and 10 sits last because its scope may shrink on
+contact.
 
 ## Exit criteria
 
-Per item, observable rather than asserted.
-
 **#326 —** Type into a pane the instant `^a c` returns and every character
 reaches the child. Pinned by a test that fails on the current tree: spawn a
-pane, write bytes, compare what the child received byte-for-byte. Exit: the
-VHS tape records the question it was always meant to depict, with no
-compensating repaint in `fake-claude.sh`.
+pane, write bytes, compare what the child received byte-for-byte. Exit: the VHS
+tape records the question it was meant to depict, with no compensating repaint
+in `fake-claude.sh`.
 
 **#327 —** A `remove_worktree` interrupted mid-delete leaves git's view
 consistent, and re-running it finishes the job. Exit: a test that fails the
 first removal (a directory that regains an entry during the walk) and asserts
-the second one succeeds, deletes the branch, and leaves no `.git/worktrees/`
-admin dir behind.
+the second succeeds, deletes the branch, and leaves no `.git/worktrees/` admin
+dir behind.
 
 **#40 —** Addressing a column goes through a handle everywhere it isn't
 legitimately naming a specific one. Exit: the widened
 `state_left_listing_dir_uses_are_allowlisted` guard passes with an allowlist
-that names only render and fs-watch, each with a why.
+naming only render and fs-watch, each with a why.
 
 **Pane identity —** An agent in worktree X gets X from `get_spyc_context` while
 the user browses Y. Exit: an older proxy that omits the field still works,
 proved by a test that drives the server with an `initialize` carrying no pane
-id; and SECURITY.md's attribution-is-not-authorization paragraph still reads
-true.
+id; and SECURITY.md's attribution-is-not-authorization paragraph still holds.
 
-**#22 + #11 —** Two spyc instances in one directory coexist, and the second one
-to want MCP asks before taking it. Exit: an integration test that stands up two
+**#22 + #11 —** Two spyc instances in one directory coexist, and the second to
+want MCP asks before taking it. Exit: an integration test that stands up two
 instances, exercises the live-socket `TookOver` and `Skipped` branches
 end-to-end, and fails against today's tree.
 
@@ -441,9 +418,8 @@ paths covered, `--print-config` emits the new keys with comments, and
 CONFIGURATION.md documents them in the same commit.
 
 **#8 —** `^a f` on a live agent tab produces a second tab on that conversation,
-with its history readable. Exit: the per-agent behaviour is documented in
-`docs/HARNESS.md` including where it is a shared session rather than a branch —
-no silent pretence.
+with its history readable. Exit: `docs/HARNESS.md` documents the per-agent
+behaviour, including which agents give a shared session rather than a branch.
 
 **#9 —** `^a s` from a worktree pane produces a path the agent can `cat` from
 its own cwd without a `cd`. Exit: a test where the pane's cwd differs from
@@ -457,20 +433,18 @@ the DSL verb is `is_executing`, CONFIGURATION.md documents the token set, and
 the substitution refuses a non-UTF-8 path the way `expand_percent` does.
 
 **#34 —** Either the live pane stops drifting, or the issue is closed with the
-reading half documented and the display half stated as out of scope. Both are
-acceptable outcomes; silently shipping neither is not.
+reading half documented and the display half recorded as out of scope. Both
+count as done; shipping neither does not.
 
 **`PROJECTS_PLAN.md` —** All six questions in §7 answered, with a decision and
-a reason for each, and the doc marked approved before 2.3 opens.
+a reason for each, and the doc approved before 2.3 opens.
 
 ## Docs each PR must carry (same commit, not a follow-up)
 
-Per AGENTS.md's doc-sync rule: `FEATURES.md` and `docs/KEYBINDINGS.md` +
-`src/ui/help.rs` for any new binding (#8) or changed one (#9 — `^a s`'s
-described behaviour changes, and `src/ui/help.rs` carries its help text),
-`CONFIGURATION.md` and
-`--print-config` for any new config key (#58, #71), `docs/HARNESS.md` for
-per-agent behaviour (#8, #34), `SECURITY.md` for the MCP surface (item 1 —
-extend, don't contradict), `AGENTS.md`'s module index for any new module, and
-`ROADMAP.md`'s decisions log when a decision here supersedes one recorded
-there.
+Per AGENTS.md's doc-sync rule: `FEATURES.md`, `docs/KEYBINDINGS.md` and
+`src/ui/help.rs` for a new binding (#8) or a changed one (#9 changes what `^a s`
+does, and all three describe it); `CONFIGURATION.md` and `--print-config` for a
+new config key (#58, #71); `docs/HARNESS.md` for per-agent behaviour (#8, #34);
+`SECURITY.md` for the MCP surface (item 1 — extend, don't contradict);
+`AGENTS.md`'s module index for a new module; and `ROADMAP.md`'s decisions log
+when a decision here supersedes one recorded there.
