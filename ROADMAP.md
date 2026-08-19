@@ -138,6 +138,8 @@ the other. Detailed scope and sequencing:
   the head of your first message),
   [#327](https://github.com/Tripstack-Corp/spyc/issues/327) (a partially-failed
   `remove_worktree` strands the worktree),
+  [#9](https://github.com/Tripstack-Corp/spyc/issues/9) (`^a s` anchors paths
+  on PROJECT_HOME, so an agent in a worktree can't resolve them),
   [#34](https://github.com/Tripstack-Corp/spyc/issues/34) (Claude PTY
   scrollback artifacts), and
   [#22](https://github.com/Tripstack-Corp/spyc/issues/22) +
@@ -290,6 +292,18 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
      cwd — is the target design, blocked on transport: `SPYC_PANE_ID`
      reaches the pane's env, but read-tool dispatch resolves through
      the context file, which carries no pane identity.
+- **`^a s` anchors on the pane's live cwd, not on `PROJECT_HOME`**
+  (2026-08-19). `PATH_HANDOFF_PLAN`'s Option A, decided rather than
+  left pending: a path under the target pane's live cwd goes out
+  relative, everything else absolute, and the absolute tier is never
+  `~`-collapsed (claude's `Read` won't reliably expand it). This is a
+  bug fix — the old anchor hands an agent working in a worktree a path
+  that resolves against the wrong directory — and it degrades safely,
+  since an unknown `live_cwd` falls through to absolute. It is also the
+  anchor prompt templates ([#71](https://github.com/Tripstack-Corp/spyc/issues/71))
+  inherit, so only one convention exists. The *general* handoff problem
+  (terse tokens, submit hooks, consumer-aware `^a s`) stays exploration
+  under [#59](https://github.com/Tripstack-Corp/spyc/issues/59).
 - **CounterTop stays parked as an *architecture*; the multi-project
   goal is reopened for 2.3 on the monolith route** (2026-08-19). What
   fights the single-process core is siblings + mirror — peer discovery,
@@ -326,7 +340,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/drafts/pane-identity-transport-proposal.md` | Accepted for 2.2 — pane id in the MCP `initialize` handshake (option B). Also the attribution mechanism Projects extends. |
 | `docs/drafts/PANE_STARTUP_TABS_PLAN.md` | Pending design, 2.2 scope ([#58](https://github.com/Tripstack-Corp/spyc/issues/58)). |
 | `docs/drafts/AUTO_APPROVAL_PLAN.md` | Pending design, unscheduled ([#57](https://github.com/Tripstack-Corp/spyc/issues/57)). |
-| `docs/drafts/PATH_HANDOFF_PLAN.md` | Pending design, unscheduled ([#9](https://github.com/Tripstack-Corp/spyc/issues/9), [#59](https://github.com/Tripstack-Corp/spyc/issues/59)). |
+| `docs/drafts/PATH_HANDOFF_PLAN.md` | Split — Option A is 2.2 scope ([#9](https://github.com/Tripstack-Corp/spyc/issues/9)); the rest stays exploration ([#59](https://github.com/Tripstack-Corp/spyc/issues/59)). |
 | `docs/drafts/multi-question-bug-investigation.md` | Open bug, parked without a repro — an agent pane going deaf to input. Not in the tracker; this is the record. |
 | `docs/archive/LAUNCH_PLAN_2_0.md` | Archived — the 2.0 distribution/launch plan, every gate closed, plus what never shipped. |
 | `docs/archive/ARCHIVE_BROWSING_PLAN.md` | Archived design — navigate into zip/tarballs with full editing; shipped v2.1.0, [#149](https://github.com/Tripstack-Corp/spyc/issues/149) closed. |

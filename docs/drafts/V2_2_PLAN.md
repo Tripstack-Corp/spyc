@@ -30,7 +30,7 @@ No Projects implementation code lands in 2.2. The Projects *design doc* does.
 | 3 | Configurable startup pane tabs | prep + feature | [#58](https://github.com/Tripstack-Corp/spyc/issues/58), [plan](PANE_STARTUP_TABS_PLAN.md) |
 | 4 | Session forking (`^a f`) | feature | [#8](https://github.com/Tripstack-Corp/spyc/issues/8) |
 | 5 | Prompt templates in `.spycrc.toml` | feature | [#71](https://github.com/Tripstack-Corp/spyc/issues/71) |
-| 6 | The daily-driver bug set | fix | [#326](https://github.com/Tripstack-Corp/spyc/issues/326), [#327](https://github.com/Tripstack-Corp/spyc/issues/327), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#22](https://github.com/Tripstack-Corp/spyc/issues/22), [#11](https://github.com/Tripstack-Corp/spyc/issues/11) |
+| 6 | The daily-driver bug set | fix | [#326](https://github.com/Tripstack-Corp/spyc/issues/326), [#327](https://github.com/Tripstack-Corp/spyc/issues/327), [#9](https://github.com/Tripstack-Corp/spyc/issues/9), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#22](https://github.com/Tripstack-Corp/spyc/issues/22), [#11](https://github.com/Tripstack-Corp/spyc/issues/11) |
 | 7 | Author `docs/drafts/PROJECTS_PLAN.md` | design | this doc, §7 |
 
 ---
@@ -83,9 +83,18 @@ holds can change. The `Commander` extraction (vsplit Stage 2) already did the
 hard half: per-column browser state — `listing`, `cursor`, `rows`, `picks`,
 `masks`, `temp_filter`, `view`, sort, `list_generation`, `git_cache`, harpoon —
 is one struct, and `cur()` / `cur_mut()` / `col(side)` are the accessors. What
-remains is the naming: `state.left` and `state.right` appear ~114 times in
-production `src/`, `Side` is a two-variant enum (`Left`, `Right`), and
-`right: Option<Commander>` encodes "there may be a second one" in the type.
+remains is the naming: `state.left` and `state.right` appear **~67 times in
+production modules** — `#[cfg(test)]` tails stripped with
+`guard_support::production_half`, the test harness excluded — `Side` is a
+two-variant enum (`Left`, `Right`), and `right: Option<Commander>` encodes
+"there may be a second one" in the type.
+
+Derive that number the same way before acting on it. `grep -c` over `src/`
+returns 204, threefold the production surface, because the house convention
+keeps tests in the same file: ~50 of those sit in in-file `#[cfg(test)]` tails
+and ~87 more in `harness_tests/` and `test_harness.rs`. Quoting the raw count
+is the exact trap the
+800-LoC paragraph this plan's ROADMAP section replaced was written about.
 
 The existing guard `state_left_listing_dir_uses_are_allowlisted`
 (`src/app/mod_tests.rs`) already enforces the rule for the one case that bit —
@@ -174,12 +183,12 @@ The two mechanisms to build on, both already load-bearing:
   *refuses* rather than silently mis-expanding a non-UTF-8 path). A prompt
   template wants the same expander, possibly a wider token set.
 - **`send_selection_to_pane`** (`src/app/clipboard.rs`) is the existing
-  spyc→pane text path, with the path-anchoring problem
-  [`PATH_HANDOFF_PLAN.md`](PATH_HANDOFF_PLAN.md) documents (paths are anchored
-  on `PROJECT_HOME`, which breaks when the agent's cwd isn't the project root).
-  A template that emits paths inherits that bug. Path handoff is **not** in 2.2
-  scope, so the template design has to state which anchor it uses rather than
-  inherit the ambiguity.
+  spyc→pane text path. Its anchoring is decided rather than ambiguous, because
+  §6 lands Option A first: **relative under the target pane's live cwd,
+  absolute otherwise**. A template that emits paths uses that policy — it does
+  not get to invent a second one. This is why the two are sequenced: an ad hoc
+  anchor call inside #71 would become de facto handoff policy without the
+  design work behind it.
 
 **Binding shape.** This is a new DSL verb alongside `unix` / `command` / `lua` /
 `jump`. Every one of those is `is_executing` — only `$HOME/.spycrc.toml` may
@@ -189,7 +198,7 @@ explicitly, and default to `is_executing`.
 
 ## 6. The daily-driver bug set
 
-Five issues. Each paragraph below is orientation — where the behaviour lives
+Six issues. Each paragraph below is orientation — where the behaviour lives
 and what is already known — not a fix design.
 
 ### #326 — the first keystrokes into a fresh pane are dropped
@@ -242,6 +251,37 @@ worktree".
 This one is worse than its frequency suggests, because
 `create_worktree`/`remove_worktree` is the workflow AGENTS.md tells every agent
 to use, and recovery is three manual git commands.
+
+### #9 — `^a s` anchors paths on PROJECT_HOME, not on the pane's cwd
+
+Option A of [`PATH_HANDOFF_PLAN.md`](PATH_HANDOFF_PLAN.md), and only Option A.
+`send_selection_to_pane` (`src/app/clipboard.rs`) makes each selected path
+relative to `project_home` and leaves everything else absolute. When the pane's
+agent is working in a worktree rather than at the project root, the relative
+path it receives resolves against the wrong directory: the plan records
+spyc pasting `book-org/client-api-20-contract/docs`, the agent running
+`cd book-org/… ` from `~/src/tripstack_platform`, and getting
+`no such file or directory`.
+
+It is in the bug set, not the feature list, for the same reason #327 is: it
+breaks in exactly the workflow AGENTS.md prescribes — an agent in its own
+worktree, driven from a spyc column browsing somewhere else.
+
+The infrastructure is already there. `TabEntry::live_cwd` (`src/pane/tabs.rs`)
+tracks the pane's actual cwd, refreshed off-thread behind a cache via
+`proc_cwd::cwd_for_pid` (`readlink /proc/<pid>/cwd` on Linux, in-process
+`sysinfo` on macOS since #356, `None` elsewhere). So the change is an anchor
+swap plus the plan's no-`~`-collapse rule — claude's `Read` wants real
+absolute paths and won't reliably expand `~`, and the in-tree relative path
+already carries the terseness.
+
+The property that makes this a fix rather than a design question is how it
+degrades: an unknown or stale `live_cwd` falls through to the absolute tier,
+which is verbose but correct. Nothing silently resolves to the wrong file.
+
+Everything else in that document — the terse-token expansion, the hooks, the
+four-channel topology argument, the consumer-aware `^a s`/`^a S` split — stays
+under [#59](https://github.com/Tripstack-Corp/spyc/issues/59) and out of 2.2.
 
 ### #34 — Claude PTY scrollback artifacts
 
@@ -333,13 +373,16 @@ is the deliverable's acceptance criteria, not its content.
   elimination makes them unnecessary rather than deferred.
 - **No cross-process discovery files.** Nothing that has one spyc enumerate
   another.
-- **No path handoff** ([#9](https://github.com/Tripstack-Corp/spyc/issues/9) /
-  [#59](https://github.com/Tripstack-Corp/spyc/issues/59)). Item 5 touches the
-  same seam and must name its anchor, but the general problem stays out.
+- **No general path handoff.**
+  [#59](https://github.com/Tripstack-Corp/spyc/issues/59) stays out — terse
+  tokens, the `UserPromptSubmit` hook, bracketed-paste expansion, the
+  consumer-aware `^a s` / `^a S` split. Option A
+  ([#9](https://github.com/Tripstack-Corp/spyc/issues/9)) is in, as a bug fix,
+  and §5's templates use its anchor.
 
 ## Staging
 
-One PR per numbered item unless the tree argues otherwise. Two hard
+One PR per numbered item unless the tree argues otherwise. Three hard
 dependencies, the rest is scheduling.
 
 | PR | Item | Depends on | Why here |
@@ -351,12 +394,13 @@ dependencies, the rest is scheduling.
 | 5 | #22 + #11 — takeover prompt + coexistence test | 4 (shared MCP surface) | The test lands red first. Sequenced after 4 so it is written against the attributed server rather than twice. |
 | 6 | #58 — startup pane tabs | 3 | Config schema plus startup wiring. The pointer re-resolution is step zero *inside* this PR, not a separate one. |
 | 7 | #8 — session forking | 3 | Pane-tier binding, tab duplication, per-agent resume. |
-| 8 | #71 — prompt templates | — | New DSL verb; independent of the rest, so it floats to wherever there is room. |
-| 9 | #34 — pin the CLI to the bottom | — | Display-layer work, unblocked, but the least certain scope of the six bugs — it may resolve to "documented, not fixed". |
+| 8 | #9 — anchor `^a s` on the pane's live cwd | — | Small and otherwise independent, but it must precede #71 so templates inherit a decided anchor instead of making one. |
+| 9 | #71 — prompt templates | 8 | New DSL verb. Uses PR 8's anchor policy. |
+| 10 | #34 — pin the CLI to the bottom | — | Display-layer work, unblocked, but the least certain scope of the six bugs — it may resolve to "documented, not fixed". |
 | — | `PROJECTS_PLAN.md` | 4 (informs §2) | Written across the release, reviewed at the end. Not a PR in the sequence; a deliverable gating 2.3. |
 
 Bugs are interleaved deliberately: 1 and 2 open the release so a daily driver
-feels the difference immediately, and 9 sits late because its scope is the one
+feels the difference immediately, and 10 sits last because its scope is the one
 that might shrink on contact.
 
 ## Exit criteria
@@ -401,6 +445,12 @@ with its history readable. Exit: the per-agent behaviour is documented in
 `docs/HARNESS.md` including where it is a shared session rather than a branch —
 no silent pretence.
 
+**#9 —** `^a s` from a worktree pane produces a path the agent can `cat` from
+its own cwd without a `cd`. Exit: a test where the pane's cwd differs from
+`PROJECT_HOME` asserts the relative form resolves under the pane, plus one
+where `live_cwd` is unknown asserts the absolute-tier fallback. The absolute
+tier is not `~`-collapsed.
+
 **#71 —** A template bound in `~/.spycrc.toml` sends a composed prompt with
 picks substituted, and a project-local `.spycrc.toml` cannot bind one. Exit:
 the DSL verb is `is_executing`, CONFIGURATION.md documents the token set, and
@@ -416,7 +466,9 @@ a reason for each, and the doc marked approved before 2.3 opens.
 ## Docs each PR must carry (same commit, not a follow-up)
 
 Per AGENTS.md's doc-sync rule: `FEATURES.md` and `docs/KEYBINDINGS.md` +
-`src/ui/help.rs` for any new binding (#8), `CONFIGURATION.md` and
+`src/ui/help.rs` for any new binding (#8) or changed one (#9 — `^a s`'s
+described behaviour changes, and `src/ui/help.rs` carries its help text),
+`CONFIGURATION.md` and
 `--print-config` for any new config key (#58, #71), `docs/HARNESS.md` for
 per-agent behaviour (#8, #34), `SECURITY.md` for the MCP surface (item 1 —
 extend, don't contradict), `AGENTS.md`'s module index for any new module, and
