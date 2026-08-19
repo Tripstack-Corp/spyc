@@ -38,58 +38,53 @@ routing authority).
 
 The **800-LoC file rule is a convention with an explicit escape hatch**, stated
 in AGENTS.md and enforced nowhere except `mod_rs_stays_decomposed`, which caps
-`src/app/mod.rs` alone. Files over the line exist; re-derive the list from the
-tree before acting on it rather than from a number written down here.
+`src/app/mod.rs` alone. Some files are over it. Re-derive the list from the
+tree rather than from a number written down here.
 
-The thesis work shipped over 1.x and 2.0 — agent-awareness dots and
+The thesis work shipped over 1.x and 2.0: agent-awareness dots and
 notifications, the worktree MCP suite, the merge/scope registry, the in-process
 review loop, the vertical split, Lua scripting, and the chord/leader overhaul.
-Those are the differentiators the competitive review
-([`docs/COMPETITIVE_REVIEW.md`](docs/COMPETITIVE_REVIEW.md)) named as spyc's
-wedge, and they are all real; the mechanics live in
+The competitive review
+([`docs/COMPETITIVE_REVIEW.md`](docs/COMPETITIVE_REVIEW.md)) named these as
+spyc's wedge; the mechanics are documented in
 [`docs/AGENT_ORCHESTRATION.md`](docs/AGENT_ORCHESTRATION.md), AGENTS.md and
 ARCHITECTURE.md.
 
 2.0 was the distribution pass — public repo, signed binaries, brew / apt /
 crates.io, Show HN. Its plan is archived at
 [`docs/archive/LAUNCH_PLAN_2_0.md`](docs/archive/LAUNCH_PLAN_2_0.md), with the
-done-criteria confirmed and the parts that never shipped named. **2.1 was the
-release where the tool got used**, and its arc is what daily-driving turned up:
+done-criteria confirmed and the parts that never shipped named. 2.1 shipped:
 
-- **An installable agent skill.** `spyc --install-skill` writes an embedded
-  usage guide into Claude Code's, codex's and agy's personal-skills dirs, with
-  a startup `[Y/n]` offer when spyc's copy moves ahead and local edits never
-  clobbered unprompted (#187). It is the depth beneath the MCP `initialize`
-  handshake, which has to stay short.
-- **agy became first-class and gemini went away** (#194), with a scrape
-  fallback for the `Blocked` state its hooks can't report, and session pinning
-  from its own hook payload rather than spawn proximity (#202, #285, #287).
-- **The mouse works, and it ships on by default** (#212–#234, plus twenty
-  follow-ups through #387). The wheel scrolls whatever is under the pointer,
-  three button gestures, drag-select in four surfaces. Non-goals narrowed to
-  match: mouse *support* is no longer a non-goal, mouse-*first* design still is.
-- **Archive browsing, end to end** (#301–#334, closing
+- **An installable agent skill** (#187). `spyc --install-skill` writes an
+  embedded usage guide into Claude Code's, codex's and agy's personal-skills
+  dirs, offers a `[Y/n]` update when spyc's copy moves ahead, and never
+  clobbers local edits unprompted. The MCP `initialize` handshake has to stay
+  short, so the depth ships here instead.
+- **agy support, and gemini removed** (#194), with a scrape fallback for the
+  `Blocked` state agy's hooks can't report and session pinning from its hook
+  payload rather than spawn proximity (#202, #285, #287).
+- **The mouse suite, on by default** (#212–#234, plus follow-ups through #387):
+  the wheel scrolls whatever is under the pointer, three button gestures,
+  drag-select in four surfaces. The Non-goals entry narrowed to match — mouse
+  support is no longer a non-goal; mouse-first design still is.
+- **Archive browsing** (#301–#334, closing
   [#149](https://github.com/Tripstack-Corp/spyc/issues/149)). Walk into a zip
-  or a tarball, change what's inside, `:archive write` repacks and verifies. A
+  or tarball, change what's inside, `:archive write` repacks and verifies. A
   mount is an index, not a directory, so entering a huge zip extracts nothing.
-- **Images stopped being opaque tokens** — capture at paste time, full-screen
-  preview, and the `^a g` gallery of what the agent actually received (#300,
-  #302, #304).
+- **Image capture, preview and the `^a g` gallery** (#300, #302, #304) — what
+  the agent received, plus anything pasted and not yet sent.
 - **Per-character intraline diff highlight**, on by default (#351, #364).
-- **A security and correctness pass**, then a review of it. The MCP `root`
-  override is validated rather than merely documented (F1, #237), every
-  persistent write goes through `write_atomic` (F3, #238), there is one
-  state-root resolver (F6, #239), and the fuzz targets build for the target
-  that can run them and go weekly in CI (F5, #242). The pre-2.1 review that
-  followed put six reviewers plus a referee over `v2.0.0..HEAD` and closed 58
-  findings across eight passes; the reports are archived under
+- **A security and correctness pass.** The MCP `root` override is validated
+  rather than documented (F1, #237), persistent writes go through
+  `write_atomic` (F3, #238), there is one state-root resolver (F6, #239), and
+  the fuzz targets build for a target that can run them and go weekly in CI
+  (F5, #242). The pre-2.1 review that followed put six reviewers and a referee
+  over `v2.0.0..HEAD` and closed 58 findings across eight passes; the reports
+  are archived under
   [`docs/archive/review-2.1/`](docs/archive/review-2.1/).
 
-v2.1.1 is one packaging fix on top: `docs/ABOUT.md` is compiled into the binary
-via `include_str!` and was missing from the published crate (#426).
-
-Next is **2.2** — projects-prep plus daily-driver credibility — and then the
-2.3 headline, Projects. Both below.
+v2.1.1 adds one packaging fix: `docs/ABOUT.md` is compiled into the binary via
+`include_str!` and was missing from the published crate (#426).
 
 ## Working tracks
 
@@ -107,23 +102,20 @@ foundations work continues throughout.
 
 ## Road to 2.2
 
-2.2 has two jobs and no third. It lands the prerequisites Projects needs, so
-2.3 starts on an approved design instead of a refactor swamp; and it closes the
-bugs a daily driver hits weekly, because the release that made the tool
-credible is the one that has to keep it that way. Every item below is one or
-the other. Detailed scope and sequencing:
+2.2 lands the prerequisites Projects needs and closes the bugs a daily driver
+hits weekly. Every item is one or the other. Scope and sequencing:
 [`docs/drafts/V2_2_PLAN.md`](docs/drafts/V2_2_PLAN.md).
 
 - **Pane-identity transport** — option B of
   [`docs/drafts/pane-identity-transport-proposal.md`](docs/drafts/pane-identity-transport-proposal.md):
   the `spyc --mcp` proxy sends its `$SPYC_PANE_ID` in the `initialize`
   handshake and the server binds it to that connection. Closes the target
-  design the F1 decisions-log entry names, and makes `get_spyc_context` answer
-  for the caller instead of for whichever column the user is browsing.
+  design the F1 decisions-log entry names, and lets `get_spyc_context` answer
+  for the calling pane rather than for whichever column the user is browsing.
   Attribution, not authorization — SECURITY.md says which.
 - **[#40](https://github.com/Tripstack-Corp/spyc/issues/40) — one spyc per
-  agent.** Abstract away the hardcoded `left`/`right` column references so what
-  a column holds can change. Projects prep, and standalone cleanup value.
+  agent.** Abstract the hardcoded `left`/`right` column references so what a
+  column holds can change. Projects prep, with standalone cleanup value.
 - **[#58](https://github.com/Tripstack-Corp/spyc/issues/58) — configurable
   startup pane tabs**, per
   [`docs/drafts/PANE_STARTUP_TABS_PLAN.md`](docs/drafts/PANE_STARTUP_TABS_PLAN.md).
@@ -134,56 +126,49 @@ the other. Detailed scope and sequencing:
 - **[#71](https://github.com/Tripstack-Corp/spyc/issues/71) — prompt templates
   in `.spycrc.toml`**, with picks and inventory substituted.
 - **The daily-driver bug set** —
-  [#326](https://github.com/Tripstack-Corp/spyc/issues/326) (a fresh pane eats
-  the head of your first message),
+  [#326](https://github.com/Tripstack-Corp/spyc/issues/326) (the first
+  keystrokes into a fresh pane are dropped),
   [#327](https://github.com/Tripstack-Corp/spyc/issues/327) (a partially-failed
   `remove_worktree` strands the worktree),
   [#9](https://github.com/Tripstack-Corp/spyc/issues/9) (`^a s` anchors paths
   on PROJECT_HOME, so an agent in a worktree can't resolve them),
   [#34](https://github.com/Tripstack-Corp/spyc/issues/34) (Claude PTY
-  scrollback artifacts), and
+  scrollback artifacts),
   [#22](https://github.com/Tripstack-Corp/spyc/issues/22) +
   [#11](https://github.com/Tripstack-Corp/spyc/issues/11) (the MCP takeover
-  prompt, and an integration test that exercises multi-instance coexistence).
-- **`docs/drafts/PROJECTS_PLAN.md`** — authored in 2.2, design only. It is a
-  tracked deliverable, not a nice-to-have: 2.3's scope depends on it existing
-  and being approved before any code lands.
+  prompt, and an integration test for multi-instance coexistence).
+- **`docs/drafts/PROJECTS_PLAN.md`** — authored in 2.2, design only. 2.3's
+  scope depends on it being written and approved before code lands.
 
 ## The 2.3 horizon: Projects
 
-The goal is stated the way the user states it: **stop managing multiple
-terminal windows.** A project is a wrapper around spyc sessions — a project
-switcher, a `projects` segment in the status bar, several agents per project,
-one attention signal that reaches you no matter which project raised it, and
-recovery that restores every project rather than one. All of it **in one
-process**.
+The goal is to stop managing multiple terminal windows. A project wraps spyc
+sessions: a project switcher, a `projects` status-bar segment, several agents
+per project, one attention signal across all of them, and recovery that
+restores every project rather than one. All in one process.
 
-That is the route CounterTop rejected. `docs/archive/V1_60_PLAN.md` lists
-"lift App state into `Vec<Workspace>` with an active index" among three
-candidates and rules it out — too much state to lift, complicates persistence
-and the process model — choosing **siblings + mirror** instead: independent
-peer spycs, frame mirroring over the MCP socket, input forwarding, headless
-`--detached` instances. That design was parked on 2026-07-02 for fighting
-spyc's single-process sync core, and it stays parked. The parking rationale
-was about the *mirror*, though, not about the goal. Eliminating windows makes
-mirroring, forwarding and headless peers moot rather than hard: there is one
-process, one render state, one keyboard.
+CounterTop rejected that route. `docs/archive/V1_60_PLAN.md` lists "lift App
+state into `Vec<Workspace>` with an active index" as one of three candidates
+and rules it out — too much state to lift, complicates persistence and the
+process model — choosing siblings + mirror instead: independent peer spycs,
+frame mirroring over the MCP socket, input forwarding, headless `--detached`
+instances. That design was parked on 2026-07-02 for fighting spyc's
+single-process sync core, and it stays parked. The rationale applied to the
+mirror rather than to the goal: with one process there is nothing to mirror,
+forward, or run headless.
 
-Four things are true now that were not when CounterTop was written. The MVU
-migration is complete and guard-enforced, so "lift App state" is a bounded
-question about which fields move into a project struct rather than an open one.
-Vsplit Stage 2 already put a second full `Commander` — its own cwd, git,
-harpoon, worktree-scoped MCP — in one process, which is the same lift at
-smaller scale. Agent-awareness dots and desktop notifications already run
-per-process, so global attention aggregation is nearly free once the panes
-belong to projects. And the pane-identity transport (2.2) gives every MCP
-connection an identity that extends naturally to project attribution.
+Four things changed since. MVU is complete and guard-enforced, so lifting App
+state is a bounded question about which fields move. Vsplit Stage 2 already
+runs a second full `Commander` — own cwd, git, harpoon, worktree-scoped MCP —
+in one process. Agent-awareness dots and desktop notifications already run
+per-process, so aggregating attention across projects costs little. And the
+pane-identity transport (2.2) gives every MCP connection an identity that
+extends to project attribution.
 
-Explicitly out of scope, in 2.3 and after: no frame mirroring, no input
-forwarding, no headless or `--detached` peers, no cross-process discovery, no
-CounterTop revival. `docs/drafts/PROJECTS_PLAN.md` — a 2.2 deliverable — is
-where the design gets argued; this section only records the direction.
-Tracked as [#99](https://github.com/Tripstack-Corp/spyc/issues/99).
+Out of scope in 2.3 and after: frame mirroring, input forwarding, headless or
+`--detached` peers, cross-process discovery, and any CounterTop revival.
+`docs/drafts/PROJECTS_PLAN.md` — a 2.2 deliverable — is where the design gets
+argued. Tracked as [#99](https://github.com/Tripstack-Corp/spyc/issues/99).
 
 ## Backlog & roadmap
 
@@ -293,31 +278,29 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
      reaches the pane's env, but read-tool dispatch resolves through
      the context file, which carries no pane identity.
 - **`^a s` anchors on the pane's live cwd, not on `PROJECT_HOME`**
-  (2026-08-19). `PATH_HANDOFF_PLAN`'s Option A, decided rather than
-  left pending: a path under the target pane's live cwd goes out
-  relative, everything else absolute, and the absolute tier is never
-  `~`-collapsed (claude's `Read` won't reliably expand it). This is a
-  bug fix — the old anchor hands an agent working in a worktree a path
-  that resolves against the wrong directory — and it degrades safely,
-  since an unknown `live_cwd` falls through to absolute. It is also the
-  anchor prompt templates ([#71](https://github.com/Tripstack-Corp/spyc/issues/71))
-  inherit, so only one convention exists. The *general* handoff problem
-  (terse tokens, submit hooks, consumer-aware `^a s`) stays exploration
-  under [#59](https://github.com/Tripstack-Corp/spyc/issues/59).
+  (2026-08-19). `PATH_HANDOFF_PLAN`'s Option A: a path under the target
+  pane's live cwd goes out relative, everything else absolute, and the
+  absolute tier is never `~`-collapsed (claude's `Read` won't reliably
+  expand it). The old anchor hands an agent working in a worktree a path
+  that resolves against the wrong directory. An unknown `live_cwd` falls
+  through to absolute, so the failure mode is verbose rather than wrong.
+  Prompt templates ([#71](https://github.com/Tripstack-Corp/spyc/issues/71))
+  use the same anchor. The general handoff problem — terse tokens,
+  submit hooks, consumer-aware `^a s` — stays exploration under
+  [#59](https://github.com/Tripstack-Corp/spyc/issues/59).
 - **CounterTop stays parked as an *architecture*; the multi-project
   goal is reopened for 2.3 on the monolith route** (2026-08-19). What
-  fights the single-process core is siblings + mirror — peer discovery,
+  fought the single-process core was siblings + mirror — peer discovery,
   frame mirroring, input forwarding, headless `--detached` spycs — and
-  that stays archived. Eliminating windows instead of aggregating them
-  makes all of it moot, so 2.3 takes the route V1_60 rejected: one
-  process, many projects. Four things changed since the 2026-07-02
-  parking. MVU is complete and guard-enforced, so "lift App state" is a
-  bounded question. Vsplit Stage 2 already runs a second full
-  `Commander` in-process. Agent-status dots and notifications are
-  already per-process, so global attention costs almost nothing.
-  And #40 exists as the prep refactor. It depends on the pane-identity
-  transport (2.2) for project attribution. `docs/drafts/PROJECTS_PLAN.md`,
-  a 2.2 deliverable, is where it gets argued.
+  that stays archived. With one process there is nothing to mirror, so
+  2.3 takes the route V1_60 rejected: one process, many projects. Four
+  things changed since the 2026-07-02 parking. MVU is complete and
+  guard-enforced, so lifting App state is a bounded question. Vsplit
+  Stage 2 already runs a second full `Commander` in-process.
+  Agent-status dots and notifications are already per-process. And #40
+  exists as the prep refactor. Depends on the pane-identity transport
+  (2.2) for project attribution; `docs/drafts/PROJECTS_PLAN.md`, a 2.2
+  deliverable, is where it gets argued.
 
 ## Doc map
 
