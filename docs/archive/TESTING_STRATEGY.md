@@ -1,7 +1,10 @@
 # spyc testing strategy — coverage + anti-"test theater"
 
 **Status:** the campaign that produced this is **COMPLETE** — all 8 clusters
-shipped (#426–#438): ~50 new tests, the anti-"test theater" effect-intent
+shipped over 2026-06-15/16, against v1.58.x (the `#426–#438` and `#430`/`#431`
+numbers below are **Bitbucket** PR numbers from before the GitHub move; GitHub
+reissued that range for unrelated work, so read them as history, not as links):
+~50 new tests, the anti-"test theater" effect-intent
 seam in place, both a `proptest` in-crate pass and a real coverage-guided
 **cargo-fuzz** pass (6 targets, all clean), and **2 real bugs found + fixed**
 (#430, #431 — both in the live pane/pty workflow, cluster 4). This doc now

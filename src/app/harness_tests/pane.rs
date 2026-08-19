@@ -1146,7 +1146,7 @@ fn closing_help_over_a_v_editor_keeps_the_editor_column_pinned() {
 /// mounts spyc's own scrollback pager. The vt100 branch used to settle the pty
 /// by sleeping — `3 × 10 ms` inline — so an input event cost 30 ms of dead loop,
 /// re-paid on the next qualifying tick whenever scrollback turned out empty and
-/// nothing mounted. `docs/drafts/native_scroll_plan.md` ruled exactly this out
+/// nothing mounted. `docs/archive/native_scroll_plan.md` ruled exactly this out
 /// ("the wheel must never mount anything ... at ~30 ticks/s that's a hang").
 ///
 /// Measured rather than asserted structurally: a test that checked for the

@@ -413,7 +413,7 @@ impl App {
             // A pane selection is anchored to SCREEN coordinates, so the moment the
             // child paints, the grid scrolls out from under it and the highlight
             // would name different text than the user picked. Dropping it is the
-            // simple half of the tradeoff in `docs/drafts/mouse_selection_plan.md`;
+            // simple half of the tradeoff in `docs/archive/mouse_selection_plan.md`;
             // it costs nothing for the case this serves (reading a static transcript
             // overlay, where no output arrives) and avoids silently copying the
             // wrong thing. Only while no drag is in flight: a drag over a chatty

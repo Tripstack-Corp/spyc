@@ -1,8 +1,8 @@
 # spyc v1.70 — Mise en Place
 
 > **Archived (2026-07-02).** Design-history, not an active plan — named for a
-> version (1.70) the project shipped past (now 1.97+) via other work. Live
-> summary: `ROADMAP.md` → "Post-2.0 (2.x) — the structural arc". The MCP socket
+> version (1.70) the project shipped past via other work. Summarized in
+> `ROADMAP.md`'s doc map. The MCP socket
 > already delivers this thesis's *value* informally (`SPYC_PANE_ID` stable
 > handles, `get_spyc_context` read+drive, `wait_for_scope_clear` observed wait);
 > the unbuilt part is the *typed* protocol + crate split + SDK — revisit only if

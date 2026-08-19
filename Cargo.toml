@@ -153,7 +153,7 @@ strip-ansi-escapes = "0.2"
 pulldown-cmark = { version = "0.13", default-features = false }
 tar = "0.4"
 zstd = "0.13"
-# Archive browsing (docs/drafts/ARCHIVE_BROWSING_PLAN.md): read the zip central
+# Archive browsing (docs/archive/ARCHIVE_BROWSING_PLAN.md): read the zip central
 # directory to index a mount without decompressing, and `raw_copy_file` untouched
 # entries on repack. `default-features = false` is required, not tidiness — the
 # 14-feature default set pulls a C `bzip2` binding plus lzma/xz/ppmd/zopfli/aes.

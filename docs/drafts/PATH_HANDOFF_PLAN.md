@@ -2,6 +2,13 @@
 
 **Status:** exploration, decision pending. Captured from a 2026-05-27
 design session so the reasoning doesn't evaporate. No code written yet.
+Tracked as [#9](https://github.com/Tripstack-Corp/spyc/issues/9) (Option A) and
+[#59](https://github.com/Tripstack-Corp/spyc/issues/59) (the general form).
+**Not in 2.2 scope** — the ROADMAP's old "Option A is road-to-2.0" framing is
+retired, and nothing has replaced it. Its `src/app/mod.rs:NNNN` pointers
+predate the MVU decomposition (`send_selection_to_pane` now lives in
+`src/app/clipboard.rs`); re-resolve the rest against the current layout at
+pickup.
 
 ## The problem
 

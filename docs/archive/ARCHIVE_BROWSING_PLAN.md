@@ -1,10 +1,23 @@
 # Archive browsing with full editing
 
-**Status:** design approved (2026-08-08), no code written yet. Charter for
-[issue #149](https://github.com/Tripstack-Corp/spyc/issues/149) — "support
-navigating into zip/tarball's with full editing/yanking capabilities … minimize
-disk space requirements (warn on potential issues) and keep interactions
-responsive."
+> **Shipped (v2.1.0, 2026-08-18) — archived as historical record.** The whole
+> charter landed: mount, listing, read-out, write-back, nesting, MCP member
+> reads, and session/mark round-trips inside a mount (#301, #305, #307, #310,
+> #311, #314, #317, #319, #328, #333, #334), followed by the fixes hand-driving
+> turned up (#312, #320, #321, #329, #330, #335–#339, #341, #343, #347, #348,
+> #376, #377, #392–#399, #410, #412, #414, #417). The refusals the plan
+> specified are the refusals that shipped — creating entries, copying a
+> directory in, moving across the boundary, `:grep`, `F`, marks, harpoon and
+> shell. [Issue #149](https://github.com/Tripstack-Corp/spyc/issues/149) is
+> closed. The living reference is AGENTS.md → `src/archive/` and
+> ARCHITECTURE.md → "Archive mounts"; this file is the design argument behind
+> them.
+
+**Status:** design approved (2026-08-08), shipped v2.1.0 — see the banner.
+Charter for [issue #149](https://github.com/Tripstack-Corp/spyc/issues/149) —
+"support navigating into zip/tarball's with full editing/yanking capabilities …
+minimize disk space requirements (warn on potential issues) and keep
+interactions responsive."
 
 ## The problem, and why it's structural
 

@@ -240,7 +240,7 @@ pub enum Focus {
 /// `git status` snapshot. (The git *caches* — `raw_cache`, `repo_root`,
 /// `generation`, … — are `AppState` fields; clustering them would be pure
 /// relocation, not a fix.)
-/// Archives currently mounted (`docs/drafts/ARCHIVE_BROWSING_PLAN.md`). Pure
+/// Archives currently mounted (`docs/archive/ARCHIVE_BROWSING_PLAN.md`). Pure
 /// data — an index plus the user's pending changes — so it belongs in the Model
 /// even though the bytes it describes live on disk.
 pub type Mounts = crate::archive::Mounts;
@@ -651,7 +651,7 @@ pub struct AppState {
     pub marks: Marks,
     /// Archives mounted this session, keyed by the archive file's own path. A
     /// column whose `listing.dir` sits under one of them is browsing an index
-    /// rather than a directory (`docs/drafts/ARCHIVE_BROWSING_PLAN.md`).
+    /// rather than a directory (`docs/archive/ARCHIVE_BROWSING_PLAN.md`).
     pub mounts: Mounts,
     pub resolver: Resolver,
     pub user_keymap: UserKeymap,
