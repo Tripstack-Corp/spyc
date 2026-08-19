@@ -554,6 +554,93 @@ uncommitted content goes to the graveyard; a branch is deleted only if merged),
 and a worktree can be **leased** (`claim_worktree` writes git's native lock) so a
 second agent's cleanup refuses it.
 
+## Mouse routing
+
+`src/app/mouse/`. The layer is split pure/impure on the `route.rs` / `focus.rs`
+template, which is what makes the interesting half testable without a terminal.
+
+**`mouse/route.rs` — the pure half.** A `Copy` `MouseSnapshot` plus a pure
+`route_mouse` → `MouseSink`, and `region_at` hit-testing the pointer against
+`compute_layout`'s `FrameLayout`. It resolves against **the pointer, never
+keyboard focus** — that single choice is what makes the wheel scroll the thing
+you are looking at rather than the thing that happens to be focused.
+
+**`selection.rs` — four drag-select clusters** (pager text, chrome, pane text,
+list rows), each a `begin` + `extend` + `finish` triple. The press *claims* the
+drag; an unclaimed press leaves child-forwarding untouched, which is why a drag
+inside a mouse-aware child still reaches the child.
+
+**`scroll.rs` — wheel for children that ignore mouse reports.** A tick becomes
+the agent's own verified scroll keybinding, and a sustained streak escalates to
+page keys. The agent is the rate limiter, not spyc. Also drives codex's `^T`
+overlay.
+
+**`forward.rs`** forwards to a mouse-aware child, pairing press and release to
+the *same* child, and owns `mouse_report`'s translation into the pane's
+coordinate space.
+
+**`tab_hit.rs`** is the divider tab bar's geometry. `tab_widths` is the **single
+source of truth** for per-tab widths, consumed by both `render/chrome.rs` and
+the hit-test. Derive them in two places and a click lands on the neighbouring
+tab — but only after whichever tab drifted, so it reads as "clicks are off by
+one sometimes" rather than as a width bug.
+
+**`mod.rs`** holds the selection/streak data types and `handle_mouse`, the one
+dispatch entry. Every button rides the same pure fn via a `Gesture`:
+
+- **left** — focus the region, clicking *through* to a mouse-aware child. Reuses
+  `set_pane_focus` / `vsplit_focus`, so zoom-refusal and split-column restore
+  come free rather than being reimplemented for the mouse.
+- **middle** — `Effect::PasteFromClipboard`. The read runs on a worker because
+  `xclip -o` blocks until the selection owner transfers, and a wedged one on the
+  loop thread is a total freeze. `apply_clipboard_pastes` then routes it through
+  `handle_paste`, so bracketed-paste gating is inherited and focus is read at
+  *landing* time, not at click time.
+- **right** — `resolver.enter_leader()` plus a due-now `chord_hint_due`, so the
+  which-key popup appears without the keyboard path's debounce.
+
+Middle and right are never forwarded to a child.
+
+## Archive mounts
+
+`src/archive/` is the pure core; `src/app/archive*.rs` is the app glue. A mount
+is an **index, not a directory**: entering a multi-gigabyte zip writes zero
+bytes, and a member is materialized only when something reads it.
+
+**Containment is decided against the filesystem, never against the name.**
+Names are only half the problem — `index` normalization makes a zip-slip *name*
+structurally impossible by rejecting unsafe names on the way in, but a member is
+also free to be a symlink, and a link relocates where a *later* member lands. No
+per-name check can see that composition. So:
+
+- **Extraction never traverses a symlink.** `contained_dest` walks the
+  destination one component at a time and refuses if any existing component is a
+  link.
+- **A link target is judged the same way, and never folded on paper.**
+  Cancelling `..` against the preceding component is a paper operation and is
+  wrong the moment that component is itself a link: `d/link1/../x` reads as
+  `d/x` lexically while `open()` follows `link1` first and climbs out of the
+  mount. `link_target_contained` follows link components and applies `..` to the
+  real directory reached.
+- **A `..` behind a component that doesn't exist yet is refused outright**, since
+  a later member could create it as a link. That is what makes the verdict
+  independent of member order — the property the whole design rests on.
+
+**Staging carries spyc's permissions, the index carries the archive's.** A
+staged copy is owner-rw so spyc can read and rewrite its own cache; the mode a
+repack writes back comes from the index, never off disk.
+
+**Seekable vs streamed.** A zip or plain tar is indexed only and materialized
+per entry. A compressed tar cannot be listed without decompressing it, so it
+extracts as it streams under `[archive] extract_budget_mb` — the budget counts
+bytes that *arrive*, not bytes a header declares.
+
+**The write-back** (`write`) plans repack steps, writes a temp file beside the
+original, carries untouched members across without recompressing, **verifies by
+reading the result back**, then renames atomically — so a failed write leaves
+the original byte-identical. The verification re-read of a compressed tar is
+bounded by the same extract budget the mount used.
+
 ## Documentation contract
 
 Architecture decisions land in:

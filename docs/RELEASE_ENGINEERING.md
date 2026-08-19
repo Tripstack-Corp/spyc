@@ -27,36 +27,60 @@ human-written highlights); support windows are **published**; security has a
 
 ## 2. Release streams (the FreeBSD model, mapped)
 
-| FreeBSD | spyc | Git ref | Audience | Stability |
-|---|---|---|---|---|
-| `-CURRENT` | **CURRENT** | `main` | contributors, early adopters | rolling, may break |
-| `-STABLE` | **STABLE** | `stable/N` (per major) | users wanting fixes without churn | ABI/behavior-stable within major N |
-| `-RELEASE` | **RELEASE** | tag `vN.M.P` on `releng/N.M` | end users | frozen snapshot |
-| `releng/*` | **release branch** | `releng/N.M` | release engineering | frozen; security/errata only |
-| snapshots | **SNAPSHOT** | CI artifacts off `main`/`stable/N` | testers | nightly/weekly, unsigned-prerelease |
+> **What actually happens today: every release is tagged on `main`.** No
+> `stable/*` or `releng/*` branch has ever existed — v2.0.0 through v2.1.1 were
+> all cut from `main`, and `make release-tag` *refuses to run anywhere else*
+> (`test "$(git rev-parse --abbrev-ref HEAD)" = "main"`). The multi-stream model
+> below is the intended shape, not the current one; §2a says when it becomes
+> necessary and what has to change to adopt it. It is recorded here rather than
+> deleted because the reasoning still holds — but a document that describes a
+> process the repo does not run is worse than no document, so read the table
+> with the Status column.
 
-- **CURRENT (`main`)** — all development lands here, gated by CI. Nightly
-  snapshot builds are published as a rolling `nightly` prerelease.
-- **STABLE (`stable/N`)** — cut from `main` when major `N` begins its life.
-  Receives only **backports** of vetted fixes (FreeBSD's *MFC — Merge From
-  Current*); our equivalent is a cherry-pick PR labeled `backport stable/N`. No
-  new features that break behavior within the major.
-- **RELEASE (`releng/N.M`)** — a release branch forked from `stable/N` (or from
-  `main` for the very first release), then **frozen**. It only ever receives
-  errata + security patches, each producing a new patch tag `vN.M.P`.
-- **SNAPSHOT** — automated builds for people who want to test ahead of a release.
+| FreeBSD | spyc | Git ref | Audience | Stability | Status |
+|---|---|---|---|---|---|
+| `-CURRENT` | **CURRENT** | `main` | contributors, early adopters | rolling, may break | **live** |
+| `-RELEASE` | **RELEASE** | tag `vN.M.P` | end users | frozen snapshot | **live** (tagged on `main`) |
+| `-STABLE` | **STABLE** | `stable/N` (per major) | users wanting fixes without churn | behavior-stable within major N | *not implemented* |
+| `releng/*` | **release branch** | `releng/N.M` | release engineering | frozen; security/errata only | *not implemented* |
+| snapshots | **SNAPSHOT** | CI artifacts off `main` | testers | nightly/weekly, unsigned-prerelease | *not implemented* |
 
-**MFC / backport rule:** a fix flows *toward* stability — land on `main`, then a
-labeled cherry-pick PR backports it to `stable/N`, then (if a release branch is
-open) to `releng/N.M`. Never the reverse. During a freeze, backports to
-`releng/*` require Release-Manager approval.
+- **CURRENT (`main`)** — all development lands here, gated by CI.
+- **RELEASE** — a `vN.M.P` tag on `main`, produced by `make release-prep` on a
+  branch, merging that PR, then `make release-tag` on `main`. A patch release
+  works the same way: land the fix on `main`, then tag. v2.1.1 was cut exactly
+  so, one commit after v2.1.0.
+- **STABLE / release branches** — the planned shape, below.
+
+### 2a. When the branch model becomes necessary
+
+Tagging patches off `main` works while `main` contains nothing that shouldn't
+ship in a patch. That held for v2.1.1: `main` was v2.1.0 plus one packaging fix.
+It stops holding the moment you need to patch `N.M` *after* `N.M+1` work has
+landed — the fix and a pile of unrelated features would then be on the same
+commit, and there is no way to tag one without the other.
+
+That is the trigger. Adopting the model at that point means:
+
+- fork `releng/N.M` from the release tag, cherry-pick the fix, tag `vN.M.P+1`
+  there;
+- relax `release-tag`'s `main`-only check to accept `releng/*` (the check exists
+  so a tag can't be cut off a feature branch by accident, which is still worth
+  keeping — it needs widening, not removing);
+- `stable/N` only earns its keep with more than one live minor, so it can wait
+  until then.
+
+**MFC / backport rule** (applies once release branches exist): a fix flows
+*toward* stability — land on `main`, then a labeled cherry-pick PR backports it
+to `stable/N`, then to `releng/N.M`. Never the reverse.
 
 ## 3. Versioning
 
 SemVer, with FreeBSD's patch-level mapping made explicit:
 
-- `MAJOR.MINOR.PATCH` — `MAJOR.MINOR` names the release branch (`releng/2.0`),
-  `PATCH` is FreeBSD's `-pK` errata/security level (`v2.0.0` → `v2.0.1` → …).
+- `MAJOR.MINOR.PATCH` — `MAJOR.MINOR` is the release line (and would name its
+  branch, `releng/2.0`, once §2a's branches exist), `PATCH` is FreeBSD's `-pK`
+  errata/security level (`v2.0.0` → `v2.0.1` → …).
 - **What `main` carries between releases: `N.M.0-CURRENT`** — the *next* minor,
   suffixed to mark it as the rolling CURRENT stream (`2.1.0-CURRENT` while 2.1
   is in development). It is **static** for the whole cycle: no PR bumps it, and
@@ -85,6 +109,10 @@ SemVer, with FreeBSD's patch-level mapping made explicit:
 > abandoned clean-slate rebrand; staying spyc, we continue the line.)
 
 ## 4. Branch & tag topology
+
+> **The planned topology (§2a), not the current one.** Today the graph is a
+> straight line: every tag from `v2.0.0` to `v2.1.1` sits on `main`, with no
+> `stable/*` or `releng/*` branch in existence.
 
 ```mermaid
 gitGraph
