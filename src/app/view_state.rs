@@ -357,7 +357,7 @@ pub struct ViewState {
     /// scrolls out from under a selection anchored this way. That is fine for the
     /// case it exists to serve — reading a static transcript overlay — and is the
     /// simple half of the tradeoff recorded in
-    /// `docs/drafts/mouse_selection_plan.md`.
+    /// `docs/archive/mouse_selection_plan.md`.
     pub(super) pane_selection: Option<((u16, u16), (u16, u16))>,
     /// A charwise selection over one of the single-line chrome surfaces (the status
     /// bar, the pane divider/tab line) — the row and an unordered column pair.

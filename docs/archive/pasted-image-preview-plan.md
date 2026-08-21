@@ -1,6 +1,18 @@
 # Preview images pasted to the agent — plan (#119)
 
-**Status:** planned — scope decided, no code written.
+> **Shipped (v2.1.0) — archived as historical record.** All five PRs landed:
+> the shared `image_ops` path and image-file preview (#300), the gallery on
+> `^a g` (#302), and live capture at paste time (#304), with the transcript
+> image index in `src/state/transcript_images.rs`. Fixes followed — the
+> overlay was undismissable until it moved onto the modal axis (#313), viewer
+> temp files moved to a private dir (#316), the index's line reader gained a
+> bound (#318), and the gallery became a popup rather than a view of the frame
+> (#308). The transcript half is **still Claude-only**: `transcript_images()`
+> is implemented by `ClaudeProfile` alone, and any other agent flashes that
+> spyc can't read its transcript. [Issue #119](https://github.com/Tripstack-Corp/spyc/issues/119)
+> is closed.
+
+**Status:** planned — scope decided, shipped v2.1.0 (see the banner).
 **Measured against:** `b2b391f`.
 
 **Decisions (2026-08-08):** all five PRs are in scope, including the image-file

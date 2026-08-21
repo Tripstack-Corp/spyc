@@ -3,7 +3,11 @@
 **Status:** plan, not yet implemented. Tracking issue: [#57](https://github.com/Tripstack-Corp/spyc/issues/57). Original note:
 > feature to allow spyc to approve certain Claude CLI actions automatically and keep a log
 
-**Target release:** v1.51 (feature-shaped, not blocking v1.60 hub work).
+**Target release:** unscheduled. The original "v1.51, not blocking v1.60 hub
+work" line is dead twice over — the project shipped past 1.51 and 2.0, and the
+v1.60 hub is archived design (`docs/archive/V1_60_PLAN.md`). Not in 2.2 scope.
+Its file pointers predate the MVU decomposition; re-resolve them against the
+current module layout before picking this up.
 
 ## Thesis
 

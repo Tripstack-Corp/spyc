@@ -1,5 +1,5 @@
 //! Archive browsing — the format core behind mounting a zip/tarball as a
-//! browsable tree (`docs/drafts/ARCHIVE_BROWSING_PLAN.md`).
+//! browsable tree (`docs/archive/ARCHIVE_BROWSING_PLAN.md`).
 //!
 //! Split so every decision is testable without a live mount: `index` (the entry
 //! table + name normalization), `scan` (what we may safely do with it),

@@ -3,8 +3,17 @@
 **Status:** plan, not yet implemented. Sourced from external-contributor
 analysis (Caleb Howard, 2026-05-15).
 
-**Target release:** opportunistic — small enough to land in any future
-release. No urgent driver.
+**Target release:** 2.2 ([#58](https://github.com/Tripstack-Corp/spyc/issues/58);
+scope and sequencing in [`V2_2_PLAN.md`](V2_2_PLAN.md)). It stopped being
+opportunistic: a declarative tab set is the config half of a 2.3 project
+definition.
+
+**Step zero:** the `src/app/mod.rs:NNNN` pointers below predate the MVU
+decomposition and resolve nowhere. `open_pane_tab` is now
+`src/app/pane_tabs.rs`, `App::new` is `src/app/bootstrap.rs`; `PaneConfig`
+(`src/config/mod.rs`) and `Action::PaneTabByIndex` (`src/keymap/action.rs`)
+kept their homes but not their line numbers. Re-resolve the rest against the
+current layout before writing code.
 
 ## Thesis
 

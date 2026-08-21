@@ -1,5 +1,19 @@
 # Mouse text selection — implementation plan
 
+> **Shipped (v2.1.0) — archived as historical record.** All four drag-select
+> clusters landed: forward-the-drag first (#224), then the pager (#227), the
+> file list plus the status line (#233), a pane whose child ignores the mouse
+> (#234), and the prompt row and activity HUD (#281). Follow-ups fixed what
+> hand-driving found — the echo-then-confirm message (#342), copying part of a
+> flash (#372), a chrome row's right edge (#375). OSC 52 (open decision
+> 5) exists in `src/clipboard.rs`, so the SSH problem Tier 5 raises is
+> answered. Click-to-select a list row remains rejected, not deferred.
+>
+> The plan was not amended as the implementation moved; the pre-2.1 review
+> (`docs/archive/review-2.1/B-app-interaction.md`) records where the two
+> diverged. The living reference is AGENTS.md → `src/app/mouse/` and
+> ARCHITECTURE.md → "Mouse routing".
+
 ## Goal
 
 Drag to select text, release to have it on the clipboard — on the agent pane,

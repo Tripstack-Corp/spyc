@@ -166,8 +166,9 @@ spyc --install-skill      # → Claude Code, codex, and agy skill dirs
 
 spyc offers a `[Y/n]` update when its copy moves ahead of yours, never
 overwrites edits you've made, and is managed in-app with `:skill`. Multiple
-spyc instances coexist safely, and enterprise `managed-mcp.json` policies are
-respected — see [INSTALL.md](INSTALL.md#mcp-configuration).
+spyc instances coexist, one owning MCP for a directory at a time, and
+enterprise `managed-mcp.json` policies are respected — see
+[INSTALL.md](INSTALL.md#mcp-configuration).
 
 ## Running multiple agents
 

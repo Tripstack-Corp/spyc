@@ -1,7 +1,7 @@
 # spyc roadmap
 
-The strategy layer — thesis, current state, the 2.0 gate, non-goals, and the
-decisions log. The per-item **backlog lives in [GitHub Issues](https://github.com/Tripstack-Corp/spyc/issues)**
+The strategy layer — thesis, current state, the 2.2 and 2.3 arcs, non-goals, and
+the decisions log. The per-item **backlog lives in [GitHub Issues](https://github.com/Tripstack-Corp/spyc/issues)**
 (organized on the [roadmap board](https://github.com/orgs/Tripstack-Corp/projects/1));
 `CHANGELOG.md` is the shipped history. Detailed designs for not-yet-started work
 live in `docs/drafts/*_PLAN.md`; shipped or parked plans are archived in
@@ -25,64 +25,66 @@ supporting infrastructure that makes the split-pane workflow fast and
 comfortable. The roadmap is organized accordingly: the pane-and-agent
 integration is the defining work track, not the trailing milestone.
 
-## Where we are (v1.97.2)
+## Where we are (v2.1.1)
 
 The structural foundation has been **done** for a while: the full MVU/Elm
 migration (Model/Runtime/ViewState split, effects-as-data, single message
-channel, pure render), the `app/mod.rs` decomposition (12.4k → ~1.4k lines,
-ceiling-guard-enforced at 1,500), the complete git→gix migration
+channel, pure render), the `app/mod.rs` decomposition (12.4k → 425 lines,
+ceiling-guard-enforced at 600), the complete git→gix migration
 (100% in-process, guard-enforced, with in-house side-by-side diff/show/blame
 views), off-thread PagerStream (grep / git-view / agent transcripts on one
 seam), and unified input routing (`route_input`/`InputSink`, `Focus` as the
 routing authority).
 
-The **800-LoC file rule is a convention, not a guard** — AGENTS.md states it
-with an explicit escape hatch ("without a solid reason"), and the only ceiling
-guard in the tree is `mod_rs_stays_decomposed`, which caps `src/app/mod.rs`
-alone. Listing it above as a finished foundation read as compliance; roughly a
-dozen and a half files exceed 800 *production* lines (counting lines outside
-`#[cfg(test)]` modules — a raw `wc -l` badly overstates it, since the house
-convention keeps tests in the same file). The `src/app/mouse.rs` outlier named
-here has since been decomposed into `src/app/mouse/` (`route`/`selection`/
-`scroll`/`forward`/`tab_hit`/`mod`, largest 621 production lines), so the
-remaining outliers are elsewhere — re-derive the list before acting on it rather
-than trusting this paragraph's count.
+The **800-LoC file rule is a convention with an explicit escape hatch**, stated
+in AGENTS.md and enforced nowhere except `mod_rs_stays_decomposed`, which caps
+`src/app/mod.rs` alone. Some files are over it. Re-derive the list from the
+tree rather than from a number written down here.
 
-Since then the **thesis work has largely shipped** — the differentiators the
-competitive review ([`docs/COMPETITIVE_REVIEW.md`](docs/COMPETITIVE_REVIEW.md))
-named as spyc's wedge are now real, not planned:
+The thesis work shipped over 1.x and 2.0: agent-awareness dots and
+notifications, the worktree MCP suite, the merge/scope registry, the in-process
+review loop, the vertical split, Lua scripting, and the chord/leader overhaul.
+The competitive review
+([`docs/COMPETITIVE_REVIEW.md`](docs/COMPETITIVE_REVIEW.md)) named these as
+spyc's wedge; the mechanics are documented in
+[`docs/AGENT_ORCHESTRATION.md`](docs/AGENT_ORCHESTRATION.md), AGENTS.md and
+ARCHITECTURE.md.
 
-- **Agent awareness (P0–P3, complete).** Per-pane activity dots driven by an
-  MCP/hook *self-report* channel (working/blocked/done) with an output-timing
-  fallback, desktop notifications + a branded visual-bell border pulse on the
-  attention transition, and live Claude session-id pinning so `-r` resumes the
-  *exact* conversation. The reliable, cooperative answer to "which agent needs
-  me" that herdr does fragile-ly by screen-scraping. See
-  [`docs/AGENT_ORCHESTRATION.md`](docs/AGENT_ORCHESTRATION.md).
-- **Worktree MCP suite.** `list`/`create`/`open`/`remove`/`clean_worktrees` +
-  leases, all in-process gix; safe-by-default teardown archives to the graveyard.
-- **Merge / scope registry (P2).** `register_scope`/`list_scopes`/
-  `wait_for_scope_clear`/`release_scope` for advisory multi-agent merge
-  coordination, plus the `spyc-semver` merge driver that auto-resolves the
-  version-line conflict every concurrent PR collides on.
-- **In-process review loop.** Syntax-highlighted side-by-side diff/show/blame
-  per worktree — the uncontested review wedge in the TUI lane.
-- **Vertical split (Stage 1 + 2).** A live-reloading preview column, plus a full
-  second file-commander with its own cwd/git/harpoon and worktree-scoped MCP.
-- **Lua scripting.** `map KEY lua` + an `init.lua` platform (`spyc.map`/
-  `spyc.command`/`spyc.on` events, full-`Action` `spyc.action`, live reads) on a
-  sandboxed off-thread worker.
-- **Chord + command overhaul.** which-key hint popup, `Space` leader, the
-  `command`/`lua` DSL verbs, and a guard-enforced global/frame/pane tier
-  taxonomy; low-frequency features demoted to `:`-commands.
-- **Crash-sufficient autosave**, `^z` pane suspend/resume, and per-channel
-  notification gating (`Blocked`-only bell/flash, quiet `Done` desktop ping).
+2.0 was the distribution pass — public repo, signed binaries, brew / apt /
+crates.io, Show HN. Its plan is archived at
+[`docs/archive/LAUNCH_PLAN_2_0.md`](docs/archive/LAUNCH_PLAN_2_0.md), with the
+done-criteria confirmed and the parts that never shipped named. 2.1 shipped:
 
-AGENTS.md is the architectural contract + conventions; ARCHITECTURE.md holds
-the deep design decisions. The feature set is **launch-ready** — what remains
-before 2.0 is just the distribution / launch pass. The daily-driver papercuts
-and the near-term thesis features (session forking, prompt templates) are
-post-2.0 work — see "Road to 2.0."
+- **An installable agent skill** (#187). `spyc --install-skill` writes an
+  embedded usage guide into Claude Code's, codex's and agy's personal-skills
+  dirs, offers a `[Y/n]` update when spyc's copy moves ahead, and never
+  clobbers local edits unprompted. The MCP `initialize` handshake has to stay
+  short, so the depth ships here instead.
+- **agy support, and gemini removed** (#194), with a scrape fallback for the
+  `Blocked` state agy's hooks can't report and session pinning from its hook
+  payload rather than spawn proximity (#202, #285, #287).
+- **The mouse suite, on by default** (#212–#234, plus follow-ups through #387):
+  the wheel scrolls whatever is under the pointer, three button gestures,
+  drag-select in four surfaces. The Non-goals entry narrowed to match — mouse
+  support is no longer a non-goal; mouse-first design still is.
+- **Archive browsing** (#301–#334, closing
+  [#149](https://github.com/Tripstack-Corp/spyc/issues/149)). Walk into a zip
+  or tarball, change what's inside, `:archive write` repacks and verifies. A
+  mount is an index, not a directory, so entering a huge zip extracts nothing.
+- **Image capture, preview and the `^a g` gallery** (#300, #302, #304) — what
+  the agent received, plus anything pasted and not yet sent.
+- **Per-character intraline diff highlight**, on by default (#351, #364).
+- **A security and correctness pass.** The MCP `root` override is validated
+  rather than documented (F1, #237), persistent writes go through
+  `write_atomic` (F3, #238), there is one state-root resolver (F6, #239), and
+  the fuzz targets build for a target that can run them and go weekly in CI
+  (F5, #242). The pre-2.1 review that followed put six reviewers and a referee
+  over `v2.0.0..HEAD` and closed 58 findings across eight passes; the reports
+  are archived under
+  [`docs/archive/review-2.1/`](docs/archive/review-2.1/).
+
+v2.1.1 adds one packaging fix: `docs/ABOUT.md` is compiled into the binary via
+`include_str!` and was missing from the published crate (#426).
 
 ## Working tracks
 
@@ -98,156 +100,93 @@ foundations work continues throughout.
 - **Distribution** -- release automation, signing, packaging, docs.  Turns a
   repo into a tool people can install, trust, and find.
 
-## Road to 2.0
+## Road to 2.2
 
-2.0 is a public-distribution + signaling bump — **not** a feature gate. Where we
-stand today is launch-ready: the structural foundation, the agent-awareness
-wedge, the in-process review loop, worktrees + scope registry, vsplit, and Lua
-all shipped (see "Where we are"), on top of the MVU rewrite and the
-test-de-risking campaign (workflow harness, proptest/cargo-fuzz — see
-[`docs/archive/TESTING_STRATEGY.md`](docs/archive/TESTING_STRATEGY.md)).
+2.2 lands the prerequisites Projects needs and closes the bugs a daily driver
+hits weekly. Every item is one or the other. Scope and sequencing:
+[`docs/drafts/V2_2_PLAN.md`](docs/drafts/V2_2_PLAN.md).
 
-So the **only** thing between here and 2.0 is the **distribution / launch pass** —
-the launch plan below, end to end. Everything else moves to post-2.0: the
-daily-driver papercuts (path handoff, startup pane tabs, pane-recovery Phase 0,
-cwd-export, keymap-DSL completeness, PgUp/PgDn) and the near-term thesis features
-(session forking `^a f`, prompt templates) — all tracked in
-[Issues](https://github.com/Tripstack-Corp/spyc/issues). Good, standalone work;
-it just doesn't block the launch.
+- **Pane-identity transport** — option B of
+  [`docs/drafts/pane-identity-transport-proposal.md`](docs/drafts/pane-identity-transport-proposal.md):
+  the `spyc --mcp` proxy sends its `$SPYC_PANE_ID` in the `initialize`
+  handshake and the server binds it to that connection. Closes the target
+  design the F1 decisions-log entry names, and lets `get_spyc_context` answer
+  for the calling pane rather than for whichever column the user is browsing.
+  Attribution, not authorization — SECURITY.md says which.
+- **[#40](https://github.com/Tripstack-Corp/spyc/issues/40) — one spyc per
+  agent.** Abstract the hardcoded `left`/`right` column references so what a
+  column holds can change. Projects prep, with standalone cleanup value.
+- **[#58](https://github.com/Tripstack-Corp/spyc/issues/58) — configurable
+  startup pane tabs**, per
+  [`docs/drafts/PANE_STARTUP_TABS_PLAN.md`](docs/drafts/PANE_STARTUP_TABS_PLAN.md).
+  A declarative tab set is the config half of a 2.3 project definition.
+- **[#8](https://github.com/Tripstack-Corp/spyc/issues/8) — session forking
+  (`^a f`)**, so an agent conversation can branch without losing the prior line
+  of inquiry.
+- **[#71](https://github.com/Tripstack-Corp/spyc/issues/71) — prompt templates
+  in `.spycrc.toml`**, with picks and inventory substituted.
+- **The daily-driver bug set** —
+  [#326](https://github.com/Tripstack-Corp/spyc/issues/326) (the first
+  keystrokes into a fresh pane are dropped),
+  [#327](https://github.com/Tripstack-Corp/spyc/issues/327) (a partially-failed
+  `remove_worktree` strands the worktree),
+  [#9](https://github.com/Tripstack-Corp/spyc/issues/9) (`^a s` anchors paths
+  on PROJECT_HOME, so an agent in a worktree can't resolve them),
+  [#34](https://github.com/Tripstack-Corp/spyc/issues/34) (Claude PTY
+  scrollback artifacts),
+  [#22](https://github.com/Tripstack-Corp/spyc/issues/22) +
+  [#11](https://github.com/Tripstack-Corp/spyc/issues/11) (the MCP takeover
+  prompt, and an integration test for multi-instance coexistence).
+- **`docs/drafts/PROJECTS_PLAN.md`** — authored in 2.2, design only. 2.3's
+  scope depends on it being written and approved before code lands.
 
-**v2.0 — public distribution launch.** Cut once the launch plan is done.
-External announcement (TripStack engineering blog, optional Show HN). The major
-bump is a signaling choice as much as a semver one — the MCP positioning shift +
-public distribution mark the transition.
+## The 2.3 horizon: Projects
 
-## Launch plan (2.0)
+The goal is to stop managing multiple terminal windows. A project wraps spyc
+sessions: a project switcher, a `projects` status-bar segment, several agents
+per project, one attention signal across all of them, and recovery that
+restores every project rather than one. All in one process.
 
-> **Execution manual:** this section holds the strategic gates and open
-> decisions; the end-to-end release *mechanics* — release streams, CI
-> workflows, signing/notarization, Homebrew, org setup — live in
-> [`docs/RELEASE_ENGINEERING.md`](docs/RELEASE_ENGINEERING.md), the launch
-> operating manual. Keep the two in sync when a gate moves.
+CounterTop rejected that route. `docs/archive/V1_60_PLAN.md` lists "lift App
+state into `Vec<Workspace>` with an active index" as one of three candidates
+and rules it out — too much state to lift, complicates persistence and the
+process model — choosing siblings + mirror instead: independent peer spycs,
+frame mirroring over the MCP socket, input forwarding, headless `--detached`
+instances. That design was parked on 2026-07-02 for fighting spyc's
+single-process sync core, and it stays parked. The rationale applied to the
+mirror rather than to the goal: with one process there is nothing to mirror,
+forward, or run headless.
 
-Benchmarked against Yazi (github.com/sxyazi/yazi, ~39.9k stars) as the
-gold-standard reputable TUI tool. The MCP / Claude-Code pairing
-remains spyc's differentiator — Yazi has nothing like it; keep it
-front and centre. Goal: a release that someone reading the repo cold
-can trust enough to make their daily file manager. Not a promotion
-blitz — just enough signal to feel "this is real, maintained, and
-works for me."
+Four things changed since. MVU is complete and guard-enforced, so lifting App
+state is a bounded question about which fields move. Vsplit Stage 2 already
+runs a second full `Commander` — own cwd, git, harpoon, worktree-scoped MCP —
+in one process. Agent-awareness dots and desktop notifications already run
+per-process, so aggregating attention across projects costs little. And the
+pane-identity transport (2.2) gives every MCP connection an identity that
+extends to project attribution.
 
-### Open decisions
-
-- [x] **Repo home: RESOLVED (2026-07-02) — full move to GitHub.**
-  `github.com/Tripstack-Corp/spyc` is canonical; **all dev + CI move there**
-  (not a mirror). The repo stays **private** until launch. `Cargo.toml
-  repository =`, the clone URLs (README/INSTALL/CONTRIBUTING), and the CI moved
-  in this pass: `.github/workflows/{ci,audit}.yml` port the retired
-  `bitbucket-pipelines.yml` (archived under `docs/archive/`). Remaining
-  GitHub-side setup (branch protection on `main`, the weekly-audit schedule,
-  and the distribution workflows — release/snapshot/homebrew per
-  RELEASE_ENGINEERING.md) is done on the repo before it goes public.
-- [ ] **License footer.** Already BSD-3-Clause in `Cargo.toml`;
-  confirm for public release and that LICENSE is at repo root.
-- [ ] **Status statement wording.** Default proposal: *"Public beta,
-  daily-driver-ready. macOS and Linux."*
-
-### Required for 2.0
-
-1. **Repo move/mirror execution** (per the decision above): public
-   repo, history + tags pushed, `Cargo.toml` repository field,
-   README/INSTALL link updates, branch protection on `main`.
-2. **Demo capture at top of README.** 30–60s asciinema or MP4 of the
-   full Claude pairing loop: launch → `F` fuzzy-find → `:grep` →
-   `^\` to Claude → "what files am I picking?" answered via
-   `get_spyc_context` → `gf` jump on a path Claude mentions → quit.
-   Place as the first media element after the value prop.
-3. **Release pipeline + binaries.** Tag push triggers cross-compile
-   matrix — macOS arm64 + x86_64, Linux x86_64 + arm64 (musl,
-   static) — with artifacts attached to Releases. Homebrew tap
-   (`brew tap <org>/spyc && brew install spyc`) auto-bumped from the
-   release workflow. crates.io publish (binary-only crate,
-   acceptable). AUR `spyc-bin` deferred post-2.0 unless a volunteer
-   emerges.
-
-### Cheap wins — batch with the launch pass
-
-- **README hygiene**: stale status line replaced with the agreed
-  status statement; headline sells the Claude angle in one sentence;
-  spot-check keybinding tables.
-- **Repo scaffolding**: issue templates (bug: repro/version/OS/
-  terminal; feature: what/why/would-you-use-it), PR template,
-  CODE_OF_CONDUCT (Contributor Covenant, link only). SECURITY.md ✅
-  exists.
-- **`MIGRATION.md`**: three small keybind tables (ranger → spyc,
-  lf → spyc, Yazi → spyc, ~10 binds each) plus one paragraph on what
-  spyc has that they don't (the MCP integration). Unblocks the two
-  remaining Yazi-review recommendations
-  ([`docs/COMPETITIVE_REVIEW.md`](docs/COMPETITIVE_REVIEW.md) §1d).
-- **Signing & supply chain**: macOS Developer ID signing +
-  notarization (without it the first user report is "macOS says spyc
-  is damaged"); Linux minisign signatures with the public key in the
-  repo; SBOM via `cargo-sbom`/`cargo-auditable`; reproducible-build
-  verification job (toolchain already pinned, `SOURCE_DATE_EPOCH`,
-  rebuild-and-diff). Proportionate — no SLSA theater (see Non-goals).
-- **Shell completions**: `spyc --generate-completion {bash,zsh,fish}`
-  via clap derive; ship in release artifacts.
-- **First-run hint flash**: on first launch (no
-  `state_root()/first_run_done` marker), flash that (1) `^a`/`^w` are
-  reserved chord prefixes (rebindable) and (2) `?` opens help.
-  ~30 lines; saves every tmux/shell-heavy user the same surprise.
-- **`:tutor` (vimtutor-style)**: interactive walkthrough on a
-  pre-baked scratch directory — motions, marks, picks, `=` filter,
-  pager, `^a` family, MCP context, sessions. Each lesson sets a goal,
-  watches for the action, advances. The one-command demo for a
-  Show-HN reader. Tutor content tracks bindings — add to the AGENTS.md
-  doc-sync checklist when it lands.
-
-### Explicitly deferred (not 2.0)
-
-- Dedicated docs site (mdbook/Starlight). The Markdown reads fine on
-  GitHub; revisit if docs outgrow single files.
-- Blog/marketing posts beyond one Show HN at 2.0. CHANGELOG is enough.
-- Windows support (see Non-goals — WSL is the story).
-- Discord/Matrix/forum. GitHub Discussions post-launch if traffic
-  warrants; a chat channel is a maintenance commitment.
-- Sponsorship buttons, until traction warrants.
-
-### Done-criteria for the 2.0 launch
-
-A user landing on the repo cold should be able to:
-
-1. Watch a 30-second demo in the README and understand what spyc does
-   and why it's different.
-2. Install via Homebrew *or* a pre-built Release binary — no Rust
-   toolchain required.
-3. Read FEATURES.md and INSTALL.md without broken links or stale
-   version numbers.
-4. File a bug or feature request via templated issues.
-5. See a recent release (within ~30 days) and a current CHANGELOG.
-6. Read a clear 2.0 CHANGELOG entry: what changed since 1.x, what
-   stability we promise going forward.
-
-Sequencing: repo decision first (blocks everything) → README hygiene
-→ demo capture → scaffolding → release pipeline + first 2.0 binaries
-→ Homebrew → migration page. The 2.0 CHANGELOG entry is written last,
-once we've daily-driven our own builds for a few days.
+Out of scope in 2.3 and after: frame mirroring, input forwarding, headless or
+`--detached` peers, cross-process discovery, and any CounterTop revival.
+`docs/drafts/PROJECTS_PLAN.md` — a 2.2 deliverable — is where the design gets
+argued. Tracked as [#99](https://github.com/Tripstack-Corp/spyc/issues/99).
 
 ## Backlog & roadmap
 
-The live, actionable work — features, fixes, tooling, the speculative icebox, and
-the post-2.0 arc — is tracked in **[GitHub Issues](https://github.com/Tripstack-Corp/spyc/issues)**,
+The live, actionable work — features, fixes, tooling, and the speculative
+icebox — is tracked in **[GitHub Issues](https://github.com/Tripstack-Corp/spyc/issues)**,
 labeled by `area:*` / `type:*` and organized on the **[roadmap board](https://github.com/orgs/Tripstack-Corp/projects/1)**. Signposts:
 
-- **`2.0` milestone** — the launch-gating work (see "Launch plan" above).
+- **`2.2` milestone** — the scoped 2.2 work (see "Road to 2.2" above).
+- **`2.3` milestone** — Projects (see "The 2.3 horizon" above).
 - **`icebox`** — speculative / nice-to-have ideas.
 - **`needs-design`** — items with a design doc in `docs/drafts/` or needing a spike.
+- **`needs-repro`** — reported, not yet reproducible; evidence wanted before design.
 - **`good first issue`** — small, self-contained entry points.
 
-This file is the *strategy* layer — thesis, current state, the 2.0 gate,
-non-goals, and the decisions log. The per-item backlog lives in Issues; detailed
-designs for not-yet-started work are in `docs/drafts/*_PLAN.md`; shipped or
-parked designs are archived under `docs/archive/`.
+This file is the *strategy* layer — thesis, current state, the 2.2 and 2.3
+arcs, non-goals, and the decisions log. The per-item backlog lives in Issues;
+detailed designs for not-yet-started work are in `docs/drafts/*_PLAN.md`;
+shipped or parked designs are archived under `docs/archive/`.
 
 ## Non-goals
 
@@ -338,13 +277,37 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
      cwd — is the target design, blocked on transport: `SPYC_PANE_ID`
      reaches the pane's env, but read-tool dispatch resolves through
      the context file, which carries no pane identity.
+- **`^a s` anchors on the pane's live cwd, not on `PROJECT_HOME`**
+  (2026-08-19). `PATH_HANDOFF_PLAN`'s Option A: a path under the target
+  pane's live cwd goes out relative, everything else absolute, and the
+  absolute tier is never `~`-collapsed (claude's `Read` won't reliably
+  expand it). The old anchor hands an agent working in a worktree a path
+  that resolves against the wrong directory. An unknown `live_cwd` falls
+  through to absolute, so the failure mode is verbose rather than wrong.
+  Prompt templates ([#71](https://github.com/Tripstack-Corp/spyc/issues/71))
+  use the same anchor. The general handoff problem — terse tokens,
+  submit hooks, consumer-aware `^a s` — stays exploration under
+  [#59](https://github.com/Tripstack-Corp/spyc/issues/59).
+- **CounterTop stays parked as an *architecture*; the multi-project
+  goal is reopened for 2.3 on the monolith route** (2026-08-19). What
+  fought the single-process core was siblings + mirror — peer discovery,
+  frame mirroring, input forwarding, headless `--detached` spycs — and
+  that stays archived. With one process there is nothing to mirror, so
+  2.3 takes the route V1_60 rejected: one process, many projects. Four
+  things changed since the 2026-07-02 parking. MVU is complete and
+  guard-enforced, so lifting App state is a bounded question. Vsplit
+  Stage 2 already runs a second full `Commander` in-process.
+  Agent-status dots and notifications are already per-process. And #40
+  exists as the prep refactor. Depends on the pane-identity transport
+  (2.2) for project attribution; `docs/drafts/PROJECTS_PLAN.md`, a 2.2
+  deliverable, is where it gets argued.
 
 ## Doc map
 
 | Doc | Role |
 |---|---|
-| `ROADMAP.md` | This file — strategy, the 2.0 gate, non-goals, decisions log. |
-| [GitHub Issues](https://github.com/Tripstack-Corp/spyc/issues) + [roadmap board](https://github.com/orgs/Tripstack-Corp/projects/1) | The live backlog — features, fixes, ideas, the post-2.0 arc; labeled + milestoned. |
+| `ROADMAP.md` | This file — strategy, the 2.2 and 2.3 arcs, non-goals, decisions log. |
+| [GitHub Issues](https://github.com/Tripstack-Corp/spyc/issues) + [roadmap board](https://github.com/orgs/Tripstack-Corp/projects/1) | The live backlog — features, fixes, ideas; labeled + milestoned. |
 | `docs/archive/BACKLOG_DRAFT_NOTES.md` | Archived raw intake backlog — open items migrated to Issues (2026-07); kept as history. |
 | `CHANGELOG.md` | Shipped history (git-cliff, conventional commits). |
 | `AGENTS.md` | The canonical agent guide: architectural contract (MVU invariants), module map, conventions. |
@@ -356,18 +319,27 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/RELEASE_ENGINEERING.md` | The launch operating manual — release streams, CI, signing, Homebrew, org setup. |
 | `docs/BRAND.md` | Brand & identity — the name story, palette, voice. |
 | `docs/AGENT_ORCHESTRATION.md` | How the agent activity-dots / notifications / session-resume / scope registry fit together (living reference). |
-| `docs/drafts/AUTO_APPROVAL_PLAN.md` | Pending design (post-2.0). |
-| `docs/drafts/PANE_STARTUP_TABS_PLAN.md` | Pending design (road-to-2.0). |
-| `docs/drafts/PATH_HANDOFF_PLAN.md` | Pending design (Option A is road-to-2.0). |
-| `docs/drafts/ARCHIVE_BROWSING_PLAN.md` | Approved design, unstarted — navigate into zip/tarballs with full editing ([#149](https://github.com/Tripstack-Corp/spyc/issues/149)). Prior art, the mount-is-an-index model, and the 6-PR staging. |
-| `docs/archive/TESTING_STRATEGY.md` | Testing strategy & guidelines (coverage, anti-"test theater", proptest/cargo-fuzz, AI-testing rules). Campaign complete (#426–#438); kept as the how-we-test reference. |
-| `docs/archive/V1_60_PLAN.md` | Archived design — CounterTop multi-instance hub. Considered & parked (fights the single-process core); summarized in Post-2.0. |
-| `docs/archive/V1_70_PLAN.md` | Archived design — Mise en Place typed addressability + crate split. Post-2.0 speculative; MCP already covers the basics. Summarized in Post-2.0. |
+| `docs/drafts/V2_2_PLAN.md` | The 2.2 scope, sequencing and exit criteria — the plan behind "Road to 2.2". |
+| `docs/drafts/pane-identity-transport-proposal.md` | Accepted for 2.2 — pane id in the MCP `initialize` handshake (option B). Also the attribution mechanism Projects extends. |
+| `docs/drafts/PANE_STARTUP_TABS_PLAN.md` | Pending design, 2.2 scope ([#58](https://github.com/Tripstack-Corp/spyc/issues/58)). |
+| `docs/drafts/AUTO_APPROVAL_PLAN.md` | Pending design, unscheduled ([#57](https://github.com/Tripstack-Corp/spyc/issues/57)). |
+| `docs/drafts/PATH_HANDOFF_PLAN.md` | Split — Option A is 2.2 scope ([#9](https://github.com/Tripstack-Corp/spyc/issues/9)); the rest stays exploration ([#59](https://github.com/Tripstack-Corp/spyc/issues/59)). |
+| `docs/drafts/multi-question-bug-investigation.md` | Open bug, parked without a repro — an agent pane going deaf to input. Not in the tracker; this is the record. |
+| `docs/archive/LAUNCH_PLAN_2_0.md` | Archived — the 2.0 distribution/launch plan, every gate closed, plus what never shipped. |
+| `docs/archive/ARCHIVE_BROWSING_PLAN.md` | Archived design — navigate into zip/tarballs with full editing; shipped v2.1.0, [#149](https://github.com/Tripstack-Corp/spyc/issues/149) closed. |
+| `docs/archive/native_scroll_plan.md` · `docs/archive/mouse_selection_plan.md` | Archived designs — the mouse suite, shipped v2.1.0. Neither was amended as it was built; the banners name what diverged. |
+| `docs/archive/pasted-image-preview-plan.md` | Archived design — paste capture, image preview, the `^a g` gallery; shipped v2.1.0. |
+| `docs/archive/2.1-release-notes.md` | Archived — the human-facing 2.1 notes. |
+| `docs/archive/TESTING_STRATEGY.md` | Testing strategy & guidelines (coverage, anti-"test theater", proptest/cargo-fuzz, AI-testing rules). Campaign complete — 8 clusters, June 2026; kept as the how-we-test reference. |
+| `docs/archive/V1_60_PLAN.md` | Archived design — CounterTop multi-instance hub. Parked as an architecture; the multi-project goal it targeted is reopened for 2.3 on the monolith route (see the decisions log). |
+| `docs/archive/V1_70_PLAN.md` | Archived design — Mise en Place typed addressability + crate split. Speculative; MCP already covers the basics. |
+| `docs/archive/engagements/` | Engagement briefs and deliverables (the review-remediation and cleanup rounds) — which PR closed which finding. |
 | `docs/COMPETITIVE_REVIEW.md` | Consolidated competitive review + GTM: the AI coding-agent-manager category (§1–§1c: herdr, psmux, claude-code-ide.el) plus the TUI file-manager lane (§1d: Yazi, folded 2026-07-02). Refresh on a competitor's next major. (Standalone Yazi original archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md`.) |
 | `docs/archive/` | Shipped plans, kept as historical record. |
 
 > **Note on pending plans:** `AUTO_APPROVAL_PLAN`, `PANE_STARTUP_TABS_PLAN`
 > and `PATH_HANDOFF_PLAN` predate the MVU decomposition — their designs hold,
-> but `src/app/mod.rs:NNNN`-style file pointers are stale; re-resolve against
-> the current module layout when picking one up. `ARCHIVE_BROWSING_PLAN` is
-> written against the current layout.
+> but `src/app/mod.rs:NNNN`-style file pointers resolve nowhere; re-resolve
+> against the current module layout when picking one up, and each carries that
+> warning in its own header. `V2_2_PLAN` and
+> `pane-identity-transport-proposal` are written against the current layout.

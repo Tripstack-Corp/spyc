@@ -1,5 +1,19 @@
 # Post-remediation cleanup — deliverable
 
+> **Archived (2026-08-19).** It was held out of this directory because its
+> "Found along the way" list still carried open items. Two have since closed:
+> **item 2** — SECURITY.md now says pane attribution is not authorization
+> (#429) — and **item 3** — spyc honours the child's DECCKM (#259). Item 1 is
+> documented in AGENTS.md (#256). What stays open is observation, not
+> unfinished engagement work: **item 4** (no low-disk warning on
+> `create_worktree`; the shared-target-dir guidance in AGENTS.md is the only
+> mitigation), **item 6** (the cargo-deny segfault, deliberately undecided on
+> one data point — and `deny` has since left `make check` for `audit.yml`),
+> and **item 7** (`pick_best_rollout`'s two-unclaimed-panes residual, still
+> noted on #230). C7 became
+> [`docs/drafts/pane-identity-transport-proposal.md`](../../drafts/pane-identity-transport-proposal.md),
+> accepted for 2.2.
+
 Brief: the C1–C7 cleanup engagement, plus C8 and C9 added mid-flight.
 Baseline `edc27b8`. Eleven PRs: #247–#250, #252, #253, #255, #256.
 

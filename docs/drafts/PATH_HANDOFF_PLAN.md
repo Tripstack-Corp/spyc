@@ -1,7 +1,31 @@
 # spyc → agent path handoff
 
-**Status:** exploration, decision pending. Captured from a 2026-05-27
-design session so the reasoning doesn't evaporate. No code written yet.
+**Status (2026-08-19): split.** **Option A is in 2.2** —
+[#9](https://github.com/Tripstack-Corp/spyc/issues/9), scoped in
+[`V2_2_PLAN.md`](V2_2_PLAN.md) §6. Everything else in this document stays
+exploration under [#59](https://github.com/Tripstack-Corp/spyc/issues/59): the
+terse-token expansion, the hooks, and the four-channel topology problem are a
+design question, and Option A is not. This document already made that call in
+its own words — *"This is the actual bug fix and should ship regardless"* — so
+the decision here is to act on it rather than to re-open it. B (consumer-aware
+`^a s` plus an `^a S` sibling) is explicitly **not** in 2.2: it changes the
+behaviour of a daily keybinding and drags in a new binding decision.
+
+**Its file pointers predate the MVU decomposition** — `send_selection_to_pane`
+is `src/app/clipboard.rs`, not `src/app/mod.rs:7515`. Re-resolve the rest at
+pickup. Three specifics below have also drifted, all in Option A's favour:
+
+- `TabEntry::live_cwd` is in `src/pane/tabs.rs`, and the lookup now runs
+  **off-thread** behind a pending/refreshing handshake and a cache, not as an
+  inline 1 Hz poll.
+- `proc_cwd::cwd_for_pid` no longer spawns `lsof` on macOS — it reads the cwd
+  in-process via `sysinfo`, scoped to the one pid (#356). Linux is still
+  `readlink /proc/<pid>/cwd`; every other platform returns `None`, which is
+  the absolute-tier fallback.
+- Option D's premise is gone: MCP `initialize` **does** carry
+  `SERVER_INSTRUCTIONS` today. D stays not-recommended for the reason that
+  actually killed it — it is model-voluntary — but "spyc currently sends none"
+  is no longer true.
 
 ## The problem
 

@@ -16,7 +16,7 @@ use crate::ui::pager::PagerView;
 /// land before taking it.
 ///
 /// Spent on the event loop (a `Deadline`), never in a sleep: this is reachable
-/// from a wheel tick, and `docs/drafts/native_scroll_plan.md` rules out
+/// from a wheel tick, and `docs/archive/native_scroll_plan.md` rules out
 /// blocking the loop from one ("at ~30 ticks/s that's a hang"). The loop drains
 /// pane output every iteration anyway, so waiting *on* it is also the more
 /// thorough settle — the old sleep only yielded the thread.

@@ -10,6 +10,9 @@ mechanism, and candidate B remains live. See below.
 merges, so those are cleared.
 **Severity:** high. An agent pane that silently stops accepting input is a
 dogfooding stopper, and it has bitten at least twice.
+**Not in the tracker.** There is no repro to file, so this file is the record;
+re-read it the next time a pane goes deaf, before starting from scratch.
+(Renamed from `mutli-question-…` 2026-08-19; the typo was the filename only.)
 
 ## Symptom
 

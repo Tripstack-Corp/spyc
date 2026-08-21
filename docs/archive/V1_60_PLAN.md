@@ -6,8 +6,14 @@
 > daemon is out of scope). The attention pain it targets — "which agent needs
 > me, across windows?" — was met the single-process way instead: in-instance
 > agent-status dots + notifications, and the MCP scope registry for merge
-> coordination. Live summary: `ROADMAP.md` → "Post-2.0 (2.x)". Named for a
-> version (1.60) the project shipped past (now 1.97+).
+> coordination. Named for a version (1.60) the project shipped past.
+>
+> **Update (2026-08-19).** This architecture is still parked, and stays so. The
+> *goal* it targeted — several projects, one attention surface — is reopened as
+> 2.3's headline on the route § "Architectural choice" rejected: one process,
+> many projects, no mirroring. See `ROADMAP.md` → "The 2.3 horizon: Projects"
+> and its decisions log; [#99](https://github.com/Tripstack-Corp/spyc/issues/99)
+> tracks it.
 
 **Status:** archived design (parked — see banner).
 **Predecessor:** [`V1_5_PLAN.md`](V1_5_PLAN.md) (six-phase pager / task-viewer

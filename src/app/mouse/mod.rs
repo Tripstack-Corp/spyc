@@ -248,7 +248,7 @@ impl super::App {
         // spyc-side selection for a NON-mouse child is deliberately not here: this
         // change only stops throwing drags away, so a child that speaks mouse gets
         // its own selection back (claude's `onSelectionDrag` was dead solely
-        // because these events were dropped). See `docs/drafts/mouse_selection_plan.md`.
+        // because these events were dropped). See `docs/archive/mouse_selection_plan.md`.
         if matches!(ev.kind, MouseEventKind::Drag(_)) {
             return self.forward_drag(ev, frame);
         }

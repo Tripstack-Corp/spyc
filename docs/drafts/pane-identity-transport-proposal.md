@@ -1,7 +1,13 @@
 # Pane identity for MCP tool dispatch — design proposal (C7)
 
-**Status:** proposal. No code written.
+**Status:** accepted for 2.2 — option B (pane id in the `initialize` handshake).
+No code written. Scope and sequencing in
+[`V2_2_PLAN.md`](V2_2_PLAN.md).
 **Measured against:** `6e087b3`.
+
+The same connection-scoped id is the attribution mechanism Projects (2.3)
+extends: with N project homes behind one process, "which pane called" and
+"which project it belongs to" are the same lookup.
 
 ## What's missing and why it matters
 

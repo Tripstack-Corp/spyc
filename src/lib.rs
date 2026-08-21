@@ -8,7 +8,7 @@
 
 mod agent;
 mod app;
-/// Archive browsing — see `docs/drafts/ARCHIVE_BROWSING_PLAN.md`.
+/// Archive browsing — see `docs/archive/ARCHIVE_BROWSING_PLAN.md`.
 ///
 /// Public, unlike the rest of the tree, so the round-trip tests in `tests/` —
 /// which link the crate as a library — can drive a real archive all the way

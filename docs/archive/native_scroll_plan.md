@@ -1,5 +1,25 @@
 # Native mouse scroll — implementation plan
 
+> **Shipped (v2.1.0) — archived as historical record.** Tiers 0–3b landed
+> across #212–#214, #218, #219, #221, #224–#226, #228, #229, #260, #264, #279,
+> #281, #292, #349, #375, #378, #387, and capture is on by default. Two things
+> the plan specifies did **not** ship as written:
+>
+> - **Mouse-button DSL bindings** (`<LeftClick>` / `<MiddleClick>` /
+>   `<RightClick>` tokens, the *Mouse bindings* subsection and half of PR 3's
+>   scope) were dropped, not deferred. The three gestures are hard-wired in
+>   `route_mouse`. The subsection carries its own "Not shipped" note (#389).
+> - **Spyc-owned pane scrollback** and **wheel-burst coalescing** stayed in
+>   *Deferred*, as planned.
+>
+> The plan also went twenty-four mouse PRs without amendment, so read its
+> present tense as intent rather than description; the pre-2.1 review
+> (`docs/archive/review-2.1/B-app-interaction.md`) catalogues the divergences,
+> and the one live defect among them — a wheel tick reaching a 30 ms main-loop
+> sleep, which this plan had ruled out by name — was fixed in #379. The
+> living reference is AGENTS.md → `src/app/mouse/` and ARCHITECTURE.md →
+> "Mouse routing".
+
 ## Goal
 
 Wheel/trackpad scrolling that means "scroll the thing under my pointer" — most of
