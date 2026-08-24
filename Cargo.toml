@@ -115,7 +115,7 @@ unicode-segmentation = "1"
 # slice either in half. Not a new dependency at all: `ratatui-core` already
 # pulls it in for ratatui's own truncation, so this only promotes it to direct
 # (zero new crates, zero binary-size cost).
-unicode-truncate = { version = "2", default-features = false, features = ["std"] }
+unicode-truncate = { version = "3", default-features = false, features = ["std"] }
 libc = "0.2"
 ignore = "0.4"
 # Git plumbing — the gitoxide crate. Pure-Rust (zlib-rs is the default
