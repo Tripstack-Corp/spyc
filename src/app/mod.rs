@@ -210,7 +210,7 @@ pub enum View {
     /// Graveyard view: list of soft-deleted entries (most recent
     /// first). Bindings inside: `p` restore-to-cwd, `P`
     /// restore-to-original, `dd`/`x` purge entry to system trash,
-    /// `Z` purge all (with confirm), `Esc`/`gy` close.
+    /// `Z` purge all (with confirm), `Esc` closes.
     Graveyard,
 }
 

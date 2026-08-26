@@ -87,7 +87,7 @@ impl App {
     /// runs here; the un-tar runs OFF-thread via `Effect::Graveyard` and
     /// reports via `apply_graveyard_outcomes` (which surfaces a tar
     /// `set_overwrite(false)` error if the original path is now occupied —
-    /// the user can then `gy` + `p` to restore-to-cwd instead).
+    /// the user can then `:graveyard` + `p` to restore-to-cwd instead).
     pub fn undo_last_remove(&mut self) -> Vec<Effect> {
         let g = crate::state::graveyard::Graveyard::load();
         let Some(latest) = g.entries.into_iter().next() else {

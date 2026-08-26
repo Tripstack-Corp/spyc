@@ -181,7 +181,7 @@
 # `confirm` (default true) shows a `y/N` prompt with a warning-color
 # highlight on the targeted rows before anything happens. Set to
 # false for "yolo mode" — deletions fire immediately, no prompt, no
-# highlight. The graveyard (`gy`) is still the destination either
+# highlight. The graveyard (`:graveyard`) is still the destination either
 # way, so accidental yolo deletions are still recoverable.
 [delete]
 # confirm = true
