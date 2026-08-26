@@ -70,6 +70,13 @@ commit_preprocessors = [
   { pattern = '^Fix git status endless re-walk bug due to HEAD mtime cache drift', replace = "fix(git): resolve the branch ref in the marker poll so commits trigger a re-walk" },
   { pattern = '^agy mcp support', replace = "feat(agent): agy MCP config, scrape-fallback blocked detection, worktree-aware session restore — and drop deprecated gemini support" },
   { pattern = '^Refine Agy block detection', replace = "fix(agent): debounce the agy approval-prompt scrape so a half-drawn screen can't flip a dot" },
+
+  # #434 landed five well-typed commits — four `fix`, one `feat(mouse)` — but a
+  # squash merge writes the PR TITLE as the subject and `split_commits = false`
+  # means the body is never parsed. So the whole PR became one `fix(graveyard)`
+  # line and the double-click feature was invisible. Retyped here to name it;
+  # the durable fix is one PR per type, which CONTRIBUTING.md now says.
+  { pattern = '^fix\(graveyard\): make the size warning actionable, the purge work, and the status-line copy stable', replace = "fix(graveyard): point the size warning at `:graveyard`, purge to trash without Finder automation, and stop the chrome copy echo rewriting its own row — plus double-click a chrome row to copy the whole line" },
 ]
 
 commit_parsers = [
