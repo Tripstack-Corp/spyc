@@ -202,7 +202,12 @@ impl super::super::App {
                 .then(|| crate::ui::line_select::text_between_columns(&row.line, 0, usize::MAX));
             (selected, whole_row)
         };
-        let text = text.trim().to_string();
+        // A row copied from twice already carries the marker the first copy
+        // echoed onto it. It is spyc's annotation, not the line's content — it
+        // belongs on neither the clipboard nor the front of a second marker.
+        let text = crate::app::effect::strip_copy_marker(text.trim()).to_string();
+        let whole_row =
+            whole_row.map(|row| crate::app::effect::strip_copy_marker(row.trim_end()).to_string());
         if text.is_empty() {
             return Vec::new();
         }
@@ -895,6 +900,86 @@ mod tests {
                 Some(whole),
                 "the echo carries the whole message, so copying from it doesn't erase it"
             );
+        });
+    }
+
+    /// Reported: copying the flash row a second time produced
+    /// `…then confirm to clear (c… (copied)` — the message rewritten shorter, with
+    /// the first copy's marker chopped mid-word and a second one stacked behind it.
+    ///
+    /// Two compounding causes, both pinned here: the echo capped the whole row at
+    /// 60 chars (so it re-truncated the very line it was preserving), and nothing
+    /// stripped the marker the previous copy had written onto that row.
+    ///
+    /// Round-trips through the real `success` formatter, because the bug only
+    /// exists across the two copies — each one alone looks correct.
+    #[test]
+    fn copying_a_flash_twice_neither_nests_the_marker_nor_truncates_it() {
+        use crossterm::event::KeyModifiers;
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let tmp = tempfile::tempdir().expect("tempdir").keep();
+        crate::state::with_state_root(&tmp, || {
+            let mut app = App::test_app(tmp.clone());
+            // The reported message, longer than the 60-char preview cap so a
+            // capped echo would visibly eat it.
+            let whole = "graveyard is using 100 MB of 500 MB — oldest entries auto-move to the system trash";
+            assert!(whole.chars().count() > 60, "or the cap is never exercised");
+            app.state.flash_info(whole);
+            app.view.term_size = (120, 24);
+
+            let mut terminal = Terminal::new(TestBackend::new(120, 24)).expect("backend");
+            let copy_once = |app: &mut App, terminal: &mut Terminal<TestBackend>| -> String {
+                terminal.draw(|f| app.render(f)).expect("draw");
+                let flash_y = {
+                    let rows = app.view.chrome_rows.borrow();
+                    rows.iter()
+                        .find(|r| {
+                            crate::ui::line_select::text_between_columns(&r.line, 0, usize::MAX)
+                                .contains("graveyard is using")
+                        })
+                        .map(|r| r.y)
+                        .expect("the flash row was recorded")
+                };
+                let at = |kind, col| MouseEvent {
+                    kind,
+                    column: col,
+                    row: flash_y,
+                    modifiers: KeyModifiers::NONE,
+                };
+                app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 0));
+                app.extend_chrome_selection(at(MouseEventKind::Drag(MouseButton::Left), 18));
+                let effects =
+                    app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left), 18));
+                let [Effect::CopyToClipboard { text, ok }] = effects.as_slice() else {
+                    panic!("expected one clipboard copy, got {effects:?}");
+                };
+                // What `run_effects` does on a successful write — the echo becomes
+                // the flash, which is the row the NEXT copy reads back.
+                let echo = ok.success(text);
+                app.state.flash_info(echo.clone());
+                echo
+            };
+
+            let first = copy_once(&mut app, &mut terminal);
+            assert_eq!(
+                first,
+                format!("{whole}{}", crate::app::effect::COPY_MARKER),
+                "the whole row is echoed intact — capping it here is what shortened \
+                 the message every time it was copied"
+            );
+
+            let second = copy_once(&mut app, &mut terminal);
+            assert_eq!(
+                second, first,
+                "copying the echo again is idempotent: one marker, same message"
+            );
+            assert_eq!(
+                second.matches(crate::app::effect::COPY_MARKER).count(),
+                1,
+                "the marker must not stack"
+            );
+            assert!(!second.contains('…'), "nothing is truncated: {second}");
         });
     }
 

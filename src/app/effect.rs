@@ -419,9 +419,30 @@ pub enum ClipMsg {
     ListNames { count: usize, paths: bool },
 }
 
+/// The suffix [`ClipMsg::StatusLine`] appends to its echo.
+///
+/// A const shared with [`strip_copy_marker`] so the two cannot drift: the echo is
+/// written onto the very row a later copy reads back, and a stripper that guessed
+/// at the spelling would let the marker accumulate.
+pub const COPY_MARKER: &str = " (copied)";
+
+/// Drop a trailing [`COPY_MARKER`] from a chrome row's text.
+///
+/// spyc's own annotation, never content: copying a row that already carries one
+/// must not put it on the clipboard, and must not nest a second marker into the
+/// next echo.
+pub fn strip_copy_marker(text: &str) -> &str {
+    text.strip_suffix(COPY_MARKER).unwrap_or(text)
+}
+
 impl ClipMsg {
     /// Render the success flash for a completed copy of `text`.
-    fn success(&self, text: &str) -> String {
+    ///
+    /// Reachable across the app layer so a test of the surface that PRODUCES the
+    /// copy can round-trip through the real formatter — the echo lands back on the
+    /// row a second copy reads, so a hand-written stand-in would test a string the
+    /// user never sees.
+    pub(in crate::app) fn success(&self, text: &str) -> String {
         match self {
             Self::PaneLines => format!("yanked {} lines from pane", text.lines().count()),
             Self::Scrollback => format!("yanked {} lines (full scrollback)", text.lines().count()),
@@ -434,14 +455,19 @@ impl ClipMsg {
             Self::StatusLine { whole_row } => {
                 // Show the whole row when the echo would otherwise eat it; the
                 // drag highlight still marks which part went to the clipboard.
-                let shown = whole_row.as_deref().unwrap_or(text);
-                let preview: String = shown.chars().take(60).collect();
-                let ellipsis = if shown.chars().count() > 60 {
-                    "…"
-                } else {
-                    ""
+                //
+                // Uncapped in that case, unlike the fragment below. The cap exists
+                // so a long selection doesn't bury the marker, but a whole row is
+                // already one screen row wide and the renderer clips it — capping
+                // it at 60 chars REWROTE the message shorter each time it was
+                // copied, and once the marker itself fell past the cut the row
+                // read `…to clear (c… (copied)`.
+                let Some(row) = whole_row else {
+                    let preview: String = text.chars().take(60).collect();
+                    let ellipsis = if text.chars().count() > 60 { "…" } else { "" };
+                    return format!("{preview}{ellipsis}{COPY_MARKER}");
                 };
-                format!("{preview}{ellipsis} (copied)")
+                format!("{row}{COPY_MARKER}")
             }
             Self::ListNames { count, paths } => {
                 let unit = if *paths { "path" } else { "name" };
