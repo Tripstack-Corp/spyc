@@ -202,8 +202,12 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 - `type` picks the section: `feat:` → Features, `fix:` → Bug Fixes,
   `refactor:`/`perf:`/`docs:`/`build:` → theirs.
 - The subject must cover the *actual* diff scope, not just its
-  headline. A category-spanning PR wants multiple well-typed
-  commits, not one.
+  headline.
+- **Under squash merge the PR title becomes that subject**, and
+  `split_commits = false` means the body is never parsed — so
+  extra well-typed commits inside a PR shape the git log, not the
+  changelog. A category-spanning PR gets one section: split it into
+  a PR per type when both halves are worth finding.
 - Preview the pending section with `make changelog`; cut a release
   with `make release-prep` then `make release-tag` (see
   `docs/RELEASE_ENGINEERING.md` § The release cycle).
