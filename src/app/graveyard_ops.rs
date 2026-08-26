@@ -166,9 +166,9 @@ impl App {
                     }
                     self.state.refresh_listing();
                 }
-                Err(e) => self
-                    .state
-                    .flash_error(format!("undo: {e:#} — try `gy` then `p` to restore to cwd")),
+                Err(e) => self.state.flash_error(format!(
+                    "undo: {e:#} — try `:graveyard` then `p` to restore to cwd"
+                )),
             },
             GraveyardOutcome::Purged { trashed, errors } => {
                 if errors > 0 {
