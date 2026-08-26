@@ -129,17 +129,48 @@ pub struct ChromeSelection {
     pub y: u16,
     pub anchor_col: u16,
     pub focus_col: u16,
+    /// Set by a double-click: the whole row is selected, and the pointer no
+    /// longer moves either end. Carried on the selection rather than resolved
+    /// into `anchor_col`/`focus_col` at press time so [`Self::range`] stays the
+    /// one authority on which columns are lit, and the paint cannot disagree
+    /// with what the release copies.
+    pub whole_row: bool,
 }
 
 impl ChromeSelection {
     /// Inclusive `(low, high)` columns, relative to the row's own left edge.
     pub const fn range(self) -> (u16, u16) {
+        if self.whole_row {
+            return (0, u16::MAX);
+        }
         if self.anchor_col <= self.focus_col {
             (self.anchor_col, self.focus_col)
         } else {
             (self.focus_col, self.anchor_col)
         }
     }
+}
+
+/// How close together two presses on one chrome row have to be to read as a
+/// double-click. The interval every desktop toolkit settles near; spyc cannot
+/// read the host's own setting through a pty, so it picks the same number.
+pub const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Is a press on chrome row `y` at `now` the second half of a double-click?
+///
+/// `prev` is the previous chrome press — its row and when it happened. Only the
+/// ROW has to match, not the column: a double-click drifts a cell or two, and the
+/// gesture selects the whole row anyway, so requiring the same column would fail
+/// exactly the presses it is meant to catch.
+///
+/// Pure, and takes `now` rather than reading the clock, so the boundary is
+/// testable — see this module's tests.
+pub fn is_double_click(
+    prev: Option<(u16, std::time::Instant)>,
+    y: u16,
+    now: std::time::Instant,
+) -> bool {
+    prev.is_some_and(|(prev_y, at)| prev_y == y && now.duration_since(at) <= DOUBLE_CLICK)
 }
 
 /// A sustained same-direction wheel-scroll gesture over an agent's own view. See

@@ -362,6 +362,10 @@ pub struct ViewState {
     /// A charwise selection over one of the single-line chrome surfaces (the status
     /// bar, the pane divider/tab line) — the row and an unordered column pair.
     pub(super) chrome_selection: Option<mouse::ChromeSelection>,
+    /// The last press on a chrome row: which row, and when. The whole state a
+    /// double-click needs — see [`mouse::is_double_click`]. Not reset on release,
+    /// because the second press of the pair arrives after one.
+    pub(super) last_chrome_click: Option<(u16, std::time::Instant)>,
     /// What each chrome row actually rendered this frame, for a mouse copy.
     ///
     /// `RefCell` because the draw pass is `&self` and this is the renderer recording
@@ -492,6 +496,7 @@ impl ViewState {
             pane_selection: None,
             chrome_selection: None,
             chrome_rows: std::cell::RefCell::new(Vec::new()),
+            last_chrome_click: None,
             pane_scroll_streak: None,
             pane_view_sent: None,
             transcript_show_tool_calls: true,

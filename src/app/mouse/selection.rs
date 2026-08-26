@@ -134,14 +134,24 @@ impl super::super::App {
     }
 
     /// Anchor a chrome-line selection where the pointer pressed.
+    ///
+    /// A press that lands on the row a previous press just left, inside
+    /// [`DOUBLE_CLICK`](super::DOUBLE_CLICK), is a double-click: it selects the
+    /// whole row instead of anchoring a drag. Status lines are one atomic string —
+    /// an error with its `source()` chain, a path, a git summary — and picking the
+    /// whole thing up is the common case that a drag makes fiddly.
     pub(super) fn begin_chrome_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
         let Some((y, col)) = self.chrome_col_at(ev) else {
             return Vec::new();
         };
+        let now = std::time::Instant::now();
+        let whole_row = super::is_double_click(self.view.last_chrome_click, y, now);
+        self.view.last_chrome_click = Some((y, now));
         self.view.chrome_selection = Some(ChromeSelection {
             y,
             anchor_col: col,
             focus_col: col,
+            whole_row,
         });
         self.view.mouse_selection = Some(MouseDragTarget::Chrome);
         Vec::new()
@@ -179,7 +189,7 @@ impl super::super::App {
         let Some(sel) = self.view.chrome_selection else {
             return Vec::new();
         };
-        if sel.anchor_col == sel.focus_col {
+        if sel.anchor_col == sel.focus_col && !sel.whole_row {
             self.view.chrome_selection = None;
             return Vec::new();
         }
@@ -757,6 +767,7 @@ mod tests {
                 y: 0,
                 anchor_col: 2,
                 focus_col: 8,
+                whole_row: false,
             });
 
             let mut pager = PagerView::new_plain("p", vec!["a".into(), "b".into()]);
@@ -981,6 +992,106 @@ mod tests {
             );
             assert!(!second.contains('…'), "nothing is truncated: {second}");
         });
+    }
+
+    /// Double-click on a chrome row selects and copies the whole row. Status lines
+    /// are one atomic string — an error with its `source()` chain, a path, a git
+    /// summary — and dragging column-perfectly across one is fiddly.
+    #[test]
+    fn a_double_click_copies_the_whole_chrome_row() {
+        use crossterm::event::KeyModifiers;
+        let tmp = tempfile::tempdir().expect("tempdir").keep();
+        crate::state::with_state_root(&tmp, || {
+            let mut app = App::test_app(tmp.clone());
+            app.view
+                .chrome_rows
+                .borrow_mut()
+                .push(crate::app::mouse::ChromeRow {
+                    y: 0,
+                    x: 0,
+                    width: 80,
+                    line: ratatui::text::Line::from(vec![
+                        ratatui::text::Span::raw("spyc"),
+                        ratatui::text::Span::raw("|"),
+                        ratatui::text::Span::raw("main*"),
+                    ]),
+                });
+            let at = |kind, col| MouseEvent {
+                kind,
+                column: col,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            };
+            // First click: a plain press-and-release on one column. It selects
+            // nothing (a click, not a drag) and copies nothing.
+            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 6));
+            assert!(
+                app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left), 6))
+                    .is_empty(),
+                "a single click still copies nothing"
+            );
+
+            // Second click, same row, immediately after — and no motion between
+            // press and release, which is what a real double-click looks like.
+            // That leaves anchor == focus, the shape the release otherwise
+            // discards as an empty click.
+            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 6));
+            assert!(
+                app.view.chrome_selection.is_some_and(|s| s.whole_row),
+                "the second press claims the row"
+            );
+            let effects = app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left), 6));
+
+            let [Effect::CopyToClipboard { text, .. }] = effects.as_slice() else {
+                panic!("expected one clipboard copy, got {effects:?}");
+            };
+            assert_eq!(text, "spyc|main*", "the whole row, not the clicked column");
+            assert_eq!(
+                app.view.chrome_selection.map(super::ChromeSelection::range),
+                Some((0, u16::MAX)),
+                "the highlight lights the whole row, matching what was copied"
+            );
+
+            // A cell of pointer drift between the second press and its release is
+            // normal and must not narrow the row back down to those columns.
+            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 6));
+            app.extend_chrome_selection(at(MouseEventKind::Drag(MouseButton::Left), 7));
+            let effects = app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left), 7));
+            let [Effect::CopyToClipboard { text, .. }] = effects.as_slice() else {
+                panic!("expected one clipboard copy, got {effects:?}");
+            };
+            assert_eq!(text, "spyc|main*", "drift leaves the whole row selected");
+        });
+    }
+
+    /// Two presses far apart in time are two clicks, not a double-click — the
+    /// second must anchor a fresh drag rather than grab the row.
+    #[test]
+    fn presses_outside_the_double_click_window_stay_separate_clicks() {
+        use super::super::{DOUBLE_CLICK, is_double_click};
+        use std::time::Instant;
+
+        let t0 = Instant::now();
+        assert!(
+            !is_double_click(None, 3, t0),
+            "nothing precedes the first press"
+        );
+        assert!(
+            is_double_click(Some((3, t0)), 3, t0 + DOUBLE_CLICK),
+            "the boundary itself counts, so a slow-but-deliberate pair still works"
+        );
+        assert!(
+            !is_double_click(
+                Some((3, t0)),
+                3,
+                t0 + DOUBLE_CLICK + std::time::Duration::from_millis(1)
+            ),
+            "one tick past the window is two clicks"
+        );
+        assert!(
+            !is_double_click(Some((3, t0)), 4, t0),
+            "a different row is a different surface, however fast"
+        );
     }
 
     /// The same drag on the STATUS BAR carries no whole-row echo: that row is not
