@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::state::graveyard::GRAVEYARD_CAP_BYTES;
+
 /// Result of a startup health scan.
 pub struct HealthReport {
     /// Human-readable warnings to flash to the user.
@@ -198,20 +200,37 @@ fn check_sessions(dir: &Path, warnings: &mut Vec<String>) {
     }
 }
 
-/// Warn if the graveyard is consuming significant disk space.
+/// Warn if the graveyard is approaching the cap its own FIFO cascade enforces.
 ///
 /// Takes the total rather than deriving it, because [`check_paired_dir`] has
 /// already walked the directory and stat'd every entry — this used to be a
 /// second full walk for the same number.
+///
+/// The threshold is derived from [`GRAVEYARD_CAP_BYTES`] rather than set
+/// independently. A fixed 100 MB against a 500 MB cap told the user to act on a
+/// state spyc considers entirely healthy — the cascade evicts nothing until the
+/// cap — so the warning read as a chore that never went away no matter what was
+/// cleared.
 fn warn_on_graveyard_size(total_bytes: u64, warnings: &mut Vec<String>) {
-    // Warn above 100 MB.
-    if total_bytes > 100 * 1024 * 1024 {
-        let mb = total_bytes / (1024 * 1024);
-        warnings.push(format!(
-            "graveyard is using {mb} MB — run `z` then confirm to clear"
-        ));
+    if total_bytes <= WARN_ABOVE_BYTES {
+        return;
     }
+    let mb = total_bytes / (1024 * 1024);
+    let cap_mb = GRAVEYARD_CAP_BYTES / (1024 * 1024);
+    // Names the way in that exists. This used to say "run `z`" — which is bound,
+    // but to `EmptyInventory`: following the advice moves the inventory INTO the
+    // graveyard, growing the thing the warning is about. `Z` (purge all) is the
+    // key meant, and it only exists once you are inside the view.
+    warnings.push(format!(
+        "graveyard is using {mb} MB of {cap_mb} MB — oldest entries auto-move to \
+         the system trash above the cap; `:graveyard` then `Z` clears it now"
+    ));
 }
+
+/// Warn once the graveyard passes 80% of the cap: close enough that the next few
+/// deletions start silently evicting the oldest, which is worth a heads-up, and
+/// far enough that an ordinary working graveyard never trips it.
+const WARN_ABOVE_BYTES: u64 = GRAVEYARD_CAP_BYTES / 5 * 4;
 
 /// Validate the frecency database (JSON).
 fn check_frecency(path: &Path, warnings: &mut Vec<String>) {
@@ -233,6 +252,49 @@ pub fn state_dir() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The warning must name a way in that exists. It said "run `z`" long after
+    /// the keymap slimming demoted the graveyard to a `:` command, so following it
+    /// landed the user in `^a z`'s pane zoom with no idea what they were looking
+    /// at — and `Z`, the purge-all, is only reachable once inside the view.
+    #[test]
+    fn the_graveyard_warning_names_the_command_that_opens_it() {
+        let mut warnings = Vec::new();
+        warn_on_graveyard_size(GRAVEYARD_CAP_BYTES, &mut warnings);
+        let [msg] = warnings.as_slice() else {
+            panic!("expected one warning, got {warnings:?}");
+        };
+        assert!(msg.contains(":graveyard"), "names the view: {msg}");
+        assert!(
+            msg.contains("`Z`"),
+            "names the purge-all key you press once inside: {msg}"
+        );
+    }
+
+    /// Derived from the cap, not set independently. A fixed 100 MB against a
+    /// 500 MB cascade cap nagged about a graveyard spyc considers entirely
+    /// healthy — nothing is evicted until the cap, so the warning asked for work
+    /// that changed nothing and came back every launch.
+    #[test]
+    fn the_graveyard_warning_stays_quiet_well_under_the_cap() {
+        // The reported graveyard: a hair over the old fixed 100 MB threshold, and
+        // a fifth of the cap. Sized past that old number on purpose — at exactly
+        // 100 MB the old code was silent too, so this would prove nothing.
+        let mut warnings = Vec::new();
+        warn_on_graveyard_size(101 * 1024 * 1024, &mut warnings);
+        assert!(
+            warnings.is_empty(),
+            "a fifth of the cap warrants nothing: {warnings:?}"
+        );
+
+        // It does still fire as the cap comes into range, where the next few
+        // deletions start silently evicting the oldest entries.
+        let mut warnings = Vec::new();
+        warn_on_graveyard_size(WARN_ABOVE_BYTES + 1, &mut warnings);
+        assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+        // The heads-up has to land before the cascade, not after.
+        const { assert!(WARN_ABOVE_BYTES < GRAVEYARD_CAP_BYTES) };
+    }
 
     #[test]
     fn empty_state_dir_is_healthy() {
@@ -327,10 +389,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let grave = tmp.path().join("graveyard");
         std::fs::create_dir_all(&grave).unwrap();
-        // One valid pair, payload just over the 100 MB warn threshold.
+        // One valid pair, payload just over the warn threshold. Sized from the
+        // constant, not a literal, so moving the threshold can't leave this test
+        // asserting against a number it no longer means. Sparse — `set_len`
+        // allocates nothing.
         std::fs::write(grave.join("big.json"), br#"{"id":"big"}"#).unwrap();
         let f = std::fs::File::create(grave.join("big.tar.zst")).unwrap();
-        f.set_len(101 * 1024 * 1024).unwrap();
+        f.set_len(WARN_ABOVE_BYTES + 1).unwrap();
         drop(f);
 
         let report = check(tmp.path());

@@ -323,6 +323,7 @@ focus.
 | Left click | Focus that region — and click *through* to a mouse-aware child |
 | Left click on a pane tab | Switch to that tab |
 | Left drag | Select text: pager content, a non-mouse pane's grid, any chrome row, or file-list rows. Release copies |
+| Double click on a chrome row | Select and copy that whole row — the status line, the divider, a flashed error |
 | `Ctrl` + left drag (list) | Copy absolute paths instead of names |
 | Middle click | Paste the clipboard |
 | Right click | Open the leader menu |

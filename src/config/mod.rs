@@ -449,7 +449,7 @@ pub struct DeleteConfig {
     /// prompt before moving anything to the graveyard. Setting to
     /// false enables "yolo mode" — deletions fire immediately on
     /// `dd` / `R`, no prompt, no warning highlight. The graveyard
-    /// is still the destination either way, so `gy` can recover.
+    /// is still the destination either way, so `:graveyard` can recover.
     pub confirm: bool,
 }
 

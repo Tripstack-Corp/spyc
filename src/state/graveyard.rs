@@ -26,7 +26,7 @@
 //! ## Cascade
 //!
 //! Cap defaults to 500 MB. On `App::new`, while `total > cap`, the oldest entry
-//! is unpacked and its paths handed to `trash::delete`, then the spyc artifacts
+//! is unpacked and its paths handed to the system trash, then the spyc artifacts
 //! removed (flash: "N items moved to system trash"). Legacy pre-v1.41.0 entries
 //! the new reader can't unpack are cascaded the same way.
 //!
@@ -243,7 +243,7 @@ impl Graveyard {
 
     /// Push `entry` into the system trash by unpacking the tarball
     /// into a temp dir and handing each top-level path to
-    /// `trash::delete`. This is what the cascade calls per entry,
+    /// [`trash_all`]. This is what the cascade calls per entry,
     /// and what the viewer's `dd`/`x` purge also calls.
     ///
     /// On success, the spyc artifacts are removed. On failure, the
@@ -257,7 +257,7 @@ impl Graveyard {
         for entry_dir in std::fs::read_dir(temp.path())?.flatten() {
             to_trash.push(entry_dir.path());
         }
-        if let Err(e) = trash::delete_all(&to_trash) {
+        if let Err(e) = trash_all(&to_trash) {
             return Err(std::io::Error::other(format!("trash: {e}")));
         }
         Self::delete_entry(entry);
@@ -307,6 +307,56 @@ impl Graveyard {
         }
         (trashed, errors)
     }
+}
+
+/// Hand `paths` to the system trash.
+///
+/// On macOS the `trash` crate defaults to driving Finder over AppleScript, which
+/// requires the host terminal to hold Automation permission for Finder. A TUI has
+/// no way to raise that grant dialog, so a denial reaches the user as a bare
+/// `-1743` and the graveyard becomes impossible to empty. `NSFileManager`'s
+/// `trashItemAtURL` needs no such permission, so a Finder failure retries there.
+///
+/// Finder stays the FIRST attempt because it is the only method that records the
+/// "Put Back" origin, and the retry is sticky for the rest of the process: a
+/// cascade evicting hundreds of entries must not pay an `osascript` round-trip
+/// each time to relearn the same denial.
+#[cfg(target_os = "macos")]
+fn trash_all(paths: &[PathBuf]) -> Result<(), trash::Error> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use trash::macos::{DeleteMethod, TrashContextExtMacos};
+
+    static USE_FILE_MANAGER: AtomicBool = AtomicBool::new(false);
+
+    fn with_method(method: DeleteMethod, paths: &[PathBuf]) -> Result<(), trash::Error> {
+        let mut ctx = trash::TrashContext::default();
+        ctx.set_delete_method(method);
+        ctx.delete_all(paths)
+    }
+
+    if USE_FILE_MANAGER.load(Ordering::Relaxed) {
+        return with_method(DeleteMethod::NsFileManager, paths);
+    }
+    let Err(finder_err) = with_method(DeleteMethod::Finder, paths) else {
+        return Ok(());
+    };
+    // `delete_using_finder` builds ONE osascript for the whole batch, so a
+    // failure trashed nothing and every path is still there to retry.
+    match with_method(DeleteMethod::NsFileManager, paths) {
+        Ok(()) => {
+            USE_FILE_MANAGER.store(true, Ordering::Relaxed);
+            Ok(())
+        }
+        // Report Finder's error, not the fallback's: the first one names the
+        // cause, the second is a consequence of retrying after it.
+        Err(_) => Err(finder_err),
+    }
+}
+
+/// Hand `paths` to the system trash. Everywhere but macOS there is one method.
+#[cfg(not(target_os = "macos"))]
+fn trash_all(paths: &[PathBuf]) -> Result<(), trash::Error> {
+    trash::delete_all(paths)
 }
 
 fn graveyard_dir() -> Option<PathBuf> {
@@ -559,6 +609,33 @@ mod tests {
             let g = Graveyard::load();
             assert!(g.entries.is_empty());
         });
+    }
+
+    // ── the system-trash seam ─────────────────────────────────────
+
+    /// Live check that [`trash_all`] can actually empty the graveyard on this
+    /// machine. Ignored by default: it puts a real file in the real Trash, which
+    /// no CI run and no `make check` should do as a side effect.
+    ///
+    /// Run it after touching the trash seam, on a mac where Automation access to
+    /// Finder is DENIED — that denial is the whole reason the fallback exists, and
+    /// it is invisible to a machine that has granted it:
+    ///
+    /// ```sh
+    /// cargo test --lib trash_all_reaches_the_system_trash -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "moves a real file to the real system Trash"]
+    fn trash_all_reaches_the_system_trash() {
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("spyc-trash-seam-check.txt");
+        std::fs::write(&victim, b"spyc trash seam check").unwrap();
+
+        super::trash_all(std::slice::from_ref(&victim)).expect("the file reached the trash");
+        assert!(
+            !victim.exists(),
+            "trash_all returned Ok but left the file behind"
+        );
     }
 
     // ── cascade cost ──────────────────────────────────────────────

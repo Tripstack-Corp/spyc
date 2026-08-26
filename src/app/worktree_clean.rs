@@ -4,7 +4,7 @@
 //! Strict `worktree::remove` refuses a dirty worktree (like `git worktree
 //! remove`). Safe-remove instead **preserves** the work and tears the tree
 //! down: it archives the worktree's untracked *and* uncommitted-tracked file
-//! contents into the graveyard (recoverable via `gy` / `:undo`), force-removes
+//! contents into the graveyard (recoverable via `:graveyard` / `:undo`), force-removes
 //! the worktree, and then deletes its branch **iff that branch is merged** into
 //! the repo's integration base (`delete_branch: auto`) — an unmerged branch's
 //! ref is kept, since the ref itself is the commit backup (owner decisions,

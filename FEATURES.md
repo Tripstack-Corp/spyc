@@ -734,6 +734,12 @@ end).
   take just a branch name, an agent session id, a custom tab name or an error
   message without the rest of the line. A click that doesn't move copies nothing,
   and copying part of a flash leaves the message intact.
+  **Double-click a chrome row to take the whole line** — a flashed error with its
+  whole `source()` chain, the status line, a divider. That's the copy you want
+  when the line is one thing rather than a list of them, and it doesn't ask you to
+  drag a full terminal width accurately. Copying the same row twice gives the same
+  text both times: the ` (copied)` confirmation is spyc's own marker and never
+  reaches the clipboard.
   **Drag in a pager to select text; release copies it** and the pager title
   reports the line count. Works the same full-screen or popped-up, and copies the
   content only — never the line-number gutter, the whitespace/line-break markers,
@@ -941,7 +947,8 @@ flag, etc.), mtime, and best-effort UID/GID; restore preserves all
 of them. xattrs / ACLs / macOS resource forks are NOT preserved
 (out of scope for v1).
 
-- **`gy`** / **`:graveyard`** — open the graveyard view (newest entries first)
+- **`:graveyard`** — open the graveyard view (newest entries first). No default
+  key since the keymap slim; bind one with `map <KEY> command graveyard`
 - **`:undo`** — restore the most-recent entry to its original path
 - Inside the graveyard view:
   - **`p`** — restore the cursor entry to the current dir (cwd)
@@ -951,7 +958,7 @@ of them. xattrs / ACLs / macOS resource forks are NOT preserved
     (out of spyc, into Finder / Files / etc.)
   - **`Z`** — purge ALL entries to the system trash (single-key
     confirm)
-  - **`Esc`** / **`gy`** — close
+  - **`Esc`** — close
 
 When the graveyard exceeds 500 MB at startup, the **oldest entries
 cascade to the system trash** (FIFO) until the total falls below
