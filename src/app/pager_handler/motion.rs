@@ -173,6 +173,12 @@ impl App {
                     self.view.pager_pending_bracket = Some(c);
                 }
             }
+            // vim's fold prefix. Armed here, answered in `handle_pager_bracket`
+            // alongside the other chords, so the pager has one place where a
+            // two-key sequence completes.
+            KeyCode::Char('z') => {
+                self.view.pager_pending_z = true;
+            }
             KeyCode::Char('j') | KeyCode::Down => {
                 if !scrolled_down(view, 1, viewport) {
                     self.exit_scrollback_past_the_end();

@@ -231,8 +231,13 @@ impl App {
         }
     }
 
-    /// `[b`/`]b` buffer-history nav and `[t`/`]t` task-viewer cycle (chord follow-up).
-    pub(super) fn handle_pager_bracket(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
+    /// Chord follow-ups: `[b`/`]b` buffer history, `[t`/`]t` task cycle,
+    /// `[[`/`]]` heading motion, and the `z` fold prefix (`za`/`zR`/`zM`).
+    pub(super) fn handle_pager_bracket(
+        &mut self,
+        key: KeyEvent,
+        viewport: u16,
+    ) -> Option<Vec<Effect>> {
         // [b / ]b — pager buffer history navigation (two-key sequence).
         // [t / ]t — task viewer cycle (peek through backgrounded tasks).
         if let Some(bracket) = self.view.pager_pending_bracket.take() {
@@ -256,7 +261,53 @@ impl App {
                 self.cycle_task_viewer(direction);
                 return Some(Vec::new());
             }
+            // [[ / ]] — previous / next Markdown heading, vim's section motion.
+            if matches!(key.code, KeyCode::Char('[' | ']')) {
+                let forward = bracket == ']';
+                if let Some(view) = active_pager_mut!(self) {
+                    if !view.has_outline() {
+                        view.flash = Some("no outline (rendered Markdown only)".into());
+                    } else if !view.goto_heading(forward, viewport) {
+                        view.flash = Some(
+                            if forward {
+                                "last heading"
+                            } else {
+                                "first heading"
+                            }
+                            .into(),
+                        );
+                    }
+                }
+                return Some(Vec::new());
+            }
             // Unrecognized chord follow-up -- swallow it.
+            return Some(Vec::new());
+        }
+
+        // z-prefixed fold chord: `za` toggle, `zR` unfold all, `zM` fold all —
+        // vim's own fold keys, so the muscle memory transfers.
+        if std::mem::take(&mut self.view.pager_pending_z) {
+            let Some(view) = active_pager_mut!(self) else {
+                return Some(Vec::new());
+            };
+            if !view.has_outline() {
+                view.flash = Some("no outline (rendered Markdown only)".into());
+                return Some(Vec::new());
+            }
+            match key.code {
+                KeyCode::Char('a') => {
+                    view.toggle_fold(viewport);
+                }
+                KeyCode::Char('R') => {
+                    view.unfold_all(viewport);
+                    view.flash = Some("outline expanded".into());
+                }
+                KeyCode::Char('M') => {
+                    view.fold_all(viewport);
+                    view.flash = Some("outline collapsed".into());
+                }
+                _ => {}
+            }
             return Some(Vec::new());
         }
 
