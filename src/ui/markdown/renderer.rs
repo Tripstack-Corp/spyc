@@ -6,7 +6,7 @@
 //! feeds it events, and calls `finish`. Split out of `markdown.rs`
 //! verbatim during the 800-LoC decomposition — behavior-identical.
 
-use pulldown_cmark::{CodeBlockKind, Event, Tag, TagEnd};
+use pulldown_cmark::{BlockQuoteKind, CodeBlockKind, Event, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -34,6 +34,7 @@ impl<'t> Renderer<'t> {
             style_mods: StyleMods::default(),
             list_indent: 0,
             in_blockquote: false,
+            in_metadata: false,
             code_block: None,
             pending_link_url: None,
             table: None,
@@ -179,6 +180,18 @@ impl<'t> Renderer<'t> {
         match event {
             Event::Start(tag) => self.start_tag(tag),
             Event::End(tag) => self.end_tag(tag),
+            // Front matter is a data header, not prose: emit it line for line
+            // rather than through `push_text`, which reflows to `prose_width`
+            // and would run every YAML field together.
+            Event::Text(t) if self.in_metadata => {
+                let dim = Style::default()
+                    .fg(self.theme.status_suffix)
+                    .add_modifier(Modifier::DIM);
+                for raw in t.lines() {
+                    self.lines
+                        .push(Line::from(Span::styled(raw.to_string(), dim)));
+                }
+            }
             Event::Text(t) => self.push_text(&t, Style::default()),
             Event::Code(t) => {
                 // Inline `code`: teal-on-default reads as "code" the
@@ -261,10 +274,33 @@ impl<'t> Renderer<'t> {
                 // Subsequent text in the heading inherits BOLD via style_mods.
                 self.style_mods.push(Modifier::BOLD);
             }
-            Tag::BlockQuote(_) => {
+            Tag::MetadataBlock(_) => {
+                if !self.current.is_empty() {
+                    self.flush_line();
+                }
+                self.in_metadata = true;
+            }
+            Tag::BlockQuote(kind) => {
                 self.in_blockquote = true;
                 if !self.current.is_empty() {
                     self.flush_line();
+                }
+                // A GFM alert (`> [!WARNING]`) is a blockquote with a kind.
+                // Emit the label as its own styled row: the tag is markup, and
+                // leaving it in the body renders it as the literal text
+                // `[!WARNING]`, which is what it did before `ENABLE_GFM`.
+                if let Some(kind) = kind {
+                    let (label, color) = self.alert_label(kind);
+                    self.lines.push(Line::from(vec![
+                        Span::styled(
+                            "\u{2503} ".to_string(),
+                            Style::default().fg(self.theme.status_suffix),
+                        ),
+                        Span::styled(
+                            label.to_string(),
+                            Style::default().fg(color).add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
                 }
             }
             Tag::CodeBlock(kind) => {
@@ -331,7 +367,7 @@ impl<'t> Renderer<'t> {
                     Style::default().fg(self.theme.status_suffix),
                 ));
             }
-            Tag::Table(_alignments) => {
+            Tag::Table(alignments) => {
                 if !self.current.is_empty() {
                     self.flush_line();
                 }
@@ -341,6 +377,7 @@ impl<'t> Renderer<'t> {
                     in_head: false,
                     cur_row: Vec::new(),
                     stashed_current: Vec::new(),
+                    alignments,
                 });
             }
             Tag::TableHead => {
@@ -382,6 +419,10 @@ impl<'t> Renderer<'t> {
                 if !self.current.is_empty() {
                     self.flush_line();
                 }
+                self.lines.push(Line::from(Vec::<Span<'static>>::new()));
+            }
+            TagEnd::MetadataBlock(_) => {
+                self.in_metadata = false;
                 self.lines.push(Line::from(Vec::<Span<'static>>::new()));
             }
             TagEnd::BlockQuote(_) => {
@@ -535,8 +576,9 @@ impl<'t> Renderer<'t> {
         bot.push('\u{2518}'); // ┘
 
         self.lines.push(Line::from(Span::styled(top, frame_style)));
+        let aligns = t.alignments.clone();
         if let Some(h) = head {
-            self.render_table_row(h, &widths, true, frame_style);
+            self.render_table_row(h, &widths, &aligns, true, frame_style);
             self.lines
                 .push(Line::from(Span::styled(mid.clone(), frame_style)));
         }
@@ -550,7 +592,7 @@ impl<'t> Renderer<'t> {
                 self.lines
                     .push(Line::from(Span::styled(mid.clone(), frame_style)));
             }
-            self.render_table_row(row, &widths, false, frame_style);
+            self.render_table_row(row, &widths, &aligns, false, frame_style);
         }
         self.lines.push(Line::from(Span::styled(bot, frame_style)));
         self.lines.push(Line::from(Vec::<Span<'static>>::new()));
@@ -562,10 +604,27 @@ impl<'t> Renderer<'t> {
     /// hard-break fallback). The visual height of the row is the
     /// max wrap-rows across cells; cells that wrap to fewer rows
     /// are padded with blank cells for those visual rows.
+    /// Label and colour for a GFM alert blockquote.
+    ///
+    /// Colours reuse the theme's existing roles rather than adding five knobs:
+    /// the two that mean "act on this" borrow the warning/cursor colours the
+    /// rest of spyc already uses for that, so an alert reads the same way a
+    /// flashed error does.
+    const fn alert_label(&self, kind: BlockQuoteKind) -> (&'static str, ratatui::style::Color) {
+        match kind {
+            BlockQuoteKind::Note => ("NOTE", self.theme.status_path),
+            BlockQuoteKind::Tip => ("TIP", self.theme.take),
+            BlockQuoteKind::Important => ("IMPORTANT", self.theme.prompt_prefix),
+            BlockQuoteKind::Warning => ("WARNING", self.theme.delete_warning),
+            BlockQuoteKind::Caution => ("CAUTION", self.theme.cursor_bg),
+        }
+    }
+
     fn render_table_row(
         &mut self,
         row: &[Vec<Span<'static>>],
         widths: &[usize],
+        aligns: &[pulldown_cmark::Alignment],
         is_header: bool,
         frame_style: Style,
     ) {
@@ -594,6 +653,18 @@ impl<'t> Renderer<'t> {
             for (i, w) in widths.iter().enumerate() {
                 let cell_row = wrapped[i].get(vr).unwrap_or(&empty_row);
                 let used = spans_visual_width(cell_row);
+                // Split the slack according to the delimiter row's alignment.
+                // `Alignment::None` keeps everything on the right, which is the
+                // left-aligned default every cell used before.
+                let slack = w.saturating_sub(used);
+                let (pad_left, pad_right) = match aligns.get(i) {
+                    Some(pulldown_cmark::Alignment::Right) => (slack, 0),
+                    Some(pulldown_cmark::Alignment::Center) => (slack / 2, slack - slack / 2),
+                    _ => (0, slack),
+                };
+                if pad_left > 0 {
+                    line_spans.push(Span::raw(" ".repeat(pad_left)));
+                }
                 for s in cell_row {
                     let mut style = s.style;
                     if is_header {
@@ -601,8 +672,8 @@ impl<'t> Renderer<'t> {
                     }
                     line_spans.push(Span::styled(s.content.clone(), style));
                 }
-                if used < *w {
-                    line_spans.push(Span::raw(" ".repeat(*w - used)));
+                if pad_right > 0 {
+                    line_spans.push(Span::raw(" ".repeat(pad_right)));
                 }
                 if i + 1 < widths.len() {
                     line_spans.push(Span::styled(" \u{2502} ".to_string(), frame_style));
@@ -626,16 +697,10 @@ impl<'t> Renderer<'t> {
             self.emit_mermaid_block(body);
             return;
         }
-        // Try syntect highlighting if a language is given; fall
-        // back to plain dim text otherwise. We synthesize a fake
-        // filename for highlight_to_lines's extension-based lookup
-        // when the language tag matches a known extension.
-        let highlighted = if state.lang.is_empty() {
-            None
-        } else {
-            let fake_name = format!("snippet.{}", state.lang);
-            crate::ui::syntax::highlight_to_lines(&fake_name, body)
-        };
+        // Try syntect highlighting if a language is given; fall back to plain
+        // dim text otherwise. The fence tag is a LANGUAGE, so it goes through
+        // the language lookup — see `syntax::highlight_lang_to_lines`.
+        let highlighted = crate::ui::syntax::highlight_lang_to_lines(&state.lang, body);
         let dim = Style::default()
             .fg(self.theme.status_suffix)
             .add_modifier(Modifier::DIM);

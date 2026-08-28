@@ -645,6 +645,13 @@ spyc.
   raw source view (with full syntect highlighting of the
   markdown source itself); press `m` again to flip back. Yank
   and save always emit the source.
+  Also rendered: **GFM alerts** (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`,
+  `[!WARNING]`, `[!CAUTION]`) as coloured labels; **YAML front matter** as its
+  own dim block, line for line, so a `SKILL.md` or agent memory file reads
+  correctly; **table alignment** from the delimiter row (`|--:|:--|`); and
+  ` ```mermaid ` blocks as diagrams (`o` / `i`). Code fences resolve the
+  language by name or extension, so ` ```rust ` and ` ```rs ` highlight alike,
+  and an attribute suffix (` ```rust,ignore `) doesn't defeat it.
 - Page-up/down, half-page, and vi-style scrolling
 
 ## Shell integration

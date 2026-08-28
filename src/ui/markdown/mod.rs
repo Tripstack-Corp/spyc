@@ -86,6 +86,15 @@ pub fn render_doc(source: &str, theme: &Theme, table_width_hint: Option<usize>) 
     opts.insert(Options::ENABLE_TASKLISTS);
     opts.insert(Options::ENABLE_FOOTNOTES);
     opts.insert(Options::ENABLE_TABLES);
+    // Alert blockquotes (`> [!WARNING]`). The ONLY thing this flag turns on, so
+    // it can't perturb anything else; without it the tag is literal text in the
+    // quote, which is how spyc's own CONFIGURATION.md rendered.
+    opts.insert(Options::ENABLE_GFM);
+    // YAML front matter. Without it the opening `---` is a thematic break and
+    // the closing one a setext underline, so the whole block collapsed into an
+    // H2 of run-together fields — which is what `SKILL.md`, the file spyc
+    // itself installs, looked like in spyc's own pager.
+    opts.insert(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
     let prepared = force_hard_breaks_before_keyed_lines(source);
     let parser = Parser::new_ext(&prepared, opts);
     let mut r = Renderer::new(theme, table_width_hint);
@@ -173,6 +182,10 @@ struct Renderer<'t> {
     /// True while inside any blockquote (single level — nested
     /// blockquotes render with the same `┃ ` prefix).
     in_blockquote: bool,
+    /// True while inside a YAML front-matter block. Its text is emitted
+    /// verbatim, line for line: it is a data header, and reflowing it into a
+    /// paragraph destroys the one thing that makes it readable.
+    in_metadata: bool,
     /// When inside a fenced code block, accumulate body here so we
     /// can hand the whole thing to syntect (or render plain) on End.
     code_block: Option<CodeBlockState>,
@@ -237,6 +250,10 @@ struct TableBuilder {
     /// because tables only nest after a paragraph flush, but keeping
     /// the stash makes the swap symmetric.
     stashed_current: Vec<Span<'static>>,
+    /// Per-column alignment from the delimiter row (`|--:|:--|`). Author intent
+    /// spyc used to discard, so a numeric column that the source right-aligned
+    /// rendered ragged-left like everything else.
+    alignments: Vec<pulldown_cmark::Alignment>,
 }
 
 struct CodeBlockState {
