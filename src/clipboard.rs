@@ -735,6 +735,30 @@ mod tests {
     /// racing a stub's fork+exec under a loaded parallel run.
     const TEST_REAP_BUDGET: Duration = Duration::from_secs(10);
 
+    /// Budget for the detach test. It has to sit between two things, and the
+    /// old 100ms cleared only one of them:
+    ///
+    /// - **Above** the writer thread's spawn-and-run latency. `spawn_and_pipe`
+    ///   treats a writer that hasn't finished by the deadline as "the helper
+    ///   never took the payload", kills the child and returns `TimedOut` — the
+    ///   conservative call it is designed to make, since it cannot confirm the
+    ///   text landed. At 100ms that verdict was one descheduled thread away,
+    ///   and it is what the flake actually tripped: forcing the budget to 1µs
+    ///   reproduces it every time with
+    ///   `"/bin/sh did not read the clipboard payload"`.
+    /// - **Below** [`STUB_LIFETIME`], or the child exits on its own and the
+    ///   test can no longer tell detaching from waiting.
+    ///
+    /// One second leaves ~1000× the first margin and 30× the second. It costs
+    /// a second of wall clock, all of it inside the deadline poll, in a suite
+    /// that runs its tests in parallel.
+    const DETACH_TEST_BUDGET: Duration = Duration::from_secs(1);
+
+    /// How long the persisting stub stays alive. Only has to outlast
+    /// [`DETACH_TEST_BUDGET`] by enough that the child is unambiguously still
+    /// there when the assertion runs.
+    const STUB_LIFETIME: Duration = Duration::from_secs(30);
+
     #[test]
     fn paste_via_override_returns_the_injected_text() {
         with_paste_override("hello \u{1f336}", || {
@@ -1065,30 +1089,69 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let tmp = tempfile::tempdir().expect("tempdir");
         let stub = tmp.path().join("stub-persist.sh");
-        // Read stdin first so the write doesn't EPIPE, THEN keep running well
-        // past the reap budget — the leftover process is intentionally
-        // abandoned; the test asserts we didn't wait on it, not that it's
-        // gone by the time the test returns.
-        fs::write(&stub, "#!/bin/sh\ncat > /dev/null\nsleep 10\n").expect("write stub");
+        let pidfile = tmp.path().join("child.pid");
+        // Records its pid, reads stdin so the write doesn't EPIPE, then persists
+        // — the shape of an X11 helper still serving the selection. `exec`s the
+        // sleep so the pid it published stays the only process there is, and
+        // killing it at the end leaves nothing orphaned.
+        fs::write(
+            &stub,
+            format!(
+                "#!/bin/sh\necho $$ > {}\ncat > /dev/null\nexec sleep {}\n",
+                pidfile.display(),
+                STUB_LIFETIME.as_secs()
+            ),
+        )
+        .expect("write stub");
         let mut perms = fs::metadata(&stub).unwrap().permissions();
         perms.set_mode(0o755);
         fs::set_permissions(&stub, perms).unwrap();
 
-        // Bounded well above HELPER_REAP_BUDGET + fork/exec + poll-interval
-        // slop, but far below the stub's 10s sleep — proves we detached rather
-        // than waited, without being sensitive to scheduling jitter under a
-        // loaded/parallel test run.
-        let start = Instant::now();
-        with_reap_budget(Duration::from_millis(100), || {
+        with_reap_budget(DETACH_TEST_BUDGET, || {
             retry_text_busy(|| with_clipboard_override(&stub, || copy("hello")))
                 .expect("a persisting-but-successful helper must read as Ok, not an error");
         });
+
+        // THE PROPERTY: `copy` came back while the helper is still running.
+        //
+        // This used to assert `elapsed < 4s` against a stub that slept 10s, and
+        // that is what made it flaky — a wall clock cannot tell "detached" from
+        // "descheduled", and 2.5× is not much room on a loaded machine. Whether
+        // the child is still alive says the same thing with no clock in it: had
+        // `spawn_and_pipe` waited, the child would have exited AND been reaped,
+        // so its pid would be gone.
+        let pid = read_stub_pid(&pidfile);
         assert!(
-            start.elapsed() < Duration::from_secs(4),
-            "spawn_and_pipe blocked for {:?}, should have detached at ~{:?}",
-            start.elapsed(),
-            HELPER_REAP_BUDGET
+            crate::sysinfo::pid_alive(pid),
+            "the helper is gone, so spawn_and_pipe waited it out instead of detaching"
         );
+
+        // Don't leave a sleeper behind for the rest of the suite to run under.
+        // `spawn_and_pipe`'s detached reaper collects it.
+        if let Some(p) = rustix::process::Pid::from_raw(pid as i32) {
+            let _ = rustix::process::kill_process(p, rustix::process::Signal::KILL);
+        }
+    }
+
+    /// Poll for the stub's pidfile, then read it.
+    ///
+    /// Fixture synchronisation, NOT the assertion: `copy` can legitimately
+    /// return before the stub has run its first line, because a payload smaller
+    /// than the pipe buffer lands in the kernel whether or not the child ever
+    /// reads it. Bounded so a stub that never starts fails the test instead of
+    /// hanging it.
+    #[cfg(unix)]
+    fn read_stub_pid(pidfile: &std::path::Path) -> u32 {
+        let deadline = Instant::now() + STUB_LIFETIME / 2;
+        while Instant::now() < deadline {
+            if let Ok(text) = fs::read_to_string(pidfile)
+                && let Ok(pid) = text.trim().parse::<u32>()
+            {
+                return pid;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("stub never published its pid to {}", pidfile.display());
     }
 }
 
