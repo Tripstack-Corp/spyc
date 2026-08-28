@@ -81,7 +81,6 @@ const THEME_NAME: &str = "base16-eighties.dark";
 /// Returns `None` if the file type isn't recognized by syntect.
 pub fn highlight_to_lines(filename: &str, content: &str) -> Option<Vec<Line<'static>>> {
     let ss = &*SYNTAX_SET;
-    let ts = &*THEME_SET;
 
     // Detect syntax from file extension, then by bare filename (so
     // `Makefile` resolves — it has no extension but syntect's
@@ -105,6 +104,40 @@ pub fn highlight_to_lines(filename: &str, content: &str) -> Option<Vec<Line<'sta
                 .and_then(|first| ss.find_syntax_by_first_line(first))
         })?;
 
+    highlight_with(syntax, content)
+}
+
+/// Highlight `content` as `lang`, a Markdown fence's info string
+/// (` ```rust `, ` ```py `, ` ```Bash `).
+///
+/// A separate entry point from [`highlight_to_lines`] because a fence tag is a
+/// LANGUAGE, not a filename, and syntect looks the two up differently.
+/// Synthesizing `snippet.<lang>` and going through the extension table meant
+/// every full language name missed: ` ```rust `, ` ```python `, ` ```javascript `
+/// and ` ```typescript ` all rendered unhighlighted, while their extension
+/// spellings (`rs`, `py`, `js`, `ts`) worked. That is backwards from how people
+/// write Markdown — spyc's own docs carry 28 ` ```rust ` blocks and no ` ```rs `.
+///
+/// `find_syntax_by_token` tries the extension table first and then matches
+/// syntax names case-insensitively, so both spellings resolve and ` ```Rust `
+/// does too. Only the first whitespace- or comma-separated word is used: mdBook
+/// and rustdoc write attributes into the info string (` ```rust,ignore `,
+/// ` ```rust no_run `), and those are not part of the language name.
+pub fn highlight_lang_to_lines(lang: &str, content: &str) -> Option<Vec<Line<'static>>> {
+    let token = lang
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .find(|t| !t.is_empty())?;
+    let ss = &*SYNTAX_SET;
+    highlight_with(ss.find_syntax_by_token(token)?, content)
+}
+
+/// The shared highlight loop: a resolved syntax + content -> styled lines.
+fn highlight_with(
+    syntax: &syntect::parsing::SyntaxReference,
+    content: &str,
+) -> Option<Vec<Line<'static>>> {
+    let ss = &*SYNTAX_SET;
+    let ts = &*THEME_SET;
     let theme = ts.themes.get(THEME_NAME)?;
     let mut highlighter = HighlightLines::new(syntax, theme);
 

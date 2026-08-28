@@ -409,3 +409,146 @@ fn mermaid_range_stays_in_bounds_when_the_diagram_ends_the_doc() {
     assert!(block_text.contains("mermaid diagram"));
     assert!(block_text.contains("flowchart LR"));
 }
+
+// ── render fidelity: what the parser knows but the renderer used to drop ──
+
+/// A fence tag is a language, not a filename. Synthesizing `snippet.<lang>` and
+/// going through syntect's EXTENSION table meant the spellings people actually
+/// write missed entirely: spyc's own docs carry 28 ` ```rust ` blocks and zero
+/// ` ```rs `, and every one of them rendered unhighlighted.
+///
+/// Asserts on span COUNT, not colours: a highlighted line is split into many
+/// styled spans, a plain one is a single span. That distinguishes the two
+/// without pinning syntect's palette.
+#[test]
+fn full_language_names_in_a_fence_highlight_not_just_extensions() {
+    let theme = Theme::default();
+    let spans_for = |lang: &str| {
+        let src = format!("```{lang}\nfn main() {{ let x = 1; }}\n```\n");
+        render(&src, &theme, None)
+            .into_iter()
+            .map(|l| l.spans.len())
+            .max()
+            .unwrap_or(0)
+    };
+    // The extension spelling always worked — it's the control.
+    let by_ext = spans_for("rs");
+    assert!(by_ext > 1, "```rs should highlight (got {by_ext} spans)");
+    for lang in ["rust", "Rust", "RUST"] {
+        assert!(
+            spans_for(lang) > 1,
+            "```{lang} must highlight like ```rs does"
+        );
+    }
+    // mdBook and rustdoc write attributes into the info string; the language is
+    // the first word, and the rest must not defeat the lookup.
+    for lang in ["rust,ignore", "rust no_run"] {
+        assert!(
+            spans_for(lang) > 1,
+            "```{lang} must highlight — attributes aren't part of the name"
+        );
+    }
+    // An unknown language still falls back to plain rather than failing.
+    assert_eq!(
+        spans_for("nosuchlang"),
+        1,
+        "an unrecognized language renders plain, one span per line"
+    );
+}
+
+/// YAML front matter is a data header. Without the metadata option the opening
+/// `---` parsed as a thematic break and the closing one as a setext underline,
+/// so the fields collapsed into a single run-together H2 — which is how
+/// `SKILL.md`, the file spyc itself installs, looked in spyc's own pager.
+#[test]
+fn yaml_front_matter_renders_as_its_own_lines_not_a_heading() {
+    let lines = render_plain("---\nname: spyc\ndescription: a thing\n---\n\n# Real Heading\n");
+    assert!(
+        lines.iter().any(|l| l == "name: spyc"),
+        "each field keeps its own line: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "description: a thing"),
+        "fields are not reflowed together: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.starts_with("##")),
+        "the closing `---` must not become a setext underline: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.starts_with("\u{2500}\u{2500}")),
+        "the opening `---` must not become a thematic break: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "# Real Heading"),
+        "the document after the front matter still renders: {lines:?}"
+    );
+}
+
+/// GFM alerts. Without `ENABLE_GFM` the tag stayed in the quote body and
+/// rendered as the literal text `[!WARNING]` — which is how CONFIGURATION.md
+/// and four archive docs looked.
+#[test]
+fn gfm_alerts_render_as_a_label_not_literal_tag_text() {
+    for (tag, label) in [
+        ("NOTE", "NOTE"),
+        ("TIP", "TIP"),
+        ("IMPORTANT", "IMPORTANT"),
+        ("WARNING", "WARNING"),
+        ("CAUTION", "CAUTION"),
+    ] {
+        let lines = render_plain(&format!("> [!{tag}]\n> Body text.\n"));
+        assert!(
+            lines.iter().any(|l| l == &format!("\u{2503} {label}")),
+            "[!{tag}] should render as its own label row: {lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|l| l.contains("[!")),
+            "the raw tag must not survive into the body: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("Body text.")),
+            "the quote body still renders: {lines:?}"
+        );
+    }
+    // A plain blockquote is unaffected — no label row, no leading blank.
+    let plain = render_plain("> just a quote\n");
+    assert!(
+        plain.iter().any(|l| l == "\u{2503} just a quote"),
+        "an ordinary blockquote keeps its shape: {plain:?}"
+    );
+}
+
+/// The delimiter row's alignment is author intent, and `Tag::Table` used to
+/// throw the whole vector away — so a right-aligned numeric column rendered
+/// ragged-left like everything else.
+#[test]
+fn table_columns_honor_the_delimiter_rows_alignment() {
+    let lines = render_plain("| left | mid | right |\n|:-----|:---:|------:|\n| a | b | c |\n");
+    let body = lines
+        .iter()
+        .find(|l| l.contains('a') && l.contains('b') && l.contains('c'))
+        .unwrap_or_else(|| panic!("no body row in {lines:?}"));
+
+    // Cell interiors, between the `│` separators and minus the framing spaces.
+    let cells: Vec<&str> = body.split('\u{2502}').filter(|c| !c.is_empty()).collect();
+    let [left, mid, right] = cells.as_slice() else {
+        panic!("expected three cells, got {cells:?}");
+    };
+    assert!(
+        left.starts_with(" a") && left.ends_with("  "),
+        "`:---` pads on the right: {left:?}"
+    );
+    assert!(
+        right.starts_with("  ") && right.trim_end().ends_with('c'),
+        "`---:` pads on the left: {right:?}"
+    );
+    let m = mid.trim_matches(' ');
+    assert_eq!(m, "b");
+    let lead = mid.len() - mid.trim_start_matches(' ').len();
+    let trail = mid.len() - mid.trim_end_matches(' ').len();
+    assert!(
+        lead > 1 && trail > 1 && lead.abs_diff(trail) <= 1,
+        "`:--:` splits the slack both sides: lead={lead} trail={trail} in {mid:?}"
+    );
+}
