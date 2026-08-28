@@ -867,3 +867,177 @@ fn wrap_line_capped_bounds_to_visible_rows() {
     // max_rows past the real row count is a no-op (full expansion).
     assert_eq!(wrap_line_capped(&line, 10, 999).len(), 10);
 }
+
+// ── outline folding ───────────────────────────────────────────────────
+
+/// Viewport for the outline tests. Deliberately SMALLER than the document:
+/// `scroll_max` pins `scroll` to 0 whenever the content fits on screen, so a
+/// viewport tall enough to show everything makes every scroll assertion below
+/// vacuously pass.
+const OUTLINE_VIEWPORT: u16 = 3;
+
+/// A rendered-markdown pager over `# One / ## Two / ### Three / ## Four`.
+fn outline_view() -> PagerView {
+    let theme = crate::ui::theme::Theme::default();
+    let src = "# One\n\nalpha\n\n## Two\n\nbeta\n\n### Three\n\ngamma\n\n## Four\n\ndelta\n";
+    let doc = crate::ui::markdown::render_doc(src, &theme, Some(60));
+    let mut v = PagerView::new_styled("doc.md", doc.lines.clone());
+    v.markdown_rendered = true;
+    v.alt_lines = Some(Vec::new());
+    v.md_fold = Some(Box::new(outline::MarkdownFold {
+        lines: doc.lines,
+        headings: doc.headings,
+        mermaid_blocks: doc.mermaid_blocks,
+        folded: std::collections::BTreeSet::new(),
+        marker: Style::default(),
+    }));
+    v.last_viewport_h.set(OUTLINE_VIEWPORT);
+    // `scroll_max` is wrap-aware, so a body width of 0 makes every line wrap
+    // into nothing and pins the scroll ceiling at 0. Wide enough here that
+    // nothing wraps and the ceiling is the plain line count.
+    v.last_body_w.set(60);
+    v
+}
+
+fn body_lines(v: &PagerView) -> Vec<String> {
+    v.lines.iter().map(plain_text).collect()
+}
+
+/// `za` collapses the section the viewport is in, and leaves the cursor on the
+/// heading it just folded rather than wherever that row moved to.
+#[test]
+fn toggling_a_fold_hides_the_section_and_keeps_the_heading_in_view() {
+    let mut v = outline_view();
+    v.scroll = 6; // inside "## Two"'s body ("beta")
+    assert!(
+        v.toggle_fold(OUTLINE_VIEWPORT),
+        "there is an outline to act on"
+    );
+
+    let lines = body_lines(&v);
+    assert!(
+        lines.iter().any(|l| l.starts_with("## Two")),
+        "the heading stays: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l == "beta" || l == "gamma"),
+        "the body and its nested section are hidden: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "## Four"),
+        "the next sibling is untouched: {lines:?}"
+    );
+    assert_eq!(
+        plain_text(&v.lines[v.scroll]).split("  ").next(),
+        Some("## Two"),
+        "the fold anchors on the heading it collapsed"
+    );
+
+    // And back.
+    assert!(v.toggle_fold(OUTLINE_VIEWPORT));
+    assert!(
+        body_lines(&v).iter().any(|l| l == "gamma"),
+        "unfolding restores the nested section too"
+    );
+}
+
+/// The bug this design is most exposed to: `scroll` indexes the FOLDED buffer
+/// while the outline indexes the unfolded one. A second fold has to translate
+/// through `md_kept` first, or it resolves the wrong heading and collapses a
+/// section the user was not looking at.
+#[test]
+fn a_second_fold_resolves_against_the_folded_line_numbering() {
+    let mut v = outline_view();
+    v.scroll = 6;
+    v.toggle_fold(OUTLINE_VIEWPORT); // fold "## Two"
+
+    // "## Four" is now near the top of a much shorter buffer. Put the viewport
+    // on it by NAME, so the test says what the user did rather than an index.
+    let four = body_lines(&v)
+        .iter()
+        .position(|l| l == "## Four")
+        .expect("## Four is on screen");
+    v.scroll = four + 1; // its body, "delta"
+    assert!(v.toggle_fold(OUTLINE_VIEWPORT));
+
+    let lines = body_lines(&v);
+    assert!(
+        lines.iter().any(|l| l.starts_with("## Four")),
+        "## Four collapsed: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l == "delta"),
+        "its body went away: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.starts_with("## Two")),
+        "the first fold is still folded, not clobbered: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "alpha"),
+        "and an unrelated section was NOT collapsed: {lines:?}"
+    );
+}
+
+/// `zM` then `zR` round-trips to exactly the original buffer.
+#[test]
+fn fold_all_then_unfold_all_restores_the_document() {
+    let mut v = outline_view();
+    let original = body_lines(&v);
+
+    assert!(v.fold_all(OUTLINE_VIEWPORT));
+    assert!(
+        v.lines.len() < original.len(),
+        "something actually collapsed"
+    );
+
+    assert!(v.unfold_all(OUTLINE_VIEWPORT));
+    assert_eq!(body_lines(&v), original, "zR is the exact inverse of zM");
+    assert!(v.md_kept.iter().enumerate().all(|(i, &k)| i == k));
+}
+
+/// `[[` / `]]` move between headings and report the ends rather than wrapping —
+/// same contract as the wheel over the file list.
+#[test]
+fn heading_motion_stops_at_the_ends() {
+    let mut v = outline_view();
+    v.scroll = 0; // on "# One"
+    assert!(
+        !v.goto_heading(false, OUTLINE_VIEWPORT),
+        "already at the first heading"
+    );
+
+    for expected in ["## Two", "### Three", "## Four"] {
+        assert!(
+            v.goto_heading(true, OUTLINE_VIEWPORT),
+            "moving to {expected}"
+        );
+        assert_eq!(plain_text(&v.lines[v.scroll]), expected);
+    }
+    assert!(
+        !v.goto_heading(true, OUTLINE_VIEWPORT),
+        "no heading past the last"
+    );
+    assert!(v.goto_heading(false, OUTLINE_VIEWPORT), "and back up again");
+}
+
+/// Every outline verb is inert on a pager with no outline — a plain text file,
+/// and a markdown buffer while the `m` toggle is showing the source (whose line
+/// numbers don't match the outline's).
+#[test]
+fn outline_verbs_are_inert_without_a_rendered_outline() {
+    let mut plain = PagerView::new_plain("notes.txt", vec!["a".into(), "b".into()]);
+    assert!(!plain.has_outline());
+    assert!(!plain.toggle_fold(OUTLINE_VIEWPORT));
+    assert!(!plain.fold_all(OUTLINE_VIEWPORT));
+    assert!(!plain.unfold_all(OUTLINE_VIEWPORT));
+    assert!(!plain.goto_heading(true, 20));
+
+    let mut source_side = outline_view();
+    source_side.markdown_rendered = false;
+    assert!(
+        !source_side.has_outline(),
+        "the outline indexes the RENDERED lines only"
+    );
+    assert!(!source_side.toggle_fold(OUTLINE_VIEWPORT));
+}

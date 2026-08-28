@@ -55,6 +55,8 @@ impl PagerView {
             pane_scroll: false,
             pending_scroll_to_bottom: std::cell::Cell::new(false),
             mermaid_blocks: Vec::new(),
+            md_fold: None,
+            md_kept: Vec::new(),
         }
     }
 
@@ -220,6 +222,15 @@ pub fn build_pager_help(theme: &Theme) -> PagerView {
                     "toggle alt view (.md render ↔ source, .json pretty ↔ raw)",
                 ),
                 ("f", "toggle full-width / centered"),
+            ],
+        ),
+        (
+            "Markdown outline",
+            &[
+                ("za", "fold / unfold the section you're reading"),
+                ("zM", "collapse every section"),
+                ("zR", "expand everything"),
+                ("[[  ]]", "previous / next heading"),
             ],
         ),
         (

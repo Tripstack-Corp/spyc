@@ -12,8 +12,9 @@ use ratatui::text::{Line, Span};
 
 use super::wrap::{slice_spans, spans_visual_width, wrap_spans_to_width};
 use super::{
-    CONTENT_WIDTH, CodeBlockState, MarkdownDoc, MermaidBlock, PROSE_WRAP_MIN, Renderer, StyleMods,
-    TABLE_MAX_COL_WIDTH_CEILING, TABLE_MAX_COL_WIDTH_FALLBACK, TableBuilder, heading_depth,
+    CONTENT_WIDTH, CodeBlockState, Heading, MarkdownDoc, MermaidBlock, PROSE_WRAP_MIN, Renderer,
+    StyleMods, TABLE_MAX_COL_WIDTH_CEILING, TABLE_MAX_COL_WIDTH_FALLBACK, TableBuilder,
+    heading_depth,
 };
 use crate::ui::theme::Theme;
 use crate::ui::wrap::word_wrap_ranges;
@@ -42,6 +43,8 @@ impl<'t> Renderer<'t> {
             table_width,
             prose_width,
             mermaid_blocks: Vec::new(),
+            headings: Vec::new(),
+            open_heading: None,
         }
     }
 
@@ -68,9 +71,14 @@ impl<'t> Renderer<'t> {
         for block in &mut self.mermaid_blocks {
             block.line_range.end = block.line_range.end.min(len);
         }
+        // Trailing separators were just dropped, so a heading that ends the
+        // document can be left pointing past the end for the same reason a
+        // mermaid range could.
+        self.headings.retain(|h| h.line < len);
         MarkdownDoc {
             lines: self.lines,
             mermaid_blocks: self.mermaid_blocks,
+            headings: self.headings,
         }
     }
 
@@ -263,6 +271,7 @@ impl<'t> Renderer<'t> {
                 }
             }
             Tag::Heading { level, .. } => {
+                self.open_heading = Some(u8::try_from(heading_depth(level)).unwrap_or(u8::MAX));
                 if !self.current.is_empty() || !self.lines.is_empty() {
                     self.push_blank();
                 }
@@ -416,6 +425,25 @@ impl<'t> Renderer<'t> {
             }
             TagEnd::Heading(_) => {
                 self.style_mods.pop(Modifier::BOLD);
+                // Captured BEFORE the flush: `lines.len()` is the index the
+                // heading's own row is about to take. Reading it after would
+                // point one past the heading, at the blank line below it, and
+                // every fold would start one row late.
+                let at = self.lines.len();
+                if let Some(level) = self.open_heading.take() {
+                    let text: String = self
+                        .current
+                        .iter()
+                        .map(|s| s.content.as_ref())
+                        .collect::<String>()
+                        .trim_start_matches(['#', ' '])
+                        .to_string();
+                    self.headings.push(Heading {
+                        level,
+                        line: at,
+                        text,
+                    });
+                }
                 if !self.current.is_empty() {
                     self.flush_line();
                 }

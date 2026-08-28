@@ -118,7 +118,7 @@ impl App {
         if let Some(r) = self.handle_pager_jump_buf(key) {
             return r;
         }
-        if let Some(r) = self.handle_pager_bracket(key) {
+        if let Some(r) = self.handle_pager_bracket(key, viewport) {
             return r;
         }
         if let Some(r) = self.handle_pager_jump_history(key, viewport) {
@@ -937,12 +937,26 @@ pub(super) fn build_pager_view(
             let crate::ui::markdown::MarkdownDoc {
                 lines: rendered,
                 mermaid_blocks,
+                headings,
             } = doc;
+            // The outline rides along with the rendered view: folding rebuilds
+            // `lines` from this master copy rather than re-parsing, so it costs
+            // one clone here and nothing per keystroke.
+            let fold = Box::new(crate::ui::pager::outline::MarkdownFold {
+                lines: rendered.clone(),
+                headings,
+                mermaid_blocks: mermaid_blocks.clone(),
+                folded: std::collections::BTreeSet::new(),
+                marker: ratatui::style::Style::default()
+                    .fg(theme.status_suffix)
+                    .add_modifier(ratatui::style::Modifier::DIM),
+            });
             if open_as_rendered {
                 let mut v = PagerView::new_styled(name, rendered);
                 v.alt_lines = Some(source_lines);
                 v.markdown_rendered = true;
                 v.mermaid_blocks = mermaid_blocks;
+                v.md_fold = Some(fold);
                 v
             } else {
                 // Source first: `lines` holds source, `alt_lines`
@@ -954,6 +968,7 @@ pub(super) fn build_pager_view(
                 v.alt_lines = Some(rendered);
                 v.markdown_rendered = false;
                 v.mermaid_blocks = mermaid_blocks;
+                v.md_fold = Some(fold);
                 v
             }
         } else {

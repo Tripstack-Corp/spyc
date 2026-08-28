@@ -172,6 +172,10 @@ pub struct ViewState {
     pub(super) image_gallery: Option<ImageGallery>,
     pub(super) pager_history: PagerHistory,
     pub(super) pager_pending_bracket: Option<char>,
+    /// True after a bare `z` in the pager — the vim fold prefix, awaiting
+    /// `a` / `R` / `M`. Its own flag rather than a second use of
+    /// `pager_pending_bracket`, so a `z` can never be answered by a `]`.
+    pub(super) pager_pending_z: bool,
     pub(super) pager_was_open: bool,
     /// This turn's input went to a pager, so a status-bar flash raised while
     /// running its effects belongs in the pager instead (#166). Consumed at
@@ -431,6 +435,7 @@ impl ViewState {
             image_gallery: None,
             pager_history: PagerHistory::new(),
             pager_pending_bracket: None,
+            pager_pending_z: false,
             pager_was_open: false,
             input_went_to_pager: false,
             pager_help_stash: None,

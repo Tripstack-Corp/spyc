@@ -9,6 +9,7 @@ use ratatui::text::Line;
 
 mod construct;
 mod layout;
+pub mod outline;
 mod render;
 mod scroll_search;
 mod selection;
@@ -363,6 +364,15 @@ pub struct PagerView {
     /// Drives the `o`-to-open hook (and later the inline image). See
     /// `docs/archive/MERMAID_PAGER_PLAN.md`.
     pub mermaid_blocks: Vec<crate::ui::markdown::MermaidBlock>,
+    /// The unfolded rendered markdown plus its outline, retained so folding
+    /// rebuilds `lines` instead of re-parsing the document. `None` for every
+    /// non-markdown pager. Boxed: one `Option` pointer on the common path
+    /// rather than four fields nothing else uses.
+    pub md_fold: Option<Box<outline::MarkdownFold>>,
+    /// For each line currently in `lines`, its index in the unfolded document.
+    /// Empty when nothing is folded, in which case the mapping is the identity
+    /// and every lookup falls back to it.
+    pub md_kept: Vec<usize>,
 }
 
 /// Sentinel title used to identify the pager-help overlay so the

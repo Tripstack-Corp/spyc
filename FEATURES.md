@@ -652,6 +652,13 @@ spyc.
   ` ```mermaid ` blocks as diagrams (`o` / `i`). Code fences resolve the
   language by name or extension, so ` ```rust ` and ` ```rs ` highlight alike,
   and an attribute suffix (` ```rust,ignore `) doesn't defeat it.
+- **Markdown outline folding** — in a rendered view, `za` folds or unfolds the
+  section you're reading, `zM` collapses everything and `zR` expands it again;
+  `[[` / `]]` jump between headings. vim's own fold keys, so the muscle memory
+  carries over. A collapsed heading is marked `▸ N lines`, and a fold takes its
+  nested subsections with it — `##` swallows the `###`s beneath it and stops at
+  the next `##`. Turns a long README or ARCHITECTURE.md into a table of contents
+  you can open one branch at a time.
 - Page-up/down, half-page, and vi-style scrolling
 
 ## Shell integration

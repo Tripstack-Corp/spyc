@@ -16,6 +16,10 @@
 //! and the language is recognized; unrecognized languages render
 //! plain in the code-block style.
 
+pub mod outline;
+
+pub use outline::Heading;
+
 use pulldown_cmark::{HeadingLevel, Options, Parser};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
@@ -41,6 +45,9 @@ pub struct MermaidBlock {
 pub struct MarkdownDoc {
     pub lines: Vec<Line<'static>>,
     pub mermaid_blocks: Vec<MermaidBlock>,
+    /// Every heading, in document order, with the rendered line it sits on.
+    /// Drives the pager's outline folding and heading motions.
+    pub headings: Vec<Heading>,
 }
 
 /// Per-column upper bound when the caller didn't supply a width hint
@@ -220,6 +227,11 @@ struct Renderer<'t> {
     /// ` ```mermaid ` blocks found so far, with the rendered-line range each
     /// occupies. Collected in `end_code_block`; surfaced via `finish_doc`.
     mermaid_blocks: Vec<MermaidBlock>,
+    /// Headings found so far, recorded as each one's row is flushed.
+    headings: Vec<Heading>,
+    /// Level of the heading currently being accumulated into `current`.
+    /// `Some` only between `Tag::Heading` and its `TagEnd`.
+    open_heading: Option<u8>,
 }
 
 /// Insert markdown's two-space hard-break marker before each `**Key:**` line.

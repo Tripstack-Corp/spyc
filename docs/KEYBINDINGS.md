@@ -183,6 +183,23 @@ in place:
   tool-call lines, `r` reloads. Scrolling down past the end exits back
   to the live pane, same as `Esc`.
 
+### Markdown outline
+
+In a rendered Markdown view (`.md` / `.markdown`, or after `m` toggles back from
+source), the pager knows the document's headings:
+
+| Key | Action |
+| --- | --- |
+| `za` | Fold / unfold the section you're reading — the nearest heading at or above the top of the view |
+| `zM` | Collapse every section |
+| `zR` | Expand everything |
+| `[[` / `]]` | Jump to the previous / next heading |
+
+A collapsed heading is marked `▸ N lines`, and folding a section takes its
+nested subsections with it — `##` swallows the `###`s under it and stops at the
+next `##`. These are inert on any other pager, and while `m` is showing the
+Markdown *source*, which the outline doesn't index.
+
 Inside the pager: `/` search with `n`/`N`, `:N` jump-to-line,
 `V` arms visual line mode — first `V` places a line cursor you
 move to the exact start line, a second `V` anchors the selection
