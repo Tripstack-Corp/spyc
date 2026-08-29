@@ -6,8 +6,7 @@ workflow, standards, and conventions for the project.
 ## Getting started
 
 ```sh
-# Use single-branch to avoid downloading the heavy gh-pages branch
-git clone --single-branch --branch main git@github.com:Tripstack-Corp/spyc.git
+git clone git@github.com:Tripstack-Corp/spyc.git
 cd spyc
 make doctor         # check prerequisites (rustc, cargo, zig, etc.)
 make install-hooks  # pre-commit hook — see below

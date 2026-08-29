@@ -189,11 +189,18 @@ The prune runs in the same step as the reindex on purpose: `Packages` /
 `Release` / `InRelease` are GPG-signed over the file set, so deleting debs
 without regenerating and re-signing would leave the signed index advertising
 files that are gone, failing apt's hash check on every client. That is also why
-this can't be done by hand-editing `gh-pages` — the signing key only exists
+the archive can't be edited by hand — there is nowhere to edit it (it exists
+only as a Pages artifact, rebuilt per publish), and the signing key only exists
 inside the `apt-publish` environment. To purge retroactively, dispatch `apt.yml`
 with any recent tag; the prune runs on the way through.
 
-Inspect the policy against a local gh-pages checkout without publishing:
+The policy also decides what gets BUILT. `apt.yml` materializes one empty
+placeholder per candidate version, runs this same script over them, and builds
+only the survivors — the script is purely filename-driven, so it yields the same
+answer against placeholders as against real debs, and the retention rule stays
+in one file rather than being restated in the workflow.
+
+Inspect the policy against a directory of debs without publishing:
 `make apt-prune-check APT_REPO=<dir>`.
 
 ## 6. Maintenance: Errata & Security (EN / SA)
@@ -326,19 +333,31 @@ are the source of truth — Actions *call them* so local and CI never drift.
 - On any publish (prereleases included — apt tracks the rc stream): download the
   release's Linux tarballs, build
   `.deb`s (`make deb`), regenerate the apt index (`apt-ftparchive`), sign the
-  `Release` file with the signing key, and commit the tree to this repo's
-  **`gh-pages`** branch — served via GitHub Pages at
-  `https://tripstack-corp.github.io/spyc`, so users `apt install spyc` /
-  `apt upgrade`. Because the apt repo lives on this repo's own branch, the push
-  uses the built-in **`GITHUB_TOKEN`** (org-owned, `contents:write`) — no
-  personal/cross-repo token. The job self-skips when the signing key is absent.
+  `Release` file with the signing key, and deploy the archive to GitHub Pages as
+  a **workflow artifact** — served at `https://tripstack-corp.github.io/spyc`,
+  so users `apt install spyc` / `apt upgrade`. The job self-skips when the
+  signing key is absent.
+- **No `gh-pages` branch, by design.** It used to hold the archive, and because
+  `git clone` fetches every branch that made a clone of the SOURCE repo 255 MiB
+  against 14 MiB of project — every `.deb` ever published, including 22 already
+  pruned from the index and unfetchable by any client. A user reported the
+  checkout time. Pages now deploys from an artifact (`build_type: workflow`),
+  which needs no branch and keeps the URL, so no `sources.list` had to change.
+- **The archive is a pure function of the releases.** Nothing stores debs:
+  every version in the index is rebuilt from its own release tarball on each
+  publish. Attaching them as release assets was the obvious alternative and is
+  impossible retroactively — this repo has immutable releases, so assets freeze
+  at creation. A rebuilt deb may not be byte-identical to the one it replaces
+  (`dpkg-deb` embeds mtimes); harmless, since the index is re-signed over
+  exactly what is deployed, in the same deployment.
 - **Signing key** — a dedicated RSA-4096 key signs `Release`; its public half is
   published as `KEY.gpg` (what users pin via `signed-by`). The private key +
   passphrase live in the **`apt-publish` protected Environment** (secrets
   `APT_GPG_PRIVATE_KEY` + `APT_GPG_PASSPHRASE`), scoped so only this job — on a
   `v*` tag or `main` — can read them.
 - **Operator setup — DONE** (kept for reference / rebuild):
-  1. `gh-pages` on `spyc` holds the apt tree; Pages serves it from `/` root.
+  1. Pages on `spyc` is set to **GitHub Actions** as its source
+     (`build_type: workflow`), not a branch.
   2. The `apt-publish` Environment (deployment policy: `v*` tag + `main` branch)
      holds the two `APT_GPG_*` secrets.
   3. The signing key is backed up off-repo (owner's password manager) with a

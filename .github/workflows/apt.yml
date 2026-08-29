@@ -1,15 +1,44 @@
 # Publish spyc's signed apt repository on a release (rc or stable).
 #
 # On any published GitHub Release (or manual dispatch) this:
-#   1. downloads the release's Linux tarballs,
-#   2. builds .deb packages via the Makefile (`make deb`),
-#   3. regenerates the flat apt index (apt-ftparchive) and GPG-signs `Release`,
-#   4. commits the tree to THIS repo's `gh-pages` branch, served via GitHub
-#      Pages at https://tripstack-corp.github.io/spyc (keeping older versions).
+#   1. works out which versions the archive should hold (the policy in
+#      `scripts/prune-apt-repo.sh`),
+#   2. downloads each one's Linux tarballs from its GitHub Release,
+#   3. builds .deb packages via the Makefile (`make deb`),
+#   4. regenerates the flat apt index (apt-ftparchive) and GPG-signs `Release`,
+#   5. deploys the whole archive to GitHub Pages as an ARTIFACT.
 #
-# Users then: `apt install spyc` (see INSTALL.md). The apt repo lives on this
-# repo's own gh-pages branch, so the push uses no personal token — the built-in,
-# org-owned GITHUB_TOKEN (contents:write) publishes it.
+# Users then: `apt install spyc` (see INSTALL.md), from the same URL as ever:
+# https://tripstack-corp.github.io/spyc
+#
+# ## Why there is no gh-pages branch
+#
+# There used to be, and it made a clone of the SOURCE repo 255 MiB against
+# 14 MiB of actual project. `git clone` fetches every branch, so everyone who
+# cloned spyc downloaded every .deb ever published — including 22 release
+# candidates already pruned from the index, which no apt client could ever
+# fetch. A user reported the checkout time.
+#
+# Pages deploys from a workflow artifact instead (`build_type: workflow`), so
+# the archive has no branch and never touches a clone. The URL is unchanged, so
+# no `sources.list` anywhere needed editing.
+#
+# ## Why the debs are rebuilt rather than stored
+#
+# They aren't kept anywhere. The archive is a pure function of the releases:
+# every version is rebuilt from its own release tarball on each publish, which
+# is what `make deb` already did for the triggering release (it just wraps a
+# prebuilt binary, so it is release-agnostic). Storing the debs as release
+# assets was the obvious alternative and is not possible retroactively — this
+# repo has immutable releases, so assets are frozen at creation and the ten
+# already-published debs could never have been backfilled.
+#
+# A rebuilt deb is not guaranteed byte-identical to the one it replaces
+# (`dpkg-deb` embeds mtimes and nothing here sets `SOURCE_DATE_EPOCH`). That is
+# harmless: the index is regenerated and re-signed over the exact files being
+# deployed, in the same deployment, so it always describes what is served. A
+# client that had cached an older build of a pinned version re-downloads it
+# once.
 #
 # The signing key lives in the `apt-publish` protected Environment (only this
 # job, on a `v*` tag or `main`, can read it); operator setup is in
@@ -17,11 +46,6 @@
 # stays green until then. Prereleases publish too — the deb version uses a
 # tilde (`2.0.0~rc.4`), which dpkg sorts BELOW the final `2.0.0`, so an rc never
 # blocks the stable upgrade (the Makefile's `DEB_VERSION` does the `-`→`~`).
-#
-# Because rc debs publish, they also accumulate: step 3 runs
-# `scripts/prune-apt-repo.sh` first, dropping prereleases whose final release
-# has shipped (and all but the 3 newest of an in-flight version) so the index
-# doesn't grow without bound. Stable versions are never pruned.
 name: apt
 
 on:
@@ -38,14 +62,18 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write # push the apt index to the gh-pages branch
+  contents: read # read release assets; nothing is pushed any more
+  pages: write # deploy the archive
+  id-token: write # OIDC, required by deploy-pages
 
 jobs:
-  publish:
-    name: Build .debs + publish signed apt repo
+  build:
+    name: Build .debs + sign the apt index
     runs-on: ubuntu-latest
     # Scopes the signing-key secrets to this job (and to `v*` / `main` refs).
     environment: apt-publish
+    outputs:
+      enabled: ${{ steps.guard.outputs.enabled }}
     env:
       APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
       APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
@@ -69,7 +97,7 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout spyc (for the Makefile)
+      - name: Checkout spyc (for the Makefile + the prune policy)
         if: steps.guard.outputs.enabled == 'true'
         # main, not the release tag: the .deb target just wraps the prebuilt
         # binary (release-agnostic), and older tags predate `make deb`.
@@ -81,27 +109,80 @@ jobs:
         if: steps.guard.outputs.enabled == 'true'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dpkg-dev apt-utils gnupg
 
-      - name: Download release Linux tarballs
+      - name: Decide which versions the archive holds
         if: steps.guard.outputs.enabled == 'true'
+        id: plan
         run: |
-          gh release download "${{ steps.ver.outputs.tag }}" \
-            --repo "${{ github.repository }}" \
-            --pattern 'spyc-*-linux-*.tar.gz'
+          set -euo pipefail
+          # Every published release, newest first. Drafts are not public, so an
+          # apt client could never fetch their assets — they are not candidates.
+          gh release list --repo "${{ github.repository }}" --limit 200 \
+            --json tagName,isDraft --jq '.[] | select(.isDraft | not) | .tagName' \
+            | grep -E '^v[0-9]' > tags.txt
 
-      - name: Unpack binaries into the paths the Makefile expects
+          # The retention policy lives in ONE place: scripts/prune-apt-repo.sh.
+          # It is purely filename-driven (it `ls`es `spyc_*_*.deb`, parses the
+          # version out of the name and `rm`s — it never opens a deb), so
+          # running it over empty placeholders yields exactly the set a real
+          # archive would keep. Deciding first means we only build what
+          # survives, instead of building every version and deleting most of it.
+          mkdir -p plan
+          # Held in a variable: `${ver//-/\~}` keeps the backslash (a tilde is
+          # not special in a replacement, so the escape is literal), which
+          # yielded names like `spyc_2.0.0\~rc.26_amd64.deb`. The policy then
+          # read the base version as `2.0.0\`, matched no stable release, and
+          # pruned nothing.
+          tilde='~'
+          while read -r tag; do
+            ver="${tag#v}"
+            # Same `-`→`~` the Makefile's DEB_VERSION applies, so the policy
+            # sees the versions it expects to sort.
+            deb_ver="${ver//-/$tilde}"
+            : > "plan/spyc_${deb_ver}_amd64.deb"
+            : > "plan/spyc_${deb_ver}_arm64.deb"
+          done < tags.txt
+
+          ./scripts/prune-apt-repo.sh plan
+
+          # Survivors → the tags to build. The tag is recoverable from the deb
+          # version by inverting the same substitution, so there is no lookup
+          # table to keep in step (and no `awk -v`, which would re-interpret a
+          # backslash in the version it was handed).
+          : > build-tags.txt
+          for f in plan/spyc_*_amd64.deb; do
+            dv=$(basename "$f" | sed -n 's/^spyc_\(.*\)_amd64\.deb$/\1/p')
+            echo "v${dv//$tilde/-}" >> build-tags.txt
+          done
+          echo "::notice::apt archive will hold $(wc -l < build-tags.txt) version(s)"
+          cat build-tags.txt
+
+      - name: Build every deb the archive holds
         if: steps.guard.outputs.enabled == 'true'
         run: |
           set -euo pipefail
-          mkdir -p target/x86_64-unknown-linux-musl/release \
-                   target/aarch64-unknown-linux-musl/release
-          tar xzf spyc-*-linux-x86_64.tar.gz spyc
-          mv spyc target/x86_64-unknown-linux-musl/release/spyc
-          tar xzf spyc-*-linux-aarch64.tar.gz spyc
-          mv spyc target/aarch64-unknown-linux-musl/release/spyc
-
-      - name: Build .debs
-        if: steps.guard.outputs.enabled == 'true'
-        run: make deb VERSION="${{ steps.ver.outputs.version }}"
+          mkdir -p aptrepo
+          while read -r tag; do
+            ver="${tag#v}"
+            rm -rf tarballs && mkdir -p tarballs
+            # A release with no Linux tarballs predates them; skip rather than
+            # fail the publish over history we cannot package.
+            if ! gh release download "$tag" --repo "${{ github.repository }}" \
+                 --pattern 'spyc-*-linux-*.tar.gz' --dir tarballs 2>/dev/null; then
+              echo "::warning::$tag has no Linux tarballs — omitted from the apt index"
+              continue
+            fi
+            rm -rf target/x86_64-unknown-linux-musl target/aarch64-unknown-linux-musl
+            mkdir -p target/x86_64-unknown-linux-musl/release \
+                     target/aarch64-unknown-linux-musl/release
+            tar xzf tarballs/spyc-*-linux-x86_64.tar.gz -C tarballs spyc
+            mv tarballs/spyc target/x86_64-unknown-linux-musl/release/spyc
+            tar xzf tarballs/spyc-*-linux-aarch64.tar.gz -C tarballs spyc
+            mv tarballs/spyc target/aarch64-unknown-linux-musl/release/spyc
+            make deb VERSION="$ver"
+            cp dist/spyc_*.deb aptrepo/
+            rm -f dist/spyc_*.deb
+          done < build-tags.txt
+          ls -la aptrepo
 
       - name: Import GPG signing key
         if: steps.guard.outputs.enabled == 'true'
@@ -111,23 +192,10 @@ jobs:
           KEYID=$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')
           echo "keyid=$KEYID" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout the gh-pages branch (the apt repo)
-        if: steps.guard.outputs.enabled == 'true'
-        uses: actions/checkout@v7
-        with:
-          ref: gh-pages
-          path: aptrepo
-
       - name: Regenerate + sign the flat apt index
         if: steps.guard.outputs.enabled == 'true'
         run: |
           set -euo pipefail
-          cp dist/spyc_*.deb aptrepo/
-          # Prune BEFORE indexing, in this same step: the index and its GPG
-          # signature must describe the pruned set. Deleting debs without
-          # reindexing would leave the signed Packages advertising files that
-          # are gone, which fails apt's hash check on every client.
-          ./scripts/prune-apt-repo.sh aptrepo
           cd aptrepo
           apt-ftparchive packages . > Packages
           gzip -kf Packages
@@ -146,16 +214,52 @@ jobs:
           gpg --armor --export "${{ steps.gpg.outputs.keyid }}" > KEY.gpg
           # GitHub Pages skips files/dirs starting with '_' and needs no Jekyll.
           touch .nojekyll
+          cp ../docs/apt-README.md README.md
 
-      - name: Commit + push to gh-pages
+      - name: Sanity-check the archive before deploying it
         if: steps.guard.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           cd aptrepo
-          git config user.name "spyc-release-bot"
-          git config user.email "noreply@tripstack.com"
-          git add -A
-          git commit -m "apt: publish spyc ${{ steps.ver.outputs.version }}" || {
-            echo "nothing to publish"; exit 0;
-          }
-          git push origin gh-pages
+          # A signed index that advertises a file which is not there fails apt's
+          # hash check on every client, and Pages has no rollback. Cheaper to
+          # catch here than in the field.
+          # Read from a FILE, not a pipe. `awk ... | while read` runs the loop
+          # in a subshell, so an `exit 1` inside it only fails the step by way
+          # of `pipefail` — the same fail-open shape that once let a broken gate
+          # report green here (AGENTS.md, "Never pipe the gate"). A redirect
+          # keeps the loop in this shell, where `set -e` is unambiguous.
+          awk '/^Filename: /{print $2}' Packages > /tmp/advertised.txt
+          missing=0
+          while read -r f; do
+            if [ ! -e "$f" ]; then
+              echo "::error::Packages advertises $f, which is not in the archive"
+              missing=$((missing + 1))
+            fi
+          done < /tmp/advertised.txt
+          [ "$missing" -eq 0 ] || { echo "::error::$missing advertised file(s) missing"; exit 1; }
+          [ -s /tmp/advertised.txt ] || { echo "::error::Packages advertises nothing"; exit 1; }
+          test -s InRelease || { echo "::error::InRelease is empty"; exit 1; }
+          gpg --verify InRelease >/dev/null 2>&1 || { echo "::error::InRelease does not verify"; exit 1; }
+          n=$(ls spyc_*.deb 2>/dev/null | wc -l)
+          [ "$n" -gt 0 ] || { echo "::error::no debs in the archive"; exit 1; }
+          echo "archive OK: $n deb(s), index verifies"
+
+      - name: Upload the archive as the Pages artifact
+        if: steps.guard.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: aptrepo
+
+  deploy:
+    name: Deploy the apt repo to Pages
+    needs: build
+    if: needs.build.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
