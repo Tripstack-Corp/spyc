@@ -205,7 +205,14 @@ jobs:
             -o APT::FTPArchive::Release::Suite=stable \
             -o APT::FTPArchive::Release::Architectures="amd64 arm64" \
             -o APT::FTPArchive::Release::Components=main \
-            release . > Release
+            release . > ../Release.tmp
+          # Generated OUTSIDE the scanned directory, then moved in. `> Release`
+          # here truncates the file before `apt-ftparchive` walks the directory,
+          # so the hash it recorded for `Release` was of its own
+          # partially-written output — the signed index asserted 121 bytes for a
+          # 1287-byte file (#442). A `Release` that does not list itself is the
+          # correct outcome: the entry is unsatisfiable by construction.
+          mv ../Release.tmp Release
           rm -f InRelease Release.gpg
           gpg --batch --yes --pinentry-mode loopback --passphrase "$APT_GPG_PASSPHRASE" \
             --local-user "${{ steps.gpg.outputs.keyid }}" --clearsign -o InRelease Release
@@ -239,6 +246,23 @@ jobs:
           done < /tmp/advertised.txt
           [ "$missing" -eq 0 ] || { echo "::error::$missing advertised file(s) missing"; exit 1; }
           [ -s /tmp/advertised.txt ] || { echo "::error::Packages advertises nothing"; exit 1; }
+
+          # Every hash the signed Release asserts must match the bytes shipped
+          # beside it. This is the check that would have caught #442, where the
+          # index carried a hash for `Release` that could never be right — so it
+          # is a guard, not just a fix. Only the SHA256 block: start at the
+          # header, stop at the next unindented line (the following section, or
+          # the signature).
+          awk '/^SHA256:$/{f=1;next} f && /^[^ ]/{f=0} f && NF==3 {print $1" "$3}' \
+            Release > /tmp/index-hashes.txt
+          bad=0
+          while read -r want name; do
+            [ -e "$name" ] || { echo "::error::Release asserts $name, which is not here"; bad=$((bad + 1)); continue; }
+            got=$(sha256sum "$name" | awk '{print $1}')
+            [ "$got" = "$want" ] || { echo "::error::Release asserts a wrong hash for $name"; bad=$((bad + 1)); }
+          done < /tmp/index-hashes.txt
+          [ "$bad" -eq 0 ] || { echo "::error::$bad index hash(es) wrong"; exit 1; }
+          echo "index self-consistent: $(wc -l < /tmp/index-hashes.txt) hashed file(s)"
           test -s InRelease || { echo "::error::InRelease is empty"; exit 1; }
           gpg --verify InRelease >/dev/null 2>&1 || { echo "::error::InRelease does not verify"; exit 1; }
           n=$(ls spyc_*.deb 2>/dev/null | wc -l)
