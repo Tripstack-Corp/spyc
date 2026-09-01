@@ -274,6 +274,11 @@ jobs:
         uses: actions/upload-pages-artifact@v5
         with:
           path: aptrepo
+          # v4 of this action began excluding dotfiles (`--exclude=.[^/]*`),
+          # which silently drops the `.nojekyll` written above. Nothing in CI
+          # exercises this workflow, so the loss would first show up as a
+          # degraded live archive, and Pages has no rollback.
+          include-hidden-files: true
 
   deploy:
     name: Deploy the apt repo to Pages
