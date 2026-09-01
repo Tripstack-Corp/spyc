@@ -265,9 +265,12 @@ jobs:
           echo "index self-consistent: $(wc -l < /tmp/index-hashes.txt) hashed file(s)"
           test -s InRelease || { echo "::error::InRelease is empty"; exit 1; }
           gpg --verify InRelease >/dev/null 2>&1 || { echo "::error::InRelease does not verify"; exit 1; }
-          n=$(ls spyc_*.deb 2>/dev/null | wc -l)
-          [ "$n" -gt 0 ] || { echo "::error::no debs in the archive"; exit 1; }
-          echo "archive OK: $n deb(s), index verifies"
+          # Glob into an array rather than counting `ls` output: a filename
+          # with a newline would inflate the count, and the unmatched-glob case
+          # is explicit instead of riding on a suppressed `ls` error.
+          debs=(spyc_*.deb)
+          [ -e "${debs[0]}" ] || { echo "::error::no debs in the archive"; exit 1; }
+          echo "archive OK: ${#debs[@]} deb(s), index verifies"
 
       - name: Upload the archive as the Pages artifact
         if: steps.guard.outputs.enabled == 'true'
