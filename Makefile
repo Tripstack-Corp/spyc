@@ -119,6 +119,8 @@ lint-workflows: ## Lint .github/workflows (actionlint + shellcheck over every `r
 		echo "  install with: brew install shellcheck  (CI pins 0.11.0 — findings differ by version)"; \
 		exit 1; \
 	}
+	@actionlint --version | head -1 | sed 's/^/actionlint /'
+	@shellcheck --version | sed -n 's/^version: /shellcheck /p'
 	actionlint -no-color
 
 .PHONY: fmt
