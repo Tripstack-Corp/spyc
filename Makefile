@@ -116,7 +116,7 @@ lint-workflows: ## Lint .github/workflows (actionlint + shellcheck over every `r
 	}
 	@command -v shellcheck >/dev/null 2>&1 || { \
 		echo "shellcheck not found — actionlint would silently skip every run: block and exit 0."; \
-		echo "  install with: brew install shellcheck"; \
+		echo "  install with: brew install shellcheck  (CI pins 0.11.0 — findings differ by version)"; \
 		exit 1; \
 	}
 	actionlint -no-color

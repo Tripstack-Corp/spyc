@@ -71,6 +71,15 @@ jobs:
       # verified present because actionlint SILENTLY skips every `run:` block
       # and exits 0 without it, so an image change would otherwise turn this
       # step into a no-op that still reports green.
+      # shellcheck is PINNED rather than taken from the runner image. Its
+      # findings differ by version -- 0.11.0 does not report an SC2015 that the
+      # image's build does -- so an unpinned one makes the gate drift under the
+      # image and fails PRs that touched nothing. Same reasoning that moved
+      # cargo-deny off this path. Keep in step with the version the Makefile
+      # names, so a local run and CI agree.
+      - uses: taiki-e/install-action@v2.87.0
+        with:
+          tool: shellcheck@0.11.0
       - name: Lint workflows (actionlint + shellcheck)
         run: |
           ACTIONLINT_VERSION=1.7.12

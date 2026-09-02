@@ -92,7 +92,9 @@ jobs:
           MAC=$(sha "spyc-v${V}-macos-universal.tar.gz")
           LX=$(sha "spyc-v${V}-linux-x86_64.tar.gz")
           LA=$(sha "spyc-v${V}-linux-aarch64.tar.gz")
-          [ -n "$MAC" ] && [ -n "$LX" ] && [ -n "$LA" ] || { echo "missing a checksum for v${V}"; exit 1; }
+          if [ -z "$MAC" ] || [ -z "$LX" ] || [ -z "$LA" ]; then
+            echo "missing a checksum for v${V}"; exit 1
+          fi
           f=tap/Formula/spyc.rb
           # Each sha256 is attributed to the artifact named by the url above it,
           # so the formula's arch-block shape is free to change — macOS points
