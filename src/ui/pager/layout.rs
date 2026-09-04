@@ -1,4 +1,4 @@
-//! Pure geometry + text helpers: centered/fit rects and body widths, line
+//! Pure geometry + text helpers: centred/fit rects and body widths, line
 //! wrapping + multi-column partitioning, visual-row counting, word-motion
 //! boundaries. Split from `pager` verbatim.
 

@@ -854,7 +854,7 @@ impl Config {
     /// hostile content (cloned repos, extracted tarballs), so a project rc
     /// must not be able to bind a key to a shell command (`unix`) or an
     /// arbitrary `jump`. Those executing bindings are dropped from the
-    /// project file; cosmetic/behavioral settings (`[colors]`, `[layout]`, …)
+    /// project file; cosmetic/behavioural settings (`[colors]`, `[layout]`, …)
     /// and plain rebindings are still honoured.
     pub fn load_default(cwd: &Path) -> anyhow::Result<Self> {
         let user = home_dir().map(|h| h.join(".spycrc.toml"));

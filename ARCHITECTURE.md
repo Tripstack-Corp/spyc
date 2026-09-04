@@ -493,7 +493,7 @@ reload. `spyc --print-config` emits a fully-commented default
 template suitable for `>` redirect.
 
 The project file is **untrusted** (spyc is routinely pointed at
-hostile content): its cosmetic/behavioral settings and plain
+hostile content): its cosmetic/behavioural settings and plain
 rebindings are honoured, but *executing* keymap bindings (`unix`
 shell commands, `jump`) are dropped — those take effect only from
 `~/.spycrc.toml`. `^R` reload re-reads the project file from the
