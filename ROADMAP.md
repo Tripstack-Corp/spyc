@@ -200,12 +200,21 @@ The user-facing words are **detach** and **attach**. "Session" stays an
 agent-conversation term — session forking, `/resume`, session pinning — and the
 durable thing gets no noun of its own: it is just spyc, still running.
 
-Scope does not commit until the VT-engine spike (`docs/drafts/VT_ENGINE_SPIKE.md`,
-a separate engagement) reports. Screen reconstruction fidelity becomes
-load-bearing the moment a client reattaches, and reattaching from a *different*
-terminal emulator — cell size, kitty/sixel capability and colour depth all
-changing mid-session — is the known-hard bug class to price before committing
-to it. Tracked as a `3.0` milestone once issues exist; none are created yet.
+The VT-engine spike has reported (`docs/drafts/VT_ENGINE_SPIKE.md`), and its
+recommendation moved forward rather than back: **the engine lands in 2.2**, so
+it gets a full release of daily dogfood soak before a reattach depends on it.
+That closes the engine question this horizon was waiting on — screen
+reconstruction fidelity is load-bearing the moment a client reattaches, and the
+incumbent reconstructs 0% of scrollback. It does **not** commit 3.0's own scope:
+detach/attach, the daemon lifecycle and the client protocol are still
+uncommitted, and the known-hard bug class the spike priced only in part —
+reattaching into a *different* terminal emulator, where cell size, kitty/sixel
+capability and colour depth all change mid-session — is where that scope has to
+start. The spike settled the text half (the engine's emit is parameterized by
+target capability, 13 independent toggles) and explicitly left in-pane graphics
+reconstruction unpriced, flagging it for `PROJECTS_PLAN.md` to answer as a
+"serializes or is rebuilt client-side" question. Tracked as a `3.0` milestone
+once issues exist; none are created yet.
 
 
 ## Backlog & roadmap
@@ -360,6 +369,76 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   conversations. Scope does not commit until the VT-engine spike reports —
   reattaching into a different terminal emulator is the bug class to price
   first.
+- **The VT engine becomes libghostty-vt, and it lands in 2.2 — not 3.0**
+  (2026-09-04). A three-way differential spike
+  (`docs/drafts/VT_ENGINE_SPIKE.md`, harness `spikes/vt-engine/`) measured
+  vt100 0.16.2, wezterm-term and libghostty-vt over a 26-case corpus, 50,000
+  fuzz iterations and a rehydration round trip. **wezterm-term is excluded
+  structurally:** unpublished on crates.io, so reachable only by a git
+  dependency, and `cargo package` refuses one. **vt100 is excluded on
+  rehydration:** it reconstructs the visible screen perfectly and **0%** of
+  scrollback, and `all_contents_formatted` has been an open upstream PR since
+  2021-01-30 on a project with bus factor 1, 14 months silent and 15 open PRs
+  (three of them panic fixes). **libghostty-vt is adopted**: 99.5% scrollback
+  reconstruction, capability-parameterized emission (13 independent toggles —
+  the thing that prices reattaching into a different emulator), 3.7× the
+  incumbent's throughput, zero panics in 50k adversarial iterations against
+  vt100's 1,437 (2.87%), +1.0 MiB binary and +5 crates. Distribution is
+  **vendored prebuilt static archives at a spyc-owned pinned ghostty commit**,
+  measured at 0.59 MiB gzipped per target — ~2.4 MiB for the four release
+  targets against crates.io's 10 MiB cap, so `cargo install spyc` keeps working
+  with no Zig on the user's machine. FFI is isolated in a new `spyc-vt-sys`
+  crate, per this log's existing scope for unsafe. **Every figure in this entry
+  was measured at a ghostty commit that cannot ship** — see the next entry.
+  MSRV is *not* expected to move: the spike's "1.88 → 1.90" was the published
+  `libghostty-vt` crates' own `rust-version`, and spyc does not inherit it
+  because it writes its own bindings (the published ones are ABI-incompatible
+  with the shipping constructor, which is the reason for writing them).
+  `spyc-vt-sys` declares spyc's 1.88 and the CI MSRV job proves it; if the FFI
+  turns out to need more, that is a decision recorded here, not a silent bump.
+  **Why 2.2 and not 3.0, which is what the spike recommended:** #34's engine
+  half is already 2.2 scope, the incumbent cannot be fixed on its own
+  timeline, and landing the engine now buys a full release of daily dogfood
+  soak *before* 3.0 makes screen reconstruction load-bearing. Adoption is
+  staged across seven PRs; vt100 stays selectable for 2.2 as the fallback and
+  its removal is filed for 2.3 triage.
+- **The engine adoption is contingent on a measurement gate, because the
+  measured figures are not from the shipping configuration** (2026-09-04).
+  Every ghostty figure in the spike was taken at ghostty `f4c68d65`, chosen
+  because it is ABI-compatible with the published bindings — and at that
+  commit `max_scrollback` is **inert**, so the retained history saturated at
+  ~840 rows regardless of the budget. That commit cannot ship. The shipping
+  pin postdates the scrollback-limits refactor (`03d5fa26` moved limits to
+  `terminal_set`; `main` splits them into `SCROLLBACK_MAX_BYTES` /
+  `SCROLLBACK_MAX_LINES`), and at that pin the spike's numbers are unverified.
+  The gate: the harness is re-run at the shipping pin and must show a
+  functional scrollback budget, zero panics over ≥50k `fuzz_diff` iterations,
+  re-graded rehydration, the two known ghostty emit bugs re-checked, and
+  throughput and memory re-measured — appended to the spike report as a dated
+  addendum, never a rewrite. **If the re-run materially degrades rehydration
+  fidelity or the panic count, adoption does not proceed** and the series stops
+  after the profile-comment correction. Feasibility was probed before the
+  series opened and holds: at `main` the two-scalar constructor round-trips
+  geometry, and `OPT_SCROLLBACK_MAX_LINES` retains 9,883 of a configured
+  10,000 rows (98.8%) — **but only with the byte limit removed**, since a
+  default byte cap otherwise binds first and truncates history to ~840 rows
+  irrespective of the line limit. Which fixes the budget mapping as a decision
+  rather than a conversion: **spyc budgets in rows, so it sets the line limit
+  to its row budget and removes the byte limit.** Page-granularity pruning
+  makes the limit an estimate, so the contract is "approximately respected",
+  never equality.
+- **The engine's threading resolution is deliberately still open** (2026-09-04).
+  The bindings' `Terminal` is `!Send` — a conservative binding choice, not a
+  C-library constraint — while spyc's `Pane` holds `Arc<Mutex<vt100::Parser>>`
+  and parses on a dedicated worker thread. Two options: confine the terminal to
+  its worker and pass snapshots or dirty regions out (the actor shape, which
+  ghostty's `begin_update`/`end` plus `Dirty::{Clean,Partial,Full}` may make a
+  restructure with a payoff, since those map onto `needs_draw`'s reason codes),
+  or `unsafe impl Send` in `spyc-vt-sys` justified line-by-line against the C
+  API's documented threading contract at the pin, behind a `SPYC-TRAP` anchor
+  because its failure mode is silent UB. Both get priced before either is
+  coded, the actor shape is preferred if costs are comparable, and the choice
+  is recorded here when made rather than inferred from the diff.
 
 ## Doc map
 

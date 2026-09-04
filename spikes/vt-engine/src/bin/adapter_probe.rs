@@ -85,19 +85,23 @@ fn probe(label: &str, bytes: &[u8], rows: u16, cols: u16) {
     paint(screen, area, &mut buf);
 
     println!("--- {label}");
-    println!("    engine row 0 (vt100 contents, continuations skipped): {:?}", {
-        let mut t = String::new();
-        for c in 0..cols {
-            match screen.cell(0, c) {
-                Some(cell) if cell.is_wide_continuation() => {}
-                Some(cell) if cell.contents().is_empty() => t.push(' '),
-                Some(cell) => t.push_str(cell.contents()),
-                None => break,
-            }
-        }
-        t.trim_end().to_string()
-    });
-    println!("    adapter row 0 (what PaneWidget put in the ratatui buffer):  {:?}", buffer_row(&buf, 0, cols).trim_end());
+    // Both rows are built the SAME way — one cell per column, nothing skipped.
+    //
+    // An earlier version of this probe skipped wide continuation cells on the
+    // engine side and not on the buffer side. That asymmetry reported a correct
+    // wide-glyph rendering as a spurious space ("あ い ab" vs "あいab") and
+    // produced a defect that does not exist: ratatui's `set_string` claims the
+    // continuation column itself and fills it with a space, so the widget
+    // writing one there is a no-op. Compare like with like or invent findings.
+    let engine_row: String = (0..cols)
+        .map(|c| match screen.cell(0, c) {
+            Some(cell) if cell.contents().is_empty() => " ".to_string(),
+            Some(cell) => cell.contents().to_string(),
+            None => String::new(),
+        })
+        .collect();
+    println!("    engine row 0 (one cell per column, nothing skipped): {:?}", engine_row.trim_end());
+    println!("    adapter row 0 (same normalization, from the buffer): {:?}", buffer_row(&buf, 0, cols).trim_end());
     // Per-cell dump so a clobbered wide half is visible rather than inferred.
     let mut per_cell = Vec::new();
     for c in 0..cols.min(12) {
@@ -114,6 +118,18 @@ fn probe(label: &str, bytes: &[u8], rows: u16, cols: u16) {
         ));
     }
     println!("    per-cell: {}", per_cell.join("  "));
+    // Style matters as much as the symbol: a continuation cell ratatui claimed
+    // sits at `Reset`, and vt100 reports the continuation as bg=Default, so the
+    // widget's styled space lands at Reset too. Print both so a future reader
+    // can see they agree rather than take this comment's word for it.
+    if let Some(bc) = buf.cell((1u16, 0u16)) {
+        println!(
+            "    col1 (continuation): buffer symbol={:?} style.bg={:?}; engine bg={:?}",
+            bc.symbol(),
+            bc.style().bg,
+            screen.cell(0, 1).map(vt100::Cell::bgcolor)
+        );
+    }
 }
 
 fn main() {
