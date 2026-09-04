@@ -140,7 +140,9 @@ impl App {
             self.state.col_mut(side).pending_ghosts.clear();
         }
         if changed || had_pending {
-            self.state.rebuild_rows();
+            // This result is for `side`, which is not necessarily the focused
+            // column — rebuild the one that actually changed.
+            self.state.rebuild_rows_for(side);
         }
         changed || had_pending
     }
@@ -605,7 +607,7 @@ mod tests {
             );
         }
 
-        let mut app = App::test_app(a_dir.clone());
+        let mut app = App::test_app(a_dir);
         app.open_second_commander_at_background(&b_dir);
         // Opening points `vsplit.focus` at Right; put the keyboard back on `a`,
         // which is the arrangement that goes stale.
