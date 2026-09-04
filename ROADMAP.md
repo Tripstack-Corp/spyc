@@ -381,8 +381,10 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   2021-01-30 on a project with bus factor 1, 14 months silent and 15 open PRs
   (three of them panic fixes). **libghostty-vt is adopted**: 99.5% scrollback
   reconstruction, capability-parameterized emission (13 independent toggles —
-  the thing that prices reattaching into a different emulator), 3.7× the
-  incumbent's throughput, zero panics in 50k adversarial iterations against
+  the thing that prices reattaching into a different emulator), 2.0× the
+  incumbent's throughput at the shipped build (see the gate entry below —
+  the 3.7× first recorded was a `ReleaseFast` archive that does not fit
+  crates.io's size cap), zero panics in 50k adversarial iterations against
   vt100's 1,437 (2.87%), +1.0 MiB binary and +5 crates. Distribution is
   **vendored prebuilt static archives at a spyc-owned pinned ghostty commit**,
   measured at 0.59 MiB gzipped per target — ~2.4 MiB for the four release
@@ -427,6 +429,36 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   to its row budget and removes the byte limit.** Page-granularity pruning
   makes the limit an estimate, so the contract is "approximately respected",
   never equality.
+- **The engine gate passed at the shipping pin, with two figures corrected and
+  one improved** (2026-09-04). The harness was re-run at ghostty
+  `1f5bb5769fbb5e717546073d33d3985604a315b2` through `spyc-vt-sys` — the same
+  bindings and vendored archive production links — and the results are appended
+  to `docs/drafts/VT_ENGINE_SPIKE.md` as a dated addendum. Zero panics over
+  50,000 fuzz iterations (vt100: 1,437). Fidelity unchanged at 20/26 exact
+  parity. The scrollback budget works at the shipped configuration: realistic
+  content retains 9,658 of 10,000 rows against a floor of budget-minus-one-page,
+  and a pathological stream demonstrably binds the byte valve.
+  **Improved:** the pin carries a snapshot API that did not exist at the
+  measured commit, and it beats the VT formatter on every fidelity axis —
+  100% rows, cells, attributes, cursor, alt-screen and **100% of scrollback**,
+  against the formatter's 98%-at-one-row-shift; the continuation round trip
+  survives a snapshot cut mid-escape-sequence. So 3.0 attach consumes the
+  snapshot API, and the formatter's remaining one-row viewport offset is off the
+  critical path. Snapshots are **transport-only — same binary, same pin**:
+  version 1 carries no binary-compatibility guarantee, though the versioned
+  envelope and per-record CRC32C make a stale or corrupt snapshot detectable and
+  discardable rather than misparsed (measured: truncated, CRC-corrupted and
+  unknown-version streams all refuse to decode). `PROJECTS_PLAN.md` question 7
+  inherits that sentence. **Corrected:** throughput is **2.0×** the incumbent,
+  not the 3.7× first recorded — the shipped archives are `ReleaseSmall` because
+  five `ReleaseFast` archives gzip to ~16.1 MiB against crates.io's 10 MiB cap,
+  so ~1.5× throughput is the priced cost of `cargo install` needing no Zig.
+  And memory is **not** parity, in ghostty's favour: at a full 10,000-row budget
+  vt100 costs 26.62 MiB/pane against ghostty's 6.94, because vt100 allocates its
+  grid eagerly at 32 B/cell regardless of content. The earlier parity reading
+  compared ghostty's 9.64 MiB *ceiling* against vt100's *usage at 3,988 rows* —
+  a cap against a measurement, at different row counts. The adoption case never
+  rested on memory, but the figure now points the way it actually points.
 - **The engine's threading resolution is deliberately still open** (2026-09-04).
   The bindings' `Terminal` is `!Send` — a conservative binding choice, not a
   C-library constraint — while spyc's `Pane` holds `Arc<Mutex<vt100::Parser>>`

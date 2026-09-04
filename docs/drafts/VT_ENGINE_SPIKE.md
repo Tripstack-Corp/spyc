@@ -813,9 +813,14 @@ crate. Everything else about it is secondary.
 
 ## Appendix — how to reproduce every figure
 
-All commands run from `spikes/vt-engine/` with
-`export GHOSTTY_SOURCE_DIR=<ghostty at f4c68d65>`. See the spike README for the
-checkout and for why `main` cannot be used.
+All commands run from `spikes/vt-engine/` with `--features ghostty,wezterm`.
+
+**No `GHOSTTY_SOURCE_DIR` and no Zig.** As of the addendum the harness links
+`crates/spyc-vt-sys`'s vendored archive at the pinned commit, so it needs
+neither a ghostty checkout nor a Zig toolchain. The `gprobe` and `grt` probes
+are retired: `gprobe`'s finding (the silent ABI mismatch) is now a permanent
+test in `spyc-vt-sys`, and `grt`'s (the tabstops cursor clobber) is fixed at the
+pin. `snapshot_grade`, `sbprobe` and `membudget` replace them.
 
 | figure | command |
 |---|---|
@@ -827,9 +832,10 @@ checkout and for why `main` cannot be used.
 | throughput, RSS, cell size | `cargo run --release --features ghostty,wezterm --bin bench` |
 | scrollback budget units | `cargo run --release --features ghostty,wezterm --bin sbprobe` |
 | formatter option costs | `cargo run --release --features ghostty --bin gfmt` |
-| tabstops cursor bug | `cargo run --release --features ghostty --bin grt` |
-| ABI mismatch vs `main` | `cargo run --release --features ghostty --bin gprobe` |
-| `Send` bounds | `cargo run --release --features wezterm --bin sendprobe`, then uncomment the ghostty assert |
+| snapshot grading (all 4 criteria) | `cargo run --release --features ghostty --bin snapshot_grade` |
+| scrollback budget, shipped config | `cargo run --release --features ghostty --bin sbprobe` |
+| memory at a FULL row budget | `cargo run --release --features ghostty,wezterm --bin membudget` |
+| `Send` bounds | `cargo run --release --features wezterm --bin sendprobe` |
 | #34 engine vs adapter | `cargo run --release --bin adapter_probe` |
 | binary size deltas | `cd sizeprobe && cargo build --release [--features e-vt100\|e-ghostty\|e-wezterm]` |
 | crate counts | `cargo tree --target all --prefix none --features <f> \| awk 'NF{print $1}' \| sort -u \| wc -l` |
@@ -838,3 +844,248 @@ checkout and for why `main` cannot be used.
 | ghostty pulse | `git rev-list --count a887df42..origin/main` |
 | the DECRC fix shipped in 0.16.2 | `git merge-base --is-ancestor 7076e0f v0.16.2` |
 | crates.io sizes | `curl -s https://crates.io/api/v1/crates/spyc \| jq '.versions[0].crate_size'` |
+
+---
+
+# Addendum — 2026-09-04: re-measured at the shipping pin
+
+**Appended, not merged into the body above.** Everything before this line was
+measured at ghostty `f4c68d65`, chosen for ABI compatibility with the published
+`libghostty-vt` bindings — and at that commit `max_scrollback` is inert. That
+commit cannot ship. This addendum re-states every figure the adoption rests on
+at the pin that can, and it is the Stage-5 gate of `V2_2_PLAN.md` §8.
+
+**Pin:** `1f5bb5769fbb5e717546073d33d3985604a315b2`, 2026-09-04.
+**Through:** `crates/spyc-vt-sys` — the same bindings, the same vendored
+archive and the same FFI production will link. The measured mechanism is the
+shipped mechanism, which is the principle the gate exists to enforce.
+**Harness:** `spikes/vt-engine/`, `--features ghostty,wezterm`.
+
+## Verdict: the gate passes, and one figure improved materially
+
+| gate criterion | result |
+|---|---|
+| scrollback budget functional, shipped config | **pass** — see below |
+| zero panics over ≥50k `fuzz_diff` iterations | **pass** — 0 |
+| rehydration re-graded | **pass**, and the snapshot mechanism is strictly better than the formatter |
+| the two known emit bugs re-checked | one **fixed upstream**, one reduced |
+| throughput and memory re-measured | **both changed**; see the corrections |
+
+## The scrollback budget, at the shipped configuration
+
+`sbprobe`. Both limits set deliberately — `max_lines = 10_000`,
+`max_bytes = 10,109,200` (9.64 MiB) — derived by
+`spyc_vt_sys::scrollback::limits_for_row_budget`. Tolerance for "approximately
+respected" is one page, 440 rows at the heavy rate.
+
+**Assertion 1 — realistic content must not bind the valve.** 15,000 rows fed
+into a 10,000-row budget, so both engines must discard:
+
+| corpus | vt100 | ghostty | floor (budget − one page) |
+|---|---:|---:|---:|
+| plain | 10,000 | 9,658 | 9,560 |
+| heavy | 10,000 | 9,658 | 9,560 |
+
+**Assertion 2 — pathological content must bind it.** 4,000 rows with a distinct
+truecolour pair and a grapheme cluster in every cell: ghostty retained **1,613
+of 3,976 available** — the valve bound. Dividing the ceiling by the retained
+count, ghostty stored ~6.1 KiB/row for that content against ~3.0 KiB/row of
+*input*. Storage exceeding input for per-cell styling is exactly the case a
+line-only budget cannot bound, which is why both limits are set. vt100 retained
+all 3,977: it has no byte ceiling to bind.
+
+### ~840 rows is a number two unrelated causes produce
+
+Recorded deliberately. At `f4c68d65` the retained count saturated at ~840 rows
+because `max_scrollback` was inert. At the shipping pin, setting only the line
+limit *also* yields ~840, because a default byte cap binds ahead of it. Same
+number, different cause. A future harness run that recognises 840 as "the
+expected ghostty number" and stops looking is the trap this series already fell
+into once.
+
+## Robustness — unchanged
+
+`fuzz_diff`, 50,000 iterations, seed `0x5157c0de`:
+
+| engine | panics | rate |
+|---|---:|---:|
+| vt100 | **1,437** | 2.87% |
+| wezterm | 15 | 0.03% |
+| **ghostty** | **0** | **0%** |
+
+Identical to the pre-pin run. wezterm's 15 are one root cause at 13 widths,
+now filed upstream as
+[wezterm/wezterm#8134](https://github.com/wezterm/wezterm/issues/8134) with a
+5-byte reproducer.
+
+## Fidelity — unchanged
+
+`differential`: **20/26 cases at exact parity** across all three engines, with
+vt100 alone on one side of every content divergence. Same as pre-pin.
+
+## Rehydration: two mechanisms, graded separately
+
+The gate was amended before it ran, because the pin carries a **snapshot API**
+(`ghostty_snapshot_encode` / `ghostty_snapshot_decoder_*`) that did not exist at
+`f4c68d65`. Re-running only the formatter measurement would have graded the
+wrong mechanism.
+
+### Mechanism A — the VT formatter (`rehydrate`)
+
+Its consumer is the cross-emulator reattach class, where capability
+parameterisation is the property that matters.
+
+| | vt100 | ghostty |
+|---|---:|---:|
+| rows exact | **100.0%** | 57.3% |
+| rows, ±1 shift allowed | 100.0% | **98.0%** |
+| cell text | **100.0%** | 84.3% |
+| cell attributes | **100.0%** | 94.6% |
+| cursor preserved | 26/26 | **26/26** (was 24/26) |
+| alt-screen preserved | 24/26 | **26/26** |
+| **scrollback preserved** | **0 of 4,229 (0.0%)** | **4,224 of 4,230 (99.9%)** |
+| emitted, all cases | 12,482 B | 389,039 B |
+
+wezterm still has no state-emit API.
+
+vt100's 0% is unchanged and remains the disqualifying number. ghostty's 57.3%
+exact is still almost entirely **one row of viewport offset** on the six
+scrollback-bearing cases; at ±1 tolerance it is 98.0%, and scrollback rose from
+99.5% to 99.9%. Its emitted size grew because this run enables more toggles
+(tabstops, hyperlink, protection, kitty keyboard, charsets) than the pre-pin
+run did — a configuration difference, not a regression.
+
+Per-toggle costs (`gfmt`, 20x4 with two styled lines, each row is bare plus one
+toggle): palette **+5,522 B**, tabstops +20, cursor +6, style +4, and
+`modes` / `scrolling_region` / `pwd` / `keyboard` / `hyperlink` / `protection`
+/ `kitty_keyboard` / `charsets` all +0 on this state. A toggle costing 0 has
+nothing to say about *this* terminal; the point is that each is independently
+switchable for a client that cannot consume it. That is the capability
+parameterisation vt100's zero-argument `state_formatted()` has no equivalent of.
+
+### Mechanism B — the snapshot API (`snapshot_grade`)
+
+Its consumers are 3.0 attach and, likely, 2.3 recovery. Same 26-case corpus, so
+the two mechanisms are comparable.
+
+| criterion | result |
+|---|---|
+| rows exact | **100.0%** |
+| rows, ±1 shift allowed | 100.0% |
+| cell text | **100.0%** |
+| cell attributes | **100.0%** |
+| cursor preserved | **26/26** |
+| alt-screen preserved | **26/26** |
+| **scrollback preserved** | **4,230 of 4,230 — 100.0%** |
+| encoded, all 26 cases | 1,232,014 B |
+
+**No viewport offset, no attribute loss, no scrollback loss.** The snapshot
+mechanism is strictly better than the formatter on every fidelity axis, and the
+formatter's one-row offset does not exist here. The trade is size: ~1.23 MB
+against the formatter's 389 KB over the same corpus, which is what binary state
+costs against a redraw stream.
+
+**The continuation round trip (criterion 3) survives.** A stream cut 14 bytes
+into a CSI sequence, snapshotted with continuation retained, decoded, then
+resumed by re-feeding the exported 6-byte continuation (`\x1b[38;2`) followed by
+the remaining bytes, produces a state **row-for-row and attribute-for-attribute
+identical to the uncut run**, cursor included. Crash recovery does not get to
+wait for a clean parser boundary, and this is the API's answer to that, tested
+rather than assumed.
+
+One constraint that discovery surfaced, and it is a **3.0 design constraint
+rather than a probe detail**: `snapshot.h` requires that continuation tracking
+be enabled *before* the input that leaves the parser unfinished — encode returns
+`GHOSTTY_INVALID_VALUE` otherwise. A daemon that intends to snapshot must
+therefore pay for tracking continuously; it cannot opt in at crash time,
+because by then the partial sequence is gone. The API's own caveat applies on
+the way back too: set `CONTINUATION_MAX_BYTES` to zero after export and before
+post-snapshot input, since exporting an empty continuation does not itself
+disable tracking.
+
+**Format stability (criterion 4) — bounded, and safely so.** The stream carries
+an eight-byte `"GHOSTSNP"` magic and a `u16` version (**1**), with per-record
+CRC32C. All three rejection cases refuse to decode, measured rather than
+assumed:
+
+| malformed input | decodes? |
+|---|---|
+| truncated to half its length | no |
+| one byte flipped inside a CRC-covered payload | no |
+| version set to 65535 | no |
+
+But `snapshot.h` states that version 1 "does not yet carry a
+binary-compatibility guarantee". So: **snapshots are transport-only — same
+binary, same pin — and never at-rest persistence across an upgrade.** The
+version field is what makes that safe rather than dangerous: a stale snapshot
+is detectable and discardable, not silently misparsed. **`PROJECTS_PLAN.md`
+question 7 should carry that sentence verbatim.**
+
+## The two known emit bugs, re-checked at the pin
+
+- **`with_tabstops(true)` clobbering the restored cursor: FIXED upstream.** The
+  emit now places the cursor restore after the tab stops
+  (`…\x1b[9G\x1bH\x1b[17G\x1bH\x1b[H`), and the cursor round-trips `(3,0)→(3,0)`
+  with the toggle on. Nothing filed. This is why the formatter's cursor score
+  rose from 24/26 to 26/26.
+- **The one-row viewport offset: reduced, not gone.** The cursor is now correct
+  and scrollback rose to 99.9%, but the offset persists on the same six
+  scrollback-bearing cases. Not filed yet: it lives in the **formatter**, which
+  is not the mechanism 3.0 will consume, so it is no longer on the critical
+  path. Worth reporting upstream as a courtesy with the mechanism isolated, at
+  the priority that implies.
+
+## Corrections to figures in the body above
+
+Both of these are figures the adoption cited. They are wrong at the shipping
+configuration and are corrected here rather than left to circulate.
+
+### Throughput: 2.0× the incumbent, not 3.7×
+
+`bench`, `big-spew` replayed 40× in 8 KiB chunks:
+
+| engine | MiB/s | vs vt100 |
+|---|---:|---:|
+| vt100 | 188.7 | 1.0× |
+| **ghostty (shipped, ReleaseSmall)** | **375.7** | **2.0×** |
+| ghostty (ReleaseFast, for reference) | 567.0 | 3.0× |
+| wezterm | 48.8 | 0.26× |
+
+The body's "678.9 MiB/s, 3.7×" was a `ReleaseFast` build. **The shipped archives
+are `ReleaseSmall`, and that is forced rather than chosen:** five `ReleaseFast`
+archives gzip to ~16.10 MiB, which exceeds crates.io's 10 MiB cap, while five
+`ReleaseSmall` archives make a measured 3.91 MiB `.crate`. So the honest number
+is 2.0×, and the ~1.5× throughput given up is the price of `cargo install spyc`
+working without a Zig toolchain. Still twice the incumbent, on a path that was
+never the bottleneck.
+
+### Memory: ghostty wins by ~3.8× — and it is not parity
+
+The body reports ghostty at 875 KiB/pane against vt100's 9,681 KiB, caveated
+because ghostty retained a quarter as much history there. With the limits
+working, `bench` at the same 3,988 retained rows gives ghostty **2,635
+KiB/pane** against vt100's **9,699** — a real comparison at last.
+
+`membudget` then measures both at a **full** budget, which is the number that
+matters: 15,000 heavy rows into a 10,000-row budget, so both must discard.
+
+| engine | MiB/pane | rows retained |
+|---|---:|---:|
+| vt100 | **26.62** | 10,000 |
+| **ghostty** | **6.94** | 9,658 |
+| wezterm | 7.25 | 10,000 |
+
+ghostty's derived byte **ceiling** is 9.64 MiB/pane — a cap it does not reach
+even on heavy content at a full budget, which is assertion 1 above restated in
+memory terms.
+
+**This corrects a reading that had ghostty at parity with vt100 on memory.**
+That reading compared ghostty's 9.64 MiB *ceiling* against vt100's 9.68 MiB
+*measurement at 3,988 rows* — a cap against a usage, at different row counts.
+At equal budgets it is not parity: vt100 allocates its grid eagerly at 32 B/cell
+whether or not the rows hold anything, so it costs 26.62 MiB/pane where ghostty
+costs 6.94. Twenty-four pane tabs is 639 MiB against 167 MiB.
+
+The adoption case never leaned on memory — it rests on rehydration, robustness
+and fidelity — but the figure should be right in the direction it actually
+points.
