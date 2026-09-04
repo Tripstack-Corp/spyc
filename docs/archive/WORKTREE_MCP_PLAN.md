@@ -103,7 +103,7 @@ the main thread* (see §5).
 - `worktree_clean::clean_worktree(path) -> CleanReport`
   (`src/app/worktree_clean.rs:36`) — already archives **untracked** files to
   the graveyard under a `<name>-<timestamp>` label, then removes. This is the
-  seed of the safe-by-default behaviour; we generalize it.
+  seed of the safe-by-default behavior; we generalize it.
 
 **MCP plumbing (how a tool is added), for reference:**
 
@@ -157,7 +157,7 @@ Replaces, in one call, the `git worktree list` + per-tree `git status` +
 tool is the highest-leverage item in the plan.
 
 **`remove_worktree`** (W; heavy work off-thread, see §5) — *enhanced* to be
-**safe-by-default** rather than refuse-on-dirty. Default behaviour:
+**safe-by-default** rather than refuse-on-dirty. Default behavior:
 
 1. Enumerate at-risk content (`repo_status(path)` for untracked + uncommitted
    tracked changes; `branch_status` for unmerged commits).
@@ -184,7 +184,7 @@ mental model.
 **`create_worktree` — base off PROJECT_HOME by default (POLA fix).** Today
 `create_worktree` branches the new worktree off the *focused column's current
 HEAD* (`worktree::add` uses the column's `listing.dir`, `src/app/mcp.rs:331`) —
-the surprising behaviour we hit live: with column A switched to a feature branch,
+the surprising behavior we hit live: with column A switched to a feature branch,
 "new worktree for branch X" silently based X on that feature branch instead of
 `main`. **Decision (owner): default the base to PROJECT_HOME's default branch**
 (the §7 resolver, anchored on `project_home`, not the focused column), with the
@@ -313,7 +313,7 @@ optional|required|forbidden`), so we could expose Tasks for *only* the heavy
 worktree mutations and leave the other ~16 tools synchronous. `"optional"` keeps
 old clients working; `"required"` would break them (`-32601`).
 
-**Two facts that gate us:** (1) it's flagged experimental — "design and behaviour
+**Two facts that gate us:** (1) it's flagged experimental — "design and behavior
 may evolve"; (2) the *benefit is client-gated* — Tasks does nothing until the
 client (effectively just Claude Code for us) declares the `tasks` capability and
 actually augments the call + polls. spyc is a single-user, single-client, local
@@ -398,7 +398,7 @@ stay **chdir-free** — `set_current_dir` races the parallel runner):
 - **`graveyard::write_blob`** — round-trip test (archive bytes → `load` →
   `restore` → compare).
 - **Safe-remove integration** — temp repo + worktree with untracked + uncommitted
-  + unmerged commits; assert the graveyard gained the right labelled entries, the
+  + unmerged commits; assert the graveyard gained the right labeled entries, the
   tree is gone, and the branch survived (unmerged) / was deleted (merged).
 - **MCP** — extend the `initialize_response` / tool-list assertions; a
   `list_worktrees` golden over a fixture repo.
@@ -413,7 +413,7 @@ stay **chdir-free** — `set_current_dir` races the parallel runner):
 MCP-instructions work (PR #482): spyc sets the MCP `initialize` `instructions`
 field (`SERVER_INSTRUCTIONS`, `src/mcp/mod.rs:36`), which clients fold into the
 system prompt. Prior research rejected shipping `.claude/skills/` files
-(repo pollution) and CLAUDE.md edits in favour of this ephemeral, spyc-controlled
+(repo pollution) and CLAUDE.md edits in favor of this ephemeral, spyc-controlled
 channel.
 
 **So the "skill" here = updating `SERVER_INSTRUCTIONS`** to teach the

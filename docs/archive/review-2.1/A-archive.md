@@ -275,7 +275,7 @@ Independently of the ladder, this branch widens the read scope by design: any
 path under any mount root is readable regardless of `effective_root` /
 `allowed_roots`, so an agent can read out of an archive the user happens to be
 browsing in `~/Downloads` even when its root is the repo. That is documented
-behaviour (AGENTS.md, MCP tools section) and arguably intended; it is worth
+behavior (AGENTS.md, MCP tools section) and arguably intended; it is worth
 saying out loud that F1's root validation does **not** hold through this path.
 
 **What a fix needs to do.** After resolving a staged path, verify containment the

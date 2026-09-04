@@ -141,7 +141,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 
 ## 4. Phased implementation (one PR per phase, gated + dogfooded)
 
-### Phase 0 — deps + startup protocol detection (no behaviour yet)
+### Phase 0 — deps + startup protocol detection (no behavior yet)
 - Add crates; `make check` + `make lint-linux` green; cargo-deny clean.
 - In `setup_terminal()`: build `Picker` once (font size + `ProtocolType`),
   store on `App`/Runtime. Graceful fallback on query failure (SSH-safe).
@@ -210,7 +210,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
   first non-search consumer of the status row beyond visual/block mode — keep the
   precedence explicit and unit-test it.)
 - No graphics protocol at all: show the **raw mermaid source** (today's
-  behaviour) inline, with the "open" hook (Phase 3) still available locally;
+  behavior) inline, with the "open" hook (Phase 3) still available locally;
   optionally a one-time status note "terminal has no image protocol — showing
   source (press `o` to open)."
 
@@ -245,14 +245,14 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 5. **Multi-column pager mode**: images only make sense in single-column; disable
    image rendering (keep source) in multi-column.
 6. **Lower/Top-pane mounts**: decide whether images render in pane mounts or only
-   the centred overlay (start: overlay only).
+   the centered overlay (start: overlay only).
 
 ## 6. Effort
 
 ~6 PRs (one per phase). Phase 0 (deps) ✅ done; Phase 1 (detect) is small and
 pure; Phase 2 (worker) + Phase 3 ("open") are the first user-visible value and
 relatively self-contained; Phase 4 (inline blit) is the trickiest; Phase 5–6
-are fallbacks/polish. Each behaviour PR builds a release and is dogfooded on a
+are fallbacks/polish. Each behavior PR builds a release and is dogfooded on a
 graphics-capable terminal (Kitty/iTerm2/WezTerm) **and** the fika-vm before
 merge, per the standing rule. Note Phase 3 ("open") delivers a usable feature
 without any of Phase 4's inline-graphics complexity — a natural early ship.
