@@ -71,7 +71,7 @@ That is the trigger. Adopting the model at that point means:
   until then.
 
 **MFC / backport rule** (applies once release branches exist): a fix flows
-*toward* stability — land on `main`, then a labeled cherry-pick PR backports it
+*toward* stability — land on `main`, then a labelled cherry-pick PR backports it
 to `stable/N`, then to `releng/N.M`. Never the reverse.
 
 ## 3. Versioning
@@ -312,7 +312,7 @@ are the source of truth — Actions *call them* so local and CI never drift.
 - `schedule` (nightly) + `workflow_dispatch`. Build `main` with the release
   matrix, publish/refresh a single rolling `nightly` pre-release (delete-and-
   recreate, or a dated tag pruned to last N). Unsigned-acceptable; clearly
-  labeled "testing only."
+  labelled "testing only."
 
 ### `audit.yml` — supply-chain drift (schedule) — **IMPLEMENTED**
 - Weekly `cargo deny check advisories` (fresh RUSTSEC DB) + `cargo outdated` +

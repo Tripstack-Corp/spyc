@@ -297,7 +297,7 @@ impl Graveyard {
                 Ok(()) => {
                     // Only a *successful* eviction frees bytes. A failed one
                     // leaves us over cap, so we move on to the next-oldest
-                    // rather than stopping — matching the previous behavior,
+                    // rather than stopping — matching the previous behaviour,
                     // which re-read the unchanged total and kept going.
                     total = total.saturating_sub(entry.compressed_size);
                     trashed += 1;

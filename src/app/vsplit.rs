@@ -53,7 +53,7 @@ const fn mode_label(mode: state::VsplitMode) -> &'static str {
 
 impl App {
     /// `^s |` (and its `^a |` alias) — open or close the vertical split.
-    /// Behavior depends on what's open and what's under the cursor:
+    /// Behaviour depends on what's open and what's under the cursor:
     /// - **Closed:** open previewing the cursor file, at the height
     ///   `[layout] vsplit_mode` asks for (full-height by default). If the cursor
     ///   isn't a previewable file (e.g. a directory), warn and stay closed.

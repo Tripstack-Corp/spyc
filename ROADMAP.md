@@ -212,7 +212,7 @@ to it. Tracked as a `3.0` milestone once issues exist; none are created yet.
 
 The live, actionable work — features, fixes, tooling, and the speculative
 icebox — is tracked in **[GitHub Issues](https://github.com/Tripstack-Corp/spyc/issues)**,
-labeled by `area:*` / `type:*` and organized on the **[roadmap board](https://github.com/orgs/Tripstack-Corp/projects/1)**. Signposts:
+labelled by `area:*` / `type:*` and organized on the **[roadmap board](https://github.com/orgs/Tripstack-Corp/projects/1)**. Signposts:
 
 - **`2.2` milestone** — the scoped 2.2 work (see "Road to 2.2" above).
 - **`2.3` milestone** — Projects (see "The 2.3 horizon" above).
@@ -263,13 +263,13 @@ and the roadmap committing to that saves a lot of drift.
 
 ## Decisions log
 
-Condensed record of the choices that shaped current behavior — kept
+Condensed record of the choices that shaped current behaviour — kept
 so we don't re-litigate them. Full history in CHANGELOG.md.
 
 - **Sync end-to-end, no tokio.** `std::thread` + one mpsc channel.
   Revisit never; async would be a regression for this workload.
 - **MVU landed pre-2.0** (2026-05-30) so the launch ships on the
-  clean foundation; strangler-fig, every phase behavior-equivalent
+  clean foundation; strangler-fig, every phase behaviour-equivalent
   behind green CI. Shipped.
 - **`^Z` backgrounds tasks** despite overriding terminal-suspend
   muscle memory — consistent with spyc trapping most ctrl-combos.
@@ -286,7 +286,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 - **OSC 72 DnD deferred** until a second terminal (beyond kitty)
   implements it.
 - **Renovate auto-merges patch bumps** once public (May 2026); minors
-  grouped weekly; majors labeled.
+  grouped weekly; majors labelled.
 - **macOS CI deferred to post-launch**; PR template asks
   cross-platform contributors to run `make check` locally.
 - **git is 100% in-process gix** in production, guard-enforced; no

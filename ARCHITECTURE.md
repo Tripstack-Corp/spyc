@@ -196,14 +196,14 @@ Goal: 0 draws-per-second at idle. Implementation:
 - Per-frame: DEC 2026 synchronized output (`\x1b[?2026h…l`) wraps
   every render so terminals that support it (iTerm2, kitty, WezTerm,
   Alacritty current) draw atomically — no flicker.
-- Per-frame: color-depth downgrade. The theme is 24-bit `Color::Rgb`;
+- Per-frame: colour-depth downgrade. The theme is 24-bit `Color::Rgb`;
   terminals that can't parse `\x1b[38;2…m` (old GNU screen) drop all
-  color. `ui::color_depth::downgrade_buffer` rewrites the finished
+  colour. `ui::color_depth::downgrade_buffer` rewrites the finished
   frame buffer's RGB cells to nearest-256 when the resolved
   `ColorDepth` isn't `TrueColor`. Resolution is CLI `--color` >
   `[layout] color_depth` > auto, where auto forces 256 inside GNU
   screen (`$STY` set, not tmux — screen inherits a `$COLORTERM`
-  truecolor claim it can't honor) else keys off `$COLORTERM`. On the
+  truecolor claim it can't honour) else keys off `$COLORTERM`. On the
   buffer, not the theme, so it catches syntect / diffs / ANSI
   passthrough too; a no-op at `TrueColor`.
 - Caching: `build_rows()` and grid stabilization keyed by a
@@ -271,7 +271,7 @@ Graphics gotchas, each of which cost real debugging time:
   sync wrap (above) is therefore skipped while `image_view.is_some()`.
 - **`ratatui-image` renders nothing if the protocol is larger than the
   draw area** (silent), and **`Resize::Fit` only downscales** — so the
-  vector SVG is rasterized at the terminal's pixel size and centered,
+  vector SVG is rasterized at the terminal's pixel size and centred,
   rather than fitting a small natural raster into a large area.
 - **Footer-only overlay verbs must not `needs_full_repaint`** — a full
   repaint clears the screen and re-blits the image (a visible flash);
@@ -494,7 +494,7 @@ template suitable for `>` redirect.
 
 The project file is **untrusted** (spyc is routinely pointed at
 hostile content): its cosmetic/behavioral settings and plain
-rebindings are honored, but *executing* keymap bindings (`unix`
+rebindings are honoured, but *executing* keymap bindings (`unix`
 shell commands, `jump`) are dropped — those take effect only from
 `~/.spycrc.toml`. `^R` reload re-reads the project file from the
 **startup** cwd, never the browsed directory, so browsing into a
@@ -537,7 +537,7 @@ user has, and refuses to modify a **git-tracked** config (warning on
 stderr instead) — we never dirty something the user committed.
 
 Enterprise managed-settings.json policies
-(`deniedMcpServers`/`allowedMcpServers`) are honored.
+(`deniedMcpServers`/`allowedMcpServers`) are honoured.
 
 **Two execution lanes** keep the event loop responsive. *Read* tools
 (`get_spyc_context`, `search_*`, `list_worktrees`, `git_status`/`git_log`,
@@ -651,7 +651,7 @@ Architecture decisions land in:
   Module index, conventions, "what spyc does" summary, MCP usage
   hints. Don't grow it past what's worth paying context tokens for.
 - **`ROADMAP.md`** — forward *strategy* (thesis, the 2.0 gate, non-goals, decisions).
-- **GitHub Issues** — the live per-item backlog (features, fixes, ideas), labeled
+- **GitHub Issues** — the live per-item backlog (features, fixes, ideas), labelled
   `area:*`/`type:*` on the roadmap board. (`docs/archive/BACKLOG_DRAFT_NOTES.md` is
   the archived raw-intake predecessor.)
 - **`CHANGELOG.md`** — release notes (Keep-a-Changelog).
@@ -659,7 +659,7 @@ Architecture decisions land in:
 - **`README.md`** — landing page, install, positioning.
 - **`src/ui/help.rs`** — in-app `?` help; user-visible keybindings.
 
-When a commit changes user-visible behavior, update every doc
+When a commit changes user-visible behaviour, update every doc
 that's affected in the same commit — not as a follow-up.
 
 ### Load-bearing trap anchors

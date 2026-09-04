@@ -118,14 +118,14 @@ impl App {
                         // conversation this pane is definitively running, so it
                         // bypasses the spawn-proximity resolver that crosses panes
                         // restored together. Otherwise fall back to the profile
-                        // resolver, which honors `claimed` internally so multi-pane
+                        // resolver, which honours `claimed` internally so multi-pane
                         // saves don't collapse onto one conversation — and which
                         // for a *live* tab has nothing to read, since both agents
                         // only print their id on the way out.
                         let (agent_session_id, agent_session_name) = match t
                             .info
                             .pinned_session_id()
-                            // The pinned path honors `claimed` too: two tabs
+                            // The pinned path honours `claimed` too: two tabs
                             // pinned to one conversation would otherwise both
                             // save it and both restore into it, which is the
                             // collapse this whole block exists to prevent.
@@ -177,7 +177,7 @@ impl App {
         // We don't walk up for `.git` here: a Java monorepo cloned into
         // `~/src/foo/inner-repo` may have `.git` at `inner-repo`, but
         // the user thinks of the *whole workspace* (`~/src/foo`) as
-        // their project. Honoring `start_dir` matches that — the user
+        // their project. Honouring `start_dir` matches that — the user
         // launched spyc there, so that's the natural anchor. Anyone
         // who wants a different anchor can set `project_home`
         // explicitly with `:project` or `gP`.
@@ -887,7 +887,7 @@ mod tests {
 
     /// Two tabs pinned to the same conversation must not both save it: restoring
     /// them would put two panes in one conversation, which is the collapse #230
-    /// was filed for. The pinned path honors `claimed` for the same reason the
+    /// was filed for. The pinned path honours `claimed` for the same reason the
     /// spawn-proximity resolver always has.
     #[test]
     fn two_tabs_pinned_to_one_conversation_do_not_both_save_it() {

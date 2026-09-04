@@ -172,4 +172,4 @@ A single `spyc` global table.
 - `make install`; create `~/.config/spyc/lua/hello.lua` returning a navigate+notify; `map g h lua hello` in `~/.spycrc.toml`; press `g h` → observe navigation + flash.
 - `~/.config/spyc/init.lua` with `spyc.command('blame', function() spyc.action('git_blame') end)`; run `:blame` → blame view.
 - Runaway test: a script with `while true do end` → UI stays responsive, the "[y/N]" prompt appears after the soft threshold, `N` kills it with a flash; confirm spyc is fully usable afterward.
-- Confirm a project-local `.spycrc.toml` with a `lua` binding is silently dropped (only `~/.spycrc.toml` honored), and a project `init.lua` is never loaded.
+- Confirm a project-local `.spycrc.toml` with a `lua` binding is silently dropped (only `~/.spycrc.toml` honoured), and a project `init.lua` is never loaded.

@@ -9,7 +9,7 @@
 //! the repo's integration base (`delete_branch: auto`) — an unmerged branch's
 //! ref is kept, since the ref itself is the commit backup (owner decisions,
 //! 2026-06-24). A *claimed* (locked) worktree is still refused — a lease is
-//! honored even here; release it first.
+//! honoured even here; release it first.
 //!
 //! Why archive file *contents* rather than a `.patch`: the current files are
 //! the work, they round-trip through the graveyard's existing tree-archive
@@ -64,7 +64,7 @@ pub fn safe_remove_worktree(path: &Path) -> std::io::Result<SafeRemoveReport> {
             .map_err(|e| std::io::Error::other(format!("reading worktree status: {e}")))?
     };
 
-    // Honor a lease BEFORE archiving — don't archive then refuse. A claim is
+    // Honour a lease BEFORE archiving — don't archive then refuse. A claim is
     // respected even by safe-remove; release it first.
     if let Some(reason) = worktree::lock_reason(path) {
         let reason = reason.trim();
@@ -331,7 +331,7 @@ mod tests {
 
     /// `repo_status_result` carries the cause the `Option` variant discards,
     /// and the `Option` variant still answers `None` for the same input — the
-    /// marker hot path keeps its behavior.
+    /// marker hot path keeps its behaviour.
     #[test]
     fn repo_status_result_reports_why_and_option_still_returns_none() {
         let tmp = tempfile::tempdir().unwrap();

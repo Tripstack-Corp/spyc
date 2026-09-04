@@ -18,7 +18,7 @@ use super::{App, Effect, commands, lua};
 
 /// Which dispatch layer owns a named `:command`. An `App`-free routing
 /// discriminant consulted by the Model (`AppState::dispatch_command`); the
-/// concrete behavior lives in [`CmdHandler`].
+/// concrete behaviour lives in [`CmdHandler`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmdLayer {
     /// Resolved entirely by `AppState::dispatch_command` (pure-domain —

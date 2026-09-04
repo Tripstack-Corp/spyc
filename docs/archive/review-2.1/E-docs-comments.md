@@ -2,7 +2,7 @@
 
 **Subject:** `git diff v2.0.0..HEAD` (HEAD `f8dedae`, 162 commits, version `2.1.0-CURRENT`).
 **Scope:** comment house-style drift, `SPYC-TRAP` anchor integrity, FEATURES.md /
-KEYBINDINGS.md / HARNESS.md / 2.1-release-notes.md / ABOUT.md against HEAD behavior,
+KEYBINDINGS.md / HARNESS.md / 2.1-release-notes.md / ABOUT.md against HEAD behaviour,
 CHANGELOG provenance. Read-only; no repo changes.
 
 ---
@@ -20,7 +20,7 @@ campaign). Comment density is high and rising in the feature work (17.7% → 34.
 drift from the current standard.
 
 **The documentation contract is weaker, but not eroding at the process level.**
-AGENTS.md's "Keep docs in sync (same commit, not a follow-up)" is honored in **29 of
+AGENTS.md's "Keep docs in sync (same commit, not a follow-up)" is honoured in **29 of
 32** `feat` commits since v2.0.0; three miss it (#279, #281, #287), and those three are
 exactly the individual doc defects filed below — there is no separate process problem
 behind them. *(An earlier draft of this report claimed 22 of 32. That was a broken
@@ -115,7 +115,7 @@ true, so this starting condition is set explicitly rather than assumed").
 
 ## Docs claim vs HEAD
 
-Only rows where the doc and HEAD disagree, or where HEAD has behavior the doc lacks.
+Only rows where the doc and HEAD disagree, or where HEAD has behaviour the doc lacks.
 Everything else checked out — see "Verified correct".
 
 | doc:line | claim | verdict | evidence |
@@ -206,7 +206,7 @@ per-commit `git show --name-only --format=''`):
 | touched **no** `.md` and not `src/ui/help.rs` | **2** | `6fab158` (#281), `309f838` (#279) |
 | touched no *contract* doc (README/FEATURES/AGENTS/ARCHITECTURE/DESIGN/CONFIGURATION/INSTALL/ROADMAP/KEYBINDINGS/help.rs) | **3** | the two above + `6e053f8` (#287) |
 
-So the rule is honored in **29 of 32**, and the three exceptions are not an independent
+So the rule is honoured in **29 of 32**, and the three exceptions are not an independent
 process finding — they *are* F-E6 (#279, #281) and F-E2 (#287). Filing them twice would
 have double-counted the same two commits and overstated the erosion.
 
@@ -230,7 +230,7 @@ both commits *did* update docs — just not every affected one:
   *Installable agent skill* section 900 lines further down. That is the real shape of
   F-E3: a partial in-commit update, not a skipped one.
 
-### F-E6 — medium — `FEATURES.md:678, 693` — two shipped mouse behaviors undocumented, in enumerations that read as complete
+### F-E6 — medium — `FEATURES.md:678, 693` — two shipped mouse behaviours undocumented, in enumerations that read as complete
 
 `309f838` (#279) made a tab click switch tabs; FEATURES.md still says left-click
 "focuses that region" and describes the divider only as a selection surface, so the one
@@ -311,7 +311,7 @@ unnamed anywhere in AGENTS.md; four of them (`key_dispatch/{confirms,prompts}.rs
 `pager_handler/{motion,pickers}.rs`) are legitimately covered by their group's role
 description. `tab_hit.rs` is the one real miss.
 **A fix must:** decide whether an enumerating bullet should be guarded, or drop the
-enumeration in favor of a role description like the sibling bullets.
+enumeration in favour of a role description like the sibling bullets.
 
 ### F-E14 — low — `src/lib.rs:941–943` — comment with no referent
 

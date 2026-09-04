@@ -301,7 +301,7 @@ over by spyc PID N…", `src/app/mcp.rs`). That is what #22 reports.
 #11 is the test. `src/mcp/config.rs`'s test module covers only the
 deterministic branches of `decide_takeover` — own socket, dead socket — and its
 comment says the live-socket `TookOver` / `Skipped` branches "are exercised by
-the end-to-end takeover behavior". No such test exists. Write it, confirm it
+the end-to-end takeover behaviour". No such test exists. Write it, confirm it
 fails against the behaviour above, then fix the prompt.
 
 ## 7. Author `docs/drafts/PROJECTS_PLAN.md`

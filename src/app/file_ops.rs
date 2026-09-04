@@ -13,7 +13,7 @@ use crate::ui::pager::PagerView;
 /// ceremony.
 #[derive(Debug, Clone, Copy)]
 pub enum PagerDest {
-    /// Centered overlay (Enter / `gF`). `scroll`, when set, overrides the
+    /// Centred overlay (Enter / `gF`). `scroll`, when set, overrides the
     /// landing line (`gF`'s referenced line, 0-indexed); `None` keeps the
     /// builder's default position.
     Overlay { scroll: Option<usize> },
@@ -216,7 +216,7 @@ pub fn run_file_op(op: FileOp) -> FileOutcome {
         }
         FileOp::FileType { paths } => {
             // Single path → a status flash; multiple → a pager table. Mirrors
-            // the synchronous behavior the pure `apply` arm used to produce.
+            // the synchronous behaviour the pure `apply` arm used to produce.
             if let [only] = paths.as_slice() {
                 let label = crate::fs::ops::file_type_label(only);
                 FileOutcome::FileTypeReady {

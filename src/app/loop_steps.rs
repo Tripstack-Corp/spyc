@@ -1,7 +1,7 @@
 //! MVU Phase 6 PR-C: small, self-contained steps lifted out of the `App::run`
 //! event-loop body, in the established descendant-module `impl App` pattern
 //! (like `streaming.rs` / `sources.rs` / `agent_status.rs`). Each is a verbatim
-//! move of a contiguous loop slice — behavior-equivalent; the loop still calls
+//! move of a contiguous loop slice — behaviour-equivalent; the loop still calls
 //! them in the same order, so the loop's ordering invariants are unchanged.
 //! Methods that drive a redraw return a `bool`/tuple the caller folds into
 //! `needs_draw` / `draw_reason` (kept loop-side so the draw-reason precedence
@@ -37,7 +37,7 @@ impl App {
     /// MVU Phase 5: snapshot the active pane's routing flags into the Model,
     /// AFTER the drain + `mark_exited` finalized `is_closed` and BEFORE `recv`.
     /// `route_snapshot` reads this instead of the live host, decoupling key
-    /// routing from the Runtime. Behavior-equivalent: the only mutators of
+    /// routing from the Runtime. Behaviour-equivalent: the only mutators of
     /// these flags (scroll-mode key handlers / child-exit drain) run either
     /// before this point or strictly after `route_snapshot`, so the value
     /// matches what the old live read observed.
@@ -54,7 +54,7 @@ impl App {
         // loop-top seam and for the same reason: so the value `route_snapshot`
         // reads next is always current. Most pager opens never set focus and
         // closes leave it stale; this makes `state.focus` authoritative without
-        // bookkeeping at every open/close site. Behavior-preserving today (only
+        // bookkeeping at every open/close site. Behaviour-preserving today (only
         // the non-`Pane` discriminant moves; `pane_focused()` is unchanged).
         self.recompute_focus();
     }

@@ -1,4 +1,4 @@
-//! Quick Select — a labeled-overlay picker for URLs / paths / git
+//! Quick Select — a labelled-overlay picker for URLs / paths / git
 //! SHAs / IPs / custom-regex matches in the bottom pane's visible
 //! output. Borrowed wholesale from WezTerm's "Quick Select" mode
 //! (https://wezterm.org/quickselect.html); the user-visible model
@@ -91,7 +91,7 @@ pub struct Match {
 /// mode is active. The snapshot of visible text isn't retained —
 /// we extract matches with their coordinates and let the live pane
 /// keep rendering underneath. If the pane scrolls during the mode
-/// the labels go stale; the simplest correct behavior is to close
+/// the labels go stale; the simplest correct behaviour is to close
 /// the picker on the next event tick that detects pane growth.
 pub struct QuickSelect {
     pub matches: Vec<Match>,

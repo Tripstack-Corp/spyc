@@ -96,7 +96,7 @@ pub enum ApplyResult {
 /// variants it can actually return); the bridges in `actions` / `commands` /
 /// `prompt` widen to `Update` via `From` at the call site. This is the settled
 /// shape — an earlier plan to have producers return `Update` directly and
-/// delete the three was dropped as churn for no behavioral gain.
+/// delete the three was dropped as churn for no behavioural gain.
 #[derive(Debug)]
 pub enum Update {
     Handled(Vec<Effect>),
@@ -151,7 +151,7 @@ pub struct PagerRequest {
     pub lines: Vec<String>,
     pub columns: u8,
     /// When true, the pager height auto-shrinks to fit content (top edge
-    /// stays anchored to the standard centered position; the box just
+    /// stays anchored to the standard centred position; the box just
     /// grows shorter from the bottom). Line-number gutter is suppressed
     /// since it's noise for short summaries.
     pub fit_to_content: bool,
@@ -270,7 +270,7 @@ impl GitState {
 /// routing-relevant flags, refreshed once per loop iteration (after the
 /// tab drain + `mark_exited`, before `recv`). `route_snapshot` reads these
 /// instead of the live `PtyHost` so key routing decouples from the
-/// Runtime. Behavior-equivalent: refreshed from the live pane at the same
+/// Runtime. Behaviour-equivalent: refreshed from the live pane at the same
 /// loop point the old live read would have observed, and the only mutator
 /// of `is_scrolling`/`is_closed` (key handlers / child-exit drain) runs
 /// either before this refresh or after `route_snapshot`. (Render keeps its
@@ -390,7 +390,7 @@ pub struct GitCache {
     /// edit moves no `.git/index`/`HEAD` mtime — so without this flag a change
     /// landing inside the throttle window (with no trailing event) would stay
     /// stale until a chdir. Set on a throttle-skip; the next `refresh_git_state`
-    /// honors it with a forced re-walk and clears it, bounding staleness to one
+    /// honours it with a forced re-walk and clears it, bounding staleness to one
     /// poll interval instead of forever.
     pub pending_worktree_rewalk: bool,
 }
@@ -399,7 +399,7 @@ pub struct GitCache {
 /// (with the focus captured at zoom-on), the hide toggle, the once-per-loop
 /// routing snapshot, and the `^a c` prompt-echo buffers. Grouped out of
 /// Which region `^a z` has zoomed. Zoom enlarges the *focused* region:
-/// `BottomPane` collapses the file list (the historical behavior),
+/// `BottomPane` collapses the file list (the historical behaviour),
 /// `TopList` collapses the pane (the list fills the frame). `None` is the
 /// normal split. The target is derived from focus at zoom-on, so focus is
 /// unchanged across the toggle and needs no separate save/restore.
@@ -522,7 +522,7 @@ pub struct PaneLayout {
     /// row is hidden — render skips the pane area, layout treats it
     /// as if no pane existed — but `pane_tabs` and every child pty
     /// stay alive. Re-toggle flips it back; the rendered grid picks
-    /// up wherever the running processes left off. Previous behavior
+    /// up wherever the running processes left off. Previous behaviour
     /// was destructive (`pane_tabs = None`, SIGKILL via `Drop for
     /// PtyHost`), which the user experienced as "I lost my claude
     /// conversation every time I needed the whole screen for a
@@ -540,13 +540,13 @@ pub struct PaneLayout {
 /// vertical-split column owns: the directory it shows, the cursor in it, its
 /// picks/masks/filter/sort, and its display rows + grid geometry.
 ///
-/// Extracted in PR A of the vsplit Stage 2 plan as a behavior-preserving move.
+/// Extracted in PR A of the vsplit Stage 2 plan as a behaviour-preserving move.
 /// `left` is always present; `right` is `None` until a second column is opened
 /// (Stage 2 PR C, the feature). The pure-Model **update** path
 /// (`AppState::apply` / `dispatch_*` / cursor / selection / listing) reaches the
 /// **focused** column through [`AppState::cur`] / [`AppState::cur_mut`] — while
 /// `right` is `None` that always resolves to `left`, so the accessor is
-/// behavior-preserving. Render addresses `left` / `right` explicitly (it draws
+/// behaviour-preserving. Render addresses `left` / `right` explicitly (it draws
 /// both columns). (`git`/`git_cache` are per-column fields below — moved off
 /// `AppState` for dual git, so `b` in a different repo renders its own markers.)
 pub struct Commander {
@@ -699,7 +699,7 @@ pub struct AppState {
     pub should_quit: bool,
     pub quit_pending: Option<std::time::Instant>,
     /// Rows about to be deleted, populated while a `RemoveConfirm`
-    /// prompt is active. Drives the warning-color row highlight in
+    /// prompt is active. Drives the warning-colour row highlight in
     /// the list view: the user sees exactly which files the `y` /
     /// `Y` keystroke will affect. Cleared when the prompt resolves
     /// (confirm or cancel). Stored as paths so a mid-prompt
@@ -734,7 +734,7 @@ pub struct AppState {
     /// The right (secondary) file-commander, when a second column is open.
     /// `None` is the single-column default (Stage 1) — while `None`, `cur()` /
     /// `cur_mut()` always resolve to `left`, so the accessor conversion is
-    /// behavior-preserving. Populated by `^s` (Stage 2 PR C). The vsplit's
+    /// behaviour-preserving. Populated by `^s` (Stage 2 PR C). The vsplit's
     /// *preview* pager (Stage 1) is a separate `ViewState` slot, not this.
     pub right: Option<Commander>,
     /// Bottom-pane layout + prompt state (see [`PaneLayout`]).
@@ -749,7 +749,7 @@ impl AppState {
     /// Old `pane_focused` axis, derived from the single `focus` field.
     /// True exactly when the bottom pty pane owns the keyboard. Every
     /// former read of `self.state.pane_focused` is now
-    /// `self.state.pane_focused()`; behavior-equivalent because the
+    /// `self.state.pane_focused()`; behaviour-equivalent because the
     /// router, the render DIM cue, the `^C` gate and the paste filter
     /// only ever consumed the bool, never the non-Pane discriminant.
     pub const fn pane_focused(&self) -> bool {
@@ -761,7 +761,7 @@ impl AppState {
     /// focus is on it; otherwise `left`. While `right` is `None` (the
     /// single-column default, and all of Stage 1) this is always `left`, which
     /// is what makes the `self.left.…` → `self.cur().…` conversion
-    /// behavior-preserving. Render does **not** use this — it draws `left` /
+    /// behaviour-preserving. Render does **not** use this — it draws `left` /
     /// `right` explicitly as fixed visual identities.
     pub fn cur(&self) -> &Commander {
         match self.right.as_ref() {
@@ -780,13 +780,13 @@ impl AppState {
         }
     }
 
-    /// The working directory a freshly-spawned pane tab opens in, honoring
+    /// The working directory a freshly-spawned pane tab opens in, honouring
     /// `[pane] new_tab_cwd`. `WorktreeRoot` (the default) anchors the pane to
     /// the focused column's worktree/repo root (`gw`'s target); `ProjectHome`
     /// anchors to the sticky session project root; `BrowseDir` opens at the
     /// focused column's current listing dir. `WorktreeRoot`/`ProjectHome` fall
     /// back to the browse dir when their target is unresolved. Goes through
-    /// `cur()` so a focused second commander is honored — and so a pane
+    /// `cur()` so a focused second commander is honoured — and so a pane
     /// launched from the pane view follows the last-focused column, the one
     /// Every live column's listing dir — `left`, plus `right` when the split is
     /// open. Deliberately both columns, not the focused one: callers ask "is any
@@ -863,7 +863,7 @@ impl AppState {
     /// separate worktree scopes its tools to that worktree rather than the
     /// overall project anchor. In the common case (launched at the repo root,
     /// `PROJECT_HOME == repo root == worktree root`) all three agree, so
-    /// single-column behavior is unchanged. Always returns *some* dir (search
+    /// single-column behaviour is unchanged. Always returns *some* dir (search
     /// of the current dir is always sensible); harpoon, which needs a stable
     /// anchor, uses the fallible [`Self::harpoon_root`] instead.
     pub fn tool_root(&self, side: Side) -> std::path::PathBuf {

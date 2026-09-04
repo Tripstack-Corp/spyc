@@ -124,7 +124,7 @@ fn index_tar(archive: &Path, cap: usize) -> Result<Indexed> {
 /// decompressing everything before it — at which point the bytes are in hand and
 /// throwing them away would mean paying for them again on the first read. The
 /// budget is therefore enforced *during* the walk rather than up front, and the
-/// caller's `cancel` flag is honored between members so a runaway archive can be
+/// caller's `cancel` flag is honoured between members so a runaway archive can be
 /// abandoned from the UI.
 pub fn stream_mount(
     archive: &Path,

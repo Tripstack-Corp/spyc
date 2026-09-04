@@ -3,7 +3,7 @@
 //! browser history stack.
 //!
 //! Extracted verbatim from `app/mod.rs` as the first step of the
-//! `REFACTOR_PLAN.md` Phase 1 decomposition — no behavior change. The
+//! `REFACTOR_PLAN.md` Phase 1 decomposition — no behaviour change. The
 //! one addition is `pop_back()`, replacing two inline
 //! `pager_history.back.pop()` accesses so the field can stay private.
 

@@ -387,7 +387,7 @@ impl App {
     /// 2. Fallback to [`crate::config::dsl::parse_action`] for the DSL-only
     ///    aliases whose spelling differs from the canonical name (`enter`/`edit`
     ///    → `enter_or_edit`, `nextfile` → `down`, `keys` → `help`, …). Only
-    ///    `Plain` actions are honored here; DSL verbs needing inline args
+    ///    `Plain` actions are honoured here; DSL verbs needing inline args
     ///    (`unix`/`jump`/`command`/`lua`) are rejected — `spyc.cmd(":…")` is the
     ///    escape hatch for those.
     fn run_lua_action(&mut self, name: &str, count: Option<u32>) -> Vec<Effect> {

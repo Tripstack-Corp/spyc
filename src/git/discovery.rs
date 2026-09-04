@@ -46,7 +46,7 @@ pub fn shared_config_path(gitdir: &Path) -> Option<PathBuf> {
 /// Branch display string for the repo at `repo_root`: the short branch
 /// name for an attached HEAD (`refs/heads/main` → `main`), or a 7-char
 /// commit prefix for a detached HEAD (matching git's `--short` default and
-/// the prior `read_head_branch` behavior). `None` if not a repository or
+/// the prior `read_head_branch` behaviour). `None` if not a repository or
 /// HEAD can't be resolved.
 pub fn head_branch(repo_root: &Path) -> Option<String> {
     let repo = gix::open(repo_root).ok()?;

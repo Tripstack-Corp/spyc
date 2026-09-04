@@ -4,7 +4,7 @@
 //! mutating the process environment is unsound once spyc has worker
 //! threads (the per-pane vt100 parsers, the git-status worker — which
 //! runs gix in-process): another thread calling `getenv`
-//! concurrently with `setenv` is undefined behavior.
+//! concurrently with `setenv` is undefined behaviour.
 //!
 //! Instead we keep the overrides in a thread-safe map and layer them
 //! over the real environment ourselves:

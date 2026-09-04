@@ -177,8 +177,8 @@ fn line_from_visible_row(screen: &vt100::Screen, row: u16, cols: u16) -> Line<'s
 /// in the pager.
 ///
 /// Crucially, only *visually blank* spaces are trimmed. A run of
-/// spaces carrying a background color or reverse/underline video is
-/// a TUI color bar (status lines, progress bars, selection
+/// spaces carrying a background colour or reverse/underline video is
+/// a TUI colour bar (status lines, progress bars, selection
 /// highlights) — visible content, not grid padding. Trimming those
 /// would chop the bar's right edge in the `^a-v` pager, so a styled
 /// space run is preserved verbatim.
@@ -201,10 +201,10 @@ fn trim_trailing_whitespace_run(spans: &mut Vec<Span<'static>>) {
 
 /// True when a run of space characters in this style is grid padding
 /// rather than visible content. A space has no ink, so only the
-/// background color and the reverse/underline attributes can make it
+/// background colour and the reverse/underline attributes can make it
 /// visible: `cell_style` always sets `bg` to [`Color::Reset`] for a
 /// default cell, so blank padding is `bg` ∈ {`Reset`} with no
-/// reverse/underline. Foreground color and bold/italic are invisible
+/// reverse/underline. Foreground colour and bold/italic are invisible
 /// on a space and don't count.
 fn is_blank_padding(style: &Style) -> bool {
     let bg_blank = matches!(style.bg, None | Some(Color::Reset));
@@ -380,7 +380,7 @@ mod tests {
         // No styling means every cell shares Style::default(); they
         // should land in a single span, not 5 single-char spans.
         // Drop the trailing CRLF so the cursor stays on the content
-        // row — keeps the test focused on the merge behavior.
+        // row — keeps the test focused on the merge behaviour.
         let mut p = parser_with(2, 20, 100, b"hello");
         let lines = lines_from_scrollback(p.screen_mut());
         assert!(!lines.is_empty());
@@ -420,7 +420,7 @@ mod tests {
 
     #[test]
     fn styled_background_space_run_survives_trim() {
-        // A TUI color bar: spaces carrying a background color out to
+        // A TUI colour bar: spaces carrying a background colour out to
         // the right edge (status lines, progress bars). These are
         // visible content, not grid padding — the trim must keep them
         // or the bar's right edge gets chopped in the ^a-v pager.
@@ -447,7 +447,7 @@ mod tests {
     #[test]
     fn reverse_video_space_run_survives_trim() {
         // Reverse-video (`\x1b[7m`) spaces render as a solid block of
-        // the foreground color even with a default background — also a
+        // the foreground colour even with a default background — also a
         // visible bar that must survive the right-edge trim.
         let mut p = parser_with(1, 6, 0, b"\x1b[7m      ");
         let lines = lines_from_scrollback(p.screen_mut());
@@ -470,7 +470,7 @@ mod tests {
 
     #[test]
     fn styled_bar_kept_but_default_padding_after_it_dropped() {
-        // A short colored bar followed by default grid padding: the
+        // A short coloured bar followed by default grid padding: the
         // bar survives, the unstyled padding to the right edge is
         // still dropped (so the line doesn't read as full-width).
         // 3 blue cells, reset, then default padding out to col 12.

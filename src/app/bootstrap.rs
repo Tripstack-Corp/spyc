@@ -74,11 +74,11 @@ impl App {
         };
         let user_keymap = UserKeymap::from_bindings(config.bindings.clone());
         let theme = Theme::default().with_overrides(&config.colors);
-        // Resolve the render color depth: `--color` (cli_color) > `[layout]
+        // Resolve the render colour depth: `--color` (cli_color) > `[layout]
         // color_depth` > auto-detect. When it isn't TrueColor the per-frame
-        // render quantizes RGB → 256-color for truecolor-blind terminals. Auto
+        // render quantizes RGB → 256-colour for truecolor-blind terminals. Auto
         // ignores $COLORTERM inside GNU screen ($STY set, not tmux) — screen
-        // inherits a truecolor claim it can't honor. Env reads are fine here
+        // inherits a truecolor claim it can't honour. Env reads are fine here
         // (impure bootstrap).
         let in_screen = std::env::var_os("STY").is_some() && std::env::var_os("TMUX").is_none();
         let color_depth = crate::ui::color_depth::resolve(
@@ -94,7 +94,7 @@ impl App {
         // `~/src/workspace` containing a Java monorepo at
         // `~/src/workspace/inner-repo`), starving downstream code
         // (session save, harpoon, MCP context) of any project anchor.
-        // Honoring the launch dir gives every spyc invocation a project
+        // Honouring the launch dir gives every spyc invocation a project
         // anchor; users who want a different anchor can override with
         // `:project <path>` or `gP`. Cleared with `:project clear`.
         let project_home = Some(cwd.clone());

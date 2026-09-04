@@ -168,7 +168,7 @@ fn render_model(
 }
 
 /// The pager's true text-body width for a git-view, matching the render path:
-/// the full terminal width when `full_width`, else the centered overlay's body
+/// the full terminal width when `full_width`, else the centred overlay's body
 /// (90% − borders, via [`pager::centered_body_width`]). Sizing the side-by-side
 /// columns to anything wider makes every row wrap.
 fn git_view_body_width(full_width: bool) -> usize {
@@ -530,7 +530,7 @@ mod tests {
 
     /// `f` (full-width toggle) on a git-view diff must re-bake the fixed-width
     /// side-by-side rows at the new (wider) body width — not leave them sized
-    /// for the old, narrower centered overlay.
+    /// for the old, narrower centred overlay.
     #[test]
     fn full_width_toggle_rerenders_git_view_diff() {
         use crate::git::model::{

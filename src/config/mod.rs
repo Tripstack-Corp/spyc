@@ -27,7 +27,7 @@ pub struct Config {
     /// Keymap bindings parsed from the `keymap = [...]` array.
     pub bindings: Vec<UserBinding>,
 
-    /// Color palette overrides.
+    /// Colour palette overrides.
     pub colors: ColorOverrides,
 
     /// Layout overrides (status bar position, etc.).
@@ -36,19 +36,19 @@ pub struct Config {
     /// Pane / pty defaults.
     pub pane: PaneConfig,
 
-    /// Yank / clipboard behavior knobs.
+    /// Yank / clipboard behaviour knobs.
     pub yank: YankConfig,
 
-    /// Pager / viewer behavior knobs.
+    /// Pager / viewer behaviour knobs.
     pub pager: PagerConfig,
 
-    /// Markdown viewer behavior knobs.
+    /// Markdown viewer behaviour knobs.
     pub markdown: MarkdownConfig,
 
     /// Git diff/show view knobs (`[diff]`).
     pub diff: DiffConfig,
 
-    /// Delete-action behavior knobs.
+    /// Delete-action behaviour knobs.
     pub delete: DeleteConfig,
 
     /// Archive-mount knobs (`[archive]`).
@@ -95,12 +95,12 @@ pub enum StatusPosition {
     Bottom,
 }
 
-/// Desired color depth (the on-disk / `--color` preference). Resolved into a
+/// Desired colour depth (the on-disk / `--color` preference). Resolved into a
 /// concrete `crate::ui::color_depth::ColorDepth` at startup: `Auto` consults
 /// `$COLORTERM` (truecolor when it advertises `truecolor`/`24bit`, else 256),
 /// the explicit variants force it. `Ansi256` exists for terminals that can't
 /// parse 24-bit SGR — notably macOS's bundled GNU screen 4.00.03, which drops
-/// every `38;2;…m` and so renders spyc's RGB theme colorless.
+/// every `38;2;…m` and so renders spyc's RGB theme colourless.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 pub enum ColorMode {
     #[default]
@@ -152,7 +152,7 @@ pub struct LayoutConfig {
     /// Delay (ms) before the which-key chord-hint popup appears after a chord
     /// prefix is pressed and held. `0` disables the popup. Default 300.
     pub chord_hint_delay_ms: u64,
-    /// Color depth: `auto` (default), `truecolor`, or `256`. See [`ColorMode`].
+    /// Colour depth: `auto` (default), `truecolor`, or `256`. See [`ColorMode`].
     pub color_depth: ColorMode,
     /// Shape a `^s |` / `^a |` preview split opens in: `full_height` (default)
     /// or `top_only`. See [`VsplitMode`].
@@ -215,7 +215,7 @@ pub enum NewTabCwd {
 pub struct PaneConfig {
     /// Default command pre-filled into the `^a c` (new tab) prompt.
     /// Falls back to `"claude"` when both this and `$SPYC_PANE_CMD`
-    /// are unset, preserving long-standing behavior. The env var
+    /// are unset, preserving long-standing behaviour. The env var
     /// still wins so users can override per-shell on the fly.
     pub default_command: Option<String>,
     /// Where a new pane tab opens by default. See [`NewTabCwd`].
@@ -225,7 +225,7 @@ pub struct PaneConfig {
     /// the default terminal-scrollback capture. Codex always uses
     /// the transcript (terminal capture can't see its history); for
     /// Claude both work, so this is opt-in. Default false (keep the
-    /// current terminal-capture behavior).
+    /// current terminal-capture behaviour).
     pub claude_transcript_scrollback: bool,
     /// See `default.spycrc.toml` `[pane]` block for doc.
     pub agy_transcript_scrollback: bool,
@@ -442,7 +442,7 @@ impl Default for MarkdownConfig {
     }
 }
 
-/// `[delete]` — confirmation behavior for `R` / `dd` removal.
+/// `[delete]` — confirmation behaviour for `R` / `dd` removal.
 #[derive(Debug, Clone)]
 pub struct DeleteConfig {
     /// When true (default), `R` and `dd` show a `y/N` confirmation
@@ -554,7 +554,7 @@ struct FileArchive {
 /// same reasoning as [`DesktopVia`].
 ///
 /// Local stays helper-first on purpose: OSC 52 is write-only with no reply, so spyc
-/// can never confirm the terminal honored it, and some terminals disable it
+/// can never confirm the terminal honoured it, and some terminals disable it
 /// deliberately (a remote host silently writing your clipboard is a real risk). With
 /// no SSH session there's nothing to trade that uncertainty for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -598,7 +598,7 @@ pub enum DesktopVia {
     Both,
 }
 
-/// `[notify]` — desktop notification + bell behavior when an agent pane's
+/// `[notify]` — desktop notification + bell behaviour when an agent pane's
 /// status changes (P3-1, `docs/archive/AGENT_AWARENESS_PLAN.md`). Channels are
 /// independent; the desktop ping and the visual flash are on by default.
 ///
@@ -735,13 +735,13 @@ struct FileDiff {
 }
 
 /// Define `ColorOverrides` and its `merge` from a single field list, so a
-/// new color can't be added to the struct but forgotten in the merge (which
+/// new colour can't be added to the struct but forgotten in the merge (which
 /// silently dropped `delete_warning` before — the field existed but was never
 /// merged, so setting it in a config did nothing). One list = one edit.
 macro_rules! color_overrides {
     ($($field:ident),+ $(,)?) => {
-        /// Per-element color overrides parsed from `[colors]`. Each is an
-        /// optional hex/named color; `None` means "use the theme default".
+        /// Per-element colour overrides parsed from `[colors]`. Each is an
+        /// optional hex/named colour; `None` means "use the theme default".
         #[derive(Debug, Clone, Default, Deserialize)]
         #[serde(deny_unknown_fields)]
         pub struct ColorOverrides {
@@ -838,7 +838,7 @@ struct ScanPatternFile {
 /// Trust level of a config file. A `Project` (`<cwd>/.spycrc.toml`) file is
 /// attacker-controllable, so its executing keymap bindings are dropped;
 /// `Trusted` (`$HOME/.spycrc.toml`, or explicit caller-supplied paths) is
-/// honored in full.
+/// honoured in full.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Trust {
     Trusted,
@@ -854,8 +854,8 @@ impl Config {
     /// hostile content (cloned repos, extracted tarballs), so a project rc
     /// must not be able to bind a key to a shell command (`unix`) or an
     /// arbitrary `jump`. Those executing bindings are dropped from the
-    /// project file; cosmetic/behavioral settings ([colors], [layout], …)
-    /// and plain rebindings are still honored.
+    /// project file; cosmetic/behavioral settings ([colours], [layout], …)
+    /// and plain rebindings are still honoured.
     pub fn load_default(cwd: &Path) -> anyhow::Result<Self> {
         let user = home_dir().map(|h| h.join(".spycrc.toml"));
         let project = cwd.join(".spycrc.toml");
@@ -897,9 +897,9 @@ impl Config {
     fn merge_file(&mut self, file: FileConfig, source: &Path, trust: Trust) -> anyhow::Result<()> {
         self.sources.push(source.to_path_buf());
 
-        // Colors: any Some() in this file overrides the accumulated value.
+        // Colours: any Some() in this file overrides the accumulated value.
         // Field list lives once in the `color_overrides!` macro, so a new
-        // color can't be merged-by-omission (which dropped delete_warning).
+        // colour can't be merged-by-omission (which dropped delete_warning).
         self.colors.merge(file.colors);
 
         // Layout: per-field merge — only overwrite when the file
@@ -1641,7 +1641,7 @@ dir = "#aabbcc"
 
         let mut cfg = Config::default();
         cfg.load_one(&path, Trust::Project).unwrap();
-        // Cosmetic settings from a project rc are honored.
+        // Cosmetic settings from a project rc are honoured.
         assert_eq!(cfg.colors.dir.as_deref(), Some("#aabbcc"));
         // The plain rebinding (`down`) survives; the executing `unix`/`jump`
         // bindings are dropped.

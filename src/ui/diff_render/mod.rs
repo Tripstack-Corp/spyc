@@ -5,7 +5,7 @@
 //! structured `DiffModel` (`crate::git::model`) — so search, wrap,
 //! line-numbers, and visual-yank all work, and (crucially) we can lay the
 //! same model out
-//! either **unified** or **side-by-side**, which colored-byte output can't.
+//! either **unified** or **side-by-side**, which coloured-byte output can't.
 //!
 //! Two layouts over the same model:
 //! * [`DiffLayout::Unified`] — git's classic one-column `+`/`-` view.
@@ -16,7 +16,7 @@
 //! (syntect) — highlighted **once per side** (syntect is stateful across
 //! lines, so per-line calls would break multi-line strings/comments), then
 //! each line gets its `+`/`-` gutter and a non-destructive row-background
-//! tint overlaid (syntect sets only `fg`, so language colors survive).
+//! tint overlaid (syntect sets only `fg`, so language colours survive).
 //!
 //! Pure: `model + &Theme → lines`, no IO, no gix, no `&mut self`. Wired into
 //! the pager via the git-view session in `app/git_view_session.rs`.
@@ -84,7 +84,7 @@ fn tabbed_width(s: &str, tab_width: usize) -> usize {
 /// A diff's syntax highlight, computed once and reused across every
 /// layout/width re-render. syntect (in [`highlight_side`]) is by far the most
 /// expensive part of rendering a diff, and it depends only on the model — not
-/// on the theme (syntect carries its own palette; the diff wash/word colors are
+/// on the theme (syntect carries its own palette; the diff wash/word colours are
 /// overlaid later) nor the width/layout. So the `|` layout toggle, `f`
 /// full-width toggle, and a terminal resize re-lay-out from this cache instead
 /// of re-highlighting up to [`crate::git::diff_model::MAX_DIFF_LINES`] lines
@@ -559,7 +559,7 @@ fn push_split_rows(
 /// `col_w` columns wide. The first row carries `[lnum][space][marker]`;
 /// continuation rows have a blank prefix of the same width so the content
 /// indent stays consistent. `content` is already styled (wash + word highlight
-/// via [`styled_content`]); background colors are applied to prefix + padding.
+/// via [`styled_content`]); background colours are applied to prefix + padding.
 fn split_cell_rows(
     theme: &Theme,
     lnum: Option<u32>,
@@ -652,7 +652,7 @@ struct PreparedFile<'a> {
 
 /// Shared prologue for both layouts: push the file header, then resolve the
 /// hunks. The non-text kinds (binary / submodule / error) push their
-/// one-line explanation and return `None`, signaling the caller to stop. The
+/// one-line explanation and return `None`, signalling the caller to stop. The
 /// per-side highlight comes from the precomputed `hl` (see [`highlight_diff`]);
 /// a missing entry falls back to unhighlighted `+`/`-` text.
 fn prepare_file<'a>(
@@ -747,7 +747,7 @@ fn side_texts(hunks: &[Hunk]) -> (Vec<&str>, Vec<&str>) {
 
 /// Syntax-highlight one side's reconstructed text, returning one styled line
 /// per input line. `None` when syntect doesn't recognize the language (the
-/// caller then falls back to flat `+`/`-` colored text).
+/// caller then falls back to flat `+`/`-` coloured text).
 fn highlight_side(filename: &str, lines: &[&str]) -> Option<Vec<Line<'static>>> {
     if lines.is_empty() {
         return Some(Vec::new());
@@ -756,7 +756,7 @@ fn highlight_side(filename: &str, lines: &[&str]) -> Option<Vec<Line<'static>>> 
 }
 
 /// The highlighted spans for logical line `idx` on a side, or a flat fallback
-/// span (using the +/- text color for `kind = Some(is_add)`, plain for context
+/// span (using the +/- text colour for `kind = Some(is_add)`, plain for context
 /// `None`) when highlighting was unavailable or the index is past the end (the
 /// trailing-empty-line case).
 fn pick(
@@ -839,8 +839,8 @@ fn wrap_spans(spans: &[Span<'static>], width: usize, tab_width: usize) -> Vec<Ve
     pieces
 }
 
-/// Overlay a background color onto a style (non-destructive — syntect set only
-/// `fg`, so language colors survive). No-op when `bg` is `None`.
+/// Overlay a background colour onto a style (non-destructive — syntect set only
+/// `fg`, so language colours survive). No-op when `bg` is `None`.
 fn apply_bg(style: Style, bg: Option<Color>) -> Style {
     bg.map_or(style, |c| style.bg(c))
 }
@@ -906,9 +906,9 @@ fn overlay_range_bg(
     out
 }
 
-/// Pair a line's changed-ranges with a word-highlight color into the `word` arg
+/// Pair a line's changed-ranges with a word-highlight colour into the `word` arg
 /// `styled_content` wants — `Some` only when both are present (no ranges, or
-/// `mono` dropping the color, yields `None`).
+/// `mono` dropping the colour, yields `None`).
 const fn word_hl(ranges: &[Range<usize>], bg: Option<Color>) -> Option<(&[Range<usize>], Color)> {
     match bg {
         Some(c) if !ranges.is_empty() => Some((ranges, c)),

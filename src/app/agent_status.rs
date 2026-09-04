@@ -1089,7 +1089,7 @@ mod tests {
         );
 
         // Contrast: a non-blocked report (done) is still superseded by later
-        // output (unchanged behavior).
+        // output (unchanged behaviour).
         let done = Some(ReportedStatus {
             status: AgentActivity::Done,
             at: base,

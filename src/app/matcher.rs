@@ -111,7 +111,7 @@ fn desugar_anchors(query: &str) -> Option<String> {
 /// `name` on the filter/search hot path (called once per listing row per
 /// keystroke). `needle` is already lowercased by `Matcher::build`. The ASCII
 /// fast path is allocation-free; non-ASCII names fall back to `to_lowercase`
-/// so Unicode case folding stays identical to the old behavior.
+/// so Unicode case folding stays identical to the old behaviour.
 fn ascii_or_lower_contains(name: &str, needle: &str) -> bool {
     if name.is_ascii() && needle.is_ascii() {
         let (h, n) = (name.as_bytes(), needle.as_bytes());

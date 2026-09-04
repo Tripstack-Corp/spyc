@@ -1,15 +1,15 @@
-//! Truecolor → 256-color auto-degrade.
+//! Truecolor → 256-colour auto-degrade.
 //!
 //! spyc's theme (and syntect highlighting, diffs, the spice gradient, and ANSI
 //! passthrough in the pager) emit 24-bit `Color::Rgb`, which crossterm writes as
 //! `\x1b[38;2;r;g;bm`. Terminals that can't parse that SGR — notably macOS's
 //! bundled GNU screen 4.00.03 (Oct 2006), frozen at pre-GPLv3 and truecolor-blind
-//! — drop the whole attribute, so every color, background, and highlight vanishes.
+//! — drop the whole attribute, so every colour, background, and highlight vanishes.
 //!
 //! The fix is a single choke point: after the pure render pass fills the frame
 //! buffer, [`downgrade_buffer`] rewrites every `Rgb` cell to the nearest xterm
-//! 256-color index when the resolved [`ColorDepth`] isn't `TrueColor`. Because it
-//! runs on the finished buffer it catches *all* color sources, not just the theme.
+//! 256-colour index when the resolved [`ColorDepth`] isn't `TrueColor`. Because it
+//! runs on the finished buffer it catches *all* colour sources, not just the theme.
 //! `TrueColor` is a no-op, so capable terminals pay nothing.
 
 use ratatui::buffer::Buffer;
@@ -17,13 +17,13 @@ use ratatui::style::Color;
 
 use crate::config::ColorMode;
 
-/// The concrete color depth spyc renders at — resolved once at startup from the
+/// The concrete colour depth spyc renders at — resolved once at startup from the
 /// [`ColorMode`] preference (CLI > config > `$COLORTERM` auto-detect).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorDepth {
     /// 24-bit RGB — emit `Color::Rgb` unchanged (the native path).
     TrueColor,
-    /// xterm 256-color — quantize every `Color::Rgb` to a `Color::Indexed`.
+    /// xterm 256-colour — quantize every `Color::Rgb` to a `Color::Indexed`.
     Ansi256,
 }
 
@@ -33,7 +33,7 @@ pub enum ColorDepth {
 /// - **inside GNU screen** (`in_screen`) → 256, *ignoring* `$COLORTERM`. Screen
 ///   inherits `COLORTERM=truecolor` from the outer terminal but does not itself
 ///   render 24-bit SGR (the ancient macOS 4.00.03 can't; 5.x needs `truecolor on`
-///   and is off by default), so the claim is a lie. Its 256-color support is
+///   and is off by default), so the claim is a lie. Its 256-colour support is
 ///   solid, so 256 is the reliable default. Explicit `--color truecolor` still
 ///   forces it for a screen configured to pass RGB through.
 /// - otherwise → truecolor when `$COLORTERM` advertises `truecolor`/`24bit`, else
@@ -74,8 +74,8 @@ pub fn downgrade_buffer(buf: &mut Buffer, depth: ColorDepth) {
     }
 }
 
-/// Map one color to the target depth. Only `Rgb` is touched; named / indexed
-/// colors already render everywhere and pass through untouched.
+/// Map one colour to the target depth. Only `Rgb` is touched; named / indexed
+/// colours already render everywhere and pass through untouched.
 pub fn downgrade(color: Color, depth: ColorDepth) -> Color {
     match (depth, color) {
         (ColorDepth::Ansi256, Color::Rgb(r, g, b)) => Color::Indexed(rgb_to_ansi256(r, g, b)),
@@ -83,22 +83,22 @@ pub fn downgrade(color: Color, depth: ColorDepth) -> Color {
     }
 }
 
-/// The six component levels of the xterm 6×6×6 color cube (indices 16..=231).
+/// The six component levels of the xterm 6×6×6 colour cube (indices 16..=231).
 const CUBE_STEPS: [u8; 6] = [0, 95, 135, 175, 215, 255];
 
-/// Nearest xterm 256-color index for an RGB triple. Considers both the 6×6×6
-/// color cube and the 24-step grayscale ramp (232..=255) and picks whichever is
-/// closer by squared Euclidean distance — so neutral grays land on the gray ramp
-/// (finer than the cube) and saturated colors land in the cube.
+/// Nearest xterm 256-colour index for an RGB triple. Considers both the 6×6×6
+/// colour cube and the 24-step greyscale ramp (232..=255) and picks whichever is
+/// closer by squared Euclidean distance — so neutral greys land on the grey ramp
+/// (finer than the cube) and saturated colours land in the cube.
 pub fn rgb_to_ansi256(r: u8, g: u8, b: u8) -> u8 {
-    // Color-cube candidate: snap each channel to its nearest cube level.
+    // Colour-cube candidate: snap each channel to its nearest cube level.
     let ri = nearest_cube_level(r);
     let gi = nearest_cube_level(g);
     let bi = nearest_cube_level(b);
     let cube_idx = 16 + 36 * ri + 6 * gi + bi;
     let cube_rgb = (CUBE_STEPS[ri], CUBE_STEPS[gi], CUBE_STEPS[bi]);
 
-    // Grayscale-ramp candidate: value 8 + 10*n for n in 0..=23 (232..=255).
+    // Greyscale-ramp candidate: value 8 + 10*n for n in 0..=23 (232..=255).
     let avg = (u16::from(r) + u16::from(g) + u16::from(b)) / 3;
     let n = (avg.saturating_sub(8) + 5) / 10; // round to nearest ramp step
     let n = n.min(23);
@@ -183,7 +183,7 @@ mod tests {
             resolve(ColorMode::Auto, ColorMode::Auto, Some("truecolor"), true),
             ColorDepth::Ansi256
         );
-        // But an explicit request is still honored (screen configured for RGB).
+        // But an explicit request is still honoured (screen configured for RGB).
         assert_eq!(
             resolve(
                 ColorMode::TrueColor,
@@ -204,9 +204,9 @@ mod tests {
         // Pure black / white land on the cube endpoints.
         assert_eq!(rgb_to_ansi256(0, 0, 0), 16);
         assert_eq!(rgb_to_ansi256(255, 255, 255), 231);
-        // Mid gray prefers the finer grayscale ramp over the cube.
+        // Mid grey prefers the finer greyscale ramp over the cube.
         assert_eq!(rgb_to_ansi256(128, 128, 128), 244);
-        // A saturated color lands in the cube (16..=231), not the gray ramp.
+        // A saturated colour lands in the cube (16..=231), not the grey ramp.
         let idx = rgb_to_ansi256(0x7a, 0xa2, 0xf7);
         assert!((16..=231).contains(&idx), "expected cube index, got {idx}");
     }

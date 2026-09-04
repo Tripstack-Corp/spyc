@@ -366,7 +366,7 @@ pub fn render_transcript(
         .add_modifier(Modifier::BOLD);
     let tool_style = Style::default().fg(theme.take);
     // Muted but NOT Modifier::DIM: status_suffix is already a
-    // comment-gray, and DIM stacked on top of it rendered the result
+    // comment-grey, and DIM stacked on top of it rendered the result
     // previews near-invisible on dark backgrounds (dogfood report).
     let dim_style = Style::default().fg(theme.status_suffix);
 

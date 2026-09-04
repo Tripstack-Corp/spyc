@@ -134,7 +134,7 @@ works for me."
   is damaged"); Linux minisign signatures with the public key in the
   repo; SBOM via `cargo-sbom`/`cargo-auditable`; reproducible-build
   verification job (toolchain already pinned, `SOURCE_DATE_EPOCH`,
-  rebuild-and-diff). Proportionate — no SLSA theater (see Non-goals).
+  rebuild-and-diff). Proportionate — no SLSA theatre (see Non-goals).
 - **Shell completions**: `spyc --generate-completion {bash,zsh,fish}`
   via clap derive; ship in release artifacts.
 - **First-run hint flash**: on first launch (no

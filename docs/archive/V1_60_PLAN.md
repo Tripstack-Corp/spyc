@@ -117,7 +117,7 @@ The minimum capability set for v1.60 is:
 | `frame_mirror`  | Peer responds to `subscribe_frames` (Phase 2).                 |
 | `input_forward` | Peer responds to `send_input` (Phase 3).                       |
 
-CounterTop behavior is **always-visible, gracefully-degraded** for
+CounterTop behaviour is **always-visible, gracefully-degraded** for
 older peers:
 
 | Peer caps                                    | Hub behavior                                                                  |
@@ -228,7 +228,7 @@ The last row above is what an older peer looks like: rendered from
 the discovery file alone (no MCP `status` capability), with a quiet
 `·` indicator and a `pre-1.60` tag. Project home and session name
 still visible. See [Compatibility](#compatibility) for the full
-behavior matrix.
+behaviour matrix.
 
 **Files:**
 - `src/ui/counter_top.rs` — render the table.

@@ -110,7 +110,7 @@ mod guard_tests {
     /// `state.left`/`right` address a SPECIFIC column (render draws both
     /// explicitly; the fs-watch dedup-keys per column). "Where the user is
     /// working" — a spawn cwd, a restore target, the dir an op acts on — must
-    /// use `cur()`/`cur_mut()` so a focused second commander is honored. The
+    /// use `cur()`/`cur_mut()` so a focused second commander is honoured. The
     /// June-2026 vsplit review found six spawn/restore sites stranded on
     /// `state.left.listing.dir` (`:;`, the bare pane spawn, pager-edit,
     /// graveyard restore, …). A new read outside the allowlist is that smell —

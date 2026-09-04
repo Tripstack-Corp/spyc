@@ -449,7 +449,7 @@ impl App {
         };
         let forward = |key| {
             // A capture is a bare `PtyHost` with no vt100 emulator, so no DECCKM
-            // state exists to honor — the CSI form is what a terminal that never
+            // state exists to honour — the CSI form is what a terminal that never
             // negotiated the mode sends.
             let bytes = crate::pane::input::encode_key(key, false);
             if bytes.is_empty() {
@@ -537,7 +537,7 @@ impl App {
     /// Route a bracketed-paste event through the SAME authority as keys
     /// (`route_input`), matching `InputSink` exhaustively so paste and keys
     /// cannot diverge: a paste lands wherever a non-meta key would. The leaf
-    /// behavior differs per kind (a paste is a block; a key is one stroke),
+    /// behaviour differs per kind (a paste is a block; a key is one stroke),
     /// but the routing is shared. Returns effects for the sole executor
     /// (`run_effects`); a paste is infallible, so no `Result` (unlike
     /// `handle_key`, which can fail inside `update`).

@@ -1,5 +1,5 @@
 //! Rendering. Layout decisions live in `layout`; individual widgets in
-//! `list_view`, `status`, and `prompt`. Shared colors in `theme`.
+//! `list_view`, `status`, and `prompt`. Shared colours in `theme`.
 //!
 //! Width helpers: all UI code should use `display_width()` and
 //! `display_truncate()` instead of `chars().count()` or `.len()`.

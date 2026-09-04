@@ -218,7 +218,7 @@ snapshot_max_mb = 64     # graveyard-snapshot the original below this size
 ## Staged PRs
 
 Each is independently shippable and green; docs ride the commit that changes
-behavior (`FEATURES.md`, `docs/KEYBINDINGS.md`, `src/ui/help.rs`, `CHANGELOG.md`,
+behaviour (`FEATURES.md`, `docs/KEYBINDINGS.md`, `src/ui/help.rs`, `CHANGELOG.md`,
 `README.md`, `CONFIGURATION.md`, plus the guard-checked module index in
 `AGENTS.md`).
 

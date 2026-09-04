@@ -138,7 +138,7 @@ container — which is outside spyc's scope.
   `https://github.com/rust-lang/crates.io-index` are accepted.
   No `git = "..."` deps, no patched forks.
 - **MSRV pinned** via `rust-toolchain.toml`. A new stable release
-  cannot tighten lints, change behavior, or drop features behind
+  cannot tighten lints, change behaviour, or drop features behind
   our back.
 - **Pre-commit hook** (optional, install via `make install-hooks`)
   runs the same gate as CI before each commit so drift surfaces in

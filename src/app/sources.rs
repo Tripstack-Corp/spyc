@@ -519,7 +519,7 @@ mod tests {
     ///
     /// `coalesce_recv` now enumerates what it surfaces instead, so a new
     /// `Message` variant is a compile error in all three places that must agree.
-    /// What's left for a test is the behavior itself, which exhaustiveness can't
+    /// What's left for a test is the behaviour itself, which exhaustiveness can't
     /// express: that these particular variants collapse rather than surface.
     #[test]
     fn coalesce_recv_collapses_all_payloadless_done_wakes() {

@@ -198,7 +198,7 @@ new transcript entries (tail mode), like `:grep` already does.
 :perm gemini ...       # symmetric, pending Gemini's settings shape
 ```
 
-Behavior:
+Behaviour:
 - Resolves the file path (creating with a template if it doesn't exist).
 - Tears down the TUI, calls `$EDITOR <path>`, restores on exit.
   (Same pattern as `V` for editing; reuses `suspend_tui`.)
@@ -267,7 +267,7 @@ log_window_hours = 24
   schema): spyc detects on read, flashes once per session, falls back to
   read-only mode (log surface still works; rule editing disabled).
 - **Enterprise managed-settings**: already detected in `src/mcp.rs`. If
-  Claude's managed-settings disables local-config, we honor that and
+  Claude's managed-settings disables local-config, we honour that and
   refuse `:perm` writes with a clear error.
 - **No agent installed**: surface available for whichever subset *is*
   installed. The unified log iterator just skips missing agents.

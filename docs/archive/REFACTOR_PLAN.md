@@ -29,7 +29,7 @@ Smaller, more reviewable, more testable code. Concretely:
 - No file in `src/app/` over ~1500 lines.
 - Handlers ~5–20 lines each (vs. 50–200 today), composed of pure
   data transformations.
-- Side effects modeled as data (`Effect::Spawn { ... }`) so handlers
+- Side effects modelled as data (`Effect::Spawn { ... }`) so handlers
   are unit-testable without a real PTY / real signal / real disk.
 - Render and event handling fully separated.
 
@@ -61,7 +61,7 @@ Pick up when at least two of these are true:
 ## Focus required
 
 - **Phase 1**: ~30–60 min per extraction, low cognitive load.
-  Mechanical moves with no behavior change. Can be done
+  Mechanical moves with no behaviour change. Can be done
   incrementally between feature work without breaking flow.
 - **Phase 2**: ~half-day per extraction. Real focus needed because
   some interfaces have to be designed (e.g. the pager-key handler
@@ -70,7 +70,7 @@ Pick up when at least two of these are true:
   [`docs/archive/MVU_PLAN.md`](MVU_PLAN.md). The original framing here said
   "block out a full week; partial conversions are worse than either alone"
   — that assumed a big-bang. The strangler-fig plan instead lands ~8
-  phases, **each behavior-equivalent behind green CI and independently
+  phases, **each behaviour-equivalent behind green CI and independently
   revertable**, so partial conversion is the *intended* steady state and it
   interleaves with feature work like Phases 1–2 did. Per-phase focus is
   ~half-day to multi-day depending on the phase (the single-channel loop
@@ -82,7 +82,7 @@ Pick up when at least two of these are true:
 
 Self-contained types + impls that landed in `app/mod.rs` by inertia,
 not coupling. Each was a verbatim move + a `mod ...; use ...;` import
-— no behavior change, no API change. Each was one PR.
+— no behaviour change, no API change. Each was one PR.
 
 | # | Extract | Target file | PR | Status |
 |---|---------|-------------|----|--------|
@@ -176,7 +176,7 @@ denies `wildcard_imports`).
 
 The architectural change — but **not** the block-out-a-week big-bang the
 original framing below assumed. The strangler-fig design makes every phase
-behavior-equivalent behind green CI and independently revertable, so it lands
+behaviour-equivalent behind green CI and independently revertable, so it lands
 incrementally pre-2.0 and interleaves with the other road-to-2.0 tracks rather
 than requiring one unbroken multi-day push. Follow `docs/archive/MVU_PLAN.md`.
 
@@ -256,7 +256,7 @@ the plan changed.)
   *(Superseded later the same day — see the "GATE REVERSED" entry below;
   MVU moved pre-2.0.)*
 - **2026-05-30**: Phase 1 complete (PRs #180–#185). Six struct
-  extractions, one PR each, no behavior change, no test edits, gate
+  extractions, one PR each, no behaviour change, no test edits, gate
   green throughout. Scoped to *data structs* — App-coupled `&mut self`
   methods stayed put (they're Phase 2 handler work; pulling them now
   would violate the one-way-dependency rule). Net ~700 LOC off
@@ -264,7 +264,7 @@ the plan changed.)
   key-dispatch handlers) is the next track; each is ~half-day and
   needs real interface design, so not "pick up any spare moment" work.
 - **2026-05-30**: Phase 2 complete (PRs #187, #189, #190, #191). Four
-  medium extractions, one PR each, no behavior change, no test edits.
+  medium extractions, one PR each, no behaviour change, no test edits.
   Established the **child-module `impl App`** pattern: a method moved to
   a private child module (`mod render;` etc.) reads App's private state
   via the descendant-module rule, so fields stay private and only the
@@ -314,11 +314,11 @@ the plan changed.)
   don't want to launch and then be faced with a big refactor" — 2.0 should
   ship *on* the cleaner foundation, not carry it as overhang. This is only
   safe because of the strangler-fig design: every phase is
-  behavior-equivalent behind green CI and independently revertable, so it
+  behaviour-equivalent behind green CI and independently revertable, so it
   lands incrementally and interleaves with the other road-to-2.0 tracks
   rather than being a block-out-a-week big-bang. **Honest trade-off
   accepted:** deep loop/concurrency surgery before a public launch carries
-  timing/focus/stdin regression risk that behavior-equivalence tests don't
+  timing/focus/stdin regression risk that behaviour-equivalence tests don't
   fully catch; mitigated by the test harness landing first, per-phase green
   CI + manual smoke, Phase 0 (lowest-risk) first / the single-channel loop
   rewrite last, and isolation-revertability per phase. The "When to start"

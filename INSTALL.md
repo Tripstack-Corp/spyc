@@ -105,18 +105,18 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## Terminal
 
-spyc is designed for modern terminals with true-color (24-bit) and
+spyc is designed for modern terminals with true-colour (24-bit) and
 Nerd Font glyph support. We recommend **iTerm2** on macOS:
 
 ```sh
 brew install --cask iterm2
 ```
 
-iTerm2 supports true-color, Nerd Font glyphs, the mouse-pointer-hide
+iTerm2 supports true-colour, Nerd Font glyphs, the mouse-pointer-hide
 escape (`XTSMPOINTER`), and is the most tested terminal for spyc.
 
 Other terminals that work well: WezTerm, Kitty, Alacritty, Ghostty.
-The default macOS Terminal.app supports true-color but lacks Nerd Font
+The default macOS Terminal.app supports true-colour but lacks Nerd Font
 glyphs without a patched font.
 
 ## Font
@@ -314,12 +314,12 @@ To allow spyc in a managed environment:
 
 Launch spyc and check:
 
-1. **Powerline bar** — status line at the top should show colored
+1. **Powerline bar** — status line at the top should show coloured
    segments with arrow separators. If you see boxes instead of arrows,
    your font doesn't have powerline glyphs.
-2. **Colors** — file listing should be color-coded (blue dirs, green
+2. **Colours** — file listing should be colour-coded (blue dirs, green
    executables). If everything is white, your terminal may not support
-   true-color.
+   true-colour.
 3. **Pane** — press `^\` (Ctrl+Backslash) to open the lower pane. It
    should spawn `claude` (or whatever `SPYC_PANE_CMD` is set to).
 4. **MCP** — in the Claude pane, Claude should have access to spyc's

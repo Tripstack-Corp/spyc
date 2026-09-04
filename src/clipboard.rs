@@ -362,14 +362,14 @@ pub type ClipboardImage = (Vec<u8>, (u32, u32));
 /// cache, and a smaller file isn't worth a second of a worker's time.
 ///
 /// Over SSH this reads the *server's* clipboard, the same asymmetry OSC 52
-/// exists to solve for the write direction. That's the right behavior here:
+/// exists to solve for the write direction. That's the right behaviour here:
 /// the agent running in the pane reads that same clipboard, so spyc sees
 /// exactly what the agent saw.
 pub fn read_image() -> Result<Option<ClipboardImage>, String> {
     let img = match arboard::Clipboard::new().and_then(|mut cb| cb.get_image()) {
         Ok(img) => img,
         // Every "nothing usable there" shape — no image, empty clipboard, an
-        // unsupported flavor — is the same non-event to the caller.
+        // unsupported flavour — is the same non-event to the caller.
         Err(arboard::Error::ContentNotAvailable | arboard::Error::ClipboardNotSupported) => {
             return Ok(None);
         }
@@ -421,7 +421,7 @@ const OSC52_MAX_BASE64: usize = 74_994;
 ///
 /// `Err` when the payload is too large to send safely ([`OSC52_MAX_BASE64`]) — the
 /// caller reports it; there is no fallback unless `via = "both"` enabled one.
-/// Success here means "the sequence was written", not "the terminal honored it":
+/// Success here means "the sequence was written", not "the terminal honoured it":
 /// OSC 52 is write-only with no reply, and support varies (kitty/WezTerm/iTerm2/
 /// Ghostty/Alacritty yes; tmux needs `set -g set-clipboard on`; some terminals gate
 /// it deliberately, since a remote host writing your clipboard is a real risk).
@@ -470,7 +470,7 @@ fn osc52_sequence(text: &str, in_tmux: bool) -> Result<String, String> {
 ///
 /// `copy()` calls this with `config_command: None` — it's a leaf module (see
 /// AGENTS.md's "dependency direction one-way": `app` depends on this module,
-/// never the reverse), so it can honor `$SPYC_CLIPBOARD` but not
+/// never the reverse), so it can honour `$SPYC_CLIPBOARD` but not
 /// `[clipboard].command`. `deliver_clipboard` (which does have config access)
 /// passes the config value through, so both sources are checked exactly once
 /// from there.
@@ -1078,7 +1078,7 @@ mod tests {
         );
     }
 
-    /// Pins "detach, don't wait" as the actual executed behavior, not just an
+    /// Pins "detach, don't wait" as the actual executed behaviour, not just an
     /// assertion of intent: a helper that keeps running well past
     /// HELPER_REAP_BUDGET (mirrors xclip/xsel serving the X11 selection after
     /// a successful copy) must not make `spawn_and_pipe` block for anywhere

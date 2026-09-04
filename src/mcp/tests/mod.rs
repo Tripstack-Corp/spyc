@@ -1102,7 +1102,7 @@ fn mcp_json_refuses_to_overwrite_invalid_json() {
 /// An unparseable `.codex/config.toml` is REFUSED, not rewritten.
 ///
 /// This test previously asserted the opposite — "falls back to a fresh rewrite
-/// rather than failing" — which codified data loss as intended behavior. That
+/// rather than failing" — which codified data loss as intended behaviour. That
 /// file holds the user's `model` and `approval_policy`; a trailing comma or a
 /// half-finished hand-edit was enough to have spyc replace all of it with a
 /// spyc-only document on the next pane launch, with no backup and no warning.

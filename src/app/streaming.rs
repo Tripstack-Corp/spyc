@@ -4,7 +4,7 @@
 //! App's private state directly via the descendant-module rule.
 //!
 //! Each returns whether it produced a redraw-worthy change this tick; the
-//! run loop sets `needs_draw`/`draw_reason` from the return. Behavior is
+//! run loop sets `needs_draw`/`draw_reason` from the return. Behaviour is
 //! unchanged from the pre-3c inline blocks except for the `clear_wake_pending`
 //! calls (the clear-before-read half of the lost-wakeup protocol — a no-op
 //! until a capture/task installs its wake slot in this phase).

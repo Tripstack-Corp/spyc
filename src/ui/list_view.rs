@@ -85,7 +85,7 @@ pub struct Row {
     pub deleted: bool,
     pub git_status: GitFileStatus,
     /// True while this entry is among the targets of an active
-    /// `RemoveConfirm` prompt. Drives the warning-color row
+    /// `RemoveConfirm` prompt. Drives the warning-colour row
     /// highlight: the user sees exactly which files the next `y`
     /// keystroke will affect. Always `false` outside the prompt.
     pub pending_delete: bool,
@@ -345,7 +345,7 @@ impl Widget for ListView<'_> {
             // unfocused case.
             //
             // A row pending delete (active `RemoveConfirm` prompt)
-            // overrides the cursor bg with the warning color so the
+            // overrides the cursor bg with the warning colour so the
             // user sees the consequence of the next `y` keystroke.
             // The warning wins even when the row is also the cursor.
             let (cursor_bg, cursor_bold) = if row.pending_delete {
@@ -396,7 +396,7 @@ impl Widget for ListView<'_> {
             let final_name_style = if highlighted || row.pending_delete {
                 // Pending-delete rows always force the bright fg +
                 // bold treatment over the warning bg so the
-                // filename stays readable against the strong color.
+                // filename stays readable against the strong colour.
                 // Cursor rows do the same against the cursor bg.
                 Style::default()
                     .fg(self.theme.cursor_fg)
@@ -439,10 +439,10 @@ fn row_style(kind: EntryKind, _git: GitFileStatus, theme: &Theme) -> Style {
     }
 }
 
-/// Glyph + color for a single XY half. Returns the same per-change
+/// Glyph + colour for a single XY half. Returns the same per-change
 /// glyph for either side; the *position* in the marker column tells
 /// the user which half it is (column 0 = staged, column 1 = unstaged).
-/// Color encodes the kind (modified/added/etc.).
+/// Colour encodes the kind (modified/added/etc.).
 fn change_glyph(change: GitChange, theme: &Theme) -> (char, Style) {
     match change {
         GitChange::Modified => ('~', Style::default().fg(theme.pick)),
@@ -464,7 +464,7 @@ fn change_glyph(change: GitChange, theme: &Theme) -> (char, Style) {
 /// staged side (porcelain `??`) and render as ` ?` so the `?` lines up with
 /// the unstaged column.
 ///
-/// Each char carries its own style — staged and unstaged colors don't
+/// Each char carries its own style — staged and unstaged colours don't
 /// have to match, which is the whole point: at a glance the user can
 /// tell `~ ` (ready to commit) from ` ~` (still working) from `~~`
 /// (partially staged + further edits).

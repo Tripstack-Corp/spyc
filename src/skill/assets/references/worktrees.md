@@ -85,7 +85,7 @@ claim_worktree(path, reason)
 release_worktree(path)
 ```
 
-A claim is advisory but honored by `remove_worktree`, which refuses a claimed
+A claim is advisory but honoured by `remove_worktree`, which refuses a claimed
 tree. Claim one when you'll be working in it across several turns so a parallel
 agent doesn't tear it out from under you.
 

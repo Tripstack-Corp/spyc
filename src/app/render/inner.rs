@@ -1,7 +1,7 @@
 //! The main draw pass (`render_inner`): paints the composed frame for every
 //! branch — `;cmd`/`$EDITOR` top-overlay, a `TopPane`/`LowerPane`-mounted
 //! pager, and the default status-bar + file-list + prompt + bottom-pane
-//! layout — plus the centered `Overlay` pager and the harpoon menu on top.
+//! layout — plus the centred `Overlay` pager and the harpoon menu on top.
 //! Split from `app/render.rs` verbatim; an `impl App` child module reading
 //! App's private state via the descendant-module rule.
 
@@ -31,7 +31,7 @@ impl App {
             // Overlay resize/drain + the dismissal flag are settled in
             // `prepare_panes` before this draw (MVU Stage 2).
             // Visual focus tracks `state.pane_focused`: false ⇒
-            // overlay focused (cursor block, full color); true ⇒
+            // overlay focused (cursor block, full colour); true ⇒
             // bottom pane focused (overlay dims to half-lightness via
             // PaneWidget's DIM modifier). User toggles with ^a-j/k.
             // The overlay is bright only when it actually owns the keyboard: not
@@ -103,7 +103,7 @@ impl App {
             if self.state.vsplit.is_some() {
                 self.render_prompt_line(frame, layout.prompt);
             }
-            // A centered `Overlay` pager (help / grep / git-view / version, …)
+            // A centred `Overlay` pager (help / grep / git-view / version, …)
             // opened while the editor is up must still draw. The user switched
             // focus off the editor (e.g. `^a l` to `b`), so `?` landed an
             // Overlay pager in `view.pager` that owns focus but has no draw
@@ -185,7 +185,7 @@ impl App {
             // The TopPane branch returns early — if the pager-help
             // overlay is up over a TopPane pager, render it here on
             // top of the just-drawn slot before returning. The
-            // standard branch's centered-overlay tail (further down)
+            // standard branch's centred-overlay tail (further down)
             // never runs in this path.
             if in_help && let Some(help) = self.view.pager.as_ref() {
                 crate::ui::pager::render(frame, frame.area(), help, &self.view.theme);
@@ -241,7 +241,7 @@ impl App {
 
         // Pager comes after list but before help (help always wins).
         // `LowerPane` and `TopPane` mounts already rendered into
-        // their slots above; only `Overlay` mount hits this centered
+        // their slots above; only `Overlay` mount hits this centred
         // render path.
         if let Some(view) = &self.view.pager
             && matches!(view.mount, crate::ui::pager::Mount::Overlay)
@@ -318,7 +318,7 @@ impl App {
             text::{Line, Span},
         };
         if let Mode::Prompting(p) = &self.state.mode {
-            // HookConsent is shown as a centered pop-up (`render_hook_consent_popup`),
+            // HookConsent is shown as a centred pop-up (`render_hook_consent_popup`),
             // not this one-line bar — leave the prompt row blank so the ask reads
             // as a modal, not a status line lost beneath the pane.
             if matches!(p.kind, crate::app::PromptKind::HookConsent { .. }) {
@@ -595,7 +595,7 @@ impl App {
     /// (the rect is 1 col wide) via the same `cell_mut` API the pane widget
     /// uses. (PR4 can make it focus-aware.)
     fn render_vsplit_divider(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
-        // Use the accent (prompt-prefix) color, bold, so the column boundary
+        // Use the accent (prompt-prefix) colour, bold, so the column boundary
         // reads as a deliberate divider and doesn't blend with muted content
         // lines / gaps (e.g. a side-by-side diff's own separators).
         let style = ratatui::style::Style::default()
@@ -640,9 +640,9 @@ impl App {
         use ratatui::text::{Line, Span};
         use ratatui::widgets::{Clear, Paragraph};
         frame.render_widget(Clear, area);
-        // Center the diagram in the region above the one-row dismiss hint.
+        // Centre the diagram in the region above the one-row dismiss hint.
         // ratatui-image anchors at the rect's top-left, so we place a rect of
-        // the protocol's own cell size at the centered offset. `allow_clipping`
+        // the protocol's own cell size at the centred offset. `allow_clipping`
         // guards an off-by-one from Fit's cell rounding.
         let avail = Rect {
             height: area.height.saturating_sub(1),

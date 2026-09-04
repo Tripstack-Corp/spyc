@@ -146,7 +146,7 @@ coordinates that survive past column 223. Belt-and-braces: also drop
 `MouseEventKind::Moved` / `Drag` in the reader's forward filter (`proc.rs:99`),
 since a few terminals report motion regardless of what we asked for.
 
-1007 and 1000 must not both be on — a terminal honoring both could deliver the
+1007 and 1000 must not both be on — a terminal honouring both could deliver the
 tick twice (once as arrows, once as a mouse event). The two are mutually
 exclusive by construction below.
 
@@ -512,7 +512,7 @@ That's the wrong home:
   isn't a keymap entry.
 
 `route_mouse` returning a `MouseSink` that the mouse handler dispatches directly
-to existing methods keeps the Action vocabulary clean. If a sink needs behavior an
+to existing methods keeps the Action vocabulary clean. If a sink needs behaviour an
 `Action` already names, call `self.apply(&Action::Down(n))` — note it's `apply`
 (or `update(UiMsg::Action(..))`, `update.rs:43`), not `apply_action`.
 
@@ -679,7 +679,7 @@ silently dies over another.
 6. `^a v` transcript pager open → wheel scrolls the pager.
 7. Vsplit: wheel over the `b` preview scrolls the preview, not column `a`.
 8. `:mouse off` → selection works again immediately, wheel reverts to 1007
-   arrow behavior. `:mouse on` → back. No restart.
+   arrow behaviour. `:mouse on` → back. No restart.
 9. Selection bypass: Shift-drag (Ghostty/WezTerm/kitty), Option-drag (iTerm2).
 10. Quit spyc → wheel scrolls the shell's own scrollback (no leaked `?1000h`).
     Repeat via a forced panic → same.

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 const MAX_SESSIONS: usize = 20;
 
 /// Which interactive coding agent (if any) the tab is hosting.
-/// Drives session-save and resume-on-restore behavior — claude uses
+/// Drives session-save and resume-on-restore behaviour — claude uses
 /// a UUID-or-name token plus `/resume` over stdin (CLI flag is
 /// regression-prone), codex uses `codex resume <UUID>` directly.
 #[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
@@ -661,7 +661,7 @@ pub fn extract_claude_resume_token(lines: &[String]) -> Option<String> {
 /// containing any of `markers`, returning the whitespace-delimited token
 /// immediately after the marker when it satisfies `valid`. Uses `find`
 /// (not `strip_prefix`) so a leading "To continue this session, run "
-/// prefix and any trailing color-reset bytes on the same render line are
+/// prefix and any trailing colour-reset bytes on the same render line are
 /// tolerated.
 ///
 /// Shared by the codex / agy extractors below. (The claude extractor stays

@@ -44,7 +44,7 @@ fn expand_with(
 ) -> PathBuf {
     // `_no_errors` because our lookup is infallible: a miss is `None`, which
     // shellexpand renders as the original `$VAR` text — the documented
-    // "unset vars are left as-is" behavior, not an error.
+    // "unset vars are left as-is" behaviour, not an error.
     PathBuf::from(shellexpand::full_with_context_no_errors(input, || home, lookup).into_owned())
 }
 

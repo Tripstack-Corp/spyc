@@ -2,7 +2,7 @@
 
 Everything spyc reads at runtime, with examples. Two surfaces:
 
-- **`.spycrc.toml`** — TOML: layout, notifications, colors, ignore masks, and the
+- **`.spycrc.toml`** — TOML: layout, notifications, colours, ignore masks, and the
   keymap DSL.
 - **`~/.config/spyc/`** — Lua: `map KEY lua <name>` scripts and an optional
   `init.lua` for keybinds, `:` commands, and event hooks.
@@ -72,10 +72,10 @@ confirm = true                 # y/N prompt before R / dd; false = yolo (still r
 All optional; anything unset uses the built-in default. See `spyc --print-config`
 for the annotated version of each.
 
-### Color depth — `[layout] color_depth`
+### Colour depth — `[layout] color_depth`
 
 spyc's theme is 24-bit truecolor. Terminals that can't parse `\x1b[38;2;r;g;bm`
-drop it wholesale — you get no color and no highlight. The worst offender is
+drop it wholesale — you get no colour and no highlight. The worst offender is
 macOS's **bundled GNU screen 4.00.03** (frozen at pre-GPLv3, from 2006), which
 also mangles the powerline/emoji glyphs.
 
@@ -86,13 +86,13 @@ also mangles the powerline/emoji glyphs.
 | `256` | quantize every color to the nearest xterm-256 index |
 
 When not truecolor, the finished frame is remapped once before it's written, so
-**all** colors degrade — theme, syntax highlighting, diffs, and ANSI passthrough.
+**all** colours degrade — theme, syntax highlighting, diffs, and ANSI passthrough.
 `--color auto|truecolor|256` overrides the config for a single run.
 
 **GNU screen:** `auto` drops to 256 whenever it's running inside screen (`$STY`
 set), *even if `$COLORTERM=truecolor`* — screen inherits that claim from the outer
 terminal but doesn't render 24-bit SGR (macOS's bundled 4.00.03 can't at all; 5.x
-needs `truecolor on`, off by default), so trusting it leaves you colorless. If
+needs `truecolor on`, off by default), so trusting it leaves you colourless. If
 you've turned `truecolor on` in a modern screen, force it back with
 `color_depth = "truecolor"`. tmux is unaffected — it renders RGB and keeps
 truecolor.
@@ -134,7 +134,7 @@ can never paste from. OSC 52 travels back up the same connection the UI is drawn
 so it reaches the terminal you're typing at.
 
 Locally it stays helper-first deliberately — OSC 52 is write-only with no reply, so
-spyc can't confirm the terminal honored it, and some terminals disable it on purpose
+spyc can't confirm the terminal honoured it, and some terminals disable it on purpose
 (a remote host writing your clipboard is a real risk). Inside tmux it needs
 `set -g set-clipboard on`; spyc DCS-wraps the escape so tmux forwards it to the outer
 terminal. A selection too large for the escape (~75 KB of base64) is **refused with a
@@ -397,7 +397,7 @@ fly. Raise it for a detented wheel that sends one event per physical click.
 mouse-aware child is unaffected — the child receives one event per tick and picks
 its own step. Clamped to at least 1.
 
-## Colors — `[colors]`
+## Colours — `[colors]`
 
 Hex (`"#aabbcc"`) or named (`"red"`). Anything unset falls back to the built-in
 palette. Match these to spyc's brand palette (see `docs/BRAND.md`) if you want
@@ -562,7 +562,7 @@ Events: `startup`, `dir_changed` (`{cwd}`), `project_changed` (`{project_home}`)
   `spyc.search_content(regex)` → rows of `{ file, line, text }`.
 - **Drive the view:** `spyc.navigate(path)`, `spyc.pick(...)`,
   `spyc.clear_picks()`, `spyc.filter(...)`, `spyc.report_status(state)`.
-- **Invoke behaviors:** `spyc.action("<snake_case_name>")` (any built-in action,
+- **Invoke behaviours:** `spyc.action("<snake_case_name>")` (any built-in action,
   e.g. `git_blame`), `spyc.cmd("<:command>")`.
 - **Talk to the user:** `spyc.notify(msg)`, `spyc.warn(msg)`.
 

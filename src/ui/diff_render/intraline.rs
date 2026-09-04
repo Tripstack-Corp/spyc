@@ -6,7 +6,7 @@
 //! changed region is reported. Trimming a common prefix and suffix — the cheap
 //! approach — yields exactly one region, which collapses
 //! `foo(a, b, c)` → `foo(x, b, y)` into the single blob `a, b, c` / `x, b, y`
-//! and washes the unchanged `b` in the highlight color.
+//! and washes the unchanged `b` in the highlight colour.
 //!
 //! **Granularity is a user choice** ([`Intraline`], `[diff] intraline`):
 //!

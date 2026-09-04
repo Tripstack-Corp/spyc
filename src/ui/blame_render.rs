@@ -2,9 +2,9 @@
 //!
 //! The in-house replacement for piping `git blame` bytes through the pager.
 //! Each file line gets a fixed-width gutter — short commit id, author, date —
-//! followed by the syntax-highlighted line content. The gutter is colored by a
+//! followed by the syntax-highlighted line content. The gutter is coloured by a
 //! stable hash of the commit id, so consecutive lines from the same commit
-//! share a color (mirroring `git blame --color-lines`, making churn visible at
+//! share a colour (mirroring `git blame --color-lines`, making churn visible at
 //! a glance). Line numbers come free from the pager's own line-number toggle.
 //!
 //! Pure: `model + &Theme → lines`, no IO, no gix. Wired into the pager by
@@ -22,8 +22,8 @@ const AUTHOR_W: usize = 12;
 /// Date column width (`YYYY-MM-DD`).
 const DATE_W: usize = 10;
 
-/// Distinguishable hues for per-commit gutter coloring (Tokyo-Night palette).
-/// A commit's id hashes to one of these; same commit → same color.
+/// Distinguishable hues for per-commit gutter colouring (Tokyo-Night palette).
+/// A commit's id hashes to one of these; same commit → same colour.
 const BLAME_PALETTE: [Color; 6] = [
     Color::Rgb(0x7a, 0xa2, 0xf7), // blue
     Color::Rgb(0x9e, 0xce, 0x6a), // green
@@ -102,7 +102,7 @@ fn blame_gutter(bl: &BlameLine, theme: &Theme) -> Span<'static> {
     )
 }
 
-/// Gutter style for a commit: a palette color keyed by the id hash, or a dim
+/// Gutter style for a commit: a palette colour keyed by the id hash, or a dim
 /// terminal default in `mono`.
 fn blame_style(theme: &Theme, short_id: &str) -> Style {
     if theme.mono {
@@ -112,7 +112,7 @@ fn blame_style(theme: &Theme, short_id: &str) -> Style {
     }
 }
 
-/// Map a commit short id to a stable palette color via FNV-1a, so all lines
+/// Map a commit short id to a stable palette colour via FNV-1a, so all lines
 /// from one commit share a hue.
 fn blame_color(short_id: &str) -> Color {
     let mut hash: u32 = 0x811c_9dc5;
@@ -185,7 +185,7 @@ mod tests {
         let theme = Theme::default();
         let out = render_blame(&sample(), &theme);
         let gutter_fg = |i: usize| out[i].spans[0].style.fg;
-        // Lines 0, 1, 3 are Ada's commit → same color; line 2 is Bob's → differs.
+        // Lines 0, 1, 3 are Ada's commit → same colour; line 2 is Bob's → differs.
         assert_eq!(gutter_fg(0), gutter_fg(1));
         assert_eq!(gutter_fg(0), gutter_fg(3));
         assert_ne!(gutter_fg(0), gutter_fg(2));

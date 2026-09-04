@@ -1,5 +1,5 @@
 //! Pager visual / block / placement selection + state-clamp tests,
-//! split out of `pager/tests.rs` (800-LoC campaign). Behavior-identical;
+//! split out of `pager/tests.rs` (800-LoC campaign). Behaviour-identical;
 //! relocated verbatim.
 
 use super::*;

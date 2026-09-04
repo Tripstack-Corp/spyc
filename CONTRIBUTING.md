@@ -55,7 +55,9 @@ We use GitHub pull requests. The target branch is `main`.
    host clippy compiles that code out. If you touched anything under
    `.github/workflows/`, run `make lint-workflows` (actionlint +
    shellcheck; `brew install actionlint shellcheck`) — CI runs it in
-   the lint job. `make aislop` is an advisory AI-slop scan (net-new
+   the lint job. Prose — docs and comments alike — is
+   Canadian English (`colour`, `centre`, but `organize`/`analyze`);
+   `prose_is_canadian_english` enforces it, and identifiers are exempt. `make aislop` is an advisory AI-slop scan (net-new
    findings vs the baseline).
 
 4. **Push and open a PR** on GitHub:
@@ -104,14 +106,14 @@ each entry carries its handler, so a registered command with no
 handler is a compile error. Side effects are `Effect` variants
 (`src/app/effect.rs`) returned as data — handlers never touch the OS
 directly. `AGENTS.md` is the full architectural contract (MVU
-invariants + conventions); read it before adding behavior.
+invariants + conventions); read it before adding behaviour.
 
 ### File size
 
 No `.rs` file over ~800 lines without a solid reason (a module root
 holding its own core type definitions qualifies; a pile of helpers
 does not). When a file grows, extract a cohesive child/sibling module
-— verbatim relocation, behavior-identical. `app/mod.rs` has a
+— verbatim relocation, behaviour-identical. `app/mod.rs` has a
 ceiling-guard test (`app::guard_tests::mod_rs_stays_decomposed`):
 if you hit it, extract a module, don't bump the number.
 
@@ -150,7 +152,7 @@ use `terminal.clear()` per frame.
 
 ## Keep docs in sync
 
-When your change affects user-visible behavior, keybindings, or
+When your change affects user-visible behaviour, keybindings, or
 project status, update **all** of:
 
 - `FEATURES.md` — what the app does

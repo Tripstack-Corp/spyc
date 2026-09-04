@@ -102,7 +102,7 @@ pub fn render_transcript(
         .fg(theme.prompt_prefix)
         .add_modifier(Modifier::BOLD);
     let tool_style = Style::default().fg(theme.take);
-    // Muted via status_suffix's gray, NOT Modifier::DIM — DIM on top of it
+    // Muted via status_suffix's grey, NOT Modifier::DIM — DIM on top of it
     // renders near-invisible on dark backgrounds.
     let dim_style = Style::default().fg(theme.status_suffix);
 

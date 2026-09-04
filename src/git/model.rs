@@ -2,7 +2,7 @@
 //!
 //! These types are the structured foundation the in-house renderer
 //! ([`crate::ui::diff_render`] / [`crate::ui::blame_render`]) styles into pager
-//! lines, replacing the colored-bytes-from-`git` subprocess path (deleted in
+//! lines, replacing the coloured-bytes-from-`git` subprocess path (deleted in
 //! PR 9). They are deliberately free of any gix types: every field is an owned
 //! `String` / number / plain enum, so the model is `Send`, comparable in
 //! tests, and carries no borrow back into the repository. The builders that

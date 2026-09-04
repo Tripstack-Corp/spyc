@@ -571,7 +571,7 @@ mod tests {
         let sel = view.visual.expect("still selecting");
         // The rect's right edge (col 9) clamps first, and THEN `hit_test` clamps
         // again to the line's own length ("line0" is 5 chars, max index 4) — the
-        // same end-of-line behavior `hit_test_clamps_past_end_of_line` pins.
+        // same end-of-line behaviour `hit_test_clamps_past_end_of_line` pins.
         assert_eq!(
             sel.cursor_col, 4,
             "clamped into the rect, then to end-of-line"

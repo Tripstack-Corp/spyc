@@ -80,7 +80,7 @@ impl AppState {
             Action::Climb => return ApplyResult::Post(self.climb()),
             Action::Home => {
                 // Resolve HOME through the envset layer so a `:setenv HOME=…`
-                // override is honored here just as it is for `:cd` and the
+                // override is honoured here just as it is for `:cd` and the
                 // shell spawn (envset::var falls back to the real env).
                 if let Some(home) = crate::envset::var("HOME").map(PathBuf::from) {
                     return ApplyResult::Post(vec![Effect::ChangeDir {
@@ -263,7 +263,7 @@ impl AppState {
             Action::RemovePrompt(count) => {
                 // `count.is_some()` = explicit `Ndd` from the user.
                 // None = bare `R` or bare `dd` → picks-or-cursor
-                // semantics (existing `R` behavior).
+                // semantics (existing `R` behaviour).
                 let paths: Vec<PathBuf> = if let Some(n) = count {
                     // Cursor + (n-1) entries below, clamped at end
                     // of list. No wrap. Ignores picks — the count
@@ -328,7 +328,7 @@ impl AppState {
                     )
                 };
                 // Capture the targeted paths so the list view can
-                // highlight them in the warning color while the
+                // highlight them in the warning colour while the
                 // confirm prompt is up. Cleared on confirm/cancel
                 // in `handle_remove_confirm_key`.
                 self.pending_delete_preview =

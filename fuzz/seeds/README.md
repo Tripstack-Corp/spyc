@@ -13,7 +13,7 @@ the containment cases.
 
 ## archive_container
 
-The first byte of each file selects the container flavor (`% 4` →
+The first byte of each file selects the container flavour (`% 4` →
 zip / tar / tar.gz / tar.zst); the rest is the container itself.
 
 | seed | shape |

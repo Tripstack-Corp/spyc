@@ -151,7 +151,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 
 Press `Enter` on a file to view it in the built-in pager with
 syntax highlighting, search (`/` forward, `?` backward; `n` / `N`
-repeat), line numbers, hex dump, markdown rendering, and ANSI color
+repeat), line numbers, hex dump, markdown rendering, and ANSI colour
 support. Press `H` (or `F1`) inside the pager for its own help overlay.
 
 `Enter` on a **PNG / JPEG / GIF / WebP** shows the picture full-screen
@@ -170,7 +170,7 @@ instead (detected by magic bytes, not the extension). Its verbs:
 On a terminal with no graphics protocol the picture can't be drawn
 inline; `o` still opens it externally.
 
-The pager isn't limited to a centered overlay. It can also mount
+The pager isn't limited to a centred overlay. It can also mount
 in place:
 
 - **`D`** opens the cursor file in the **top pane** (bottom pane
@@ -244,7 +244,7 @@ Long captured commands shouldn't lock you out of spyc.
 
 Backgrounded tasks render in the pane divider as `[N+]` (running, new
 output), `[N●]` (running, quiescent), `[N⏸]` (paused via `S`), `[N✓]`
-(exit 0), `[N✗]` (non-zero / killed / crashed), in a distinct color
+(exit 0), `[N✗]` (non-zero / killed / crashed), in a distinct colour
 from pane tabs.
 When a viewed task exits, closing the task viewer pushes its
 final rendered view into the buffer-history stack so `[b` walks

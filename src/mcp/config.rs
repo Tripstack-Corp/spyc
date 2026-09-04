@@ -332,7 +332,7 @@ fn ensure_spyc_in_mcp_json(
 /// us automatically, the same way claude does via `.mcp.json`. Codex
 /// reads both `~/.codex/config.toml` (user-scope) and
 /// `<cwd>/.codex/config.toml` (project-scope); we only ever write the
-/// project file to mirror claude's project-scoped behavior and avoid
+/// project file to mirror claude's project-scoped behaviour and avoid
 /// touching the user's main config.
 ///
 /// Codex's TOML schema is `[mcp_servers.<name>]` with `command`,
@@ -765,7 +765,7 @@ mod tests {
     // socket): an entry pointing at our own socket, or at a dead one, must
     // never trigger a takeover. The live-socket TookOver/Skipped branches
     // share the same `UnixStream::connect` call and are exercised by the
-    // end-to-end takeover behavior.
+    // end-to-end takeover behaviour.
 
     #[test]
     fn decide_takeover_proceeds_on_own_socket() {

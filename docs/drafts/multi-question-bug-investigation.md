@@ -304,7 +304,7 @@ Leave the question **unanswered** on screen; that's the state the bug needs.
   `last_size` per tab so a returning tab isn't handed a size change it
   doesn't need. The Ink bug isn't ours to fix, but the trigger is ours to
   withhold.
-- **If C:** already done — `encode_key` honors the pane's DECCKM. Nothing more
+- **If C:** already done — `encode_key` honours the pane's DECCKM. Nothing more
   to build; the open work is confirming or falsifying it from the field.
 
 These are entirely different changes. Picking wrong costs a PR.

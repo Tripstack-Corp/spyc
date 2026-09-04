@@ -294,7 +294,7 @@ impl App {
 
         // `<Space>` or `?` in Normal mode opens the history popup. The
         // full sequence is `Esc Space` (or `Esc ?`): first Esc enters
-        // Normal mode (the standard vi-line-editor behavior); Space/`?`
+        // Normal mode (the standard vi-line-editor behaviour); Space/`?`
         // then asks for the bigger pager view. Reads more naturally
         // than double-Esc and doesn't fight Esc's "back out of
         // something" muscle memory.

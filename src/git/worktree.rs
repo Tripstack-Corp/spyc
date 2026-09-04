@@ -434,7 +434,7 @@ fn resolve_or_create_branch(
     gix::refs::FullName::try_from(full_ref)
         .map_err(|e| std::io::Error::other(format!("invalid branch name '{branch}': {e}")))?;
     // Start the new branch at `base` (the repo's default branch) when given and
-    // resolvable, else the current HEAD — the pre-POLA behavior, and the
+    // resolvable, else the current HEAD — the pre-POLA behaviour, and the
     // fallback when there's no resolvable default (origin-less / unborn repo).
     let start_commit = match base.and_then(|b| {
         repo.rev_parse_single(gix::bstr::BStr::new(b.as_bytes()))
@@ -518,7 +518,7 @@ pub fn remove(path: &Path) -> std::io::Result<()> {
 
 /// Like [`remove`], but skips the *dirty* refusal — for safe-remove, which has
 /// already archived the worktree's uncommitted/untracked content to the
-/// graveyard. A *lease* (lock) is still honored: `force` forces past dirt, not
+/// graveyard. A *lease* (lock) is still honoured: `force` forces past dirt, not
 /// past another session's claim — release it first.
 pub fn remove_force(path: &Path) -> std::io::Result<()> {
     remove_inner(path, true)

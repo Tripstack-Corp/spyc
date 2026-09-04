@@ -4,7 +4,7 @@
 //! state, so they live apart from the event state machine. `super::renderer`
 //! uses them to wrap prose paragraphs and table cells at a target column
 //! width. Split out of `markdown.rs` verbatim during the 800-LoC
-//! decomposition — behavior-identical.
+//! decomposition — behaviour-identical.
 
 use ratatui::text::Span;
 

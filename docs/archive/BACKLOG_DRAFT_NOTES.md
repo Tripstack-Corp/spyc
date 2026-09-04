@@ -265,7 +265,7 @@ long-running FIXED log.)_
   binding-taxonomy overhaul (global/frame/pane tiers, guard-enforced; see
   AGENTS.md → "Binding taxonomy")
 - Spencer hates that g-h and g-w conflict — resolved by the leader/global-menu
-  rework: `gh` retired in favor of `Space p` (PROJECT_HOME jump); `gw`
+  rework: `gh` retired in favour of `Space p` (PROJECT_HOME jump); `gw`
   (worktree-root jump) kept as frame nav, no longer colliding
 - investigate what it would take to create a brew tap from our github — now
   planned in full in `docs/RELEASE_ENGINEERING.md` (§9 distribution channels,
@@ -418,13 +418,13 @@ long-running FIXED log.)_
 - (fixed, v1.41.15) Huge directories no longer hang spyc on chdir.
   `Listing::read` caps at 50,000 entries; truncated reads flash a
   hint so the user knows the listing isn't the full picture. The
-  pre-fix behavior on a 1M-entry tmp dir was a multi-minute event
+  pre-fix behaviour on a 1M-entry tmp dir was a multi-minute event
   loop block that required killing the terminal.
 - (fixed, v1.41.14) Staged vs unstaged changes now visually distinct
   via a two-character marker mirroring `git status -s` (col 0 =
   staged side, col 1 = unstaged side). `M ` ready-to-commit,
   ` M` working-tree-only, `MM` partially staged + further edits.
-  Each char colored independently. `GitFileStatus` upgraded from a
+  Each char coloured independently. `GitFileStatus` upgraded from a
   flat enum to a struct carrying both halves + an untracked flag.
 - (fixed, v1.41.13) Unfocused side now visibly dims so the user can
   tell at a glance which half is the input target. Per-cell
@@ -604,7 +604,7 @@ long-running FIXED log.)_
   fall back to plain dump-to-stdout (or print a friendly "this
   terminal lacks features" error and exit). FORCE_COLOR /
   CLICOLOR_FORCE / COLORTERM kept so tools that respect those
-  still produce colored output despite the dumb terminfo signal.
+  still produce coloured output despite the dumb terminfo signal.
 - (fixed, v1.25.0) Pager line wrap is back -- this time done by
   spyc instead of ratatui's `Paragraph::wrap`. Pre-computed
   visual-width chunking with per-span style preservation, so
@@ -665,7 +665,7 @@ long-running FIXED log.)_
   when the prompt has an editor (shell prompts), it calls a new
   `LineEditor::insert_str` that inserts each char at the cursor and
   advances. Simple prompts (search, mkdir, etc.) keep the append
-  behavior since they have no cursor concept. Three new unit tests
+  behaviour since they have no cursor concept. Three new unit tests
   cover splice-at-cursor in Insert mode, end-of-line paste, and
   start-of-line paste.
 - (fixed, v1.21.2) `!cmd` capture pager (and task viewer) now collapse
@@ -695,7 +695,7 @@ long-running FIXED log.)_
   group (names via `getpwuid_r` / `getgrgid_r`), size, bytes, 512B
   blocks, mtime, atime, ctime, birth, and name (symlinks as
   `name -> target`). Column widths computed once across the whole
-  selection so rows align. Renders inside the standard centered
+  selection so rows align. Renders inside the standard centred
   pager with `fit_to_content` shrinking the height from the bottom,
   so a single-file or short listing doesn't sit inside a 92%-tall
   frame. Line-number gutter suppressed since it's noise for the
@@ -713,7 +713,7 @@ long-running FIXED log.)_
 - (fixed) pane scroll-mode is hard to miss now: divider rule
   line and active tab label retint to theme.pick (yellow) while
   scrolling, active tab label is bold-uppercased, the [SCROLL]
-  tag picks up the same color. Entering scroll mode no longer
+  tag picks up the same colour. Entering scroll mode no longer
   shifts the viewport (the cue is now visual instead of
   positional), so there's no "jump" on entry.
 - (fixed) session restore now sidesteps Claude's
@@ -904,7 +904,7 @@ long-running FIXED log.)_
   from the start
 - (fixed) when in a subdir of a git repo the watcher doesn't seem to work to
   monitor changes - does our .git watch work?
-- (fixed) git status colors not updating after commits/checkouts — the
+- (fixed) git status colours not updating after commits/checkouts — the
   500ms debounce was dropping .git/index events because needs_refresh
   was a local variable reset each loop iteration. Now persists as
   pending_refresh across iterations.

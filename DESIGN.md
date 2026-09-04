@@ -30,9 +30,9 @@ ships a default; `.spycrc.toml`'s `[colors]` table overrides them.
 | `status_suffix` | indigo grey | suffix segment (`[picks:0 …]`) |
 | `prompt_prefix` | amber | the leading `:`, `!`, `;`, `/`, etc. |
 
-**Mono mode** (`C` toggle) drops to default terminal colors with
+**Mono mode** (`C` toggle) drops to default terminal colours with
 modifiers (BOLD, DIM, REVERSED) carrying the structural information.
-Anything new must read in mono — no role-only-by-color.
+Anything new must read in mono — no role-only-by-colour.
 
 ## Component vocabulary
 
@@ -83,7 +83,7 @@ rather than create a new modal type.
 ### Transient surfaces
 
 - **Flash** — single-line message at the prompt row, cleared on the
-  next key. Two flavors: `flash_info` (neutral) and `flash_error`
+  next key. Two flavours: `flash_info` (neutral) and `flash_error`
   (red). The default surface for "something happened" feedback.
   **Use this** for non-blocking notifications; reach for an overlay
   only when the user needs to read more than one line or interact.
@@ -257,7 +257,7 @@ A checklist for adding a feature with UI surface:
    binding in the resolver, handler in the matching `src/app/`
    child module (or `command_table.rs` for a `:`-command), help
    row in `ui/help.rs`.
-5. Confirm it reads in mono. If color carries meaning, also use a
+5. Confirm it reads in mono. If colour carries meaning, also use a
    modifier (BOLD / DIM / REVERSED).
 6. Update CHANGELOG, the relevant GitHub Issue (if it closes one), and any user-facing
    doc. ARCHITECTURE only if the *engine* changed; DESIGN only if

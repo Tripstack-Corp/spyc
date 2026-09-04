@@ -1,7 +1,7 @@
 //! Hex-dump view: style a file's leading bytes into pager `Line`s.
 //!
 //! The byte read lives in the `fs` layer ([`crate::fs::ops::read_hex_window`]);
-//! this module owns the *presentation* — theme colors and `ratatui` spans —
+//! this module owns the *presentation* — theme colours and `ratatui` spans —
 //! so those UI dependencies stay out of `fs`. `fs` reads bytes, `ui` paints
 //! them.
 

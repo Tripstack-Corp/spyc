@@ -10,7 +10,7 @@
 //! `BackgroundTask`).
 //!
 //! Strict rule for Phase 6a: this module changes no observable
-//! behavior. The reader-thread protocol, debug-byte-dump,
+//! behaviour. The reader-thread protocol, debug-byte-dump,
 //! exit-status harvesting, and shutdown semantics all match the
 //! pre-refactor `Pane`/`BackgroundTask` paths exactly.
 

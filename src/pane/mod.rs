@@ -124,7 +124,7 @@ impl Pane {
         // Pane env: tell child processes (e.g. Claude CLI's MCP server)
         // where this spyc instance's context file lives, and advertise
         // truecolor support so apps that negotiate it (bat, fzf, delta,
-        // …) don't silently downgrade to 256-color. TERM=xterm-256color
+        // …) don't silently downgrade to 256-colour. TERM=xterm-256color
         // alone doesn't signal 24-bit; COLORTERM=truecolor is the de
         // facto standard pair.
         let context_str = context_path.to_string_lossy().into_owned();
@@ -417,7 +417,7 @@ impl Pane {
     ///
     /// - it reads `grid().visible_rows()`, so it follows the pane's CURRENT scroll
     ///   position — the same rows the widget drew, with no coordinate translation;
-    /// - it honors `row.wrapped()`, emitting a newline only at a HARD line end. A
+    /// - it honours `row.wrapped()`, emitting a newline only at a HARD line end. A
     ///   cell walk inserts a spurious `\n` in the middle of every soft-wrapped
     ///   line, which is the most irritating bug a terminal selection can have.
     ///
@@ -555,7 +555,7 @@ impl Pane {
     }
 
     /// Enter scroll mode without shifting the view. The mode flag
-    /// drives the divider re-color and tab uppercase that signal
+    /// drives the divider re-colour and tab uppercase that signal
     /// "you've left live view" — shifting the viewport would just
     /// add a jarring jump.
     pub const fn enter_scroll_mode(&mut self) {

@@ -52,13 +52,13 @@ impl App {
             .pane_tabs
             .as_ref()
             .is_some_and(|t| t.active().is_scrolling());
-        // Scroll mode flips the rule + active-tab color to blue
+        // Scroll mode flips the rule + active-tab colour to blue
         // (theme.dir) so "you're in scrollback" is unambiguous from
-        // peripheral vision. Amber stays the "focus" color for live
+        // peripheral vision. Amber stays the "focus" colour for live
         // mode; blue is reserved for scrollback and unused elsewhere
         // as a UI signal. The `[SCROLL]` tag below uses the same
-        // color, plus the active tab's label stays uppercased (shape
-        // cue independent of color).
+        // colour, plus the active tab's label stays uppercased (shape
+        // cue independent of colour).
         let rule_style = if is_scrolling {
             Style::default()
                 .fg(self.view.theme.dir)
@@ -110,7 +110,7 @@ impl App {
                 let sep = "─";
                 // Uppercase the active tab label in scroll mode — the
                 // shape change is a peripheral-vision cue even before
-                // the color registers.
+                // the colour registers.
                 let label = if is_active && is_scrolling {
                     entry.info.label.to_uppercase()
                 } else {
@@ -121,7 +121,7 @@ impl App {
                 // The active tab is marked by reverse-video (`active_tab_style`),
                 // not a `*` glyph — that glyph was redundant with the highlight
                 // AND made the active tab one column wider (a focus-switch jump).
-                // The single cell is: the colored activity dot for an agent tab
+                // The single cell is: the coloured activity dot for an agent tab
                 // (one with a resolved activity), else `+` for a shell tab with
                 // unseen output, else a blank space (still reserved, so a shell's
                 // `+` flicking on/off — e.g. htop — no longer changes the width).
@@ -129,7 +129,7 @@ impl App {
                 let suspended = entry.info.suspended;
                 let bracket = format!("[{}]", i + 1);
                 // Suspended (`^z`) → 💤, overriding the activity dot; else an
-                // agent's own colored dot span; else a shell's `+`/blank cell.
+                // agent's own coloured dot span; else a shell's `+`/blank cell.
                 // 💤 is 2 cols wide, so a suspended tab is 1 col wider than its
                 // running self — acceptable for a deliberate, sticky toggle
                 // (unlike the per-frame flicker the fixed-width cell prevents).
@@ -173,7 +173,7 @@ impl App {
                     "tab {i} paints a different width than tab_widths budgeted"
                 );
                 spans.push(Span::styled(sep, rule_style));
-                // An agent tab's eye-pull comes from the colored dot, so its
+                // An agent tab's eye-pull comes from the coloured dot, so its
                 // label stays calm (inactive style); a shell tab keeps the teal
                 // `activity_style` highlight for unseen output.
                 let style = if is_active {
@@ -228,7 +228,7 @@ impl App {
             }
         }
 
-        // Right-aligned background-task tags. Distinct color from pane
+        // Right-aligned background-task tags. Distinct colour from pane
         // tabs so the numbering doesn't visually collide (pane tabs are
         // 1..N left-to-right; bg tasks are 1..N right-anchored). Keeps
         // the rendered group ordered ascending L→R, but if there isn't
@@ -375,10 +375,10 @@ impl App {
         }
     }
 
-    /// Map a "spicy pulse" frame to a warm pepper-heat color: a 6-phase
+    /// Map a "spicy pulse" frame to a warm pepper-heat colour: a 6-phase
     /// ping-pong (deep-red → ember → orange → spark and back) so the Working dot
     /// *breathes* like a heating pepper rather than blinking. Truecolor walks an
-    /// RGB gradient; a 16/256-color terminal alternates two warm ANSI hues; a
+    /// RGB gradient; a 16/256-colour terminal alternates two warm ANSI hues; a
     /// mono theme drops to the single accent (no pulse). PURE.
     const fn spicy_pulse_color(&self, frame: u64) -> ratatui::style::Color {
         use ratatui::style::Color;
@@ -396,10 +396,10 @@ impl App {
         }
     }
 
-    /// P3-1 visual-bell color: a point on spyc's spice-heat gradient
+    /// P3-1 visual-bell colour: a point on spyc's spice-heat gradient
     /// (pepper→ember→orange→spark) at `frac` (0..1 around the border), swept by
     /// the animation `frame`. Truecolor walks the smooth gradient
-    /// (`spice_gradient`); a 256-color terminal still animates via a 3-color warm
+    /// (`spice_gradient`); a 256-colour terminal still animates via a 3-colour warm
     /// cycle; mono falls back to the popup-border accent.
     pub(super) fn spice_pulse_color(&self, frac: f32, frame: u64) -> ratatui::style::Color {
         use ratatui::style::Color;
@@ -432,7 +432,7 @@ impl App {
                         let hidden = total.saturating_sub(shown);
                         let hidden_tag = format!(" hidden:{hidden}");
                         // Bg tasks normally render in the divider line above
-                        // the pane (distinct color, right-aligned). When the
+                        // the pane (distinct colour, right-aligned). When the
                         // pane is hidden there is no divider, so fall back
                         // to the status-bar suffix here.
                         let bg_tag = if self.runtime.pane_tabs.is_some() {
@@ -599,7 +599,7 @@ const fn on_off(b: bool) -> &'static str {
 /// spyc's "spice heat" palette — the warm pepper→ember→orange→spark ramp shared
 /// by the Working activity dot's breathing pulse (`spicy_pulse_color`) and the
 /// visual-bell border sweep (`spice_gradient`), so both read as the same heat
-/// rather than two unrelated color stories.
+/// rather than two unrelated colour stories.
 const SPICE_HEAT: [(u8, u8, u8); 4] = [
     (0xE0, 0x32, 0x22), // pepper red
     (0xF4, 0x62, 0x12), // ember
@@ -669,7 +669,7 @@ mod tests {
     }
 
     /// The requirement behind `anim_phase_offset`: two Working tabs at the SAME
-    /// shared frame but different phase seeds land on different heat colors, so
+    /// shared frame but different phase seeds land on different heat colours, so
     /// the dots don't breathe in lockstep. Also pins the overflow contract — a
     /// full-range seed must `wrapping_add` onto the frame, not panic.
     #[test]
@@ -682,7 +682,7 @@ mod tests {
         app.view.agent_anim_frame = 1;
 
         // Offsets 0 and 3 sit at opposite ends of the ping-pong (pepper red vs
-        // spark) — distinct seeds, distinct colors at one instant.
+        // spark) — distinct seeds, distinct colours at one instant.
         let a = app.spicy_pulse_color(app.view.agent_anim_frame.wrapping_add(0));
         let b = app.spicy_pulse_color(app.view.agent_anim_frame.wrapping_add(3));
         assert_ne!(
@@ -695,7 +695,7 @@ mod tests {
         let _ = app.agent_activity_span(AgentActivity::Working, u64::MAX);
     }
 
-    // P3-1 visual bell: the pure spice-heat gradient color fn.
+    // P3-1 visual bell: the pure spice-heat gradient colour fn.
     #[test]
     fn spice_gradient_is_pure_and_starts_at_pepper_red() {
         // frame 0, frac 0 → the first stop (pepper red) exactly.

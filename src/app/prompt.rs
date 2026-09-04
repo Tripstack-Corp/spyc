@@ -72,7 +72,7 @@ pub enum PromptKind {
     /// destination are different.
     GraveyardPurgeAllConfirm,
     SetEnv,
-    /// `!` — capture command output with ANSI colors, show in in-app pager.
+    /// `!` — capture command output with ANSI colours, show in in-app pager.
     ShellCmdCaptured,
     /// New pane tab step 1: command to run.
     PaneNewTabCmd,

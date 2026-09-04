@@ -210,7 +210,7 @@ default:
 spyc --print-config > ~/.spycrc.toml
 ```
 
-Rebind keys, set colors and layout, tune agent notifications, script in Lua.
+Rebind keys, set colours and layout, tune agent notifications, script in Lua.
 Note that `^a` and `^w` are reserved as chord prefixes, and a project-local
 config can't bind executing verbs — full reference, including both rules, in
 [CONFIGURATION.md](CONFIGURATION.md).

@@ -109,7 +109,7 @@ impl FindPicker {
     /// Re-rank `candidates` against the current `query` and store in
     /// `filtered`, keeping the cursor on the same path if it survives the
     /// re-rank. The walker streams candidates in batches and re-ranks on
-    /// each; resetting `selected` to 0 every batch (the old behavior) yanked
+    /// each; resetting `selected` to 0 every batch (the old behaviour) yanked
     /// the cursor back to the top under the user, so a batch arriving just
     /// before Enter opened the wrong file. On a query change the previously
     /// selected path usually isn't in the new results, so it falls back to 0.

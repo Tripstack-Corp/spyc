@@ -292,7 +292,7 @@ Mechanics (the loop-held-waiter shape above):
   `release_scope` / tab close / claim edit) walks the parked waiters: none
   overlapping a `Merging` claim → send `cleared` + drop; past `deadline` → send
   `timed_out` + drop. A `Deadline::ScopeWait` at the earliest pending deadline
-  honors timeouts with no other activity — armed only while a waiter is parked, so
+  honours timeouts with no other activity — armed only while a waiter is parked, so
   **0-dps-idle holds**.
 - **Mandatory** `timeout_ms` (no unbounded blocks — a hard guardrail); the
   overlap check is pure + unit-tested (given claims + query paths → conflict?),

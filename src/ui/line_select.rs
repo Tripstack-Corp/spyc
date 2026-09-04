@@ -140,7 +140,7 @@ mod tests {
     }
 
     /// The highlight reverses exactly the selected columns and preserves each
-    /// piece's original style, so a segment's own colors survive.
+    /// piece's original style, so a segment's own colours survive.
     #[test]
     fn highlight_reverses_only_the_selected_columns() {
         let out = highlight_columns(&seg_line(), 5, 9);
