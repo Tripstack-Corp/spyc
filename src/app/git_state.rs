@@ -140,7 +140,9 @@ impl App {
             self.state.col_mut(side).pending_ghosts.clear();
         }
         if changed || had_pending {
-            self.state.rebuild_rows();
+            // This result is for `side`, which is not necessarily the focused
+            // column — rebuild the one that actually changed.
+            self.state.rebuild_rows_for(side);
         }
         changed || had_pending
     }
@@ -547,6 +549,92 @@ mod tests {
         assert!(
             app.git_restore_cursor().is_empty(),
             "a live (non-deleted) row produces no restore effect"
+        );
+    }
+
+    /// A status walk that lands for the **unfocused** column must repaint THAT
+    /// column. `rebuild_rows()` targets `cur()` — wherever the keyboard is — so
+    /// with `a` focused, every status change in `b` rebuilt `a` and left `b`
+    /// drawing whatever markers its row cache was built with. That is the
+    /// split-view staleness: `:why-git` reporting `0 marker(s)` while the screen
+    /// still drew `~` on `b`'s rows.
+    ///
+    /// Asserts the RENDERED rows, not `git.files`: the model half is already
+    /// correct, so a `git.files` assertion passes with the bug in place and
+    /// proves nothing.
+    #[test]
+    fn a_status_change_in_the_unfocused_column_repaints_that_column() {
+        use crate::app::App;
+        use crate::app::state::Side;
+        use crate::git::test_support::run_git;
+        use crate::ui::list_view::GitFileStatus;
+        use ratatui::{Terminal, backend::TestBackend};
+
+        fn draw(app: &mut App) {
+            let mut t = Terminal::new(TestBackend::new(160, 40)).expect("test backend");
+            t.draw(|f| app.render(f)).expect("draw");
+        }
+        fn tracked_status(app: &App) -> GitFileStatus {
+            app.view
+                .right_cached_rows
+                .iter()
+                .find(|r| r.display.starts_with("tracked.txt"))
+                .expect("b's rendered rows include tracked.txt")
+                .git_status
+        }
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let a_dir = tmp.path().join("a");
+        let b_dir = tmp.path().join("b");
+        // Two independent repos: per-column git is the point — `b` shows its own
+        // status, not `a`'s.
+        for d in [&a_dir, &b_dir] {
+            std::fs::create_dir_all(d).expect("mkdir");
+            run_git(d, &["init", "-q"]);
+            std::fs::write(d.join("tracked.txt"), "one\n").expect("write");
+            run_git(d, &["add", "tracked.txt"]);
+            run_git(
+                d,
+                &[
+                    "-c",
+                    "user.email=t@t",
+                    "-c",
+                    "user.name=t",
+                    "commit",
+                    "-qm",
+                    "init",
+                ],
+            );
+        }
+
+        let mut app = App::test_app(a_dir);
+        app.open_second_commander_at_background(&b_dir);
+        // Opening points `vsplit.focus` at Right; put the keyboard back on `a`,
+        // which is the arrangement that goes stale.
+        app.state.vsplit.as_mut().expect("vsplit open").focus = Side::Left;
+        draw(&mut app);
+        assert_eq!(
+            tracked_status(&app),
+            GitFileStatus::clean(),
+            "precondition: b starts clean, so the assertion below is not vacuous"
+        );
+
+        // Stage a change in `b` only. `git add` moves `.git/index`, so the poll's
+        // mtime key genuinely differs — no test-only poking of the cache needed.
+        std::fs::write(b_dir.join("tracked.txt"), "two\n").expect("write");
+        run_git(&b_dir, &["add", "tracked.txt"]);
+
+        assert!(
+            app.state.refresh_git_state(),
+            "the poll must observe b's staged change"
+        );
+        draw(&mut app);
+
+        assert_ne!(
+            tracked_status(&app),
+            GitFileStatus::clean(),
+            "b's RENDERED rows must carry the marker: a walk for the unfocused \
+             column has to repaint that column, not whichever one holds the keyboard"
         );
     }
 }

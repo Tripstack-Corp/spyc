@@ -15,20 +15,29 @@ use super::{AppState, GitStatusCache, GitWorkerRequest, Side};
 use super::find_repo_root;
 
 impl AppState {
-    /// Re-poll git state for **every** active column and rebuild rows once if
-    /// anything changed. The 1 Hz safety-net poll (see
+    /// Re-poll git state for **every** active column, rebuilding each column
+    /// whose git actually changed. The 1 Hz safety-net poll (see
     /// [`Self::refresh_git_state_for`] for the per-column mechanics + the mtime
     /// short-circuit). Returns `true` iff any column's git changed.
     pub fn refresh_git_state(&mut self) -> bool {
         // Refresh each active column independently (per-column git). Explicit
         // sides rather than iterating `active_sides()` so the loop body can take
-        // `&mut self` without collecting the borrow first.
-        let mut any = self.refresh_git_state_for(Side::Left);
-        if self.right.is_some() {
-            any |= self.refresh_git_state_for(Side::Right);
+        // `&mut self` without collecting the borrow first — and so each column's
+        // rebuild is addressed to ITS side. The row cache is per column, keyed on
+        // that column's own `list_generation`, so one `cur()`-targeted rebuild
+        // left the other column drawing stale markers until something else
+        // happened to bump its generation.
+        let left_changed = self.refresh_git_state_for(Side::Left);
+        if left_changed {
+            self.rebuild_rows_for(Side::Left);
         }
-        if any {
-            self.rebuild_rows();
+        let mut any = left_changed;
+        if self.right.is_some() {
+            let right_changed = self.refresh_git_state_for(Side::Right);
+            if right_changed {
+                self.rebuild_rows_for(Side::Right);
+            }
+            any |= right_changed;
         }
         any
     }
