@@ -1,0 +1,47 @@
+# Standalone spike crate. The empty `[workspace]` table makes this its own
+# workspace root, so cargo never walks up into spyc's manifest and `make check`
+# on main is untouched. Nothing here is published or linked into the binary.
+[workspace]
+
+[package]
+name = "vt-engine-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[features]
+# Each engine is a feature so a toolchain that can't build one (option C needs
+# `zig` on PATH plus network access at build time) still runs the rest.
+default = []
+ghostty = ["dep:libghostty-vt"]
+wezterm = ["dep:wezterm-term", "dep:wezterm-surface"]
+
+[dependencies]
+vt100 = "0.16.2"
+# Capture only: same pty crate spyc uses, so a fixture is produced through the
+# same kernel path spyc's `PtyHost` does.
+portable-pty = "0.9"
+anyhow = "1"
+# For the adapter probe only: spyc's `mod pane` / `mod ui` are private in
+# lib.rs (only `pub mod fuzz` is exported), so the spike cannot link
+# `PaneWidget` / `lines_from_scrollback` and instead TRANSCRIBES them against
+# the same ratatui version spyc builds with. Noted in the report.
+ratatui = "0.30"
+
+# Option C. `libghostty-vt-sys`'s build script shells out to `zig build` AND
+# git-clones ghostty at a pinned commit into OUT_DIR — see the distribution
+# section of the report.
+libghostty-vt = { version = "0.2.1", optional = true }
+
+# Option B. NOT on crates.io at any version: `cargo add wezterm-term` fails.
+# A git dependency is the only way to reach it, which is precisely why it
+# cannot be a production dependency of a crates.io-published crate.
+wezterm-term = { git = "https://github.com/wezterm/wezterm", optional = true }
+# Same git source so cargo unifies it with the one wezterm-term links; the
+# crates.io `termwiz` 0.23 is a DIFFERENT crate to the type system than the
+# termwiz 0.24 inside this checkout, which is its own kind of adoption cost.
+wezterm-surface = { git = "https://github.com/wezterm/wezterm", optional = true }
+
+[profile.release]
+opt-level = 3
+debug = false
