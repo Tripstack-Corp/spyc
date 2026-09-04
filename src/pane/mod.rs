@@ -661,9 +661,12 @@ fn append_pty_debug(bytes: &[u8]) {
 }
 
 /// Replace a torn parser with a fresh one at its CURRENT size — NOT a captured
-/// adopt-time size. (vt100 0.15 can panic on some valid escape sequences, e.g.
-/// nvim's exit-from-alt-screen; the worker's `catch_unwind` calls this to
-/// recover.) `Pane::resize` coalesces same-size resizes, so a stale size would
+/// adopt-time size. (vt100 0.16.2 still panics on valid input at a 1-row or
+/// 1-column screen and on a wide char split by a shrink — all reachable,
+/// because the geometry clamps stop at 1; the worker's `catch_unwind` calls
+/// this to recover. The nvim exit-from-alt-screen panic this used to name was
+/// fixed in 0.16.2. `Cargo.toml`'s `[profile.release]` carries the full list.)
+/// `Pane::resize` coalesces same-size resizes, so a stale size would
 /// never get corrected. Reading the live size off the parser keeps the
 /// recovered grid the right shape; the size fields survive a `process` panic
 /// (it tears cell/cursor state, not dimensions).
