@@ -18,6 +18,12 @@ designing Projects.
 
 No Projects implementation code lands in 2.2 — only the design doc.
 
+The VT engine (§8) joined after the scope was accepted: the spike that was
+meant to gate a 3.0 decision reported that the incumbent is unfixable on its
+own timeline, and #34's engine half was already 2.2 scope. Landing it here
+buys a release of dogfood soak before 3.0 makes screen reconstruction
+load-bearing.
+
 ## Scope
 
 | # | Item | Kind | Tracking |
@@ -27,8 +33,9 @@ No Projects implementation code lands in 2.2 — only the design doc.
 | 3 | Configurable startup pane tabs | prep + feature | [#58](https://github.com/Tripstack-Corp/spyc/issues/58), [plan](PANE_STARTUP_TABS_PLAN.md) |
 | 4 | Session forking (`^a f`) | feature | [#8](https://github.com/Tripstack-Corp/spyc/issues/8) |
 | 5 | Prompt templates in `.spycrc.toml` | feature | [#71](https://github.com/Tripstack-Corp/spyc/issues/71) |
-| 6 | The daily-driver bug set | fix | [#326](https://github.com/Tripstack-Corp/spyc/issues/326), [#327](https://github.com/Tripstack-Corp/spyc/issues/327), [#9](https://github.com/Tripstack-Corp/spyc/issues/9), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#22](https://github.com/Tripstack-Corp/spyc/issues/22), [#11](https://github.com/Tripstack-Corp/spyc/issues/11) |
+| 6 | The daily-driver bug set | fix | [#326](https://github.com/Tripstack-Corp/spyc/issues/326), [#327](https://github.com/Tripstack-Corp/spyc/issues/327), [#9](https://github.com/Tripstack-Corp/spyc/issues/9), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#22](https://github.com/Tripstack-Corp/spyc/issues/22), [#11](https://github.com/Tripstack-Corp/spyc/issues/11) |
 | 7 | Author `docs/drafts/PROJECTS_PLAN.md` | design | this doc, §7 |
+| 8 | The VT engine — libghostty-vt replaces vt100 | prep + fix | [spike](VT_ENGINE_SPIKE.md), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#453](https://github.com/Tripstack-Corp/spyc/issues/453) |
 
 ---
 
@@ -268,19 +275,51 @@ topology argument, the consumer-aware `^a s`/`^a S` split — stays under
 
 ### #34 — Claude PTY scrollback artifacts
 
-Half of this is already answered, and the issue predates the answer.
-`docs/HARNESS.md` §3 documents that inline claude is the one agent with two
-history sources: spyc's vt100 capture (the grid, which accumulates repaint
-artifacts from progress bars, spinners and cursor repositioning) and claude's
-own on-disk transcript (real text, searchable). #391 shipped `T` to swap
-between them, and `[pane] claude_transcript_scrollback` picks the default. So
-an artifact-free source for reading history already exists.
+This was the least certain scope of the six bugs and the spike settled it: it
+is **one adapter defect and a set of engine defects**, and they are fixed in
+different stages of §8. The adapter half is split out as
+[#452](https://github.com/Tripstack-Corp/spyc/issues/452); #34 is retitled to
+the engine half, which is the bulk of it.
 
-What remains is the live view: the CLI scrolling halfway up the pane, and `^L`
-redrawing the visible screen without repairing the grid. The issue's suggestion
-— pin the CLI to the bottom — is a display question about `src/pane/widget.rs`
-(vt100 → ratatui) and the 10,000-row parser in `Pane::spawn_with_env`. Scope it
-to that, and say in the issue that the reading half is closed.
+The reading half was already answered before the issue was filed.
+`docs/HARNESS.md` §3 documents that inline claude is the one agent with two
+history sources — spyc's terminal capture (the grid, which accumulates repaint
+artifacts) and claude's own on-disk transcript (real text, searchable). #391
+shipped `T` to swap between them and `[pane] claude_transcript_scrollback`
+picks the default, so an artifact-free source for reading history exists.
+
+**The adapter half ([#452](https://github.com/Tripstack-Corp/spyc/issues/452), PR 10), independent of the engine:**
+
+- `cell_style` never reads `Cell::dim()`. SGR 2 support arrived in vt100 0.16,
+  after the function was written, so a child's dim text renders at normal weight
+  — flattening exactly the hierarchy agent CLIs use it for. Note the interaction
+  the fix has to state: the unfocused-pane fade already spends
+  `Modifier::DIM`, so on an unfocused pane content-dim and focus-dim collapse
+  into one another. That is acceptable and pre-existing; it is not a reason to
+  pick a different modifier.
+
+A second adapter claim — that `PaneWidget` clobbers ratatui's wide-glyph
+continuation cell — **was withdrawn** (spike report §4, dated). `set_string`
+claims that column and fills it with a space itself, and vt100 reports the
+continuation cell at `bg=Default`, so skipping it and writing a space into it
+are byte-identical. The finding was an artifact of the harness comparing two
+differently-normalized rows. Recorded here because it briefly made the adapter
+half look like the headline of #34, and it is not.
+
+**The engine half (#34, PR 15), fixed by the swap, not by us:** vt100 has no DEC
+special graphics charset, so a child drawing a box with SCS renders literal
+`lqqqk`; it loses a row written before a DECSTBM region is set; it retains **0**
+scrollback rows under a scroll region where both other engines retain their
+content, which is the codex limitation `src/agent/mod.rs:470` documents; and it
+silently truncates a grapheme cluster past 18 bytes (`CONTENT_BYTES = 22`, with
+`append` returning early), which is why a tag-sequence flag loses its last two
+tag characters.
+
+What is **not** in either half: the issue's own suggestion, pinning the CLI to
+the bottom of the pane. The spike found no evidence that the live view drifts
+for any reason other than the defects above, so that idea is dropped rather
+than deferred — if drift survives stages 2 and 6, it gets a fresh issue with a
+fresh reproduction.
 
 ### #22 + #11 — MCP takeover and multi-instance coexistence
 
@@ -348,6 +387,109 @@ plan does not answer them.
    manifest is written knowing the 3.0 attach snapshot is its superset — one
    inventory, two consumers.
 
+## 8. The VT engine — libghostty-vt replaces vt100
+
+Full evidence in [`VT_ENGINE_SPIKE.md`](VT_ENGINE_SPIKE.md); this section is the
+staging, the gate, and the decisions the stages are allowed to make.
+
+**Why it is here and not in 3.0**, which is what the spike recommended: #34's
+engine half is already 2.2 scope, so the swap was going to be touched this
+release either way; the incumbent is not fixable on its own timeline (bus factor
+1, 14 months silent, the panic-fix PRs open since 2021 and the scrollback
+rehydration PR since 2021-01-30); and landing the engine now buys a full release
+of daily dogfood soak before 3.0 makes screen reconstruction load-bearing.
+
+### The gate (PR 13)
+
+**Every ghostty figure in the spike was measured at ghostty `f4c68d65`, and that
+commit cannot ship.** It was chosen because it is ABI-compatible with the
+published `libghostty-vt-sys 0.2.1` bindings, and at that commit
+`max_scrollback` is inert — retained history saturates at ~840 rows regardless
+of the configured budget, which is why the report's per-pane memory figure
+carries a "not comparable at face value" caveat.
+
+The shipping pin postdates the scrollback-limits refactor, so the report's
+numbers are unverified there. PR 13 re-runs the harness at the pin and must
+show: a functional scrollback budget (`sbprobe`), zero panics over ≥50k
+`fuzz_diff` iterations, re-graded rehydration, the two known ghostty emit bugs
+re-checked, and throughput and memory re-measured. Results land as a **dated
+addendum** to the spike report — appended, never a rewrite; the report records
+what was measured when.
+
+**If the re-run materially degrades rehydration fidelity or the panic count,
+adoption does not proceed.** The series stops after PR 11 and the decisions log
+is amended to say so. That is a real branch, not a formality.
+
+### Decisions the stages make
+
+**The scrollback budget mapping is a decision, not a conversion.** spyc budgets
+in rows (`Pane::spawn_with_env` passes 10,000). The pin's API exposes both a
+byte limit and a line limit, and the header is explicit that if both are set the
+first-reached one wins. Measured before the series opened: setting only the line
+limit leaves a **default byte cap** binding first, which truncates history to
+~840 rows irrespective of the line limit — the same number the inert-option
+commit produced, from a different cause. So **both limits are set
+deliberately and neither is left at its default**: the line limit to spyc's row
+budget, and the byte limit to an explicit, documented ceiling. Leaving the byte
+limit alone is what produced the truncation; removing it entirely trades a
+documented cap for an unbounded one, which is the wrong direction for a
+long-lived pane set. With the line limit binding, a configured 10,000 retains
+9,883 rows (98.8%).
+
+Page-granularity pruning makes the limit an estimate, so the retention criterion
+is **"≥ budget minus one page"** — never an exact count. PR 13 runs `sbprobe`
+with the **shipped** configuration, not a probe-only one, so the number in the
+addendum is the number users get.
+
+The addendum must also say, in so many words, that **~840 rows is a number two
+unrelated causes produce**: the inert `max_scrollback` at `f4c68d65`, and a
+default byte cap binding ahead of the line limit at the shipping pin. Both were
+measured during this work. Recorded because a future harness run that recognises
+840 as "the expected ghostty number" and stops looking is exactly the trap this
+series already fell into once.
+
+**The threading resolution is open until PR 15 prices it.** The bindings'
+`Terminal` is `!Send` — a conservative binding choice, not a C-library
+constraint — and spyc parses on a dedicated worker thread behind a mutex.
+Option one: confine the terminal to its worker and pass snapshots or dirty
+regions out; ghostty's `begin_update`/`end` and `Dirty::{Clean,Partial,Full}`
+map onto `needs_draw`'s reason codes, so this may be a restructure with a
+payoff rather than a workaround. Option two: `unsafe impl Send` in
+`spyc-vt-sys`, justified line-by-line against the C API's documented threading
+contract at the pin, behind a `SPYC-TRAP` anchor because its failure mode is
+silent UB. Both priced before either is coded; option one preferred if costs are
+comparable; the choice recorded in the decisions log, not left to be inferred
+from the diff.
+
+**The MSRV does not move, unless the FFI proves otherwise.** The spike recorded
+"1.88 → 1.90"; re-checked, that number is the published `libghostty-vt` /
+`libghostty-vt-sys` crates' own `rust-version` declaration and nothing about
+ghostty's C API or the FFI requires it. spyc does not depend on those crates —
+they are ABI-incompatible with the shipping constructor, which is why PR 12
+writes bindings against the pin's headers instead — so `spyc-vt-sys` declares
+spyc's own 1.88 and the CI MSRV job is what proves it. A bump becomes a
+recorded decision only if a needed feature demands one.
+
+**vt100 stays selectable for 2.2.** The flip makes ghostty the default and keeps
+`[pane] engine` as the fallback while it soaks. Removing vt100 — and with it the
+`panic = "unwind"` profile setting's original rationale, the trait's second impl,
+and a dependency — is filed as [#453](https://github.com/Tripstack-Corp/spyc/issues/453) for 2.3 triage rather than decided
+here.
+
+### What does not happen
+
+No vt100 patches and no geometry floor, despite four live panic classes
+reachable at spyc's `.max(1)` clamp. The swap lands this release; patching a
+parser we are leaving makes spyc its fork, and a floor is a second mechanism to
+maintain for one release. The `catch_unwind` net absorbs them in the meantime,
+which is what PR 11's comment is corrected to say.
+
+The spike crate stays a spike. PR 13 needs the harness's ghostty adapter updated
+to the pin's constructor and that is in scope for `spikes/`, but nothing under
+`spikes/` becomes a production dependency.
+
+---
+
 ## Non-goals for 2.2
 
 - **No Projects implementation code** — the design doc only.
@@ -381,12 +523,29 @@ dependencies; the rest is scheduling.
 | 7 | #8 — session forking | 3 | Pane-tier binding, tab duplication, per-agent resume. |
 | 8 | #9 — anchor `^a s` on the pane's live cwd | — | Small and otherwise independent, but must precede #71 so templates inherit a settled anchor. |
 | 9 | #71 — prompt templates | 8 | New DSL verb. Uses PR 8's anchor policy. |
-| 10 | #34 — pin the CLI to the bottom | — | Display-layer work, unblocked, and the least certain scope of the six bugs — it may resolve to "documented, not fixed". |
+| 10 | [#452](https://github.com/Tripstack-Corp/spyc/issues/452) — `cell_style` drops SGR 2 (#34 adapter half) | — | One-line fix behind a failing test written against the widget's **output** (SGR 2 in, `Modifier::DIM` in the buffer), not against vt100 internals — so the same test passes unchanged against the ghostty impl in 15. The test surviving the swap is what makes a one-line fix worth its own PR. |
+| 11 | Engine — profile comment tells the truth | — | The `panic = "unwind"` rationale names a bug fixed in 0.16.2. Comment-only; no patches to a parser we are leaving, and no geometry floor. |
+| 12 | Engine — `spyc-vt-sys` | 11 | New crate owning the pin, the FFI, the vendored archives + checksums, ghostty's MIT attribution. |
+| 13 | Engine — harness re-run at the pin (**the gate**) | 12 | Re-measure everything at the shipping pin and append a dated addendum to the spike report. Not green ⇒ the series stops here and the docs say so. |
+| 14 | Engine — extract the `Engine` trait, vt100 behind it | 11 | Behaviour-identical strangler-fig work that touches no input timing, so it is **not** gated on #326. May land any time after 11, in parallel with 12-13 if the tree makes that convenient. `insta` snapshots unchanged. |
+| 15 | Engine — ghostty impl, threading, flip ([#34](https://github.com/Tripstack-Corp/spyc/issues/34) engine half) | 13, 14, **#326 merged** | The half that does restructure the pane input path, so it waits for #326 (dispatched as its own engagement) and re-verifies its test. |
+| 16 | Engine — fuzz target graduates | 15 | `fuzz_diff`'s generator into `fuzz/fuzz_targets/` against the shipped engine, on the weekly CI fuzz job. |
 | — | `PROJECTS_PLAN.md` | 4 (informs §2) | Written across the release, reviewed at the end. Not a PR in the sequence; a deliverable gating 2.3. |
 
 Bugs are interleaved on purpose. 1 and 2 open the release so a daily driver
-sees the difference early, and 10 sits last because its scope may shrink on
-contact.
+sees the difference early. 10 no longer sits last "because its scope may shrink
+on contact" — the spike removed that uncertainty, and what is left of #34 is a
+small display fix (10) plus an engine swap (14).
+
+The engine stages are strictly ordered and 13 is a gate, not a formality: the
+figures the adoption rests on were measured at a ghostty commit that cannot
+ship, so 13 either reproduces them at the shipping pin or the series ends at
+11 with the decisions log amended to say adoption did not proceed. The engine work adds one cross-item ordering constraint, and only to
+half of what was originally one stage: extracting the trait with vt100 behind it
+(14) is behaviour-identical and touches no input timing, so it is unblocked,
+while the ghostty impl, the threading restructure and the flip (15) wait for
+#326 to merge. #326 is dispatched as its own engagement with its own failing
+test, per this table's PR 1 — it is not pulled into the engine work.
 
 ## Exit criteria
 
@@ -437,9 +596,18 @@ picks substituted, and a project-local `.spycrc.toml` cannot bind one. Exit:
 the DSL verb is `is_executing`, CONFIGURATION.md documents the token set, and
 the substitution refuses a non-UTF-8 path the way `expand_percent` does.
 
-**#34 —** Either the live pane stops drifting, or the issue is closed with the
-reading half documented and the display half recorded as out of scope. Both
-count as done; shipping neither does not.
+**#34 —** Closed across both halves, each pinned by a test that fails on the
+tree before it. **Adapter (PR 10):** a cell carrying SGR 2 reaches the ratatui
+buffer with `Modifier::DIM` on a focused pane. Asserted against the buffer's
+cell styles rather than a glyph snapshot — a snapshot compares symbols and
+cannot see a modifier at all, which is the same blind spot #493–#504 recorded
+for styling. **Engine (PR 15):** the four engine
+defects the spike names are gone at the default engine — SCS box drawing draws
+boxes, a row written before a DECSTBM region survives, a scroll-region child
+accumulates scrollback, and a tag-sequence grapheme survives past 18 bytes —
+each as a differential case in the spike harness that vt100 fails and the
+shipped engine passes. The issue's own suggestion (pin the CLI to the bottom)
+is explicitly **not** an exit criterion; see §"#34" for why it is dropped.
 
 **`PROJECTS_PLAN.md` —** All seven questions in §7 answered, with a decision and
 a reason for each, and the doc approved before 2.3 opens.
@@ -453,3 +621,19 @@ new config key (#58, #71); `docs/HARNESS.md` for per-agent behaviour (#8, #34);
 `SECURITY.md` for the MCP surface (item 1 — extend, don't contradict);
 `AGENTS.md`'s module index for a new module; and `ROADMAP.md`'s decisions log
 when a decision here supersedes one recorded there.
+
+The engine stages (§8) add a few of their own. `AGENTS.md` needs the new
+`spyc-vt-sys` crate in its "Other crates" index (PR 12) and the `Engine` trait
+seam described where the `src/pane/` entry today says bytes are fed into a
+`vt100::Parser` (PR 14). `ARCHITECTURE.md` takes the threading resolution,
+because choosing between the actor shape and an `unsafe impl Send` is an
+architectural decision and the losing option needs to stay refuted (PR 15) —
+plus a `SPYC-TRAP` rationale section if the unsafe option wins, since the anchor
+and its section share a slug. `CONFIGURATION.md` and `--print-config` take
+`[pane] engine` (PR 15). `deny.toml` documents the vendored archives and
+`SECURITY.md` the pin and its checksum verification (PR 12). `INSTALL.md` gets
+the MSRV bump (PR 12). `docs/drafts/VT_ENGINE_SPIKE.md` takes the dated addendum
+(PR 13) — appended, never rewritten. `CHANGELOG.md` is generated, so what
+matters is that each engine PR's **title** is typed for the section it belongs
+in: `fix(pane)` for the adapter half, `feat(pane)` for the flip, `chore` for the
+comment correction.
