@@ -196,7 +196,118 @@ fn run_engine<E: Engine>(rows: u16, cols: u16, bytes: &[u8], resize: Option<(u16
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let iters: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(20_000);
+    let first = args.next();
+
+    // `--dump <seed>` prints one iteration's geometry and bytes as a
+    // standalone reproducer. A fuzz finding is only useful upstream if it can
+    // be handed over without this crate attached.
+    if first.as_deref() == Some("--dump") {
+        let seed: u64 = std::env::args()
+            .nth(2)
+            .and_then(|s| s.trim_start_matches("0x").parse().ok().or_else(|| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok()))
+            .expect("--dump <seed>");
+        let mut rng = Rng(seed | 1);
+        let rows = 1 + rng.below(30) as u16;
+        let cols = 1 + rng.below(40) as u16;
+        let len = 64 + rng.below(700) as usize;
+        let bytes = gen_stream(&mut rng, len);
+        let resize = if rng.below(3) == 0 {
+            Some((1 + rng.below(30) as u16, 1 + rng.below(40) as u16))
+        } else {
+            None
+        };
+        println!("seed      {seed:#x}");
+        println!("geometry  {rows} rows x {cols} cols");
+        println!("resize    {resize:?}   (applied at the midpoint of the feed)");
+        println!("bytes     {} total, fed as two halves", bytes.len());
+        println!();
+        println!("// Rust byte literal:");
+        print!("let input: &[u8] = &[");
+        for (i, b) in bytes.iter().enumerate() {
+            if i % 16 == 0 {
+                print!("\n    ");
+            }
+            print!("0x{b:02x}, ");
+        }
+        println!("\n];");
+        return;
+    }
+
+    // `--shrink <seed>` delta-debugs a panicking stream down to something a
+    // maintainer can read. A 700-byte reproducer is technically valid and
+    // practically ignored.
+    #[cfg(feature = "wezterm")]
+    if first.as_deref() == Some("--shrink") {
+        use vt_engine_spike::engines::WeztermEngine;
+        let seed: u64 = std::env::args()
+            .nth(2)
+            .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+            .expect("--shrink <hex seed>");
+        let mut rng = Rng(seed | 1);
+        let rows = 1 + rng.below(30) as u16;
+        let cols = 1 + rng.below(40) as u16;
+        let len = 64 + rng.below(700) as usize;
+        let original = gen_stream(&mut rng, len);
+        let panics = |b: &[u8]| run_engine::<WeztermEngine>(rows, cols, b, None).is_err();
+        assert!(panics(&original), "seed {seed:#x} does not panic wezterm");
+
+        let mut cur = original.clone();
+        // Repeatedly try deleting a chunk; keep any deletion that still panics.
+        let mut chunk = cur.len() / 2;
+        while chunk >= 1 {
+            let mut i = 0;
+            while i < cur.len() {
+                let end = (i + chunk).min(cur.len());
+                let mut cand = cur[..i].to_vec();
+                cand.extend_from_slice(&cur[end..]);
+                if !cand.is_empty() && panics(&cand) {
+                    cur = cand;
+                } else {
+                    i += chunk;
+                }
+            }
+            chunk /= 2;
+        }
+        println!("seed     {seed:#x}");
+        println!("geometry {rows} rows x {cols} cols");
+        println!("shrunk   {} bytes -> {} bytes", original.len(), cur.len());
+        println!("escaped  {:?}", String::from_utf8_lossy(&cur));
+        print!("bytes    &[");
+        for b in &cur {
+            print!("0x{b:02x}, ");
+        }
+        println!("]");
+        let msg = run_engine::<WeztermEngine>(rows, cols, &cur, None).err().unwrap_or_default();
+        println!("panic    {msg}");
+        return;
+    }
+
+    // `--variants` isolates WHICH part of a shrunk reproducer causes the
+    // panic, so the report can explain the mechanism instead of just handing
+    // over bytes.
+    #[cfg(feature = "wezterm")]
+    if first.as_deref() == Some("--variants") {
+        use vt_engine_spike::engines::WeztermEngine;
+        let cases: &[(&[u8], &str)] = &[
+        (b"\x1b[;53H\x1b\x88", "the shrunk reproducer"),
+        (b"\x1b[;53H\x88", "same, without the ESC (bare C1 HTS)"),
+        (b"\x1b[;9H\x88", "CUP to col 9 on an 8-col screen"),
+        (b"\x1b[;8H\x88", "CUP to col 8 (in range)"),
+        (b"\x1b[;53H", "CUP alone, no HTS"),
+        (b"\x88", "HTS alone at col 0"),
+        ];
+        for (bytes, desc) in cases {
+            let r = run_engine::<WeztermEngine>(28, 8, bytes, None);
+            println!(
+                "  {:<38} {}",
+                desc,
+                r.err().map_or_else(|| "ok".to_string(), |m| format!("PANIC {m}"))
+            );
+        }
+        return;
+    }
+
+    let iters: u64 = first.and_then(|s| s.parse().ok()).unwrap_or(20_000);
     let seed0: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0x5157_C0DE);
 
     println!("differential fuzz: {iters} iterations, base seed {seed0:#x}");
@@ -206,7 +317,9 @@ fn main() {
     println!("{:-<100}", "");
 
     let mut panics: Vec<(u64, &str, String)> = Vec::new();
+    #[allow(unused_mut, reason = "only mutated when both engine features are on")]
     let mut compared = 0usize;
+    #[allow(unused_mut, reason = "only mutated when both engine features are on")]
     let mut agreed = 0usize;
     let mut vt100_outlier = 0usize;
     let mut three_way = 0usize;

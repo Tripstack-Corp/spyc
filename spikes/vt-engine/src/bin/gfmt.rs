@@ -12,7 +12,9 @@ fn main() {
         t
     };
 
-    let variants: &[(&str, fn(FormatterOptions<'static, 'static>) -> FormatterOptions<'static, 'static>)] = &[
+    /// One formatter configuration: a label and the builder that produces it.
+    type Variant = (&'static str, fn(FormatterOptions<'static, 'static>) -> FormatterOptions<'static, 'static>);
+    let variants: &[Variant] = &[
         ("plain",            |o| o.with_format(Format::Plain)),
         ("vt bare",          |o| o.with_format(Format::Vt)),
         ("vt +style",        |o| o.with_format(Format::Vt).with_style(true)),

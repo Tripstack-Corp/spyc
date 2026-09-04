@@ -18,6 +18,13 @@ GHOSTTY_SOURCE_DIR=/path/to/ghostty \
   cargo build --release --features ghostty         # + libghostty-vt
 ```
 
+The harness's supported invocation is **`--features ghostty,wezterm`**, and it
+is warning-clean there. A single-engine or no-engine build compiles but warns
+about unused comparison machinery — a differential harness with nothing to
+differentiate against has no work to do, and cfg-gating five binaries to
+silence a configuration that cannot produce a result would cost more than it
+buys. Build with both.
+
 **Do not build flags into a shell variable** — zsh does not word-split unquoted
 parameters, so `cargo build $ARGS` passes `--features a,b` as one argument and
 fails; with `-q`/`2>/dev/null` it fails silently and you then measure a stale
