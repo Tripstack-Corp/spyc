@@ -5,7 +5,7 @@
 //! `agy --list-sessions` output. They're pure string functions with no
 //! `App`/state dependency — they live here, next to the `AgentProfile` impls
 //! that call them, rather than in `crate::app` (MVU Stage 4: the agent layer
-//! shouldn't reach back up into `app` for its own behavior).
+//! shouldn't reach back up into `app` for its own behaviour).
 
 /// Strip claude's resume/continue flags from a command line. Used to derive a
 /// fresh-session fallback when an automatic resume fails — we want to preserve

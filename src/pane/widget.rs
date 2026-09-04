@@ -1,7 +1,7 @@
 //! ratatui widget that draws a `vt100::Screen` into a frame.
 //!
 //! Each cell becomes a single styled character in the buffer. We map
-//! vt100's color model onto ratatui's, preserving bold / italic /
+//! vt100's colour model onto ratatui's, preserving bold / italic /
 //! underline / reverse.
 
 use ratatui::{
@@ -50,7 +50,7 @@ impl Widget for PaneWidget<'_> {
                 let mut style = cell_style(cell).add_modifier(dim);
                 if selected(self.selection, row, col) {
                     // Reverse rather than a theme bg: the pane's cells carry the
-                    // CHILD's colors, which can be anything, so a fixed background
+                    // CHILD's colours, which can be anything, so a fixed background
                     // would vanish against a child that happens to use it. Reverse
                     // is relative to whatever the cell already is.
                     style = style.add_modifier(Modifier::REVERSED);
@@ -72,7 +72,7 @@ impl Widget for PaneWidget<'_> {
         //    TUIs (nvim, vim, less, htop, lazygit, claude in TUI mode)
         //    paint their own cursor in their own shape — beam in nvim
         //    insert mode, e.g. — and our hard-coded block clobbers it
-        //    with the wrong shape and color.
+        //    with the wrong shape and colour.
         // 3. Child hasn't explicitly hidden the cursor (DEC ?25l).
         //
         // Net effect: a plain shell / REPL on the main screen still

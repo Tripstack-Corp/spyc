@@ -60,7 +60,7 @@ impl GrepMatch {
     }
 }
 
-/// Walk `root` honoring gitignore, run `pattern` against each text
+/// Walk `root` honouring gitignore, run `pattern` against each text
 /// file, stream `GrepMatch` batches through `tx`. Designed to run
 /// in a worker thread; the receiver drives a live pager view.
 ///
@@ -241,9 +241,9 @@ const MAX_LINE_DISPLAY: usize = 400;
 /// Convert a matched line's raw bytes into a single-line string
 /// safe to render in the pager. Drops trailing CR/LF, replaces
 /// control characters (NUL, ESC, BEL, etc. — including the C1 range
-/// U+0080..=U+009F, where U+009B is a CSI that many terminals honor
+/// U+0080..=U+009F, where U+009B is a CSI that many terminals honour
 /// exactly like `ESC [`) with `·` so they can't move the cursor or
-/// set colors, expands tabs to spaces (ratatui counts `\t` as
+/// set colours, expands tabs to spaces (ratatui counts `\t` as
 /// zero-width but terminals expand it to 8 columns, which scrambles
 /// tab-separated content like TSV postcode tables), and truncates
 /// absurdly long lines with an ellipsis.
@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     fn skips_binary_files() {
-        // ripgrep-default behavior: a NUL byte in the file means
+        // ripgrep-default behaviour: a NUL byte in the file means
         // "stop searching this file." Without this, tracked .docx /
         // .pdf / .dll matches dump raw bytes into the pager.
         let tmp = tempdir().unwrap();
@@ -577,7 +577,7 @@ mod tests {
     #[test]
     fn sanitize_neutralizes_c1_control_chars() {
         // C1 controls (U+0080..=U+009F) are encoded in UTF-8 as two
-        // bytes (0xC2 0x8x/0x9x). U+009B is the CSI — a terminal honors
+        // bytes (0xC2 0x8x/0x9x). U+009B is the CSI — a terminal honours
         // it like `ESC [`, so a matched line carrying one must not pass
         // through. "a"(·)"b" → the CSI between them becomes `·`.
         let s = sanitize_line("a\u{009b}31mb".as_bytes());

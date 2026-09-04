@@ -374,7 +374,7 @@ impl App {
 
         // Capture-side TERM was `dumb`; promoting doesn't change
         // that — the child's TERM is set at spawn time. Plain shells
-        // and SGR-color output render fine; alt-screen TUIs (vim,
+        // and SGR-colour output render fine; alt-screen TUIs (vim,
         // htop, lazygit) won't suddenly start working. Document via
         // the flash hint below.
 
@@ -460,7 +460,7 @@ impl App {
     /// accumulates from the demote point. We don't seed from
     /// `screen.contents()` because the task buffer is ANSI bytes
     /// (so rebuild via `ansi-to-tui` works) and `screen.contents()`
-    /// is plain text — seeding would erase color. Acceptable;
+    /// is plain text — seeding would erase colour. Acceptable;
     /// can revisit if users hit it.
     pub fn demote_pane_to_task(&mut self) {
         let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
@@ -760,10 +760,10 @@ impl App {
 fn spawn_capture(cmd: &str, cwd: &std::path::Path) -> Result<crate::pane::pty_host::PtyHost> {
     let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
     // TERM=dumb so TUI programs refuse to run as a TUI inside our
-    // capture (the pager only renders SGR colors and CRLF, not
+    // capture (the pager only renders SGR colours and CRLF, not
     // cursor positioning / alt-screen). FORCE_COLOR / CLICOLOR_FORCE
     // / COLORTERM ride alongside so tools that respect those (cargo,
-    // eza, bat, ripgrep) keep their color output anyway. PAGER=cat /
+    // eza, bat, ripgrep) keep their colour output anyway. PAGER=cat /
     // GIT_PAGER=cat / MANPAGER=cat stops tools that auto-invoke a
     // sub-pager (git log, man) from launching `less` against our
     // pty and freezing the capture.

@@ -109,9 +109,9 @@ pub fn encode_key(ev: KeyEvent, app_cursor: bool) -> Vec<u8> {
 /// Shift=1, Alt=2, Ctrl=4 — the de-facto VT/xterm encoding every common pane
 /// app (vim, less, readline, tmux) understands. `None` when no shift/alt/ctrl
 /// is set, so callers emit the bare (unparameterized) sequence — byte-identical
-/// to the pre-modifier behavior. Super/Meta/Hyper are deliberately excluded:
+/// to the pre-modifier behaviour. Super/Meta/Hyper are deliberately excluded:
 /// terminals don't agree on a code for them, so falling back to the bare
-/// sequence (today's behavior) beats sending one apps won't recognize.
+/// sequence (today's behaviour) beats sending one apps won't recognize.
 fn modifier_param(m: KeyModifiers) -> Option<u8> {
     let mask = u8::from(m.contains(KeyModifiers::SHIFT))
         + u8::from(m.contains(KeyModifiers::ALT)) * 2

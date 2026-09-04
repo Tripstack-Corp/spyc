@@ -58,7 +58,7 @@ impl StatusBar<'_> {
     fn powerline(&self, area: Rect) -> Line<'static> {
         let avail = area.width as usize;
 
-        // Segment background/foreground colors.
+        // Segment background/foreground colours.
         let proj_bg = Color::Rgb(0x7a, 0x4d, 0x3a); // warm brown (pepper-ish)
         let proj_fg = Color::Rgb(0xf2, 0xe8, 0xcf); // cream
 
@@ -83,7 +83,7 @@ impl StatusBar<'_> {
         let term_bg = Color::Reset;
 
         // Pepper emoji gets its own span with terminal-default bg so the
-        // emoji color rendering isn't clipped by the segment background.
+        // emoji colour rendering isn't clipped by the segment background.
         let emoji_text = " \u{1f336}\u{fe0f} ";
         let emoji_w = 4; // space + 🌶️ (2 cols) + space
 

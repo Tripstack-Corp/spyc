@@ -8,7 +8,7 @@
 //! read under a byte ceiling respects it — a header may understate its size, and
 //! a cap that trusts the declaration hands back the real stream.
 //!
-//! The first byte of each input selects the container flavor, so one corpus
+//! The first byte of each input selects the container flavour, so one corpus
 //! exercises zip, tar, tar.gz and tar.zst. Run on demand (needs nightly +
 //! cargo-fuzz):
 //!

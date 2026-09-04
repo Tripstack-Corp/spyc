@@ -122,9 +122,9 @@ pub struct VisualBell {
 /// field; handlers reach it via `self.view.…`.
 #[allow(clippy::struct_excessive_bools)]
 pub struct ViewState {
-    /// The top-region / centered pager: `Mount::Overlay` (grep, git-view,
+    /// The top-region / centred pager: `Mount::Overlay` (grep, git-view,
     /// help, command output, file viewers) or `Mount::TopPane` (`D`). Drives
-    /// the file-list area or the centered overlay.
+    /// the file-list area or the centred overlay.
     pub(super) pager: Option<PagerView>,
     /// The bottom-region pane-scrollback pager (`^a v`): always
     /// `Mount::LowerPane` + `pane_scroll`. Held in a *separate* slot so it
@@ -291,7 +291,7 @@ pub struct ViewState {
     /// Agent-activity (P0) "spicy pulse" animation frame, advanced in
     /// `settle_agent_activity` (a `&mut` settle point — render is pure and
     /// can't read the clock) while ≥1 agent tab is Working. The pure draw maps
-    /// it to a warm heat color for the per-tab dot.
+    /// it to a warm heat colour for the per-tab dot.
     pub(super) agent_anim_frame: u64,
     /// Active spice-heat border-pulse flash (P3-1 visual bell), or `None`.
     /// Started by `settle_agent_activity` on a Blocked/Done transition when
@@ -307,11 +307,11 @@ pub struct ViewState {
     pub(super) hud_pid: u32,
     pub(super) hud_term: String,
     pub(super) hud_truecolor: bool,
-    /// Resolved color depth for this session (CLI `--color` > `[layout]
+    /// Resolved colour depth for this session (CLI `--color` > `[layout]
     /// color_depth` > `$COLORTERM` auto-detect). When not `TrueColor`, the
-    /// per-frame render downgrades every `Color::Rgb` to the nearest 256-color
+    /// per-frame render downgrades every `Color::Rgb` to the nearest 256-colour
     /// index so terminals that can't parse 24-bit SGR (old GNU screen) still get
-    /// colors. `hud_truecolor` is derived from this — they never disagree.
+    /// colours. `hud_truecolor` is derived from this — they never disagree.
     pub(super) color_depth: crate::ui::color_depth::ColorDepth,
     /// Whether spyc is running over SSH (`$SSH_CONNECTION`/`$SSH_TTY`/`$SSH_CLIENT`),
     /// snapshotted once at construction (doesn't change mid-session). Drives the

@@ -422,7 +422,7 @@ impl App {
         // with the pane — leaves no stale rect behind for the mouse to hit-test
         // against, which is the trap `pager_slot_at` documents for pager rects.
         self.view.chrome_rows.borrow_mut().clear();
-        // The two structural rules a centered popup border could land on (and so
+        // The two structural rules a centred popup border could land on (and so
         // visually merge with): the horizontal pane divider and the vertical
         // split separator. Captured before `layout` is consumed by render_inner.
         let h_divider_row = layout.divider.map(|r| r.y);
@@ -437,7 +437,7 @@ impl App {
         // ring, above the chrome + HUD (an attention flash), below the mermaid
         // image. A no-op unless a flash is live (only armed on a transition).
         self.render_visual_bell(frame, frame_area);
-        // First-launch status-hooks consent — a centered modal pop-up drawn over
+        // First-launch status-hooks consent — a centred modal pop-up drawn over
         // everything (chrome + HUD), so an auto-fired ask can't be mistaken for a
         // frozen pane while the user's eyes are on the agent. No-op unless the
         // `HookConsent` prompt is active.
@@ -546,7 +546,7 @@ impl App {
     /// run the LowerPane pager's first-frame scroll snap. Relocated out of
     /// `render_inner` (MVU Stage 2) so the draw path performs no mutations.
     ///
-    /// Behavior-equivalent to the old in-draw calls: `prepare_frame` runs
+    /// Behaviour-equivalent to the old in-draw calls: `prepare_frame` runs
     /// immediately before `render_inner` with nothing between them, so the
     /// resize → drain → (clear/snap) → draw ordering each branch relied on is
     /// preserved. The conditions mirror `render_inner`'s branches — the bottom
@@ -830,7 +830,7 @@ mod render_tests {
     //! prompt and their layout — at a fixed geometry, so the
     //! `prepare_frame` extraction (rows-cache + grid-stabilization settle
     //! moved out of the draw path) and the `&self` `render_inner` stay
-    //! behavior-equivalent: a regression that shifts a glyph makes
+    //! behaviour-equivalent: a regression that shifts a glyph makes
     //! the `.snap` diff. Pane *content* is intentionally not snapshotted — it
     //! needs a live `PtyHost`; these cover the file-list surface, which is
     //! exactly what `prepare_frame` touches.
@@ -934,8 +934,8 @@ mod render_tests {
             out.contains('┌') && out.contains('│'),
             "a bordered box drew:\n{out}"
         );
-        // It's a CENTERED modal, NOT the one-line prompt bar: the question must
-        // not sit on the final (chrome) row — that's the confusing old behavior.
+        // It's a CENTRED modal, NOT the one-line prompt bar: the question must
+        // not sit on the final (chrome) row — that's the confusing old behaviour.
         let last = out.lines().last().unwrap_or_default();
         assert!(
             !last.contains("live status"),
@@ -986,7 +986,7 @@ mod render_tests {
     }
 
     // NOTE: no focus-direction snapshot here — `render_to_string` dumps glyphs
-    // only, and the inactive-column dim is a *style* (color), so a focus-left vs
+    // only, and the inactive-column dim is a *style* (colour), so a focus-left vs
     // focus-right frame is byte-identical. The dim direction isn't snapshot-
     // covered; `decide_focus` / vsplit focus unit tests guard the focus state.
 
@@ -1073,7 +1073,7 @@ mod render_tests {
         });
     }
 
-    /// A centered `Overlay` pager (`?` help / `:grep` / git-view / version)
+    /// A centred `Overlay` pager (`?` help / `:grep` / git-view / version)
     /// opened while a `V`/`;` `top_overlay` editor is live must still render.
     /// The overlay branch returns early before the default Overlay-pager draw,
     /// so it has to paint the pager on top itself — otherwise the pager owns
@@ -1117,7 +1117,7 @@ mod render_tests {
     /// `build_rows` must flag exactly the rows whose path is in
     /// `pending_delete_preview` — and only those. Locks the set-membership
     /// refactor (the old per-row linear `any(p == path)` scan was quadratic
-    /// when deleting picks in a big directory) as behavior-equivalent.
+    /// when deleting picks in a big directory) as behaviour-equivalent.
     #[test]
     fn build_rows_marks_only_pending_delete_paths() {
         let mut app = demo_app(&files()); // dir = /projects/demo

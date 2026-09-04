@@ -55,7 +55,7 @@ fn open_pane_tab_project_home_anchors_at_project_root() {
     });
 }
 
-/// `new_tab_cwd = browse_dir` restores the "open here" behavior: the pane
+/// `new_tab_cwd = browse_dir` restores the "open here" behaviour: the pane
 /// spawns in the focused column's current listing dir, ignoring PROJECT_HOME.
 #[test]
 fn open_pane_tab_browse_dir_uses_listing_dir() {

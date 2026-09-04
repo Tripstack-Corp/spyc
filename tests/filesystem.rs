@@ -26,10 +26,10 @@ fn build_tree(root: &Path) {
 
 // We can't import private items from a binary crate in integration tests,
 // so we test the contract via `cargo test --bin spyc` in the unit tests.
-// These integration tests invoke the binary or test public behavior.
+// These integration tests invoke the binary or test public behaviour.
 //
 // Since spyc is a binary crate (not a library), we can't `use spyc::fs::*`
-// directly. Instead, we test the filesystem behavior that the crate relies
+// directly. Instead, we test the filesystem behaviour that the crate relies
 // on — the same primitives it uses internally.
 
 #[test]
@@ -92,7 +92,7 @@ fn sort_name_dirs_first() {
         .collect();
 
     // Sort dirs-first, then by name (case-insensitive) — mirroring spyc's
-    // default SortMode::Name behavior.
+    // default SortMode::Name behaviour.
     entries.sort_by(|a, b| {
         b.0.cmp(&a.0) // dirs first (true > false)
             .then_with(|| a.1.to_lowercase().cmp(&b.1.to_lowercase()))

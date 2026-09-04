@@ -737,7 +737,7 @@ impl Resolver {
             }
 
             // Shell-out. `!` captures output into the in-app pager (with
-            // ANSI colors preserved); `;` runs in the foreground for
+            // ANSI colours preserved); `;` runs in the foreground for
             // interactive tools (vim, htop, etc.).
             KeyCode::Char('!') => {
                 self.reset();

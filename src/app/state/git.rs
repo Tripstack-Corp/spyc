@@ -42,7 +42,7 @@ impl AppState {
     /// invalidates the **focused** column — so without this an UNFOCUSED
     /// column's `~ `/` ~` markers stay stale after an external edit until a git
     /// op or chdir. Sets the existing `pending_worktree_rewalk` escape hatch,
-    /// which the next 1 Hz poll honors (re-walking once, off-thread). Flagging
+    /// which the next 1 Hz poll honours (re-walking once, off-thread). Flagging
     /// the focused column too is harmless — its listing refresh clears the flag
     /// on success. Returns whether any column was flagged.
     pub fn flag_worktree_rewalk_for_path(&mut self, path: &Path) -> bool {
@@ -77,7 +77,7 @@ impl AppState {
         let key = self.compute_git_mtime_key_fast(side);
         // A throttled working-tree change (refresh_listing deferred its
         // invalidation) forces a re-walk: the mtime key can't see an unstaged
-        // edit, so honoring this flag is the only thing that converges a stale
+        // edit, so honouring this flag is the only thing that converges a stale
         // ` ~`/clean marker without waiting for a chdir.
         let force_rewalk =
             std::mem::take(&mut self.col_mut(side).git_cache.pending_worktree_rewalk);

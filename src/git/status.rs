@@ -102,7 +102,7 @@ fn decode_porcelain(porcelain: &str) -> Vec<StatusEntry> {
 /// Stage 2: map decoded [`StatusEntry`]s to the basename-keyed
 /// [`GitFileStatus`] map for one listing dir.
 ///
-/// Lifted verbatim (behavior-identical) from the original
+/// Lifted verbatim (behaviour-identical) from the original
 /// `parse_porcelain_statuses`: strip `prefix`, give in-this-dir files a
 /// basename entry, and aggregate deep files onto their top-level parent dir
 /// (untracked-only subtree → untracked dir; any tracked change →

@@ -37,7 +37,7 @@ struct ScrollSnapshot {
     has_vt100_capture: bool,
     /// The source the user flipped to with `T` for THIS tab, if any. Already
     /// validated by [`flip_scroll_source`] — the one place that knows what this
-    /// pane actually has — so it is honored as given rather than re-decided.
+    /// pane actually has — so it is honoured as given rather than re-decided.
     pick: Option<ScrollSourcePick>,
 }
 
@@ -88,7 +88,7 @@ const fn decide_scroll_source(s: ScrollSnapshot) -> ScrollSource {
 /// What `T` flips the current scrollback to, or why it can't.
 ///
 /// The single place that decides whether a source is available for this pane, so
-/// [`decide_scroll_source`] can honor a pick without re-deriving the same fact —
+/// [`decide_scroll_source`] can honour a pick without re-deriving the same fact —
 /// two derivations of one fact is how a flip and its refusal come to disagree.
 /// Flips against whatever is on screen NOW, including a previous flip.
 const fn flip_scroll_source(s: ScrollSnapshot) -> Result<ScrollSourcePick, &'static str> {

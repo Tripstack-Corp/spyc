@@ -81,7 +81,7 @@ fn status_trace_enabled() -> bool {
 /// reporter only needs *some* spyc that speaks `--report-status`, not the exact
 /// running binary. Falls back to the running binary's absolute path when spyc
 /// isn't on PATH. `None` only when neither is a UTF-8 string embeddable in the
-/// command (mirrors the prior skip-on-non-UTF-8-exe behavior).
+/// command (mirrors the prior skip-on-non-UTF-8-exe behaviour).
 fn reporter_binary() -> Option<String> {
     if spyc_on_path() {
         return Some("spyc".to_string());

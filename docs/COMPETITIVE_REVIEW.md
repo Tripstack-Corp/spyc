@@ -300,7 +300,7 @@ not evidence spyc is redundant.
 variant, **the editor/buffer is the noun and the agent bolts onto it**; dired is
 a mode you visit, not the persistent driving interface, and vi-style modal
 navigation is a separate package (`evil-mode`) layered on top of decades of
-editor-first defaults. spyc inverts the center of gravity —
+editor-first defaults. spyc inverts the centre of gravity —
 *"the file commander is the noun the agent operates on"* — the file commander
 is primary, an editor is optional-to-absent, and vi-modal navigation is the
 whole interaction model from the start, not a retrofit. Recreating spyc in
@@ -764,7 +764,7 @@ or beat each.
 - **Instant worktree creation.** "Since there's very little friction to spinning
   up a worktree (~2s), I open one for any small tasks." — hoakiet98,
   [HN](https://news.ycombinator.com/item?id=46368739). *Sub-2s creation changes
-  behavior; keep spyc's in-process gix create instant.*
+  behaviour; keep spyc's in-process gix create instant.*
 - **Programmability / scriptability.** "Love the ideas here, specifically: the
   programmability … I haven't tried it yet, but had been considering learning
   tmux partly for this." — johnthedebs,

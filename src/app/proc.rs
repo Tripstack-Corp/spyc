@@ -15,7 +15,7 @@ use crate::{Tui, resume_tui, suspend_tui};
 use super::{Message, Wake};
 
 /// Owns the parkable crossterm input-reader thread (MVU Phase 1). The
-/// reader becomes the SOLE caller of `event::poll`/`event::read`. Modeled
+/// reader becomes the SOLE caller of `event::poll`/`event::read`. Modelled
 /// on `ParserWorker` (src/pane/mod.rs): a stop flag set on `Drop`, then
 /// `unpark` + `join`. See `docs/MVU_PLAN.md` Phase 1 for the
 /// park/ack/drain handshake the executor below relies on.

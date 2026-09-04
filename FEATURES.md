@@ -35,7 +35,7 @@ spyc has a lot of chord prefixes (`g`, `^a`, `H`, `W`, `y`, `m`, `[`/`]`,
 short pause a popup appears listing every key that completes the chord,
 each with a one-line description, flowed into columns. Pressing the next
 key (or `Esc`) dismisses it. It's spyc's on-demand answer to "what can I
-do from here?", modeled on Neovim's which-key.
+do from here?", modelled on Neovim's which-key.
 
 - The delay is `[layout] chord_hint_delay_ms` (default **300** ms). Set
   it to **0** to disable the popup entirely.
@@ -65,7 +65,7 @@ do from here?", modeled on Neovim's which-key.
   top-pane slot — bottom pane stays visible. Same loader as `Enter`
   (syntax highlighting, markdown render, hex dump for
   binaries, truncation banner for big files) but mounted in the
-  top slot instead of as a centered overlay. Workflow: `D` on a
+  top slot instead of as a centred overlay. Workflow: `D` on a
   doc, `^a-j` into the bottom pane to do work, `^a-k` back to
   scroll the doc. Files past 5 MB fall back to `$PAGER` as a top
   overlay (streaming from disk wins for multi-GB logs)
@@ -75,13 +75,13 @@ do from here?", modeled on Neovim's which-key.
   suggestions from visit history)
 - **F** project-wide fuzzy filename finder. Walks the focused
   commander's worktree root (its repo root, else `PROJECT_HOME`,
-  else the current dir) honoring `.gitignore`, ranks
+  else the current dir) honouring `.gitignore`, ranks
   candidates against typed input via nucleo-matcher (basename hits
   outrank parent-dir hits, fzf-style). Up/Down move selection,
   Enter chdirs to the matched file's parent and places the cursor
   on it; Esc cancels. No persistent index — walks lazily on open.
 - Multi-column layout that adapts to terminal width
-- Color-coded entries: directories, executables, symlinks, files
+- Colour-coded entries: directories, executables, symlinks, files
 - **Git status markers** — two-character left-gutter pair whose *positions*
   mirror `git status -s`: column 0 = staged side, column 1 = unstaged side.
   The glyphs are spyc's own, not git's letters: `~` modified, `+` added,
@@ -89,7 +89,7 @@ do from here?", modeled on Neovim's which-key.
   ready-to-commit, ` ~` working-tree-only, `~~` partially staged with
   further edits, `>~` a staged rename with unstaged tweaks, ` ?` untracked
   (the leading space keeps `?` in the unstaged column), and `!!` conflicted
-  — a conflict sets both halves. Each char is colored independently
+  — a conflict sets both halves. Each char is coloured independently
   (modified=amber, added/untracked=green, deleted=red, renamed=lavender,
   conflicted=bold red). Directories containing changes are tinted too.
 
@@ -160,7 +160,7 @@ Two levels of selection for flexible file management.
   user-supplied command — see CONFIGURATION.md. Every verb that yanks
   text shares this one delivery path — `yf`, `yP`, `yp`, `ya`, a mouse
   drag, `^a u` Quick Select and the image overlay's `Y` — so the SSH
-  and override behavior is the same whichever one you reach for.
+  and override behaviour is the same whichever one you reach for.
 
 - **Y** remove cursor file from inventory
 - **p** put all inventory files to the current directory
@@ -596,8 +596,8 @@ A built-in pager for viewing files and command output without leaving
 spyc.
 
 - **Syntax highlighting** via syntect — source files are highlighted
-  with language-aware coloring (hundreds of languages supported)
-- ANSI color preservation — captured command output looks exactly right
+  with language-aware colouring (hundreds of languages supported)
+- ANSI colour preservation — captured command output looks exactly right
 - **Streaming output** — `!` commands show output live with an
   hourglass timer, stderr merged so build progress appears in real-time
 - **/ search** forward / **? search** backward within pager content,
@@ -612,7 +612,7 @@ spyc.
 - **W** toggle line wrap (default on for content; off for picker UIs)
 - **m** toggle Markdown rendered ↔ source view (`.md`/`.markdown` only;
   flashes "not a markdown file" otherwise)
-- **f** toggle full-width mode vs. centered overlay
+- **f** toggle full-width mode vs. centred overlay
 - **v** open pager content in `$EDITOR`
 - **s** save pager content to a file
 - **y** yank pager content to the system clipboard (always operates
@@ -785,7 +785,7 @@ end).
 - **`:grep <pattern>`** — project-wide content search via embedded
   ripgrep matcher (`grep-regex` + `grep-searcher`). Walks the
   focused commander's worktree root (its repo root, else
-  `PROJECT_HOME`, else current dir) honoring `.gitignore`, smart-case
+  `PROJECT_HOME`, else current dir) honouring `.gitignore`, smart-case
   by default. Results stream into a pager as `path:line:col: text`,
   so `gf`/`gF` jump from a hit to the file in-place. Capped at 5000
   matches; refine the pattern if you hit it. Power users: `! rg foo`
@@ -803,7 +803,7 @@ to lock you out of spyc.
 - **^Z** while a `!` capture pager is open sends the task to the
   background. The reader thread keeps draining output into a per-task
   buffer (head-truncated at 1 MB). Tasks render in the pane divider,
-  right-aligned, in a distinct color family from pane tabs:
+  right-aligned, in a distinct colour family from pane tabs:
   `[N+]` running with new output (teal), `[N●]` running quiescent
   (blue), `[N✓]` exited cleanly (green), `[N✗]` non-zero / killed
   (red). When the pane is hidden, falls back to a status-bar
@@ -843,7 +843,7 @@ to lock you out of spyc.
   (a dead pty would just immediately tear down the tab); use
   `:fg` for the static-output view in that case. The promoted
   tab inherits the task's TERM (`dumb`, set when the `!` capture
-  spawned), so plain shells and SGR-color output work fine but
+  spawned), so plain shells and SGR-colour output work fine but
   alt-screen TUIs won't suddenly start working in the new tab.
 - **`:pane-to-task`** is the symmetric inverse — moves the active
   pane tab into the background-task list without killing the
@@ -912,7 +912,7 @@ appear too.
 Claude only for now — other agents report that rather than showing an
 empty list, which would read as "spyc lost them".
 
-## Quick Select — labeled overlay picker
+## Quick Select — labelled overlay picker
 
 Borrowed from [WezTerm's Quick Select][wezterm-qs]. Press **`^a u`**
 to scan the visible pane for matches (URLs, file paths, git SHAs,
@@ -1047,7 +1047,7 @@ which-key popup lists the options:
 This is the line between *global* commands (worktree, project — they make
 sense from any focus) and *frame* commands (git, picks, sort — they act on
 the file view and stay on the `g` / letter chords). `gh` (old project-home
-jump) is gone in favor of `Space p`; `gw` (jump to the worktree root) stays.
+jump) is gone in favour of `Space p`; `gw` (jump to the worktree root) stays.
 
 ## Project home & session name
 
@@ -1129,7 +1129,7 @@ unambiguous:
   has focus) or non-cursor list rows (when the pane has focus)
   render with SGR 2 / `Modifier::DIM`, so the focus target is
   obvious at a glance
-- **File list cursor** dims to a muted color when the pane has focus
+- **File list cursor** dims to a muted colour when the pane has focus
 - **Pane cursor** shows as a reverse-video block at the pty cursor
   position when the pane is focused AND the child is on the main
   screen (plain shell / REPL). Suppressed when the pane is
@@ -1141,7 +1141,7 @@ unambiguous:
 - The divider also shows the active tab's *live* cwd (polled from
   `/proc/<pid>/cwd` on Linux, `lsof` on macOS). If the subprocess
   has `cd`'d away from where spyc launched it, the cwd is prefixed
-  with `↪` and rendered in the active-tab color so it's easy to
+  with `↪` and rendered in the active-tab colour so it's easy to
   spot — useful when a `bash` tab has wandered.
 
 ## Configuration
@@ -1199,15 +1199,15 @@ unambiguous:
   an instruction-budget hook and a hard 30s ceiling, and `:lua off` /
   `--no-lua` disable the engine. `$HOME`-only (a project config can never run
   Lua, and init.lua loads only from `~/.config/spyc/`).
-- **Color overrides** — customize the palette for directories, cursors,
+- **Colour overrides** — customize the palette for directories, cursors,
   picks, status bar segments, etc.
 - **Ignore mask patterns** — define what each mask group hides.
 - **Layout** — `[layout] status_position = "top" | "bottom"`. Default
   is `"top"`. `"bottom"` matches vim/tmux convention and avoids a
   double status bar when running spyc inside tmux. With `"bottom"` the
   prompt sits one row above the status bar (vim cmdline ordering).
-- **Color depth** — `[layout] color_depth = "auto" | "truecolor" | "256"`
-  (or `--color` for one run). Default `"auto"` uses 256-color inside GNU
+- **Colour depth** — `[layout] color_depth = "auto" | "truecolor" | "256"`
+  (or `--color` for one run). Default `"auto"` uses 256-colour inside GNU
   screen (which can't render 24-bit SGR even when `$COLORTERM` claims
   truecolor), else 24-bit truecolor when `$COLORTERM` advertises it, else
   256. When not truecolor the finished frame is remapped RGB→256, so theme,
@@ -1471,7 +1471,7 @@ jump from Claude's output back to the file list.
   fixed-width so it doesn't bounce as rates rise and fall — plus an
   extended section tallying cumulative per-tool **MCP call counts**
   (every agent `tools/call`, read tools included)
-- **C** toggle between color and mono themes
+- **C** toggle between colour and mono themes
 - **:setenv NAME=VALUE** set an environment variable
 - **:dump-scrollback** write the active pane's scrollback snapshot
   (one line per row) to `/tmp/spyc-scrollback.txt` — diagnostic for

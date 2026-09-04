@@ -50,7 +50,7 @@ pub enum DrainOutcome {
 /// Render inputs handed to [`PagerStream::drain`]. **Owned** (not borrowed) so
 /// the drain dispatcher can hold a `&mut PagerView` at the same time — the
 /// theme and the pager both live under `self.view`, so a borrowed `&Theme`
-/// would alias the `&mut`. `Theme` is a cheap `Clone` (colors only).
+/// would alias the `&mut`. `Theme` is a cheap `Clone` (colours only).
 ///
 /// The fields are read by the git-view renderer; the streaming grep /
 /// one-shot transcript streams ignore `ctx`.
@@ -119,7 +119,7 @@ pub trait PagerStream {
 /// How [`App::spawn_pager_stream`] mounts the initial (empty / "computing…")
 /// pager that the worker then fills.
 pub enum PagerStreamMount {
-    /// Centered overlay (grep, git-view): pushes the prior pager onto history
+    /// Centred overlay (grep, git-view): pushes the prior pager onto history
     /// for `:bprev`. `line_count_hint` locks the gutter width while streaming.
     Overlay {
         /// Initial title (e.g. `"grep — … — scanning…"`).

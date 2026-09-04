@@ -5,7 +5,7 @@
 //! ran the child, and restored. Phase 4 generalizes that one arm into an
 //! `Effect` enum so `run_effects` becomes the **sole** side-effect
 //! executor. This first slice introduces only `Effect::ForegroundExec`
-//! (== the old `Spawn`) behind a `From<PostAction>` shim — behavior is
+//! (== the old `Spawn`) behind a `From<PostAction>` shim — behaviour is
 //! byte-identical; later slices add clipboard / signal / send / title
 //! variants. The Model/Runtime split (and class-D subscription effects
 //! like `SpawnPane`) stay in Phase 5.
@@ -578,7 +578,7 @@ impl App {
                 },
                 // A-class: copy + flash the ACTIVE PAGER's title (not the status
                 // bar), so a yank inside a pager confirms where the user is
-                // looking — the former inline `view.flash` behavior, now after a
+                // looking — the former inline `view.flash` behaviour, now after a
                 // copy that runs in the executor.
                 Effect::CopyToPagerClipboard { text, ok_msg } => {
                     let msg = match self.deliver_clipboard(&text) {
@@ -763,7 +763,7 @@ impl App {
                 Effect::PasteFromClipboard => self.spawn_clipboard_read(),
                 Effect::SetMouseMode { capture } => {
                     // Mutually exclusive with 1007 alternate-scroll: a terminal
-                    // honoring both could deliver one wheel tick twice.
+                    // honouring both could deliver one wheel tick twice.
                     //
                     // `set_mouse_capture` records the new terminal state itself, and
                     // only on success — so a failed write leaves the reconcile
@@ -920,7 +920,7 @@ impl App {
                                         // Reading the edited buffer back failed.
                                         // Do NOT delete the temp file — it holds
                                         // the user's edits; deleting it (the old
-                                        // behavior) silently discarded them. Tell
+                                        // behaviour) silently discarded them. Tell
                                         // the user where to recover them.
                                         self.state.flash_error(format!(
                                             "couldn't read back edits ({e:#}); preserved at {}",

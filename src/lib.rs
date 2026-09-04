@@ -87,7 +87,7 @@ pub mod fuzz {
     /// about *how many* bytes arrive, which no amount of asserting where they
     /// land can reach.
     ///
-    /// The first input byte picks the container flavor and the rest is its
+    /// The first input byte picks the container flavour and the rest is its
     /// content, so one corpus serves all four formats.
     pub fn archive_container(data: &[u8]) {
         use crate::archive::ArchiveFormat;
@@ -403,10 +403,10 @@ struct Cli {
     #[arg(long)]
     no_lua: bool,
 
-    /// Color depth: `auto` (default — truecolor when $COLORTERM advertises it,
-    /// else 256-color), `truecolor`, or `256`. Force `256` on terminals that
+    /// Colour depth: `auto` (default — truecolor when $COLORTERM advertises it,
+    /// else 256-colour), `truecolor`, or `256`. Force `256` on terminals that
     /// can't parse 24-bit SGR (notably macOS's bundled GNU screen 4.00.03, which
-    /// otherwise drops every color). Overrides `[layout] color_depth`.
+    /// otherwise drops every colour). Overrides `[layout] color_depth`.
     #[arg(long, value_name = "MODE")]
     color: Option<String>,
 
@@ -431,7 +431,7 @@ pub fn run() -> Result<()> {
         // on the alt screen, or — the two that were easy to miss here — with
         // the kitty keyboard-enhancement flag still pushed or alternate-scroll
         // still on. Both of those silently corrupt the next TUI / scroll-wheel
-        // behavior in the *same shell session*, long after the panic.
+        // behaviour in the *same shell session*, long after the panic.
         let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
         let _ = execute!(
@@ -588,7 +588,7 @@ pub type Tui = Terminal<CrosstermBackend<io::Stdout>>;
 /// `false` to mean "leave the existing instance alone."
 ///
 /// Non-tty stdin (CI, piped input) keeps the historical auto-takeover
-/// behavior — there's no one to prompt.
+/// behaviour — there's no one to prompt.
 fn prompt_mcp_takeover_if_needed() -> bool {
     use std::io::{BufRead, IsTerminal, Write};
 
@@ -701,7 +701,7 @@ impl crossterm::Command for DisableAlternateScroll {
 /// use it (guarded by `production_code_never_uses_crossterms_mouse_capture`).
 ///
 /// 1006h keeps coordinates correct past column 223. Mutually exclusive with
-/// [`EnableAlternateScroll`]: a terminal honoring both could deliver one tick
+/// [`EnableAlternateScroll`]: a terminal honouring both could deliver one tick
 /// twice (once as arrows, once as a mouse event), so the two are always toggled
 /// as a pair.
 struct EnableWheelReporting;
@@ -983,7 +983,7 @@ fn setup_terminal() -> Result<Tui> {
     execute!(
         stdout,
         EnterAlternateScreen,
-        // Blank the buffer we just entered. On terminals that honor the alt
+        // Blank the buffer we just entered. On terminals that honour the alt
         // screen this is redundant (the alt buffer starts empty), but GNU
         // screen with `altscreen off` (macOS's bundled 4.00.03 default) ignores
         // `?1049h` and leaves us on the main buffer with the shell's content
@@ -1047,7 +1047,7 @@ fn restore_terminal(terminal: &mut Tui) -> Result<()> {
 /// Switch the terminal between 1007 alternate-scroll (wheel as arrow keys, native
 /// selection intact) and real mouse reporting (`?1000h?1006h`).
 ///
-/// The two are mutually exclusive on purpose — a terminal honoring both could
+/// The two are mutually exclusive on purpose — a terminal honouring both could
 /// deliver one wheel tick twice, once as arrows and once as a mouse event — so
 /// this always emits the disable of one alongside the enable of the other. Called
 /// only from the `Effect::SetMouseMode` executor, which in turn is emitted only by
@@ -1254,7 +1254,7 @@ mod mouse_reporting_tests {
 
     /// **The invariant the whole feature rests on**, in both directions: DEC 1007
     /// (wheel-as-arrows) and DEC 1000 (real reporting) are never both enabled. A
-    /// terminal honoring both delivers one wheel tick twice — once as arrow keys,
+    /// terminal honouring both delivers one wheel tick twice — once as arrow keys,
     /// once as a mouse event.
     ///
     /// Untestable before `mouse_mode_seq` was split out of `set_mouse_capture`,
@@ -1459,6 +1459,9 @@ mod mouse_reporting_tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod style_guard;
 
 #[cfg(test)]
 mod fuzz_target_registration_tests {

@@ -1421,7 +1421,7 @@ mod tests {
     }
 
     /// **Deliberate reversal of what #228 shipped.** That version reasoned that
-    /// beside a centered overlay the user still sees the list, so clicking there
+    /// beside a centred overlay the user still sees the list, so clicking there
     /// should reach it. In practice that read as a POLA break: it let a click
     /// select content in the pane *underneath* a pager the user was reading. An
     /// open modal pager is now the only interacting surface, matching how

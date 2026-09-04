@@ -75,7 +75,7 @@ pty, not inferred.
 
 agy's own settings UI frames the trade-off well, and it applies generally:
 **altscreen** means no flicker but you must hold Shift/Option for native
-selection; **inline** preserves terminal behavior but may truncate long
+selection; **inline** preserves terminal behaviour but may truncate long
 conversations.
 
 claude's own mode is `/tui`, persisted as `"tui": "default" | "fullscreen"` in

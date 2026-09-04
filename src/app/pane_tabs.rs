@@ -859,7 +859,7 @@ impl App {
     /// `set_pane_focus` uses. Called at the loop top (and on surface close) so
     /// `state.focus` always reflects reality with **no per-open-site
     /// bookkeeping** — most pager opens (`:grep`, git-view, help, …) never touch
-    /// focus, and closes left a stale `Overlay`/`Pager` behind. Behavior-
+    /// focus, and closes left a stale `Overlay`/`Pager` behind. Behaviour-
     /// preserving while routing/render still read only `pane_focused()`: this
     /// only refines the non-`Pane` discriminant, which `pane_focused()` ignores.
     /// Does the FOCUSED vsplit column host a `V`/`D`/`;cmd` overlay PTY? Reads

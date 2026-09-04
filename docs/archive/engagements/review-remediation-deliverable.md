@@ -29,7 +29,7 @@ cursor-independent allowed set.
 accepted.
 
 **F2 — `6abc6d7`.** SECURITY.md claimed "no prebuilt binary distribution" and
-that signing "would be theater", while the repo ships signed tarballs, a brew
+that signing "would be theatre", while the repo ships signed tarballs, a brew
 tap, a signed apt repo, and crates.io. Rewritten around release-pipeline
 compromise, the keyless chain, and the apt key as the one stored secret.
 *Tests:* n/a (docs); cross-checked against README, INSTALL, and the workflows.
@@ -93,7 +93,7 @@ Severity-framed. **Nothing below was fixed without asking.**
 ### Fixed in passing (surfaced during the work)
 
 - **SECURITY.md *understated* the posture** — medium. The review caught the
-  stale distribution claim but not that the doc said signing "would be theater"
+  stale distribution claim but not that the doc said signing "would be theatre"
   while `release.yml` has produced SLSA attestations and cosign signatures since
   2.0.0. A reader was talked out of verification that already worked.
 - **The untrusted-input claim was false** — medium. "No untrusted-input parser

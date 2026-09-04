@@ -3,7 +3,7 @@
 //! Used for spyc-internal content where shelling out to `less` would be
 //! overkill — long listings, file contents, captured `!` output, version
 //! info. Arbitrary terminal-output viewing lives here too, with ANSI
-//! colors preserved via `ansi-to-tui`.
+//! colours preserved via `ansi-to-tui`.
 
 use ratatui::text::Line;
 
@@ -24,7 +24,7 @@ enum Search {
     Off,
     /// The user is typing a query. `backward` is the direction the search was
     /// initiated in — `/` forward, `?` backward — carried through to the
-    /// committed `Active` so the landing match and `n`/`N` honor it.
+    /// committed `Active` so the landing match and `n`/`N` honour it.
     Typing { query: String, backward: bool },
     /// A query has been committed. `matches` holds line indices that
     /// contain the query; `cursor` is an index into `matches`. `backward`
@@ -39,14 +39,14 @@ enum Search {
 }
 
 /// Where to render the pager. v1.5 introduces this so the same
-/// `PagerView` can be a centered popup, embedded into the top-pane
+/// `PagerView` can be a centred popup, embedded into the top-pane
 /// slot (replacing the file list — like `;less` does today via the
 /// pty overlay path), or embedded into the lower-pane slot
 /// (replacing the pty pane — used by `^a-v` scrollback in v1.5).
 ///
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Mount {
-    /// Centered (or full-width / fit-to-content) overlay drawn on
+    /// Centred (or full-width / fit-to-content) overlay drawn on
     /// top of the file list and pane. Default; matches every
     /// pre-v1.5 caller.
     #[default]
@@ -64,7 +64,7 @@ pub enum Mount {
     RightPane,
 }
 
-/// What flavor of visual selection is active.
+/// What flavour of visual selection is active.
 ///
 /// - `Line` — vi's `V`: whole rows from `min(anchor, cursor)` to
 ///   `max(anchor, cursor)`. The column fields on
@@ -202,11 +202,11 @@ pub struct PagerView {
     /// already exist on disk).
     pub saveable: bool,
     /// When true, the pager fills the entire terminal instead of the
-    /// centered 90×92% box. Toggled with `f`.
+    /// centred 90×92% box. Toggled with `f`.
     pub full_width: bool,
     /// When true (and not `full_width`), shrink the pager box to fit its
     /// content -- height grows with line count, width grows with the
-    /// widest line, both clamped to the centered 90×92% bound and floored
+    /// widest line, both clamped to the centred 90×92% bound and floored
     /// at a usable minimum. For short summaries (single-file long
     /// listing, version info) so a 5-line block doesn't sit inside a
     /// nearly-full-screen frame.
@@ -343,7 +343,7 @@ pub struct PagerView {
     /// `TopPane` (`D`) and `LowerPane` (`^a-v`).
     pub mount: Mount,
     /// True when this pager is the v1.5 pane-scrollback view
-    /// (opened via `^a-v`). Drives a couple of pieces of behavior
+    /// (opened via `^a-v`). Drives a couple of pieces of behaviour
     /// that differ from the regular pager: Esc tells the underlying
     /// pty pane to exit scroll mode (so the divider's `[SCROLL]`
     /// indicator clears), and the view is never pushed to buffer

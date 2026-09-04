@@ -156,7 +156,7 @@ fn find_prefix_match() {
 
 #[test]
 fn find_wraps_around() {
-    // Pick names with no shared substrings so the wrap behavior is
+    // Pick names with no shared substrings so the wrap behaviour is
     // unambiguous under substring matching: only `foo` contains `f`.
     let s = state_with_rows(&["foo", "bar", "baz"]);
     assert_eq!(s.find_match("f", 1, false), Some(0)); // wraps from bar/baz back to foo
@@ -429,7 +429,7 @@ proptest! {
     /// finds `src` in the row `src/`). A name ending in `*` is indistinguishable
     /// from an executable row, so `ends_with` is not the right reference for one —
     /// which is what made this a latent flake, firing only when the generated name
-    /// happened to end in a decoration. That behavior has its own tests in
+    /// happened to end in a decoration. That behaviour has its own tests in
     /// `app::matcher` (`end_anchor_looks_past_the_row_kind_decoration`).
     #[test]
     fn anchors_agree_with_starts_and_ends_with(

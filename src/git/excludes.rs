@@ -4,7 +4,7 @@
 //! `fuzz/target`, `node_modules/`, `.claude/`, …) so their churn never
 //! triggers a listing / git-status refresh. The recursive FSEvents watch
 //! can't skip those subtrees itself (macOS hands us one stream for the whole
-//! tree), so we filter at ingest time. git-faithful: honors nested
+//! tree), so we filter at ingest time. git-faithful: honours nested
 //! `.gitignore`, `.git/info/exclude`, and `core.excludesFile`. Built once per
 //! event batch (the exclude stack borrows the opened repo, so it can't be
 //! cached across calls).

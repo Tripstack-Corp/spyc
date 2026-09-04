@@ -20,7 +20,7 @@ impl super::App {
     /// at render time, so a resize needs a rebuild).
     pub(super) fn open_about(&mut self) {
         let (term_w, _) = self.view.term_size;
-        // Match `build_pager_view`'s markdown width math: the centered overlay
+        // Match `build_pager_view`'s markdown width math: the centred overlay
         // body minus the block borders and the line-number gutter, so prose
         // reflows to the space it will actually be drawn in.
         let body_w = pager::centered_body_width(term_w) as usize;

@@ -1,4 +1,4 @@
-//! Modal/overlay draw helpers: the centered harpoon menu
+//! Modal/overlay draw helpers: the centred harpoon menu
 //! (`render_harpoon_menu`) and the top-right activity (`A`) monitor
 //! (`render_activity_hud`). Split from `app/render.rs` verbatim; an `impl App`
 //! child module reading App's private state via the descendant-module rule.
@@ -50,7 +50,7 @@ impl App {
         }
     }
 
-    /// Render the harpoon menu overlay. Centered modal box listing
+    /// Render the harpoon menu overlay. Centred modal box listing
     /// the active project's slots, with the menu cursor on a
     /// highlighted row. Footer shows the bindings. `h_divider_row` /
     /// `v_divider_col` let it nudge its border off a structural divider
@@ -175,7 +175,7 @@ impl App {
         );
     }
 
-    /// Render the `^a g` image gallery as a centered modal popup.
+    /// Render the `^a g` image gallery as a centred modal popup.
     ///
     /// A popup rather than a view the frame switches into: checking what you
     /// attached is a glance mid-task, and taking the whole file list away to
@@ -329,7 +329,7 @@ impl App {
     }
 
     /// Render the first-launch status-hooks consent (`PromptKind::HookConsent`)
-    /// as a centered modal pop-up. It fires automatically when an agent pane
+    /// as a centred modal pop-up. It fires automatically when an agent pane
     /// launches — while the user's eyes are on the pane — so the old one-line
     /// prompt bar read as "spyc isn't taking my input". A bordered box in the
     /// middle of the screen with a prominent `y`/`n` footer makes the ask
@@ -595,7 +595,7 @@ impl App {
         }
     }
 
-    /// Render the which-key chord-hint popup: a centered box listing the armed
+    /// Render the which-key chord-hint popup: a centred box listing the armed
     /// chord's continuations (`keys → label`). Long labels **wrap** onto indented
     /// continuation lines (never truncated); entries flow into as many columns as
     /// the terminal height needs. Drawn from `view.chord_hint` (built in
@@ -700,7 +700,7 @@ impl App {
         let rows_tall = columns.iter().map(Vec::len).max().unwrap_or(0);
         let width = ((n * col_w) as u16 + 2).min(area.width);
         let height = (rows_tall as u16 + 2).min(area.height);
-        // Center, then nudge a border off a structural divider it would land on
+        // Centre, then nudge a border off a structural divider it would land on
         // (a box edge collinear with the pane / split rule merges into it).
         let cx = area.x + area.width.saturating_sub(width) / 2;
         let cy = area.y + area.height.saturating_sub(height) / 2;
@@ -741,9 +741,9 @@ impl App {
 
 /// Place a popup span of `size` cells so neither of its edges (`start` and
 /// `start + size - 1`) sits on `line`, staying within `[min, max_end)`. Starts
-/// from the centered `start` and, only if it collides, tries the nearest
+/// from the centred `start` and, only if it collides, tries the nearest
 /// offsets (±1, ±2); if none fit (the popup nearly fills the axis, leaving no
-/// room to dodge), returns the centered value unchanged. `line: None` (no such
+/// room to dodge), returns the centred value unchanged. `line: None` (no such
 /// divider on screen) is a no-op.
 fn place_clear_of_line(start: u16, size: u16, line: Option<u16>, min: u16, max_end: u16) -> u16 {
     let Some(line) = line else {

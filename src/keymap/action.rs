@@ -1,7 +1,7 @@
 /// The full vocabulary of things spyc can do in response to input.
 ///
 /// Keep this enum stable and spy-parity-friendly: each variant should map to
-/// one user-observable behavior, so `.spycrc` can bind any key to any action.
+/// one user-observable behaviour, so `.spycrc` can bind any key to any action.
 ///
 /// `strum::EnumIter` is derived *for the guard test only* (`action_names_round_trip`):
 /// it lets that test iterate every variant so a new one that isn't wired into
@@ -50,7 +50,7 @@ pub enum Action {
     CommandPrompt,  // : — vim-style command line (limit, !, !!, ;, etc.)
 
     // Shell-out.
-    ShellCapturedPrompt, // ! — prompt command, capture output, show in pager with colors
+    ShellCapturedPrompt, // ! — prompt command, capture output, show in pager with colours
     ShellForegroundPrompt, // ; — prompt command, run in foreground (for interactive tools)
     StartShell,          // $ — drops you into $SHELL in the current directory
     ChmodAdd(char),      // ^X -> 'x'
@@ -107,7 +107,7 @@ pub enum Action {
     Date,           // :date — show date/time
     Version,        // gV / :version — show spyc version
     ShowMemory,     // I — session info pager (version, pid, rss, counts)
-    ColorToggle,    // C — toggle color theme on/off
+    ColorToggle,    // C — toggle colour theme on/off
     SetEnvPrompt,   // :setenv — open the NAME=VALUE prompt (no default key)
     ToggleActivity, // :activity — toggle draws/sec, bytes/sec overlay
 
@@ -155,7 +155,7 @@ pub enum Action {
     // `:graveyard` command (which dispatches this action for its entry hint).
     OpenGraveyardView,
 
-    // Quick Select — wezterm-style labeled overlay over pane output.
+    // Quick Select — wezterm-style labelled overlay over pane output.
     QuickSelectOpen, // ^a u — scan visible pane, label matches, pick to yank/open
     /// `^a g` — gallery of the images the focused agent tab actually received,
     /// read back out of its transcript.
@@ -207,7 +207,7 @@ pub enum Action {
     ReopenLastBuffer,
 
     /// `F` from the file list -- open the project-wide filename
-    /// finder. Walks PROJECT_HOME (or the listing dir) honoring
+    /// finder. Walks PROJECT_HOME (or the listing dir) honouring
     /// gitignore, fuzzy-matches against typed input, Enter chdirs
     /// to the matched file's parent and places the cursor on it.
     FindFile,

@@ -158,7 +158,7 @@ fn home() -> Option<PathBuf> {
 }
 
 /// Where each host looks for personal skills:
-/// `~/.claude/skills/spyc` and `$CODEX_HOME/skills/spyc` (codex honors
+/// `~/.claude/skills/spyc` and `$CODEX_HOME/skills/spyc` (codex honours
 /// `CODEX_HOME`, defaulting to `~/.codex`).
 #[must_use]
 pub fn host_dir(host: Host) -> Option<PathBuf> {
@@ -171,8 +171,8 @@ pub fn host_dir(host: Host) -> Option<PathBuf> {
             };
             Some(base.join("skills").join(SKILL_NAME))
         }
-        // Antigravity's cross-flavor personal skills root. `~/.gemini/config/` is
-        // the customization root every flavor reads (CLI, IDE, app);
+        // Antigravity's cross-flavour personal skills root. `~/.gemini/config/` is
+        // the customization root every flavour reads (CLI, IDE, app);
         // `~/.gemini/antigravity-cli/skills/` also works but is CLI-only, and
         // `antigravity-cli/builtin/skills/` is agy's own shipped bundle — not
         // ours to write into.

@@ -19,7 +19,7 @@
 # before the which-key popup lists its continuations. Default 300. Set to 0
 # to disable the popup entirely.
 #
-# color_depth (default "auto"): how many colors to emit. "auto" uses 256-color
+# color_depth (default "auto"): how many colours to emit. "auto" uses 256-colour
 # inside GNU screen (which can't render 24-bit SGR even when $COLORTERM claims
 # truecolor), else 24-bit truecolor when $COLORTERM advertises it, else 256.
 # "truecolor" / "256" force it — e.g. set "truecolor" if you've enabled
@@ -85,7 +85,7 @@
 #   is unaffected.
 
 # ── yank ──────────────────────────────────────────────────────────────
-# Pager yank (`y` / `Y` / visual-mode `y`) behavior.
+# Pager yank (`y` / `Y` / visual-mode `y`) behaviour.
 # `include_pager_title` (default true) prepends a short header to the
 # yanked text identifying the source — the pager's title, e.g.
 # `!cargo build`, `task #3: cargo test`, or the filename. Useful when
@@ -177,8 +177,8 @@
 # intraline = "char"
 
 # ── delete ────────────────────────────────────────────────────────────
-# Behavior of the `R` and `dd` / `Ndd` removal actions.
-# `confirm` (default true) shows a `y/N` prompt with a warning-color
+# Behaviour of the `R` and `dd` / `Ndd` removal actions.
+# `confirm` (default true) shows a `y/N` prompt with a warning-colour
 # highlight on the targeted rows before anything happens. Set to
 # false for "yolo mode" — deletions fire immediately, no prompt, no
 # highlight. The graveyard (`:graveyard`) is still the destination either
@@ -266,7 +266,7 @@
 #   both    try both (useful if you paste on either end).
 #
 # Local stays helper-first on purpose: OSC 52 is write-only with no reply, so
-# spyc can't confirm the terminal honored it, and some terminals disable it
+# spyc can't confirm the terminal honoured it, and some terminals disable it
 # deliberately (a remote host writing your clipboard is a real risk). Inside
 # tmux it needs `set -g set-clipboard on`; spyc DCS-wraps the escape so tmux
 # forwards it. Oversized selections fall back rather than risk a terminal
@@ -290,8 +290,8 @@
 # visual_done = false
 # suppress_focused_tab = false
 
-# ── colors ────────────────────────────────────────────────────────────
-# Hex strings ("#aabbcc") or named colors ("red", "blue"). Anything you
+# ── colours ───────────────────────────────────────────────────────────
+# Hex strings ("#aabbcc") or named colours ("red", "blue"). Anything you
 # don't set falls back to the built-in palette.
 [colors]
 # dir            = "#82aaff"
@@ -307,11 +307,11 @@
 # status_path    = "#7dcfff"
 # status_suffix  = "#565f89"
 # prompt_prefix  = "#ff9e64"
-# popup_border   = "#bb9af7"  # outline of centered pop-ups (which-key, harpoon)
+# popup_border   = "#bb9af7"  # outline of centred pop-ups (which-key, harpoon)
 # Diff / show / blame renderer (the in-house syntax-highlighted view).
 # *_fg are foregrounds; *_bg are the row-background tints behind +/- lines
 # (dropped in mono / colortoggle). Syntax-highlighted code keeps its own
-# colors — only the row background is tinted.
+# colours — only the row background is tinted.
 # diff_add_fg    = "#9ece6a"
 # diff_del_fg    = "#f7768e"
 # diff_add_bg      = "#122619"  # dim line wash

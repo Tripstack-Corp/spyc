@@ -73,7 +73,7 @@ impl App {
     }
 
     /// Apply a git worker result to domain state, returning whether the
-    /// displayed git info/files changed (so the loop can redraw). Honors
+    /// displayed git info/files changed (so the loop can redraw). Honours
     /// the generation + repo-root drop gates. Moved verbatim from the run
     /// loop (MVU Phase 5 PR 0).
     pub(super) fn apply_git_worker_result(&mut self, result: state::GitWorkerResult) -> bool {

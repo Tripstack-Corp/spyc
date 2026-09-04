@@ -135,12 +135,12 @@ fn scroll_to_match_translates_to_chunk_local_offset_in_multi_col() {
 #[test]
 fn scroll_max_logical_when_no_wrap_or_no_body_w() {
     let mut view = PagerView::new_plain("test", vec!["x".repeat(60); 10]);
-    // wrap off → logical-line behavior. 10 - 4 = 6 pins the last line to the
+    // wrap off → logical-line behaviour. 10 - 4 = 6 pins the last line to the
     // bottom; +1 reserves a row for the `[EOF]` marker (long-file end signal).
     view.wrap = false;
     assert_eq!(view.scroll_max(4), 7);
     // wrap on but body_w = 0 (e.g. before first render) →
-    // fall back to logical-line behavior so we don't return a
+    // fall back to logical-line behaviour so we don't return a
     // bogus value when the wrap-aware path can't compute.
     view.wrap = true;
     view.last_body_w.set(0);
@@ -255,7 +255,7 @@ fn mount_default_is_overlay() {
 
 #[test]
 fn pager_inner_area_overlay_centers() {
-    // 100x40 frame, default Mount::Overlay → centered 90×92 %.
+    // 100x40 frame, default Mount::Overlay → centred 90×92 %.
     let view = sample_view();
     let frame = Rect::new(0, 0, 100, 40);
     let inner = pager_inner_area(frame, &view);
@@ -278,7 +278,7 @@ fn pager_inner_area_top_pane_uses_area_as_is() {
     let mut view = sample_view();
     view.mount = Mount::TopPane;
     // Caller would pass the top-pane slot rect; pager must
-    // honor it verbatim (no extra centering / fit logic).
+    // honour it verbatim (no extra centring / fit logic).
     let slot = Rect::new(0, 0, 100, 20);
     assert_eq!(pager_inner_area(slot, &view), slot);
 }
@@ -355,7 +355,7 @@ fn pager_inner_area_lower_pane_uses_area_as_is() {
 // ── snapshot tests (TestBackend) ──────────────────────────────
 //
 // Glyph-level snapshots of the pager's four interesting modes:
-// ANSI input (color-tagged source), hex dump styling, line-number
+// ANSI input (colour-tagged source), hex dump styling, line-number
 // gutter, and search highlight. We capture symbols only (no
 // styling) — same trade-off as `ui::status::tests`. A regression
 // that breaks layout, gutter width, search-bar formatting, or
@@ -692,7 +692,7 @@ fn long_file_shows_eof_marker_at_bottom() {
 #[test]
 fn exact_fit_file_can_still_reach_the_eof_marker() {
     use ratatui::{Terminal, backend::TestBackend};
-    // 20 terminal rows ⇒ a centered 18-row overlay ⇒ a 16-row content viewport.
+    // 20 terminal rows ⇒ a centred 18-row overlay ⇒ a 16-row content viewport.
     let lines: Vec<String> = (0..16).map(|i| format!("line {i}")).collect();
     let mut view = PagerView::new_plain("exact.txt", lines);
     let theme = Theme::default();

@@ -28,7 +28,7 @@ pub(super) fn line_display_width(line: &Line) -> usize {
         .sum()
 }
 
-/// Centered pager occupies this percent of the terminal width.
+/// Centred pager occupies this percent of the terminal width.
 /// Exposed so callers (help content generation) can compute the same
 /// column width the pager will actually render at.
 pub(super) const CENTERED_W_PCT: u16 = 90;
@@ -36,8 +36,8 @@ pub(super) const CENTERED_W_PCT: u16 = 90;
 /// Gap (in cells) between columns in multi-column mode.
 pub(super) const COL_GAP: u16 = 2;
 
-/// Column width a centered pager will use for `ncols` columns at the
-/// given terminal width. Mirrors the render-path math: centered rect
+/// Column width a centred pager will use for `ncols` columns at the
+/// given terminal width. Mirrors the render-path math: centred rect
 /// → minus 2 for block borders → divided evenly across columns.
 #[must_use]
 pub const fn centered_col_width(term_w: u16, ncols: u16) -> u16 {
@@ -47,7 +47,7 @@ pub const fn centered_col_width(term_w: u16, ncols: u16) -> u16 {
     body_w.saturating_sub(gaps) / ncols
 }
 
-/// Body width inside the centered pager (useful for deciding how many
+/// Body width inside the centred pager (useful for deciding how many
 /// columns actually fit before calling `centered_col_width`).
 #[must_use]
 pub const fn centered_body_width(term_w: u16) -> u16 {
@@ -320,14 +320,14 @@ pub(super) fn is_blank_line(line: &Line<'static>) -> bool {
 ///
 /// - `Mount::Overlay` keeps the pre-v1.5 dispatch: full-width if
 ///   the user toggled it, fit-to-content for short summaries,
-///   else the centered 90×92 % box.
+///   else the centred 90×92 % box.
 /// - `Mount::TopPane` / `Mount::LowerPane` use `area` as-is — the
 ///   caller (App::render) passes the slot's rect directly so the
-///   pager fills it without extra centering.
+///   pager fills it without extra centring.
 ///
 /// `full_width` and `fit_to_content` are deliberately ignored for
 /// the pane mounts because the slot's rect already defines the
-/// pager's footprint there. We could honor them later if a use
+/// pager's footprint there. We could honour them later if a use
 /// case demands it.
 pub(super) fn pager_inner_area(area: Rect, view: &PagerView) -> Rect {
     match view.mount {
@@ -361,7 +361,7 @@ const fn centered_rect(area: Rect, percent_w: u16, percent_h: u16) -> Rect {
     }
 }
 
-/// Same x / y / width as the standard centered pager, but shrinks from
+/// Same x / y / width as the standard centred pager, but shrinks from
 /// the bottom: height = the rows the content needs + borders + status row,
 /// capped at the standard 92% height. Top edge stays where the user expects
 /// (matching the regular pager origin); short summaries don't sit inside a
@@ -440,7 +440,7 @@ mod tests {
     #[test]
     fn centered_rect_does_not_overflow_on_large_areas() {
         // `area.width * percent_w` overflows u16 past ~728 cols (and height
-        // past ~712 rows). The u32 widening must keep the centered rect
+        // past ~712 rows). The u32 widening must keep the centred rect
         // within its area on a very large terminal rather than panic/wrap.
         let area = Rect {
             x: 0,
@@ -451,7 +451,7 @@ mod tests {
         let r = centered_rect(area, CENTERED_W_PCT, 92);
         assert!(r.width <= area.width, "width {} > area", r.width);
         assert!(r.height <= area.height, "height {} > area", r.height);
-        // Centered: a non-trivial inset on both axes (not zero, not full).
+        // Centred: a non-trivial inset on both axes (not zero, not full).
         assert!(r.x > 0 && r.y > 0, "rect not inset: {r:?}");
         // Sanity on a normal-size area: 100 * 90 / 100 = 90 wide.
         let small = Rect {

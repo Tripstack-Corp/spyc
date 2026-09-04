@@ -411,7 +411,7 @@ impl App {
 
     /// Render one frame iff the accumulator is dirty (extracted verbatim from
     /// the loop's `if ctx.draw.dirty { … }` block). Composes the term-title
-    /// effect, wraps the draw in a DEC 2026 synchronized update, honors the
+    /// effect, wraps the draw in a DEC 2026 synchronized update, honours the
     /// per-iteration `pending_clear`, times the build/whole-frame for the
     /// activity monitor, and counts the draw (skipping `activity_only` frames
     /// so the stats don't oscillate — H6). Resets `ctx.draw` for the next
@@ -459,7 +459,7 @@ impl App {
                 // it from the diff + tty emission measured below.
                 let render_start = std::time::Instant::now();
                 self.render(frame);
-                // Single choke point: quantize RGB → 256-color for truecolor-blind
+                // Single choke point: quantize RGB → 256-colour for truecolor-blind
                 // terminals (old GNU screen). No-op at TrueColor, so capable
                 // terminals pay nothing; catches theme + syntect + diff + ANSI
                 // passthrough alike since it runs on the finished buffer.
@@ -933,7 +933,7 @@ impl App {
             }
 
             // P2 `wait_for_scope_clear`: resolve parked scope-waiters (a
-            // `release_scope` may have landed in the drain just above) + honor
+            // `release_scope` may have landed in the drain just above) + honour
             // their deadlines. Armed only while a waiter is parked ⇒ 0 dps idle.
             self.settle_scope_waiters(now_pre, &mut ctx);
 

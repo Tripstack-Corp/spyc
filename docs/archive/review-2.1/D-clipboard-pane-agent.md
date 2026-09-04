@@ -172,7 +172,7 @@ Consequences, all silent:
    clipboard of the machine spyc runs on, which over SSH is the *server* — text the
    user can never paste." `yf` and `yP` (same `y` chord) do the right thing; `yp` and
    `ya` do not.
-2. **`[clipboard].command` is not honored** by them. `copy()` calls
+2. **`[clipboard].command` is not honoured** by them. `copy()` calls
    `resolve_override(None)` (`src/clipboard.rs:378`), which reads only
    `$SPYC_CLIPBOARD` — by design, since `clipboard.rs` is a leaf with no config access
    (`src/clipboard.rs:325-334`). So `$SPYC_CLIPBOARD` works on all six verbs but the
@@ -327,14 +327,14 @@ an oversized selection produces `Err("selection too large for OSC 52 …")` and 
 is copied anywhere. Same under `via = "osc52"`. The claim is true only under
 `via = "both"`, which is not the default.
 
-The behavior is arguably right (a helper writing the server's clipboard is not a
+The behaviour is arguably right (a helper writing the server's clipboard is not a
 useful fallback over SSH, and the user *is* told — see "verified correct" below). The
 defect is that three places state a fallback that no code performs, which is exactly
 what AGENTS.md's "comments state what IS" rule and the `comments_carry_no_reasoning_leakage`
 guard exist to prevent.
 
 A fix needs either the comments and `CONFIGURATION.md` corrected to describe the real
-behavior ("refused with a message; no fallback unless `via = "both"`"), or a genuine
+behaviour ("refused with a message; no fallback unless `via = "both"`"), or a genuine
 fallback added under `auto`.
 
 ### D7 — `low` — `src/app/session.rs:568`; `src/app/session.rs:211`
@@ -428,7 +428,7 @@ Spot-checks that found nothing to report:
   `mouse/scroll.rs::repeat_key_effect` takes it from `tabs.active().application_cursor()`
   (`src/app/mouse/scroll.rs:45`, `:89`, `:179-186`), and the `!` capture path states the
   invariant ("a capture is a bare `PtyHost` with no vt100 emulator, so no DECCKM state
-  exists to honor", `src/app/key_dispatch/mod.rs:454-457`).
+  exists to honour", `src/app/key_dispatch/mod.rs:454-457`).
 
 - **`osc52_sequence` (#234).** Encoding is the escaping — the payload is base64, whose
   alphabet excludes ESC and BEL, so no sanitizer is needed and none is written; the test

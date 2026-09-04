@@ -23,7 +23,7 @@ impl App {
         };
         // Always scan the *visible* viewport — labels must land on
         // text the user can see. Scroll mode falls out of this for
-        // free since `visible_lines()` honors the user's current
+        // free since `visible_lines()` honours the user's current
         // scroll position.
         let lines = tabs.active().visible_lines();
         let patterns = build_patterns(&self.state.config.scan_patterns);
@@ -172,7 +172,7 @@ impl App {
 
     /// Render label overlay on top of the pane. Drawn after the
     /// pane widget so labels paint over the live vt100 grid; small
-    /// inverted-color cells next to each match's start position.
+    /// inverted-colour cells next to each match's start position.
     pub fn render_quick_select_overlay(&self, frame: &mut Frame, pane_rect: ratatui::layout::Rect) {
         use ratatui::{
             style::{Color, Modifier, Style},

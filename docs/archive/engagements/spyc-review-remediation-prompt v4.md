@@ -4,7 +4,7 @@ You are working in the spyc repository (Tripstack-Corp/spyc). An external code
 review was performed against commit `dbffd29`; its findings were verified and
 corrected against `208d3ba`, then hardened against runtime knowledge from an
 agent working inside the repo. The commits between the review baseline and
-main are entirely mouse work — treat `src/app/mouse.rs` and neighbors as the
+main are entirely mouse work — treat `src/app/mouse.rs` and neighbours as the
 one area where "verify the finding still holds" is more than a formality.
 
 **Amended after PR #234 merged:** the earlier "do not touch `src/app/mouse.rs`"
@@ -44,12 +44,12 @@ surface the conflict rather than silently overriding it.
 2. **One finding, one PR-shaped change**, conventional-commit messages
    referencing the finding number (e.g. `fix(mcp): validate root override
    against session roots (review F1)`). No bundled cleanups.
-3. **Tests first-class.** Every behavioral change ships with a test that
+3. **Tests first-class.** Every behavioural change ships with a test that
    fails before and passes after, placed per existing conventions.
 4. **Run the full gate** (`make check` / CI-parity target) before declaring
    any finding done. All work passes with `--locked`.
 5. **Docs in the same change.** ARCHITECTURE.md's "Documentation contract"
-   applies: behavior change and its doc change land together.
+   applies: behaviour change and its doc change land together.
 
 ## Order of work
 
@@ -207,7 +207,7 @@ machinery.
 **Correction to the original finding:** the bare-`/tmp` fallback is a
 symptom. The defect is two resolvers:
 
-- `state::state_root()` — honors `$XDG_STATE_HOME`, returns `Option`
+- `state::state_root()` — honours `$XDG_STATE_HOME`, returns `Option`
   (no HOME → `None`, callers skip persistence safely)
 - `mcp::state_dir()` — ignores `$XDG_STATE_HOME`, falls back to bare `/tmp`
 
@@ -225,7 +225,7 @@ and any `/tmp`-squat hardening disappear with it.
 
 **Acceptance:** one resolver; a test that sets `XDG_STATE_HOME` and verifies
 the socket path and (e.g.) the frecency path share a root; the no-HOME
-behavior on the MCP side is explicit and tested.
+behaviour on the MCP side is explicit and tested.
 
 ### F5 — Fuzz targets exist but never run in CI
 
@@ -316,7 +316,7 @@ approval. No edits landed.
   `fmt-check` that CI then caught.
 - Do not land a `src/app/mouse.rs` split. F4 Part B is propose-only.
 - Do not touch the MVU structure, the sync-only concurrency model, the
-  pager_stream seam, or the gix facade — reviewed favorably.
+  pager_stream seam, or the gix facade — reviewed favourably.
 - Do not add dependencies. std plus the existing tree covers every finding.
 - Do not build a new atomic-write helper (F3 — it exists).
 - Do not add `/tmp`-squat hardening (F6 — the path it defends should not

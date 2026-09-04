@@ -1,7 +1,7 @@
 //! Syntax highlighting for the pager via `syntect` + `two-face`.
 //!
 //! Lazy-loads the syntax and theme sets once, then converts syntect's
-//! highlighting output into ratatui `Line`s with RGB colors.
+//! highlighting output into ratatui `Line`s with RGB colours.
 //!
 //! The base syntax set comes from `two_face::syntax::extra_newlines()`:
 //! `bat`'s curated grammar collection (TypeScript, TOML, Dockerfile,
@@ -18,7 +18,7 @@
 //!
 //! - `<config_root>/syntaxes/`, i.e. `$XDG_CONFIG_HOME/spyc/syntaxes/` or
 //!   `~/.config/spyc/syntaxes/` — resolved by [`crate::state::config_root`],
-//!   the single config-root resolver, so it honors the same precedence (and the
+//!   the single config-root resolver, so it honours the same precedence (and the
 //!   same test override) as `init.lua` and the `lua/` script dir.
 //!
 //! Files are best-effort; a malformed grammar is logged via

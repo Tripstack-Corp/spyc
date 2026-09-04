@@ -4,7 +4,7 @@
 //! defined in the parent module; this file holds the `impl` that walks
 //! events and accumulates spans. `super::render` constructs a `Renderer`,
 //! feeds it events, and calls `finish`. Split out of `markdown.rs`
-//! verbatim during the 800-LoC decomposition — behavior-identical.
+//! verbatim during the 800-LoC decomposition — behaviour-identical.
 
 use pulldown_cmark::{BlockQuoteKind, CodeBlockKind, Event, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
@@ -552,7 +552,7 @@ impl<'t> Renderer<'t> {
         // decent slice rather than every column getting hard-clamped
         // at 24. Fallback (no hint, or budget == CONTENT_WIDTH)
         // preserves the original tight cap so existing tests / small
-        // terminals keep their behavior.
+        // terminals keep their behaviour.
         let per_col_cap = if self.table_width > CONTENT_WIDTH {
             // Frame overhead: 3 cells per column + 1 outer border.
             let usable = self.table_width.saturating_sub(3 * n_cols + 1);

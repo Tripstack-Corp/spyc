@@ -1,10 +1,10 @@
-//! Runtime color theme.
+//! Runtime colour theme.
 //!
 //! The default palette is inspired by Tokyo Night — tuned for dark terminal
-//! backgrounds. We use true-color RGB values; ratatui will map them to the
-//! closest 256-color on terminals that don't speak 24-bit.
+//! backgrounds. We use true-colour RGB values; ratatui will map them to the
+//! closest 256-colour on terminals that don't speak 24-bit.
 //!
-//! Users can override individual colors via `[colors]` in `.spycrc.toml`.
+//! Users can override individual colours via `[colors]` in `.spycrc.toml`.
 //! Invalid values are silently ignored so a bad rc file degrades rather than
 //! crashing.
 
@@ -12,7 +12,7 @@ use ratatui::style::{Color, Modifier, Style};
 
 use crate::config::ColorOverrides;
 
-/// Runtime color theme. Every field corresponds to a named color that can be
+/// Runtime colour theme. Every field corresponds to a named colour that can be
 /// overridden by the user's `.spycrc.toml` `[colors]` table.
 #[derive(Debug, Clone)]
 pub struct Theme {
@@ -30,10 +30,10 @@ pub struct Theme {
     pub status_path: Color,
     pub status_suffix: Color,
     pub prompt_prefix: Color,
-    /// Border color for centered pop-up overlays (the which-key chord hint,
+    /// Border colour for centred pop-up overlays (the which-key chord hint,
     /// the harpoon menu). Deliberately *not* `prompt_prefix`: the frame chrome
     /// (active pane divider, tab line) is amber `prompt_prefix`, so a popup
-    /// sharing that color blends into the frame beneath it. A distinct accent
+    /// sharing that colour blends into the frame beneath it. A distinct accent
     /// reads as "this floats above everything else."
     pub popup_border: Color,
     pub empty_marker: Color,
@@ -45,12 +45,12 @@ pub struct Theme {
     pub delete_warning: Color,
     /// Foreground for added (`+`) lines in the diff/show renderer (the
     /// gutter glyph + the unknown-language fallback text). Syntax-highlighted
-    /// lines keep their language colors; only the row background is tinted.
+    /// lines keep their language colours; only the row background is tinted.
     pub diff_add_fg: Color,
     /// Foreground for removed (`-`) lines in the diff/show renderer.
     pub diff_del_fg: Color,
     /// Row background tint behind added lines (overlaid on the syntect fg, so
-    /// language colors survive). A dim wash — the brighter `diff_add_word_bg`
+    /// language colours survive). A dim wash — the brighter `diff_add_word_bg`
     /// marks the actually-changed tokens. Dropped in `mono`.
     pub diff_add_bg: Color,
     /// Row background tint behind removed lines. Dropped in `mono`.
@@ -69,7 +69,7 @@ pub struct Theme {
     /// Foreground for low-emphasis metadata (binary/submodule notes, the
     /// `show` commit header's Author/Date labels, truncation banner).
     pub diff_meta_fg: Color,
-    /// When true, all colors fall back to terminal defaults. Used by the
+    /// When true, all colours fall back to terminal defaults. Used by the
     /// `C` (colortoggle) action — the cursor row falls back to reverse
     /// video so the selection is still visible.
     pub mono: bool,
@@ -110,7 +110,7 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// Return a copy with `mono` flipped — flipping between the colored
+    /// Return a copy with `mono` flipped — flipping between the coloured
     /// palette and a terminal-defaults look.
     pub fn toggled(&self) -> Self {
         let mut copy = self.clone();
@@ -118,7 +118,7 @@ impl Theme {
         copy
     }
 
-    /// Apply user overrides from the config. Invalid color strings are
+    /// Apply user overrides from the config. Invalid colour strings are
     /// silently ignored (the default stays in place).
     pub fn with_overrides(mut self, overrides: &ColorOverrides) -> Self {
         macro_rules! apply {
@@ -215,10 +215,10 @@ impl Theme {
 }
 
 /// Diff / show / blame renderer styles. In their own impl block grouping the
-/// diff-view color logic; consumed by the `diff_render` and `blame_render`
+/// diff-view colour logic; consumed by the `diff_render` and `blame_render`
 /// modules (driven into the pager by the git-view session).
 /// All mono-aware: in `mono` the +/- distinction is carried by the gutter
-/// glyph + BOLD rather than color, and row backgrounds are dropped (honoring
+/// glyph + BOLD rather than colour, and row backgrounds are dropped (honouring
 /// the `C` colortoggle).
 impl Theme {
     /// Style for a per-file header line (`status  path`).
@@ -252,7 +252,7 @@ impl Theme {
     }
 
     /// Style for a diff that *failed* to build (a [`DiffKind::Error`] line) —
-    /// the soft-red removal color plus bold so a broken diff stands out from
+    /// the soft-red removal colour plus bold so a broken diff stands out from
     /// the dim metadata of a binary/submodule note. Bold-only in `mono`.
     ///
     /// [`DiffKind::Error`]: crate::git::model::DiffKind::Error
@@ -267,7 +267,7 @@ impl Theme {
     }
 
     /// Gutter-glyph style for an added (`is_add`) or removed line. The glyph
-    /// carries the meaning in `mono`; in color it also gets the +/- color.
+    /// carries the meaning in `mono`; in colour it also gets the +/- colour.
     pub fn diff_gutter_style(&self, is_add: bool) -> Style {
         if self.mono {
             Style::default().add_modifier(Modifier::BOLD)
@@ -321,10 +321,10 @@ impl Theme {
     }
 }
 
-/// Parse a color string. Accepts:
+/// Parse a colour string. Accepts:
 /// - Hex `#rrggbb` (6 hex digits) -> `Color::Rgb`
 /// - Short hex `#rgb` (3 hex digits) -> expand each digit, e.g. `#abc` = `#aabbcc`
-/// - Named colors (case-insensitive): `black`, `red`, `green`, `yellow`,
+/// - Named colours (case-insensitive): `black`, `red`, `green`, `yellow`,
 ///   `blue`, `magenta`/`purple`, `cyan`, `white`, `gray`/`grey`/`dark_gray`,
 ///   and `light_*` versions.
 pub fn parse_color(s: &str) -> Option<Color> {

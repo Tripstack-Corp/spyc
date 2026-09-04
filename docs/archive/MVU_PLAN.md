@@ -101,7 +101,7 @@ from the draw branch, `write_context` (synchronous-by-design for the MCP
 read-after-write contract), `save_session`, MCP-config writes, and
 `send_pending_resumes` (a two-phase pane write).
 
-Focus is **not modeled** — reconstructed from ~8 booleans at every site, with
+Focus is **not modelled** — reconstructed from ~8 booleans at every site, with
 ~10 copy-pasted `pane_focused = false` overlay-open mutations and 5+
 semantically distinct `^C` sites. `AppState` is **not pure** — it holds
 `git_worker_tx` (a `Sender`) and does blocking IO (`chdir` does `canonicalize`
@@ -408,7 +408,7 @@ preserved; a **timing-equivalence harness** asserts a Message arriving 5ms into 
   streaming elapsed-timer the cap used to).
 **Phase 3 DONE**: every event source wakes the unified channel; the run loop is
 fully event-driven (0 idle wakes when no deadline is armed). Each sub-phase was
-spec'd via an adversarial workflow + shipped behavior-equivalent behind green
+spec'd via an adversarial workflow + shipped behaviour-equivalent behind green
 CI, one source per PR (3b/3c/3d split add-the-wake / delete-the-floor so the
 floor backstopped every wake migration before its poll was removed).
 
@@ -423,7 +423,7 @@ Add `SendToPane` and route the inline `send_bytes` sites through it. Convert the
 Scope `^C`: only signal-**delivery** sites become `SignalGroup`; prompt-cancel/
 buffer-clear/flash-hint stay pure transitions.
 
-**Phase 4 DONE** (PRs #213–#216, each behavior-equivalent behind green CI +
+**Phase 4 DONE** (PRs #213–#216, each behaviour-equivalent behind green CI +
 a per-PR adversarial verification workflow): `run_effects` (in the new
 `src/app/effect.rs`) is the **sole side-effect executor** for clipboard /
 signal / send-to-pane / terminal-title. Vocabulary: `ForegroundExec` (via a
@@ -482,9 +482,9 @@ incrementalism, scope-honesty); all returned viable after these were folded in.
 
 - **Pre-launch timing (the deliberate trade-off).** Landing deep loop/
   concurrency surgery before a public 2.0 launch risks subtle regressions
-  (timing, focus, stdin) that behavior-equivalence tests don't fully catch, at
+  (timing, focus, stdin) that behaviour-equivalence tests don't fully catch, at
   the worst possible moment. → Accepted to avoid a post-launch refactor
-  overhang. Mitigated by: every phase behavior-equivalent behind green CI +
+  overhang. Mitigated by: every phase behaviour-equivalent behind green CI +
   manual daily-driver smoke; the test harness (`docs/archive/TESTING_STRATEGY.md`)
   lands *before* Phases 1–6; Phase 0 (lowest-risk, highest-value) lands first
   and the single-channel loop rewrite lands last; each phase is independently
@@ -536,7 +536,7 @@ incrementalism, scope-honesty); all returned viable after these were folded in.
   `ResizePane` effect on Resize Messages (Phase 6).
 - **Dropped (out of scope)**: a pure `handle_key(key, &Model) -> Option<Message>`
   (the chord suppressor reads wall-clock `elapsed()`); folding `^\` SIGQUIT / `^t`
-  into Phase 4 (a behavior change, not a free byproduct).
+  into Phase 4 (a behaviour change, not a free byproduct).
 
 ---
 

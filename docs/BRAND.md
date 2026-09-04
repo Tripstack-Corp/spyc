@@ -63,7 +63,7 @@ Said aloud, *spy-see* is a near-homonym for *spicy* — and that pun is why the
 whole brand runs on chili and spice: the 🌶️ logo, the spice-pair session names,
 the warm-heat palette.
 
-Spice is also the right metaphor for the tool. It's specific — not "flavor" in
+Spice is also the right metaphor for the tool. It's specific — not "flavour" in
 the abstract, but bright, sharp, and unmistakable, where a small amount does a
 lot of work. That's spyc: precise, fast, no bulk.
 
@@ -95,7 +95,7 @@ the way you type commands — say the thing, then stop.
 - Lead with what it does, in motion: *pick three files, ask, the agent sees them.*
 - Talk like the terminal — `hjkl`, yank, pick, jump, socket, branch. Verbs, keys, paths.
 - Cut anything not earning its place. Brevity is the brand.
-- Use dry humor when it's true. (The session names are a joke the tool is in on.)
+- Use dry humour when it's true. (The session names are a joke the tool is in on.)
 
 **Don't**
 - Reach for the marketing adjective cloud — *revolutionary, seamless, powerful, game-changing, blazingly fast.* If there's a benchmark, show the number instead.
@@ -111,7 +111,7 @@ carries the brand — there is no wordmark requirement beyond setting "spyc" in
 the doc/site type.
 
 **Palette.** The spice rack: red heat and warm accents against charcoal. Two of
-these aren't just brand colors — they're what users see every session, so they're
+these aren't just brand colours — they're what users see every session, so they're
 canon, not decoration.
 
 | Token | Hex | Role |

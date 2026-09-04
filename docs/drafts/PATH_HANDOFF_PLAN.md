@@ -110,7 +110,7 @@ high reliability because it's an explicit prompt directing a named tool
 sidesteps codex's weak `instructions` handling (see D) because the
 directive is in the prompt.
 
-Keep behavior predictable: `^a s` = consumer-aware, plus a sibling
+Keep behaviour predictable: `^a s` = consumer-aware, plus a sibling
 (`^a S`) that always sends literal native paths (option A) for when you
 want the path itself (e.g. dropping it into a code comment).
 

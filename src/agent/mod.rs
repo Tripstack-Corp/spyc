@@ -8,7 +8,7 @@
 //! no match-arm edits.
 //!
 //! [`AgentKind`] (in `state::sessions`) stays the *persistence* tag
-//! serialized into saved sessions; profiles carry *behavior*. The two
+//! serialized into saved sessions; profiles carry *behaviour*. The two
 //! meet at [`profile_for`] (kind → profile, for restored tabs) and
 //! [`detect`] (command → profile, for live panes).
 
@@ -143,7 +143,7 @@ impl StatusHookSupport {
     }
 }
 
-/// Per-agent behavior. Default methods express "this agent doesn't do
+/// Per-agent behaviour. Default methods express "this agent doesn't do
 /// X" — an agent without a capability simply doesn't override.
 pub trait AgentProfile: Sync {
     fn kind(&self) -> AgentKind;
@@ -1163,7 +1163,7 @@ mod tests {
 
     // ── kind → profile dispatch (restore-time) ────────────────────────
     // `detect` (command → profile) is covered above; these pin the OTHER
-    // direction, `profile_for` (persisted AgentKind → behavior), which the
+    // direction, `profile_for` (persisted AgentKind → behaviour), which the
     // restore loop uses to choose each tab's resume strategy.
 
     /// Every registered agent's kind round-trips through `profile_for`:

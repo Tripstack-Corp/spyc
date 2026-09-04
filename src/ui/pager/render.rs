@@ -24,7 +24,7 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     frame.render_widget(Clear, inner_area);
 
     // Borderless when:
-    //   - `full_width` (current behavior — terminal text selection
+    //   - `full_width` (current behaviour — terminal text selection
     //     is clean without the box drawing).
     //   - `Mount::LowerPane` — the pager occupies the bottom-pane
     //     slot, which the pty renders into without a border. Drawing
@@ -505,7 +505,7 @@ fn apply_row_styling(
     if view.picker_cursor == Some(abs_idx) {
         if let Some((col, vi_mode)) = view.picker_edit_cursor {
             // History editor: the whole selected row reads as solid cursor
-            // colors (like the non-edit picker row below); the edit cell on
+            // colours (like the non-edit picker row below); the edit cell on
             // top gets a reverse/underline cue for normal/insert mode.
             let row_style = Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg);
             let solid = Line::from(
@@ -661,7 +661,7 @@ fn paint_block_selection(
 }
 
 /// Apply match highlighting to a line when a search is active. The
-/// current match gets the cursor-bg color for max pop; other matches get
+/// current match gets the cursor-bg colour for max pop; other matches get
 /// a softer bg tint.
 fn styled_line_for_render(
     line: &Line<'static>,
@@ -679,7 +679,7 @@ fn styled_line_for_render(
         theme.other
     };
     // Apply the background across every span in the line so the whole
-    // row reads as "a hit" without clobbering existing fg colors.
+    // row reads as "a hit" without clobbering existing fg colours.
     let spans = line
         .spans
         .iter()
@@ -741,14 +741,14 @@ fn expand_tabs(
 }
 
 /// Vim-style whitespace substitution. Applied per span to keep existing
-/// colors. Tabs are already expanded by [`expand_tabs`] before this runs, so
+/// colours. Tabs are already expanded by [`expand_tabs`] before this runs, so
 /// only the remaining cues are handled here. Visual cues:
 ///   `·`  trailing space
 ///   `^M` carriage return
 ///   `$`  end-of-line (non-empty lines only — blank lines are obviously blank)
 fn apply_whitespace_markers(line: &Line<'static>, theme: &Theme) -> Line<'static> {
     // Warm amber-ish so markers are visible against dark backgrounds
-    // without fighting the content. Uses the pick color (amber) dimmed.
+    // without fighting the content. Uses the pick colour (amber) dimmed.
     let ws_style = Style::default().fg(theme.pick).add_modifier(Modifier::DIM);
 
     // Check if the whole line is empty / whitespace-only.
@@ -823,7 +823,7 @@ mod tests {
         let theme = crate::ui::theme::Theme::default();
         let line = Line::from(Span::styled("\tx", Style::default().fg(Color::Red)));
         // tab_width 4, no marker: a leading tab becomes 4 plain spaces that
-        // keep the surrounding span's color, so indentation aligns invisibly.
+        // keep the surrounding span's colour, so indentation aligns invisibly.
         let out = super::expand_tabs(&line, 4, false, &theme);
         let text: String = out.spans.iter().map(|s| s.content.to_string()).collect();
         assert_eq!(text, "    x");

@@ -143,7 +143,7 @@ impl App {
     }
 
     /// The pager's content viewport height (body rows). Prefers the
-    /// renderer's cached `last_viewport_h`; falls back to the centered-
+    /// renderer's cached `last_viewport_h`; falls back to the centred-
     /// overlay heuristic only before the first frame has run.
     fn pager_viewport(&self) -> u16 {
         let Some(view) = self.active_pager_ref() else {
@@ -403,7 +403,7 @@ impl App {
     /// Answered from each pager's `last_content_area`, the rect the renderer
     /// actually drew it into — the same source of truth `PagerView::hit_test` uses,
     /// so "which pager did I click" and "which character did I click" can't
-    /// disagree. Content rect, not the whole box: beside a centered overlay the
+    /// disagree. Content rect, not the whole box: beside a centred overlay the
     /// user genuinely sees the list, and clicking there should reach the list.
     ///
     /// Checked in paint order (topmost first). A slot holding a pager that is not
@@ -584,7 +584,7 @@ impl App {
         let file_size = std::fs::metadata(&path).map_or(0, |m| m.len());
         if file_size > crate::fs::ops::MAX_PAGER_BYTES {
             // Huge file: $PAGER's stream-from-disk wins over our
-            // in-memory pager. Fall back to the pre-v1.5 behavior
+            // in-memory pager. Fall back to the pre-v1.5 behaviour
             // (spawn $PAGER as a top overlay). A char device reports
             // length 0, so it never lands here — it routes to the
             // device-safe off-thread open below.
@@ -784,7 +784,7 @@ impl App {
 /// Pure load+render half of [`App::build_pager_view_for_file`]: read `path`
 /// off disk and build a `PagerView` (markdown render / syntax highlight /
 /// big-file truncation banner / binary hex-dump), wrapping markdown to
-/// `wrap_width` (or the centered-overlay body width when `None`). No
+/// `wrap_width` (or the centred-overlay body width when `None`). No
 /// `&mut self` — `theme` and `open_as_rendered` are passed in — so the
 /// live-reload worker can call it on a detached thread. Returns the error
 /// string (instead of flashing) on a read/decode failure; the caller decides
@@ -909,7 +909,7 @@ pub(super) fn build_pager_view(
             // fences).
             // Hint the markdown renderer at the actual pager body
             // width so wide tables expand instead of wrapping into
-            // the 80-col prose budget. Centered overlay pager
+            // the 80-col prose budget. Centred overlay pager
             // claims 90% of the terminal minus block borders;
             // matches the `pager_inner_area` math.
             //
@@ -923,7 +923,7 @@ pub(super) fn build_pager_view(
             // conservative estimate, which buys ~1 digit of
             // safety on the gutter.
             // A caller-supplied `wrap_width` (the right-split column) wins;
-            // otherwise wrap to the centered overlay body width. The
+            // otherwise wrap to the centred overlay body width. The
             // terminal-size query is lazy so the off-thread reload path
             // (which always supplies a width) never touches the tty.
             let body_w = wrap_width.unwrap_or_else(|| {
@@ -1024,7 +1024,7 @@ pub(super) fn build_pager_view(
 }
 
 impl App {
-    /// Pre-v1.5 `D` behavior: spawn `\$PAGER` as a top overlay pty.
+    /// Pre-v1.5 `D` behaviour: spawn `\$PAGER` as a top overlay pty.
     /// Now used only as the huge-file fallback path from
     /// `display_in_pane` — files past `MAX_PAGER_BYTES` benefit from
     /// `less`'s stream-from-disk over our in-memory pager.

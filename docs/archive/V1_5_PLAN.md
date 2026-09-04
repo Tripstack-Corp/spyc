@@ -38,7 +38,7 @@ to users; invisible breakage potential is small if we phase it.
   pager features work: `/` search, `:N` jump, `V` visual, `y`
   yanks, `[t/]t` cycles task viewers, etc.
 - `D` opens the cursor file in the in-app pager (mounted top, not
-  centered overlay). Falls through to overlay-`$PAGER` for files
+  centred overlay). Falls through to overlay-`$PAGER` for files
   past `MAX_PAGER_BYTES` so streaming-from-disk stays available.
 - Visual mode gains **block (columnar) selection** in addition
   to line. `^v` enters block mode; `y` yanks the rectangle.
@@ -64,7 +64,7 @@ slips.
 
 ### Phase 1 — `Mount` enum on `PagerView`
 
-**What:** Replace the current implicit "pager is always centered
+**What:** Replace the current implicit "pager is always centred
 overlay" with an explicit `Mount` field:
 
 ```rust
@@ -186,7 +186,7 @@ overlay-`$PAGER` path when:
 
 **Scope:**
 - New `display_in_pane` body that loads the file via the same
-  `crate::fs::ops::read_truncated` path the centered pager
+  `crate::fs::ops::read_truncated` path the centred pager
   already uses.
 - Mounted `TopPane` so the bottom pane stays visible — same
   workflow benefit as today's `D`, but with our richer pager.

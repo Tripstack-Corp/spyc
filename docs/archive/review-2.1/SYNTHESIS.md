@@ -389,7 +389,7 @@ patterns miss real `.md` hits — and withdrew the finding. E had also run a
 run without reconciling them.
 
 The corrected number matters, because it inverts the answer to the owner's
-question: the docs contract is honored in **29 of 32** `feat` commits, and the
+question: the docs contract is honoured in **29 of 32** `feat` commits, and the
 three exceptions are exactly the individual doc defects already filed as M13 and
 M16. There is no process problem behind them.
 
@@ -408,7 +408,7 @@ this diff: 7,467 added comment-bearing lines scanned against twelve banned-shape
 patterns produced **11 hits and 0 true positives**, and of 70 hand-read hunks
 stratified across four eras, **68 met the house standard** — the two misses being
 stale placement, not slop. The diff even *deletes* a pre-existing slop comment.
-All eight SPYC-TRAP anchors resolve. The docs contract is honored in 29 of 32
+All eight SPYC-TRAP anchors resolve. The docs contract is honoured in 29 of 32
 feature commits. MVU discipline survived four post-split feature PRs with no
 cross-module reach-ins, `mod.rs`'s guarded ceiling was **not** bumped (1,500 at
 both ends, sitting at 1,418), and the 0-dps-at-idle invariant survived the 1002

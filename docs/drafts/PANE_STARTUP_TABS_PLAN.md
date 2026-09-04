@@ -65,7 +65,7 @@ distinguishable). Validation:
 
 - `tabs.len() ≤ 9` — matches `^W 1..9` jump reach
   (`Action::PaneTabByIndex(u8)`, `src/keymap/action.rs:114`).
-- Empty `tabs` *and* no `[[pane.tab]]` → today's behavior (single tab
+- Empty `tabs` *and* no `[[pane.tab]]` → today's behaviour (single tab
   from `default_command`).
 - If both `tabs` and `[[pane.tab]]` are present: hard error at config
   load (don't try to merge — surfaces the ambiguity).
@@ -94,12 +94,12 @@ session-picker branch. Order of precedence:
    wins; brings back the session's exact tab list.
 2. **`pane.tabs` config** — opens declared tabs.
 3. **Single-tab fallback** — `pane.default_command` (or
-   `$SPYC_PANE_CMD`, or `"claude"`). Today's behavior.
+   `$SPYC_PANE_CMD`, or `"claude"`). Today's behaviour.
 
 One open question to confirm at implementation time: today's
 single-tab open is triggered by `TogglePane` (the first `F10` /
 `^a-\`), not at startup. If we keep that "wait for user request"
-behavior, `pane.tabs` should also defer to first-toggle (only spawn
+behaviour, `pane.tabs` should also defer to first-toggle (only spawn
 when the user asks for the pane). Probably cleaner: introduce a single
 "open initial tabs" step that runs in either path.
 
@@ -192,7 +192,7 @@ If a real splits ask shows up (someone needs *simultaneous* visual
 state from two ptys — `htop` next to a live log tail, say), Option 1
 (horizontal-only) is the natural starting point and slots cleanly on
 top of the multi-tab config: degenerate splits with one entry each
-collapse to the current single-region behavior.
+collapse to the current single-region behaviour.
 
 ### Companion concerns
 
@@ -205,7 +205,7 @@ collapse to the current single-region behavior.
 
 ## Open questions
 
-1. **Does today's "wait for first toggle to spawn the pane" behavior
+1. **Does today's "wait for first toggle to spawn the pane" behaviour
    need to change?** If `pane.tabs` is set, do we auto-spawn at
    startup, or still wait for the user's first `F10`? Defaulting to
    the latter keeps the spec coherent.

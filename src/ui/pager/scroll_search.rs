@@ -32,7 +32,7 @@ impl PagerView {
     /// view is visited there's no memory yet, so we fall back to a
     /// proportional projection of the departing scroll — close to
     /// the right neighborhood, never worse than the old "always
-    /// reset to top" behavior.
+    /// reset to top" behaviour.
     pub fn toggle_markdown(&mut self) -> bool {
         let Some(alt) = self.alt_lines.take() else {
             return false;
@@ -378,7 +378,7 @@ impl PagerView {
         if matches.is_empty() {
             return false;
         }
-        // Land relative to the current scroll, honoring the search direction
+        // Land relative to the current scroll, honouring the search direction
         // (rather than always snapping to the top of the file).
         let cursor = Self::select_match(&matches, self.scroll, backward);
         self.scroll_to_match(matches[cursor], viewport_height);

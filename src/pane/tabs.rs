@@ -51,7 +51,7 @@ pub fn resume_still_unsubmitted(tail_lines: &[String], sid: &str) -> bool {
     tail_lines.iter().any(|l| l.contains(sid))
 }
 
-/// Activity state of a tab's process, shown as a colored dot per **agent** tab
+/// Activity state of a tab's process, shown as a coloured dot per **agent** tab
 /// in the divider (`App::settle_agent_activity`).
 ///
 /// Two sources feed it (`docs/archive/AGENT_AWARENESS_PLAN.md`): the coarse P0
@@ -158,7 +158,7 @@ pub struct TabInfo {
     /// eat a lone Enter seconds after the banner looks settled.
     pub pending_resume_send: Option<PendingResumeSend>,
     /// Phase seed for the "spicy pulse" animation: a per-tab `u64` added
-    /// (wrapping) to the shared anim frame before the color lookup, so every
+    /// (wrapping) to the shared anim frame before the colour lookup, so every
     /// tab starts at a distinct point in the 6-phase cycle and the dots don't
     /// breathe in lockstep. Seeded from the tab's UUID at construction; only
     /// its value mod the cycle length matters.
@@ -324,7 +324,7 @@ pub fn strip_exit_suffix(label: &str) -> String {
     // mark_exited writes `format!("{} [exited {}]", label, code)`
     // where `code` is either a decimal integer or `"?"`. The
     // marker substring " [exited " is reserved (any user-set label
-    // containing it is recovering display behavior they likely
+    // containing it is recovering display behaviour they likely
     // didn't intend anyway), and the suffix is always at the *end*
     // of the label.
     if let Some((base, _)) = label.rsplit_once(" [exited ")
@@ -353,7 +353,7 @@ impl TabEntry {
     /// blocks, never spawns, never mutates — the landed-result pickup and the
     /// off-thread `cwd_for_pid` kick live in `refresh_live_cwd`, run from
     /// `prepare_panes` (the `&mut` pre-draw settle point). Keeping this pure is
-    /// what lets `render_pane_status_line` honor the "render mutates nothing"
+    /// what lets `render_pane_status_line` honour the "render mutates nothing"
     /// contract (a TestBackend snapshot render no longer forks `lsof`).
     pub fn live_cwd(&self) -> std::path::PathBuf {
         self.live_cwd_cache

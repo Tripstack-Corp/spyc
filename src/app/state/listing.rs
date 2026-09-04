@@ -122,7 +122,7 @@ impl AppState {
             .collect();
 
         if ghost_names.is_empty() {
-            // Fast path: no deletions to surface — identical to the old behavior.
+            // Fast path: no deletions to surface — identical to the old behaviour.
             return self.apply_temp_filter(live.iter().copied().map(row_from_entry).collect());
         }
 
@@ -329,7 +329,7 @@ impl AppState {
     /// concerns, so they move only when `side` IS the focused column — resetting
     /// a background column (e.g. `b` after its worktree is removed) must not yank
     /// the process cwd or back-nav history out from under the focused one.
-    /// `chdir` is the `side == focused_side()` case, behavior-for-behavior.
+    /// `chdir` is the `side == focused_side()` case, behaviour-for-behaviour.
     pub fn chdir_side(&mut self, side: Side, path: &Path) -> Result<()> {
         // A path inside a mounted archive is virtual — there is no directory to
         // canonicalize and nothing to `chdir` into, since the "directory" is a
@@ -350,7 +350,7 @@ impl AppState {
         // If the directory had more than `MAX_ENTRIES`, the read
         // stopped early. Surface that to the user with a flash so a
         // partial listing isn't mistaken for the whole picture — the
-        // alternative was the pre-fix behavior of hanging the event
+        // alternative was the pre-fix behaviour of hanging the event
         // loop for many seconds on a 1M-entry tmp dir.
         if new_listing.truncated {
             self.flash_info(format!(
@@ -484,7 +484,7 @@ impl AppState {
     /// `"{err_prefix}: {e}"`. The single implementation shared by the
     /// `run_effects` executor (the pure-Model `apply()` Action arms route
     /// their chdirs through it via the deferred effect) — kept on `AppState`
-    /// so its behavior is unit-testable without a `Tui`. Impure App-layer
+    /// so its behaviour is unit-testable without a `Tui`. Impure App-layer
     /// callers that need bespoke post-chdir work (harpoon / finder /
     /// inventory) stay on `chdir` directly.
     pub fn change_dir(

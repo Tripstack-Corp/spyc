@@ -124,7 +124,7 @@ and only the pre-submit preview is lost; the campaign can't stall on it.
   detached worker → decode → `Protocol` sized to the cell box → new
   `runtime.image_results` slot + payloadless `Message::ImageDone`.
 - Extract mermaid's "raster → `Protocol` fitted to `cols`×`rows`" half into the
-  shared builder; `mermaid_ops` calls it. Behavior-preserving, snapshots untouched.
+  shared builder; `mermaid_ops` calls it. Behaviour-preserving, snapshots untouched.
 - `ImageView` gains `origin: ImageOrigin { Mermaid{source} | Bytes{label} }` so
   `Y`/`c` (mermaid-only verbs) gate correctly instead of silently no-op'ing, and
   the footer can show `label · 1024×768 · png · 412 KB`.

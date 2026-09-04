@@ -2,7 +2,7 @@
 //! consumes, and [`Wake`], the kinds of "something finished off-thread".
 //!
 //! Extracted from `mod.rs` (the anti-monolith ceiling) as one cohesive unit of
-//! type definitions. Nothing here has behavior — the coalesce that routes these
+//! type definitions. Nothing here has behaviour — the coalesce that routes these
 //! lives in `sources.rs` and the dispatch in `run.rs`.
 
 use crossterm::event::Event;

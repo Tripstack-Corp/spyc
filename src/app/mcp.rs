@@ -91,7 +91,7 @@ impl App {
             }
             // Codex equivalent: both agents share the same socket; the writer
             // just registers a stdio entry that re-execs `spyc --mcp` to proxy.
-            // Enterprise-flavored statuses are claude-specific; codex shouldn't
+            // Enterprise-flavoured statuses are claude-specific; codex shouldn't
             // return them, but if it ever does we treat them as a no-op.
             // `[pane] codex_mcp = false`: skip registering our MCP server for
             // codex and strip any entry we wrote before, so codex has no spyc

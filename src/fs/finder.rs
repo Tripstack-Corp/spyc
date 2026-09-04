@@ -1,7 +1,7 @@
 //! Filename finder backing the `F` picker in the file list.
 //!
 //! Walks the project tree (PROJECT_HOME or the listing dir as
-//! fallback) honoring `.gitignore` via the `ignore` crate, then
+//! fallback) honouring `.gitignore` via the `ignore` crate, then
 //! scores candidates against a fuzzy query with `nucleo-matcher`.
 //! No persistent index -- the walk runs lazily on F open and the
 //! result is cached on `App` for the lifetime of the picker.
@@ -38,7 +38,7 @@ pub const MAX_CANDIDATES: usize = 100_000;
 /// updates feel live on a 100K-file repo."
 const STREAM_BATCH: usize = 256;
 
-/// Walk `root` honoring gitignore + standard hidden-file rules,
+/// Walk `root` honouring gitignore + standard hidden-file rules,
 /// streaming repo-relative paths through `tx` in batches. Designed
 /// to run in a background thread so the picker stays interactive
 /// while a large monorepo is being enumerated.
@@ -436,7 +436,7 @@ mod tests {
         // Sibling clone -- its own git repo, not part of outer's tracked tree.
         std::fs::create_dir_all(root.join("sibling/.git")).unwrap();
         File::create(root.join("sibling/inner_kept.txt")).unwrap();
-        // Sibling has its own gitignore; should still be honored
+        // Sibling has its own gitignore; should still be honoured
         // within its own tree.
         std::fs::write(root.join("sibling/.gitignore"), "inner_skip.txt\n").unwrap();
         File::create(root.join("sibling/inner_skip.txt")).unwrap();

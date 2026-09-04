@@ -230,7 +230,7 @@ fn unknown_language_falls_back_to_plus_minus_color() {
         Some("f.xyzzy"),
     );
     let out = render_diff(&model, &theme, DiffLayout::Unified, 80);
-    // The `+new` content span uses the add foreground (no syntax colors).
+    // The `+new` content span uses the add foreground (no syntax colours).
     let add_row = out.iter().find(|l| row_text(l).starts_with('+')).unwrap();
     assert_eq!(
         add_row.spans.last().unwrap().style.fg,
@@ -657,7 +657,7 @@ fn wrap_spans_splits_at_width_boundary() {
 }
 
 /// Encode styled lines as one debug string per line — glyphs plus every span's
-/// fg/bg — so a cache mismatch in colors (not just glyphs) is caught by a plain
+/// fg/bg — so a cache mismatch in colours (not just glyphs) is caught by a plain
 /// string compare.
 fn styled_fingerprint(lines: &[Line]) -> Vec<String> {
     lines
@@ -676,7 +676,7 @@ fn styled_fingerprint(lines: &[Line]) -> Vec<String> {
 fn cached_highlight_render_matches_inline_render() {
     // `render_diff_highlighted` with a precomputed highlight must be byte-for-
     // byte identical to `render_diff` (which highlights inline) — the resize/
-    // toggle cache is a pure optimization, not a behavior change. Exercise a
+    // toggle cache is a pure optimization, not a behaviour change. Exercise a
     // syntect-known language (.rs) in both layouts so the highlight cache is
     // actually populated and flows through identically.
     let theme = Theme::default();
@@ -953,7 +953,7 @@ fn word_highlight_never_bleeds_into_same_row_padding() {
         .find(|l| row_text(l).contains("baz"))
         .expect("paired change row");
     // Scope to the right (add) side only — the left (remove) side has its
-    // own, differently-colored padding right next to it across the `│`.
+    // own, differently-coloured padding right next to it across the `│`.
     let sep_idx = change
         .spans
         .iter()

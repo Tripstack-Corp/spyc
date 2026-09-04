@@ -165,7 +165,7 @@ impl App {
 // Each receives the trimmed argument string (everything after the command
 // name); no-arg commands ignore it. Terminal-touching — they live next to
 // `dispatch_command`, and the registry names them so a missing handler is a
-// build error. Behavior mirrors the former `if input == "…"` / `strip_prefix`
+// build error. Behaviour mirrors the former `if input == "…"` / `strip_prefix`
 // arms; the only change is that no-arg commands now tolerate trailing args
 // instead of flashing "unknown" (a benign relaxation, no test depends on it).
 

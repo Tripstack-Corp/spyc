@@ -953,7 +953,7 @@ fn declining_the_write_unmounts_and_discards() {
 /// **An archive that genuinely earns read-only gets it, end to end.**
 ///
 /// The sibling test below hand-writes the demotion into the mount, so it proves
-/// the refusal honors a `ReadOnly` capability but not that anything ever *sets*
+/// the refusal honours a `ReadOnly` capability but not that anything ever *sets*
 /// one. Here the archive earns it: a `..` member is skipped on the way in, and a
 /// repack that silently dropped it would hand the user a lossy archive with no
 /// warning. The reason string is asserted as the one `assess` produces, and the

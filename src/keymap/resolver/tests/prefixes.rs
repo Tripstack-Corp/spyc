@@ -359,7 +359,7 @@ fn ctrl_a_space_enters_leader_from_pane_prefix() {
 
 #[test]
 fn gh_no_longer_jumps_project_home() {
-    // `gh` was dropped in favor of the leader (`Space p`); `gw` stays.
+    // `gh` was dropped in favour of the leader (`Space p`); `gw` stays.
     let mut r = Resolver::new();
     feed(&mut r, key('g'));
     assert_eq!(feed(&mut r, key('h')), ResolverOutcome::Ignored);

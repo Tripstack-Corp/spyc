@@ -97,7 +97,7 @@ impl AppState {
         // the blocking listing read; `run_effects` runs it via `change_dir`,
         // flashing `"cd: {e}"` on failure — same as the former inline match).
         if input == "cd" {
-            // Honor a `:setenv HOME=…` override (consistent with `gh`/Home and
+            // Honour a `:setenv HOME=…` override (consistent with `gh`/Home and
             // the shell spawn); envset::var falls back to the real environment.
             let home = crate::envset::var("HOME").unwrap_or_else(|| "/".into());
             return CommandResult::Post(vec![Effect::ChangeDir {

@@ -19,7 +19,7 @@
 //!
 //! (`libproc`, also already in the tree, is *not* the route: its `pidcwd` is
 //! `Err("pidcwd is not implemented for macos")` and it exposes no
-//! `PROC_PIDVNODEPATHINFO` flavor.)
+//! `PROC_PIDVNODEPATHINFO` flavour.)
 //!
 //! Returns `None` on any failure (process gone, permission denied, etc.).
 

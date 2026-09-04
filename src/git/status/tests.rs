@@ -84,7 +84,7 @@ mod map_tests {
     //! Path-mapping rules: `decode_porcelain` → `map_to_listing`. Relocated
     //! from `sysinfo::tests` when the porcelain parser was split into the
     //! shared decode + map stages (gix flip, PR 5). These pin the
-    //! prefix/basename/parent-dir-aggregation behavior that both backends
+    //! prefix/basename/parent-dir-aggregation behaviour that both backends
     //! share.
     use super::super::{decode_porcelain, map_to_listing};
     use crate::ui::list_view::{GitChange, GitFileStatus};

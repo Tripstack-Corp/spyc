@@ -269,7 +269,7 @@ impl App {
                 // `Esc` cancels.
                 //
                 // The old "anchor at top visible line immediately"
-                // behavior was awkward when the user wanted the
+                // behaviour was awkward when the user wanted the
                 // anchor anywhere other than the top of the
                 // viewport; placement makes the anchor explicit.
                 view.enter_placement();
@@ -324,7 +324,7 @@ impl App {
                 let scroll = view.scroll;
                 // Preserve the v1.5 mount + pane_scroll across the
                 // editor round-trip so a `v` from the lower-pane
-                // scrollback pager doesn't return as a centered
+                // scrollback pager doesn't return as a centred
                 // overlay (reported as a regression).
                 let mount = view.mount;
                 let pane_scroll = view.pane_scroll;

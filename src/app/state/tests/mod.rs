@@ -734,7 +734,7 @@ fn refresh_listing_picks_up_edit_and_clears_after_commit() {
 /// A working-tree edit whose fs-event lands inside `refresh_listing`'s
 /// invalidation throttle must NOT stay stale forever: the throttle defers the
 /// re-walk via `pending_worktree_rewalk`, and the next `refresh_git_state`
-/// honors it with a forced re-walk even though the `.git/index`/`HEAD` mtimes
+/// honours it with a forced re-walk even though the `.git/index`/`HEAD` mtimes
 /// (the poll's short-circuit key) never moved. Without the flag the poll would
 /// short-circuit and the marker would only converge on a chdir.
 #[test]

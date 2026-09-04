@@ -19,14 +19,14 @@ rather than silently overriding it.
    commit series with a conventional-commit message referencing the finding
    number below (e.g. `fix(mcp): validate root override against worktree
    registry (review F1)`). Do not bundle unrelated cleanups.
-3. **Tests first-class.** Every behavioral change ships with a test that fails
+3. **Tests first-class.** Every behavioural change ships with a test that fails
    before the change and passes after. Follow the existing test placement
    conventions (module `#[cfg(test)]` blocks, `harness_tests/`, or `tests/` as
    appropriate to the layer).
 4. **Run the full gate** (`make check` or the equivalent CI-parity target)
    before declaring any finding done. All work must pass with `--locked`.
 5. **Update documentation in the same change.** The docs contract in
-   ARCHITECTURE.md §"Documentation contract" applies: if behavior changes,
+   ARCHITECTURE.md §"Documentation contract" applies: if behaviour changes,
    the doc that describes it changes in the same commit.
 
 ## Findings
@@ -55,7 +55,7 @@ the decision in ROADMAP.md's decisions log:
   tool error naming the allowed set. Canonicalize both sides before
   comparison (symlinked worktree paths must not produce false rejections).
 - **(b) Document:** if enforcement is rejected (e.g. because the agent has
-  pane shell access anyway and the boundary is judged theater), state plainly
+  pane shell access anyway and the boundary is judged theatre), state plainly
   in SECURITY.md and in every affected tool description that the `root`
   parameter is unscoped and MCP tools are **not** a privilege boundary against
   the connected agent.
@@ -168,7 +168,7 @@ in a shared directory, and predictable names invite squatting.
 
 **Do:** fall back to a per-user directory (`/tmp/spyc-<uid>`) created with
 0700, verifying ownership and mode on reuse (refuse a pre-existing dir owned
-by someone else — classic /tmp squat defense). Honor `$XDG_STATE_HOME` before
+by someone else — classic /tmp squat defence). Honour `$XDG_STATE_HOME` before
 `$HOME` if it isn't already consulted.
 
 **Acceptance:** test covering the no-`$HOME` path; the squat-refusal branch
@@ -191,7 +191,7 @@ F1 → F2 (F2 folds in F1's decision) → F3 → F6 → F5 → F4 → F7.
 ## What NOT to do
 
 - Do not touch the MVU structure, the sync-only concurrency model, the
-  pager_stream seam, or the gix facade — these were reviewed favorably.
+  pager_stream seam, or the gix facade — these were reviewed favourably.
 - Do not add dependencies for F3 or F6; std is sufficient. (tempfile is
   already a dev-dependency; keep it out of the production graph unless it
   already is one.)
