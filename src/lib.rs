@@ -20,6 +20,7 @@ mod context;
 mod debug_log;
 mod envset;
 mod fs;
+mod fuzz_support;
 mod git;
 #[cfg(test)]
 mod guard_support;
@@ -54,6 +55,164 @@ pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("SPYC_GI
 /// and discards the result (no internal types leak into the public API), so a
 /// fuzz target asserts only the "never panics" property.
 pub mod fuzz {
+    /// Drive the pane's byte-processing path with structured escape streams and
+    /// assert the terminal is still usable afterwards.
+    ///
+    /// **The property is recovery, not absence of panics.** spyc's
+    /// `pane::parser_worker` deliberately wraps `process()` in `catch_unwind`,
+    /// rebuilds a torn parser at its current size, and clears the mutex poison —
+    /// because the incumbent engine panics on roughly 2.87% of structured-random
+    /// escape streams at reachable geometries (see `[profile.release]`'s comment
+    /// and `docs/drafts/VT_ENGINE_SPIKE.md` §5). Asserting "the engine never
+    /// panics" would therefore fail on the *current* engine for a known and
+    /// mitigated reason, which trains a reader to ignore a red fuzz job.
+    ///
+    /// So this asserts what production actually depends on and what holds for
+    /// any engine: after ANY byte stream, the terminal is still there and still
+    /// answers questions. That covers the recovery path itself, which is
+    /// production code no test reaches — the panic branch only runs when the
+    /// engine panics, so a fuzzer is the only thing that exercises it.
+    ///
+    /// When the engine flips (`docs/drafts/V2_2_PLAN.md` §8, PR 15) the stricter
+    /// property becomes assertable: libghostty panicked 0 times in 50,000
+    /// iterations of the same generator. Tighten the assertion then rather than
+    /// adding a knowingly-red target now.
+    ///
+    /// The input is used as a *script* rather than as a PRNG seed, so
+    /// libFuzzer's coverage feedback can steer the shape of the escape stream
+    /// instead of steering an opaque hash.
+    pub fn pane_engine(data: &[u8]) {
+        use crate::pane::engine::TerminalScreen as _;
+
+        let Some((&g0, rest)) = data.split_first() else {
+            return;
+        };
+        let Some((&g1, script)) = rest.split_first() else {
+            return;
+        };
+        // Geometry spyc can actually produce: `Pane::resize` and
+        // `pane_spawn_size` clamp both dimensions with `.max(1)`, so 1 is
+        // reachable and 0 is not. 1-row and 1-column are where the incumbent's
+        // live panic classes are, so they must be in range.
+        let rows = u16::from(g0 % 40) + 1;
+        let cols = u16::from(g1 % 60) + 1;
+
+        let stream = crate::fuzz_support::escape_stream(script);
+
+        let parser = std::sync::Arc::new(std::sync::Mutex::new(
+            <crate::pane::PaneEngine as crate::pane::engine::Engine>::new(rows, cols, 200),
+        ));
+
+        // Silence the panic hook for the duration of the feed, and restore it
+        // immediately afterwards.
+        //
+        // This is load-bearing, not noise suppression. `libfuzzer-sys` installs
+        // a hook that calls `std::process::abort()`, and a hook runs BEFORE
+        // unwinding — so under the fuzzer's default hook `catch_unwind` never
+        // gets the panic and this target cannot express its own property. The
+        // first version of this target aborted on its 27th execution for
+        // exactly that reason, on a ZWJ glyph in a one-column grid: a panic
+        // production recovers from, reported as a crash.
+        //
+        // Scoped as tightly as possible. The hook is process-global, so a panic
+        // anywhere OUTSIDE the `process()` call below still reaches libFuzzer
+        // and still aborts — which is what should happen, because everything
+        // else here is spyc's own code and a panic in it is a real finding.
+        // libFuzzer runs one input at a time on one thread, so there is no
+        // other iteration to disturb.
+        let mut previous_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+
+        // Mirror `parser_worker`'s loop exactly: chunked feed, catch_unwind,
+        // rebuild on panic, clear the poison.
+        for chunk in stream.chunks(64.max(stream.len() / 8 + 1)) {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut p = parser
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                p.process(chunk);
+            }));
+            if result.is_err() {
+                {
+                    let mut p = parser
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let (r, c) = p.screen().size();
+                    *p = <crate::pane::PaneEngine as crate::pane::engine::Engine>::new(r, c, 200);
+                }
+                parser.clear_poison();
+            }
+
+            // Restore the real hook before asserting: from here on a panic is
+            // spyc's, and libFuzzer must see it.
+            let quiet_hook = std::panic::take_hook();
+            std::panic::set_hook(previous_hook);
+
+            // The invariants, checked after every chunk rather than once at the
+            // end: a pane that is briefly unusable mid-stream is still a pane
+            // the render pass can lock during that window.
+            assert!(
+                !parser.is_poisoned(),
+                "the mutex must never be left poisoned — the render pass locks it"
+            );
+            // Scoped so the guard drops before the next chunk's lock —
+            // clippy's `significant_drop_tightening`, and it is right: holding
+            // the render lock across the loop back-edge is not what
+            // `parser_worker` does either.
+            let guard = parser.lock().expect("not poisoned, just asserted");
+            let screen = guard.screen();
+            let (r, c) = screen.size();
+            assert!(r > 0 && c > 0, "geometry collapsed to {r}x{c}");
+            let (cy, cx) = screen.cursor_position();
+            // The column bound is `<=`, not `<`, and that is deliberate.
+            // `x == cols` is the PENDING-WRAP state every terminal has: after
+            // writing the last column the cursor sits past it until the next
+            // glyph wraps. Both consumers already guard for it —
+            // `app::util::place_pty_cursor_from_screen` returns early on
+            // `cx >= rect.width`, and `PaneWidget`'s block cursor is gated on
+            // `cx < draw_cols` — so it is normal, not a defect.
+            //
+            // An earlier version of this assertion used `<` on both axes and
+            // fired instantly on a one-column grid. Caught by the gate test
+            // below before it could land as a red weekly fuzz job; a target
+            // whose first run is red teaches people to ignore it.
+            //
+            // The ROW bound stays strict: a cursor past the last row is the
+            // DECRC-after-resize class that `[profile.release]`'s net exists
+            // for, and nothing downstream expects it.
+            assert!(
+                cy < r,
+                "cursor row {cy} past the last row of a {r}x{c} grid"
+            );
+            assert!(
+                cx <= c,
+                "cursor column {cx} beyond pending-wrap on a {r}x{c} grid"
+            );
+            // Every in-bounds cell must answer, and the first out-of-bounds one
+            // must not: `line_from_visible_row` breaks its loop on `None`, so a
+            // grid that lies about its own extent silently truncates a row.
+            for row in 0..r {
+                assert!(
+                    screen.cell_style(row, c.saturating_sub(1)).is_some(),
+                    "last column of row {row} missing from a {r}x{c} grid"
+                );
+                assert!(
+                    screen.cell_style(row, c).is_none(),
+                    "grid answered past its own last column"
+                );
+            }
+            // These must not panic on any state the stream can produce.
+            let _ = screen.contents();
+            let _ = screen.contents_between(0, 0, r.saturating_sub(1), c.saturating_sub(1));
+            drop(guard);
+
+            // Back to quiet for the next chunk's `process()`.
+            previous_hook = std::panic::take_hook();
+            std::panic::set_hook(quiet_hook);
+        }
+        std::panic::set_hook(previous_hook);
+    }
+
     /// Normalize one raw archive member name and discard the result.
     ///
     /// This is the boundary that makes zip-slip impossible — every member name

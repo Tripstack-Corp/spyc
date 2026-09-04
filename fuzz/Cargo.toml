@@ -81,3 +81,10 @@ path = "fuzz_targets/archive_container.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "pane_engine"
+path = "fuzz_targets/pane_engine.rs"
+test = false
+doc = false
+bench = false

@@ -26,3 +26,28 @@ zip / tar / tar.gz / tar.zst); the rest is the container itself.
 | `declared_size_2p62.tar` | Same idea via GNU base-256 encoding, which overflows differently. |
 | `truncated_tar.tar`, `garbage_gz.tar.gz` | Malformed headers and a gz stream that decompresses to non-tar. |
 | `plain.tar`, `plain.tar.gz`, `plain.zip` | Minimal well-formed archives, so the mutator has valid structure to work from. |
+
+## pane_engine
+
+The first two bytes pick the geometry (`rows = b0 % 40 + 1`,
+`cols = b1 % 60 + 1`, so `1` is reachable and `0` is not — matching the `.max(1)`
+clamp in `Pane::resize` and `pane_spawn_size`). The rest is a *script* for
+`fuzz_support::escape_stream`, which selects a sequence shape per byte
+(`% 12` → CSI / private mode / SGR / printable / CRLF / DECSC / DECRC / OSC /
+APC / charset).
+
+These are the shapes the VT-engine spike found worth reaching, kept so a fresh
+corpus does not have to rediscover them.
+
+| seed | shape |
+|---|---|
+| `one_row_wrap` | text wrapping on a 1-row screen — a live vt100 panic class |
+| `one_col_wide` | a double-width glyph on a 1-column screen — likewise |
+| `one_by_one` | the 1x1 corner both clamps can produce |
+| `cup_past_edge` | CUP well past the right edge, then a tab set. The shape that panicked wezterm-term (wezterm/wezterm#8134); kept because it is cheap and engine-independent |
+| `decsc_decrc` | save cursor, move, restore — the DECRC class `[profile.release]`'s net was originally written for |
+| `scroll_region` | DECSTBM plus scrolling content, where the incumbent loses a row |
+| `unterminated_osc_apc` | OSC and APC with no terminator, which is how they arrive when split across pty reads |
+| `charset_switch` | SCS charset selection (DEC special graphics) |
+| `mode_churn` | alt screen, bracketed paste, mouse and cursor-key modes toggled densely |
+| `zwj_glyph_one_column` | the three bytes that aborted the first version of this target. A ZWJ glyph in a one-column grid panics vt100, and `libfuzzer-sys`'s hook aborted before `catch_unwind` could recover it. Kept because it is the shape that proves the hook scoping is still in place — if that regresses, this seed aborts on the first run rather than after someone rediscovers it |
