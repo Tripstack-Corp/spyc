@@ -101,6 +101,16 @@ pub fn cell_style(cell: &vt100::Cell) -> Style {
     if cell.bold() {
         style = style.add_modifier(Modifier::BOLD);
     }
+    // SGR 2. vt100 exposed `dim()` in 0.16, after this function was written
+    // against 0.15, so a child's dim text used to arrive here and be dropped.
+    // Note the channel is shared: the unfocused-pane fade in `PaneWidget`
+    // also spends `Modifier::DIM`, so on an unfocused pane content-dim and
+    // focus-dim are indistinguishable. That is accepted — SGR 2 is what a
+    // terminal has for "dimmer", and there is no second one to move either
+    // use onto.
+    if cell.dim() {
+        style = style.add_modifier(Modifier::DIM);
+    }
     if cell.italic() {
         style = style.add_modifier(Modifier::ITALIC);
     }
@@ -137,6 +147,88 @@ const fn selected(sel: Option<((u16, u16), (u16, u16))>, row: u16, col: u16) -> 
     let after_start = row > sr || col >= sc;
     let before_end = row < er || col <= ec;
     after_start && before_end
+}
+
+#[cfg(test)]
+mod attribute_tests {
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::style::Modifier;
+    use ratatui::widgets::Widget as _;
+
+    use super::PaneWidget;
+
+    /// Render `bytes` through the real widget and hand back the buffer, so the
+    /// assertions below are about the widget's OUTPUT rather than about what
+    /// the emulator holds. Only this helper knows which engine produced the
+    /// screen; the tests do not, which is what lets them survive an engine
+    /// swap unchanged.
+    fn rendered(bytes: &[u8], rows: u16, cols: u16, focused: bool) -> Buffer {
+        let mut parser = vt100::Parser::new(rows, cols, 0);
+        parser.process(bytes);
+        let area = Rect::new(0, 0, cols, rows);
+        let mut buf = Buffer::empty(area);
+        PaneWidget {
+            screen: parser.screen(),
+            focused,
+            selection: None,
+        }
+        .render(area, &mut buf);
+        buf
+    }
+
+    fn modifiers_at(buf: &Buffer, x: u16, y: u16) -> Modifier {
+        buf.cell((x, y)).expect("cell in area").style().add_modifier
+    }
+
+    /// SGR 2 reaches the buffer as `Modifier::DIM`.
+    ///
+    /// vt100 exposed `Cell::dim()` in 0.16, after `cell_style` was written
+    /// against 0.15, so the attribute was read by the emulator and dropped by
+    /// the adapter — a child's dim text rendered at full weight.
+    #[test]
+    fn sgr_2_reaches_the_buffer_as_dim() {
+        let buf = rendered(b"\x1b[2mdim", 1, 8, true);
+        assert!(
+            modifiers_at(&buf, 0, 0).contains(Modifier::DIM),
+            "a cell the child marked SGR 2 must carry DIM; got {:?}",
+            modifiers_at(&buf, 0, 0)
+        );
+    }
+
+    /// …and only that cell. SGR 22 turns dim off, and a focused pane adds no
+    /// dimming of its own, so the text after the reset must come through at
+    /// full weight. Without this half the test would also pass if the widget
+    /// dimmed everything unconditionally.
+    #[test]
+    fn sgr_22_clears_dim_on_a_focused_pane() {
+        let buf = rendered(b"\x1b[2md\x1b[22mN", 1, 8, true);
+        assert!(
+            modifiers_at(&buf, 0, 0).contains(Modifier::DIM),
+            "the dim run"
+        );
+        assert!(
+            !modifiers_at(&buf, 1, 0).contains(Modifier::DIM),
+            "after SGR 22 the cell must not be dim; got {:?}",
+            modifiers_at(&buf, 1, 0)
+        );
+    }
+
+    /// An UNFOCUSED pane fades wholesale, and it spends `Modifier::DIM` to do
+    /// it — the same channel SGR 2 uses. So content-dim and focus-dim collapse
+    /// there and cannot be told apart. Pinned deliberately: it is the reason
+    /// the focused-pane assertion above specifies `focused: true`, and it stops
+    /// a later reader "fixing" the collapse by moving content-dim to some other
+    /// modifier the terminal would render differently.
+    #[test]
+    fn an_unfocused_pane_dims_everything_including_undimmed_cells() {
+        let buf = rendered(b"\x1b[2md\x1b[22mN", 1, 8, false);
+        assert!(modifiers_at(&buf, 0, 0).contains(Modifier::DIM));
+        assert!(
+            modifiers_at(&buf, 1, 0).contains(Modifier::DIM),
+            "the focus fade covers the whole pane, dim content or not"
+        );
+    }
 }
 
 #[cfg(test)]

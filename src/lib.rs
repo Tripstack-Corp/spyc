@@ -742,8 +742,10 @@ impl crossterm::Command for DisableWheelReporting {
 /// A process-global rather than a field on `ViewState`, because two of the three
 /// things that change this state run outside `App` and cannot reach its fields:
 /// [`restore_terminal`] and the **panic hook**. The hook is not exit-only —
-/// `pane::Pane` deliberately `catch_unwind`s a known vt100 panic (nvim leaving
-/// the alternate screen is the documented trigger) and spyc keeps running — so
+/// `pane::parser_worker` deliberately `catch_unwind`s a parser panic on
+/// untrusted child output (vt100 0.16.2 has four such classes reachable at
+/// spyc's geometry clamp; `Cargo.toml`'s `[profile.release]` lists them) and
+/// spyc keeps running — so
 /// with the flag on `ViewState` that path disabled reporting at the terminal
 /// while `App` still believed it was on. `settle_mouse_mode` then saw no
 /// divergence and never re-enabled: the mouse was dead for the rest of the

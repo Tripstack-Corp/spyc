@@ -1128,7 +1128,11 @@ unambiguous:
 - **The whole unfocused side dims** — pane content (when the list
   has focus) or non-cursor list rows (when the pane has focus)
   render with SGR 2 / `Modifier::DIM`, so the focus target is
-  obvious at a glance
+  obvious at a glance. A child's *own* SGR 2 is honoured too, so
+  dim text in an agent CLI reads as dim rather than as normal
+  weight; because both use the one channel a terminal has for
+  "dimmer", the two are indistinguishable on an unfocused pane —
+  already-dim text does not get dimmer
 - **File list cursor** dims to a muted colour when the pane has focus
 - **Pane cursor** shows as a reverse-video block at the pty cursor
   position when the pane is focused AND the child is on the main
