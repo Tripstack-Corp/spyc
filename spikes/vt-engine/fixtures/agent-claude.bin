@@ -1,0 +1,27 @@
+[33mPermission allow rule (../../../../../spyc/.claude/settings.local.json): Bash(grep -n '\\bV\\b.*editor\\|V.*\\$EDITOR\\|EDITOR.*top' /Users/derekmarshall/src/spyc/FEATURES.md) has a wildcard before the rest of the command, so it also matches any options inserted at that position and approves them without a prompt. Replace that * with the exact value you mean, or only use * after the subcommand.[39m
+[33mPermission allow rule (../../../../../spyc/.claude/settings.local.json): Bash(grep -rn "exit.*lines\\|exit \\\\\\${\\|format!.*exit\\|task.status\\|TaskStatus" /Users/derekmarshall/src/spyc/src/) has a wildcard before the rest of the command, so it also matches any options inserted at that position and approves them without a prompt. Replace that * with the exact value you mean, or only use * after the subcommand.[39m
+[33mPermission allow rule (../../../../../spyc/.claude/settings.local.json): Bash(rg -n "PaneNextTab|PanePrevTab|CONTROL.*'a'|fn feed_|feed\\\(|UserKeymap::default|fn ctrl\\b|fn key\\b" src/keymap/resolver/tests/*.rs) has a wildcard before the rest of the command, so it also matches any options inserted at that position and approves them without a prompt. Replace that * with the exact value you mean, or only use * after the subcommand.[39m
+[33mPermission allow rule (../../../../../spyc/.claude/settings.local.json): Bash(rg -n "layout.list\\\)|render_widget\\\(\\s*$|ListView \\{|layout.right|layout.vdivider|Mount::Overlay" src/app/render/inner.rs) has a wildcard before the rest of the command, so it also matches any options inserted at that position and approves them without a prompt. Replace that * with the exact value you mean, or only use * after the subcommand.[39m
+[33mPermission allow rule (../../../../../spyc/.claude/settings.local.json): Bash(perl -0777 -ne 'while\(/self\\s*\\n\\s*\\.left\\./g\){print "FOUND multiline\\n"}' src/app/state/apply.rs src/app/state/dispatch.rs src/app/state/listing.rs src/app/state/navigation.rs src/app/state/selection.rs src/app/state/git.rs) has a wildcard before the rest of the command, so it also matches any options inserted at that position and approves them without a prompt. Replace that * with the exact value you mean, or only use * after the subcommand.[39m
+[33mPermission allow rule (../../../../../spyc/.claude/settings.local.json): Bash(perl -0777 -i -pe 's/\(App::carve_vsplit\\\(\\s*\\n\\s*base,\\s*\\n\\s*VSplit \\{[^}]*\\},\\s*\\n\\s*area\\\([^\)]*\\\),\)\(\\s*\\n\\s*\\\)\)/$1\\n            None,$2/g' src/app/mod_tests.rs) has a wildcard before the rest of the command, so it also matches any options inserted at that position and approves them without a prompt. Replace that * with the exact value you mean, or only use * after the subcommand.[39m
+[33mPermission allow rule (../../../../../spyc/.claude/settings.local.json): Bash(rg -rn "PromptKind::|render_prompt|prompt_line|LuaRunaway|centered|Clear|popup|modal|render_help|Block::.*border" src/app/render/) has a wildcard before the rest of the command, so it also matches any options inserted at that position and approves them without a prompt. Replace that * with the exact value you mean, or only use * after the subcommand.[39m
+7[r8[?25h[?25l[?2004h[?1004h[?2031h[<u[>5u[>4;2m[?2026h
+[38;2;255;193;7m────────────────────────────────────────────────────────────────────────────────[39m
+[3G[38;2;255;193;7m[1mAllow[9Gexternal[18GCLAUDE.md[28Gfile[33Gimports?[22m[39m
+
+[3GThis[8Gproject's[18GCLAUDE.md[28Gimports[36Gfiles[42Goutside[50Gthe[54Gcurrent[62Gworking
+[3Gdirectory.[14GNever[20Gallow[26Gthis[31Gfor[35Gthird-party[47Grepositories.
+
+[3G[38;2;153;153;153mExternal[12Gimports:[39m
+[3G[38;2;153;153;153m [5G/Users/derekmarshall/src/spyc.worktrees/spike/vt-engine/AGENTS.md[39m
+
+[3G[38;2;153;153;153mImportant:[14GOnly[19Guse[23GClaude[30GCode[35Gwith[40Gfiles[46Gyou[50Gtrust.[57GAccessing[67Guntrusted[39m
+[3G[38;2;153;153;153mfiles[9Gmay[13Gpose[18Gsecurity[27Grisks[33G]8;id=zaxmda;https://code.claude.com/docs/en/securityhttps://code.claude.com/docs/en/security[39m]8;;
+
+[3G[38;2;177;185;249m❯[5GNo,[9Gdisable[17Gexternal[26Gimports[39m
+[5GYes,[10Gallow[16Gexternal[25Gimports
+
+[3G[38;2;153;153;153m[3mEnter[9Gto[12Gconfirm[20G·[22GEsc[26Gto[29Gcancel[23m[39m
+[2C[4A[?2026l[>0q[c(B[<u[>5u[>4;2m[?2026h[2D[4B[2C[1A[38;2;153;153;153m[3mPress[9GCtrl-D again[22Gto exit[23m[39m[K
+[2C[4A[?2026l[?2026h[2D[4B[2C[1A[38;2;153;153;153m[3mEnter[9Gto confirm ·[22GEsc to cancel[23m[39m
+[2C[4A[?2026l
