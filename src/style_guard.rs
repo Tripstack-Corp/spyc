@@ -90,10 +90,16 @@ const BANNED: &[(&str, &str)] = &[
 /// `.` and `:` only bind when something follows them — `color.rs`, `Color::Rgb`.
 /// A sentence-final "colour." is prose, and treating that period as an
 /// identifier join silently exempts every word that ends a sentence.
+///
+/// `/` binds nothing. It was in this set for bare paths, but AGENTS.md's
+/// backtick contract already requires those to be backticked, and a bare
+/// `color.rs` is still covered by the extension rule above. What the slash
+/// actually exempted was ordinary prose — "cosmetic/behavioural",
+/// "centred/fit", "Colour/style" — four of them, in the tree, silently.
 fn binds_after(text: &str, end: usize) -> bool {
     let mut it = text[end..].chars();
     let Some(c) = it.next() else { return false };
-    if c.is_alphanumeric() || matches!(c, '_' | '/' | '\\') {
+    if c.is_alphanumeric() || matches!(c, '_' | '\\') {
         return true;
     }
     if matches!(c, '.' | ':') {
@@ -106,7 +112,7 @@ fn binds_after(text: &str, end: usize) -> bool {
 fn binds_before(text: &str, start: usize) -> bool {
     let mut it = text[..start].chars().rev();
     let Some(c) = it.next() else { return false };
-    if c.is_alphanumeric() || matches!(c, '_' | '/' | '\\') {
+    if c.is_alphanumeric() || matches!(c, '_' | '\\') {
         return true;
     }
     if matches!(c, '.' | ':') {
@@ -394,6 +400,10 @@ mod tests {
             "// pass --color=never to disable",
             "// $COLORTERM=truecolor claims support",
             "// the `color` field of the theme table",
+            // Still exempt: an extension or an underscore makes it a path or
+            // an identifier even with a slash in front.
+            "// see src/color.rs for the remap",
+            "// see src/color_depth.rs for the remap",
             // The shape that bit on first run: an HTML attribute in README.md
             // whose value has exactly one legal spelling.
             "<p align=\"center\">",
@@ -416,6 +426,11 @@ mod tests {
             // identifier join. This shape escaped the first guard entirely.
             "// sets the default color.",
             "# The status bar is centered.",
+            // A slash between two words is prose, not a path. Treating it as
+            // an identifier join exempted four real misses in this tree.
+            "// cosmetic/behavioral settings and plain rebindings",
+            "//! centered/fit rects and body widths",
+            "/// Color/style overrides.",
         ] {
             assert!(!offenders(code).is_empty(), "prose must be flagged: {code}");
         }

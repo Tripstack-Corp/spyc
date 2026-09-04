@@ -196,7 +196,7 @@ pub struct ViewState {
     /// Per-file scroll memory for the pager (loaded once at startup;
     /// see [`super::state::pager_positions`]).
     pub(super) pager_positions: crate::state::pager_positions::PagerPositions,
-    /// Color/style overrides.
+    /// Colour/style overrides.
     pub(super) theme: Theme,
     /// One-shot full buffer clear/redraw request.
     pub(super) needs_full_repaint: bool,
