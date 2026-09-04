@@ -1,0 +1,42 @@
+[package]
+name = "spyc-vt-sys"
+version = "0.1.0"
+edition = "2024"
+# spyc's MSRV, unchanged. The FFI needs nothing newer: the published
+# libghostty-vt crates declare 1.90, but spyc does not depend on them — their
+# bindings are ABI-incompatible with this pin's constructor, which is why the
+# bindings here are generated from the pin's own headers instead.
+rust-version = "1.88"
+description = "Vendored FFI bindings to libghostty-vt at a spyc-owned pinned commit"
+license = "BSD-3-Clause"
+repository = "https://github.com/Tripstack-Corp/spyc"
+# NOT `publish = false`. spyc is published to crates.io, and `cargo package`
+# refuses a dependency without a registry version — "all dependencies must have
+# a version requirement specified when packaging". So this crate has to be
+# published for spyc to be, and the release order is fixed: **spyc-vt-sys
+# first, then spyc**. See docs/RELEASE_ENGINEERING.md.
+#
+# The two crates package separately, which is why the archives fit: this one
+# carries the five vendored archives (~3.8 MiB gzipped) and spyc's own crate
+# stays at ~1.6 MiB, so each is independently well under crates.io's 10 MiB cap
+# rather than sharing one budget.
+include = [
+    "src/**/*.rs",
+    "tools/**/*.rs",
+    "build.rs",
+    "vendor/CHECKSUMS",
+    "vendor/*/libghostty-vt.a",
+    "REQUIRED_ZIG",
+    "README.md",
+    "LICENSE-ghostty",
+]
+# `links` claims the native library globally, so two crates cannot both link it.
+links = "ghostty-vt"
+
+[lints.clippy]
+# The generated bindings are not ours to restyle.
+pedantic = { level = "warn", priority = -1 }
+
+[dependencies]
+
+[dev-dependencies]

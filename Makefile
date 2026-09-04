@@ -71,12 +71,12 @@ check-ci: ## `check` ending in an unmissable verdict line — safe to pipe
 # `--locked` on test/lint/build forbids implicit Cargo.lock changes —
 # CI and dev builds use the committed lockfile or fail loudly.
 .PHONY: test
-test: ## Run all tests
-	cargo test --locked --all-targets
+test: ## Run all tests (--workspace: spyc-vt-sys is a member and must be gated too)
+	cargo test --locked --workspace --all-targets
 
 .PHONY: lint
 lint: ## Clippy with pedantic + nursery
-	cargo clippy --locked --all-targets -- -D warnings
+	cargo clippy --locked --workspace --all-targets -- -D warnings
 
 # Clippy for the Linux target, runnable from macOS via zig as the C
 # cross-compiler (cargo-zigbuild's `zig cc` wrapper rewrites the Rust
@@ -130,6 +130,25 @@ fmt: ## Format code
 .PHONY: fmt-check
 fmt-check: ## Check formatting without modifying
 	cargo fmt --all -- --check
+
+.PHONY: vendor-ghostty
+vendor-ghostty: ## Rebuild spyc-vt-sys's vendored libghostty-vt archives at the pinned commit
+	@# Out-of-band on purpose: the archives are committed so that `cargo install
+	@# spyc` needs no Zig, no network and no git for this crate. Run this only on
+	@# a deliberate pin bump, and follow it with the full harness re-run that
+	@# `spyc-vt-sys/src/pin.rs` (BUMP_POLICY) describes.
+	@command -v zig >/dev/null 2>&1 || { \
+		echo "zig not found. The pin needs exactly zig $$(cat crates/spyc-vt-sys/REQUIRED_ZIG)"; \
+		echo "  ghostty's requireZig compares major.minor for EQUALITY, not as a floor."; \
+		exit 1; \
+	}
+	@have=$$(zig version); want=$$(cat crates/spyc-vt-sys/REQUIRED_ZIG); \
+	if [ "$$have" != "$$want" ]; then \
+		echo "zig $$have found, but the pin requires exactly $$want"; \
+		echo "  a newer zig is REJECTED by ghostty's build, not tolerated"; \
+		exit 1; \
+	fi
+	scripts/vendor-ghostty.sh
 
 .PHONY: deny
 deny: ## Supply-chain checks: advisories, licenses, sources, bans (cargo-deny)

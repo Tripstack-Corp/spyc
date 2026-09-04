@@ -1,3 +1,18 @@
+# spyc is the workspace root now that `crates/spyc-vt-sys` exists. The FFI to
+# libghostty-vt lives in its own crate so the whole `unsafe` surface, the pinned
+# ghostty commit and the vendored static archives have one home — the decisions
+# log's standing scope for unsafe ("exceptional and isolated (a future crate
+# split would give it a dedicated crate)").
+#
+# `spikes/` and `fuzz/` each declare their own `[workspace]`, so they are
+# separate workspace roots and not members here. They are listed in `exclude`
+# anyway: relying on a nested manifest to opt itself out is invisible from this
+# file, and a nested crate that forgets its own `[workspace]` would silently
+# join the gate.
+[workspace]
+members = [".", "crates/spyc-vt-sys"]
+exclude = ["fuzz", "spikes/vt-engine", "spikes/vt-engine/sizeprobe"]
+
 [package]
 name = "spyc"
 version = "2.2.0-CURRENT"

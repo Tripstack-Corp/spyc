@@ -213,6 +213,36 @@ because `signed-by` pins the old one — an unavoidable break, and the
 reason the apt key is the most valuable secret in the project. This
 procedure is stated here but has never been rehearsed.
 
+### The vendored libghostty-vt archives
+
+`spyc-vt-sys` ships **prebuilt static archives** of libghostty-vt — one per
+target, built from a spyc-owned pinned ghostty commit and committed to the
+repository. This is a deliberate trade and it is worth stating plainly, because
+a binary blob in a dependency tree is the shape of a supply-chain problem.
+
+What we do about it:
+
+* **The pin is ours.** `spyc-vt-sys::pin::GHOSTTY_COMMIT` names an exact commit,
+  never a branch, never a moving tag. It moves only on a deliberate bump that
+  re-runs the engine harness in full.
+* **Every archive is checksummed and verified on every build.** `vendor/CHECKSUMS`
+  carries a SHA-256 per archive, and the build script recomputes and compares
+  before emitting a single link flag. A mismatch fails the build with both
+  hashes printed. Verified by tampering with a byte, not by assuming.
+* **Reproducible by anyone.** `make vendor-ghostty` rebuilds all five from the
+  pinned source with a pinned Zig version and rewrites the checksums, so a third
+  party can confirm the committed bytes are what the pinned source produces.
+* **The alternative was worse.** The published `libghostty-vt-sys` bindings
+  `git clone` ghostty *at build time* and run `zig build`. That fetches code
+  from a URL during `cargo build`, is invisible to `cargo vendor` and
+  `--offline`, and is not covered by any checksum. Vendored archives are at
+  least pinned, hashed and reviewable in-tree.
+
+What we do **not** claim: `cargo audit` and `cargo deny` cannot see inside a
+static archive, so an advisory against ghostty would not surface through them.
+Ghostty's own security posture is upstream's; ours is the pin, the checksum and
+the bump gate. `deny.toml` records the same.
+
 ## Known caveats (what we don't do)
 
 - **No reproducible builds.** Two builds of the same source on two

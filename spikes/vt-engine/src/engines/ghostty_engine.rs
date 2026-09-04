@@ -22,7 +22,7 @@ pub struct GhosttyEngine {
 fn color(c: StyleColor) -> Color {
     match c {
         StyleColor::None => Color::Default,
-        StyleColor::Palette(i) => Color::Idx(i.0 as u8),
+        StyleColor::Palette(i) => Color::Idx(i.0),
         StyleColor::Rgb(rgb) => Color::Rgb(rgb.r, rgb.g, rgb.b),
     }
 }
