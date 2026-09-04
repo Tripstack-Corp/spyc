@@ -1,12 +1,17 @@
 //! A pty-hosted subprocess rendered inside a ratatui frame.
 //!
-//! Bytes from the child are fed into a `vt100::Parser` which maintains a
-//! 2D cell grid we render directly. Input keystrokes are encoded as ANSI
+//! Bytes from the child are fed into a [`PaneEngine`] which maintains a
+//! 2D cell grid we render directly. The engine is reached only through the
+//! [`engine::Engine`] and [`engine::TerminalScreen`] traits, so which one it is
+//! lives in one type alias. Input keystrokes are encoded as ANSI
 //! and written to the master side of the pty.
 //!
 //! The pane is deliberately a generic pty host; agent-specific defaults
 //! (claude, send-selection) live in higher layers.
 
+pub mod engine;
+mod engine_vt100;
+pub use engine_vt100::{PaneEngine, PaneScreen};
 pub mod input;
 pub mod pathref;
 pub mod quick_select;
@@ -55,7 +60,7 @@ pub struct Pane {
     /// the main thread locks briefly during render to read the
     /// grid. Lock contention is small because each lock window is
     /// brief.
-    parser: Arc<Mutex<vt100::Parser>>,
+    parser: Arc<Mutex<PaneEngine>>,
     /// Generation counter incremented by the parser worker each
     /// time it processes a byte chunk. `drain_output()` compares
     /// this to `last_seen_gen` to detect new output without locking
@@ -149,7 +154,7 @@ impl Pane {
             // shell (no job-control wrapper to fight `^z` suspend/resume).
             exec_replace: true,
         })?;
-        let parser = vt100::Parser::new(rows, cols, 10_000);
+        let parser = <PaneEngine as engine::Engine>::new(rows, cols, 10_000);
         Ok(Self::adopt(host, parser, wake))
     }
 
@@ -163,7 +168,7 @@ impl Pane {
     /// spawns a parser worker thread. The thread owns the receiver
     /// and consumes bytes into the (mutex-wrapped) parser. Main
     /// thread reads grid state via `with_screen` / `with_screen_mut`.
-    pub fn adopt(mut host: PtyHost, parser: vt100::Parser, wake: PaneWake) -> Self {
+    pub fn adopt(mut host: PtyHost, parser: PaneEngine, wake: PaneWake) -> Self {
         let parser = Arc::new(Mutex::new(parser));
         let parser_gen = Arc::new(AtomicU64::new(0));
         let stop = Arc::new(AtomicBool::new(false));
@@ -307,6 +312,8 @@ impl Pane {
             return Ok(());
         }
         self.host.resize(rows, cols)?;
+        // `set_size` is the engine's own resize; the seam does not expose it
+        // because only the pane calls it.
         self.lock_parser().screen_mut().set_size(rows, cols);
         Ok(())
     }
@@ -410,7 +417,7 @@ impl Pane {
     /// keep the closure body short. Returns whatever `f` returns.
     /// The visible-grid text between two screen positions, for a clipboard copy.
     ///
-    /// Delegates to `vt100::Screen::contents_between`, which is purpose-built for
+    /// Delegates to the seam's `contents_between`, which is purpose-built for
     /// this ("useful for things like determining the contents of a clipboard
     /// selection"). Two properties make it the right primitive rather than merely a
     /// convenient one, and are why this isn't a hand-rolled cell walk:
@@ -424,23 +431,25 @@ impl Pane {
     /// Trailing whitespace is trimmed per line: the grid is space-padded to its full
     /// width, so an untrimmed copy pastes a ragged block of spaces.
     pub fn selection_text(&self, start: (u16, u16), end: (u16, u16)) -> String {
-        let raw = self.with_screen(|s| s.contents_between(start.0, start.1, end.0, end.1));
+        let raw = self.with_screen(|s| {
+            engine::TerminalScreen::contents_between(s, start.0, start.1, end.0, end.1)
+        });
         raw.lines()
             .map(str::trim_end)
             .collect::<Vec<_>>()
             .join("\n")
     }
 
-    pub fn with_screen<R, F: FnOnce(&vt100::Screen) -> R>(&self, f: F) -> R {
+    pub fn with_screen<R, F: FnOnce(&PaneScreen) -> R>(&self, f: F) -> R {
         let guard = self.lock_parser();
-        f(guard.screen())
+        f(engine::Engine::screen(&*guard))
     }
 
     /// Lock the parser, tolerating poison. The worker recovers a
     /// panicked parser in place (see [`parser_worker`]); a poisoned
     /// guard here would otherwise crash the render thread, turning a
     /// recoverable one-frame glitch into a whole-session crash.
-    fn lock_parser(&self) -> std::sync::MutexGuard<'_, vt100::Parser> {
+    fn lock_parser(&self) -> std::sync::MutexGuard<'_, PaneEngine> {
         self.parser
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -450,9 +459,9 @@ impl Pane {
     /// Used by the scrollback adapter (which walks scrollback by
     /// temporarily shifting the offset). Same lock semantics as
     /// `with_screen` — keep the closure short.
-    pub fn with_screen_mut<R, F: FnOnce(&mut vt100::Screen) -> R>(&self, f: F) -> R {
+    pub fn with_screen_mut<R, F: FnOnce(&mut PaneScreen) -> R>(&self, f: F) -> R {
         let mut guard = self.lock_parser();
-        f(guard.screen_mut())
+        f(engine::Engine::screen_mut(&mut *guard))
     }
 
     /// True when the child has switched to the xterm alternate screen
@@ -463,7 +472,7 @@ impl Pane {
     /// can flash a hint pointing the user at the app's own history
     /// viewer instead.
     pub fn is_alternate_screen(&self) -> bool {
-        self.with_screen(vt100::Screen::alternate_screen)
+        self.with_screen(engine::TerminalScreen::alternate_screen)
     }
 
     /// Has the child enabled bracketed-paste mode (DECSET 2004)? Gates paste
@@ -471,7 +480,7 @@ impl Pane {
     /// markers; a plain shell that never turned it on (e.g. a remote `/bin/sh`
     /// over ssh) would take those bytes as literal input.
     pub fn bracketed_paste_enabled(&self) -> bool {
-        self.with_screen(vt100::Screen::bracketed_paste)
+        self.with_screen(engine::TerminalScreen::bracketed_paste)
     }
 
     /// Has the child asked for mouse reporting, and in which protocol/encoding?
@@ -479,13 +488,13 @@ impl Pane {
     /// The gate on forwarding: when the mode is `None` the child never opted in,
     /// and the escape bytes would land as literal input at its prompt — the same
     /// failure [`Self::bracketed_paste_enabled`] exists to prevent (#170).
-    pub fn mouse_protocol(&self) -> (vt100::MouseProtocolMode, vt100::MouseProtocolEncoding) {
-        self.with_screen(|s| (s.mouse_protocol_mode(), s.mouse_protocol_encoding()))
+    pub fn mouse_protocol(&self) -> (engine::MouseMode, engine::MouseEncoding) {
+        self.with_screen(engine::TerminalScreen::mouse_protocol)
     }
 
     /// True when the child requested any mouse reporting.
     pub fn wants_mouse(&self) -> bool {
-        self.with_screen(|s| s.mouse_protocol_mode() != vt100::MouseProtocolMode::None)
+        self.with_screen(|s| engine::TerminalScreen::mouse_protocol(s).0 != engine::MouseMode::None)
     }
 
     /// Has the child switched its cursor keys to application mode (DECCKM,
@@ -493,7 +502,7 @@ impl Pane {
     /// child in this mode drops the CSI form, which presents as a pane whose
     /// arrows do nothing while bare control bytes (`^C`) still land.
     pub fn application_cursor(&self) -> bool {
-        self.with_screen(vt100::Screen::application_cursor)
+        self.with_screen(engine::TerminalScreen::application_cursor)
     }
 
     /// Return visible screen content as individual lines (plain text,
@@ -502,7 +511,12 @@ impl Pane {
     /// tail. Use `pickable_text` for picker/scanner code that should
     /// follow the user's eye.
     pub fn visible_lines(&self) -> Vec<String> {
-        self.with_screen(|s| s.contents().lines().map(String::from).collect())
+        self.with_screen(|s| {
+            engine::TerminalScreen::contents(s)
+                .lines()
+                .map(String::from)
+                .collect()
+        })
     }
 
     /// Text that interactive pickers (`gf`/`gF`, `^a u`) should scan:
@@ -526,7 +540,7 @@ impl Pane {
     /// screen). Used by `gf`/`gF` so path references that scrolled past
     /// the viewport are still found.
     pub fn recent_lines(&self, max_lines: usize) -> Vec<String> {
-        // `vt100::Screen::contents()` is viewport-only — it returns at most
+        // The seam's `contents()` is viewport-only — it returns at most
         // terminal_height rows at the current scrollback offset. Walking the
         // full scrollback requires the page-walk in `lines_from_scrollback`.
         let all: Vec<String> = self.with_screen_mut(|s| {
@@ -599,7 +613,7 @@ impl Pane {
 
     /// Save full scrollback + screen contents to a timestamped file.
     pub fn save_to_file(&self) -> std::io::Result<std::path::PathBuf> {
-        // `vt100::Screen::contents()` is viewport-only. Walk the full
+        // The seam's `contents()` is viewport-only. Walk the full
         // scrollback + live screen via the page-walk in `lines_from_scrollback`.
         let text = self.with_screen_mut(|s| {
             crate::ui::scrollback::lines_from_scrollback(s)
@@ -670,15 +684,15 @@ fn append_pty_debug(bytes: &[u8]) {
 /// never get corrected. Reading the live size off the parser keeps the
 /// recovered grid the right shape; the size fields survive a `process` panic
 /// (it tears cell/cursor state, not dimensions).
-fn rebuild_parser_preserving_size(p: &mut vt100::Parser) {
-    let (rows, cols) = p.screen().size();
-    *p = vt100::Parser::new(rows, cols, 10_000);
+fn rebuild_parser_preserving_size(p: &mut PaneEngine) {
+    let (rows, cols) = engine::TerminalScreen::size(engine::Engine::screen(p));
+    *p = <PaneEngine as engine::Engine>::new(rows, cols, 10_000);
 }
 
 fn parser_worker(
     guard: RxReturn,
     stop: Arc<AtomicBool>,
-    parser: Arc<Mutex<vt100::Parser>>,
+    parser: Arc<Mutex<PaneEngine>>,
     parser_gen: Arc<AtomicU64>,
     debug_dump: bool,
     wake: Wake,
@@ -719,7 +733,7 @@ fn parser_worker(
                     let mut p = parser
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    p.process(&bytes);
+                    engine::Engine::process(&mut *p, &bytes);
                 }));
                 if result.is_err() {
                     crate::spyc_debug!(

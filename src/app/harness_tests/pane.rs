@@ -254,7 +254,7 @@ fn empty_scrollback_flashes_hint_and_stays_live() {
             app.runtime.pane_scroll_settle.is_some(),
             "opening arms the settle rather than snapshotting inline"
         );
-        app.mount_vt100_scrollback();
+        app.mount_terminal_scrollback();
         assert_eq!(
             app.flash_text(),
             Some("no terminal scrollback captured"),
@@ -358,7 +358,7 @@ fn capital_t_flips_the_scrollback_source_both_ways() {
         // With a capture present and the config gate off, `^a v` snapshots vt100
         // — the deferred settle is what the loop drives, so drive it here.
         app.open_pane_scroll_pager();
-        app.mount_vt100_scrollback();
+        app.mount_terminal_scrollback();
         let title = |a: &App| {
             a.view
                 .scroll_pager
@@ -383,7 +383,7 @@ fn capital_t_flips_the_scrollback_source_both_ways() {
         app.flip_scrollback_source();
         // Flash asserted BEFORE the mount, which flashes its own "scroll: on".
         assert_eq!(app.flash_text(), Some("scrollback: terminal capture"));
-        app.mount_vt100_scrollback();
+        app.mount_terminal_scrollback();
         assert!(
             title(&app).contains("(history)"),
             "and T again should come back to the capture: {:?}",

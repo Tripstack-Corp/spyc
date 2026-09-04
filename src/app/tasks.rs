@@ -392,8 +392,9 @@ impl App {
         // the visible grid reflects what the user saw in the
         // task viewer. Same scrollback budget Pane::spawn_with_env
         // uses (10K rows).
-        let mut parser = vt100::Parser::new(rows, cols, 10_000);
-        parser.process(&task.buffer);
+        let mut parser =
+            <crate::pane::PaneEngine as crate::pane::engine::Engine>::new(rows, cols, 10_000);
+        crate::pane::engine::Engine::process(&mut parser, &task.buffer);
 
         // Wake a paused task — it's user-facing now, no point
         // leaving SIGSTOP'd.
