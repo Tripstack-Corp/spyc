@@ -36,11 +36,12 @@ found.**
    vt100 in **2.87% of iterations** where ghostty panics in 0% and wezterm in
    0.03%. The net is load-bearing today — just not for the reason recorded.
 2. **#34 is both an engine defect and an adapter defect, and the adapter half is
-   fixable now without touching the engine.** spyc's `PaneWidget` writes a
-   literal space into every wide-glyph continuation cell, so *every* CJK/emoji
-   line in a pane renders with a spurious space after each double-width glyph.
-   Separately, `cell_style` never reads `Cell::dim()`, which vt100 gained in
-   0.16, so SGR 2 renders at normal weight. Neither needs an engine swap.
+   fixable now without touching the engine.** `cell_style` never reads
+   `Cell::dim()`, which vt100 gained in 0.16 *after* the function was written,
+   so a child's SGR 2 renders at normal weight. That needs no engine swap.
+   (A second adapter claim — a spurious space in wide-glyph continuation cells —
+   **was withdrawn on 2026-09-04**; it was an artifact of this harness comparing
+   two different normalizations. See §4.)
 3. **For the 3.0 rehydration criterion, vt100 is disqualified on one number:
    scrollback reconstruction is 0%.** It round-trips the visible screen
    perfectly (100% rows, cells and attributes, cursor 26/26) and cannot emit a
@@ -239,25 +240,58 @@ which transcribes spyc's `PaneWidget` cell walk and `cell_style` verbatim
 (`mod pane` and `mod ui` are private in `src/lib.rs`, so the spike cannot link
 them) and prints the engine's state beside what the widget wrote.
 
-### Adapter defect 1 — a spurious space after every wide glyph
+### Adapter defect 1 — WITHDRAWN (2026-09-04)
 
-```
---- double-width CJK
-    engine row 0 (vt100 contents, continuations skipped): "あいab"
-    adapter row 0 (what PaneWidget put in the ratatui buffer):  "あ い ab"
-    per-cell: 0:"あ"[W]->"あ"  1:""[T]->" "  2:"い"[W]->"い"  3:""[T]->" "  4:"a"->"a"
-```
+**This finding was wrong. It is left here, marked, rather than deleted, because
+it reached a decisions-log entry, two issues and a scope amendment before it was
+caught, and a silently-vanishing claim is worse than a corrected one.**
 
-`src/pane/widget.rs:45-60` walks every column and does
-`let ch = if contents.is_empty() { " " } else { contents };` then
-`buf.set_string(x, y, ch, style)` unconditionally. A wide glyph written at
-column *N* makes ratatui occupy *N* and *N+1*; the next iteration then writes
-`" "` into *N+1*, clobbering ratatui's continuation marker. The widget never
-consults `is_wide_continuation()`, which it already has available.
+The claim was that `PaneWidget` clobbers ratatui's wide-glyph continuation cell
+by writing a space into it, rendering `"あいab"` as `"あ い ab"`.
 
-This is a **live, user-visible rendering artifact on every pane line containing
-a double-width glyph** — CJK, emoji, and the box-drawing characters agent CLIs
-use. It needs no engine change.
+What is actually true. Measured, and then confirmed against upstream source —
+the empirical check says *that* they agree, the source says *why*:
+
+- `Buffer::set_string(0, 0, "あ", ..)` **claims** the continuation column itself
+  and fills it with `" "` at style `Reset`. Verified against a buffer pre-filled
+  with `#`: after the write, col 1 is `" "`, not `#`, so `set_string` touched it.
+- That is deliberate, and ratatui says so. `ratatui-core-0.1.2`,
+  `src/buffer/buffer.rs:363-366`, inside `set_stringn`:
+
+  ```rust
+  // Reset following cells if multi-width (they would be hidden by the grapheme),
+  while x < next_symbol {
+      self[(x, y)].reset();
+      x += 1;
+  ```
+
+  `Cell::reset()` restores symbol `" "` and the default style, so the buffer is
+  already in exactly the state the widget's space-write puts it in — and the
+  renderer hides that cell behind the wide symbol regardless.
+- vt100 reports the continuation cell as `bg=Default`, **not** the head's
+  background — so the style the widget writes there is `Reset` as well.
+- Skipping the cell and writing a space into it are therefore **no-ops relative
+  to each other three times over**: ratatui already reset the cell, the style
+  written into it is `Reset` anyway, and the renderer would hide it either way.
+
+`"あ い ab"` is the correct ratatui representation of a wide glyph: one cell for
+the glyph, one claimed spacer. The original finding came from **this probe
+comparing two different normalizations** — the engine row was built with wide
+continuation cells *skipped* and the buffer row with them *included*, so a
+correct rendering read as a spurious space. `adapter_probe` now builds both rows
+identically and prints the continuation cell's symbol and style side by side;
+they agree.
+
+One real observation survives, as a non-defect: neither path paints the head's
+background into the continuation column, so a wide glyph on a coloured
+background has a one-column gap in spyc's buffer. That is vt100's model faithfully
+reproduced — it reports `Default` for the continuation — and what the user sees
+depends on whether their terminal draws the glyph's background across both
+columns. Not spyc's to fix, and not evidence for a widget change.
+
+**The lesson, which is the reason this section stays:** a differential probe
+that normalizes its two sides differently manufactures findings. Compare like
+with like, and when a probe reports a defect, check the probe before the code.
 
 ### Adapter defect 2 — SGR 2 (dim) is dropped
 
@@ -297,11 +331,13 @@ Also engine-side, from `differential`:
   `if len >= CONTENT_BYTES - 4 { return; }` — a silent drop at 18 bytes. The
   flag needs 28.
 
-**Verdict for #34:** the issue's "scrollback accumulates artifacts" has a real
-engine component (SCS, scroll-region content loss, grapheme truncation), but the
-first thing a user would notice — and the cheapest to fix — is the adapter's
-wide-glyph space and dropped dim. Recommend splitting #34: an adapter fix that
-can ship in 2.2, and an engine-fidelity note that defers to the engine decision.
+**Verdict for #34:** the issue's "scrollback accumulates artifacts" is
+predominantly an **engine** problem — SCS, scroll-region content loss, zero
+scrollback under DECSTBM, grapheme truncation — with one small adapter defect
+alongside it (dropped dim). Recommend splitting #34: the dim fix can ship
+immediately, and the rest defers to the engine decision. Note that this verdict
+is weaker than the one first written here: the wide-glyph claim that made the
+adapter half look like the headline did not survive checking.
 
 ---
 

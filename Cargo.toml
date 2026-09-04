@@ -211,15 +211,35 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 # `unwind` instead of `abort` so `std::panic::catch_unwind` actually
-# catches panics — used in `pane::Pane::process_bytes_safe` to recover
-# from vt100 0.15's known unwrap-on-edge-case panic (hits
-# `Option::unwrap` deep in screen.rs for some valid escape sequences,
-# e.g. nvim's exit-from-alt-screen after specific scroll state). With
-# `abort` a single panicking byte stream took down the entire spyc
-# process, dropping every other pane along with it. Slightly larger
-# binary + minor codegen change is a fine trade for not crashing the
-# user's session. Worth keeping as a safety net even after a vt100
-# upgrade.
+# catches panics — `pane::parser_worker` wraps every `process()` call in
+# one and rebuilds a torn parser, so one bad byte stream costs a blank
+# grid instead of the whole process and every other pane with it.
+#
+# This comment used to give the reason as vt100's DECRC-after-resize
+# panic (nvim leaving the alternate screen). **That one was fixed
+# upstream in 0.16.2, which we ship** — so the stated reason had
+# expired while the net stayed load-bearing, which is an invitation to
+# delete a net that is still catching things. What it actually catches
+# on 0.16.2, measured by the spike's `vt100_panics` probe over the open
+# upstream reports (see `docs/drafts/VT_ENGINE_SPIKE.md` §5):
+#
+#   * a wrap on a 1-row screen                 (issue #37)
+#   * a double-width char on a 1-column screen (issue #37)
+#   * a wide char split by a shrink, then written  (#37 / #28)
+#   * the same setup, then erased                  (#28)
+#
+# All four are reachable: `Pane::resize` and `pane_spawn_size` clamp
+# both dimensions with `.max(1)`, which lands exactly on the 1-row and
+# 1-column cases. Structured-random escape streams panic vt100 on 2.87%
+# of iterations. We are not carrying patches for these and not adding a
+# geometry floor — the engine swap lands this release (V2_2_PLAN.md §8),
+# and patching a parser we are leaving would make spyc its fork.
+#
+# When the engine flips, this list stops being the reason but the
+# setting stays: `catch_unwind` around any terminal state machine's
+# byte processing is cheap insurance against a parser bug in untrusted
+# input, and the alternative is `abort`. Retiring it is not part of
+# removing vt100.
 panic = "unwind"
 
 [profile.release-static]
