@@ -37,8 +37,11 @@ The agent asks spyc *what is the cursor on, what is staged, what is picked* —
 no copy-paste, no path description. Pick three files, ask a question, and it
 sees your selection. When it names a path in its answer, `gf` jumps you there.
 
-The file manager is the shared workspace where you and your agents actually
-work — not a file list bolted onto a chat window.
+Sharing a terminal with an agent usually means sharing a *screen* — cells and
+scrollback for it to scrape. What spyc shares is the working set: cursor,
+picks, filter, branch, worktree, as structured state it can query. The file
+manager is the shared workspace where you and your agents actually work — not a
+file list bolted onto a chat window.
 
 ## What it is
 

@@ -7,7 +7,9 @@ for verbatim text and correct attribution. spyc straddles two lanes — the
 agent-manager category (§1, §1a–§1c) and the TUI **file-commander** lane, whose
 incumbent Yazi is covered in §1d (folded in 2026-07-01 from the standalone Yazi
 review; the raw original is archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md`)
-and whose minimalist counterweight lf is covered in §1e.
+and whose minimalist counterweight lf is covered in §1e. §1f records a third
+thing — the **session layer** beneath both lanes (Superlogical, zmx), added
+2026-09-04 on a stated-facts basis rather than the mine-and-verify standard.
 
 > **Method.** Two deep-research passes. The first (v1) drew only on vendor
 > primary sources (GitHub READMEs, changelogs, marketing pages) and produced a
@@ -76,6 +78,8 @@ lane** is where spyc lives — and it already has occupants.
 | **claude-code-ide.el** | editor plugin | 1.6k★ · 109 forks · Emacs. The closest **architectural** twin outside the TUI-manager space: Claude Code runs in a hosted terminal pane (vterm/eat/ghostty) behind a **bidirectional MCP bridge** that pushes live editor context (file, selection, diagnostics, project) to Claude automatically. Different host (a 40-year-old editor, not a file commander) and different center of gravity — the buffer/editor is the noun, dired is a visited mode, not the driving UI. See §1c. |
 | **Yazi** | TUI · cross-plat · **file manager** | ~41.3k★ (2026-08-12) · Rust · the gold-standard TUI file commander (image preview, plugins + package manager, async scheduler). A *different lane* — no agent concept, no MCP; it sets the bar for the file-manager half of spyc's identity, not the agent half. See §1d. |
 | **lf** | TUI · cross-plat · **file manager** | 9.5k★ · Go · MIT · ranger-inspired minimalist, now **community-maintained** (founder's last commit 2024-03-31). Ships the lane's only external **read+write** control surface (`lf -remote send`/`query`) — yet zero agent framing, and its README *Non-Features* (no tabs, no builtin pager/editor, no builtin file ops) are the precise inverse of spyc's integration bet. See §1e. |
+| **Superlogical** | session layer | Launched 2026-07-29 · Hashimoto, Pearkes, Monk, Simpson · Notable Capital + Amplify Partners. Server-side terminal multiplexer on MIT libghostty — "the multiplexer for all work." **Waitlist only, nothing shipped** as of 2026-09-04. A *layer beneath* spyc, not a manager. See §1f. |
+| **zmx** | session layer | Zig · the unbundled form of tmux persistence: daemon per session over a unix socket, passthrough to the PTY, libghostty-vt as a shadow state machine for rehydrating a client on reattach. Deliberately **no windows, tabs or splits**. See §1f. |
 | **long tail** | mixed | Chorus · Vibetunnel · VibeKanban · Mux · Happy · AutoClaude · Codirigent · Centurion · AgentWire · Baton … |
 | **spyc** | TUI · cross-plat | Rust/ratatui · in-process gix worktrees · MCP bridge · vi-keyboard **file+process+agent manager** (not just a multiplexer). |
 
@@ -698,6 +702,52 @@ the agent axis (§4) and not file-manager feature parity.
 6. **Re-run this section** when lf cuts r43, or the moment anyone publishes an MCP
    shim over `lf -remote`. That shim is the entry vector into spyc's lane, and it
    would show up on GitHub well before it shows up in an HN thread.
+
+---
+
+## 1f. The session layer — Superlogical and zmx (2026-09-04)
+
+A second wave forming under the manager category: not agent managers at all,
+but the **session layer** those managers sit on. Recorded here because it is
+the closest thing to a structural challenge spyc has, and because it sharpens
+the thesis by contrast rather than by overlap.
+
+> **Provenance.** Unlike §1a–§1e, this section was not produced by the mine-and-
+> verify pass described in the Method note. It records the facts as supplied in
+> the strategy brief that prompted it — launch date, people, backers, licence
+> basis, shipping status, and stated architecture. Nothing here is a fetched
+> quote, and no claim is made about either project's unshipped internals. Apply
+> the document's normal standard when either ships something to read.
+
+**[Superlogical](https://superlogical.com)** launched **2026-07-29** — Mitchell
+Hashimoto's new company, founded with Jack Pearkes, Alasdair Monk and Hector
+Simpson, backed by Notable Capital and Amplify Partners. The stated aim is a
+**server-side terminal multiplexer** built on MIT-licensed **libghostty** — "the
+multiplexer for all work." As of 2026-09-04 it is **waitlist only; nothing has
+shipped**, so there is no surface to evaluate and none is guessed at here.
+
+**[zmx](https://github.com/neurosnap/zmx)** (Zig) shipped the unbundled form of
+what tmux's persistence actually is: a **daemon per session** over a unix
+socket, passthrough to the PTY, with **libghostty-vt as a shadow state machine**
+used only to rehydrate a client on reattach. Deliberately **no windows, no tabs,
+no splits** — persistence without the multiplexer wrapped around it.
+
+**Why this does not move the thesis — and what it confirms.** Both share a
+*screen* with the agent: cells, bytes, scrollback to scrape. spyc shares the
+*working set* — cursor, picks, inventory, filter, branch, worktree — over MCP,
+as state that already means something. A better multiplexer underneath spyc is
+not a competitor to that; it is a better floor.
+
+Where it does touch the roadmap is durability. zmx is the useful proof that the
+persistence half is separable from the multiplexer half, which is the shape
+spyc's 3.0 horizon takes: one headless process, one attached client, no
+mirroring and no protocol ambitions (see ROADMAP.md). The funded, general-purpose
+version of that category is Superlogical's fight, and ROADMAP.md's non-goals now
+say so explicitly.
+
+**Watch conditions.** Superlogical shipping anything at all — the first release
+is the first evaluable fact. zmx growing a context or agent-integration surface,
+which would move it out of the session layer and into this category.
 
 ---
 
