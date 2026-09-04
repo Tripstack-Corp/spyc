@@ -92,7 +92,7 @@ Module groups (chunking for Phase 1 / one PR each):
 ## Per-PR conventions
 
 - Set up via spyc's `create_worktree` / tear down with `remove_worktree`.
-- Deletions-only, behaviour-preserving; `make check` green.
+- Deletions-only, behavior-preserving; `make check` green.
 - Bump the version per PR (patch); squash-merge `--close-source=false` after CI.
 
 ## Definition of done
