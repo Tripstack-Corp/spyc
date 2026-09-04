@@ -1,3 +1,23 @@
+# ---------------------------------------------------------------------------
+# spyc note: the vendored libghostty-vt archives are OUTSIDE these checks.
+#
+# `crates/spyc-vt-sys` ships prebuilt static archives of libghostty-vt (see
+# SECURITY.md). cargo-deny reasons about the Cargo dependency graph, and a
+# `.a` file committed to a crate is not in it — no advisory, licence or source
+# check here can see inside one.
+#
+# What covers them instead:
+#   * a spyc-owned pinned ghostty commit (`spyc-vt-sys::pin::GHOSTTY_COMMIT`);
+#   * a SHA-256 per archive in `crates/spyc-vt-sys/vendor/CHECKSUMS`, verified
+#     by the build script before it emits any link flag;
+#   * `make vendor-ghostty`, which reproduces the archives from the pinned
+#     source so the committed bytes can be independently confirmed;
+#   * the bump gate on `spyc-vt-sys::pin::BUMP_POLICY`.
+#
+# Ghostty is MIT (`crates/spyc-vt-sys/LICENSE-ghostty`); that licence is not
+# discoverable by the `licenses` check below for the same reason.
+# ---------------------------------------------------------------------------
+
 # This template contains all of the possible sections and their default values
 
 # Note that all fields that take a lint level have these possible values:

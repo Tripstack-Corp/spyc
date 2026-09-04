@@ -203,6 +203,29 @@ in one file rather than being restated in the workflow.
 Inspect the policy against a directory of debs without publishing:
 `make apt-prune-check APT_REPO=<dir>`.
 
+### 5a. Two crates now publish, in order
+
+`spyc-vt-sys` must reach crates.io **before** spyc. This is not a preference:
+`cargo package` refuses a dependency without a registry version — *"all
+dependencies must have a version requirement specified when packaging"* — so
+spyc cannot be published while its FFI crate is unpublished. Verified by
+attempting it.
+
+```
+cargo publish -p spyc-vt-sys     # first
+cargo publish -p spyc            # then, once the registry has it
+```
+
+The two package separately, which is what makes the vendored archives
+affordable: `spyc-vt-sys` measures **3.91 MiB** as a `.crate` (five archives)
+and spyc's own stays around 1.6 MiB, so each is independently well inside
+crates.io's 10 MiB cap instead of sharing one budget. Both figures are from an
+actual `cargo package`, not arithmetic — re-measure on a pin bump, since the
+archives are most of the first number.
+
+`spyc-vt-sys` is versioned independently of spyc and only moves when the pin or
+the bindings move. A spyc release that changes neither republishes nothing.
+
 ## 6. Maintenance: Errata & Security (EN / SA)
 
 FreeBSD splits post-release fixes into **Errata Notices** (critical non-security)
