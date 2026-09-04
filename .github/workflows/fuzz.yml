@@ -57,6 +57,7 @@ jobs:
           - expand_path
           - expand_percent
           - highlight
+          - pane_engine
           - render_markdown
           - word_wrap
     steps:
