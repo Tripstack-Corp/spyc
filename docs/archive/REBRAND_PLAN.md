@@ -198,7 +198,7 @@ internal-first, then the breaking/user-facing layers, then docs, then infra.
 - [ ] Decide D8 (CI platform) and D1 (version `2.0.0`).
 - [ ] Reserve the binary name on any package channel we'll publish to.
 
-### Phase 1 — Internal identifiers (mechanical, low-risk, no behaviour change)
+### Phase 1 — Internal identifiers (mechanical, low-risk, no behavior change)
 - `Cargo.toml`: `name = "cay"`, `[[bin]] name = "cay"`, `description`,
   `repository` → GitHub URL; `cargo update -p cay` to rewrite `Cargo.lock`.
 - `build.rs`: `SPYC_GIT_SHA`/`SPYC_BUILD_TIME`/`SPYC_RUSTC_VERSION` → `CAY_*`,

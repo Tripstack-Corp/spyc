@@ -248,10 +248,27 @@ mod tests {
     use super::*;
     use std::path::{Path, PathBuf};
 
-    /// Generated from commit subjects by git-cliff, and frozen verbatim history
-    /// before v1.57.0 — editing it here would be undone and would rewrite
-    /// quoted history.
-    const SKIP_FILES: &[&str] = &["CHANGELOG.md"];
+    /// Exempt by file name, each for a reason that outranks house spelling.
+    const SKIP_FILES: &[&str] = &[
+        // Generated from commit subjects by git-cliff, and frozen verbatim
+        // history before v1.57.0 — editing it here would be undone and would
+        // rewrite quoted history.
+        "CHANGELOG.md",
+        // A vendored canonical document (Contributor Covenant). Its worth is
+        // in being recognizably the standard text, so it is the
+        // verbatim-import class — the same principle as skipping blockquotes.
+        "CODE_OF_CONDUCT.md",
+    ];
+
+    /// Exempt by repo-relative path prefix.
+    const SKIP_PATHS: &[&str] = &[
+        // An archive records what was written when. Re-spelling one is
+        // rewriting history, which the decisions log refuses to do by policy;
+        // documents archived from here on are already Canadian, having been
+        // written under the rule.
+        "docs/archive/",
+    ];
+
     const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", ".cache"];
 
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -289,15 +306,19 @@ mod tests {
                 Some("toml" | "yml" | "yaml" | "sh") => hash_prose,
                 _ => continue,
             };
-            let Ok(src) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            scanned += 1;
             let rel = path
                 .strip_prefix(root)
                 .unwrap_or(&path)
                 .display()
-                .to_string();
+                .to_string()
+                .replace('\\', "/");
+            if SKIP_PATHS.iter().any(|skip| rel.starts_with(skip)) {
+                continue;
+            }
+            let Ok(src) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            scanned += 1;
             for (line_no, line) in extract(&src) {
                 for (found, want) in offenders(&line) {
                     bad.push(format!("{rel}:{line_no}: `{found}` should be `{want}`"));
@@ -313,6 +334,54 @@ mod tests {
             bad.is_empty(),
             "prose must be Canadian English (see AGENTS.md). {} occurrence(s):\n{}",
             bad.len(),
+            bad.join("\n")
+        );
+    }
+
+    /// A Canadianized word inside a TOML-section shape is always a bug: the
+    /// sweep read a bare `[colors]` as prose and produced a comment naming a
+    /// section that does not exist. Backticks are the real contract
+    /// (AGENTS.md) and this cannot police bare identifiers in general — but
+    /// this one shape is cheap and, measured over the tree, matches nothing
+    /// legitimate, so it is worth the twenty lines.
+    #[test]
+    fn no_canadianized_toml_section_names() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut files = Vec::new();
+        walk(root, &mut files);
+        let mut bad = Vec::new();
+        for path in files {
+            if !matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("rs" | "md" | "toml")
+            ) {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .display()
+                .to_string()
+                .replace('\\', "/");
+            // The pair table necessarily contains every Canadian spelling.
+            if rel == "src/style_guard.rs" {
+                continue;
+            }
+            let Ok(src) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for (i, line) in src.lines().enumerate() {
+                for (_us, ca) in BANNED {
+                    if line.contains(&format!("[{ca}]")) {
+                        bad.push(format!("{rel}:{}: `[{ca}]` is not a config section", i + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "a config section is spelled the way the struct field is spelled, \
+             and prose must backtick it (AGENTS.md):\n{}",
             bad.join("\n")
         );
     }

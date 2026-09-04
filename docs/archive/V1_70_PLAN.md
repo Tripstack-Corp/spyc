@@ -75,7 +75,7 @@ Three public surfaces share one daemon protocol:
 All three speak to the *spyc daemon*, which is just the running spyc
 process itself — there's no separate `spycd`. The existing MCP socket
 server is renamed to the **Order rail** and extended to handle all
-order types, not just MCP-flavoured reads. Peer subscription
+order types, not just MCP-flavored reads. Peer subscription
 (V1_60's `subscribe_frames`) becomes one order shape among many.
 
 Crate split happens *before* the protocol work, not after — it's the

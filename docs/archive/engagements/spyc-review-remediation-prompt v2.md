@@ -4,7 +4,7 @@ You are working in the spyc repository (Tripstack-Corp/spyc). An external code
 review was performed against commit `dbffd29`; its findings were then verified
 and corrected against `208d3ba` (current main at time of writing). The 15
 commits between the two are entirely mouse work — so treat `src/app/mouse.rs`
-and its neighbours as the one area where "verify the finding still holds" is
+and its neighbors as the one area where "verify the finding still holds" is
 more than a formality, and be aware mouse work may still be in flight (PR
 #234) — do not touch `src/app/mouse.rs` in this engagement.
 
@@ -23,12 +23,12 @@ surface the conflict rather than silently overriding it.
    commit series with a conventional-commit message referencing the finding
    number (e.g. `fix(mcp): validate root override against known roots (review
    F1)`). Do not bundle unrelated cleanups.
-3. **Tests first-class.** Every behavioural change ships with a test that fails
+3. **Tests first-class.** Every behavioral change ships with a test that fails
    before the change and passes after, placed per existing conventions.
 4. **Run the full gate** (`make check` or the CI-parity target) before
    declaring any finding done. All work must pass with `--locked`.
 5. **Update documentation in the same change.** ARCHITECTURE.md's
-   "Documentation contract" applies: behaviour change and its doc change land
+   "Documentation contract" applies: behavior change and its doc change land
    in the same commit.
 
 ## Order of work
@@ -62,7 +62,7 @@ actually matters is the **harness permission asymmetry**: agent harnesses
 commonly auto-approve MCP tool calls while gating shell execution behind
 per-command permission prompts. In that configuration,
 `search_content(root: "/", regex: "BEGIN OPENSSH PRIVATE KEY")` silently
-bypasses a boundary the user believes exists. That is not theatre, and it is
+bypasses a boundary the user believes exists. That is not theater, and it is
 why the resolution is **(a) enforce**, not (b) document.
 
 **Do:** validate the `root` override against the set of legitimate roots
@@ -139,7 +139,7 @@ test machinery is needed.
 **Correction to the original finding:** the bare-`/tmp` fallback is a
 symptom, not the defect. The defect is that spyc has two resolvers:
 
-- `state::state_root()` — honours `$XDG_STATE_HOME`, returns `Option`
+- `state::state_root()` — honors `$XDG_STATE_HOME`, returns `Option`
   (no HOME → `None`, callers skip persistence safely)
 - `mcp::state_dir()` — ignores `$XDG_STATE_HOME` entirely, falls back to
   bare `/tmp`
@@ -160,7 +160,7 @@ disappear with it.
 
 **Acceptance:** one resolver; a test that sets `XDG_STATE_HOME` and
 verifies the socket path and, e.g., the frecency path share a root; the
-no-HOME behaviour on the MCP side is explicit and tested.
+no-HOME behavior on the MCP side is explicit and tested.
 
 ### F5 — Fuzz targets exist but never run in CI
 
@@ -219,7 +219,7 @@ approval. No edits landed in this engagement.
 
 - Do not touch `src/app/mouse.rs` or the in-flight mouse work.
 - Do not touch the MVU structure, the sync-only concurrency model, the
-  pager_stream seam, or the gix facade — these were reviewed favourably.
+  pager_stream seam, or the gix facade — these were reviewed favorably.
 - Do not add dependencies. std plus the existing tree is sufficient for
   every finding here.
 - Do not build a new atomic-write helper (see F3 — it exists).

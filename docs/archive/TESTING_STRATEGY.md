@@ -1,10 +1,10 @@
-# spyc testing strategy — coverage + anti-"test theatre"
+# spyc testing strategy — coverage + anti-"test theater"
 
 **Status:** the campaign that produced this is **COMPLETE** — all 8 clusters
 shipped over 2026-06-15/16, against v1.58.x (the `#426–#438` and `#430`/`#431`
 numbers below are **Bitbucket** PR numbers from before the GitHub move; GitHub
 reissued that range for unrelated work, so read them as history, not as links):
-~50 new tests, the anti-"test theatre" effect-intent
+~50 new tests, the anti-"test theater" effect-intent
 seam in place, both a `proptest` in-crate pass and a real coverage-guided
 **cargo-fuzz** pass (6 targets, all clean), and **2 real bugs found + fixed**
 (#430, #431 — both in the live pane/pty workflow, cluster 4). This doc now
@@ -16,7 +16,7 @@ historical record. The harness (`App::test_app`, `src/app/test_harness.rs`)
 workflow tests.
 
 Originally a running campaign plan folding the May workflow-coverage plan
-together with the "Beyond Test Theatre" quality RFC; retained as the
+together with the "Beyond Test Theater" quality RFC; retained as the
 project's testing strategy now that the campaign has closed.
 
 **Goal:** raise the *value* of the suite, not just the count. Two distinct
@@ -27,7 +27,7 @@ risks, addressed in parallel:
    ownership, or a session restore picks an agent-specific resume path.
    Those flows need harness-level tests between tiny unit tests and full
    terminal automation.
-2. **"Test theatre"** — tests that confirm the code does what it already
+2. **"Test theater"** — tests that confirm the code does what it already
    does (tautologies) or pin internal struct layout byte-for-byte, creating
    false confidence and refactoring paralysis instead of catching real
    regressions. (See the appendix.)
@@ -39,7 +39,7 @@ the deep-review campaign added the rest). `cargo test --locked --all-targets`
 passes under normal permissions; sandboxed runs can fail the Unix-socket MCP
 tests with `Operation not permitted`.
 
-**Genuine strengths (already not theatre):**
+**Genuine strengths (already not theater):**
 
 - **Pure domain tests** — `src/app/state/tests/{navigation,apply}.rs` exercise
   state transitions with no mocked terminal, avoiding the brittle UI tests
@@ -51,7 +51,7 @@ tests with `Operation not permitted`.
 - **Enforced invariants as tests** — the render-purity source scan
   (`app::render::purity_guard`), the `mod.rs` line ceiling, and the
   compile-checked `COMMAND_TABLE`. These are tests that catch *architecture*
-  drift, not behaviour tautologies.
+  drift, not behavior tautologies.
 - Property tests exist (shell quoting, ignore masks, keymap counts); 15+
   `insta` snapshots cover pager/status/prompt/list rendering.
 
@@ -71,7 +71,7 @@ Run like the deep-review campaign: **one PR per cluster, verify the gap first
 (write the missing/failing test), then close it, gate green, merge as we go.**
 The workstreams are independent — interleave by value, not strict order.
 
-### A. Move off "test theatre" (quality)
+### A. Move off "test theater" (quality)
 
 - **Property-based testing (`proptest`).** spyc's pure MVU state is the ideal
   candidate.
@@ -94,10 +94,10 @@ The workstreams are independent — interleave by value, not strict order.
 
 ### B. AI-assisted-testing rules (process)
 
-Adopt these so we expand coverage without manufacturing theatre:
+Adopt these so we expand coverage without manufacturing theater:
 
 1. **Never prompt "write tests for this function."** That just re-asserts
-   current behaviour.
+   current behavior.
 2. **Prompt with the requirement.** e.g. *"property test: no sequence of
    `Up`/`Down` may leave the cursor index ≥ `inventory.len()`."*
 3. **Use AI for edge-case data**, not assertions — circular symlinks,
@@ -138,7 +138,7 @@ Keep the real-socket tests; make failures interpretable:
 
 - Socket server responds to initialize + tool calls; disconnect routes through
   the command channel; path traversal stays blocked for file-content reads;
-  tool searches use the expected project root + ignore behaviour.
+  tool searches use the expected project root + ignore behavior.
 - Unix-socket permission failures in restricted sandboxes produce a clear
   diagnostic pointing to "rerun under normal permissions."
 - Do **not** weaken the authoritative check: `cargo test --locked
@@ -168,7 +168,7 @@ Keep the real-socket tests; make failures interpretable:
   reach from a free-standing libFuzzer target.
 - **Organization & hygiene:** keep unit tests (`#[cfg(test)]` in-file) separate
   from integration tests (`tests/`); single-responsibility, descriptive names;
-  use `.unwrap()`/`.expect()` for setup and reserve `assert!` for the behaviour
+  use `.unwrap()`/`.expect()` for setup and reserve `assert!` for the behavior
   under test (don't assert on intermediate setup steps).
 
 ## Order of attack
@@ -221,26 +221,26 @@ the risk actually concentrates.
   fake data only.
 - Real pty/socket tests are isolated and either pass under normal permissions
   or fail with a clear environment-specific message.
-- The harness stays test-only; no user-visible behaviour changes.
+- The harness stays test-only; no user-visible behavior changes.
 
 ## Out of scope
 
 - Full interactive terminal automation; performance benchmarking;
   coverage-percentage gates.
-- Product behaviour changes, except clearer diagnostics for environment-specific
+- Product behavior changes, except clearer diagnostics for environment-specific
   socket failures.
 - Docs/changelog/version churn unless an implementation change makes it
   user-visible.
 
-## Appendix — "The Rise of Test Theatre" (Ben Houston, 2025)
+## Appendix — "The Rise of Test Theater" (Ben Houston, 2025)
 
-The source article (*"The Rise of Test Theatre": When AI Coders Write Tests
+The source article (*"The Rise of Test Theater": When AI Coders Write Tests
 That Mean Nothing*) frames the quality risk this campaign targets:
 
 - **The circularity problem:** "write tests for this function" yields
   tautologies that confirm the code does what it's written to do, not whether
   it does the *right* thing.
-- **Theatre vs. real testing:** generated suites create false confidence; real
+- **Theater vs. real testing:** generated suites create false confidence; real
   tests validate requirements, protect against regression, document intent, and
   challenge assumptions.
 - **The cost:** false confidence, maintenance burden, refactoring paralysis

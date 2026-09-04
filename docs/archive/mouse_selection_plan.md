@@ -38,7 +38,7 @@ right primitive rather than merely a convenient one:
 
 - it walks `grid().visible_rows()`, so it follows the pane's **current scroll
   position** — the same rows the widget drew, no coordinate translation;
-- it honours `row.wrapped()`, emitting a newline only on a **hard** line end. A
+- it honors `row.wrapped()`, emitting a newline only on a **hard** line end. A
   hand-rolled cell walk gets soft-wrapped lines wrong (a spurious `\n` mid-line),
   which is the single most annoying bug in a terminal selection.
 
@@ -125,7 +125,7 @@ is the conventional block-select modifier and is available.
 - **List**: rows are already styled per-row; a selection here is arguably just
   the existing pick mechanism and may not be worth a second concept.
 
-Use a theme colour, not a hardcoded `REVERSED` — `REVERSED` collides with the
+Use a theme color, not a hardcoded `REVERSED` — `REVERSED` collides with the
 block cursor the widget already draws, and with a diff's own background wash.
 
 ### Tier 5 — copy, and the SSH problem this exposes
