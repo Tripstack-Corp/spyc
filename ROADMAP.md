@@ -1,7 +1,7 @@
 # spyc roadmap
 
-The strategy layer — thesis, current state, the 2.2 and 2.3 arcs, non-goals, and
-the decisions log. The per-item **backlog lives in [GitHub Issues](https://github.com/Tripstack-Corp/spyc/issues)**
+The strategy layer — thesis, current state, the 2.2, 2.3 and 3.0 arcs,
+non-goals, and the decisions log. The per-item **backlog lives in [GitHub Issues](https://github.com/Tripstack-Corp/spyc/issues)**
 (organized on the [roadmap board](https://github.com/orgs/Tripstack-Corp/projects/1));
 `CHANGELOG.md` is the shipped history. Detailed designs for not-yet-started work
 live in `docs/drafts/*_PLAN.md`; shipped or parked plans are archived in
@@ -9,21 +9,22 @@ live in `docs/drafts/*_PLAN.md`; shipped or parked plans are archived in
 
 ## Thesis
 
-spyc is a vi-keyboard-driven file commander that exposes itself to an AI coding
-agent as a queryable context source. The target user is a developer who already
-thinks in vi motions and wants Claude Code living in the same workspace -- not
-one window over, not in a browser tab, in the same session, sharing context.
+spyc is the working set, shared. A vi-keyboard-driven file commander is the
+human's view of it; MCP is the agent's. A multiplexer shares a *screen* with an
+agent — cells, bytes, scrollback to scrape. spyc shares state that already
+means something: cursor, picks, inventory, filter, branch, worktree. The target
+user is a developer who thinks in vi motions and wants their agents in the same
+session, reading the same context — not one window over, not in a browser tab.
 
-The MCP server shifted the tool's nature: spyc isn't just "a file manager with
-Claude in a pane." It's a file manager that Claude can query -- current
-directory, cursor, picks, inventory, filter, git branch -- via a standard
-protocol. That bidirectional awareness is the positioning that differentiates
-spyc from `tmux` + `claude`.
+The arc follows from that sentence. 2.2 gives every participant an identity
+(pane-identity transport). 2.3 grows the session to everything you're working
+on (Projects: one process, many working sets, one attention signal). 3.0 makes
+the session outlive the terminal that started it.
 
-Every other feature -- picks, inventory, pager, status bar, sessions -- is
-supporting infrastructure that makes the split-pane workflow fast and
-comfortable. The roadmap is organized accordingly: the pane-and-agent
-integration is the defining work track, not the trailing milestone.
+The benchmark stays `tmux` + `claude` — better on context today, better on
+durability after 3.0, at which point the target user's stack simply no longer
+contains tmux. That is the full extent of the tmux claim: we don't replace it
+for anyone else; we remove the reason our user runs it.
 
 ## Where we are (v2.1.1)
 
@@ -165,10 +166,47 @@ per-process, so aggregating attention across projects costs little. And the
 pane-identity transport (2.2) gives every MCP connection an identity that
 extends to project attribution.
 
-Out of scope in 2.3 and after: frame mirroring, input forwarding, headless or
-`--detached` peers, cross-process discovery, and any CounterTop revival.
+Out of scope permanently: frame mirroring, input forwarding, cross-process
+discovery, and any CounterTop revival. Headless needs the finer distinction.
+Headless *peers* are dead with the rest of that list — a second spyc that
+another spyc discovers, mirrors or forwards to. The daemonized *monolith*
+returns in 3.0, and it is not a peer: one process, nothing mirrored, and the
+client is a renderer rather than an instance. See "The 3.0 horizon" below.
 `docs/drafts/PROJECTS_PLAN.md` — a 2.2 deliverable — is where the design gets
 argued. Tracked as [#99](https://github.com/Tripstack-Corp/spyc/issues/99).
+
+## The 3.0 horizon: Slow Cooker (durable sessions)
+
+The goal is that spyc stops needing tmux underneath it. Detach, close the
+laptop, let the agents keep working; `spyc -a` restores the client and
+everything is where you left it.
+
+The shape is the daemonized monolith. One headless spyc owns the PTYs, the
+agent children and the Model; a thin client attaches over the existing unix
+socket and renders. One attached client at a time. Explicitly not a
+general-purpose multiplexer, not multi-client, no cross-machine protocols, and
+no binary state-replication ambitions — that is Superlogical's fight and
+zellij's category, and neither is ours.
+
+The architecture already affords it. MVU's single message channel means every
+inter-message tick is a quiescent, mutation-safe snapshot boundary, so state
+capture falls out of the pre-2.0 migration rather than needing new machinery.
+The 2.3 Projects work supplies the rest: the per-project state inventory and
+the recovery manifest are the same inventory an attach snapshot needs, which is
+why `PROJECTS_PLAN.md` is asked to answer for each field whether it serializes
+or is rebuilt client-side.
+
+The user-facing words are **detach** and **attach**. "Session" stays an
+agent-conversation term — session forking, `/resume`, session pinning — and the
+durable thing gets no noun of its own: it is just spyc, still running.
+
+Scope does not commit until the VT-engine spike (`docs/drafts/VT_ENGINE_SPIKE.md`,
+a separate engagement) reports. Screen reconstruction fidelity becomes
+load-bearing the moment a client reattaches, and reattaching from a *different*
+terminal emulator — cell size, kitty/sixel capability and colour depth all
+changing mid-session — is the known-hard bug class to price before committing
+to it. Tracked as a `3.0` milestone once issues exist; none are created yet.
+
 
 ## Backlog & roadmap
 
@@ -183,8 +221,8 @@ labeled by `area:*` / `type:*` and organized on the **[roadmap board](https://gi
 - **`needs-repro`** — reported, not yet reproducible; evidence wanted before design.
 - **`good first issue`** — small, self-contained entry points.
 
-This file is the *strategy* layer — thesis, current state, the 2.2 and 2.3
-arcs, non-goals, and the decisions log. The per-item backlog lives in Issues;
+This file is the *strategy* layer — thesis, current state, the 2.2, 2.3 and
+3.0 arcs, non-goals, and the decisions log. The per-item backlog lives in Issues;
 detailed designs for not-yet-started work are in `docs/drafts/*_PLAN.md`;
 shipped or parked designs are archived under `docs/archive/`.
 
@@ -215,6 +253,10 @@ and the roadmap committing to that saves a lot of drift.
   longer a non-goal. What stays out of scope is mouse-first design —
   every action keeps a keybinding, and no affordance is reachable only
   by pointer. Keys remain the API.
+- **A general-purpose multiplexer.** Multi-client attach, cross-machine
+  session protocols, multiplayer, production-ops surfaces — the funded
+  players can have that category. The durability work in 3.0 is scoped to
+  one user, one machine, one attached client, and stops there.
 - **tmux command compatibility.** We have our own bindings.
 - **Persistent search index** (tantivy/ctags). Ripgrep on a 100K-file
   repo is sub-second cold; the maintenance burden isn't worth it.
@@ -301,12 +343,29 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   exists as the prep refactor. Depends on the pane-identity transport
   (2.2) for project attribution; `docs/drafts/PROJECTS_PLAN.md`, a 2.2
   deliverable, is where it gets argued.
+- **The 3.0 horizon opens on durable sessions, via the daemonized
+  monolith** (2026-09-04). A headless spyc owns the PTYs, agent children and
+  Model; a thin client attaches over the existing unix socket and renders.
+  One user, one machine, one attached client — not a multiplexer. What
+  changed is the premise, not the appetite: the `^Z` entry above reasons
+  about children tied to a dying spyc PID under a dying TTY, and a daemon's
+  children hang off a process that doesn't die. That entry stays as written;
+  the log records what was decided when, and doesn't rewrite it. This is the
+  CounterTop pattern a second time — the parking rationale named mechanisms
+  (mirroring, forwarding, discovery), not the goal, and those mechanisms stay
+  archived, while a monolith needs none of them. Positioning never says "tmux
+  replacement": the claim is only that our user's stack stops containing
+  tmux, and the tmux-command-compatibility non-goal is unchanged. Vocabulary
+  is fixed to detach/attach, with "session" reserved for agent
+  conversations. Scope does not commit until the VT-engine spike reports —
+  reattaching into a different terminal emulator is the bug class to price
+  first.
 
 ## Doc map
 
 | Doc | Role |
 |---|---|
-| `ROADMAP.md` | This file — strategy, the 2.2 and 2.3 arcs, non-goals, decisions log. |
+| `ROADMAP.md` | This file — strategy, the 2.2, 2.3 and 3.0 arcs, non-goals, decisions log. |
 | [GitHub Issues](https://github.com/Tripstack-Corp/spyc/issues) + [roadmap board](https://github.com/orgs/Tripstack-Corp/projects/1) | The live backlog — features, fixes, ideas; labeled + milestoned. |
 | `docs/archive/BACKLOG_DRAFT_NOTES.md` | Archived raw intake backlog — open items migrated to Issues (2026-07); kept as history. |
 | `CHANGELOG.md` | Shipped history (git-cliff, conventional commits). |
@@ -334,7 +393,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/archive/V1_60_PLAN.md` | Archived design — CounterTop multi-instance hub. Parked as an architecture; the multi-project goal it targeted is reopened for 2.3 on the monolith route (see the decisions log). |
 | `docs/archive/V1_70_PLAN.md` | Archived design — Mise en Place typed addressability + crate split. Speculative; MCP already covers the basics. |
 | `docs/archive/engagements/` | Engagement briefs and deliverables (the review-remediation and cleanup rounds) — which PR closed which finding. |
-| `docs/COMPETITIVE_REVIEW.md` | Consolidated competitive review + GTM: the AI coding-agent-manager category (§1–§1c: herdr, psmux, claude-code-ide.el) plus the TUI file-manager lane (§1d: Yazi, folded 2026-07-02). Refresh on a competitor's next major. (Standalone Yazi original archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md`.) |
+| `docs/COMPETITIVE_REVIEW.md` | Consolidated competitive review + GTM: the AI coding-agent-manager category (§1–§1c: herdr, psmux, claude-code-ide.el), the TUI file-manager lane (§1d: Yazi, folded 2026-07-02; §1e: lf), and the session layer beneath both (§1f: Superlogical, zmx). Refresh on a competitor's next major. (Standalone Yazi original archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md`.) |
 | `docs/archive/` | Shipped plans, kept as historical record. |
 
 > **Note on pending plans:** `AUTO_APPROVAL_PLAN`, `PANE_STARTUP_TABS_PLAN`

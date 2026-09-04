@@ -342,6 +342,11 @@ plan does not answer them.
    agent-awareness channel — `report_status`, the per-agent status hooks, the
    `Blocked`/`Done` transition, `Effect::Notify`, the visual bell — and what
    has to be new to answer "which agent, in which project, needs me".
+7. **Attach-awareness of the state inventory.** For every field question 1
+   places in a project struct or leaves global, note whether it serializes for
+   a future attach snapshot or is rebuilt client-side. Question 3's recovery
+   manifest is written knowing the 3.0 attach snapshot is its superset — one
+   inventory, two consumers.
 
 ## Non-goals for 2.2
 
@@ -436,7 +441,7 @@ the substitution refuses a non-UTF-8 path the way `expand_percent` does.
 reading half documented and the display half recorded as out of scope. Both
 count as done; shipping neither does not.
 
-**`PROJECTS_PLAN.md` —** All six questions in §7 answered, with a decision and
+**`PROJECTS_PLAN.md` —** All seven questions in §7 answered, with a decision and
 a reason for each, and the doc approved before 2.3 opens.
 
 ## Docs each PR must carry (same commit, not a follow-up)
