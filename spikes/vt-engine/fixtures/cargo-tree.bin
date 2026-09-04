@@ -1,0 +1,187 @@
+vt-engine-spike v0.0.0 (/Users/derekmarshall/src/spyc.worktrees/spike/vt-engine/spikes/vt-engine)
+├── anyhow feature "default"
+│   ├── anyhow v1.0.104
+│   └── anyhow feature "std"
+│       └── anyhow v1.0.104
+├── portable-pty feature "default"
+│   └── portable-pty v0.9.0
+│       ├── anyhow feature "default" (*)
+│       ├── bitflags feature "default"
+│       │   └── bitflags v1.3.2
+│       ├── downcast-rs feature "default"
+│       │   ├── downcast-rs v1.2.1
+│       │   └── downcast-rs feature "std"
+│       │       └── downcast-rs v1.2.1
+│       ├── filedescriptor feature "default"
+│       │   └── filedescriptor v0.8.3
+│       │       ├── libc feature "default"
+│       │       │   ├── libc v0.2.189
+│       │       │   └── libc feature "std"
+│       │       │       └── libc v0.2.189
+│       │       ├── thiserror feature "default"
+│       │       │   └── thiserror v1.0.69
+│       │       │       └── thiserror-impl feature "default"
+│       │       │           └── thiserror-impl v1.0.69 (proc-macro)
+│       │       │               ├── proc-macro2 feature "default"
+│       │       │               │   ├── proc-macro2 v1.0.107
+│       │       │               │   │   └── unicode-ident feature "default"
+│       │       │               │   │       └── unicode-ident v1.0.24
+│       │       │               │   └── proc-macro2 feature "proc-macro"
+│       │       │               │       └── proc-macro2 v1.0.107 (*)
+│       │       │               ├── quote feature "default"
+│       │       │               │   ├── quote v1.0.47
+│       │       │               │   │   └── proc-macro2 v1.0.107 (*)
+│       │       │               │   └── quote feature "proc-macro"
+│       │       │               │       ├── quote v1.0.47 (*)
+│       │       │               │       └── proc-macro2 feature "proc-macro" (*)
+│       │       │               └── syn feature "default"
+│       │       │                   ├── syn v2.0.119
+│       │       │                   │   ├── proc-macro2 v1.0.107 (*)
+│       │       │                   │   ├── quote v1.0.47 (*)
+│       │       │                   │   └── unicode-ident feature "default" (*)
+│       │       │                   ├── syn feature "clone-impls"
+│       │       │                   │   └── syn v2.0.119 (*)
+│       │       │                   ├── syn feature "derive"
+│       │       │                   │   └── syn v2.0.119 (*)
+│       │       │                   ├── syn feature "parsing"
+│       │       │                   │   └── syn v2.0.119 (*)
+│       │       │                   ├── syn feature "printing"
+│       │       │                   │   └── syn v2.0.119 (*)
+│       │       │                   └── syn feature "proc-macro"
+│       │       │                       ├── syn v2.0.119 (*)
+│       │       │                       ├── proc-macro2 feature "proc-macro" (*)
+│       │       │                       └── quote feature "proc-macro" (*)
+│       │       ├── winapi feature "default"
+│       │       │   └── winapi v0.3.9
+│       │       │       ├── winapi-i686-pc-windows-gnu feature "default"
+│       │       │       │   └── winapi-i686-pc-windows-gnu v0.4.0
+│       │       │       └── winapi-x86_64-pc-windows-gnu feature "default"
+│       │       │           └── winapi-x86_64-pc-windows-gnu v0.4.0
+│       │       ├── winapi feature "fileapi"
+│       │       │   └── winapi v0.3.9 (*)
+│       │       ├── winapi feature "handleapi"
+│       │       │   └── winapi v0.3.9 (*)
+│       │       ├── winapi feature "namedpipeapi"
+│       │       │   └── winapi v0.3.9 (*)
+│       │       ├── winapi feature "processenv"
+│       │       │   └── winapi v0.3.9 (*)
+│       │       ├── winapi feature "processthreadsapi"
+│       │       │   └── winapi v0.3.9 (*)
+│       │       ├── winapi feature "winsock2"
+│       │       │   └── winapi v0.3.9 (*)
+│       │       └── winapi feature "winuser"
+│       │           └── winapi v0.3.9 (*)
+│       ├── libc feature "default" (*)
+│       ├── winapi feature "consoleapi"
+│       │   └── winapi v0.3.9 (*)
+│       ├── winapi feature "default" (*)
+│       ├── winapi feature "fileapi" (*)
+│       ├── winapi feature "handleapi" (*)
+│       ├── winapi feature "namedpipeapi" (*)
+│       ├── winapi feature "synchapi"
+│       │   └── winapi v0.3.9 (*)
+│       ├── winapi feature "winuser" (*)
+│       ├── lazy_static feature "default"
+│       │   └── lazy_static v1.5.0
+│       ├── log feature "default"
+│       │   └── log v0.4.34
+│       ├── nix feature "default"
+│       │   └── nix v0.28.0
+│       │       ├── libc feature "default" (*)
+│       │       ├── libc feature "extra_traits"
+│       │       │   └── libc v0.2.189
+│       │       ├── bitflags feature "default"
+│       │       │   └── bitflags v2.13.1
+│       │       └── cfg-if feature "default"
+│       │           └── cfg-if v1.0.4
+│       │       [build-dependencies]
+│       │       └── cfg_aliases feature "default"
+│       │           └── cfg_aliases v0.1.1
+│       ├── nix feature "fs"
+│       │   └── nix v0.28.0 (*)
+│       ├── nix feature "term"
+│       │   └── nix v0.28.0 (*)
+│       ├── serial2 feature "default"
+│       │   └── serial2 v0.2.38
+│       │       ├── libc feature "default" (*)
+│       │       ├── cfg-if feature "default" (*)
+│       │       ├── windows-sys feature "Win32_Devices_Communication"
+│       │       │   ├── windows-sys v0.61.2
+│       │       │   │   └── windows-link v0.2.1
+│       │       │   └── windows-sys feature "Win32_Devices"
+│       │       │       ├── windows-sys v0.61.2 (*)
+│       │       │       └── windows-sys feature "Win32"
+│       │       │           ├── windows-sys v0.61.2 (*)
+│       │       │           └── windows-sys feature "Win32_Foundation"
+│       │       │               ├── windows-sys v0.61.2 (*)
+│       │       │               └── windows-sys feature "Win32" (*)
+│       │       ├── windows-sys feature "Win32_Security"
+│       │       │   ├── windows-sys v0.61.2 (*)
+│       │       │   └── windows-sys feature "Win32" (*)
+│       │       ├── windows-sys feature "Win32_Storage_FileSystem"
+│       │       │   ├── windows-sys v0.61.2 (*)
+│       │       │   └── windows-sys feature "Win32_Storage"
+│       │       │       ├── windows-sys v0.61.2 (*)
+│       │       │       └── windows-sys feature "Win32" (*)
+│       │       ├── windows-sys feature "Win32_System_IO"
+│       │       │   ├── windows-sys v0.61.2 (*)
+│       │       │   └── windows-sys feature "Win32_System"
+│       │       │       ├── windows-sys v0.61.2 (*)
+│       │       │       └── windows-sys feature "Win32" (*)
+│       │       ├── windows-sys feature "Win32_System_Registry"
+│       │       │   ├── windows-sys v0.61.2 (*)
+│       │       │   └── windows-sys feature "Win32_System" (*)
+│       │       ├── windows-sys feature "Win32_System_Threading"
+│       │       │   ├── windows-sys v0.61.2 (*)
+│       │       │   └── windows-sys feature "Win32_System" (*)
+│       │       ├── windows-sys feature "Win32_System_WindowsProgramming"
+│       │       │   ├── windows-sys v0.61.2 (*)
+│       │       │   └── windows-sys feature "Win32_System" (*)
+│       │       └── windows-sys feature "default"
+│       │           └── windows-sys v0.61.2 (*)
+│       ├── shared_library feature "default"
+│       │   └── shared_library v0.1.9
+│       │       ├── libc feature "default" (*)
+│       │       └── lazy_static feature "default" (*)
+│       ├── shell-words feature "default"
+│       │   ├── shell-words v1.1.1
+│       │   └── shell-words feature "std"
+│       │       └── shell-words v1.1.1
+│       └── winreg feature "default"
+│           └── winreg v0.10.1
+│               ├── winapi feature "default" (*)
+│               ├── winapi feature "handleapi" (*)
+│               ├── winapi feature "impl-debug"
+│               │   └── winapi v0.3.9 (*)
+│               ├── winapi feature "impl-default"
+│               │   └── winapi v0.3.9 (*)
+│               ├── winapi feature "minwinbase"
+│               │   └── winapi v0.3.9 (*)
+│               ├── winapi feature "minwindef"
+│               │   └── winapi v0.3.9 (*)
+│               ├── winapi feature "timezoneapi"
+│               │   └── winapi v0.3.9 (*)
+│               ├── winapi feature "winerror"
+│               │   └── winapi v0.3.9 (*)
+│               ├── winapi feature "winnt"
+│               │   └── winapi v0.3.9 (*)
+│               └── winapi feature "winreg"
+│                   └── winapi v0.3.9 (*)
+└── vt100 feature "default"
+    └── vt100 v0.16.2
+        ├── itoa feature "default"
+        │   └── itoa v1.0.18
+        ├── unicode-width feature "default"
+        │   ├── unicode-width v0.2.2
+        │   └── unicode-width feature "cjk"
+        │       └── unicode-width v0.2.2
+        └── vte feature "default"
+            ├── vte v0.15.0
+            │   ├── arrayvec v0.7.8
+            │   └── memchr v2.8.3
+            └── vte feature "std"
+                ├── vte v0.15.0 (*)
+                └── memchr feature "std"
+                    ├── memchr v2.8.3
+                    └── memchr feature "alloc"
+                        └── memchr v2.8.3

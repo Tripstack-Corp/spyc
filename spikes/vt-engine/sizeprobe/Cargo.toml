@@ -1,0 +1,32 @@
+# Compiled-size probe. Four separate binaries, each linking exactly one engine
+# (or none), built with spyc's release profile settings so the delta is
+# comparable to what spyc's binary would gain.
+[workspace]
+
+[package]
+name = "sizeprobe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[features]
+default = []
+e-vt100 = ["dep:vt100"]
+e-ghostty = ["dep:libghostty-vt"]
+e-wezterm = ["dep:wezterm-term"]
+
+[dependencies]
+vt100 = { version = "0.16.2", optional = true }
+libghostty-vt = { version = "0.2.1", optional = true }
+wezterm-term = { git = "https://github.com/wezterm/wezterm", optional = true }
+
+[[bin]]
+name = "sizeprobe"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "unwind"
