@@ -99,6 +99,30 @@ lint-linux: ## Clippy for the Linux target (catches OS-gated lints; needs zig + 
 	CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="cargo-zigbuild zig cc --" \
 	cargo clippy --locked --all-targets --target $(LINUX_LINT_TARGET) -- -D warnings
 
+# actionlint parses every workflow and runs shellcheck over each `run:` block —
+# the half that matters here, since the release-critical workflows are mostly
+# bash and CI never executes them (apt.yml fires on release, not on a PR).
+#
+# The shellcheck probe below is load-bearing, not politeness: with no shellcheck
+# on PATH actionlint does not warn, it silently drops the integration and exits
+# 0. Measured on this tree — the one real finding vanished and the run went
+# green. A gate that checks almost nothing while reporting success is the
+# failure mode src/guard_support.rs exists to document.
+.PHONY: lint-workflows
+lint-workflows: ## Lint .github/workflows (actionlint + shellcheck over every `run:` block)
+	@command -v actionlint >/dev/null 2>&1 || { \
+		echo "actionlint not found — install with: brew install actionlint"; \
+		exit 1; \
+	}
+	@command -v shellcheck >/dev/null 2>&1 || { \
+		echo "shellcheck not found — actionlint would silently skip every run: block and exit 0."; \
+		echo "  install with: brew install shellcheck  (CI pins 0.11.0 — findings differ by version)"; \
+		exit 1; \
+	}
+	@actionlint --version | head -1 | sed 's/^/actionlint /'
+	@shellcheck --version | sed -n 's/^version: /shellcheck /p'
+	actionlint -no-color
+
 .PHONY: fmt
 fmt: ## Format code
 	cargo fmt --all

@@ -1509,3 +1509,106 @@ mod fuzz_target_registration_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod pages_artifact_guards {
+    use std::path::{Path, PathBuf};
+
+    fn repo() -> &'static Path {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    fn workflows() -> Vec<PathBuf> {
+        let mut found: Vec<PathBuf> = std::fs::read_dir(repo().join(".github/workflows"))
+            .expect("read .github/workflows")
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "yml" || e == "yaml"))
+            .collect();
+        found.sort();
+        found
+    }
+
+    /// Line range of the workflow step containing `uses_idx`, as `[start, end)`.
+    ///
+    /// A step is its `- ` bullet plus every line indented past it, so the span
+    /// ends at the next bullet at the same indent or at any dedent.
+    fn step_span(lines: &[&str], uses_idx: usize) -> (usize, usize) {
+        let indent_of = |l: &str| l.len() - l.trim_start().len();
+        let mut start = uses_idx;
+        while start > 0 && !lines[start].trim_start().starts_with("- ") {
+            start -= 1;
+        }
+        let indent = indent_of(lines[start]);
+        let mut end = start + 1;
+        while end < lines.len() {
+            let line = lines[end];
+            if !line.trim().is_empty() && indent_of(line) <= indent {
+                break;
+            }
+            end += 1;
+        }
+        (start, end)
+    }
+
+    /// `actions/upload-pages-artifact` v4 began excluding dotfiles from the
+    /// tarball (`--exclude=.[^/]*`), so the archive's `.nojekyll` reaches Pages
+    /// only while the step opts back in with `include-hidden-files: true`.
+    ///
+    /// No linter can see this: the workflow stays valid YAML, every action
+    /// input is legal, and `apt.yml` never runs on a PR — it fires on release.
+    /// The v3 -> v5 bump (#444) passed a fully green check set while silently
+    /// dropping the file, and Pages has no rollback.
+    #[test]
+    fn every_pages_upload_keeps_hidden_files() {
+        let mut checked = 0;
+        for path in workflows() {
+            let src = std::fs::read_to_string(&path).expect("read workflow");
+            let lines: Vec<&str> = src.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                if !line.contains("uses:") || !line.contains("actions/upload-pages-artifact") {
+                    continue;
+                }
+                checked += 1;
+                let (start, end) = step_span(&lines, i);
+                let value = lines[start..end]
+                    .iter()
+                    .find_map(|l| l.trim().strip_prefix("include-hidden-files:"))
+                    .map(|v| v.trim().trim_matches(|c| c == '"' || c == '\''));
+                assert_eq!(
+                    value,
+                    Some("true"),
+                    "{}: the upload-pages-artifact step must set \
+                     `include-hidden-files: true` (found {value:?}). Without it the \
+                     action drops every dotfile from the artifact, which silently \
+                     removes the archive's .nojekyll from the deployed site.",
+                    path.display(),
+                );
+            }
+        }
+        // A rename of the action would otherwise leave this guard passing while
+        // inspecting nothing — the fail-open shape src/guard_support.rs exists
+        // to document.
+        assert!(
+            checked > 0,
+            "no upload-pages-artifact step found in any workflow — this guard \
+             is inspecting nothing; retarget it or delete it"
+        );
+    }
+
+    /// The other half of the pair above: the flag is only load-bearing while
+    /// something in the archive actually starts with a dot. If that write goes
+    /// away this fails, so the flag's continued value gets a human decision
+    /// rather than quietly becoming cargo cult.
+    #[test]
+    fn the_apt_archive_still_writes_the_dotfile_the_flag_protects() {
+        let apt = std::fs::read_to_string(repo().join(".github/workflows/apt.yml"))
+            .expect("read apt.yml");
+        assert!(
+            apt.lines().any(|l| l.trim() == "touch .nojekyll"),
+            "apt.yml no longer writes .nojekyll — decide whether \
+             `include-hidden-files: true` on the upload step is still needed, \
+             then update or drop this guard and its pair"
+        );
+    }
+}

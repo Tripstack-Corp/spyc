@@ -52,8 +52,11 @@ We use GitHub pull requests. The target branch is `main`.
    which is the wrong thing to do on every commit. `audit.yml` owns
    them; run `make deny` by hand if you changed a dependency. If you touched
    `cfg(target_os = "linux")` code, also run `make lint-linux` —
-   host clippy compiles that code out. `make aislop` is an advisory
-   AI-slop scan (net-new findings vs the baseline).
+   host clippy compiles that code out. If you touched anything under
+   `.github/workflows/`, run `make lint-workflows` (actionlint +
+   shellcheck; `brew install actionlint shellcheck`) — CI runs it in
+   the lint job. `make aislop` is an advisory AI-slop scan (net-new
+   findings vs the baseline).
 
 4. **Push and open a PR** on GitHub:
    ```sh
@@ -241,6 +244,17 @@ GitHub Actions (`.github/workflows/ci.yml`) runs the quality gate on every PR
 (fmt + clippy as one job, tests in parallel) and adds a coverage gate on
 merges to `main`. All jobs must pass before merge. CI pins the toolchain via
 `rust-toolchain.toml`, so it matches your local `make check`.
+
+**The lint job also lints the workflows themselves** (`make lint-workflows`:
+actionlint, plus shellcheck over every `run:` block). Worth knowing why that
+earns a place in the gate: most workflows here never execute on a PR — `apt.yml`
+fires on release, `release.yml` on a tag — so a break in one is invisible until
+the moment it matters, and the apt channel deploys to Pages, which has no
+rollback. A dependabot bump of `upload-pages-artifact` passed a fully green
+check set while silently dropping a file from the published archive (#444).
+Invariants no linter can infer — like that action needing
+`include-hidden-files: true` — are pinned as guard tests in `src/lib.rs`
+instead.
 
 **Supply chain lives in `.github/workflows/audit.yml`**, not the PR gate: weekly
 plus `workflow_dispatch`, running the full `make deny` (advisories, bans,
