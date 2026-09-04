@@ -21,10 +21,20 @@ impl AppState {
         }
     }
 
+    /// Rebuild the FOCUSED column's rows. A caller that already knows WHICH
+    /// column changed must use [`Self::rebuild_rows_for`]: the render-side row
+    /// cache is keyed per column on its own `list_generation`, so rebuilding
+    /// `cur()` for a change in the other column leaves that column drawing
+    /// whatever markers its cache was built with.
     pub fn rebuild_rows(&mut self) {
-        self.cur_mut().list_generation = self.cur().list_generation.wrapping_add(1);
-        self.cur_mut().rows = match self.cur().view {
-            View::Dir => self.build_dir_rows(),
+        self.rebuild_rows_for(self.focused_side());
+    }
+
+    /// Rebuild one specific column's rows and bump its `list_generation`.
+    pub fn rebuild_rows_for(&mut self, side: Side) {
+        self.col_mut(side).list_generation = self.col(side).list_generation.wrapping_add(1);
+        self.col_mut(side).rows = match self.col(side).view {
+            View::Dir => self.build_dir_rows(side),
             View::Inventory => self
                 .inventory
                 .items()
@@ -73,8 +83,8 @@ impl AppState {
                 })
                 .collect(),
         };
-        let row_count = self.cur().rows.len();
-        self.cur_mut().cursor.clamp(row_count);
+        let row_count = self.col(side).rows.len();
+        self.col_mut(side).cursor.clamp(row_count);
     }
 
     /// Build the `View::Dir` rows: the on-disk entries (mask-filtered, in the
@@ -84,12 +94,12 @@ impl AppState {
     /// Ghosts are interleaved via the listing's own sort so a deleted file sorts
     /// into place — e.g. the source of an unstaged rename sits right next to its
     /// new name under name order.
-    fn build_dir_rows(&self) -> Vec<RowData> {
+    fn build_dir_rows(&self, side: Side) -> Vec<RowData> {
         use std::collections::HashSet;
 
-        let masks = &self.cur().masks;
+        let masks = &self.col(side).masks;
         let live: Vec<&Entry> = self
-            .cur()
+            .col(side)
             .listing
             .entries
             .iter()
@@ -107,13 +117,13 @@ impl AppState {
         // mask-hidden — one still on disk (e.g. `git rm --cached`, or a removal
         // not yet unlinked) keeps its real row.
         let git_deleted = self
-            .cur()
+            .col(side)
             .git
             .files
             .iter()
             .filter(|(name, st)| !name.ends_with('/') && st.is_deleted())
             .map(|(name, _)| name.as_str());
-        let optimistic = self.cur().pending_ghosts.iter().map(String::as_str);
+        let optimistic = self.col(side).pending_ghosts.iter().map(String::as_str);
         let ghost_names: Vec<&str> = git_deleted
             .chain(optimistic)
             .filter(|name| !name.ends_with('/') && !live_names.contains(name) && !masks.hides(name))
@@ -123,14 +133,15 @@ impl AppState {
 
         if ghost_names.is_empty() {
             // Fast path: no deletions to surface — identical to the old behaviour.
-            return self.apply_temp_filter(live.iter().copied().map(row_from_entry).collect());
+            return self
+                .apply_temp_filter(side, live.iter().copied().map(row_from_entry).collect());
         }
 
         // Combine live + ghost placeholders and re-sort with the listing's OWN
         // comparator (a throwaway `Listing` reuses `Listing::sort` verbatim, so
         // the order — and #525's allocation-free sort — can't drift). Ghosts
         // are then identified by name to set the struck-through flag.
-        let dir = self.cur().listing.dir.clone();
+        let dir = self.col(side).listing.dir.clone();
         let mut combined: Vec<Entry> = live.iter().map(|&e| e.clone()).collect();
         for name in &ghost_names {
             combined.push(Entry::deleted_placeholder(&dir, name));
@@ -141,7 +152,7 @@ impl AppState {
             entries: combined,
             truncated: false,
         };
-        tmp.sort(self.cur().sort_order, self.cur().sort_reversed);
+        tmp.sort(self.col(side).sort_order, self.col(side).sort_reversed);
         let rows: Vec<RowData> = tmp
             .entries
             .iter()
@@ -151,7 +162,7 @@ impl AppState {
                 rd
             })
             .collect();
-        self.apply_temp_filter(rows)
+        self.apply_temp_filter(side, rows)
     }
 
     /// Re-sort the listing with the current `sort_order` / `sort_reversed` and
@@ -164,20 +175,20 @@ impl AppState {
         self.rebuild_rows();
     }
 
-    pub fn apply_temp_filter(&self, rows: Vec<RowData>) -> Vec<RowData> {
-        let Some(ref pattern) = self.cur().temp_filter else {
+    pub fn apply_temp_filter(&self, side: Side, rows: Vec<RowData>) -> Vec<RowData> {
+        let Some(ref pattern) = self.col(side).temp_filter else {
             return rows;
         };
         if pattern == "!" {
             rows.into_iter()
-                .filter(|r| self.cur().picks.contains(&r.path))
+                .filter(|r| self.col(side).picks.contains(&r.path))
                 .collect()
         } else if pattern == "h" {
             // Harpoon filter — keep entries whose absolute path is
             // in the project's harpoon set (slot paths plus all
             // their ancestor directories). Empty set → empty list.
             rows.into_iter()
-                .filter(|r| self.cur().harpoon_filter_set.contains(&r.path))
+                .filter(|r| self.col(side).harpoon_filter_set.contains(&r.path))
                 .collect()
         } else if pattern == "git" {
             // Show only entries that appear in `git status` with a
@@ -188,7 +199,7 @@ impl AppState {
             // strips the executable `*` decoration so exec files match.
             rows.into_iter()
                 .filter(|r| {
-                    self.cur()
+                    self.col(side)
                         .git
                         .files
                         .get(r.git_key())
