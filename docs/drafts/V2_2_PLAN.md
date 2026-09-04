@@ -418,7 +418,81 @@ what was measured when.
 
 **If the re-run materially degrades rehydration fidelity or the panic count,
 adoption does not proceed.** The series stops after PR 11 and the decisions log
-is amended to say so. That is a real branch, not a formality.
+is amended to say so. That is a real branch, not a formality. The gate is also
+not one-directional: an **improvement** gets recorded on the same terms, and
+the adoption figures in the addendum cite whichever mechanism 3.0 will actually
+consume, labelled by mechanism. No blended numbers.
+
+#### Both rehydration mechanisms are graded
+
+The principle is the one that created the gate: **the measured mechanism must
+be the shipped mechanism.**
+
+The spike graded rehydration through libghostty's **VT formatter** — emit
+escape sequences, replay them into a fresh terminal. The shipping pin also
+carries a **snapshot API** (`ghostty_snapshot_encode` /
+`ghostty_snapshot_decoder_*`) that did not exist at `f4c68d65`: purpose-built
+binary state serialisation rather than a redraw stream. If 3.0 attach and 2.3
+recovery will use the snapshot API, then re-running only the formatter
+measurement grades the wrong thing.
+
+So PR 13 grades both, for their distinct consumers.
+
+**Formatter — emit to a real terminal.** Its consumer is the cross-emulator
+reattach class: a client whose colour depth, cell size and graphics support
+differ from the session's. Capability parameterisation is the property that
+matters, and the existing criteria are unchanged.
+
+**Snapshot API — state transport and persistence.** Its consumers are 3.0
+attach and, likely, 2.3 recovery. Four new criteria:
+
+1. **Fidelity.** Encode, decode into a fresh engine, diff row by row against
+   the source — rows, cells, attributes, cursor, scrollback depth. Over the
+   **same corpus** as the formatter grading, so the two are comparable rather
+   than merely both present.
+2. **Size** on that corpus, stated beside the formatter's byte figures.
+3. **The continuation round trip.** Cut a stream mid-escape-sequence, snapshot
+   with the continuation retained
+   (`GHOSTTY_SNAPSHOT_DECODER_OPT_RETAIN_CONTINUATION` plus
+   `..._MAX_CONTINUATION_BYTES`, exported through the
+   `ghostty_terminal_continuation_*` calls), decode, re-feed the exported
+   continuation followed by the remaining bytes, and assert the final state is
+   identical to the uncut run. This is the parser-boundary problem answered as
+   an API rather than avoided, and it has to be tested because crash recovery
+   does not get to wait for a clean boundary. Include the caveat the API's own
+   docs carry: set `GHOSTTY_TERMINAL_OPT_CONTINUATION_MAX_BYTES` back to zero
+   after export and before writing post-snapshot input, since exporting an
+   empty continuation does not itself disable tracking.
+4. **Format stability**, which scopes the whole API. Cross-pin decode is **not
+   assumed**, and the answer goes in the addendum whichever way it falls.
+   Read at the pin, the answer is already known and it is bounded: the stream
+   carries an eight-byte `"GHOSTSNP"` magic and a `u16` version, with per-record
+   CRC32C — but `snapshot.h` states that "snapshot format version 1 is a work
+   in progress and does not yet carry a binary-compatibility guarantee". So
+   snapshots are **transport-only: same binary, same pin**, and never at-rest
+   persistence across an upgrade. The version field is what makes that safe
+   rather than dangerous — a stale snapshot is detectable and discardable, not
+   silently misparsed. `PROJECTS_PLAN.md`'s question 7 needs exactly that
+   sentence in writing, so it is recorded here rather than left to be
+   rediscovered.
+
+#### Corrections the addendum must carry
+
+Two figures from the spike are already known to be wrong or stale, and the
+addendum states so rather than leaving them to circulate:
+
+- **Memory is parity, not an advantage.** The spike reported ghostty at
+  875 KiB/pane against vt100's 9,681 KiB — but that comparison was taken where
+  ghostty's `max_scrollback` was inert and it retained a quarter as much
+  history. At a real budget the derived byte ceiling is **9.64 MiB/pane**
+  against vt100's measured **9.68 MiB**, which is parity. The adoption case
+  never leaned on memory — it rests on rehydration, robustness and throughput —
+  so the addendum says that explicitly and retires the old figure.
+- **~840 rows is a number two unrelated causes produce**: the inert
+  `max_scrollback` at `f4c68d65`, and a default byte cap binding ahead of the
+  line limit at the shipping pin. A future harness run that recognises 840 as
+  "the expected ghostty number" and stops looking is the trap this series
+  already fell into once.
 
 ### Decisions the stages make
 
