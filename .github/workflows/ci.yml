@@ -59,6 +59,38 @@ jobs:
       # a PR that touched no dependencies.
       - run: make fmt-check lint
 
+      # Workflow linting rides in THIS job because `Lint (fmt, clippy)` is
+      # already a required status check. A separate job would need adding to
+      # branch protection as a second operation, and until that happened a
+      # broken workflow could still merge — which is the exact gap this closes.
+      # The job name is left alone: renaming a required context deadlocks every
+      # open PR (see the note on this job's `name`).
+      #
+      # Pinned + checksum-verified rather than floating, same as cargo-llvm-cov
+      # in `coverage`. shellcheck ships on the ubuntu-latest image; it is
+      # verified present because actionlint SILENTLY skips every `run:` block
+      # and exits 0 without it, so an image change would otherwise turn this
+      # step into a no-op that still reports green.
+      # shellcheck is PINNED rather than taken from the runner image. Its
+      # findings differ by version -- 0.11.0 does not report an SC2015 that the
+      # image's build does -- so an unpinned one makes the gate drift under the
+      # image and fails PRs that touched nothing. Same reasoning that moved
+      # cargo-deny off this path. Keep in step with the version the Makefile
+      # names, so a local run and CI agree.
+      - uses: taiki-e/install-action@v2.87.0
+        with:
+          tool: shellcheck@0.11.0
+      - name: Lint workflows (actionlint + shellcheck)
+        run: |
+          ACTIONLINT_VERSION=1.7.12
+          ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          curl -sSLo /tmp/actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  /tmp/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          install -m 0755 /tmp/actionlint "$HOME/.cargo/bin/actionlint"
+          make lint-workflows
+
   test:
     name: Tests (cargo test --all-targets)
     runs-on: ubuntu-latest
