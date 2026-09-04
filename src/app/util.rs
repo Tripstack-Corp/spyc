@@ -14,9 +14,9 @@ use ratatui::Frame;
 ///
 /// Takes the child's screen and the rect it was drawn into rather than reaching
 /// for either, which is what lets the `&self` render pass call it.
-pub(super) fn place_pty_cursor_from_screen(
+pub(super) fn place_pty_cursor_from_screen<S: crate::pane::engine::TerminalScreen>(
     frame: &mut Frame,
-    screen: &vt100::Screen,
+    screen: &S,
     rect: ratatui::layout::Rect,
 ) {
     if screen.hide_cursor() {

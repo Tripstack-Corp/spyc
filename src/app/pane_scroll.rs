@@ -1,5 +1,5 @@
 //! Pane scrollback / transcript pager (`^a-v`): snapshot the active pane's
-//! vt100 scrollback (or an agent's on-disk transcript) into a lower-pane
+//! terminal scrollback (or an agent's on-disk transcript) into a lower-pane
 //! pager, the vi-style scroll-mode key handler, and the tab-switch stash/
 //! restore pair that keeps a scrollback pager attached to its tab. Extracted
 //! verbatim from `app/mod.rs` (the impl-extraction sweep). The open / stash /
@@ -12,7 +12,7 @@ use super::pager_stream::{DrainOutcome, PagerStream, PagerStreamMount, RenderCtx
 use super::{App, Effect, PaneTextKind, PaneTextSink, state};
 use crate::ui::pager::PagerView;
 
-/// How long the vt100 scrollback snapshot waits for in-flight pty bytes to
+/// How long the terminal scrollback snapshot waits for in-flight pty bytes to
 /// land before taking it.
 ///
 /// Spent on the event loop (a `Deadline`), never in a sleep: this is reachable
@@ -31,10 +31,10 @@ struct ScrollSnapshot {
     transcript_enabled: bool,
     /// The pane is on the alternate screen (a full-screen TUI / agent).
     is_alt_screen: bool,
-    /// The pane's vt100 emulator holds at least one row above the visible
+    /// The pane's terminal emulator holds at least one row above the visible
     /// screen. False for an alt-screen app, for a scroll-region app (codex), and
     /// for a pane too young to have scrolled anything off yet.
-    has_vt100_capture: bool,
+    has_terminal_capture: bool,
     /// The source the user flipped to with `T` for THIS tab, if any. Already
     /// validated by [`flip_scroll_source`] — the one place that knows what this
     /// pane actually has — so it is honoured as given rather than re-decided.
@@ -46,8 +46,8 @@ struct ScrollSnapshot {
 enum ScrollSource {
     /// Read the agent's structured on-disk transcript.
     Transcript,
-    /// Snapshot the pane's vt100 scrollback buffer.
-    Vt100,
+    /// Snapshot the pane's terminal scrollback buffer.
+    Terminal,
     /// A non-agent alt-screen app — nothing to show; flash a hint.
     AltScreenDeadEnd,
 }
@@ -57,31 +57,31 @@ enum ScrollSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScrollSourcePick {
     Transcript,
-    Vt100,
+    Terminal,
 }
 
 /// Pure routing for `^a v` (the `route.rs` / `focus.rs` template).
 ///
 /// A `T` flip wins outright. Otherwise an agent with a transcript uses it when
-/// the config says so, and ALSO whenever there is no usable vt100 capture to
+/// the config says so, and ALSO whenever there is no usable terminal capture to
 /// fall back to — the alt screen (claude's full-screen mode, whose history never
 /// touches the main buffer) and the young or scroll-region pane are the same
 /// situation seen twice, so they take one branch. Inline WITH a capture keeps
 /// the config gate: that capture is real, and it holds what a transcript never
 /// will, like whatever the shell printed before the agent started. A non-agent
-/// alt-screen app dead-ends; everything else snapshots vt100.
+/// alt-screen app dead-ends; everything else snapshots the terminal.
 const fn decide_scroll_source(s: ScrollSnapshot) -> ScrollSource {
     match s.pick {
         Some(ScrollSourcePick::Transcript) => return ScrollSource::Transcript,
-        Some(ScrollSourcePick::Vt100) => return ScrollSource::Vt100,
+        Some(ScrollSourcePick::Terminal) => return ScrollSource::Terminal,
         None => {}
     }
-    if s.has_transcript && (s.transcript_enabled || s.is_alt_screen || !s.has_vt100_capture) {
+    if s.has_transcript && (s.transcript_enabled || s.is_alt_screen || !s.has_terminal_capture) {
         ScrollSource::Transcript
     } else if s.is_alt_screen {
         ScrollSource::AltScreenDeadEnd
     } else {
-        ScrollSource::Vt100
+        ScrollSource::Terminal
     }
 }
 
@@ -93,12 +93,12 @@ const fn decide_scroll_source(s: ScrollSnapshot) -> ScrollSource {
 /// Flips against whatever is on screen NOW, including a previous flip.
 const fn flip_scroll_source(s: ScrollSnapshot) -> Result<ScrollSourcePick, &'static str> {
     match decide_scroll_source(s) {
-        ScrollSource::Transcript if s.has_vt100_capture => Ok(ScrollSourcePick::Vt100),
+        ScrollSource::Transcript if s.has_terminal_capture => Ok(ScrollSourcePick::Terminal),
         ScrollSource::Transcript => Err("no terminal scrollback captured for this pane"),
-        ScrollSource::Vt100 | ScrollSource::AltScreenDeadEnd if s.has_transcript => {
+        ScrollSource::Terminal | ScrollSource::AltScreenDeadEnd if s.has_transcript => {
             Ok(ScrollSourcePick::Transcript)
         }
-        ScrollSource::Vt100 | ScrollSource::AltScreenDeadEnd => {
+        ScrollSource::Terminal | ScrollSource::AltScreenDeadEnd => {
             Err("no agent transcript for this pane")
         }
     }
@@ -255,7 +255,7 @@ impl App {
     /// first, so a pane whose bytes are still in flight isn't misread as having
     /// no history.
     fn scroll_snapshot(&mut self) -> Option<ScrollSnapshot> {
-        let has_vt100_capture = {
+        let has_terminal_capture = {
             let pane = self.runtime.pane_tabs.as_mut()?.active_mut();
             pane.drain_output();
             pane.with_screen_mut(crate::ui::scrollback::scrollback_len) > 0
@@ -282,7 +282,7 @@ impl App {
             has_transcript: spec.is_some(),
             transcript_enabled,
             is_alt_screen,
-            has_vt100_capture,
+            has_terminal_capture,
             pick,
         })
     }
@@ -317,7 +317,7 @@ impl App {
                 self.open_pane_scroll_pager();
                 self.state.flash_info(match pick {
                     ScrollSourcePick::Transcript => "scrollback: agent transcript",
-                    ScrollSourcePick::Vt100 => "scrollback: terminal capture",
+                    ScrollSourcePick::Terminal => "scrollback: terminal capture",
                 });
             }
             Err(why) => self.state.flash_info(why),
@@ -345,8 +345,8 @@ impl App {
         // Agent-aware scrollback. An agent's `AgentProfile` may carry a
         // `TranscriptSpec` — its structured on-disk transcript, the source of
         // truth whenever the terminal has nothing: codex/agy confine history to a
-        // scroll region vt100 can't capture, and claude's full-screen mode
-        // renders on the *alternate screen*, so vt100 captures nothing either.
+        // scroll region the emulator can't capture, and claude's full-screen
+        // mode renders on the *alternate screen*, so it captures nothing either.
         // `decide_scroll_source` is the pure routing over `scroll_snapshot`; the
         // engaged read + render runs off-thread (the worker below).
         let profile = crate::agent::detect(&command);
@@ -360,7 +360,7 @@ impl App {
                 // heavy for the keypress path (and `resolve` itself scans +
                 // parses every session-index file). An empty / not-found result
                 // flashes the miss and closes back to the pane. (The old
-                // synchronous vt100-on-miss fallthrough is retired: vestigial
+                // synchronous terminal-on-miss fallthrough is retired: vestigial
                 // for inline agents, absent for a full-screen alt-screen agent.)
                 let resolve = spec.resolve;
                 let render = spec.render;
@@ -408,10 +408,10 @@ impl App {
                     .flash_info("scroll: alt-screen app — use its own scrollback / history keys");
                 return;
             }
-            ScrollSource::Vt100 => {}
+            ScrollSource::Terminal => {}
         }
 
-        // vt100 terminal-scrollback path: not an alt-screen app and no engaged
+        // terminal-scrollback path: not an alt-screen app and no engaged
         // transcript, so snapshot the pane's own scrollback buffer — but not
         // yet. Bytes that reached the OS pipe just before this event may still
         // be in flight on the reader/parser threads, and the snapshot should
@@ -433,7 +433,7 @@ impl App {
         ));
     }
 
-    /// PRE-recv settle for a deferred vt100 scrollback snapshot.
+    /// PRE-recv settle for a deferred terminal scrollback snapshot.
     ///
     /// Takes the shot once `SCROLL_SETTLE` has elapsed, then disarms — and
     /// abandons it if the user switched tabs in the meantime, since the window
@@ -467,17 +467,17 @@ impl App {
             ScrollSettle::Take => {
                 self.runtime.pane_scroll_settle = None;
                 ctx.scheduler.disarm(Deadline::PaneScrollSettle);
-                self.mount_vt100_scrollback();
+                self.mount_terminal_scrollback();
                 true
             }
         }
     }
 
-    /// Snapshot the active pane's vt100 scrollback and mount it, or say why it
-    /// can't be. The tail of [`Self::open_pane_scroll_pager`]'s vt100 branch,
+    /// Snapshot the active pane's terminal scrollback and mount it, or say why it
+    /// can't be. The tail of [`Self::open_pane_scroll_pager`]'s terminal branch,
     /// split off so the settle window can elapse on the loop rather than in a
     /// sleep. Callable on its own — that is what the harness drives.
-    pub(crate) fn mount_vt100_scrollback(&mut self) {
+    pub(crate) fn mount_terminal_scrollback(&mut self) {
         let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
             return;
         };
@@ -516,7 +516,7 @@ impl App {
     }
 
     /// Mount a lower-pane scroll/transcript pager from pre-built
-    /// lines. Shared by the vt100-scrollback path and the codex
+    /// lines. Shared by the terminal-scrollback path and the codex
     /// on-disk transcript path. Enters the active pane's scroll mode
     /// (divider cues + key routing flip to the pager) and parks the
     /// view at the bottom on first render.
@@ -548,7 +548,7 @@ impl App {
     /// `t` in an agent-transcript scrollback: flip whether the agent's
     /// tool-use / tool-result lines render, then re-spawn so the change
     /// shows (the worker re-runs `render` with the new flag). A no-op with
-    /// a hint on a plain vt100 scrollback — there are no tool calls there.
+    /// a hint on a plain terminal scrollback — there are no tool calls there.
     pub(crate) fn toggle_scrollback_tool_calls(&mut self) {
         let has_transcript = self.runtime.pane_tabs.as_ref().is_some_and(|tabs| {
             crate::agent::detect(&tabs.active_info().command)
@@ -639,7 +639,7 @@ impl App {
 
         // NB: `r` (reload a transcript scrollback) is handled in
         // `handle_pager_motion` (motion.rs), which owns the stream-backed
-        // `scroll_pager`. This handler only runs for the raw vt100 scroll mode
+        // `scroll_pager`. This handler only runs for the raw terminal scroll mode
         // (`InputSink::PaneScroll`), where a stream pager never lives in
         // `view.pager` (those are Modal / Scrollback → routed to PagerKey), so
         // the `view.pager.stream_id` check here was always false (dead). `r`
@@ -789,12 +789,12 @@ mod tests {
         has_transcript: false,
         transcript_enabled: false,
         is_alt_screen: false,
-        has_vt100_capture: false,
+        has_terminal_capture: false,
         pick: None,
     };
 
     /// A full-screen (alt-screen) agent with a transcript engages it REGARDLESS
-    /// of the config gate — there's no vt100 to fall back to.
+    /// of the config gate — there's no terminal capture to fall back to.
     #[test]
     fn alt_screen_agent_engages_transcript_even_when_config_disabled() {
         for enabled in [false, true] {
@@ -821,7 +821,7 @@ mod tests {
             decide_scroll_source(ScrollSnapshot {
                 has_transcript: true,
                 transcript_enabled: false,
-                has_vt100_capture: false,
+                has_terminal_capture: false,
                 ..BARE
             }),
             ScrollSource::Transcript
@@ -837,7 +837,7 @@ mod tests {
             decide_scroll_source(ScrollSnapshot {
                 has_transcript: true,
                 transcript_enabled: true,
-                has_vt100_capture: true,
+                has_terminal_capture: true,
                 ..BARE
             }),
             ScrollSource::Transcript
@@ -846,15 +846,15 @@ mod tests {
             decide_scroll_source(ScrollSnapshot {
                 has_transcript: true,
                 transcript_enabled: false,
-                has_vt100_capture: true,
+                has_terminal_capture: true,
                 ..BARE
             }),
-            ScrollSource::Vt100
+            ScrollSource::Terminal
         );
     }
 
     /// A non-agent app (no transcript spec) on the alt screen dead-ends;
-    /// otherwise vt100.
+    /// otherwise the terminal capture.
     #[test]
     fn non_agent_routes_by_alt_screen() {
         assert_eq!(
@@ -864,7 +864,7 @@ mod tests {
             }),
             ScrollSource::AltScreenDeadEnd
         );
-        assert_eq!(decide_scroll_source(BARE), ScrollSource::Vt100);
+        assert_eq!(decide_scroll_source(BARE), ScrollSource::Terminal);
     }
 
     /// A `T` flip beats the automatic choice in both directions — including
@@ -876,16 +876,16 @@ mod tests {
             decide_scroll_source(ScrollSnapshot {
                 has_transcript: true,
                 is_alt_screen: true,
-                has_vt100_capture: true,
-                pick: Some(ScrollSourcePick::Vt100),
+                has_terminal_capture: true,
+                pick: Some(ScrollSourcePick::Terminal),
                 ..BARE
             }),
-            ScrollSource::Vt100
+            ScrollSource::Terminal
         );
         assert_eq!(
             decide_scroll_source(ScrollSnapshot {
                 has_transcript: true,
-                has_vt100_capture: true,
+                has_terminal_capture: true,
                 pick: Some(ScrollSourcePick::Transcript),
                 ..BARE
             }),
@@ -898,10 +898,10 @@ mod tests {
     /// key in the first place.
     #[test]
     fn flip_offers_the_other_source_or_says_why() {
-        // Inline agent, gate off, capture present → showing vt100, so flip up.
+        // Inline agent, gate off, capture present → showing the terminal, so flip up.
         let inline_agent = ScrollSnapshot {
             has_transcript: true,
-            has_vt100_capture: true,
+            has_terminal_capture: true,
             ..BARE
         };
         assert_eq!(
@@ -914,7 +914,7 @@ mod tests {
                 pick: Some(ScrollSourcePick::Transcript),
                 ..inline_agent
             }),
-            Ok(ScrollSourcePick::Vt100)
+            Ok(ScrollSourcePick::Terminal)
         );
         // Alt-screen agent: showing its transcript, and there is no capture to
         // offer instead.
@@ -931,7 +931,7 @@ mod tests {
             assert_eq!(
                 flip_scroll_source(ScrollSnapshot {
                     is_alt_screen: alt,
-                    has_vt100_capture: !alt,
+                    has_terminal_capture: !alt,
                     ..BARE
                 }),
                 Err("no agent transcript for this pane"),

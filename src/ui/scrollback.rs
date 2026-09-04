@@ -1,6 +1,6 @@
-//! Scrollback adapter: `vt100::Screen` → `Vec<Line<'static>>`.
+//! Scrollback adapter: a terminal screen → `Vec<Line<'static>>`.
 //!
-//! Bridges the pane's vt100 emulator (cell grid + bounded
+//! Bridges the pane's terminal emulator (cell grid + bounded
 //! scrollback) into the pager's data model (styled lines), so the
 //! v1.5 `^a-v` rewrite can use the in-app pager — search, jump,
 //! visual-mode range yank, line numbers — over pane history
@@ -11,14 +11,17 @@
 //!
 //! ## Algorithm
 //!
-//! vt100 0.16's public `Screen` API only exposes the *visible*
-//! window via `cell(row, col)`; the scrollback buffer itself is
-//! not iterable. To capture the whole history we walk the visible
-//! window backwards through scrollback by mutating
-//! `scrollback_offset` (clamped by `set_scrollback`), reading one
-//! page at a time. The original offset is restored before the
-//! function returns, so callers can keep using the screen state
-//! they had before invoking the adapter.
+//! The seam exposes only the *visible* window per cell; history is
+//! not iterable. To capture the whole thing we walk the visible
+//! window backwards through scrollback by moving the view offset
+//! (clamped by `set_scrollback`), reading one page at a time. The
+//! original offset is restored before the function returns, so
+//! callers can keep using the screen state they had before
+//! invoking the adapter.
+//!
+//! That is why the readers below take `&mut`. It is the incumbent's
+//! constraint, not an inherent one: an engine that addresses
+//! history by coordinate would let this collapse to a plain walk.
 //!
 //! Pages are sized to `rows_len` and chosen so each is a clean
 //! contiguous slice with no overlap — the partial last scrollback
@@ -33,6 +36,7 @@ use ratatui::{
 };
 
 use crate::pane::cell_style;
+use crate::pane::engine::{TerminalScreen, Wide};
 
 /// Snapshot the whole vt100 buffer (scrollback + live screen) as
 /// styled lines, in chronological order (oldest first). The live-
@@ -43,11 +47,11 @@ use crate::pane::cell_style;
 /// pads short rows with spaces out to the full column width and
 /// that's a fixed-grid artifact, not user content.
 ///
-/// `&mut Screen` is required because the implementation walks the
-/// scrollback by adjusting `scrollback_offset`; the original
-/// offset is restored before returning. Callers can keep their
-/// own scroll state across the call.
-pub fn lines_from_scrollback(screen: &mut vt100::Screen) -> Vec<Line<'static>> {
+/// `&mut` is required because the implementation walks the
+/// scrollback by moving the view offset; the original offset is
+/// restored before returning. Callers can keep their own scroll
+/// state across the call.
+pub fn lines_from_scrollback<S: TerminalScreen>(screen: &mut S) -> Vec<Line<'static>> {
     let saved_offset = screen.scrollback();
     let (rows_u16, cols_u16) = screen.size();
     let rows_len = rows_u16 as usize;
@@ -109,9 +113,9 @@ pub fn lines_from_scrollback(screen: &mut vt100::Screen) -> Vec<Line<'static>> {
 /// that confines its history to a DECSTBM scroll region so lines
 /// never scroll off the top into the main buffer.
 ///
-/// `&mut Screen` because the probe walks `scrollback_offset`; the
-/// original offset is restored before returning.
-pub fn scrollback_len(screen: &mut vt100::Screen) -> usize {
+/// `&mut` because the probe moves the view offset; the original
+/// offset is restored before returning.
+pub fn scrollback_len<S: TerminalScreen>(screen: &mut S) -> usize {
     let saved_offset = screen.scrollback();
     // `set_scrollback` clamps to the real length; ask for the max
     // and read back the clamped offset to discover it.
@@ -125,26 +129,27 @@ pub fn scrollback_len(screen: &mut vt100::Screen) -> usize {
 /// current visible window. Adjacent cells with identical styles
 /// are merged into one span; trailing whitespace at the row's
 /// right edge is dropped (preserving leading / interior spaces).
-fn line_from_visible_row(screen: &vt100::Screen, row: u16, cols: u16) -> Line<'static> {
+fn line_from_visible_row<S: TerminalScreen>(screen: &S, row: u16, cols: u16) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut current_text = String::new();
     let mut current_style: Option<Style> = None;
 
+    // Scratch for one cell's text, reused across the row.
+    let mut cell_buf = String::new();
     for col in 0..cols {
-        let Some(cell) = screen.cell(row, col) else {
+        let Some(cs) = screen.cell_style(row, col) else {
             break;
         };
-        // vt100 represents wide-char continuations as separate
-        // cells with empty contents. Skip them so the wide char's
-        // first-half cell carries the full glyph and we don't
-        // emit a stray empty span (which would split runs of
-        // identical style).
-        if cell.is_wide_continuation() {
+        // A wide glyph's continuation cell carries no text of its own. Skip it
+        // so the head carries the full glyph and we don't emit a stray empty
+        // span, which would split a run of identical style in two.
+        if cs.wide == Wide::Tail {
             continue;
         }
-        let style = cell_style(cell);
-        let contents = cell.contents();
-        let ch: &str = if contents.is_empty() { " " } else { contents };
+        let style = cell_style(cs);
+        cell_buf.clear();
+        screen.cell_text(row, col, &mut cell_buf);
+        let ch: &str = if cell_buf.is_empty() { " " } else { &cell_buf };
 
         if Some(style) != current_style {
             if !current_text.is_empty() {

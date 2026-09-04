@@ -6,10 +6,11 @@
 //! unusual combinations fall through as an empty slice, which is the
 //! terminal's "nothing happened" signal.
 
+use super::engine::{MouseEncoding, MouseMode};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// Encode `ev` for a child whose DECCKM (cursor-key) state is `app_cursor`
-/// (`vt100::Screen::application_cursor` — set by the child's `ESC[?1h`).
+/// (`TerminalScreen::application_cursor` — set by the child's `ESC[?1h`).
 ///
 /// A child in application-cursor mode waits for the SS3 arrow form (`ESC O A`)
 /// and a strict one silently drops the CSI form, which presents as a pane that
@@ -210,12 +211,8 @@ pub struct MouseReport {
 /// Never relays the bytes spyc received: spyc asks the terminal for SGR (1006),
 /// but the child may have requested the default or UTF-8 encoding, so the event
 /// is re-encoded from the decoded form.
-pub fn encode_mouse(
-    ev: MouseReport,
-    mode: vt100::MouseProtocolMode,
-    encoding: vt100::MouseProtocolEncoding,
-) -> Vec<u8> {
-    use vt100::MouseProtocolMode as M;
+pub fn encode_mouse(ev: MouseReport, mode: MouseMode, encoding: MouseEncoding) -> Vec<u8> {
+    use MouseMode as M;
     // Send only what the child's declared mode covers. `Press` (X10) reports
     // presses only — a release is noise it has no grammar for. And **only
     // ButtonMotion (1002) / AnyMotion (1003) report motion at all**: DEC 1000
@@ -248,13 +245,13 @@ pub fn encode_mouse(
     let (x, y) = (u32::from(ev.col) + 1, u32::from(ev.row) + 1);
 
     match encoding {
-        vt100::MouseProtocolEncoding::Sgr => {
+        MouseEncoding::Sgr => {
             // `ESC [ < Cb ; Cx ; Cy (M|m)` — release is the lowercase final byte,
             // which is how SGR distinguishes it without a sentinel button value.
             let final_byte = if ev.release { 'm' } else { 'M' };
             format!("\x1b[<{cb};{x};{y}{final_byte}").into_bytes()
         }
-        vt100::MouseProtocolEncoding::Utf8 => {
+        MouseEncoding::Utf8 => {
             // Like the default encoding, but the three values go out as chars so
             // coordinates past 223 survive. A release is button 3 (the default
             // encoding has no lowercase-final trick).
@@ -267,7 +264,7 @@ pub fn encode_mouse(
             }
             out
         }
-        vt100::MouseProtocolEncoding::Default => {
+        MouseEncoding::Default => {
             // `ESC [ M Cb+32 Cx+32 Cy+32`, one byte each. Coordinates past 223
             // don't fit — xterm's own behaviour is to clamp rather than emit a
             // byte that would be read as part of the next sequence.
@@ -284,7 +281,7 @@ pub fn encode_mouse(
 #[cfg(test)]
 mod mouse_tests {
     use super::{MouseReport, encode_mouse};
-    use vt100::{MouseProtocolEncoding as Enc, MouseProtocolMode as Mode};
+    use crate::pane::engine::{MouseEncoding as Enc, MouseMode as Mode};
 
     /// Wheel-up at pane-relative (0,0) — the origin case, which is where an
     /// off-by-one in the 0-based→1-based conversion shows up.

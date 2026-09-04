@@ -1,4 +1,4 @@
-//! ratatui widget that draws a `vt100::Screen` into a frame.
+//! ratatui widget that draws a terminal screen into a frame.
 //!
 //! Each cell becomes a single styled character in the buffer. We map
 //! vt100's colour model onto ratatui's, preserving bold / italic /
@@ -11,8 +11,10 @@ use ratatui::{
     widgets::Widget,
 };
 
-pub struct PaneWidget<'a> {
-    pub screen: &'a vt100::Screen,
+use super::engine::{CellStyle, TerminalScreen};
+
+pub struct PaneWidget<'a, S: TerminalScreen> {
+    pub screen: &'a S,
     pub focused: bool,
     /// A spyc-side text selection over the visible grid, as ordered
     /// `((start_row, start_col), (end_row, end_col))` in SCREEN coordinates.
@@ -22,7 +24,7 @@ pub struct PaneWidget<'a> {
     pub selection: Option<((u16, u16), (u16, u16))>,
 }
 
-impl Widget for PaneWidget<'_> {
+impl<S: TerminalScreen> Widget for PaneWidget<'_, S> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let (screen_rows, screen_cols) = self.screen.size();
         let draw_rows = area.height.min(screen_rows);
@@ -40,14 +42,18 @@ impl Widget for PaneWidget<'_> {
             Modifier::DIM
         };
 
+        // One buffer for the whole render rather than one per cell: the seam's
+        // text accessor appends, precisely so a walk like this allocates once.
+        let mut text = String::new();
         for row in 0..draw_rows {
             for col in 0..draw_cols {
-                let Some(cell) = self.screen.cell(row, col) else {
+                let Some(cs) = self.screen.cell_style(row, col) else {
                     continue;
                 };
-                let contents = cell.contents();
-                let ch: &str = if contents.is_empty() { " " } else { contents };
-                let mut style = cell_style(cell).add_modifier(dim);
+                text.clear();
+                self.screen.cell_text(row, col, &mut text);
+                let ch: &str = if text.is_empty() { " " } else { &text };
+                let mut style = cell_style(cs).add_modifier(dim);
                 if selected(self.selection, row, col) {
                     // Reverse rather than a theme bg: the pane's cells carry the
                     // CHILD's colours, which can be anything, so a fixed background
@@ -94,11 +100,12 @@ impl Widget for PaneWidget<'_> {
     }
 }
 
-pub fn cell_style(cell: &vt100::Cell) -> Style {
+/// Map the seam's cell style onto ratatui's.
+pub fn cell_style(cell: CellStyle) -> Style {
     let mut style = Style::default();
-    style = style.fg(convert_color(cell.fgcolor()));
-    style = style.bg(convert_color(cell.bgcolor()));
-    if cell.bold() {
+    style = style.fg(convert_color(cell.fg));
+    style = style.bg(convert_color(cell.bg));
+    if cell.bold {
         style = style.add_modifier(Modifier::BOLD);
     }
     // SGR 2. vt100 exposed `dim()` in 0.16, after this function was written
@@ -108,26 +115,27 @@ pub fn cell_style(cell: &vt100::Cell) -> Style {
     // focus-dim are indistinguishable. That is accepted — SGR 2 is what a
     // terminal has for "dimmer", and there is no second one to move either
     // use onto.
-    if cell.dim() {
+    if cell.dim {
         style = style.add_modifier(Modifier::DIM);
     }
-    if cell.italic() {
+    if cell.italic {
         style = style.add_modifier(Modifier::ITALIC);
     }
-    if cell.underline() {
+    if cell.underline {
         style = style.add_modifier(Modifier::UNDERLINED);
     }
-    if cell.inverse() {
+    if cell.reverse {
         style = style.add_modifier(Modifier::REVERSED);
     }
     style
 }
 
-pub const fn convert_color(c: vt100::Color) -> Color {
+pub const fn convert_color(c: super::engine::Color) -> Color {
+    use super::engine::Color as E;
     match c {
-        vt100::Color::Default => Color::Reset,
-        vt100::Color::Idx(i) => Color::Indexed(i),
-        vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+        E::Default => Color::Reset,
+        E::Idx(i) => Color::Indexed(i),
+        E::Rgb(r, g, b) => Color::Rgb(r, g, b),
     }
 }
 
