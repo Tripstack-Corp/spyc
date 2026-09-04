@@ -837,6 +837,7 @@ pin. `snapshot_grade`, `sbprobe` and `membudget` replace them.
 | memory at a FULL row budget | `cargo run --release --features ghostty,wezterm --bin membudget` |
 | `Send` bounds | `cargo run --release --features wezterm --bin sendprobe` |
 | #34 engine vs adapter | `cargo run --release --bin adapter_probe` |
+| the viewport offset, isolated | `cargo run --release --features ghostty --bin offset_isolate` |
 | binary size deltas | `cd sizeprobe && cargo build --release [--features e-vt100\|e-ghostty\|e-wezterm]` |
 | crate counts | `cargo tree --target all --prefix none --features <f> \| awk 'NF{print $1}' \| sort -u \| wc -l` |
 | archive sizes | `find <target> -name libghostty-vt.a`, `strip -S`, `gzip -9`, `nm -g \| grep -c ' [TDSB] _ghostty_'` |
@@ -1089,3 +1090,44 @@ costs 6.94. Twenty-four pane tabs is 639 MiB against 167 MiB.
 The adoption case never leaned on memory — it rests on rehydration, robustness
 and fidelity — but the figure should be right in the direction it actually
 points.
+
+## Addendum — the viewport offset, isolated (2026-09-04)
+
+`offset_isolate` reduces the formatter's one-row shift to a 2x12 grid fed two
+lines, and separates the two causes that look identical from outside.
+
+**The emit is content-complete; the replay is one scroll short.** At that
+geometry the original viewport is `["L001", ""]` over one row of history, and
+the 33-byte emit is
+`\x1b[3g\x1b[9G\x1bH\x1b[HL000\r\nL001\x1b[2;1H\x1b[0m` — every row that
+holds content, history included. Rows are **joined** by `\r\n` rather than
+terminated by it, so the final newline that performed the last scroll is not
+in the stream. Replayed, `L000` stays in the viewport instead of moving to
+history: shift `+1`, history one row short.
+
+Two independent confirmations, because a row count cannot tell these apart:
+
+- **Control.** The same content with no trailing newline — nothing scrolled,
+  so nothing can be lost — round-trips 2/2 with no offset. The emit differs
+  only in the cursor restore (`\x1b[2;5H` against `\x1b[2;1H`).
+- **By construction.** Replaying the emit gives 0/2 rows aligned; replaying it
+  with one `\r\n` appended gives 2/2.
+
+It reproduces at 2, 3, 4 and 24 rows, at 1 through 11 rows of history, always
+exactly `+1`, and at the library's own default limits as well as the shipped
+ones — so it is not downstream of spyc's scrollback configuration.
+
+**A method note, the same shape as the withdrawn adapter finding in §4.** The
+first discriminator counted `L###` labels in the emit against "history +
+viewport rows" and concluded the emit drops a row. It does not: that count
+treats a **blank** viewport row as content the emit owes. An instrument whose
+model of "what should be there" is wrong reports the subject as wrong.
+
+**What it is worth.** `formatter.h` documents the API as content output —
+plain text, VT or HTML, with "the entire screen is formatted" when no
+selection is given — and claims no round-trip guarantee anywhere. The
+mechanism spyc adopts is `ghostty_snapshot_*`, which does make that claim and
+grades 100%. So the upstream report is written as a question about intended
+scope rather than a defect claim, and offers a one-sentence `formatter.h`
+clarification if the answer is that round-trip is out of scope.
+
