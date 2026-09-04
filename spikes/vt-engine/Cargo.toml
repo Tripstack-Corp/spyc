@@ -13,7 +13,7 @@ publish = false
 # Each engine is a feature so a toolchain that can't build one (option C needs
 # `zig` on PATH plus network access at build time) still runs the rest.
 default = []
-ghostty = ["dep:libghostty-vt"]
+ghostty = ["dep:spyc-vt-sys"]
 wezterm = ["dep:wezterm-term", "dep:wezterm-surface"]
 
 [dependencies]
@@ -28,10 +28,14 @@ anyhow = "1"
 # the same ratatui version spyc builds with. Noted in the report.
 ratatui = "0.30"
 
-# Option C. `libghostty-vt-sys`'s build script shells out to `zig build` AND
-# git-clones ghostty at a pinned commit into OUT_DIR — see the distribution
-# section of the report.
-libghostty-vt = { version = "0.2.1", optional = true }
+# Option C, now through spyc's OWN crate rather than the published bindings.
+# `spyc-vt-sys` carries the shipping pin, bindings generated from that pin's
+# headers, and the vendored archives — so the harness measures the same
+# library, at the same commit, through the same FFI that production will use.
+# That is the point of the Stage-5 gate: the measured mechanism must be the
+# shipped mechanism. It also means no `zig` and no build-time `git clone`,
+# which is what the published `libghostty-vt-sys 0.2.1` required.
+spyc-vt-sys = { path = "../../crates/spyc-vt-sys", optional = true }
 
 # Option B. NOT on crates.io at any version: `cargo add wezterm-term` fails.
 # A git dependency is the only way to reach it, which is precisely why it
