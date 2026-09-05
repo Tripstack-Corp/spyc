@@ -49,7 +49,7 @@ pub fn frame(buf: &[u8]) -> Result<Frame<'_>> {
 ## Architecture
 
 ```mermaid
-graph LR
+graph TD
     P[Producer] --> B[Broker]
     B --> C[(Segment store)]
     B --> D[Consumer group]

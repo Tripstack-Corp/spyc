@@ -3,11 +3,12 @@
 Scripted clips of spyc's markdown viewing: the full-height rendered preview, live
 re-render on save, outline folding, and the mermaid diagram painted in the terminal.
 
-**Status: the harness runs, the film does not exist yet.** All five beats of the
-AppleScript driver assert green in rehearsal, but no take has been shot. No video
-is committed here on purpose — a `.mov` belongs on a release, not in git history,
-and nothing is worth keeping until we have a demo we are sure of. Recordings are
-written to `/private/tmp/spyc-demo/out/`.
+**Status: it films.** All five beats assert green and a full take has been shot —
+about 90 seconds, ending on the mermaid diagram rendered as a real bitmap in the
+terminal, with the `c` theme toggle flipping it dark to light. Pacing and framing
+are still open. No video is committed here on purpose — a `.mov` belongs on a
+release, not in git history, and nothing is worth keeping until we have a demo we
+are sure of. Takes are written to `/private/tmp/spyc-demo/out/`.
 
 ## Layout
 
@@ -53,10 +54,19 @@ rows`), no focus stealing (keys go to the session, so you can keep working), and
 `get text` gives readback so the script asserts instead of sleeping. spyc supports
 iTerm2's image protocol explicitly (`SPYC-TRAP` `iterm-osc1337`), so diagrams paint.
 
+The recorder is `screencapture -v -R <x,y,w,h>`, which films **only the window
+rect**. Nothing else on the desktop is ever in the file, and no crop pass is
+needed — a region take is already the right size. The `quicktime` recorder is kept
+only for older systems: see the first trap below.
+
 ## Traps, all confirmed by experiment
 
 Recording:
 
+- **QuickTime's AppleScript recording API is dead on macOS 26.** `new screen
+  recording` returns no document at all, so the next line fails with `The variable
+  r is not defined` — an error that names a variable and says nothing about the
+  cause. `screencapture -v -R` is the working path and is now the default.
 - **`get text of sess` returns the WHOLE SCROLLBACK** (617 lines for a 50-row
   window), and `contents` is identical. Assertions silently match stale output
   from earlier beats. Slice the last `rowCount` paragraphs.
@@ -91,8 +101,16 @@ Recording:
 
 Driving spyc:
 
-- **spyc restores pager scroll positions**, so a re-recorded take starts mid-file.
-  Force `gg` after opening any pager or preview, or the shot is not reproducible.
+- **spyc restores pager scroll positions**, so a re-recorded take starts wherever
+  the LAST take ended. Force `gg` after opening any pager or preview — and do it
+  **before the assertion, not after**. Three beats here asserted on a near-top
+  string first and took the top second; they passed for as long as the restored
+  position happened to be the top, then all failed the moment a run ended on the
+  mermaid fence at the bottom of the file. The preview was working perfectly; the
+  anchor was just off-screen above.
+- **A wide `graph LR` overflows the frame.** Five nodes left-to-right renders at
+  3200px against a 200-column window and the last node is severed at the right
+  edge. `graph TD` fits the terminal's aspect ratio — the fixture uses it.
 - **`za` keys off the top of the view, not a cursor.** In a folded table of contents
   shorter than the screen the view cannot scroll, so `za` is unreachable and `j`
   does nothing. Use `]]` on the expanded doc — it scrolls the heading to the view
@@ -111,6 +129,16 @@ Driving spyc:
   full-height right. It also confines the status bar to the left column, which
   truncates the path segment to about one character.
 
-**Assertions must bite.** The first fold clip asserted on `lines`, which matched
-the pager header `(149 lines)` and proved nothing. Counting `▸` markers is the
-assertion that actually fails when folding breaks.
+**Assertions must bite**, and this harness has now proved it twice.
+
+The first fold clip asserted on `lines`, which matched the pager header
+`(149 lines)` and proved nothing. Counting `▸` markers is the assertion that
+actually fails when folding breaks.
+
+Worse, the mermaid beat asserted on `mermaid diagram` — and **passed on spyc's own
+refusal**, `no mermaid diagram in view`. The beat was opening `HANDBOOK.md`, which
+has no fence at all, and filming a plain page of text while reporting green. That
+string occurs in three places: the refusal, the rendered placeholder block
+(`▣ mermaid diagram — i: view in terminal …`), and the image overlay. Only the
+overlay means a diagram is on screen, so the assertion is `c theme` — a verb the
+overlay offers only for a mermaid origin, and which cannot match anything else.

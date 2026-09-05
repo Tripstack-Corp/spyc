@@ -38,7 +38,11 @@ property demoDir     : "/private/tmp/spyc-demo/aurora-docs"
 property outDir      : "/private/tmp/spyc-demo/out"
 property colCount    : 200
 property rowCount    : 50
-property recorder    : "quicktime"   -- "quicktime" (full screen + crop) | "screencapture" (region)
+--  `screencapture -v -R` films JUST the window rect, so nothing else on the
+--  desktop is ever in the file and no crop pass is needed. The "quicktime"
+--  path is kept only for older systems: on macOS 26 `new screen recording`
+--  returns no document at all, so `start` fails with "variable is not defined".
+property recorder    : "screencapture"   -- "screencapture" (region) | "quicktime" (dead on macOS 26)
 property typeDelay   : 0.055
 property tagName     : "SPYC-DEMO"
 property paneCmd     : "vim -n RELEASE-NOTES.md"   -- -n = NO SWAP FILE. A stale
@@ -311,7 +315,8 @@ on screenPoints()
 	return {item 3 of b, item 4 of b}
 end screenPoints
 
-on startRec(path_)
+-- rect_ is "x,y,w,h" in POINTS -- screencapture captures it at native scale.
+on startRec(path_, rect_)
 	if isDry then
 		my trace("[dry] recording skipped")
 		return
@@ -319,15 +324,18 @@ on startRec(path_)
 	if recorder is "quicktime" then
 		tell application "QuickTime Player"
 			activate
-			set r to new screen recording
-			start r
+			set qtDoc to new screen recording
+			start qtDoc
 		end tell
 		delay 3
 		tell application "iTerm2" to activate
 		delay 1
 	else
-		my sh("nohup screencapture -v -D 1 " & quoted form of path_ & " >/dev/null 2>&1 &")
+		my sh("nohup screencapture -v -R " & rect_ & " " & quoted form of path_ & " >/dev/null 2>&1 &")
 		delay 2.5
+		if (my sh("pgrep -x screencapture >/dev/null && echo y || echo n")) is not "y" then
+			error "screencapture did not start -- grant Screen Recording to your terminal in System Settings > Privacy & Security"
+		end if
 	end if
 end startRec
 
@@ -373,8 +381,10 @@ on run argv
 	tell application "iTerm2" to set wb to bounds of win
 	my trace("window " & (item 1 of wb) & "," & (item 2 of wb) & " → " & (item 3 of wb) & "," & (item 4 of wb) & "   screen " & (item 1 of pts) & "x" & (item 2 of pts))
 
-	my trace("recording (" & recorder & ")")
-	my startRec(rawPath)
+	set rectStr to "" & (item 1 of wb) & "," & (item 2 of wb) & "," & ¬
+		((item 3 of wb) - (item 1 of wb)) & "," & ((item 4 of wb) - (item 2 of wb))
+	my trace("recording (" & recorder & ") rect " & rectStr)
+	my startRec(rawPath, rectStr)
 	delay 1.5
 
 	try
@@ -393,13 +403,17 @@ on run argv
 		my ctrlKey("s")
 		delay 0.25
 		my emit("|")
-		my waitFor("compression codec", 15)
-		delay 3
+		delay 1.5
+		-- spyc RESTORES the scroll position, so a re-run opens the preview where
+		-- the last run left it -- at the bottom, if that run ended on the mermaid
+		-- fence. Take the top BEFORE asserting, or the anchor is off-screen above
+		-- and the beat fails on a preview that is working perfectly.
 		my chordA("b")
 		my emit("g")
 		delay 0.12
 		my emit("g")
-		delay 1.5
+		my waitFor("compression codec", 15)
+		delay 3
 		repeat 4 times
 			my ctrlKey("d")
 			delay 1.1
@@ -469,10 +483,11 @@ on run argv
 		my escKey()
 		delay 0.6
 		my enter()
-		my waitFor("audience: operators", 15)
+		delay 1.2
 		my emit("g")
 		delay 0.12
 		my emit("g")
+		my waitFor("audience: operators", 15)
 		delay 1.5
 		my chordZ("M")
 		my waitForCount("▸", 10, 12)
@@ -487,12 +502,34 @@ on run argv
 
 		--------------------------------------------- beat 5 — THE MERMAID BEAT
 		my trace("beat 5 — mermaid diagram rendered in the terminal")
+		-- The only fence in the fixture is in RELEASE-NOTES.md, and beat 4 left
+		-- the pager on HANDBOOK.md -- so leave it and open the right file, or
+		-- `i` has nothing to render and the beat films a plain page of text.
+		my escKey()
+		delay 1.2
+		my emit("/RELEASE")
+		delay 0.9
+		my enter()
+		delay 0.7
+		my escKey()
+		delay 0.6
+		my enter()
+		delay 1.2
+		my emit("g")
+		delay 0.12
+		my emit("g")
+		my waitFor("streaming ingest layer", 15)
+		delay 1.2
 		my emit("/mermaid")
 		delay 1
 		my enter()
 		delay 1.8
 		my emit("i")
-		my waitFor("mermaid diagram", 25)
+		-- `mermaid diagram` alone is NOT evidence: it is also the rendered
+		-- placeholder block, and it is inside the refusal "no mermaid diagram
+		-- in view". `c theme` is on the image overlay and only for a mermaid
+		-- origin, so it cannot match anything but a diagram actually on screen.
+		my waitFor("c theme", 25)
 		my trace("      diagram is on screen — the frame no scripted recorder can capture")
 		delay 5
 		my emit("c")
@@ -518,23 +555,33 @@ on run argv
 	my stageFixture()
 
 	if not isDry then
-		set cmd to "set -e" & ¬
-			"; RAW=" & quoted form of rawPath & ¬
-			"; OUT=" & quoted form of outPath & ¬
-			"; VW=$(ffprobe -v error -select_streams v -show_entries stream=width -of csv=p=0 \"$RAW\")" & ¬
-			"; SC=$(python3 -c \"print(round($VW/" & (item 1 of pts) & ",4))\")" & ¬
-			"; X=$(python3 -c \"print(int(" & (item 1 of wb) & "*$SC)//2*2)\")" & ¬
-			"; Y=$(python3 -c \"print(int(" & (item 2 of wb) & "*$SC)//2*2)\")" & ¬
-			"; W=$(python3 -c \"print(int((" & (item 3 of wb) & "-" & (item 1 of wb) & ")*$SC)//2*2)\")" & ¬
-			"; H=$(python3 -c \"print(int((" & (item 4 of wb) & "-" & (item 2 of wb) & ")*$SC)//2*2)\")" & ¬
-			"; echo \"video=${VW}px scale=$SC crop=${W}x${H}+${X}+${Y}\"" & ¬
-			"; ffmpeg -v error -i \"$RAW\" -vf \"crop=$W:$H:$X:$Y\" -an -c:v libx264 -crf 18 -pix_fmt yuv420p -movflags +faststart \"$OUT\" -y" & ¬
-			"; echo \"$OUT\""
+		if recorder is "screencapture" then
+			-- already exactly the window rect: transcode only, never crop twice
+			set cmd to "set -e" & ¬
+				"; RAW=" & quoted form of rawPath & ¬
+				"; OUT=" & quoted form of outPath & ¬
+				"; test -s \"$RAW\" || { echo 'no take was written'; exit 1; }" & ¬
+				"; ffmpeg -v error -i \"$RAW\" -an -c:v libx264 -crf 18 -pix_fmt yuv420p -movflags +faststart \"$OUT\" -y" & ¬
+				"; echo \"$(ffprobe -v error -select_streams v -show_entries stream=width,height -of csv=p=0 \"$OUT\") -> $OUT\""
+		else
+			set cmd to "set -e" & ¬
+				"; RAW=" & quoted form of rawPath & ¬
+				"; OUT=" & quoted form of outPath & ¬
+				"; VW=$(ffprobe -v error -select_streams v -show_entries stream=width -of csv=p=0 \"$RAW\")" & ¬
+				"; SC=$(python3 -c \"print(round($VW/" & (item 1 of pts) & ",4))\")" & ¬
+				"; X=$(python3 -c \"print(int(" & (item 1 of wb) & "*$SC)//2*2)\")" & ¬
+				"; Y=$(python3 -c \"print(int(" & (item 2 of wb) & "*$SC)//2*2)\")" & ¬
+				"; W=$(python3 -c \"print(int((" & (item 3 of wb) & "-" & (item 1 of wb) & ")*$SC)//2*2)\")" & ¬
+				"; H=$(python3 -c \"print(int((" & (item 4 of wb) & "-" & (item 2 of wb) & ")*$SC)//2*2)\")" & ¬
+				"; echo \"video=${VW}px scale=$SC crop=${W}x${H}+${X}+${Y}\"" & ¬
+				"; ffmpeg -v error -i \"$RAW\" -vf \"crop=$W:$H:$X:$Y\" -an -c:v libx264 -crf 18 -pix_fmt yuv420p -movflags +faststart \"$OUT\" -y" & ¬
+				"; echo \"$OUT\""
+		end if
 		try
 			my trace(my sh(cmd))
 		on error e2
-			my trace("crop failed: " & e2)
-			my trace("uncropped take kept at " & rawPath)
+			my trace("post-processing failed: " & e2)
+			my trace("raw take kept at " & rawPath)
 		end try
 	end if
 
