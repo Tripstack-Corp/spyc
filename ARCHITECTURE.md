@@ -367,6 +367,38 @@ reopens the second commander there.
   is head-truncated at 1 MB (the tail of a `cargo build` is what
   the user wants).
 
+<!-- SPYC-TRAP: ghostty-terminal-send -->
+`GhosttyEngine` carries a raw `GhosttyTerminal` from `spyc-vt-sys`, which the C
+API makes neither `Send` nor `Sync`. `unsafe impl Send` is what lets `Pane`
+keep its shape: the engine lives in an `Arc<Mutex<PaneEngine>>`, the parser
+worker thread writes bytes into it, and the render pass locks it to read.
+
+**Why this is sound, and what would break it.** The library never asks for
+thread *affinity* — it asks for *serialization*, repeatedly and in writing:
+`ghostty_terminal_compression_step` is documented as "not thread-safe with
+other operations on the same terminal. The caller must serialize it with
+writes, rendering, searches, and other terminal access." Serialized access from
+several threads is exactly `Send` without `Sync`, and the mutex is what
+provides it. The terminal is never shared unlocked and never reached from two
+threads at once.
+
+It would stop being sound if the library grew thread-local state, or if any
+code path reached the terminal outside the mutex. The second is the one to
+watch, because it is an ordinary-looking mistake: every read goes through
+`Pane::with_screen` / `with_screen_mut`, and a new accessor that captures the
+raw handle instead would compile.
+
+**Why not an actor.** The alternative was to confine the terminal to the worker
+thread and hand the renderer a copy. It was rejected on measurement, not taste.
+The render path now reads through `ghostty_render_state_*`, whose two-phase
+`begin_update` / `end_update` split exists (in its own documentation) for
+"callers that synchronize access to the terminal state (e.g. with a lock shared
+with an IO thread)": only `begin_update` touches the terminal, so the lock
+window is one call rather than a whole frame walk. With the window that small
+an actor buys nothing measurable and costs a message protocol and a copy — and
+it would not even remove the `unsafe`, because the main thread still calls
+`begin_update` on the terminal, so the handle still crosses threads either way.
+
 <!-- SPYC-TRAP: pane-shell-rc-double-source -->
 An interactive pane spawns as `$SHELL -i -c 'exec <command>'`
 (`shell::pane_invocation`): `-i` so the wrapper loads the user's rc-file PATH

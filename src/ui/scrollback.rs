@@ -220,9 +220,13 @@ fn is_blank_padding(style: &Style) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(unused_imports)]
+    use crate::pane::PaneEngine;
+    #[allow(unused_imports)]
+    use crate::pane::engine::{Engine as EngineT, TerminalScreen as _};
 
-    fn parser_with(rows: u16, cols: u16, scrollback: usize, bytes: &[u8]) -> vt100::Parser {
-        let mut p = vt100::Parser::new(rows, cols, scrollback);
+    fn parser_with(rows: u16, cols: u16, scrollback: usize, bytes: &[u8]) -> PaneEngine {
+        let mut p = <PaneEngine as EngineT>::new(rows, cols, scrollback);
         p.process(bytes);
         p
     }

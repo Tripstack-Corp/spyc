@@ -7,6 +7,10 @@
 #[cfg(test)]
 mod preview_tests {
     use super::super::preview_bytes;
+    #[allow(unused_imports)]
+    use crate::pane::PaneEngine;
+    #[allow(unused_imports)]
+    use crate::pane::engine::{Engine as EngineT, TerminalScreen as _};
 
     #[test]
     fn preview_renders_printable_and_controls() {
@@ -29,6 +33,10 @@ mod preview_tests {
 #[cfg(test)]
 mod worker_tests {
     use super::super::ParserWorker;
+    #[allow(unused_imports)]
+    use crate::pane::PaneEngine;
+    #[allow(unused_imports)]
+    use crate::pane::engine::{Engine as EngineT, TerminalScreen as _};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -90,6 +98,10 @@ mod worker_tests {
 mod wake_tests {
     //! MVU Phase 3b: the parser worker's lost-wakeup-safe wake protocol.
     use super::super::{PtyEvent, RxReturn, Wake, parser_worker};
+    #[allow(unused_imports)]
+    use crate::pane::PaneEngine;
+    #[allow(unused_imports)]
+    use crate::pane::engine::{Engine as EngineT, TerminalScreen as _};
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
@@ -119,7 +131,7 @@ mod wake_tests {
         std::thread::JoinHandle<()>,
     ) {
         let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
-        let parser = Arc::new(Mutex::new(vt100::Parser::new(24, 80, 100)));
+        let parser = Arc::new(Mutex::new(<PaneEngine as EngineT>::new(24, 80, 100)));
         let gen_ctr = Arc::new(AtomicU64::new(0));
         let pending = Arc::new(AtomicBool::new(false));
         let count = Arc::new(AtomicUsize::new(0));
@@ -224,7 +236,7 @@ mod wake_tests {
         let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
         let (home_tx, home_rx) = std::sync::mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
-        let parser = Arc::new(Mutex::new(vt100::Parser::new(24, 80, 100)));
+        let parser = Arc::new(Mutex::new(<PaneEngine as EngineT>::new(24, 80, 100)));
         let gen_ctr = Arc::new(AtomicU64::new(0));
         let wake = Wake {
             pending: Arc::new(AtomicBool::new(false)),
@@ -260,6 +272,10 @@ mod app_cursor_tests {
     //! here (a pty spawn in a unit test is what `pty_host`'s own tests document as
     //! flaky, so the worker is the deepest deterministic seam).
     use super::super::{PtyEvent, RxReturn, Wake, parser_worker};
+    #[allow(unused_imports)]
+    use crate::pane::PaneEngine;
+    #[allow(unused_imports)]
+    use crate::pane::engine::{Engine as EngineT, TerminalScreen as _};
     use crate::pane::input::encode_key;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -269,7 +285,7 @@ mod app_cursor_tests {
     #[test]
     fn a_childs_decckm_output_reaches_the_key_encoder() {
         let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
-        let parser = Arc::new(Mutex::new(vt100::Parser::new(24, 80, 100)));
+        let parser = Arc::new(Mutex::new(<PaneEngine as EngineT>::new(24, 80, 100)));
         let stop = Arc::new(AtomicBool::new(false));
         let (rx_home_tx, _rx_home_rx) = std::sync::mpsc::channel();
         let worker = {
@@ -344,6 +360,10 @@ mod app_cursor_tests {
 #[cfg(test)]
 mod recovery_tests {
     use super::super::rebuild_parser_preserving_size;
+    #[allow(unused_imports)]
+    use crate::pane::PaneEngine;
+    #[allow(unused_imports)]
+    use crate::pane::engine::{Engine as EngineT, TerminalScreen as _};
 
     #[test]
     fn rebuild_preserves_current_size_not_initial() {
@@ -351,7 +371,7 @@ mod recovery_tests {
         // `set_size` `Pane::resize` uses). A panic-recovery rebuild must land at
         // the CURRENT size, not the adopt-time 24×80 — otherwise the coalescer
         // (`== last_size` early-return) never corrects it.
-        let mut p = vt100::Parser::new(24, 80, 100);
+        let mut p = <PaneEngine as EngineT>::new(24, 80, 100);
         p.screen_mut().set_size(30, 100);
         let current = p.screen().size();
         assert_ne!(

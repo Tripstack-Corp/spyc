@@ -17,7 +17,7 @@ use super::engine::{CellStyle, Color, Engine, MouseEncoding, MouseMode, Terminal
 /// through [`Engine`] and [`TerminalScreen`], so swapping the engine is a
 /// change to this line and the impls under it — not to a signature anywhere
 /// else.
-pub type PaneEngine = vt100::Parser;
+pub type PaneEngine = super::engine_ghostty::GhosttyEngine;
 
 /// The screen type that engine exposes, spelled once so call sites do not
 /// repeat the projection.
