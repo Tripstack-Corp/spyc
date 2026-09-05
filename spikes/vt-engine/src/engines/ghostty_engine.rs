@@ -204,6 +204,16 @@ impl GhosttyEngine {
         scrollback::limits_for_row_budget(budget)
     }
 
+    /// Create at the library's OWN defaults — no `ghostty_terminal_set` at
+    /// all, so a probe can show behaviour that is not downstream of spyc's
+    /// scrollback configuration.
+    pub fn create_at_defaults(rows: u16, cols: u16) -> Self {
+        let mut t: ffi::GhosttyTerminal = std::ptr::null_mut();
+        let ok = unsafe { ffi::ghostty_terminal_new(std::ptr::null(), &raw mut t, cols, rows) };
+        assert_eq!(ok, spyc_vt_sys::SUCCESS, "ghostty_terminal_new failed");
+        Self { t, rows, cols }
+    }
+
     /// Create at an explicit budget, for `sbprobe`'s sweep.
     pub fn create_with_budget(rows: u16, cols: u16, budget: usize) -> Self {
         let mut t: ffi::GhosttyTerminal = std::ptr::null_mut();
