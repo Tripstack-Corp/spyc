@@ -87,6 +87,14 @@ commit_parsers = [
   { message = "^docs", group = "<!-- 4 -->Documentation" },
   { message = "^build", group = "<!-- 5 -->Build & Tooling" },
   { message = "^test", group = "<!-- 6 -->Tests" },
+  # `ci` is a conventional type this repo genuinely uses, but it matched no
+  # parser — and an unmatched commit is dropped with nothing louder than a
+  # WARN, so every CI change ever merged is absent from the log (#441 and
+  # #447 are the two still unreleased; this parser recovers them). Grouped
+  # with Build & Tooling, which already holds `build` and `chore(deps)`.
+  # Anchored `^ci[(:]` rather than a bare `^ci`, which would also swallow a
+  # subject that merely starts with those two letters.
+  { message = "^ci[(:]", group = "<!-- 5 -->Build & Tooling" },
   # Release-bump commits are noise in a per-version changelog — drop them.
   { message = "^chore\\(release\\)", skip = true },
   { message = "^chore\\(version\\)", skip = true },
