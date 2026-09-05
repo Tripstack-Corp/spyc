@@ -10,6 +10,7 @@
 //! (claude, send-selection) live in higher layers.
 
 pub mod engine;
+pub mod engine_ghostty;
 mod engine_vt100;
 pub use engine_vt100::{PaneEngine, PaneScreen};
 pub mod input;
