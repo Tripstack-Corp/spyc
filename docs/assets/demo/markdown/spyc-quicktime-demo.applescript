@@ -324,8 +324,17 @@ on startRec(path_, rect_)
 	if recorder is "quicktime" then
 		tell application "QuickTime Player"
 			activate
-			set qtDoc to new screen recording
-			start qtDoc
+			-- `new screen recording` declares NO <result> in QuickTime's sdef,
+			-- while `new audio recording` and `new movie recording` both return
+			-- a document -- so `set x to new screen recording` can never bind,
+			-- and reports the useless "the variable x is not defined". Take the
+			-- document off the app instead.
+			new screen recording
+			delay 1
+			if (count of documents) is 0 then
+				error "QuickTime made no recording document -- it has no Screen Recording grant (System Settings > Privacy & Security > Screen & System Audio Recording). Use the screencapture recorder."
+			end if
+			start document 1
 		end tell
 		delay 3
 		tell application "iTerm2" to activate

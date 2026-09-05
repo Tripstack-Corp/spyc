@@ -63,10 +63,18 @@ only for older systems: see the first trap below.
 
 Recording:
 
-- **QuickTime's AppleScript recording API is dead on macOS 26.** `new screen
-  recording` returns no document at all, so the next line fails with `The variable
-  r is not defined` — an error that names a variable and says nothing about the
-  cause. `screencapture -v -R` is the working path and is now the default.
+- **QuickTime cannot be scripted into recording here, for two independent
+  reasons — and the error names neither.** `set r to new screen recording` fails
+  with `The variable r is not defined`, which sounds like a typo. It is not.
+  First, `new screen recording` declares **no `<result>`** in QuickTime's own
+  dictionary (`QuickTimePlayerX.sdef`), while its siblings `new audio recording`
+  and `new movie recording` both return a `document` — so the assignment can
+  never bind, whatever else is true. Second, even called correctly it creates no
+  document, because QuickTime Player holds no Screen Recording grant: its only
+  TCC row is `kTCCServiceUbiquity`. Driven by AppleScript it fails silently
+  instead of prompting. Fixing either alone changes nothing.
+  `screencapture -v -R` is the working path and is now the default — it runs
+  under the terminal's own grant (`kTCCServiceScreenCapture | com.googlecode.iterm2`).
 - **`get text of sess` returns the WHOLE SCROLLBACK** (617 lines for a 50-row
   window), and `contents` is identical. Assertions silently match stale output
   from earlier beats. Slice the last `rowCount` paragraphs.
