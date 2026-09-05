@@ -274,9 +274,12 @@ spyc's workflow: browse files above, talk to Claude below.
     in a repo pops a `[Y/n]` ("let spyc show this agent's live status? writes
     hooks to `<config>`, removed on exit"), and the answer is **saved per repo** —
     never nags again. The write preserves your existing hooks/config; on exit
-    spyc removes only what it added (and never a git-tracked file). The popup
-    requires an explicit decision — `y` or `n`; Esc and any other key keep it up
-    (it can't be dismissed accidentally), and a saved `n` is undoable, so
+    spyc removes only what it added (and never a git-tracked file). Only `y`
+    or `n` answers it; **any other key defers** — the popup closes, nothing is
+    saved, and the next launch asks again. It has to work that way because the
+    popup appears once the pane already has focus, so the first words of a
+    message to the agent would otherwise be swallowed until one of them
+    contained a `y`, which would then answer it. A saved `n` is undoable, so
     **`:hooks on|on!|off`** changes a project's choice later — `on` also installs
     the hooks for an already-running agent (claude live-reloads → kicks in on the
     next message; codex/agy pick them up on their next launch). That's the undo
