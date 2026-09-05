@@ -45,3 +45,15 @@ pub const REQUIRED_ZIG: &str = "0.16.0";
 ///
 /// A pin bump that skips step 3 is the failure this crate exists to prevent.
 pub const BUMP_POLICY: () = ();
+
+/// Defects reported upstream against this pin, so a bump checks them off
+/// instead of re-investigating them.
+///
+/// - **The VT formatter loses the last scroll on replay.** Reported as
+///   <https://github.com/ghostty-org/ghostty/discussions/14148>. Replaying the
+///   formatter's output into a fresh terminal puts the viewport one row high
+///   and history one row short whenever the source had scrolled. It does not
+///   affect us: the mechanism spyc consumes is `ghostty_snapshot_*`, which
+///   round-trips these states exactly. On a pin bump, check whether it is
+///   fixed before re-investigating.
+pub const REPORTED_UPSTREAM: () = ();
