@@ -351,9 +351,14 @@ are the source of truth — Actions *call them* so local and CI never drift.
   reads source and never invokes cargo, so no build cache shortens it.
 - **Deliberately off the PR path.** CodeQL is not a required context, so a
   per-PR run gated nothing while costing ~12 min a push (the `rust` leg measured
-  601-737s; the `ci.yml` gate is ~70s). Merge to `main` still analyzes
-  everything that lands; the Monday 05:00 UTC sweep re-runs newly published
-  queries against unchanged code.
+  601-737s; the `ci.yml` gate is ~70s). Every push to `main` queues an analysis;
+  the Monday 05:00 UTC sweep re-runs newly published queries against unchanged
+  code.
+- **The concurrency group must not cancel in progress.** The `rust` leg outlasts
+  the gap between merges, so `cancel-in-progress: true` meant no analysis ever
+  finished — four consecutive main pushes were cancelled mid-leg (the last at
+  461s) and `main` went unscanned. Queueing is bounded: a group holds at most one
+  pending run, so a burst drops the superseded middles and converges on HEAD.
 - Migrated off GitHub's **default setup**, whose triggers are fixed and cannot
   be narrowed. Default setup must stay **disabled** in repo settings — an
   advanced-setup upload is rejected while it is on. Re-enabling it in the UI

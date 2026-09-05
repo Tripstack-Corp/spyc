@@ -137,15 +137,21 @@ spyc is Model-View-Update. Keep these — they're what make it reason-about-able
 
   **A same-shaped but different-cause incident, observed and fixed 2026-08-07:** worktrees were repeatedly reset to an unrelated branch's tip mid-commit, with no one ever having typed the command above. Root cause: `git` exports `GIT_DIR` into every hook's environment, and `GIT_DIR` overrides `-C`. `cargo-deny`'s advisory-db self-update (`git -C ~/.cargo/advisory-dbs/<hash> fetch && git reset --hard FETCH_HEAD`, run by `make check`'s `deny` target from inside the pre-commit hook) inherited it, so the reset silently landed on spyc's own checked-out branch instead of the advisory-db clone it meant to update — the working tree still went to the advisory-db's cwd (a "split-brain" reset), which is why files on disk survived while the branch ref didn't. Same root cause as C9 (#248, which hit the test suite's own scratch-repo git spawns — see `src/git/test_support.rs::git_command` / `GIT_REDIRECT_ENV`). Fixed at the hook boundary (`scripts/git-hooks/pre-commit` unsets the same var list before `exec make check`) so every tool the gate invokes is covered, not just spyc's own git spawns. Re-run `make install-hooks` if your local `.git/hooks/pre-commit` predates this fix.
 - **Squash on merge** (`bkt pr merge <N> --strategy squash`) — `main`'s log becomes one commit per shipped shape.
-- **Merging straight after `gh pr update-branch` races the checks.** The update pushes a new head, which re-triggers CI; merge before GitHub has registered the new runs and it refuses with `2 of 2 required status checks are expected`. Branch protection requires up-to-date *and* green, so a sequence of PRs hits this on every one after the first. Wait for the checks to leave `pending`, then merge, and retry a few times — the second attempt usually lands. **The wait must also require a non-empty list**: in the gap right after the push, `gh pr checks` returns `[]`, and `all` over nothing is `true` — so a bare `all(.[]; …)` falls straight through and "waits" for a check set that doesn't exist yet (it reports `no checks reported on the branch` and moves on). Same fail-open shape as truncating `gh pr checks`:
+- **Merging straight after `gh pr update-branch` races the checks.** The update pushes a new head, which re-triggers CI; merge before GitHub has registered the new runs and it refuses with `2 of 2 required status checks are expected`. Branch protection requires up-to-date *and* green, so a sequence of PRs hits this on every one after the first. **Gate on `mergeStateStatus`, never on the check list** — it is what GitHub's own merge button reads, folding up-to-date and green into one answer:
 
   ```sh
-  gh pr update-branch <N>
-  until [ "$(gh pr checks <N> --json bucket --jq \
-    'if length == 0 then "no" elif all(.[]; .bucket!="pending") then "true" else "no" end')" = "true" ]
-  do sleep 20; done
-  for i in 1 2 3; do gh pr merge <N> --squash && break; gh pr update-branch <N>; sleep 25; done
+  for _ in 1 2 3 4 5 6 7 8; do
+    st=$(gh pr view <N> --json mergeStateStatus --jq .mergeStateStatus)
+    case "$st" in
+      CLEAN)           gh pr merge <N> --squash --delete-branch && break ;;
+      BEHIND)          gh pr update-branch <N>; sleep 15 ;;
+      BLOCKED|UNKNOWN) sleep 30 ;;   # checks running, or still computing
+      *)               echo "stopping on $st"; break ;;   # DIRTY = conflicts
+    esac
+  done
   ```
+
+  Bound the loop: `BLOCKED` covers *running* and *failed* alike, so an unbounded wait spins forever on a red PR. `gh pr checks` has three fail-open shapes and all three have shipped here — an empty list (`all` over nothing is `true`, reported as `no checks reported on the branch`), a truncated list, and the one that beat the guard against those two on both PRs of the #467-#469 train: the **previous** head's checks, still reported and still green. A check list says what you know about some commit; `mergeStateStatus` says whether this PR may merge now.
 - **Version-line conflicts are extinct on CURRENT.** A static `N.M.0-CURRENT` means no PR touches the version line, so concurrent PRs can't collide on it. The `spyc-semver` merge driver (`src/merge_driver.rs`, installed into git config on spyc launch via `.gitattributes`) therefore sits dormant here; it still earns its keep on release branches, where patch bumps resume. It parses plain `MAJOR.MINOR.PATCH` only — a conflict against a `-CURRENT` line is declined and reported as a real conflict, which is correct, since a version-line conflict on CURRENT means something unexpected happened. `Cargo.lock` keeps `merge=ours` + a `cargo` regen.
 - **`CHANGELOG.md` is git-cliff-generated from v1.57.0** (config `cliff.toml`): the section comes from the commit *type*, the line from `scope: subject` — so **the commit message _is_ the changelog entry**. Under squash merge that message is the **PR title**, and `split_commits = false` means the body is never parsed: well-typed commits *inside* a PR reach the log, not the changelog. A category-spanning PR therefore gets ONE section — split it into a PR per type, or accept that the title is what ships (#434 buried a `feat(mouse)` under `fix(graveyard)` this way). v1.56.0 and earlier are frozen hand-written history, left verbatim. Preview with `make changelog`; release in two steps — `make release-prep VERSION=x.y.z` on a release branch, then `make release-tag VERSION=x.y.z` on `main` once that PR merged.
 
