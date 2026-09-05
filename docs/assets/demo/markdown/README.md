@@ -63,18 +63,28 @@ only for older systems: see the first trap below.
 
 Recording:
 
-- **QuickTime cannot be scripted into recording here, for two independent
-  reasons — and the error names neither.** `set r to new screen recording` fails
-  with `The variable r is not defined`, which sounds like a typo. It is not.
-  First, `new screen recording` declares **no `<result>`** in QuickTime's own
-  dictionary (`QuickTimePlayerX.sdef`), while its siblings `new audio recording`
-  and `new movie recording` both return a `document` — so the assignment can
-  never bind, whatever else is true. Second, even called correctly it creates no
-  document, because QuickTime Player holds no Screen Recording grant: its only
-  TCC row is `kTCCServiceUbiquity`. Driven by AppleScript it fails silently
-  instead of prompting. Fixing either alone changes nothing.
-  `screencapture -v -R` is the working path and is now the default — it runs
-  under the terminal's own grant (`kTCCServiceScreenCapture | com.googlecode.iterm2`).
+- **Do not try to script QuickTime into recording. Apple's own answer is to use
+  something else.** Driven this way it puts up: *"QuickTime Player encountered an
+  error while recording your screen. Try using the Screenshot app instead."*
+  `screencapture` IS the Screenshot app's command line, so the harness is already
+  on the prescribed path.
+
+  Two separate things go wrong, and the error text names neither. `set r to new
+  screen recording` fails with `The variable r is not defined`, which sounds like
+  a typo — it is not: `new screen recording` declares **no `<result>`** in
+  QuickTime's own dictionary (`QuickTimePlayerX.sdef`), while its siblings `new
+  audio recording` and `new movie recording` both return a `document`. So the
+  assignment can never bind, whatever else is true, and every pre-Mojave recipe
+  on the web that uses `start document 1` is working around exactly this. Called
+  correctly it then creates no document or window at all (`{0, 0}`) and raises
+  the dialog above.
+
+  QuickTime also holds no Screen Recording grant — its only TCC row is
+  `kTCCServiceUbiquity`. Whether granting one would fix the recording error is
+  **untested**, and the dialog argues against it: a TCC refusal prompts, it does
+  not report a generic recording error. `screencapture -v -R` needs none of this,
+  running under the terminal's own grant
+  (`kTCCServiceScreenCapture | com.googlecode.iterm2`).
 - **`get text of sess` returns the WHOLE SCROLLBACK** (617 lines for a 50-row
   window), and `contents` is identical. Assertions silently match stale output
   from earlier beats. Slice the last `rowCount` paragraphs.

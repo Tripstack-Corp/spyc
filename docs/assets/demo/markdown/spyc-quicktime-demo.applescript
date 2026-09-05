@@ -332,7 +332,7 @@ on startRec(path_, rect_)
 			new screen recording
 			delay 1
 			if (count of documents) is 0 then
-				error "QuickTime made no recording document -- it has no Screen Recording grant (System Settings > Privacy & Security > Screen & System Audio Recording). Use the screencapture recorder."
+				error "QuickTime made no recording document. It reports \"encountered an error while recording your screen -- try using the Screenshot app instead\", which is what the screencapture recorder already is. Use recorder \"screencapture\"."
 			end if
 			start document 1
 		end tell
