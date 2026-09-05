@@ -508,6 +508,35 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   built to make possible. The escape hatch today is a one-line revert of the
   `PaneEngine` alias, which is what the seam was for.
 
+- **vt100 is removed, and `[pane] engine` never exists** (2026-09-05, decided;
+  executed after 2.2 tags). [#453](https://github.com/Tripstack-Corp/spyc/issues/453)
+  was scoped as a 2.3 triage on whether the fallback survives a release. It is
+  decided now, deliberately, because the decision does not actually depend on
+  the soak.
+
+  **Why a second engine cannot stay honest.** The seam becomes ghostty-shaped
+  the moment 3.0 consumes the snapshot API. Rehydration through
+  `ghostty_snapshot_*` graded 100% on rows, cells, attributes, cursor, alt
+  screen and scrollback, against the VT formatter's 57.3% exact — that is the
+  mechanism 3.0 is built on. vt100 cannot satisfy it in any form: its entire
+  rehydration surface is `state_formatted()`, the visible screen plus four
+  input modes, with no scrollback at all. So the seam would grow a method one
+  engine implements and the other stubs, and a stub that compiles is a lie the
+  type system endorses. Better to remove the impl than to keep a contract only
+  one side can honour.
+
+  **Why the deletion still waits for the tag.** It lands as the first commit
+  after 2.2 tags, not before. Through the release `engine_vt100.rs` stays
+  compiled and covered by the seam's contract suite, so reverting the
+  `PaneEngine` alias remains a genuine one-line escape hatch for the soak
+  window rather than a leap onto untested code. That is what the shared
+  conformance suite is for: five contract tests, run against both impls, so the
+  fallback is exercised on every push for as long as it is the fallback. #453
+  stays open until the deletion PR merges.
+
+  A pin *revert* remains the cheaper escape from a bad pin bump either way, and
+  that one survives the removal.
+
 ## Doc map
 
 | Doc | Role |

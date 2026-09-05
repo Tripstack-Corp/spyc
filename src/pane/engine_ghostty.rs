@@ -694,11 +694,39 @@ impl GhosttyScreen {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pane::engine::conformance;
 
     fn fed(rows: u16, cols: u16, bytes: &[u8]) -> GhosttyEngine {
         let mut e = <GhosttyEngine as Engine>::new(rows, cols, 10_000);
         e.process(bytes);
         e
+    }
+
+    // The seam's contract suite, against the shipped engine. The same five
+    // run against vt100 in `engine_vt100`; one contract, both impls.
+    #[test]
+    fn reports_what_the_engine_holds() {
+        conformance::reports_what_the_engine_holds::<GhosttyEngine>();
+    }
+
+    #[test]
+    fn past_the_edge_is_absence_not_blankness() {
+        conformance::past_the_edge_is_absence_not_blankness::<GhosttyEngine>();
+    }
+
+    #[test]
+    fn mouse_protocol_maps_through_the_model_enums() {
+        conformance::mouse_protocol_maps_through_the_model_enums::<GhosttyEngine>();
+    }
+
+    #[test]
+    fn set_scrollback_clamps_to_the_real_length() {
+        conformance::set_scrollback_clamps_to_the_real_length::<GhosttyEngine>();
+    }
+
+    #[test]
+    fn reports_the_modes_the_pane_branches_on() {
+        conformance::reports_the_modes_the_pane_branches_on::<GhosttyEngine>();
     }
 
     /// A frame filled by the render state and one filled by coordinate must be
@@ -744,49 +772,6 @@ mod tests {
                 .join("\n")
         };
         assert_eq!(text_of(&via_rs), text_of(&via_grid), "cell text");
-    }
-
-    /// The seam reports what the engine holds: attributes spyc renders, the
-    /// modes it forwards on, and wide-glyph roles.
-    #[test]
-    fn the_seam_reports_what_the_engine_holds() {
-        let e = fed(
-            4,
-            20,
-            b"\x1b[1mB\x1b[0m\x1b[2mD\x1b[0m\x1b[3mI\x1b[0m\x1b[4mU\x1b[0m\x1b[7mR\x1b[0m",
-        );
-        let s = e.screen();
-        let at = |c: u16| s.cell_style(0, c).expect("in-grid cell");
-        assert!(at(0).bold, "SGR 1");
-        assert!(at(1).dim, "SGR 2 — the #452 attribute");
-        assert!(at(2).italic, "SGR 3");
-        assert!(at(3).underline, "SGR 4");
-        assert!(at(4).reverse, "SGR 7");
-        assert_eq!(s.cell_style(0, 20), None, "past the last column");
-
-        let w = fed(2, 8, "\u{3042}x".as_bytes());
-        let ws = w.screen();
-        assert_eq!(ws.cell_style(0, 0).map(|c| c.wide), Some(Wide::Head));
-        assert_eq!(ws.cell_style(0, 1).map(|c| c.wide), Some(Wide::Tail));
-        let mut t = String::new();
-        assert!(ws.cell_text(0, 1, &mut t));
-        assert!(t.is_empty(), "a spacer tail carries no glyph of its own");
-    }
-
-    /// The modes the pane forwards on: bracketed paste, DECCKM, mouse.
-    #[test]
-    fn the_seam_reports_the_modes_the_pane_branches_on() {
-        let e = fed(4, 20, b"\x1b[?2004h\x1b[?1h\x1b[?1002h\x1b[?1006h");
-        let s = e.screen();
-        assert!(s.bracketed_paste(), "DECSET 2004");
-        assert!(s.application_cursor(), "DECCKM");
-        assert_eq!(
-            s.mouse_protocol(),
-            (MouseMode::ButtonMotion, MouseEncoding::Sgr)
-        );
-        assert!(!s.alternate_screen());
-        let alt = fed(4, 20, b"\x1b[?1049h");
-        assert!(alt.screen().alternate_screen(), "?1049h");
     }
 
     /// A scrolled-back view reads history, and the offset clamps to what

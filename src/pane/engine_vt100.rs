@@ -156,93 +156,33 @@ impl Engine for vt100::Parser {
 
 #[cfg(test)]
 mod tests {
-    use super::super::engine::{MouseEncoding, MouseMode, TerminalScreen, Wide};
+    use super::super::engine::conformance;
 
-    /// The delegations must report what the engine reports, including the two
-    /// attributes the seam exists to keep engine-agnostic.
+    // The contract suite, against the fallback engine. If this file's impl
+    // ever stops satisfying the seam, the escape hatch #453 weighs is gone and
+    // nothing else would say so.
     #[test]
-    fn the_seam_reports_what_the_engine_holds() {
-        // SGR 1 and SGR 2 are the SAME intensity channel — "increased" and
-        // "decreased" — so a cell cannot be both, and setting one replaces the
-        // other. They get separate cells here rather than one combined run,
-        // which an earlier version of this test got wrong.
-        let mut parser = vt100::Parser::new(2, 12, 0);
-        parser.process("\x1b[1;3;4;7;31;42mX\x1b[0m\x1b[2mD\x1b[0m\u{3042}".as_bytes());
-        let screen = parser.screen();
-
-        let styled = TerminalScreen::cell_style(screen, 0, 0).expect("cell 0,0");
-        assert!(styled.bold, "SGR 1");
-        assert!(styled.italic, "SGR 3");
-        assert!(styled.underline, "SGR 4");
-        assert!(styled.reverse, "SGR 7");
-        assert_eq!(styled.fg, super::Color::Idx(1));
-        assert_eq!(styled.bg, super::Color::Idx(2));
-        assert!(
-            !styled.dim,
-            "SGR 1 and SGR 2 share a channel; this cell asked for bold"
-        );
-
-        let dimmed = TerminalScreen::cell_style(screen, 0, 1).expect("cell 0,1");
-        assert!(
-            dimmed.dim,
-            "SGR 2 — dropped by the adapter before #452, and the seam must not re-drop it"
-        );
-        assert!(!dimmed.bold, "and dim is not bold");
-
-        // The wide pair: head carries the glyph, tail carries nothing.
-        let head = TerminalScreen::cell_style(screen, 0, 2).expect("cell 0,2");
-        let tail = TerminalScreen::cell_style(screen, 0, 3).expect("cell 0,3");
-        assert_eq!(head.wide, Wide::Head);
-        assert_eq!(tail.wide, Wide::Tail);
-
-        let mut text = String::new();
-        assert!(TerminalScreen::cell_text(screen, 0, 2, &mut text));
-        assert_eq!(text, "\u{3042}", "the head carries the glyph");
-        text.clear();
-        assert!(TerminalScreen::cell_text(screen, 0, 3, &mut text));
-        assert!(text.is_empty(), "the tail carries no text of its own");
+    fn reports_what_the_engine_holds() {
+        conformance::reports_what_the_engine_holds::<vt100::Parser>();
     }
 
-    /// Past the grid edge both cell accessors report absence rather than
-    /// inventing a blank — the distinction `line_from_visible_row` breaks on.
     #[test]
     fn past_the_edge_is_absence_not_blankness() {
-        let p = vt100::Parser::new(2, 4, 0);
-        let s = p.screen();
-        assert!(TerminalScreen::cell_style(s, 0, 4).is_none());
-        let mut t = String::from("kept");
-        assert!(!TerminalScreen::cell_text(s, 0, 4, &mut t));
-        assert_eq!(t, "kept", "a failed read must not disturb the buffer");
+        conformance::past_the_edge_is_absence_not_blankness::<vt100::Parser>();
     }
 
-    /// Mouse mode and encoding round-trip through the model enums, since these
-    /// gate whether spyc forwards mouse bytes at all (#170).
     #[test]
     fn mouse_protocol_maps_through_the_model_enums() {
-        let mut p = vt100::Parser::new(2, 8, 0);
-        assert_eq!(
-            TerminalScreen::mouse_protocol(p.screen()),
-            (MouseMode::None, MouseEncoding::Default),
-            "a child that never asked must report None, or spyc forwards bytes it shouldn't"
-        );
-        p.process(b"\x1b[?1002h\x1b[?1006h");
-        assert_eq!(
-            TerminalScreen::mouse_protocol(p.screen()),
-            (MouseMode::ButtonMotion, MouseEncoding::Sgr)
-        );
+        conformance::mouse_protocol_maps_through_the_model_enums::<vt100::Parser>();
     }
 
-    /// `set_scrollback` clamps, which is how the adapter discovers the real
-    /// length. Pinned because the whole scrollback walk depends on it.
     #[test]
     fn set_scrollback_clamps_to_the_real_length() {
-        let mut p = vt100::Parser::new(2, 8, 100);
-        for _ in 0..20 {
-            p.process(b"line\r\n");
-        }
-        let s = p.screen_mut();
-        TerminalScreen::set_scrollback(s, usize::MAX);
-        let len = TerminalScreen::scrollback(s);
-        assert!(len > 0 && len < usize::MAX, "clamped to {len}");
+        conformance::set_scrollback_clamps_to_the_real_length::<vt100::Parser>();
+    }
+
+    #[test]
+    fn reports_the_modes_the_pane_branches_on() {
+        conformance::reports_the_modes_the_pane_branches_on::<vt100::Parser>();
     }
 }

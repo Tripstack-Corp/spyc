@@ -544,11 +544,15 @@ writes bindings against the pin's headers instead — so `spyc-vt-sys` declares
 spyc's own 1.88 and the CI MSRV job is what proves it. A bump becomes a
 recorded decision only if a needed feature demands one.
 
-**vt100 stays selectable for 2.2.** The flip makes ghostty the default and keeps
-`[pane] engine` as the fallback while it soaks. Removing vt100 — and with it the
+**vt100 stays compiled for 2.2, but is not selectable.** The flip makes ghostty
+the engine outright; `[pane] engine` was never built and now never will be. The
+fallback for the soak window is a one-line revert of the `PaneEngine` alias, and
+what keeps that honest is the seam's contract suite, which runs its five tests
+against **both** impls on every push. Removing vt100 — and with it the
 `panic = "unwind"` profile setting's original rationale, the trait's second impl,
-and a dependency — is filed as [#453](https://github.com/Tripstack-Corp/spyc/issues/453) for 2.3 triage rather than decided
-here.
+and a dependency — is decided (see ROADMAP's decisions log) and executes as the
+first commit after 2.2 tags; [#453](https://github.com/Tripstack-Corp/spyc/issues/453)
+stays open until that PR merges.
 
 ### What does not happen
 
@@ -704,8 +708,8 @@ seam described where the `src/pane/` entry today says bytes are fed into a
 because choosing between the actor shape and an `unsafe impl Send` is an
 architectural decision and the losing option needs to stay refuted (PR 15) —
 plus a `SPYC-TRAP` rationale section if the unsafe option wins, since the anchor
-and its section share a slug. `CONFIGURATION.md` and `--print-config` take
-`[pane] engine` (PR 15). `deny.toml` documents the vendored archives and
+and its section share a slug. `CONFIGURATION.md` and `--print-config` take nothing:
+`[pane] engine` was dropped rather than built (decisions log). `deny.toml` documents the vendored archives and
 `SECURITY.md` the pin and its checksum verification (PR 12). `INSTALL.md` gets
 the MSRV bump (PR 12). `docs/drafts/VT_ENGINE_SPIKE.md` takes the dated addendum
 (PR 13) — appended, never rewritten. `CHANGELOG.md` is generated, so what
