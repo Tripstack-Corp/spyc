@@ -78,7 +78,10 @@ than either: agy re-drives the tool, which ran a probe turn to 17 invocations be
 it timed out, never reaching `Stop`. spyc's handler therefore prints its decision
 unconditionally and discards the reporter's own output to keep stdout pure JSON.
 It asks first — a `[Y/n]` on the first launch per repo, saved; change it later
-with **`:hooks on|on!|off`**.
+with **`:hooks on|on!|off`**. Only `y`/`n` answers it: the prompt is raised
+after the pane has focus, so any other key defers (saving nothing, asked again
+next launch) and goes to the agent, rather than being eaten by a dialogue the
+user was not typing at.
 
 **Debug:** **`:why-status`** flashes the active tab's state + source; **`:activity
 dump`** opens a pager with every pane's derivation.

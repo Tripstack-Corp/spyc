@@ -266,15 +266,21 @@ impl App {
 
     /// First-launch consent before spyc writes Claude status hooks. Only an
     /// explicit `y`/`n` records a decision — `y` installs the hooks for the
-    /// launching cwd, `n` remembers the denial. Any other key (including Esc)
-    /// keeps the prompt open; the dialogue cannot be bypassed without choosing.
+    /// launching cwd, `n` remembers the denial.
+    ///
+    /// **Any other key defers and is re-dispatched** (#326). This prompt is
+    /// raised AFTER the pane spawns and after focus moved into it, so a user
+    /// typing their first message to the agent types into this dialogue. It
+    /// used to swallow each key and re-raise itself, which meant the message
+    /// was eaten until it happened to contain a `y` — and that `y` then
+    /// recorded consent. `how is spyc structured…` lost its first ten
+    /// characters and silently installed hooks. Deferring records nothing, so
+    /// the next launch asks again; `:hooks on` sets it up directly.
     pub(super) fn handle_hook_consent_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         let prev_mode = std::mem::replace(&mut self.state.mode, Mode::Normal);
         let Mode::Prompting(Prompt {
             kind: PromptKind::HookConsent { root, cwd, agent },
-            prefix,
-            buffer,
-            editor,
+            ..
         }) = prev_mode
         else {
             return Vec::new();
@@ -301,15 +307,15 @@ impl App {
                     .flash_info("status hooks declined for this project (`:hooks on` to enable)");
             }
             _ => {
-                // Restore the prompt — y/n is required; Esc does not defer.
-                self.state.mode = Mode::Prompting(Prompt {
-                    kind: PromptKind::HookConsent { root, cwd, agent },
-                    prefix,
-                    buffer,
-                    editor,
-                });
-                self.state.flash_info("press y or n");
-                return Vec::new();
+                // Defer: nothing recorded, so the next launch asks again. The
+                // key was aimed at whatever has focus — usually the agent that
+                // just spawned — so re-dispatch it now that the prompt is
+                // closed rather than consuming it. `mode` is already `Normal`
+                // (taken above), so this cannot re-enter this arm.
+                self.state
+                    .flash_info("status hooks not set up — `:hooks on` to enable");
+                self.view.needs_full_repaint = true;
+                return self.handle_key(key).unwrap_or_default();
             }
         }
         self.view.needs_full_repaint = true;
@@ -407,10 +413,16 @@ mod tests {
         )
     }
 
-    /// The consent dialogue cannot be dismissed without an explicit decision:
-    /// Esc (and Enter, ^C, a stray letter) leave it open with a y/n nudge.
+    /// A key that is neither `y` nor `n` DEFERS the consent dialogue: it
+    /// closes, records nothing, and the next launch asks again.
+    ///
+    /// This replaces the "cannot be dismissed without an explicit decision"
+    /// contract, which #326 showed to be the bug: the dialogue is raised after
+    /// the agent pane already has focus, so a user typing their first message
+    /// typed into it, every key was swallowed, and the first `y` in their own
+    /// words recorded consent.
     #[test]
-    fn non_yn_keys_keep_hook_consent_prompt_open() {
+    fn non_yn_keys_defer_hook_consent_without_recording_it() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             for code in [
@@ -423,10 +435,14 @@ mod tests {
                 seed_hook_consent(&mut app);
                 let _ = app.handle_key(key(code)).unwrap();
                 assert!(
-                    is_hook_consent_prompt(&app),
-                    "{code:?} must not dismiss the consent dialogue"
+                    !is_hook_consent_prompt(&app),
+                    "{code:?} must defer the consent dialogue, not hold it open"
                 );
-                assert_eq!(app.flash_text(), Some("press y or n"));
+                assert_eq!(
+                    crate::state::hook_consent::consent_for(&PathBuf::from("/repo")),
+                    None,
+                    "{code:?} must record no decision, so the next launch asks again"
+                );
             }
         });
     }
