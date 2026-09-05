@@ -1,0 +1,61 @@
+# CodeQL static analysis — deliberately OFF the PR path.
+#
+# CodeQL is not a required status check, so a per-PR run gated nothing while
+# adding ~12 minutes to every push: the `rust` analysis alone measured 601-737s
+# across recent runs, against a ~70s `ci.yml` gate. It runs here on merge to
+# `main` — so everything that lands is still analyzed — plus a weekly sweep,
+# which is what catches newly published queries against unchanged code.
+#
+# Migrated off GitHub's *default setup*, whose triggers are fixed (pull request
+# + default branch + weekly) and cannot be narrowed; owning the workflow is the
+# only way to choose when it runs. Default setup must therefore stay DISABLED in
+# repo settings — while it is on, an advanced-setup upload is rejected outright.
+#
+# `python` is deliberately not in the matrix. Default setup analyzed it for
+# exactly one file, `scripts/aislop-baseline.py`, a local dev helper that ships
+# in no artifact.
+#
+# build-mode `none` on both legs is not a shortcut: CodeQL's Rust extractor
+# reads source directly and never invokes cargo, which is why no build cache
+# shortens this and why moving it off the PR path was the only lever.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Mondays 05:00 UTC — an hour ahead of Audit (06:00) and two ahead of Fuzz
+    # (07:00), so the three weeklies don't contend for the runner queue.
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+# A newer push to main supersedes an in-flight analysis: HEAD is what the
+# security posture is measured against, and the weekly sweep re-covers the rest.
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, rust]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
