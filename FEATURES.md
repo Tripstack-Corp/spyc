@@ -405,7 +405,7 @@ spyc's workflow: browse files above, talk to Claude below.
   at `[EOF]`.
   - The fundamental limit is that full-screen TUIs do *virtual
     scrolling* inside a fixed grid — old content lives in app
-    memory, not the terminal — so even a parallel vt100 parser
+    memory, not the terminal — so even a parallel terminal parser
     can't recover it. `^a v` on a *non-agent* alt-screen app
     (vim, htop, lazygit) is therefore a dead end: it flashes a
     hint pointing at the app's own history viewer.
@@ -426,7 +426,7 @@ spyc's workflow: browse files above, talk to Claude below.
     session), spyc flashes a hint.
   - **The transcript wins whenever the terminal has nothing.** An
     agent with a transcript running on the alternate screen (e.g.
-    Claude Code's full-screen mode) has no vt100 capture at all,
+    Claude Code's full-screen mode) has no terminal capture at all,
     and neither does one whose pane hasn't scrolled anything off
     yet — same situation, so `^a v` engages the transcript in
     both, config gate bypassed.
@@ -836,7 +836,7 @@ to lock you out of spyc.
 - **`:task-to-pane`** / **`:task-to-pane N`** promotes a
   backgrounded task to a new pane tab. The pty keeps running
   through the transition; spyc resizes it to the bottom-pane
-  geometry, replays the captured buffer through a fresh vt100
+  geometry, replays the captured buffer through a fresh terminal
   parser so the tab opens with the same content the task viewer
   was showing, and SIGCONT's the child if it was paused. Useful
   when an `!` task you started turns out to need persistent

@@ -6,13 +6,15 @@
 //! own bytes so libFuzzer's coverage feedback steers the SHAPE of the escape
 //! stream rather than an opaque PRNG seed.
 //!
-//! **The property is recovery, not absence of panics.** `pane::parser_worker`
-//! wraps `process()` in `catch_unwind`, rebuilds a torn parser and clears the
-//! mutex poison, precisely because the current engine panics on some valid
-//! input at reachable geometries. This asserts what production depends on and
-//! what holds for any engine: after any byte stream the terminal is still there
-//! and still answers questions. It is also the only thing that exercises that
-//! recovery branch, which by construction no ordinary test reaches.
+//! **The property is that `process` never panics**, and that after any byte
+//! stream the terminal still answers: geometry intact, cursor in bounds, every
+//! in-bounds cell present and no cell past the last column.
+//!
+//! It asserted only recovery while the engine was vt100, which panics on valid
+//! input at reachable geometries. `pane::parser_worker` keeps that net in
+//! production — it is cheap, and the next engine's bugs are not known yet —
+//! but a recovery property asserted against an engine that does not panic
+//! asserts almost nothing.
 //!
 //! Run on demand (needs nightly + cargo-fuzz):
 //!

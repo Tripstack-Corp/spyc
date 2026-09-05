@@ -88,7 +88,7 @@ mode mid-session.
 ### The consequence people hit
 
 An **alternate-screen** agent's history never enters the terminal's main buffer,
-so it is never in spyc's vt100 scrollback. codex's history isn't either — its
+so it is never in spyc's terminal scrollback. codex's history isn't either — its
 scroll region keeps completed turns off the main buffer, so **zero** rows reach
 spyc's emulator. In both cases "just scroll up" cannot work, no matter what spyc
 does. Section 3 is what does work.
@@ -109,7 +109,7 @@ has somewhere else to go — spyc's capture — when neither side owns it.
 |---|---|
 | agent has an on-disk transcript, and it's enabled **or** the agent is alt-screen | the **transcript file** |
 | alt-screen with no transcript | dead end — spyc says so rather than showing you an empty pager |
-| otherwise | vt100 terminal capture |
+| otherwise | terminal capture |
 
 That's `decide_scroll_source` in `src/app/pane_scroll.rs` — a pure function, if
 you want to read the exact ladder.

@@ -103,50 +103,31 @@ pub mod fuzz {
             <crate::pane::PaneEngine as crate::pane::engine::Engine>::new(rows, cols, 200),
         ));
 
-        // Silence the panic hook for the duration of the feed, and restore it
-        // immediately afterwards.
+        // **The property is that `process` never panics.**
         //
-        // This is load-bearing, not noise suppression. `libfuzzer-sys` installs
-        // a hook that calls `std::process::abort()`, and a hook runs BEFORE
-        // unwinding — so under the fuzzer's default hook `catch_unwind` never
-        // gets the panic and this target cannot express its own property. The
-        // first version of this target aborted on its 27th execution for
-        // exactly that reason, on a ZWJ glyph in a one-column grid: a panic
-        // production recovers from, reported as a crash.
+        // It used to be recovery — feed, `catch_unwind`, rebuild, assert the
+        // pane still answers — because the engine underneath was vt100, which
+        // panics on valid input at reachable geometries (a one-column grid, a
+        // wide char split by a shrink). `parser_worker` still carries that net
+        // in production, and should: it is cheap and the next engine's bugs
+        // are not known yet. But asserting only recovery against an engine
+        // that does not panic asserts almost nothing, so with the flip the
+        // target asserts the stronger thing and lets a panic reach libFuzzer.
         //
-        // Scoped as tightly as possible. The hook is process-global, so a panic
-        // anywhere OUTSIDE the `process()` call below still reaches libFuzzer
-        // and still aborts — which is what should happen, because everything
-        // else here is spyc's own code and a panic in it is a real finding.
-        // libFuzzer runs one input at a time on one thread, so there is no
-        // other iteration to disturb.
-        let mut previous_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
+        // That also removes the hook juggling this target needed: `libfuzzer-sys`
+        // installs a panic hook that calls `abort()`, and a hook runs BEFORE
+        // unwinding, so `catch_unwind` never saw the panic and the target
+        // aborted on its 27th execution reporting a panic production recovers
+        // from. With no `catch_unwind` there is nothing to defeat.
+        use crate::pane::engine::Engine as _;
 
-        // Mirror `parser_worker`'s loop exactly: chunked feed, catch_unwind,
-        // rebuild on panic, clear the poison.
         for chunk in stream.chunks(64.max(stream.len() / 8 + 1)) {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            {
                 let mut p = parser
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 p.process(chunk);
-            }));
-            if result.is_err() {
-                {
-                    let mut p = parser
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    let (r, c) = p.screen().size();
-                    *p = <crate::pane::PaneEngine as crate::pane::engine::Engine>::new(r, c, 200);
-                }
-                parser.clear_poison();
             }
-
-            // Restore the real hook before asserting: from here on a panic is
-            // spyc's, and libFuzzer must see it.
-            let quiet_hook = std::panic::take_hook();
-            std::panic::set_hook(previous_hook);
 
             // The invariants, checked after every chunk rather than once at the
             // end: a pane that is briefly unusable mid-stream is still a pane
@@ -205,12 +186,7 @@ pub mod fuzz {
             let _ = screen.contents();
             let _ = screen.contents_between(0, 0, r.saturating_sub(1), c.saturating_sub(1));
             drop(guard);
-
-            // Back to quiet for the next chunk's `process()`.
-            previous_hook = std::panic::take_hook();
-            std::panic::set_hook(quiet_hook);
         }
-        std::panic::set_hook(previous_hook);
     }
 
     /// Normalize one raw archive member name and discard the result.

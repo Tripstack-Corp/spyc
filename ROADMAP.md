@@ -472,6 +472,42 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   coded, the actor shape is preferred if costs are comparable, and the choice
   is recorded here when made rather than inferred from the diff.
 
+- **The threading resolution: `unsafe impl Send`, with the render path moved
+  onto ghostty's render state** (2026-09-05). Priced, as the entry above
+  required, and the measurement collapsed the question rather than answering
+  it. Reading a frame by coordinate costs 80.0 us at 24x80 (two `grid_ref`
+  lookups per cell, since style and text resolve separately); reading it
+  through `ghostty_render_state_*` costs 19.3 us, **4.15x cheaper**, with both
+  sides computing the same fields — an earlier comparison that let the render
+  state skip `wide` reported a flattering 7x and was wrong.
+
+  What decided it is not the speed but where the lock sits. `begin_update` is
+  the only call that touches the terminal, which the C API documents as its
+  purpose: "callers that synchronize access to the terminal state (e.g. with a
+  lock shared with an IO thread)" hold the lock for that call alone. The pane's
+  lock window therefore stops being a whole frame walk and becomes one call.
+  With it that small, the actor shape buys nothing measurable and costs a
+  message protocol and a copy — **and it would not even remove the `unsafe`**,
+  because the main thread still calls `begin_update` on the terminal, so the
+  handle crosses threads either way. The actor was preferred if costs were
+  comparable; they are not comparable, they are the same cost plus machinery.
+
+  Soundness is argued against the C API's own words — it asks for
+  serialization, never for thread affinity — under the `ghostty-terminal-send`
+  trap anchor in ARCHITECTURE.md, which also records what would break it.
+
+- **`[pane] engine` is not shipped with the flip** (2026-09-05). The staging
+  table listed a config key selecting the engine; it is deferred to
+  [#453](https://github.com/Tripstack-Corp/spyc/issues/453), which was already
+  the triage on whether vt100 stays selectable. Two reasons. Runtime selection
+  means an enum over both engines with delegating impls and the choice plumbed
+  through `Pane::spawn_with_env`, so every future change to the seam pays for
+  two engines. And the evidence for needing the hatch got weaker: the flip is
+  green across the whole suite — 2,483 tests including the `insta` snapshots
+  and the widget attribute tests — which is what the strangler-fig seam was
+  built to make possible. The escape hatch today is a one-line revert of the
+  `PaneEngine` alias, which is what the seam was for.
+
 ## Doc map
 
 | Doc | Role |

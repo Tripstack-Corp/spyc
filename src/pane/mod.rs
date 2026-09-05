@@ -10,6 +10,7 @@
 //! (claude, send-selection) live in higher layers.
 
 pub mod engine;
+pub mod engine_ghostty;
 mod engine_vt100;
 pub use engine_vt100::{PaneEngine, PaneScreen};
 pub mod input;
@@ -25,6 +26,10 @@ pub use widget::{PaneWidget, cell_style};
 // all wrap.
 pub mod pty_host;
 
+// A few call sites reach the engine by method syntax; with vt100 those
+// resolved to its inherent methods, so the seam's traits must be in scope
+// for any other engine.
+use crate::pane::engine::{Engine as _, TerminalScreen as _};
 use std::io::Write as _;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

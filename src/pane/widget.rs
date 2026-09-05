@@ -159,6 +159,10 @@ const fn selected(sel: Option<((u16, u16), (u16, u16))>, row: u16, col: u16) -> 
 
 #[cfg(test)]
 mod attribute_tests {
+    #[allow(unused_imports)]
+    use crate::pane::PaneEngine;
+    #[allow(unused_imports)]
+    use crate::pane::engine::{Engine as EngineT, TerminalScreen as _};
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
     use ratatui::style::Modifier;
@@ -172,7 +176,7 @@ mod attribute_tests {
     /// screen; the tests do not, which is what lets them survive an engine
     /// swap unchanged.
     fn rendered(bytes: &[u8], rows: u16, cols: u16, focused: bool) -> Buffer {
-        let mut parser = vt100::Parser::new(rows, cols, 0);
+        let mut parser = <PaneEngine as EngineT>::new(rows, cols, 0);
         parser.process(bytes);
         let area = Rect::new(0, 0, cols, rows);
         let mut buf = Buffer::empty(area);
@@ -242,6 +246,10 @@ mod attribute_tests {
 #[cfg(test)]
 mod selection_tests {
     use super::selected;
+    #[allow(unused_imports)]
+    use crate::pane::PaneEngine;
+    #[allow(unused_imports)]
+    use crate::pane::engine::{Engine as EngineT, TerminalScreen as _};
 
     /// A multi-row selection takes the tail of the first row, all of the middle, and
     /// the head of the last — not a rectangle.

@@ -281,6 +281,10 @@ pub fn encode_mouse(ev: MouseReport, mode: MouseMode, encoding: MouseEncoding) -
 #[cfg(test)]
 mod mouse_tests {
     use super::{MouseReport, encode_mouse};
+    #[allow(unused_imports)]
+    use crate::pane::PaneEngine;
+    #[allow(unused_imports)]
+    use crate::pane::engine::{Engine as EngineT, TerminalScreen as _};
     use crate::pane::engine::{MouseEncoding as Enc, MouseMode as Mode};
 
     /// Wheel-up at pane-relative (0,0) — the origin case, which is where an
@@ -503,6 +507,10 @@ mod mouse_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(unused_imports)]
+    use crate::pane::PaneEngine;
+    #[allow(unused_imports)]
+    use crate::pane::engine::{Engine as EngineT, TerminalScreen as _};
 
     fn k(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::empty())
@@ -529,7 +537,7 @@ mod tests {
     ];
     /// A parser fed `escapes`, standing in for the child's declared state.
     fn child_mode(escapes: &[u8]) -> bool {
-        let mut p = vt100::Parser::new(24, 80, 100);
+        let mut p = <PaneEngine as EngineT>::new(24, 80, 100);
         p.process(escapes);
         p.screen().application_cursor()
     }
