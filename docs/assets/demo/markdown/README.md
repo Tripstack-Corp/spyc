@@ -4,9 +4,15 @@ Scripted clips of spyc's markdown viewing: the full-height rendered preview, liv
 re-render on save, outline folding, and the mermaid diagram painted in the terminal.
 
 **Status: it films.** All five beats assert green and a full take has been shot —
-about 90 seconds, ending on the mermaid diagram rendered as a real bitmap in the
-terminal, with the `c` theme toggle flipping it dark to light. Pacing and framing
-are still open. No video is committed here on purpose — a `.mov` belongs on a
+about 67 seconds, ending on the mermaid diagram rendered as a real bitmap in the
+terminal, with the `c` theme toggle flipping it dark to light.
+
+Pacing is set by scaling every `delay` in the beats region together, so the rhythm
+stays and only the length changes; the first cut took 91s to 67s at a factor of
+0.68. Delays at or below 0.15s are keystroke gaps rather than pacing (the `g`-`g`
+of a `gg`) and are left alone. The dwells that survive a cut are the ones the
+viewer reads: the preview appearing, the `CAUTION` block re-rendering, the folded
+table of contents, and the diagram in each theme. No video is committed here on purpose — a `.mov` belongs on a
 release, not in git history, and nothing is worth keeping until we have a demo we
 are sure of. Takes are written to `/private/tmp/spyc-demo/out/`.
 

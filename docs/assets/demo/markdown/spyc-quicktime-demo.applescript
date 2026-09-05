@@ -43,7 +43,7 @@ property rowCount    : 50
 --  path is kept only for older systems: on macOS 26 `new screen recording`
 --  returns no document at all, so `start` fails with "variable is not defined".
 property recorder    : "screencapture"   -- "screencapture" (region) | "quicktime" (dead on macOS 26)
-property typeDelay   : 0.055
+property typeDelay   : 0.042
 property tagName     : "SPYC-DEMO"
 property paneCmd     : "vim -n RELEASE-NOTES.md"   -- -n = NO SWAP FILE. A stale
 --  .swp from an interrupted run makes vim open on its E325 recovery prompt
@@ -401,18 +401,18 @@ on run argv
 		my trace("beat 1 — browse the docs tree")
 		repeat 3 times
 			my emit("j")
-			delay 0.42
+			delay 0.29
 		end repeat
-		delay 1
+		delay 0.68
 		my emit("G")
-		delay 1.5
+		delay 1.02
 
 		------------------------------------------------------------- beat 2
 		my trace("beat 2 — full-height rendered markdown preview")
 		my ctrlKey("s")
-		delay 0.25
+		delay 0.17
 		my emit("|")
-		delay 1.5
+		delay 1.02
 		-- spyc RESTORES the scroll position, so a re-run opens the preview where
 		-- the last run left it -- at the bottom, if that run ended on the mermaid
 		-- fence. Take the top BEFORE asserting, or the anchor is off-screen above
@@ -422,31 +422,31 @@ on run argv
 		delay 0.12
 		my emit("g")
 		my waitFor("compression codec", 15)
-		delay 3
-		repeat 4 times
+		delay 2.04
+		repeat 3 times
 			my ctrlKey("d")
-			delay 1.1
+			delay 0.75
 		end repeat
-		delay 1
+		delay 0.68
 		my emit("g")
 		delay 0.12
 		my emit("g")
-		delay 1.5
+		delay 1.02
 
 		------------------------------------------------------------- beat 3
 		my trace("beat 3 — edit in vim, preview re-renders on save")
 		my chordA("a")
 		my chordA("c")
-		delay 1.4
+		delay 0.95
 		my enter()          -- accept the prefilled command ($SPYC_PANE_CMD)
-		delay 1.2
+		delay 0.82
 		my enter()          -- accept the prefilled cwd
 		my waitFor("1485B", 20)
-		delay 1.5
+		delay 1.02
 		my emit("G")
-		delay 0.9
+		delay 0.61
 		my emit("o")
-		delay 0.7
+		delay 0.48
 		my enter()
 		my typeSlow("## Rollback")
 		my enter()
@@ -454,60 +454,60 @@ on run argv
 		my typeSlow("> [!CAUTION]")
 		my enter()
 		my typeSlow("> Roll back with `aurora rollback --to 2.9`.")
-		delay 0.5
+		delay 0.34
 		my escKey()
-		delay 0.9
+		delay 0.61
 		my typeSlow(":w")
 		my enter()
 		my waitFor("written", 20)
-		delay 1.5
+		delay 1.02
 
 		my chordA("k")      -- pane -> list. ^a a / ^a b only move between COLUMNS
-		delay 0.8
+		delay 0.54
 		my chordA("b")      -- the preview column
 		my emit("G")
 		my waitForRight("CAUTION", 20)
-		delay 4
+		delay 2.72
 
 		-- Quitting vim does NOT remove the tab: spyc keeps it and shows
 		-- "pane exited — ^a-R to restart, ^a-x to close". So close the tab
 		-- explicitly, and use the ^a | ALIAS for the split, because plain ^s
 		-- never reaches spyc while a pane holds focus.
 		my chordA("j")
-		delay 0.8
+		delay 0.54
 		my typeSlow(":q")
 		my enter()
 		my waitFor("[exited", 15)   -- the DIVIDER, not the flash: "pane exited" fades
 		my chordA("x")      -- close the exited tab (no confirm once the child is gone)
-		delay 2
+		delay 1.36
 		my chordA("|")      -- close the vsplit
-		delay 2
+		delay 1.36
 
 		------------------------------------------------------------- beat 4
 		my trace("beat 4 — outline folding")
 		my emit("/HAND")
-		delay 0.9
+		delay 0.61
 		my enter()
-		delay 0.7
+		delay 0.48
 		my escKey()
-		delay 0.6
+		delay 0.41
 		my enter()
-		delay 1.2
+		delay 0.82
 		my emit("g")
 		delay 0.12
 		my emit("g")
 		my waitFor("audience: operators", 15)
-		delay 1.5
+		delay 1.02
 		my chordZ("M")
 		my waitForCount("▸", 10, 12)
-		delay 4.5
+		delay 3.06
 		repeat 3 times
 			my emit("]]")
-			delay 1
+			delay 0.68
 		end repeat
 		my chordZ("R")
 		my waitForCount("▸", 0, 12)
-		delay 2
+		delay 1.36
 
 		--------------------------------------------- beat 5 — THE MERMAID BEAT
 		my trace("beat 5 — mermaid diagram rendered in the terminal")
@@ -515,24 +515,24 @@ on run argv
 		-- the pager on HANDBOOK.md -- so leave it and open the right file, or
 		-- `i` has nothing to render and the beat films a plain page of text.
 		my escKey()
-		delay 1.2
+		delay 0.82
 		my emit("/RELEASE")
-		delay 0.9
+		delay 0.61
 		my enter()
-		delay 0.7
+		delay 0.48
 		my escKey()
-		delay 0.6
+		delay 0.41
 		my enter()
-		delay 1.2
+		delay 0.82
 		my emit("g")
 		delay 0.12
 		my emit("g")
 		my waitFor("streaming ingest layer", 15)
-		delay 1.2
+		delay 0.82
 		my emit("/mermaid")
-		delay 1
+		delay 0.68
 		my enter()
-		delay 1.8
+		delay 1.22
 		my emit("i")
 		-- `mermaid diagram` alone is NOT evidence: it is also the rendered
 		-- placeholder block, and it is inside the refusal "no mermaid diagram
@@ -540,13 +540,13 @@ on run argv
 		-- origin, so it cannot match anything but a diagram actually on screen.
 		my waitFor("c theme", 25)
 		my trace("      diagram is on screen — the frame no scripted recorder can capture")
-		delay 5
+		delay 3.4
 		my emit("c")
-		delay 4
+		delay 2.72
 		my escKey()
-		delay 1.5
+		delay 1.02
 		my escKey()
-		delay 2
+		delay 1.36
 	on error e
 		my trace("BEAT FAILED: " & e)
 	end try
