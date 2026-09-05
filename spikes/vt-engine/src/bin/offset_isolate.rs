@@ -195,5 +195,7 @@ fn main() {
         println!("    scrollback {sb}, aligned {aligned}/{rows}, emit {} bytes -> {}",
             dd.len(),
             if aligned == usize::from(rows) { "NO OFFSET" } else { "OFFSET" });
+        println!("    emit: {:?}", String::from_utf8_lossy(&dd).escape_debug().to_string());
+        println!("    identical to the configured emit: {}", dd == dump);
     }
 }

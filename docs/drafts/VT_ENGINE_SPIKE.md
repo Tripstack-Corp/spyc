@@ -1123,11 +1123,22 @@ viewport rows" and concluded the emit drops a row. It does not: that count
 treats a **blank** viewport row as content the emit owes. An instrument whose
 model of "what should be there" is wrong reports the subject as wrong.
 
-**What it is worth.** `formatter.h` documents the API as content output —
-plain text, VT or HTML, with "the entire screen is formatted" when no
-selection is given — and claims no round-trip guarantee anywhere. The
-mechanism spyc adopts is `ghostty_snapshot_*`, which does make that claim and
-grades 100%. So the upstream report is written as a question about intended
-scope rather than a defect claim, and offers a one-sentence `formatter.h`
-clarification if the answer is that round-trip is out of scope.
+**Reported upstream as a defect:**
+[ghostty discussion 14148](https://github.com/ghostty-org/ghostty/discussions/14148).
+
+An earlier draft framed it as a question about intended scope, because
+`formatter.h` documents the API as content output and claims no round-trip
+guarantee anywhere. That framing was wrong on the project's own record.
+[ghostty#13876](https://github.com/ghostty-org/ghostty/pull/13876) ("terminal:
+preserve pending wrap in VT formatter", merged 2026-08-17) fixed a replay
+defect in this same formatter and added a regression test that formats a
+terminal, feeds the output into a fresh one, and asserts the two agree. Replay
+is in scope by demonstration, so this is the same class of bug and the report
+says so. The pin is 442 commits ahead of that fix, so it is not a stale
+measurement.
+
+It does not affect the adoption either way: the mechanism spyc consumes is
+`ghostty_snapshot_*`, which round-trips these states exactly. The note in
+`spyc_vt_sys::pin` carries the reference so a pin bump checks it off rather
+than re-investigating it.
 
