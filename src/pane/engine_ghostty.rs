@@ -814,3 +814,97 @@ mod tests {
         assert!(s.contents().contains("L19"), "back at the live edge");
     }
 }
+
+/// The four engine-side defects [#34](https://github.com/Tripstack-Corp/spyc/issues/34)
+/// turned out to be, each pinned against the shipped engine.
+///
+/// The spike found these by differential against the incumbent and named them
+/// in `docs/drafts/VT_ENGINE_SPIKE.md`; the bytes here are its fixtures. They
+/// are asserted in-crate rather than in `spikes/vt-engine/`, which is excluded
+/// from the workspace and so runs only when someone remembers — a defect that
+/// took an engine swap to fix deserves a test that runs on every push.
+#[cfg(test)]
+mod issue_34_engine_defects {
+    use super::*;
+
+    fn screen_of(rows: u16, cols: u16, bytes: &[u8]) -> GhosttyEngine {
+        let mut e = <GhosttyEngine as Engine>::new(rows, cols, 10_000);
+        e.process(bytes);
+        e
+    }
+
+    /// `ESC ( 0` selects DEC special graphics, so `lqqqk` is a box, not
+    /// letters. vt100 does not implement SCS at all and renders the literal
+    /// text — garbage in any pane whose child draws boxes.
+    #[test]
+    fn scs_box_drawing_draws_boxes() {
+        let e = screen_of(5, 20, b"\x1b(0lqqqk\r\nx  x\r\nmqqqj\x1b(B\r\n");
+        let text = e.screen().contents();
+        let row0 = text.lines().next().unwrap_or_default();
+        assert_eq!(row0, "┌───┐", "SCS box drawing, got {row0:?}");
+        assert!(
+            text.lines().nth(2).unwrap_or_default().starts_with('└'),
+            "the bottom edge too, got {text:?}"
+        );
+    }
+
+    /// A row written before a DECSTBM scroll region is set must survive it.
+    /// vt100 loses it.
+    #[test]
+    fn a_row_written_before_decstbm_survives() {
+        let e = screen_of(
+            8,
+            20,
+            b"\x1b[2J\x1b[H\x1b[3;6rheader\r\n\x1b[3Hone\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\nseven\r\neight\r\n",
+        );
+        let text = e.screen().contents();
+        assert!(
+            text.contains("header"),
+            "the pre-region row must survive, got {text:?}"
+        );
+    }
+
+    /// Content scrolled out of a TOP-ANCHORED DECSTBM region reaches history.
+    /// vt100 retains zero rows, which is why a codex pane's scrollback was
+    /// always empty — codex confines its transcript to a scroll region.
+    ///
+    /// Top-anchored is the whole point, and the first version of this test got
+    /// it wrong by reusing the spike's `3;6` fixture. A region that does not
+    /// start at row 1 scrolls its lines within the screen, so none of them
+    /// leave it and history correctly stays empty — measured at `2;6` and
+    /// `3;6`, both 0 rows, against 15 at `1;6`. The engine was right and the
+    /// test was wrong.
+    #[test]
+    fn a_top_anchored_scroll_region_accumulates_scrollback() {
+        let mut e = <GhosttyEngine as Engine>::new(8, 20, 10_000);
+        e.process(b"\x1b[2J\x1b[H\x1b[1;6r");
+        for i in 0..20 {
+            e.process(format!("line {i:02}\r\n").as_bytes());
+        }
+        let s = e.screen_mut();
+        s.set_scrollback(usize::MAX);
+        assert!(
+            s.scrollback() > 0,
+            "a scroll-region child must accumulate scrollback, got {}",
+            s.scrollback()
+        );
+    }
+
+    /// A tag-sequence grapheme survives past 18 bytes. vt100's `Cell` has
+    /// `CONTENT_BYTES = 22` and drops silently at 18; the Scotland flag needs
+    /// 28, so it lost two of its six tag characters.
+    #[test]
+    fn a_tag_sequence_grapheme_survives_past_eighteen_bytes() {
+        let flag = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}";
+        assert!(flag.len() > 18, "the fixture must exceed the old limit");
+        let e = screen_of(3, 20, format!("{flag}|end\r\n").as_bytes());
+        let mut got = String::new();
+        e.screen().cell_text(0, 0, &mut got);
+        assert_eq!(
+            got.chars().count(),
+            flag.chars().count(),
+            "every codepoint of the cluster survives: {got:?}"
+        );
+        assert_eq!(got, flag);
+    }
+}

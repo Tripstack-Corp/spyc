@@ -38,7 +38,7 @@ binary, and handles no secrets of its own.
 
 It does, however, **parse a great deal of untrusted input**: any file
 you open in the pager, ANSI/escape output from arbitrary child
-processes in the pty pane (vt100), git objects (gix), and images /
+processes in the pty pane (libghostty-vt), git objects (gix), and images /
 SVG / markdown / syntax-highlighting input. A malicious file or a
 hostile child process is a realistic way to reach a parser bug. This
 is what `fuzz/fuzz_targets/` exists for — see the fuzzing caveat.

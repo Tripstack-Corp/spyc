@@ -289,7 +289,7 @@ src/
                     key_dispatch/, pager_handler/, run.rs, effect.rs,
                     command_table.rs
   keymap/         — Action enum, resolver, user keymap DSL
-  pane/           — pty subprocess, multi-tab, vt100 rendering
+  pane/           — pty subprocess, multi-tab, terminal rendering
   ui/             — list view, pager, status bar, prompt, theme
   fs/             — directory listing, file operations, finder, grep
   state/          — cursor, marks, picks, inventory, history, sessions
