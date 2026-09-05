@@ -177,6 +177,57 @@ const fn style_from(st: &ffi::GhosttyStyle, wide: Wide) -> CellStyle {
     }
 }
 
+/// The background of a cell that carries no text and no style.
+///
+/// A cell erased while a background was set — htop's header bar, any
+/// `ESC[K` under SGR — is stored with its colour in the CONTENT TAG, not in a
+/// style: `BG_COLOR_PALETTE` / `BG_COLOR_RGB` mean "no text; background colour
+/// from palette / as RGB". Reading only the style drops it, and the cell comes
+/// back unstyled, so a coloured bar stops at its last glyph instead of
+/// spanning the row.
+///
+/// The palette index is read as an INDEX rather than through the render
+/// state's resolved `BG_COLOR`, which flattens palette lookups to RGB — that
+/// would paint ghostty's idea of colour 2 instead of the host terminal's.
+fn content_tag_bg(raw: ffi::GhosttyCell) -> Option<Color> {
+    let mut tag: ffi::GhosttyCellContentTag::Type = 0;
+    if unsafe {
+        ffi::ghostty_cell_get(
+            raw,
+            CellData::GHOSTTY_CELL_DATA_CONTENT_TAG,
+            (&raw mut tag).cast(),
+        )
+    } != spyc_vt_sys::SUCCESS
+    {
+        return None;
+    }
+    match tag {
+        ffi::GhosttyCellContentTag::GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE => {
+            let mut idx: ffi::GhosttyColorPaletteIndex = 0;
+            (unsafe {
+                ffi::ghostty_cell_get(
+                    raw,
+                    CellData::GHOSTTY_CELL_DATA_COLOR_PALETTE,
+                    (&raw mut idx).cast(),
+                )
+            } == spyc_vt_sys::SUCCESS)
+                .then_some(Color::Idx(idx))
+        }
+        ffi::GhosttyCellContentTag::GHOSTTY_CELL_CONTENT_BG_COLOR_RGB => {
+            let mut rgb = ffi::GhosttyColorRgb { r: 0, g: 0, b: 0 };
+            (unsafe {
+                ffi::ghostty_cell_get(
+                    raw,
+                    CellData::GHOSTTY_CELL_DATA_COLOR_RGB,
+                    (&raw mut rgb).cast(),
+                )
+            } == spyc_vt_sys::SUCCESS)
+                .then_some(Color::Rgb(rgb.r, rgb.g, rgb.b))
+        }
+        _ => None,
+    }
+}
+
 fn wide_from_raw(raw: ffi::GhosttyCell) -> Wide {
     let mut w: ffi::GhosttyCellWide::Type = 0;
     if unsafe { ffi::ghostty_cell_get(raw, CellData::GHOSTTY_CELL_DATA_WIDE, (&raw mut w).cast()) }
@@ -354,7 +405,11 @@ impl GhosttyScreen {
                     } else {
                         default_style()
                     };
-                    frame.styles.push(style_from(&st, wide));
+                    let mut cell = style_from(&st, wide);
+                    if let Some(bg) = content_tag_bg(raw) {
+                        cell.bg = bg;
+                    }
+                    frame.styles.push(cell);
                     col += 1;
                 }
                 // A short row still owes the grid its full width.
@@ -423,7 +478,11 @@ impl GhosttyScreen {
                 frame.spans.push((start, end));
                 let mut st = default_style();
                 let _ = unsafe { ffi::ghostty_grid_ref_style(&raw const gr, &raw mut st) };
-                frame.styles.push(style_from(&st, wide));
+                let mut cell = style_from(&st, wide);
+                if let Some(bg) = content_tag_bg(raw) {
+                    cell.bg = bg;
+                }
+                frame.styles.push(cell);
             }
         }
     }
@@ -742,9 +801,14 @@ mod tests {
         let e = fed(
             6,
             24,
+            // The last line is a background-colour ERASE: a row painted to the
+            // edge by `ESC[K` under SGR, which stores its colour in the cell's
+            // content tag rather than a style. Added after that shape shipped
+            // a bug this corpus was too narrow to see.
             "\x1b[31mred\x1b[0m \x1b[1;4mbold-u\x1b[0m\r\n\
              wide \u{3042}\u{3044}\u{3046} tail\r\n\
              \x1b[2mdim\x1b[0m \x1b[7mrev\x1b[0m\r\n\
+             \x1b[30;42mHDR\x1b[K\x1b[0m\r\n\
              plain\r\n"
                 .as_bytes(),
         );
@@ -891,5 +955,100 @@ mod issue_34_engine_defects {
             "every codepoint of the cluster survives: {got:?}"
         );
         assert_eq!(got, flag);
+    }
+}
+
+/// The shipped engine against the reference engine, over a real captured
+/// terminal stream, through the same widget.
+///
+/// This is the only place spyc compares the two engines' *rendering* rather
+/// than their seam answers, and it is what caught the background-colour-erase
+/// bug that `both_fills_agree_on_the_live_viewport` could not: both fills were
+/// wrong the same way, so they agreed. An instrument that shares the subject's
+/// model inherits its blind spots — the reference engine does not share it.
+///
+/// It dies with `engine_vt100.rs` after 2.2 tags ([#453](https://github.com/Tripstack-Corp/spyc/issues/453)).
+/// Until then it is the strongest thing the fallback buys.
+#[cfg(test)]
+mod against_the_reference_engine {
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::widgets::Widget as _;
+
+    use crate::pane::PaneWidget;
+    use crate::pane::engine::Engine as EngineT;
+
+    fn render<E: EngineT>(bytes: &[u8], rows: u16, cols: u16) -> Buffer {
+        let mut e = E::new(rows, cols, 10_000);
+        e.process(bytes);
+        let area = Rect::new(0, 0, cols, rows);
+        let mut buf = Buffer::empty(area);
+        PaneWidget {
+            screen: e.screen(),
+            focused: true,
+            selection: None,
+        }
+        .render(area, &mut buf);
+        buf
+    }
+
+    /// htop is the case that exercises meters, a full-width header bar, a
+    /// selected row and the function-key footer — every one of which is a
+    /// coloured run that ends in erased cells.
+    #[test]
+    fn htop_renders_identically_through_both_engines() {
+        // Absolute, via the manifest dir: tests share a process, so a
+        // relative path breaks the moment another test changes the cwd.
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("spikes/vt-engine/fixtures/htop.bin");
+        let bytes = std::fs::read(&fixture)
+            .unwrap_or_else(|e| panic!("the spike's htop capture at {}: {e}", fixture.display()));
+        let (rows, cols) = (24u16, 80);
+        let a = render::<vt100::Parser>(&bytes, rows, cols);
+        let b = render::<super::GhosttyEngine>(&bytes, rows, cols);
+
+        let mut wrong = Vec::new();
+        for r in 0..rows {
+            for c in 0..cols {
+                let (Some(x), Some(y)) = (a.cell((c, r)), b.cell((c, r))) else {
+                    continue;
+                };
+                if x.symbol() != y.symbol() {
+                    wrong.push(format!(
+                        "({r},{c}) symbol {:?} vs {:?}",
+                        x.symbol(),
+                        y.symbol()
+                    ));
+                    continue;
+                }
+                let (sx, sy) = (x.style(), y.style());
+                if sx.bg != sy.bg {
+                    wrong.push(format!("({r},{c}) bg {:?} vs {:?}", sx.bg, sy.bg));
+                }
+                if sx.add_modifier != sy.add_modifier {
+                    wrong.push(format!(
+                        "({r},{c}) modifiers {:?} vs {:?}",
+                        sx.add_modifier, sy.add_modifier
+                    ));
+                }
+                // Foreground is compared only where there is a glyph to
+                // colour. A cell erased under SGR keeps the foreground of the
+                // moment in vt100 and carries none in ghostty, which stores
+                // such a cell as a background-only content tag — invisible
+                // either way, since a blank has nothing to paint.
+                if x.symbol().trim().is_empty() {
+                    continue;
+                }
+                if sx.fg != sy.fg {
+                    wrong.push(format!("({r},{c}) fg {:?} vs {:?}", sx.fg, sy.fg));
+                }
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "{} cells differ between the engines:\n  {}",
+            wrong.len(),
+            wrong[..wrong.len().min(12)].join("\n  ")
+        );
     }
 }
