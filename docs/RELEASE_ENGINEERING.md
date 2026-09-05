@@ -285,7 +285,10 @@ are the source of truth — Actions *call them* so local and CI never drift.
   --all-targets --fail-under-lines 35`) on pushes to `main`. Supply-chain
   (cargo-deny) moved to `audit.yml` — see §6. Toolchain cached via
   `Swatinem/rust-cache`; `cargo-llvm-cov` is the same sha-pinned prebuilt binary
-  as before; `CARGO_INCREMENTAL=0` throughout. Make it a required status check in
+  as before; `CARGO_INCREMENTAL=0` throughout. The `coverage` job passes
+  `workspaces: ". -> target-cov"` to rust-cache — it resolves the target dir at
+  its own step, so without that it caches an empty `target/` and recompiles the
+  dependency tree cold every run. Make it a required status check in
   branch protection. The required contexts are exactly `Lint (fmt, clippy)` and
   `Tests (cargo test --all-targets)` — a job's **`name` IS its context**, so
   renaming either one is a three-step operation: drop the old context from
@@ -395,6 +398,18 @@ in `ci.yml`); the `apt-publish` environment holds `APT_GPG_PRIVATE_KEY` +
 `APT_GPG_PASSPHRASE`, the `homebrew-tap` environment holds `HOMEBREW_APP_ID` +
 `HOMEBREW_APP_KEY` (org GitHub App). The apt push uses the built-in
 `GITHUB_TOKEN` and cosign uses OIDC — no personal tokens stored.
+
+### `cache-cleanup.yml` — reclaim a closed PR's caches — **IMPLEMENTED**
+- On `pull_request: closed`, deletes every cache keyed to `refs/pull/N/merge`.
+- The Actions cache budget is a **hard 10 GB**, and a cache is scoped to the ref
+  that wrote it — so a merged PR's entries are unreadable by anything else and
+  are pure dead weight. rust-cache writes ~560 MB (test) + ~320 MB (lint) per
+  distinct source state; the sweep that prompted this found ~3 GB held by
+  already-merged PRs.
+- Over budget GitHub evicts least-recently-used, which takes **main's** caches —
+  the ones every new PR restores from. The symptom is cold builds on unrelated
+  PRs, with nothing in the log naming the cause.
+- Fires on `closed` rather than `merged` so abandoned PRs are reclaimed too.
 
 ## 9. Artifacts, signing & distribution
 
