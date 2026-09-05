@@ -117,7 +117,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: rustup component add llvm-tools-preview
+      # The instrumented build writes to `target-cov` (CARGO_TARGET_DIR on the
+      # coverage step below), but rust-cache resolves the target dir at ITS OWN
+      # step — so without `workspaces` it saved an empty `target/` and every run
+      # recompiled the whole dependency tree. Measured: 123s of the step's 139s
+      # went to compiling, starting at proc-macro2. The tell was cache size —
+      # 126 MB here against the test job's 564 MB.
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target-cov"
       - name: Install cargo-llvm-cov (pinned, sha256-verified)
         run: |
           CARGO_LLVM_COV_VERSION=0.8.7

@@ -1,0 +1,58 @@
+# Delete a pull request's Actions caches when it closes.
+#
+# GitHub scopes a cache to the ref that wrote it, so every `refs/pull/N/merge`
+# entry is unreadable by any other branch the moment that PR closes — dead
+# weight against a repo-wide budget that is a HARD 10 GB, not a soft target.
+# `Swatinem/rust-cache` writes ~560 MB (test) + ~320 MB (lint) per distinct
+# source state, so a handful of parked PRs is measured in gigabytes: the sweep
+# that prompted this workflow found ~3 GB held by PRs already merged.
+#
+# Over budget, GitHub evicts least-recently-used — which takes MAIN's caches,
+# the ones every new PR restores from. The failure mode is therefore not "the
+# cache is full", it is cold builds on unrelated PRs, with nothing in the log
+# naming the cause.
+#
+# Runs on `closed` (not `merged`) so an abandoned PR is reclaimed too.
+name: Cache cleanup
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    name: Drop the closed PR's caches
+    runs-on: ubuntu-latest
+    permissions:
+      # `gh cache delete` writes; nothing here reads the repo's contents.
+      actions: write
+    steps:
+      - name: Delete caches for this PR's ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF: refs/pull/${{ github.event.pull_request.number }}/merge
+        run: |
+          set -euo pipefail
+          # `gh cache list` exits 0 with no rows when a PR never cached, which
+          # is the common case for a docs-only change — not an error.
+          ids=$(gh cache list --ref "$REF" --limit 100 --json id --jq '.[].id')
+          if [ -z "$ids" ]; then
+            echo "no caches held by $REF"
+            exit 0
+          fi
+          freed=0
+          for id in $ids; do
+            if gh cache delete "$id"; then
+              freed=$((freed + 1))
+            else
+              # A cache can vanish between list and delete (concurrent eviction
+              # or a re-run of this workflow). That is the desired end state, so
+              # it must not fail the job.
+              echo "cache $id already gone"
+            fi
+          done
+          echo "deleted $freed cache(s) held by $REF"
