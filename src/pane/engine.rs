@@ -174,3 +174,120 @@ pub trait Engine: Send {
     fn screen(&self) -> &Self::Screen;
     fn screen_mut(&mut self) -> &mut Self::Screen;
 }
+
+/// The seam's contract, as tests, generic over the engine behind it.
+///
+/// Every engine that claims to satisfy [`Engine`] runs these. That is not
+/// ceremony: spyc keeps a second implementation as the escape hatch from a bad
+/// pin bump ([#453](https://github.com/Tripstack-Corp/spyc/issues/453)), and an
+/// escape hatch nothing exercises is a fiction — reverting to it would ship
+/// code no test has touched since the swap. Running one suite against both is
+/// also the only differential spyc has in CI; the spike had to build a harness
+/// outside the workspace to get one.
+///
+/// What does NOT belong here is anything the engines legitimately disagree
+/// about. The four defects in `engine_ghostty::issue_34_engine_defects` are
+/// capability differences — vt100 fails them by design, which is why the engine
+/// was swapped — and pinning them here would only assert that the incumbent is
+/// still broken.
+#[cfg(test)]
+pub mod conformance {
+    use super::{Color, Engine, MouseEncoding, MouseMode, TerminalScreen, Wide};
+
+    /// Attributes, colours and wide-glyph roles reach the seam intact.
+    pub fn reports_what_the_engine_holds<E: Engine>() {
+        // SGR 1 and SGR 2 are the SAME intensity channel — "increased" and
+        // "decreased" — so a cell cannot be both, and setting one replaces the
+        // other. They get separate cells here rather than one combined run,
+        // which an earlier version of this test got wrong.
+        let mut e = E::new(2, 12, 0);
+        e.process("\x1b[1;3;4;7;31;42mX\x1b[0m\x1b[2mD\x1b[0m\u{3042}".as_bytes());
+        let screen = e.screen();
+
+        let styled = screen.cell_style(0, 0).expect("cell 0,0");
+        assert!(styled.bold, "SGR 1");
+        assert!(styled.italic, "SGR 3");
+        assert!(styled.underline, "SGR 4");
+        assert!(styled.reverse, "SGR 7");
+        assert_eq!(styled.fg, Color::Idx(1), "SGR 31");
+        assert_eq!(styled.bg, Color::Idx(2), "SGR 42");
+        assert!(
+            !styled.dim,
+            "SGR 1 and SGR 2 share a channel; this cell asked for bold"
+        );
+
+        let dimmed = screen.cell_style(0, 1).expect("cell 0,1");
+        assert!(
+            dimmed.dim,
+            "SGR 2 — dropped by the adapter before #452, and the seam must not re-drop it"
+        );
+        assert!(!dimmed.bold, "and dim is not bold");
+
+        // The wide pair: head carries the glyph, tail carries nothing.
+        let head = screen.cell_style(0, 2).expect("cell 0,2");
+        let tail = screen.cell_style(0, 3).expect("cell 0,3");
+        assert_eq!(head.wide, Wide::Head);
+        assert_eq!(tail.wide, Wide::Tail);
+
+        let mut text = String::new();
+        assert!(screen.cell_text(0, 2, &mut text));
+        assert_eq!(text, "\u{3042}", "the head carries the glyph");
+        text.clear();
+        assert!(screen.cell_text(0, 3, &mut text));
+        assert!(text.is_empty(), "the tail carries no text of its own");
+    }
+
+    /// Past the grid edge both cell accessors report absence rather than
+    /// inventing a blank — the distinction `line_from_visible_row` breaks on.
+    pub fn past_the_edge_is_absence_not_blankness<E: Engine>() {
+        let e = E::new(2, 4, 0);
+        let s = e.screen();
+        assert!(s.cell_style(0, 4).is_none());
+        let mut t = String::from("kept");
+        assert!(!s.cell_text(0, 4, &mut t));
+        assert_eq!(t, "kept", "a failed read must not disturb the buffer");
+    }
+
+    /// Mouse mode and encoding round-trip through the model enums, since these
+    /// gate whether spyc forwards mouse bytes at all (#170).
+    pub fn mouse_protocol_maps_through_the_model_enums<E: Engine>() {
+        let mut e = E::new(2, 8, 0);
+        assert_eq!(
+            e.screen().mouse_protocol(),
+            (MouseMode::None, MouseEncoding::Default),
+            "a child that never asked must report None, or spyc forwards bytes it shouldn't"
+        );
+        e.process(b"\x1b[?1002h\x1b[?1006h");
+        assert_eq!(
+            e.screen().mouse_protocol(),
+            (MouseMode::ButtonMotion, MouseEncoding::Sgr)
+        );
+    }
+
+    /// `set_scrollback` clamps, which is how the adapter discovers the real
+    /// length. Pinned because the whole scrollback walk depends on it.
+    pub fn set_scrollback_clamps_to_the_real_length<E: Engine>() {
+        let mut e = E::new(2, 8, 100);
+        for _ in 0..20 {
+            e.process(b"line\r\n");
+        }
+        let s = e.screen_mut();
+        s.set_scrollback(usize::MAX);
+        let len = s.scrollback();
+        assert!(len > 0 && len < usize::MAX, "clamped to {len}");
+    }
+
+    /// The modes the pane branches on before forwarding anything.
+    pub fn reports_the_modes_the_pane_branches_on<E: Engine>() {
+        let mut e = E::new(4, 20, 0);
+        assert!(!e.screen().bracketed_paste());
+        assert!(!e.screen().application_cursor());
+        assert!(!e.screen().alternate_screen());
+        e.process(b"\x1b[?2004h\x1b[?1h");
+        assert!(e.screen().bracketed_paste(), "DECSET 2004");
+        assert!(e.screen().application_cursor(), "DECCKM");
+        let mut alt = E::new(4, 20, 0);
+        alt.process(b"\x1b[?1049h");
+        assert!(alt.screen().alternate_screen(), "?1049h");
+    }
+}
