@@ -29,11 +29,15 @@ on:
     - cron: "0 5 * * 1"
   workflow_dispatch:
 
-# A newer push to main supersedes an in-flight analysis: HEAD is what the
-# security posture is measured against, and the weekly sweep re-covers the rest.
+# NOT cancel-in-progress. The rust leg runs 10-12 minutes and merges land more
+# often than that during a working session, so cancelling on each new push meant
+# no analysis ever finished: four consecutive main pushes were cancelled mid-leg
+# (the last at 461s) and `main` went unscanned. Queueing instead is bounded — a
+# concurrency group holds at most ONE pending run, so a burst drops the
+# superseded middles and still converges on HEAD being analyzed.
 concurrency:
   group: codeql-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
