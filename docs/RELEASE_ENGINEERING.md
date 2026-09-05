@@ -265,7 +265,7 @@ previous minor for a short tail.** Expand windows as the user base grows.
 
 ## 8. CI/CD pipelines (GitHub Actions)
 
-Five workflows under `.github/workflows/`. All pin the toolchain via
+The workflows under `.github/workflows/`. All pin the toolchain via
 `rust-toolchain.toml` and run cargo with `--locked`. The local `make` targets
 are the source of truth — Actions *call them* so local and CI never drift.
 
@@ -345,6 +345,21 @@ are the source of truth — Actions *call them* so local and CI never drift.
   `cargo tree --duplicates` (Mon 06:00 UTC + manual dispatch). Ported from the
   retired Bitbucket `weekly-deps` pipeline. The old Bitbucket→Slack failure
   notification does *not* carry over — add a GitHub-issue/Slack step if wanted.
+
+### `codeql.yml` — static analysis (push to `main` + schedule) — **IMPLEMENTED**
+- `actions` + `rust` legs, both `build-mode: none` — CodeQL's Rust extractor
+  reads source and never invokes cargo, so no build cache shortens it.
+- **Deliberately off the PR path.** CodeQL is not a required context, so a
+  per-PR run gated nothing while costing ~12 min a push (the `rust` leg measured
+  601-737s; the `ci.yml` gate is ~70s). Merge to `main` still analyzes
+  everything that lands; the Monday 05:00 UTC sweep re-runs newly published
+  queries against unchanged code.
+- Migrated off GitHub's **default setup**, whose triggers are fixed and cannot
+  be narrowed. Default setup must stay **disabled** in repo settings — an
+  advanced-setup upload is rejected while it is on. Re-enabling it in the UI
+  silently restores the per-PR cost this workflow exists to avoid.
+- `python` is not analyzed: default setup covered one dev helper,
+  `scripts/aislop-baseline.py`, which ships in no artifact.
 
 ### `homebrew.yml` — tap bump (on release published) — **TAP LIVE**
 - `Tripstack-Corp/homebrew-tap` is live with `Formula/spyc.rb` (pins the release
