@@ -159,11 +159,16 @@ pub fn eof_marker_line(tail: &str) -> ratatui::text::Line<'static> {
 ///
 /// Three passes:
 ///
-/// 1. CRLF (`\r\n`) → LF (`\n`). The pty's slave side enables ONLCR by
-///    default, so a child writing `\n` produces `\r\n` on the master
-///    we read from. Without this, ratatui rendering interprets the
-///    literal `\r` as carriage return and shorter following lines
-///    overlay just the prefix of longer prior ones.
+/// 1. A run of CRs terminating a line (`\r+\n`) → LF (`\n`). The pty's
+///    slave side enables ONLCR by default, so a child writing `\n`
+///    produces `\r\n` on the master we read from. Without this,
+///    ratatui rendering interprets the literal `\r` as carriage return
+///    and shorter following lines overlay just the prefix of longer
+///    prior ones. It is a *run* because a child that writes its own
+///    `\r\n` — OpenSSH's `do_log`, so every `ssh -v` line — comes off
+///    the master as `\r\r\n`; collapsing only the last pair leaves a
+///    CR at the end of each segment, which pass 2 then reads as an
+///    overwrite by nothing and blanks the whole line.
 /// 2. Bare `\r` collapse. `git pull`, `npm`, `cargo`, etc. use bare
 ///    `\r` (no newline) to overwrite a progress line on the same
 ///    terminal row -- `Counting: 18%\rCounting: 27%\rCounting: 100%`.
@@ -171,8 +176,10 @@ pub fn eof_marker_line(tail: &str) -> ratatui::text::Line<'static> {
 ///    a fix we render every frame side-by-side as one super-wide
 ///    line. For each `\n`-delimited segment, we keep only the text
 ///    after the *last* `\r` -- the same final state a real terminal
-///    would show. Streaming pagers re-run this every tick, so the
-///    user sees live progress (latest frame each redraw).
+///    would show. Trailing CRs are excluded from that search: a CR
+///    moves the cursor to column 0 and erases nothing, so a segment
+///    ending in one keeps its text. Streaming pagers re-run this every
+///    tick, so the user sees live progress (latest frame each redraw).
 /// 3. Strip stray ASCII control bytes that aren't whitespace or ANSI
 ///    escape. Some `git log` commit messages, mboxen, and old-school
 ///    formatter output carry `\b` (man-page bold trick), `\v`, `\f`,
@@ -188,17 +195,23 @@ pub fn eof_marker_line(tail: &str) -> ratatui::text::Line<'static> {
 /// other control bytes pass 3 strips, so the byte-level passes are
 /// safe.
 pub fn strip_crlf(bytes: &[u8]) -> Vec<u8> {
-    // Pass 1: \r\n -> \n.
+    // Pass 1: a RUN of \r immediately before \n -> one \n.
     let mut step1 = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'\r' && bytes.get(i + 1) == Some(&b'\n') {
-            step1.push(b'\n');
-            i += 2;
-        } else {
-            step1.push(bytes[i]);
-            i += 1;
+        if bytes[i] == b'\r' {
+            let mut end = i;
+            while bytes.get(end) == Some(&b'\r') {
+                end += 1;
+            }
+            if bytes.get(end) == Some(&b'\n') {
+                step1.push(b'\n');
+                i = end + 1;
+                continue;
+            }
         }
+        step1.push(bytes[i]);
+        i += 1;
     }
     // Pass 2: collapse bare \r within each line to the last frame.
     let step2: Vec<u8> = if step1.contains(&b'\r') {
@@ -209,8 +222,11 @@ pub fn strip_crlf(bytes: &[u8]) -> Vec<u8> {
                 out.push(b'\n');
             }
             first = false;
-            let start = line.iter().rposition(|&b| b == b'\r').map_or(0, |i| i + 1);
-            out.extend_from_slice(&line[start..]);
+            // A CR at the very end overwrote nothing, so it erases nothing.
+            let end = line.iter().rposition(|&b| b != b'\r').map_or(0, |i| i + 1);
+            let head = &line[..end];
+            let start = head.iter().rposition(|&b| b == b'\r').map_or(0, |i| i + 1);
+            out.extend_from_slice(&head[start..]);
         }
         out
     } else {
@@ -329,6 +345,23 @@ mod tests {
         let (user, host) = s.split_once('@').expect("user@host shape");
         assert!(!user.is_empty(), "user half empty: {s}");
         assert!(!host.is_empty(), "host half empty: {s}");
+    }
+
+    /// The pager renders `ssh -v` output as text, not as blank rows. Its
+    /// stderr lines carry their own `\r\n`, which the capture pty's ONLCR
+    /// doubles into `\r\r\n` -- the shape that used to leave every line
+    /// empty while the title still counted them.
+    #[test]
+    fn buffer_to_lines_keeps_cr_cr_lf_terminated_text() {
+        let lines = buffer_to_lines(b"debug1: Connecting to 10.49.8.42\r\r\ndebug1: connect\r\r\n");
+        let plain: Vec<String> = lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        assert_eq!(
+            plain,
+            vec!["debug1: Connecting to 10.49.8.42", "debug1: connect"]
+        );
     }
 
     /// `buffer_to_lines` normalizes CRLF and bare-CR progress overwrites the
