@@ -1372,6 +1372,38 @@ mod strip_crlf_tests {
         let input = b"a\tb\nc\x1b[31md";
         assert_eq!(strip_crlf(input), b"a\tb\nc\x1b[31md");
     }
+
+    #[test]
+    fn cr_run_before_lf_collapses_to_one_lf() {
+        // `ssh -v` writes its own `\r\n` to stderr, and the capture pty's
+        // ONLCR turns that into `\r\r\n` -- so every line arrives with a CR
+        // still ahead of the LF. Collapsing only the LAST pair leaves each
+        // segment ending in a CR, which pass 2 reads as "the line was
+        // overwritten by nothing" and blanks it. Real bytes off a live
+        // `ssh -v` capture.
+        let input = b"debug1: OpenSSH_10.3p1, LibreSSL 3.3.6\r\r\n\
+debug1: Connecting to 127.0.0.1 [127.0.0.1] port 22.\r\r\n";
+        assert_eq!(
+            strip_crlf(input),
+            b"debug1: OpenSSH_10.3p1, LibreSSL 3.3.6\n\
+debug1: Connecting to 127.0.0.1 [127.0.0.1] port 22.\n"
+        );
+    }
+
+    #[test]
+    fn trailing_cr_does_not_erase_its_line() {
+        // A CR moves the cursor to column 0; it erases nothing. A segment
+        // whose last CR sits at its end therefore keeps its text -- both
+        // mid-stream (a progress frame whose overwrite hasn't arrived) and
+        // when a CR run precedes the terminator.
+        assert_eq!(strip_crlf(b"Counting: 50%\r"), b"Counting: 50%");
+        assert_eq!(strip_crlf(b"Counting: 50%\r\r\r"), b"Counting: 50%");
+        // The overwrite still wins when there IS text after the CR.
+        assert_eq!(
+            strip_crlf(b"Counting: 18%\rCounting: 50%\r"),
+            b"Counting: 50%"
+        );
+    }
 }
 
 #[cfg(test)]
