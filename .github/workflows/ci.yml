@@ -77,7 +77,7 @@ jobs:
       # image and fails PRs that touched nothing. Same reasoning that moved
       # cargo-deny off this path. Keep in step with the version the Makefile
       # names, so a local run and CI agree.
-      - uses: taiki-e/install-action@v2.87.0
+      - uses: taiki-e/install-action@v2.87.5
         with:
           tool: shellcheck@0.11.0
       - name: Lint workflows (actionlint + shellcheck)
