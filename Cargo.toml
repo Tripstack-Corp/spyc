@@ -168,7 +168,7 @@ uzers = "0.12"
 strip-ansi-escapes = "0.2"
 pulldown-cmark = { version = "0.13", default-features = false }
 tar = "0.4"
-zstd = "0.13"
+zstd = "0.14"
 # Archive browsing (docs/archive/ARCHIVE_BROWSING_PLAN.md): read the zip central
 # directory to index a mount without decompressing, and `raw_copy_file` untouched
 # entries on repack. `default-features = false` is required, not tidiness — the
