@@ -101,21 +101,14 @@ impl App {
         // `prepare_panes`, #347), so no `&mut` re-borrow is involved.
         let mut active_idx: Option<usize> = None;
         if let Some(tabs) = &self.runtime.pane_tabs {
-            let tab_widths = super::super::mouse::tab_hit::tab_widths(tabs, is_scrolling);
+            let tab_layout =
+                super::super::mouse::tab_hit::tab_layout(tabs, is_scrolling, area.width);
             for (i, entry) in tabs.tabs().iter().enumerate() {
                 let is_active = i == tabs.active_index();
                 if is_active {
                     active_idx = Some(i);
                 }
                 let sep = "─";
-                // Uppercase the active tab label in scroll mode — the
-                // shape change is a peripheral-vision cue even before
-                // the colour registers.
-                let label = if is_active && is_scrolling {
-                    entry.info.label.to_uppercase()
-                } else {
-                    entry.info.label.clone()
-                };
                 // FIXED-WIDTH indicator so the divider never reflows as statuses
                 // change: every tab is `[N]` + exactly one status cell + label.
                 // The active tab is marked by reverse-video (`active_tab_style`),
@@ -150,12 +143,17 @@ impl App {
                 } else {
                     " " // reserved blank — keeps the width fixed
                 };
-                let label_text = format!(" {label} ");
-                // Width comes from `tab_hit::tab_widths`, NOT recomputed here:
-                // the mouse hit-test lays the bar out from that same list, and
-                // any drift between the two puts clicks on the wrong tab. See
-                // the module doc on `mouse::tab_hit`.
-                let tab_len = tab_widths.get(i).copied().unwrap_or(0) as usize;
+                // Label text (uppercased in scroll mode, padding cropped and
+                // letters shaved to fit the bar) AND width both come from
+                // `tab_hit::tab_layout`, NOT recomputed here: the mouse
+                // hit-test lays the bar out from that same list, and any drift
+                // between the two puts clicks on the wrong tab. See the module
+                // doc on `mouse::tab_hit`.
+                let label_text = tab_layout
+                    .get(i)
+                    .map(|c| c.label_text.clone())
+                    .unwrap_or_default();
+                let tab_len = tab_layout.get(i).map_or(0, |c| c.width) as usize;
                 if used + tab_len > width {
                     break;
                 }
@@ -170,7 +168,7 @@ impl App {
                             .map_or(0, |s| crate::ui::display_width(s.content.as_ref()))
                         + crate::ui::display_width(shell_cell)
                         + crate::ui::display_width(&label_text),
-                    "tab {i} paints a different width than tab_widths budgeted"
+                    "tab {i} paints a different width than tab_layout budgeted"
                 );
                 spans.push(Span::styled(sep, rule_style));
                 // An agent tab's eye-pull comes from the coloured dot, so its

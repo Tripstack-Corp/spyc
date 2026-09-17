@@ -23,17 +23,36 @@ pub struct TabSpan {
     pub end: u16,
 }
 
-/// Per-tab width in display columns, in tab order.
+/// One tab's fitted geometry: its total width in display columns and the
+/// exact label text (padding spaces included, as they survived the fit) the
+/// renderer must paint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabCell {
+    pub width: u16,
+    pub label_text: String,
+}
+
+/// Fit every tab into `bar_width` display columns — the bar never overflows
+/// and never silently drops a tab.
 ///
 /// Mirrors what `render_divider` paints for each tab: the `─` separator, the
-/// `[N]` bracket, exactly one status cell, and the space-padded label.
+/// `[N]` bracket, exactly one status cell, and the (possibly cropped) label.
 ///
 /// The status cell is one column for every tab except a suspended one, whose
 /// 💤 is two columns wide — the one deliberate width difference in the bar (a
 /// sticky toggle, unlike the per-frame flicker the reserved blank prevents).
-pub fn tab_widths(tabs: &PaneTabs, is_scrolling: bool) -> Vec<u16> {
+///
+/// When the natural layout overflows, columns are reclaimed in two stages:
+/// 1. **Padding spaces first** (trailing then leading, rightmost tab first) —
+///    uneven spacing across tabs is accepted; only as many spaces go as needed.
+/// 2. **Then letters from the longest label**, one column at a time — which
+///    converges the labels toward equal length, then shrinks them together.
+/// Only if the fixed chrome alone (`─[N]` + status cells) exceeds the bar do
+/// tabs still drop, via the overflow break in `tab_spans` / the renderer.
+pub fn tab_layout(tabs: &PaneTabs, is_scrolling: bool, bar_width: u16) -> Vec<TabCell> {
     let active = tabs.active_index();
-    tabs.tabs()
+    let items = tabs
+        .tabs()
         .iter()
         .enumerate()
         .map(|(i, entry)| {
@@ -46,11 +65,86 @@ pub fn tab_widths(tabs: &PaneTabs, is_scrolling: bool) -> Vec<u16> {
                 entry.info.label.clone()
             };
             let cell = if entry.info.suspended { 2 } else { 1 };
-            let w = 1 // "─" separator
+            let fixed = 1 // "─" separator
                 + crate::ui::display_width(&format!("[{}]", i + 1))
-                + cell
-                + crate::ui::display_width(&format!(" {label} "));
-            u16::try_from(w).unwrap_or(u16::MAX)
+                + cell;
+            (fixed, label)
+        })
+        .collect();
+    fit_tabs(items, bar_width)
+}
+
+/// The pure fit itself: `items` is each tab's fixed chrome width (`─[N]` +
+/// status cell) and its painted label. Split out from [`tab_layout`] so the
+/// algorithm is unit-testable without spawning a pty behind a `PaneTabs`.
+fn fit_tabs(items: Vec<(usize, String)>, bar_width: u16) -> Vec<TabCell> {
+    struct Fit {
+        fixed: usize,
+        label: String,
+        lpad: bool,
+        rpad: bool,
+    }
+    let mut fits: Vec<Fit> = items
+        .into_iter()
+        .map(|(fixed, label)| Fit {
+            fixed,
+            label,
+            lpad: true,
+            rpad: true,
+        })
+        .collect();
+    let total = |fits: &[Fit]| -> usize {
+        fits.iter()
+            .map(|f| {
+                f.fixed
+                    + usize::from(f.lpad)
+                    + crate::ui::display_width(&f.label)
+                    + usize::from(f.rpad)
+            })
+            .sum()
+    };
+    let bar = bar_width as usize;
+    // Stage 1: crop padding spaces, trailing before leading, right to left.
+    'spaces: for trailing in [true, false] {
+        for i in (0..fits.len()).rev() {
+            if total(&fits) <= bar {
+                break 'spaces;
+            }
+            if trailing {
+                fits[i].rpad = false;
+            } else {
+                fits[i].lpad = false;
+            }
+        }
+    }
+    // Stage 2: shave one display column off the currently-longest label until
+    // it fits (or every label is gone — fixed chrome alone overflows).
+    while total(&fits) > bar {
+        let Some(longest) = fits
+            .iter_mut()
+            .filter(|f| !f.label.is_empty())
+            .max_by_key(|f| crate::ui::display_width(&f.label))
+        else {
+            break;
+        };
+        let target = crate::ui::display_width(&longest.label).saturating_sub(1);
+        while crate::ui::display_width(&longest.label) > target {
+            longest.label.pop();
+        }
+    }
+    fits.into_iter()
+        .map(|f| {
+            let label_text = format!(
+                "{}{}{}",
+                if f.lpad { " " } else { "" },
+                f.label,
+                if f.rpad { " " } else { "" }
+            );
+            TabCell {
+                width: u16::try_from(f.fixed + crate::ui::display_width(&label_text))
+                    .unwrap_or(u16::MAX),
+                label_text,
+            }
         })
         .collect()
 }
@@ -200,6 +294,78 @@ mod tests {
         }
         assert_eq!(tab_at(4, &spans), None, "left of the bar");
         assert_eq!(tab_at(13, &spans), None, "right of the bar");
+    }
+
+    /// Single-digit tab: `─` + `[N]` + one status cell = 5 fixed columns.
+    fn item(label: &str) -> (usize, String) {
+        (5, label.to_string())
+    }
+
+    fn bar_total(cells: &[TabCell]) -> u16 {
+        cells.iter().map(|c| c.width).sum()
+    }
+
+    #[test]
+    fn fit_keeps_padding_when_there_is_room() {
+        let cells = fit_tabs(vec![item("claude"), item("bash")], 80);
+        assert_eq!(cells[0].label_text, " claude ");
+        assert_eq!(cells[1].label_text, " bash ");
+        assert_eq!(cells[0].width, 13);
+        assert_eq!(cells[1].width, 11);
+    }
+
+    /// Two columns over: only padding spaces go (trailing first, rightmost
+    /// tab first) — every letter survives, spacing ends up uneven.
+    #[test]
+    fn fit_crops_spaces_before_letters() {
+        let cells = fit_tabs(vec![item("claude"), item("bash")], 22);
+        assert_eq!(cells[1].label_text, " bash", "rightmost trailing space first");
+        assert_eq!(cells[0].label_text, " claude", "then the next tab's");
+        assert_eq!(bar_total(&cells), 22);
+    }
+
+    /// Deep overflow: after the spaces, letters come off whichever label is
+    /// currently longest, converging the labels toward equal length.
+    #[test]
+    fn fit_shaves_longest_label_first() {
+        let cells = fit_tabs(vec![item("claude"), item("bash")], 16);
+        assert_eq!(cells[0].label_text, "cla");
+        assert_eq!(cells[1].label_text, "bas");
+        assert_eq!(bar_total(&cells), 16);
+    }
+
+    /// The bar must never overflow, whatever the label pressure — that is the
+    /// whole point of the fit (tabs used to silently drop instead).
+    #[test]
+    fn fit_never_overflows_the_bar() {
+        let labels = [
+            "coordinator",
+            "discipline",
+            "watercooler",
+            "martlet",
+            "topo-oceans",
+            "codex-dev",
+            "system",
+            "shell",
+        ];
+        for bar in [200u16, 120, 80, 60, 48, 41] {
+            let cells = fit_tabs(labels.iter().map(|l| item(l)).collect(), bar);
+            assert_eq!(cells.len(), labels.len(), "no tab dropped at {bar}");
+            assert!(
+                bar_total(&cells) <= bar,
+                "overflow at bar={bar}: {}",
+                bar_total(&cells)
+            );
+        }
+    }
+
+    /// Below the fixed chrome floor (8 tabs × 5 cols = 40) the labels are gone
+    /// and the old overflow-drop in `tab_spans` remains the backstop.
+    #[test]
+    fn fit_gives_up_at_the_fixed_chrome_floor() {
+        let cells = fit_tabs(vec![item("claude"), item("bash")], 8);
+        assert!(cells.iter().all(|c| c.label_text.is_empty()));
+        assert_eq!(bar_total(&cells), 10, "the fixed chrome itself remains");
     }
 
     #[test]
