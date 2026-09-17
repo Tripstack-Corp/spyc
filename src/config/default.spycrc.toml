@@ -64,8 +64,22 @@
 # Antigravity (`agy`) panes. Reads that conversation's own transcript
 # (`~/.gemini/antigravity-cli/brain/<conversation-id>/.../transcript.jsonl`)
 # and renders cleanly without terminal artifacts.
+#
+# Startup tabs: open the bottom pane with K tabs already in place at
+# launch (the config-driven `^a c`). Two forms — compact:
+#     tabs = ["claude", "bash"]
+# or per-tab tables when a tab needs its own cwd / display label:
+#     [[pane.tab]]
+#     command = "claude"
+#     cwd = "~/Work/my-project"     # ~, absolute, or relative-to-launch-dir
+#     label = "coordinator"         # display name; defaults from command
+# Use ONE form per file (both at once is a config error). Max 9 tabs
+# (the ^a 1..9 jump reach). Precedence at startup:
+# `spyc -r` restore (if you pick a session) > these tabs > single tab
+# on demand. Unset (default): today's behaviour, no pane until ^a c.
 [pane]
 # default_command = "claude"
+# tabs = ["claude", "bash"]
 # new_tab_cwd = "worktree_root"
 # claude_transcript_scrollback = false
 # agy_transcript_scrollback = true
