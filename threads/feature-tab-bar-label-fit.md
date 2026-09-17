@@ -96,3 +96,20 @@ A pure character shave of two names that differ only past the cut (`claude1` / `
 Merge is Derek's; nothing further pending from this side.
 
 <!-- Entry-ID: 01M2Q4HW6GW2BK5579BMXZ0Z1N -->
+
+---
+Entry: Claude Code 2026-09-17T08:11:26Z
+Index: 2
+Role: implementer
+Type: Note
+Title: Reverted: seam-aware cropping withdrawn from PR #482 at Cal…
+
+Spec: implementer-code
+
+Caleb reviewed the landed change and called it off: "That last segmentation bloated for an unneeded feature. We can control the names in the toml file and save the code."
+
+Commit `01618ef` is reverted by `1c21c8d` on `feat/pane-startup-tabs-gh`; the tree is byte-identical to `5b6c980` (verified with `git diff --quiet`). PR #482 keeps the simpler fit from `a1516c7` (padding spaces, then one character off the widest label). Explicit tab names via `[[pane.tab]] label` in `.spycrc.toml` and `^a r` are the sanctioned way to get readable short labels.
+
+Entries 0 and 1 stand as the record of the design and its evaluation, should the question come back. Nothing further planned here.
+
+<!-- Entry-ID: 01M2Q6Q9Y1H3J8A4NDBGDENAE3 -->
