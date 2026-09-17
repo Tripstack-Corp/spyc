@@ -45,26 +45,11 @@ pub struct TabCell {
 /// When the natural layout overflows, columns are reclaimed in two stages:
 /// 1. **Padding spaces first** (trailing then leading, rightmost tab first) —
 ///    uneven spacing across tabs is accepted; only as many spaces go as needed.
-/// 2. **Then the widest label is cropped**, one step at a time, by the first
-///    of these that applies and frees at least one column:
-///    - **tail-segment drop** at the label's last seam (`topo-oceans` →
-///      `topo…`), refused when the result would equal another tab's label;
-///    - **head-segment drop** when the first segment is shared with another
-///      tab (`watercooler-cloud` beside `watercooler` → `…cloud`) — the shared
-///      head carried no information, the tail is what tells them apart;
-///    - **character shave** with a trailing `…` (`codex` → `cod…`);
-///    - **floor**: a label of [`LABEL_FLOOR`] painted columns or fewer is
-///      cleared outright — `[N]` still names the tab, and an empty label reads
-///      as deliberate where `c…` reads as broken.
+/// 2. **Then letters from the longest label**, one column at a time — which
+///    converges the labels toward equal length, then shrinks them together.
 ///
-/// The **active tab is cropped last**: it leaves the pool only once every
-/// other label is empty, so moderate pressure never touches the name the user
-/// is reading, and extreme pressure yields `[1][2]…[9] bash`.
-///
-/// Every step frees at least one column or is skipped, so the loop always
-/// reaches the fixed-chrome floor. Only if the fixed chrome alone (`─[N]` +
-/// status cells) exceeds the bar do tabs still drop, via the overflow break in
-/// `tab_spans` / the renderer.
+/// Only if the fixed chrome alone (`─[N]` + status cells) exceeds the bar do
+/// tabs still drop, via the overflow break in `tab_spans` / the renderer.
 pub fn tab_layout(tabs: &PaneTabs, is_scrolling: bool, bar_width: u16) -> Vec<TabCell> {
     let active = tabs.active_index();
     let items = tabs
@@ -87,26 +72,38 @@ pub fn tab_layout(tabs: &PaneTabs, is_scrolling: bool, bar_width: u16) -> Vec<Ta
             (fixed, label)
         })
         .collect();
-    fit_tabs(items, Some(active), bar_width)
+    fit_tabs(items, bar_width)
 }
 
 /// The pure fit itself: `items` is each tab's fixed chrome width (`─[N]` +
 /// status cell) and its painted label. Split out from [`tab_layout`] so the
 /// algorithm is unit-testable without spawning a pty behind a `PaneTabs`.
-fn fit_tabs(items: Vec<(usize, String)>, active: Option<usize>, bar_width: u16) -> Vec<TabCell> {
+fn fit_tabs(items: Vec<(usize, String)>, bar_width: u16) -> Vec<TabCell> {
+    struct Fit {
+        fixed: usize,
+        label: String,
+        lpad: bool,
+        rpad: bool,
+    }
     let mut fits: Vec<Fit> = items
         .into_iter()
         .map(|(fixed, label)| Fit {
             fixed,
-            original: label.clone(),
-            core: label,
-            head_elided: false,
-            tail_cut: false,
+            label,
             lpad: true,
             rpad: true,
         })
         .collect();
-    let total = |fits: &[Fit]| -> usize { fits.iter().map(Fit::width).sum() };
+    let total = |fits: &[Fit]| -> usize {
+        fits.iter()
+            .map(|f| {
+                f.fixed
+                    + usize::from(f.lpad)
+                    + crate::ui::display_width(&f.label)
+                    + usize::from(f.rpad)
+            })
+            .sum()
+    };
     let bar = bar_width as usize;
     // Stage 1: crop padding spaces, trailing before leading, right to left.
     'spaces: for trailing in [true, false] {
@@ -121,29 +118,29 @@ fn fit_tabs(items: Vec<(usize, String)>, active: Option<usize>, bar_width: u16) 
             }
         }
     }
-    // Stage 2: crop the widest eligible label one step at a time. The active
-    // tab is eligible only once every other label is already empty.
+    // Stage 2: shave one display column off the currently-longest label until
+    // it fits (or every label is gone — fixed chrome alone overflows).
     while total(&fits) > bar {
-        let others_alive = fits
-            .iter()
-            .enumerate()
-            .any(|(i, f)| Some(i) != active && !f.core.is_empty());
-        // `max_by_key` keeps the LAST maximum, so ties crop the rightmost tab.
-        let Some(idx) = (0..fits.len())
-            .filter(|&i| {
-                let alive = !fits[i].core.is_empty();
-                let spared = Some(i) == active && others_alive;
-                alive && !spared
-            })
-            .max_by_key(|&i| fits[i].painted_width())
+        let Some(longest) = fits
+            .iter_mut()
+            .filter(|f| !f.label.is_empty())
+            .max_by_key(|f| crate::ui::display_width(&f.label))
         else {
             break;
         };
-        crop_one(&mut fits, idx);
+        let target = crate::ui::display_width(&longest.label).saturating_sub(1);
+        while crate::ui::display_width(&longest.label) > target {
+            longest.label.pop();
+        }
     }
     fits.into_iter()
         .map(|f| {
-            let label_text = f.label_text();
+            let label_text = format!(
+                "{}{}{}",
+                if f.lpad { " " } else { "" },
+                f.label,
+                if f.rpad { " " } else { "" }
+            );
             TabCell {
                 width: u16::try_from(f.fixed + crate::ui::display_width(&label_text))
                     .unwrap_or(u16::MAX),
@@ -151,166 +148,6 @@ fn fit_tabs(items: Vec<(usize, String)>, active: Option<usize>, bar_width: u16) 
             }
         })
         .collect()
-}
-
-/// Marks a cropped label: the column it costs is what tells the reader the
-/// name continues, so `codex-` no longer reads as the tab's actual name.
-const ELLIPSIS: &str = "\u{2026}";
-
-/// A label painted at this many columns or fewer (`co…`) carries nothing the
-/// `[N]` bracket doesn't; the next crop clears it instead of shaving on.
-const LABEL_FLOOR: usize = 3;
-
-/// One tab mid-fit: its fixed chrome width plus the label in its current
-/// cropped form. `original` is kept for the head-segment comparison, which
-/// asks whether the label *as named* shares its first segment with a
-/// neighbour — an answer cropping must not change.
-struct Fit {
-    fixed: usize,
-    original: String,
-    core: String,
-    head_elided: bool,
-    tail_cut: bool,
-    lpad: bool,
-    rpad: bool,
-}
-
-impl Fit {
-    /// The label's painted core: ellipses included, padding excluded. An empty
-    /// core paints nothing at all — no orphaned `…`.
-    fn painted(&self) -> String {
-        if self.core.is_empty() {
-            return String::new();
-        }
-        let head = if self.head_elided { ELLIPSIS } else { "" };
-        let tail = if self.tail_cut { ELLIPSIS } else { "" };
-        format!("{head}{}{tail}", self.core)
-    }
-
-    fn painted_width(&self) -> usize {
-        crate::ui::display_width(&self.painted())
-    }
-
-    fn label_text(&self) -> String {
-        format!(
-            "{}{}{}",
-            if self.lpad { " " } else { "" },
-            self.painted(),
-            if self.rpad { " " } else { "" }
-        )
-    }
-
-    fn width(&self) -> usize {
-        self.fixed + crate::ui::display_width(&self.label_text())
-    }
-
-    fn clear(&mut self) {
-        self.core.clear();
-        self.head_elided = false;
-        self.tail_cut = false;
-    }
-}
-
-/// A separator a label can be cut before. Space is included because a custom
-/// `^a r` name can carry one; `/` because a cwd-derived name might.
-const fn is_seam_sep(c: char) -> bool {
-    matches!(c, '-' | '_' | '.' | '/' | ' ')
-}
-
-/// Byte offsets at which `s` may be cut: before a separator run that has
-/// text on both sides, and at a lowercase→uppercase transition
-/// (`TradingAgents` → `Trading` | `Agents`). Ascending.
-fn seams(s: &str) -> Vec<usize> {
-    let mut out = Vec::new();
-    let mut prev: Option<char> = None;
-    for (i, c) in s.char_indices() {
-        if let Some(p) = prev {
-            let sep_run_start = is_seam_sep(c) && !is_seam_sep(p);
-            let text_after = || s[i..].chars().any(|c| !is_seam_sep(c));
-            let camel = !is_seam_sep(c) && c.is_uppercase() && p.is_lowercase();
-            if (sep_run_start && text_after()) || camel {
-                out.push(i);
-            }
-        }
-        prev = Some(c);
-    }
-    out
-}
-
-/// `s` up to its first seam — the whole of it when there is none.
-fn first_segment(s: &str) -> &str {
-    seams(s).first().map_or(s, |&i| &s[..i])
-}
-
-/// Crop `fits[idx]` by one step: tail-segment drop, else head-segment drop,
-/// else character shave, else clear. See [`tab_layout`] for the rationale
-/// behind the order. Every step either frees at least one column or falls
-/// through to the next, which is what keeps the caller's loop finite.
-fn crop_one(fits: &mut [Fit], idx: usize) {
-    let before = fits[idx].painted_width();
-    if before <= LABEL_FLOOR {
-        fits[idx].clear();
-        return;
-    }
-    let others: Vec<(String, String, String)> = fits
-        .iter()
-        .enumerate()
-        .filter(|&(i, _)| i != idx)
-        .map(|(_, f)| {
-            (
-                f.original.to_lowercase(),
-                f.core.to_lowercase(),
-                first_segment(&f.original).to_lowercase(),
-            )
-        })
-        .collect();
-    // A crop that lands on a neighbour's name (as named, or as currently
-    // painted) is refused: two tabs reading the same defeats the label.
-    let collides = |cand: &str| {
-        let cand = cand.to_lowercase();
-        others
-            .iter()
-            .any(|(orig, core, _)| *orig == cand || *core == cand)
-    };
-    let fit = &mut fits[idx];
-    let seams = seams(&fit.core);
-    if let Some(&cut) = seams.last() {
-        let cand = &fit.core[..cut];
-        if !collides(cand) {
-            let cand = cand.to_string();
-            let prev = std::mem::replace(&mut fit.core, cand);
-            let was_cut = std::mem::replace(&mut fit.tail_cut, true);
-            if fit.painted_width() < before {
-                return;
-            }
-            fit.core = prev;
-            fit.tail_cut = was_cut;
-        }
-    }
-    if let Some(&cut) = seams.first() {
-        let head = fit.core[..cut].to_lowercase();
-        let shared = others.iter().any(|(_, _, first)| *first == head);
-        let cand = fit.core[cut..].trim_start_matches(is_seam_sep);
-        if shared && !cand.is_empty() && !collides(cand) {
-            let cand = cand.to_string();
-            let prev = std::mem::replace(&mut fit.core, cand);
-            let was_elided = std::mem::replace(&mut fit.head_elided, true);
-            if fit.painted_width() < before {
-                return;
-            }
-            fit.core = prev;
-            fit.head_elided = was_elided;
-        }
-    }
-    // Shave: the first pop only pays for the `…`, so it keeps popping until a
-    // column is actually freed.
-    fit.tail_cut = true;
-    while fit.painted_width() >= before {
-        if fit.core.pop().is_none() {
-            fit.clear();
-            return;
-        }
-    }
 }
 
 /// Lay the tab bar out left-to-right from `origin_x`, dropping tabs that would
@@ -471,7 +308,7 @@ mod tests {
 
     #[test]
     fn fit_keeps_padding_when_there_is_room() {
-        let cells = fit_tabs(vec![item("claude"), item("bash")], None, 80);
+        let cells = fit_tabs(vec![item("claude"), item("bash")], 80);
         assert_eq!(cells[0].label_text, " claude ");
         assert_eq!(cells[1].label_text, " bash ");
         assert_eq!(cells[0].width, 13);
@@ -482,7 +319,7 @@ mod tests {
     /// tab first) — every letter survives, spacing ends up uneven.
     #[test]
     fn fit_crops_spaces_before_letters() {
-        let cells = fit_tabs(vec![item("claude"), item("bash")], None, 22);
+        let cells = fit_tabs(vec![item("claude"), item("bash")], 22);
         assert_eq!(
             cells[1].label_text, " bash",
             "rightmost trailing space first"
@@ -491,134 +328,14 @@ mod tests {
         assert_eq!(bar_total(&cells), 22);
     }
 
-    /// Deep overflow with seamless labels: letters come off whichever label is
-    /// currently widest, converging the labels toward equal length, and every
-    /// shaved label wears the `…` that says it was cut.
+    /// Deep overflow: after the spaces, letters come off whichever label is
+    /// currently longest, converging the labels toward equal length.
     #[test]
     fn fit_shaves_longest_label_first() {
-        let cells = fit_tabs(vec![item("claude"), item("bash")], None, 16);
-        assert_eq!(cells[0].label_text, "cl…");
-        assert_eq!(cells[1].label_text, "ba…");
+        let cells = fit_tabs(vec![item("claude"), item("bash")], 16);
+        assert_eq!(cells[0].label_text, "cla");
+        assert_eq!(cells[1].label_text, "bas");
         assert_eq!(bar_total(&cells), 16);
-    }
-
-    /// A shave costs the `…` its column, so the first shave pops two letters
-    /// to free one — `codex` never paints as `code…` (same width as before).
-    #[test]
-    fn fit_shave_marks_the_cut_and_still_frees_a_column() {
-        let cells = fit_tabs(vec![item("codex")], None, 9);
-        assert_eq!(cells[0].label_text, "cod…");
-        assert_eq!(bar_total(&cells), 9);
-    }
-
-    /// A label with a seam loses its last segment whole rather than letters
-    /// from the middle of a word: `topo-oc` told the reader nothing.
-    #[test]
-    fn fit_cuts_at_the_last_seam_before_shaving() {
-        let cells = fit_tabs(vec![item("topo-oceans"), item("shell")], None, 22);
-        assert_eq!(cells[0].label_text, "topo…");
-        assert_eq!(
-            cells[1].label_text, "shell",
-            "the shorter label is untouched"
-        );
-        assert!(bar_total(&cells) <= 22);
-    }
-
-    /// camelCase is a seam too.
-    #[test]
-    fn fit_treats_a_case_transition_as_a_seam() {
-        let cells = fit_tabs(vec![item("TradingAgents"), item("shell")], None, 24);
-        assert_eq!(cells[0].label_text, "Trading…");
-    }
-
-    /// Siblings sharing a head must stay distinct: cutting the tail off
-    /// `watercooler-cloud` would land on the `watercooler` tab's own name, so
-    /// the shared head goes instead and the distinguishing tail survives.
-    #[test]
-    fn fit_keeps_siblings_distinct_by_dropping_the_shared_head() {
-        let cells = fit_tabs(
-            vec![
-                item("watercooler"),
-                item("watercooler-cloud"),
-                item("watercooler-dashboard"),
-            ],
-            None,
-            41,
-        );
-        assert_eq!(cells[1].label_text, "…cloud");
-        assert_eq!(cells[2].label_text, "…dashboard");
-        assert_eq!(cells[0].label_text, "watercool…", "seamless: shaved last");
-        assert!(bar_total(&cells) <= 41);
-    }
-
-    /// Below [`LABEL_FLOOR`] the label is cleared, not shaved to `c…`.
-    #[test]
-    fn fit_clears_a_label_at_the_floor_instead_of_shaving_further() {
-        let at_floor = fit_tabs(vec![item("bash")], None, 8);
-        assert_eq!(at_floor[0].label_text, "ba…");
-        let below = fit_tabs(vec![item("bash")], None, 7);
-        assert_eq!(below[0].label_text, "", "cleared, no orphan `…`");
-        assert_eq!(bar_total(&below), 5, "fixed chrome only");
-    }
-
-    /// The active tab is the one being read: it keeps its full name while any
-    /// other tab still has a label, and is cropped only once they are gone.
-    #[test]
-    fn fit_crops_the_active_tab_last() {
-        let items = || vec![item("coordinator"), item("discipline"), item("shell")];
-        let moderate = fit_tabs(items(), Some(0), 37);
-        assert_eq!(moderate[0].label_text, "coordinator", "active untouched");
-        assert_eq!(moderate[1].label_text, "disci…", "the widest other paid");
-        assert_eq!(moderate[2].label_text, "shell");
-        assert!(bar_total(&moderate) <= 37);
-
-        let extreme = fit_tabs(items(), Some(0), 18);
-        assert_eq!(extreme[1].label_text, "");
-        assert_eq!(extreme[2].label_text, "");
-        assert_eq!(
-            extreme[0].label_text, "co…",
-            "active crops only after the rest"
-        );
-        assert_eq!(bar_total(&extreme), 18);
-    }
-
-    /// Across every bar width the fit never overflows and no two painted
-    /// labels above the floor read the same. Seam-aware cropping guarantees
-    /// distinctness for segment cuts; a pure character shave of two names
-    /// that differ only past the cut (`claude1`/`claude2`) can still collide,
-    /// which is why this set has none such — the `[N]` bracket is the
-    /// backstop there.
-    #[test]
-    fn fit_stays_distinct_and_within_the_bar_at_every_width() {
-        let labels = [
-            "coordinator",
-            "discipline",
-            "watercooler",
-            "watercooler-cloud",
-            "watercooler-dashboard",
-            "martlet-ops",
-            "topo-oceans",
-            "codex",
-            "codex-dev",
-            "system",
-            "shell",
-            "bash",
-        ];
-        let floor = u16::try_from(labels.len() * 5).unwrap();
-        for bar in (floor..=220).rev() {
-            let cells = fit_tabs(labels.iter().map(|l| item(l)).collect(), Some(11), bar);
-            assert!(bar_total(&cells) <= bar, "overflow at bar={bar}: {cells:?}");
-            let painted: Vec<&str> = cells
-                .iter()
-                .map(|c| c.label_text.trim())
-                .filter(|t| crate::ui::display_width(t) > LABEL_FLOOR)
-                .collect();
-            for (i, a) in painted.iter().enumerate() {
-                for b in &painted[i + 1..] {
-                    assert_ne!(a, b, "duplicate label at bar={bar}: {cells:?}");
-                }
-            }
-        }
     }
 
     /// The bar must never overflow, whatever the label pressure — that is the
@@ -636,7 +353,7 @@ mod tests {
             "shell",
         ];
         for bar in [200u16, 120, 80, 60, 48, 41] {
-            let cells = fit_tabs(labels.iter().map(|l| item(l)).collect(), None, bar);
+            let cells = fit_tabs(labels.iter().map(|l| item(l)).collect(), bar);
             assert_eq!(cells.len(), labels.len(), "no tab dropped at {bar}");
             assert!(
                 bar_total(&cells) <= bar,
@@ -650,7 +367,7 @@ mod tests {
     /// and the old overflow-drop in `tab_spans` remains the backstop.
     #[test]
     fn fit_gives_up_at_the_fixed_chrome_floor() {
-        let cells = fit_tabs(vec![item("claude"), item("bash")], None, 8);
+        let cells = fit_tabs(vec![item("claude"), item("bash")], 8);
         assert!(cells.iter().all(|c| c.label_text.is_empty()));
         assert_eq!(bar_total(&cells), 10, "the fixed chrome itself remains");
     }
