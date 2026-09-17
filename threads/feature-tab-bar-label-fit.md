@@ -64,3 +64,35 @@ Termination: every op nets at least one column or is inapplicable, and the floor
 Committed to `feat/pane-startup-tabs-gh` as one conventional commit, pushed to the PR for Derek's review. Merge is Derek's call, not ours.
 
 <!-- Entry-ID: 01M2Q45F7SM4P1VFMKQ499TS70 -->
+
+---
+Entry: Claude Code 2026-09-17T07:33:30Z
+Index: 1
+Role: implementer
+Type: Note
+Title: Implemented as planned: commit 01618ef on PR #482
+
+Spec: implementer-code
+
+## Landed
+
+Commit `01618ef` on `feat/pane-startup-tabs-gh` (Tripstack-Corp/spyc PR #482), pushed. Implements the plan in entry 0 without deviation.
+
+- `src/app/mouse/tab_hit.rs`: `fit_tabs` now takes the active index; stage two is the op ladder (tail-segment drop with collision refusal → head-segment drop on a shared first segment → character shave with `…` → floor clear at three columns), applied to the widest eligible label, active tab exempt while any other label is non-empty. Seams: separator runs (`- _ . / space`) with text on both sides, plus lowercase→uppercase transitions. `Fit` records carry `original` (for the first-segment comparison, which cropping must not change), `core`, `head_elided`, `tail_cut`. The doc comment on `tab_layout` states the order.
+- `src/app/render/chrome.rs`: untouched, as planned.
+- `FEATURES.md`: one bullet under Multi-tab describing the fit order and pointing at `^a r` / `[[pane.tab]] label` for an explicit name.
+
+## Evidence
+
+- 20 tests in `tab_hit`, 8 of them new or changed. Each new mechanism was disabled in turn (seams empty, ellipsis blank, floor zero, active exemption off) and the matching tests failed; restored, all green.
+- Hand-computed expectations matched on first run: `topo-oceans` → `topo…`; `TradingAgents` → `Trading…`; `watercooler` / `watercooler-cloud` / `watercooler-dashboard` at 41 columns → `watercool…` / `…cloud` / `…dashboard`; `bash` at the floor → `ba…`, one column less → empty; active `coordinator` intact at moderate pressure, `co…` only after the other two are empty.
+- Sweep over every bar width from the fixed-chrome floor to 220 with twelve realistic labels: no overflow, no two labels above the floor equal.
+- `make check-ci`: fmt and clippy clean; the only test failures are the two machine-local ones already known on this box (the prose guard tripping on an untracked `.serena/` memory file, and the tracked-`.mcp.json` cleanup test blocked by this machine's global git ignore). CI on the previous head was green; the run for `01618ef` is in flight.
+
+## Known limit, documented in the sweep test
+
+A pure character shave of two names that differ only past the cut (`claude1` / `claude2`) can still collide. Segment cuts are collision-checked; character shaves are not, because shaving further would collide just the same. The `[N]` bracket is the backstop there.
+
+Merge is Derek's; nothing further pending from this side.
+
+<!-- Entry-ID: 01M2Q4HW6GW2BK5579BMXZ0Z1N -->
