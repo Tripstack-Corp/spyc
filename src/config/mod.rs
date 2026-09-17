@@ -1182,7 +1182,7 @@ fn merge_color(dst: &mut Option<String>, src: Option<String>) {
     }
 }
 
-pub(crate) fn home_dir() -> Option<PathBuf> {
+pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
@@ -1550,7 +1550,11 @@ mod tests {
         std::fs::write(&user, "[pane]\ntabs = [\"claude\"]\n").unwrap();
         std::fs::write(&project, "[pane]\ndefault_command = \"bash\"\n").unwrap();
         let cfg = Config::load_from(&[Some(&user), Some(&project)]).unwrap();
-        assert_eq!(cfg.pane.tabs.len(), 1, "project file with no tabs cleared user tabs");
+        assert_eq!(
+            cfg.pane.tabs.len(),
+            1,
+            "project file with no tabs cleared user tabs"
+        );
         assert_eq!(cfg.pane.default_command.as_deref(), Some("bash"));
     }
 

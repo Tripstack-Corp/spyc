@@ -47,6 +47,7 @@ pub struct TabCell {
 ///    uneven spacing across tabs is accepted; only as many spaces go as needed.
 /// 2. **Then letters from the longest label**, one column at a time — which
 ///    converges the labels toward equal length, then shrinks them together.
+///
 /// Only if the fixed chrome alone (`─[N]` + status cells) exceeds the bar do
 /// tabs still drop, via the overflow break in `tab_spans` / the renderer.
 pub fn tab_layout(tabs: &PaneTabs, is_scrolling: bool, bar_width: u16) -> Vec<TabCell> {
@@ -319,7 +320,10 @@ mod tests {
     #[test]
     fn fit_crops_spaces_before_letters() {
         let cells = fit_tabs(vec![item("claude"), item("bash")], 22);
-        assert_eq!(cells[1].label_text, " bash", "rightmost trailing space first");
+        assert_eq!(
+            cells[1].label_text, " bash",
+            "rightmost trailing space first"
+        );
         assert_eq!(cells[0].label_text, " claude", "then the next tab's");
         assert_eq!(bar_total(&cells), 22);
     }
