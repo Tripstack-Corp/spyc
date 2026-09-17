@@ -481,6 +481,15 @@ Multiple tabs, each running an independent pty:
   child is a new process, so its `SPYC_PANE_ID`, agent conversation, and
   scrollback all start fresh
 - Activity indicator (**+**) on background tabs that have new output
+- **Every tab fits the bar** — the divider never drops a tab for overflow.
+  Under pressure it reclaims columns in order: padding spaces first, then the
+  widest label is cropped a step at a time — a whole trailing segment at a
+  seam (`topo-oceans` → `topo…`), or the shared head when siblings would
+  otherwise read the same (`watercooler-cloud` beside `watercooler` →
+  `…cloud`), else letters with a trailing `…`. A label at three columns is
+  cleared rather than shaved to `c…` (`[N]` still names it), and the active
+  tab is cropped only once every other label is gone. Set an explicit name
+  with `^a r` or `[[pane.tab]] label` to skip the heuristic for a tab.
 - **Default command** for `^a c` resolves in this order:
   `$SPYC_PANE_CMD` env var → `[pane] default_command` in
   `.spycrc.toml` → built-in `"claude"` fallback. Switch your daily
