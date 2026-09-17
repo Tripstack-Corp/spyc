@@ -389,6 +389,7 @@ impl App {
             let declared = app.state.config.pane.tabs.clone();
             let launch_dir = app.state.left.listing.dir.clone();
             let mut opened = 0usize;
+            let mut cwd_fallbacks = 0usize;
             for tab in &declared {
                 let cwd = match &tab.cwd {
                     Some(p) => {
@@ -405,11 +406,7 @@ impl App {
                         if expanded.is_dir() {
                             expanded
                         } else {
-                            app.state.flash_error(format!(
-                                "startup tab `{}`: cwd {} not a directory — using default",
-                                tab.command,
-                                expanded.display()
-                            ));
+                            cwd_fallbacks += 1;
                             app.state.default_pane_cwd()
                         }
                     }
@@ -419,6 +416,9 @@ impl App {
                 // pane; both are overridden after the loop (summary flash,
                 // focus back on the list — startup shouldn't steal the
                 // keyboard the way an interactive `^a c` deliberately does).
+                // `state.flash` is a single slot, not a queue, so a per-tab
+                // error flashed here would be clobbered by that summary before
+                // the first render — failures are counted into it instead.
                 let spawned = app.open_pane_tab_in(&tab.command, &cwd);
                 if spawned {
                     opened += 1;
@@ -436,10 +436,19 @@ impl App {
                 tabs.switch_to(0);
             }
             app.state.focus = state::Focus::FileList;
-            app.state.flash_info(format!(
+            let summary = format!(
                 "opened {opened}/{} startup tab(s) — ^a 1..9 to jump",
                 declared.len()
-            ));
+            );
+            if cwd_fallbacks > 0 || opened < declared.len() {
+                app.state.flash_error(format!(
+                    "{summary} ({cwd_fallbacks} cwd not a directory, used default; \
+                     {} failed to spawn)",
+                    declared.len() - opened
+                ));
+            } else {
+                app.state.flash_info(summary);
+            }
         }
 
         if resume {

@@ -120,18 +120,21 @@ fn fit_tabs(items: Vec<(usize, String)>, bar_width: u16) -> Vec<TabCell> {
     }
     // Stage 2: shave one display column off the currently-longest label until
     // it fits (or every label is gone — fixed chrome alone overflows).
+    // Eligibility and the cut are both in COLUMNS: a label that is non-empty
+    // in bytes but zero columns wide (a lone ZWSP) can't shrink, and filtering
+    // on `is_empty` would select it forever. Cutting on grapheme clusters
+    // (`display_truncate`) keeps the width the fit sums equal to the width
+    // the terminal draws.
     while total(&fits) > bar {
         let Some(longest) = fits
             .iter_mut()
-            .filter(|f| !f.label.is_empty())
+            .filter(|f| crate::ui::display_width(&f.label) > 0)
             .max_by_key(|f| crate::ui::display_width(&f.label))
         else {
             break;
         };
         let target = crate::ui::display_width(&longest.label).saturating_sub(1);
-        while crate::ui::display_width(&longest.label) > target {
-            longest.label.pop();
-        }
+        longest.label = crate::ui::display_truncate(&longest.label, target).to_string();
     }
     fits.into_iter()
         .map(|f| {
@@ -370,6 +373,42 @@ mod tests {
         let cells = fit_tabs(vec![item("claude"), item("bash")], 8);
         assert!(cells.iter().all(|c| c.label_text.is_empty()));
         assert_eq!(bar_total(&cells), 10, "the fixed chrome itself remains");
+    }
+
+    /// A label that is non-empty in bytes but zero display columns (a lone
+    /// zero-width space, a variation selector) must not wedge the shave loop:
+    /// it can't be shrunk, so the fit has to look past it — and return.
+    /// Reachable from `[[pane.tab]] label = "..."`, which isn't validated.
+    #[test]
+    fn fit_terminates_on_zero_width_label() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let cells = fit_tabs(vec![item("\u{200b}"), item("claude")], 8);
+            let _ = tx.send(cells);
+        });
+        let cells = rx
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .expect("fit_tabs never returned on a zero-width label");
+        assert!(bar_total(&cells) <= 10, "fixed chrome floor holds");
+    }
+
+    /// Shaving must cut on grapheme clusters: a ZWJ emoji is one drawn glyph,
+    /// and a per-char pop would leave a half-cluster whose width the terminal
+    /// and the fit disagree on.
+    #[test]
+    fn fit_shaves_whole_clusters() {
+        let family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
+        // `ab` + family = 4 columns on 5 fixed; a bar of 6 leaves one column
+        // of label. The family (2 wide) must go as one unit, not one scalar
+        // at a time.
+        let cells = fit_tabs(vec![item(&format!("ab{family}"))], 6);
+        assert_eq!(cells[0].label_text, "a");
+        assert_eq!(bar_total(&cells), 6);
+        // And a cluster at the head with a 1-column budget drops whole rather
+        // than leaving a fragment.
+        let cells = fit_tabs(vec![item(&format!("{family}a"))], 6);
+        assert!(!cells[0].label_text.contains('\u{200d}'), "no ZWJ fragment");
+        assert!(bar_total(&cells) <= 6);
     }
 
     #[test]
