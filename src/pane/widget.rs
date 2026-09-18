@@ -285,3 +285,82 @@ mod selection_tests {
         assert!(!selected(None, 0, 0));
     }
 }
+
+/// The observed symptom of #484, at the level it was seen: a pane drawn
+/// through this widget.
+///
+/// The engine-side contract lives in `engine_ghostty::grapheme_cluster_width`.
+/// These cover what that contract is *for* — that a producer budgeting columns
+/// the way `ui::display_width` counts them gets the pane it drew.
+#[cfg(test)]
+mod cluster_alignment_tests {
+    #[allow(unused_imports)]
+    use crate::pane::PaneEngine;
+    #[allow(unused_imports)]
+    use crate::pane::engine::{Engine as EngineT, TerminalScreen as _};
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::widgets::Widget as _;
+
+    use super::PaneWidget;
+
+    fn rendered(bytes: &[u8], rows: u16, cols: u16) -> Buffer {
+        let mut parser = <PaneEngine as EngineT>::new(rows, cols, 0);
+        parser.process(bytes);
+        let area = Rect::new(0, 0, cols, rows);
+        let mut buf = Buffer::empty(area);
+        PaneWidget {
+            screen: parser.screen(),
+            focused: true,
+            selection: None,
+        }
+        .render(area, &mut buf);
+        buf
+    }
+
+    fn columns_of(buf: &Buffer, row: u16, cols: u16, symbol: &str) -> Vec<u16> {
+        (0..cols)
+            .filter(|&x| buf.cell((x, row)).is_some_and(|c| c.symbol() == symbol))
+            .collect()
+    }
+
+    /// Two table rows the producer budgeted identically — one whose cell holds
+    /// a regional-indicator flag, one holding two ASCII characters — must land
+    /// their borders in the same columns.
+    ///
+    /// This is the reported symptom: rendering a markdown table, the only row
+    /// containing a real emoji cluster was the only row whose borders were off.
+    #[test]
+    fn a_cluster_does_not_shift_what_follows_it_on_the_line() {
+        let buf = rendered("|\u{1f1e8}\u{1f1e6}|\r\n|ab|".as_bytes(), 2, 12);
+        let emoji_row = columns_of(&buf, 0, 12, "|");
+        let ascii_row = columns_of(&buf, 1, 12, "|");
+        assert_eq!(
+            emoji_row, ascii_row,
+            "the flag row's borders drifted from the ASCII row's"
+        );
+        assert_eq!(
+            emoji_row,
+            vec![0, 3],
+            "and both sit where 2 columns puts them"
+        );
+    }
+
+    /// A producer that redraws a line in place — carriage return, same budgeted
+    /// width, no erase — must fully cover what it drew before. When the engine
+    /// spent more columns on the cluster than the producer budgeted, the
+    /// overspill survived the redraw as stray characters stranded to the right.
+    #[test]
+    fn redrawing_a_line_over_a_cluster_leaves_no_orphaned_cells() {
+        // Four columns by the producer's count: the flag, then `XY`.
+        let buf = rendered("\u{1f1e8}\u{1f1e6}XY\rabcd".as_bytes(), 1, 12);
+        let row: String = (0..12)
+            .filter_map(|x| buf.cell((x, 0)).map(|c| c.symbol().to_string()))
+            .collect();
+        assert_eq!(
+            row.trim_end(),
+            "abcd",
+            "the redraw must cover the whole first write; got {row:?}"
+        );
+    }
+}

@@ -441,6 +441,58 @@ the alt screen, in raw mode, and — since `[mouse] capture` defaults on — wit
 session. The plan that introduced default-on capture listed this teardown as
 its prerequisite; the default shipped first, which is how the gap reached users.
 
+## Grapheme clustering (DEC mode 2027)
+
+spyc turns mode 2027 **on** in every pane terminal (`GhosttyEngine::new`), which
+is not libghostty's default. A grapheme cluster — a flag, a ZWJ sequence, a
+skin-tone modifier, an emoji with VS16 — therefore occupies the columns
+`ui::display_width` budgets for it, in one cell, instead of one wide cell per
+codepoint.
+
+**The choice is forced, not preferred.** spyc is both a terminal emulator (it
+parses the child's bytes into a grid) and a client of the host terminal (it
+re-emits that grid through ratatui), so the engine's model has to match the
+*host's* or the misalignment merely moves across the seam. What settles it is
+that spyc's host-facing half is already committed: ratatui is the only writer to
+the host, its `Buffer` stores one grapheme per cell, and it skips a wide
+glyph's continuation using `unicode-width` on that grapheme — the same
+cluster-level rules `ui::display_width` applies to the status bar, tab bar and
+pager. Every shape measured lands as exactly one grapheme occupying
+`display_width` columns. There is no way to emit a four-column flag through that
+path short of hand-splitting clusters in the render pass, so the alternative —
+summing `ghostty_unicode_codepoint_width` to match the engine — could only
+relocate the disagreement to the ratatui boundary, where spyc has no say. The
+engine was the one component modelling mode 2027 disabled; the rest of spyc, and
+the producers filling the pane, already assumed it enabled.
+
+That commitment was previously only *exercised* by spyc's chrome, where spyc
+controls the content and the sole cluster is the status-bar chilli. Enabling the
+mode extends it to pane content, where agents print emoji constantly — so a host
+that does not cluster would now disagree with spyc's re-emission over far more
+cells than before. That is the real cost of the choice, and it is not zero. It is
+accepted because the alternative is unavailable, not because the risk is
+imaginary. Verified against Ghostty, which clusters: a shell tab printing
+repeated cluster runs lays out identically line to line, closing at the same
+column each time.
+
+The defect this closes ([#484](https://github.com/Tripstack-Corp/spyc/issues/484)):
+agents print emoji constantly, and an engine spending four columns on a cluster
+the producer budgeted two for shifts everything after it on the line, then leaves
+the overspill stranded when the producer redraws in place. It was caught on a
+markdown table whose only misaligned row was its only row with a real cluster.
+
+Set through `GHOSTTY_TERMINAL_OPT_MODE_DEFAULT`, not `..._OPT_MODE`: that sets
+the current value *and* the one RIS restores, so a child running `reset` does not
+silently drop the pane back to per-codepoint layout.
+
+Two limits worth knowing. spyc installs no `write_pty` callback, so a child's
+`CSI ? 2027 $ p` query goes unanswered and a producer that queries before
+clustering gets no confirmation — the common ones emit and assume, which is what
+made the bug visible. And the dormant vt100 engine cannot satisfy this: it lays
+the flag out as two narrow cells, the ZWJ family across six columns and the VS16
+heart in one. The contract test is scoped to the ghostty engine for that reason
+rather than living in the `E: Engine` conformance suite.
+
 ## Git: 100% in-process gix
 
 Production git is entirely in-process via `gix` (gitoxide) — status,

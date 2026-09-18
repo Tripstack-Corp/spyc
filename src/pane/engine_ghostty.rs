@@ -38,6 +38,10 @@ use spyc_vt_sys::{ffi, scrollback};
 
 use super::engine::{CellStyle, Color, Engine, MouseEncoding, MouseMode, TerminalScreen, Wide};
 
+/// DEC mode 2027 — grapheme clustering. See `GhosttyEngine::new` for why spyc
+/// turns it on, and ARCHITECTURE.md → "Grapheme clustering (DEC mode 2027)".
+const MODE_GRAPHEME_CLUSTER: u16 = 2027;
+
 /// One materialized frame: what every read answers from.
 ///
 /// Text is a flat `String` with a span per cell rather than a `String` per
@@ -684,6 +688,25 @@ impl Engine for GhosttyEngine {
             spyc_vt_sys::SUCCESS,
             "ghostty_terminal_new"
         );
+        // Grapheme clustering (DEC mode 2027), which libghostty leaves off by
+        // default. spyc's host-facing half already models it enabled —
+        // `ui::display_width` and ratatui both measure a cluster as one unit —
+        // so an engine laying `\u{1f1e8}\u{1f1e6}` across four columns
+        // disagrees with every other component and with the producers filling
+        // the pane. `OPT_MODE_DEFAULT` rather than `OPT_MODE`: it sets the
+        // current value AND the one RIS restores, so a child running `reset`
+        // doesn't silently drop back to per-codepoint layout.
+        let cluster = GhosttyTerminalModeConfig {
+            mode: MODE_GRAPHEME_CLUSTER,
+            value: true,
+        };
+        unsafe {
+            ffi::ghostty_terminal_set(
+                t,
+                Opt::GHOSTTY_TERMINAL_OPT_MODE_DEFAULT,
+                (&raw const cluster).cast(),
+            );
+        }
         // Both limits, always: rows are the UX contract, bytes the safety
         // valve, and leaving either at its default truncates history.
         let limits = scrollback::limits_for_row_budget(scrollback_rows.max(1));
@@ -1050,5 +1073,122 @@ mod against_the_reference_engine {
             wrong.len(),
             wrong[..wrong.len().min(12)].join("\n  ")
         );
+    }
+}
+
+/// Grapheme clustering (DEC mode 2027), pinned against `ui::display_width`.
+///
+/// Ghostty-scoped rather than part of the `E: Engine` conformance suite, for
+/// the reason that suite states about `issue_34_engine_defects`: vt100 fails
+/// this by design — it lays the flag out as two narrow cells, the ZWJ family
+/// across six columns and the VS16 heart in one — and pinning a capability the
+/// escape hatch ([#453](https://github.com/Tripstack-Corp/spyc/issues/453))
+/// cannot have would assert only that it is still broken.
+#[cfg(test)]
+mod grapheme_cluster_width {
+    use super::*;
+
+    /// One regional-indicator pair: 🇨🇦.
+    const FLAG: &str = "\u{1f1e8}\u{1f1e6}";
+    /// A ZWJ sequence: 👨‍👩‍👧.
+    const FAMILY: &str = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
+    /// Base plus skin-tone modifier: 👍🏽.
+    const SKIN_TONE: &str = "\u{1f44d}\u{1f3fd}";
+    /// Emoji presentation selector: ❤️. Widens a codepoint that is narrow bare.
+    const HEART_VS16: &str = "\u{2764}\u{fe0f}";
+    /// spyc's own status-bar logo: 🌶️ — the same VS16 shape.
+    const CHILLI: &str = "\u{1f336}\u{fe0f}";
+
+    /// Columns the engine spent laying `s` out on a fresh grid.
+    ///
+    /// A cell counts as occupied when it carries text or is a wide glyph's
+    /// continuation; a trailing run of blank narrow cells is the unused rest
+    /// of the row.
+    fn columns_used(s: &str) -> usize {
+        let mut e = <GhosttyEngine as Engine>::new(2, 40, 0);
+        e.process(s.as_bytes());
+        let screen = e.screen();
+        let mut last = 0;
+        let mut text = String::new();
+        for col in 0..40u16 {
+            let Some(st) = screen.cell_style(0, col) else {
+                break;
+            };
+            text.clear();
+            screen.cell_text(0, col, &mut text);
+            if !text.is_empty() || st.wide == Wide::Tail {
+                last = usize::from(col) + 1;
+            }
+        }
+        last
+    }
+
+    /// The engine and `ui::display_width` are the two halves of one pipeline —
+    /// a producer budgets columns the way `display_width` counts them, the
+    /// engine lays the bytes out, ratatui re-emits the grid — so a shape they
+    /// disagree on is drawn misaligned. Before mode 2027 was enabled the engine
+    /// summed per-codepoint widths: the flag took 4 columns against a budget of
+    /// 2, and the VS16 heart took 1.
+    #[test]
+    fn every_cluster_shape_costs_what_display_width_budgets() {
+        for s in [
+            FLAG,
+            FAMILY,
+            SKIN_TONE,
+            HEART_VS16,
+            CHILLI,
+            "\u{2705}",  // ✅ — already wide bare
+            "\u{3042}",  // CJK, the baseline wide case
+            "\u{2764}",  // bare heart: narrow, and must STAY narrow
+            "e\u{0301}", // combining acute: one column
+            "ab",        // and clustering must not disturb plain ASCII
+        ] {
+            assert_eq!(
+                columns_used(s),
+                crate::ui::display_width(s),
+                "engine vs display_width on {:?}",
+                s.escape_unicode().to_string()
+            );
+        }
+    }
+
+    /// Agreeing on the total is not enough: the whole cluster must land in ONE
+    /// head cell. Split across cells the column count could still come out
+    /// right while `contents_between` (selection text) and `ui::scrollback`
+    /// reassemble the codepoints by luck.
+    #[test]
+    fn a_cluster_lands_in_one_cell_not_one_per_codepoint() {
+        for s in [FLAG, FAMILY, SKIN_TONE, HEART_VS16, CHILLI] {
+            let mut e = <GhosttyEngine as Engine>::new(2, 40, 0);
+            e.process(s.as_bytes());
+            let screen = e.screen();
+            let mut text = String::new();
+            assert!(screen.cell_text(0, 0, &mut text));
+            assert_eq!(
+                text,
+                s,
+                "the head cell must carry the whole cluster, got {:?}",
+                text.escape_unicode().to_string()
+            );
+            assert_eq!(screen.cell_style(0, 0).map(|c| c.wide), Some(Wide::Head));
+            assert_eq!(screen.cell_style(0, 1).map(|c| c.wide), Some(Wide::Tail));
+        }
+    }
+
+    /// A child running `reset` emits RIS, which restores every mode to its
+    /// reset default. Clustering is set through `OPT_MODE_DEFAULT` precisely so
+    /// it survives that; `OPT_MODE` alone would set the live value and let RIS
+    /// silently drop the pane back to per-codepoint layout.
+    #[test]
+    fn a_child_reset_does_not_drop_clustering() {
+        let mut e = <GhosttyEngine as Engine>::new(2, 40, 0);
+        assert!(e.screen().mode(MODE_GRAPHEME_CLUSTER), "enabled at init");
+        e.process(b"\x1bc");
+        assert!(
+            e.screen().mode(MODE_GRAPHEME_CLUSTER),
+            "RIS must restore mode 2027 set, not clear it"
+        );
+        e.process(FLAG.as_bytes());
+        assert_eq!(columns_used(FLAG), 2, "and layout still clusters after RIS");
     }
 }
