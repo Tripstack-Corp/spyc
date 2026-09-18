@@ -242,6 +242,28 @@ pub struct PaneConfig {
     /// disk. Set false to keep spyc's hands off the clipboard entirely.
     /// Default true.
     pub preview_pasted_images: bool,
+    /// Startup pane tabs. When non-empty, the bottom pane opens at launch
+    /// with these tabs already in place — the config-driven analogue of
+    /// pressing `^a c` K times (PANE_STARTUP_TABS_PLAN.md). Empty (the
+    /// default) preserves today's single-tab-on-demand behaviour. Populated
+    /// from either the compact `tabs = ["claude", "bash"]` array or the
+    /// `[[pane.tab]]` table form (command + optional cwd / label); setting
+    /// both in one file is a config error. Capped at 9 to match the
+    /// `^a 1..9` jump reach. `spyc -r` (session restore) takes precedence:
+    /// the startup seed is skipped so restored tabs aren't spawned-then-
+    /// killed underneath the picker.
+    pub tabs: Vec<PaneTabConfig>,
+}
+
+/// One declared startup pane tab. `cwd` resolution: absolute is used
+/// as-is, `~` expands to `$HOME`, relative joins the launch directory;
+/// unset falls back to `[pane] new_tab_cwd`. `label` overrides the
+/// display name derived from the command.
+#[derive(Debug, Clone)]
+pub struct PaneTabConfig {
+    pub command: String,
+    pub cwd: Option<PathBuf>,
+    pub label: Option<String>,
 }
 
 impl Default for PaneConfig {
@@ -253,6 +275,7 @@ impl Default for PaneConfig {
             agy_transcript_scrollback: true,
             codex_mcp: true,
             preview_pasted_images: true,
+            tabs: Vec::new(),
         }
     }
 }
@@ -289,6 +312,24 @@ struct FilePane {
     codex_mcp: Option<bool>,
     #[serde(default)]
     preview_pasted_images: Option<bool>,
+    /// Compact startup-tabs form: `tabs = ["claude", "bash"]`.
+    #[serde(default)]
+    tabs: Option<Vec<String>>,
+    /// Table startup-tabs form: `[[pane.tab]]` with per-tab cwd/label.
+    /// Mutually exclusive with `tabs` within one file (hard error).
+    #[serde(default)]
+    tab: Option<Vec<FilePaneTab>>,
+}
+
+/// On-disk shape of one `[[pane.tab]]` entry.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FilePaneTab {
+    command: String,
+    #[serde(default)]
+    cwd: Option<PathBuf>,
+    #[serde(default)]
+    label: Option<String>,
 }
 
 /// Yank / clipboard knobs.
@@ -937,6 +978,53 @@ impl Config {
         if let Some(b) = file.pane.codex_mcp {
             self.pane.codex_mcp = b;
         }
+        // Startup tabs: the two forms are mutually exclusive within one
+        // file — merging them would hide an ambiguity, so surface it as a
+        // hard error at load (PANE_STARTUP_TABS_PLAN.md). Whichever form
+        // is present REPLACES any earlier file's tab list (project file
+        // overrides user file wholesale, matching the other pane fields).
+        match (&file.pane.tabs, &file.pane.tab) {
+            (Some(_), Some(_)) => {
+                anyhow::bail!(
+                    "{}: [pane] sets both `tabs = [...]` and `[[pane.tab]]` — use one form",
+                    source.display()
+                );
+            }
+            (Some(cmds), None) => {
+                self.pane.tabs = cmds
+                    .iter()
+                    .map(|c| PaneTabConfig {
+                        command: c.clone(),
+                        cwd: None,
+                        label: None,
+                    })
+                    .collect();
+            }
+            (None, Some(entries)) => {
+                self.pane.tabs = entries
+                    .iter()
+                    .map(|e| PaneTabConfig {
+                        command: e.command.clone(),
+                        cwd: e.cwd.clone(),
+                        label: e.label.clone(),
+                    })
+                    .collect();
+            }
+            (None, None) => {}
+        }
+        if self.pane.tabs.len() > 9 {
+            anyhow::bail!(
+                "{}: [pane] declares {} startup tabs; the maximum is 9 (the `^a 1..9` jump reach)",
+                source.display(),
+                self.pane.tabs.len()
+            );
+        }
+        if self.pane.tabs.iter().any(|t| t.command.trim().is_empty()) {
+            anyhow::bail!(
+                "{}: [pane] startup tab with an empty command",
+                source.display()
+            );
+        }
 
         // Yank: per-field merge.
         if let Some(b) = file.yank.include_pager_title {
@@ -1094,7 +1182,7 @@ fn merge_color(dst: &mut Option<String>, src: Option<String>) {
     }
 }
 
-fn home_dir() -> Option<PathBuf> {
+pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
@@ -1385,6 +1473,89 @@ mod tests {
         std::fs::write(&path, "[pager]\ntab_width = 0\n").unwrap();
         let cfg = Config::load_from(&[Some(&path)]).unwrap();
         assert_eq!(cfg.pager.tab_width, 1, "a 0-width tab would vanish");
+    }
+
+    #[test]
+    fn parses_pane_startup_tabs_compact() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("c.toml");
+        std::fs::write(&path, "[pane]\ntabs = [\"claude\", \"bash\"]\n").unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert_eq!(cfg.pane.tabs.len(), 2);
+        assert_eq!(cfg.pane.tabs[0].command, "claude");
+        assert!(cfg.pane.tabs[0].cwd.is_none());
+        assert!(cfg.pane.tabs[0].label.is_none());
+        assert_eq!(cfg.pane.tabs[1].command, "bash");
+    }
+
+    #[test]
+    fn parses_pane_startup_tabs_table_form() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("c.toml");
+        std::fs::write(
+            &path,
+            "[[pane.tab]]\ncommand = \"claude\"\n\n[[pane.tab]]\ncommand = \"bash\"\ncwd = \"~/scratch\"\nlabel = \"scratch\"\n",
+        )
+        .unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert_eq!(cfg.pane.tabs.len(), 2);
+        assert_eq!(cfg.pane.tabs[1].command, "bash");
+        assert_eq!(
+            cfg.pane.tabs[1].cwd.as_deref(),
+            Some(std::path::Path::new("~/scratch"))
+        );
+        assert_eq!(cfg.pane.tabs[1].label.as_deref(), Some("scratch"));
+    }
+
+    #[test]
+    fn pane_startup_tabs_both_forms_is_error() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("c.toml");
+        std::fs::write(
+            &path,
+            "[pane]\ntabs = [\"claude\"]\n\n[[pane.tab]]\ncommand = \"bash\"\n",
+        )
+        .unwrap();
+        let err = Config::load_from(&[Some(&path)]).unwrap_err().to_string();
+        assert!(err.contains("both"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn pane_startup_tabs_over_nine_is_error() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("c.toml");
+        let cmds: Vec<String> = (0..10).map(|i| format!("\"cmd{i}\"")).collect();
+        std::fs::write(&path, format!("[pane]\ntabs = [{}]\n", cmds.join(", "))).unwrap();
+        let err = Config::load_from(&[Some(&path)]).unwrap_err().to_string();
+        assert!(err.contains("maximum is 9"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn pane_startup_tabs_project_replaces_user() {
+        let tmp = tempdir().unwrap();
+        let user = tmp.path().join("user.toml");
+        let project = tmp.path().join("project.toml");
+        std::fs::write(&user, "[pane]\ntabs = [\"claude\", \"bash\"]\n").unwrap();
+        std::fs::write(&project, "[pane]\ntabs = [\"codex\"]\n").unwrap();
+        let cfg = Config::load_from(&[Some(&user), Some(&project)]).unwrap();
+        assert_eq!(cfg.pane.tabs.len(), 1);
+        assert_eq!(cfg.pane.tabs[0].command, "codex");
+    }
+
+    #[test]
+    fn pane_without_tabs_does_not_clobber_user_tabs() {
+        let tmp = tempdir().unwrap();
+        let user = tmp.path().join("user.toml");
+        let project = tmp.path().join("project.toml");
+        std::fs::write(&user, "[pane]\ntabs = [\"claude\"]\n").unwrap();
+        std::fs::write(&project, "[pane]\ndefault_command = \"bash\"\n").unwrap();
+        let cfg = Config::load_from(&[Some(&user), Some(&project)]).unwrap();
+        assert_eq!(
+            cfg.pane.tabs.len(),
+            1,
+            "project file with no tabs cleared user tabs"
+        );
+        assert_eq!(cfg.pane.default_command.as_deref(), Some("bash"));
     }
 
     #[test]

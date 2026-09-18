@@ -378,6 +378,79 @@ impl App {
         // `Effect::Graveyard` kicked from `App::run`, so its disk IO stays off
         // the startup path. See that call site.
 
+        // Startup pane tabs (`[pane] tabs` / `[[pane.tab]]`): seed the
+        // declared fleet at launch — the config-driven analogue of pressing
+        // `^a c` K times. Skipped under `spyc -r`: session restore rebuilds
+        // its own tab list (`restore_session` drops `pane_tabs` outright),
+        // and seeding beneath the picker would spawn ptys only to SIGKILL
+        // them moments later. Precedence per PANE_STARTUP_TABS_PLAN.md:
+        // restore > declared tabs > single-tab-on-demand.
+        if !resume && !app.state.config.pane.tabs.is_empty() {
+            let declared = app.state.config.pane.tabs.clone();
+            let launch_dir = app.state.left.listing.dir.clone();
+            let mut opened = 0usize;
+            let mut cwd_fallbacks = 0usize;
+            for tab in &declared {
+                let cwd = match &tab.cwd {
+                    Some(p) => {
+                        let expanded = if let Ok(stripped) = p.strip_prefix("~") {
+                            match crate::config::home_dir() {
+                                Some(h) => h.join(stripped),
+                                None => p.clone(),
+                            }
+                        } else if p.is_relative() {
+                            launch_dir.join(p)
+                        } else {
+                            p.clone()
+                        };
+                        if expanded.is_dir() {
+                            expanded
+                        } else {
+                            cwd_fallbacks += 1;
+                            app.state.default_pane_cwd()
+                        }
+                    }
+                    None => app.state.default_pane_cwd(),
+                };
+                // `open_pane_tab_in` flashes per spawn and pulls focus to the
+                // pane; both are overridden after the loop (summary flash,
+                // focus back on the list — startup shouldn't steal the
+                // keyboard the way an interactive `^a c` deliberately does).
+                // `state.flash` is a single slot, not a queue, so a per-tab
+                // error flashed here would be clobbered by that summary before
+                // the first render — failures are counted into it instead.
+                let spawned = app.open_pane_tab_in(&tab.command, &cwd);
+                if spawned {
+                    opened += 1;
+                    if let Some(label) = &tab.label
+                        && let Some(tabs) = app.runtime.pane_tabs.as_mut()
+                        && let Some(entry) = tabs.tabs_mut().last_mut()
+                    {
+                        entry.info.label.clone_from(label);
+                    }
+                }
+            }
+            if let Some(tabs) = app.runtime.pane_tabs.as_mut() {
+                // Land on the first declared tab (the user ordered them;
+                // spawning leaves the last one active).
+                tabs.switch_to(0);
+            }
+            app.state.focus = state::Focus::FileList;
+            let summary = format!(
+                "opened {opened}/{} startup tab(s) — ^a 1..9 to jump",
+                declared.len()
+            );
+            if cwd_fallbacks > 0 || opened < declared.len() {
+                app.state.flash_error(format!(
+                    "{summary} ({cwd_fallbacks} cwd not a directory, used default; \
+                     {} failed to spawn)",
+                    declared.len() - opened
+                ));
+            } else {
+                app.state.flash_info(summary);
+            }
+        }
+
         if resume {
             app.show_session_picker();
         }

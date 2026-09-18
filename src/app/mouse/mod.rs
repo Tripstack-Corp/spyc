@@ -327,11 +327,17 @@ impl super::App {
             // Only resolved over the divider: the width walk allocates, and a
             // wheel tick over the pane has no use for it.
             tab_under_pointer: if matches!(region, Some(route::Region::Divider)) {
-                let widths = self
+                let bar_width = layout.divider.map_or(0, |d| d.width);
+                let widths: Vec<u16> = self
                     .runtime
                     .pane_tabs
                     .as_ref()
-                    .map(|t| tab_hit::tab_widths(t, t.active().is_scrolling()))
+                    .map(|t| {
+                        tab_hit::tab_layout(t, t.active().is_scrolling(), bar_width)
+                            .into_iter()
+                            .map(|c| c.width)
+                            .collect()
+                    })
                     .unwrap_or_default();
                 tab_hit::tab_at_point(layout.divider, &widths, ev.column, ev.row)
             } else {
