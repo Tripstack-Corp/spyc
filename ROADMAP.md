@@ -287,6 +287,11 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 - **Task-viewer shape**: exited tasks auto-promote to buffer history
   on view-close instead of an explicit dismiss step.
 - **No persistent search index** — see Non-goals.
+- **Pane terminals run DEC mode 2027 (grapheme clustering) enabled**
+  (#484). Forced rather than preferred: ratatui is spyc's only
+  writer to the host and already measures clusters that way, as does
+  `ui::display_width`, so the engine was the sole component modelling
+  the mode disabled. See ARCHITECTURE.md → "Grapheme clustering".
 - **Claude restore types `/resume <sid>`** into a fresh spawn (the
   `--resume` CLI flag has a mount-crash regression) with
   verify-and-retry on the Enter; codex restores via

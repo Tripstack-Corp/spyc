@@ -441,6 +441,38 @@ the alt screen, in raw mode, and — since `[mouse] capture` defaults on — wit
 session. The plan that introduced default-on capture listed this teardown as
 its prerequisite; the default shipped first, which is how the gap reached users.
 
+## Grapheme clustering (DEC mode 2027)
+
+Pane terminals run mode 2027 **on**, which is not libghostty's default, so a
+cluster costs the columns `ui::display_width` budgets for it rather than one wide
+cell per codepoint.
+
+The choice is forced. spyc is both a terminal emulator and a client of the host,
+so the engine's model has to match the host's — but ratatui is the only writer to
+the host, and its `Buffer` stores one grapheme per cell and skips continuations
+using `unicode-width` on that grapheme, the same rules `display_width` applies to
+the chrome. Emitting a four-column flag through that path would mean
+hand-splitting clusters in the render pass, so the alternative (summing
+`ghostty_unicode_codepoint_width` to match the engine) could only move the
+disagreement to the ratatui boundary. The engine was the one component modelling
+the mode disabled ([#484](https://github.com/Tripstack-Corp/spyc/issues/484)).
+
+The cost is real: that commitment was previously exercised only by the chrome,
+whose sole cluster is the status-bar chilli, and now covers pane content, where
+agents print emoji constantly. A host that does not cluster now disagrees over
+far more cells. Accepted because the alternative is unavailable, not because the
+risk is imaginary.
+
+Set via `OPT_MODE_DEFAULT`, not `OPT_MODE`: it sets the current value *and* the
+one RIS restores, so a child running `reset` keeps clustering.
+
+Two limits. No `write_pty` callback is installed, so a child's `CSI ? 2027 $ p`
+goes unanswered ([#486](https://github.com/Tripstack-Corp/spyc/issues/486)); the
+common producers emit and assume, which is what made the bug visible. And vt100
+cannot satisfy this (flag as two narrow cells, ZWJ family across six columns,
+VS16 heart in one), so the contract test is scoped to the ghostty engine rather
+than the `E: Engine` conformance suite.
+
 ## Git: 100% in-process gix
 
 Production git is entirely in-process via `gix` (gitoxide) — status,

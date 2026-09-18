@@ -494,3 +494,62 @@ mod tests {
         );
     }
 }
+
+/// The live pane and the scrollback pager are two different walks over the
+/// same grid — `PaneWidget` writes cell by cell, `line_from_visible_row` skips
+/// continuations and concatenates heads into a `Line`. They must land the same
+/// glyphs in the same columns, or `^a v` shows something the pane never did.
+#[cfg(test)]
+mod live_and_scrollback_agree {
+    use crate::pane::PaneEngine;
+    use crate::pane::PaneWidget;
+    use crate::pane::engine::Engine as EngineT;
+    use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget as _};
+
+    /// Every cluster shape on one row: flag, ZWJ family, skin tone, two VS16
+    /// sequences, a bare-wide emoji and CJK.
+    const ROW: &str = "\u{1F1E8}\u{1F1E6}\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{1F44D}\u{1F3FD}\u{2764}\u{FE0F}\u{1F336}\u{FE0F}\u{2705}\u{3042}";
+
+    fn row_text(buf: &Buffer, y: u16, cols: u16) -> String {
+        (0..cols)
+            .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
+
+    /// Both sides are normalized through the same `row_text` — an instrument
+    /// that shares the subject's model inherits its blind spots, so the
+    /// comparison is over rendered buffers, not over either walk's own idea of
+    /// what it produced.
+    #[test]
+    fn a_cluster_row_renders_identically_in_both_walks() {
+        let cols = 40u16;
+        let mut e = <PaneEngine as EngineT>::new(3, cols, 1000);
+        e.process(format!("{ROW}\r\n{ROW}\r\n").as_bytes());
+
+        let area = Rect::new(0, 0, cols, 3);
+        let mut live = Buffer::empty(area);
+        PaneWidget {
+            screen: e.screen(),
+            focused: true,
+            selection: None,
+        }
+        .render(area, &mut live);
+
+        let lines = super::lines_from_scrollback(e.screen_mut());
+        let mut back = Buffer::empty(area);
+        for (i, l) in lines.iter().take(3).enumerate() {
+            #[allow(clippy::cast_possible_truncation)]
+            back.set_line(0, i as u16, l, cols);
+        }
+
+        for y in 0..2u16 {
+            assert_eq!(
+                row_text(&live, y, cols),
+                row_text(&back, y, cols),
+                "row {y}: the pane and its scrollback drew different glyphs"
+            );
+        }
+    }
+}
