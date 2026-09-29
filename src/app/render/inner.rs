@@ -321,7 +321,11 @@ impl App {
             // HookConsent is shown as a centred pop-up (`render_hook_consent_popup`),
             // not this one-line bar — leave the prompt row blank so the ask reads
             // as a modal, not a status line lost beneath the pane.
-            if matches!(p.kind, crate::app::PromptKind::HookConsent { .. }) {
+            if matches!(
+                p.kind,
+                crate::app::PromptKind::HookConsent { .. }
+                    | crate::app::PromptKind::ProjectTabsConsent { .. }
+            ) {
                 return;
             }
             // Same wrapping PromptLine::render would do, but drawn row-by-row

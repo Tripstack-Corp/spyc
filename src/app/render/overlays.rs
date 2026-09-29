@@ -334,7 +334,9 @@ impl App {
     /// prompt bar read as "spyc isn't taking my input". A bordered box in the
     /// middle of the screen with a prominent `y`/`n` footer makes the ask
     /// unmissable. Only `y`/`n` dismiss it (the confirm handler enforces that);
-    /// drawn on top of everything from `render`. `h_divider_row`/`v_divider_col`
+    /// drawn on top of everything from `render`. A project's startup-tab
+    /// consent (`PromptKind::ProjectTabsConsent`) uses the same box, wider, with
+    /// one row per command. `h_divider_row`/`v_divider_col`
     /// nudge the border off a structural divider (see [`Self::render_harpoon_menu`]).
     pub(super) fn render_hook_consent_popup(
         &self,
@@ -351,16 +353,47 @@ impl App {
         let Mode::Prompting(prompt) = &self.state.mode else {
             return;
         };
-        if !matches!(prompt.kind, PromptKind::HookConsent { .. }) {
-            return;
-        }
+        // A project's startup-tab list shares the pop-up: it asks at launch,
+        // and every command it would run needs a row the user can read.
+        let (title, max_w, answers): (&str, u16, &[(&str, &str)]) = match &prompt.kind {
+            PromptKind::HookConsent { .. } => (
+                " spyc — agent status ",
+                68,
+                &[("[y] ", "yes     "), ("[n] ", "no")],
+            ),
+            PromptKind::ProjectTabsConsent { .. } => (
+                " spyc — project startup tabs ",
+                100,
+                &[
+                    ("[y] ", "run them     "),
+                    ("[n] ", "no     "),
+                    ("[Esc] ", "not now"),
+                ],
+            ),
+            _ => return,
+        };
 
         let area = frame.area();
-        let width = area.width.clamp(40, 68);
+        let width = area.width.clamp(40, max_w);
         // Body wraps to the inner width (box minus two border columns + a
         // one-column pad each side).
         let text_w = usize::from(width).saturating_sub(4).max(1);
-        let body = wrap_label(&prompt.prefix, text_w);
+        let mut body = match &prompt.kind {
+            PromptKind::ProjectTabsConsent { tabs, .. } => {
+                crate::app::startup_tabs::consent_lines(&prompt.prefix, tabs, text_w)
+            }
+            _ => wrap_label(&prompt.prefix, text_w),
+        };
+        // Never cut the list silently: past the screen, the last row says how
+        // many rows it hides.
+        let max_body = usize::from(area.height.saturating_sub(4)).max(1);
+        if body.len() > max_body {
+            let hidden = body.len() + 1 - max_body;
+            body.truncate(max_body - 1);
+            body.push(format!(
+                "… {hidden} more row(s) hidden — read the file first"
+            ));
+        }
         // 2 borders + body rows + 1 blank spacer + 1 footer.
         let height = (2 + body.len() as u16 + 2).min(area.height);
         let cx = area.x + (area.width.saturating_sub(width)) / 2;
@@ -377,7 +410,7 @@ impl App {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(" spyc — agent status ")
+            .title(title)
             .border_style(
                 Style::default()
                     .fg(self.view.theme.popup_border)
@@ -396,12 +429,12 @@ impl App {
             .fg(self.view.theme.prompt_prefix)
             .add_modifier(Modifier::BOLD);
         let word = Style::default().fg(self.view.theme.status_suffix);
-        lines.push(Line::from(vec![
-            Span::styled(" [y] ", key),
-            Span::styled("yes     ", word),
-            Span::styled("[n] ", key),
-            Span::styled("no", word),
-        ]));
+        let mut footer = vec![Span::raw(" ")];
+        for (k, w) in answers {
+            footer.push(Span::styled(*k, key));
+            footer.push(Span::styled(*w, word));
+        }
+        lines.push(Line::from(footer));
         frame.render_widget(Paragraph::new(lines), inner);
     }
 

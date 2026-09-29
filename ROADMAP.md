@@ -592,6 +592,29 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   deletion waits for the same tag, so seam changes keep paying for two engines
   until 2.2 ships.
 
+- **A project's startup tabs run only after a consent bound to the exact
+  list** (2026-09-29). #482 honoured `[pane] tabs` from the untrusted
+  project-local `.spycrc.toml`, which ran a cloned repo's commands at launch
+  with no keypress. #494 closed that by ignoring a project's tabs, and this
+  replaces that stopgap with the answer a repo-defined tab set needs. At launch
+  spyc lists every command in a pop-up. `y` approves, `n` declines, and `Esc`
+  skips for now; no other key answers, so a reflexive `Enter` can't approve a
+  command. An approved list replaces the user's own. Three choices were made
+  deliberately:
+  1. **The answer binds to content, not to the project.** It records each
+     command and cwd in order, and a changed list asks again. A per-project
+     yes would let a `git pull` swap the commands under an old approval,
+     which is the hole in a different form. This is `direnv`'s rule, and a
+     `SPYC-TRAP` guards it.
+  2. **There is no default answer.** The hook-consent popup's `[Y/n]` shape
+     fits writing a config file. It is the wrong one for running a command.
+  3. **Display is sanitized.** Control and invisible characters are escaped,
+     whitespace padding collapses, and very long commands show a count of
+     what's hidden, so what the user reads is what would run.
+
+  `PROJECTS_PLAN.md` (#492) still decides what a project definition holds.
+  This settles only how a repo-declared command earns the right to run.
+
 ## Doc map
 
 | Doc | Role |

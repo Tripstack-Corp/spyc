@@ -319,6 +319,7 @@ to open them in the current listing dir.
 | `:activity` | Toggle the activity monitor; `:activity dump` → per-pane why-status report |
 | `:archive` | Mounted archives: `info` / `list` / `write` / `discard` / `unmount` / `cancel` (mounting is `Enter` on the archive) |
 | `:hooks` | Agent status-hook consent (`on` / `on!` / `off`) |
+| `:startup-tabs` | Where launch's pane tabs come from; `forget` re-asks about a project `.spycrc.toml`'s list |
 | `:skill` | Agent skill: `status` / `update` / `remove` / `ask` |
 | `:lua` | Lua engine: `status` / `on` / `off` / `reload` |
 | `:notify test` | Fire every notification channel to verify setup |

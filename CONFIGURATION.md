@@ -30,10 +30,10 @@ clobber your user defaults.
 
 **Security:** the *executing* keymap verbs (`unix`, `command`, `lua`, `jump`)
 only take effect from **`~/.spycrc.toml`** — a project-local `.spycrc.toml` in an
-untrusted clone can't bind a key to run code. The same goes for
-[startup tabs](#startup-tabs--pane-tabs), which run their commands at launch
-with no keypress at all: a project file that declares them is ignored for that
-key, with a warning. Lua scripts load only from `~/.config/spyc/`.
+untrusted clone can't bind a key to run code. A project file's
+[startup tabs](#startup-tabs--pane-tabs) run their commands at launch with no
+keypress at all, so they open only after you approve that exact list, and an
+edited list asks again. Lua scripts load only from `~/.config/spyc/`.
 
 ---
 
@@ -138,11 +138,27 @@ cwd = "~/Work/my-project"   # ~, absolute, or relative to the launch directory
 label = "coordinator"       # defaults from the command
 ```
 
-- **Only `~/.spycrc.toml` may declare startup tabs.** They run commands with no
-  keypress, so a project-local file's `tabs` / `[[pane.tab]]` are ignored with
-  a warning and your own list stays in place. See the security note above.
+- **A project's own tabs need your approval first.** Yours, in
+  `~/.spycrc.toml`, open unasked. A project-local `.spycrc.toml` can declare a
+  list too, a repo's own claude + dev-server set for instance. Those commands
+  aren't yours, so at launch spyc lists every one in a pop-up:
+  - **`y`** approves that list: it opens now and on later launches, in place of
+    yours.
+  - **`n`** declines it, and your own tabs open, now and on later launches.
+  - **`Esc`** skips it this once and asks next time.
+  - Any other key keeps the pop-up up, so a reflexive `Enter` can't approve a
+    command.
+
+  The answer binds to the **exact list**: every command and `cwd`, in order.
+  If a later `git pull` changes the list, spyc asks again. A changed `label`
+  doesn't count, since labels don't change what runs. The prompt escapes
+  control characters and caps very long commands at a visible count, so what
+  you read is what would run. `:startup-tabs` shows the current answer, and
+  `:startup-tabs forget` drops it so the next launch asks again.
 - Use one form per file. Setting both is an error at load, and so is more than
-  9 tabs (the `^a 1..9` reach) or an empty `command`.
+  9 tabs (the `^a 1..9` reach) or an empty `command`. In a project file each of
+  those is a warning instead, and the project's list is ignored, so a broken
+  repo can't stop your own config loading.
 - A `cwd` that doesn't exist falls back to `[pane] new_tab_cwd`.
 - `spyc -r` wins: resuming a session restores its saved tabs and skips these.
   Unset, nothing opens until the first `^a c`.

@@ -24,6 +24,7 @@ pub mod scope_registry;
 pub mod session_names;
 pub mod sessions;
 pub mod skill_prompt;
+pub mod tab_consent;
 pub mod transcript_images;
 
 pub use cursor::Cursor;

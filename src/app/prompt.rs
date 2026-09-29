@@ -106,6 +106,17 @@ pub enum PromptKind {
         cwd: std::path::PathBuf,
         agent: crate::state::sessions::AgentKind,
     },
+    /// A project-local `.spycrc.toml` declares startup tabs this user hasn't
+    /// answered for in this exact form (`state::tab_consent`). A centred
+    /// pop-up listing every command. `y` approves this list and opens it, `n`
+    /// declines it (remembered for this list), `Esc` skips it this launch;
+    /// both of those open the user's own tabs instead. Anything else re-raises
+    /// it, because a stray key must not answer a question about running
+    /// commands.
+    ProjectTabsConsent {
+        source: std::path::PathBuf,
+        tabs: Vec<crate::config::PaneTabConfig>,
+    },
     /// Startup offer to install/update the Claude skill in `~/.claude/skills/`,
     /// raised only when the embedded copy differs from what's installed. Same
     /// single-key `[Y/n]` shape as `HookConsent`; `n` is remembered against

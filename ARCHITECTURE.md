@@ -560,16 +560,38 @@ The project file is **untrusted** (spyc is routinely pointed at
 hostile content): its cosmetic/behavioural settings and plain
 rebindings are honoured, but *executing* keymap bindings (`unix`
 shell commands, `jump`) are dropped — those take effect only from
-`~/.spycrc.toml`. So are `[pane]` startup tabs, which spawn their
-commands at launch with no keypress; those are dropped with a warning,
-not an error, because an error would discard the trusted user file too.
-`^R` reload re-reads the project file from the
-**startup** cwd, never the browsed directory, so browsing into a
-hostile tree can't load its rc.
+`~/.spycrc.toml`. `[pane]` startup tabs spawn their commands at launch
+with no keypress, so a project file's list is held apart
+(`pane.project_tabs`) and opens only after the user approves that exact
+list (`state::tab_consent`, `app::startup_tabs`); an edited list asks
+again. A malformed project list is a warning, not an error, because an
+error would discard the trusted user file too. `^R` reload re-reads the
+project file from the **startup** cwd, never the browsed directory, so
+browsing into a hostile tree can't load its rc.
 
 Startup runs a health check that validates inventory / marks /
 sessions / graveyard, cleans up orphaned files, and warns on
 corrupt JSON.
+
+## Startup-tab consent binds to content
+
+<!-- SPYC-TRAP: startup-tab-consent-content -->
+A project `.spycrc.toml`'s startup tabs run only once the user approves
+them, and `state::tab_consent` records that approval against the list
+itself, not against the project. It stores each tab's `command` and `cwd`,
+in order (`Identity`, built by `identity`), and `consent_for` answers
+`Allowed` only while the declared list still equals the recorded one. So a
+`git pull` that edits the rc raises the prompt again instead of running
+the new commands under an old yes, the way `direnv` re-blocks an edited
+`.envrc`. `label` is left out on purpose: it changes only what the tab bar
+shows.
+
+Load-bearing because the failure is silent. Suppose a `PaneTabConfig`
+field is added that changes what runs (an env map, a shell override,
+arguments split out of `command`) without also being added to `Identity`.
+An approval of one list then covers every list that differs only in that
+field. Nothing crashes, and no test fails unless one pins the new field;
+`any_change_to_what_runs_asks_again` is the test to extend.
 
 ## MCP server
 
