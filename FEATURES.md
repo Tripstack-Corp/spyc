@@ -1488,7 +1488,12 @@ jump from Claude's output back to the file list.
   bg-task / git / fs / mcp rates, pid/rss/threads, build identity —
   fixed-width so it doesn't bounce as rates rise and fall — plus an
   extended section tallying cumulative per-tool **MCP call counts**
-  (every agent `tools/call`, read tools included)
+  (every agent `tools/call`, read tools included). Transparent by
+  default: only the text is painted, in each row's colour on the
+  terminal background, so the file list or pane shows through the
+  padding (and a click there reaches it). `:activity solid` switches
+  to opaque colour bands; `:activity transparent` switches back —
+  either one also shows the monitor
 - **C** toggle between colour and mono themes
 - **:setenv NAME=VALUE** set an environment variable
 - **:dump-scrollback** write the active pane's scrollback snapshot

@@ -6,8 +6,9 @@
 //! hand-maintained parallel field assignments (the bug-prone "add a counter,
 //! forget to wire it into all four lists" hazard).
 //!
-//! The visibility toggle (`show_activity`) stays on `ViewState` — it gates the
-//! overlay and the rollover, but isn't part of the counter double-buffer.
+//! The visibility toggle (`show_activity`) and paint style (`activity_style`)
+//! stay on `ViewState` — they gate the overlay, but aren't part of the counter
+//! double-buffer.
 
 use std::time::Instant;
 
@@ -47,6 +48,17 @@ pub struct ActivityPeaks {
     pub frame_us: u64,
     pub render_us: u64,
     pub echo_us: u64,
+}
+
+/// How the `A` overlay paints (`:activity transparent|solid`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum HudStyle {
+    /// Text only, in each row's colour on the terminal background; the padding
+    /// that right-justifies a row is left unpainted, so what's beneath shows.
+    #[default]
+    Transparent,
+    /// Black text on opaque colour bands filling the whole block.
+    Solid,
 }
 
 /// Activity-monitor state: the live/snapshot counter pair, the peak pair, the
