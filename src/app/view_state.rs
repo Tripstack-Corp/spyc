@@ -280,6 +280,8 @@ pub struct ViewState {
     /// Activity monitor (`A`): the overlay visibility toggle. The counters
     /// themselves live in [`activity::ActivityMonitor`] (`self.view.activity`).
     pub(super) show_activity: bool,
+    /// How the activity overlay paints (`:activity transparent|solid`).
+    pub(super) activity_style: activity::HudStyle,
     /// Activity-monitor counters: live/snapshot double-buffer + peaks + proc
     /// stats. See [`activity::ActivityMonitor`].
     pub(super) activity: activity::ActivityMonitor,
@@ -475,6 +477,7 @@ impl ViewState {
             mcp_takeover_allowed: false,
             focus_chord_completed: None,
             show_activity: false,
+            activity_style: activity::HudStyle::default(),
             activity: activity::ActivityMonitor::new(std::time::Instant::now()),
             pane_send_at: None,
             started_at: std::time::Instant::now(),

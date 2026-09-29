@@ -4,31 +4,30 @@
 
 use ratatui::Frame;
 
+use crate::app::activity::HudStyle;
 use crate::app::{App, format_uptime};
 
 impl App {
     /// Render the activity (`A`) monitor overlay (top-right corner). Called
     /// LAST from `render` so it sits over every render path — including the
     /// `$EDITOR` / `;cmd` overlay and top-pager paths that return early from
-    /// `render_inner` (the "omnipresent" ask). Rows are padded to one common
-    /// display width so the block is a clean flush-right rectangle with
-    /// content right-justified, instead of the old ragged per-line staircase:
-    /// throughput + frame timing (yellow), internals (teal), process stats
-    /// (lavender), and a build + terminal-caps footer (blue). No-op unless the
-    /// monitor is toggled on.
+    /// `render_inner` (the "omnipresent" ask). Rows are right-justified to one
+    /// common display width: throughput + frame timing (yellow), internals
+    /// (teal), process stats (lavender), and a build + terminal-caps footer
+    /// (blue). [`HudStyle`] picks how they paint — see the loop below. No-op
+    /// unless the monitor is toggled on.
     pub(super) fn render_activity_hud(&self, frame: &mut Frame, frame_area: ratatui::layout::Rect) {
         if !self.view.show_activity {
             return;
         }
-        use ratatui::style::{Color, Style};
+        use ratatui::style::{Color, Modifier, Style};
         use ratatui::text::{Line as HudLine, Span};
 
         // Line 1 — throughput + frame timing. `pk` is the whole terminal.draw
         // (build + diff + tty emission); `r` is just the render closure (CPU).
         // pk-r ≈ diff+emission; pk near the inter-keystroke interval ⇒ render-bound.
         //
-        // The whole HUD renders in one foreground colour (solid black on each
-        // band) — no per-segment dimming. An earlier `Modifier::DIM` on the
+        // Each row renders in one style — no per-segment dimming. An earlier `Modifier::DIM` on the
         // `N dps` headline made that count a washed-out grey against the rest,
         // which read as an inconsistent font colour (same problem as the dropped
         // transcript-preview DIM). Fixed-width count/timing fields so the line —
@@ -171,29 +170,164 @@ impl App {
             return;
         }
         let x = frame_area.width - block_w - 1;
-        for (row, (text, bg)) in rows.iter().enumerate() {
+        for (row, (text, band)) in rows.iter().enumerate() {
             let Ok(y) = u16::try_from(row) else { break };
             if y >= frame_area.height {
                 break;
             }
-            let pad = " ".repeat(maxw.saturating_sub(crate::ui::display_width(text)));
-            let rect = ratatui::layout::Rect {
-                x,
-                y,
-                width: block_w,
-                height: 1,
+            let text_w = u16::try_from(crate::ui::display_width(text))
+                .unwrap_or(block_w)
+                .min(block_w);
+            let pad_w = block_w - text_w;
+            // A cell keeps the modifiers of what was drawn there first; without
+            // this the HUD turns bold over a directory name.
+            let base = Style::default().remove_modifier(Modifier::all());
+            let (rect, line) = match self.view.activity_style {
+                // Only the text is painted and recorded for the hit-test, so
+                // the padding shows (and clicks through to) what's beneath. Its
+                // edge and gap spaces stay opaque, keeping the fields legible.
+                HudStyle::Transparent => (
+                    ratatui::layout::Rect {
+                        x: x + pad_w,
+                        y,
+                        width: text_w,
+                        height: 1,
+                    },
+                    HudLine::from(Span::styled(text.clone(), base.fg(*band).bg(Color::Reset))),
+                ),
+                HudStyle::Solid => (
+                    ratatui::layout::Rect {
+                        x,
+                        y,
+                        width: block_w,
+                        height: 1,
+                    },
+                    HudLine::from(Span::styled(
+                        format!("{}{text}", " ".repeat(usize::from(pad_w))),
+                        base.fg(Color::Black).bg(*band),
+                    )),
+                ),
             };
-            // Every row renders in one uniform style (solid black on its band)
-            // so the HUD font colour stays consistent — including row 0, whose
-            // `N dps` headline used to be dimmed.
-            let normal = Style::default().fg(Color::Black).bg(*bg);
-            let line = HudLine::from(Span::styled(format!("{pad}{text}"), normal));
             // Through the chrome funnel, not a bare `render_widget`: that
             // records the row so the pointer can hit-test it and a drag can
             // copy it. The HUD's whole purpose is reporting numbers a human
             // then quotes — pids, timings, `:why-status` counts — so it being
             // unselectable meant retyping them from a screenshot.
             self.draw_chrome_line(frame, rect, line);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)] // test fixtures; the module deny is for production
+    use ratatui::buffer::{Buffer, Cell};
+    use ratatui::layout::Rect;
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::{Terminal, backend::TestBackend};
+
+    use crate::app::App;
+    use crate::app::activity::HudStyle;
+
+    const W: u16 = 140;
+    const H: u16 = 10;
+    /// What's beneath the HUD: every cell `#`, bold, on blue.
+    const BENEATH: Style = Style::new().bg(Color::Blue).add_modifier(Modifier::BOLD);
+
+    /// Draw the HUD alone over a frame of [`BENEATH`], returning the buffer and
+    /// the rects it recorded for the mouse hit-test.
+    fn draw(style: HudStyle) -> (Buffer, Vec<Rect>) {
+        let mut app = App::test_app(std::env::temp_dir());
+        app.view.show_activity = true;
+        app.view.activity_style = style;
+        let mut terminal = Terminal::new(TestBackend::new(W, H)).unwrap();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                for cell in &mut f.buffer_mut().content {
+                    cell.set_symbol("#").set_style(BENEATH);
+                }
+                app.render_activity_hud(f, area);
+            })
+            .unwrap();
+        let rects = app
+            .view
+            .chrome_rows
+            .borrow()
+            .iter()
+            .map(|r| Rect::new(r.x, r.y, r.width, 1))
+            .collect();
+        (terminal.backend().buffer().clone(), rects)
+    }
+
+    fn untouched(cell: &Cell) -> bool {
+        cell.symbol() == "#" && cell.bg == Color::Blue && cell.modifier == Modifier::BOLD
+    }
+
+    /// The smallest rect holding every recorded row: the block solid mode fills.
+    fn bounds(rects: &[Rect]) -> Rect {
+        rects.iter().copied().reduce(Rect::union).unwrap()
+    }
+
+    #[test]
+    fn transparent_hud_paints_only_the_text_it_records() {
+        let (buf, rects) = draw(HudStyle::Transparent);
+        assert!(rects.len() >= 5, "four base rows + the mcp row: {rects:?}");
+        let mut shown_through = 0;
+        for y in 0..H {
+            for x in 0..W {
+                let cell = &buf[(x, y)];
+                if rects.iter().any(|r| r.contains((x, y).into())) {
+                    assert_eq!(
+                        cell.bg,
+                        Color::Reset,
+                        "({x},{y}) text sits on the terminal bg"
+                    );
+                    assert!(
+                        cell.modifier.is_empty(),
+                        "({x},{y}) inherited {:?}",
+                        cell.modifier
+                    );
+                } else {
+                    assert!(
+                        untouched(cell),
+                        "({x},{y}) painted outside the text: {cell:?}"
+                    );
+                    if bounds(&rects).contains((x, y).into()) {
+                        shown_through += 1;
+                    }
+                }
+            }
+        }
+        // Rows of different widths leave padding inside the block; with none
+        // this test would pass without checking the see-through at all.
+        assert!(shown_through > 0, "no padding inside the block: {rects:?}");
+    }
+
+    #[test]
+    fn solid_hud_is_one_opaque_block() {
+        let (buf, rects) = draw(HudStyle::Solid);
+        let block = bounds(&rects);
+        for r in &rects {
+            assert_eq!(
+                (r.x, r.width),
+                (block.x, block.width),
+                "every row spans the block"
+            );
+        }
+        for y in block.top()..block.bottom() {
+            for x in block.left()..block.right() {
+                let cell = &buf[(x, y)];
+                assert!(
+                    cell.symbol() != "#" && !matches!(cell.bg, Color::Blue | Color::Reset),
+                    "({x},{y}) not covered by a band: {cell:?}"
+                );
+                assert!(
+                    cell.modifier.is_empty(),
+                    "({x},{y}) inherited {:?}",
+                    cell.modifier
+                );
+            }
         }
     }
 }
