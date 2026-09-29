@@ -92,8 +92,10 @@ rather than create a new modal type.
   worktree delete) and interrupt-on-quit. Do not introduce a
   separate dialog box — extend confirm.
 - **Activity HUD** — tiny right-anchored debug overlay (`A`
-  toggle). Reports dps, bytes/sec, poll period. Engineering tool;
-  features should not depend on it.
+  toggle). Reports dps, bytes/sec, poll period. Transparent by
+  default — coloured text only, so what's beneath shows through the
+  ragged left edge; `:activity solid` restores the opaque colour
+  bands. Engineering tool; features should not depend on it.
 
 ## Icons & glyphs
 
