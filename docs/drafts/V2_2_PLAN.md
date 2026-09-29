@@ -6,6 +6,12 @@ this document's proposal.
 **Measured against:** `9df4d7a` (`main`, `2.2.0-CURRENT`).
 **Predecessor:** [`docs/archive/LAUNCH_PLAN_2_0.md`](../archive/LAUNCH_PLAN_2_0.md)
 (the 2.0 distribution pass). Strategy context: `ROADMAP.md` → "Road to 2.2".
+**Progress (2026-09-29):** §3, §8, and three of §6's bugs (#326, #452, #34) are
+on `main`. §1, §2, §4, §5, §7, and #327, #9, #22 + #11 are still open; the
+Status column below tracks each item. 2.2 tags once all of it is done, per the
+ROADMAP decisions log (2026-09-29), and
+[#490](https://github.com/Tripstack-Corp/spyc/issues/490) (publishing
+`spyc-vt-sys` to crates.io) has to close first.
 
 ## Thesis
 
@@ -26,16 +32,16 @@ load-bearing.
 
 ## Scope
 
-| # | Item | Kind | Tracking |
-|---|---|---|---|
-| 1 | Pane-identity transport (option B) | prep | [proposal](pane-identity-transport-proposal.md) |
-| 2 | One spyc per agent — abstract the column references | prep | [#40](https://github.com/Tripstack-Corp/spyc/issues/40) |
-| 3 | Configurable startup pane tabs | prep + feature | [#58](https://github.com/Tripstack-Corp/spyc/issues/58), [plan](PANE_STARTUP_TABS_PLAN.md) |
-| 4 | Session forking (`^a f`) | feature | [#8](https://github.com/Tripstack-Corp/spyc/issues/8) |
-| 5 | Prompt templates in `.spycrc.toml` | feature | [#71](https://github.com/Tripstack-Corp/spyc/issues/71) |
-| 6 | The daily-driver bug set | fix | [#326](https://github.com/Tripstack-Corp/spyc/issues/326), [#327](https://github.com/Tripstack-Corp/spyc/issues/327), [#9](https://github.com/Tripstack-Corp/spyc/issues/9), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#22](https://github.com/Tripstack-Corp/spyc/issues/22), [#11](https://github.com/Tripstack-Corp/spyc/issues/11) |
-| 7 | Author `docs/drafts/PROJECTS_PLAN.md` | design | this doc, §7 |
-| 8 | The VT engine — libghostty-vt replaces vt100 | prep + fix | [spike](VT_ENGINE_SPIKE.md), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#453](https://github.com/Tripstack-Corp/spyc/issues/453) |
+| # | Item | Kind | Tracking | Status |
+|---|---|---|---|---|
+| 1 | Pane-identity transport (option B) | prep | [#491](https://github.com/Tripstack-Corp/spyc/issues/491), [proposal](pane-identity-transport-proposal.md) | open |
+| 2 | One spyc per agent — abstract the column references | prep | [#40](https://github.com/Tripstack-Corp/spyc/issues/40) | open |
+| 3 | Configurable startup pane tabs | prep + feature | [#58](https://github.com/Tripstack-Corp/spyc/issues/58), [plan](../archive/PANE_STARTUP_TABS_PLAN.md) | shipped (#482) |
+| 4 | Session forking (`^a f`) | feature | [#8](https://github.com/Tripstack-Corp/spyc/issues/8) | open |
+| 5 | Prompt templates in `.spycrc.toml` | feature | [#71](https://github.com/Tripstack-Corp/spyc/issues/71) | open |
+| 6 | The daily-driver bug set | fix | [#326](https://github.com/Tripstack-Corp/spyc/issues/326), [#327](https://github.com/Tripstack-Corp/spyc/issues/327), [#9](https://github.com/Tripstack-Corp/spyc/issues/9), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#22](https://github.com/Tripstack-Corp/spyc/issues/22), [#11](https://github.com/Tripstack-Corp/spyc/issues/11) | #326 (#464), #452 (#457) and #34 (#465) shipped; #327, #9, #22, #11 open |
+| 7 | Author `docs/drafts/PROJECTS_PLAN.md` | design | [#492](https://github.com/Tripstack-Corp/spyc/issues/492), this doc, §7 | open |
+| 8 | The VT engine — libghostty-vt replaces vt100 | prep + fix | [spike](VT_ENGINE_SPIKE.md), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#453](https://github.com/Tripstack-Corp/spyc/issues/453) | shipped (PRs 10–16: #457–#462, #465); the vt100 deletion (#453) is the first commit after the tag |
 
 ---
 
@@ -111,7 +117,7 @@ an op targeting column a while the user works in column b.
 
 ## 3. #58 — configurable startup pane tabs
 
-Per [`PANE_STARTUP_TABS_PLAN.md`](PANE_STARTUP_TABS_PLAN.md): a `.spycrc.toml`
+Per [`PANE_STARTUP_TABS_PLAN.md`](../archive/PANE_STARTUP_TABS_PLAN.md): a `.spycrc.toml`
 knob that opens K tabs in the bottom pane at startup, each with a command and
 an optional cwd, mirroring what `^a c` creates interactively. No splits, no
 grid.

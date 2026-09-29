@@ -1,10 +1,20 @@
 # spyc pane startup tabs (and a side door to multi-split)
 
+> **Shipped on `main` for 2.2 (#482, 2026-09-18) — archived as historical
+> record.** The config surface landed exactly as written below: compact
+> `[pane] tabs`, the `[[pane.tab]]` table form with `command` / `cwd` /
+> `label`, and restore > declared tabs > single-tab-on-demand. The same PR
+> fits every tab into the divider. The seam-aware cropping it reverted to keep
+> the PR small is [#483](https://github.com/Tripstack-Corp/spyc/issues/483).
+> [#58](https://github.com/Tripstack-Corp/spyc/issues/58) is closed. "The
+> bigger ambition (deferred): true multi-split" is **not** shipped and stays
+> deferred.
+
 **Status:** plan, not yet implemented. Sourced from external-contributor
 analysis (Caleb Howard, 2026-05-15).
 
 **Target release:** 2.2 ([#58](https://github.com/Tripstack-Corp/spyc/issues/58);
-scope and sequencing in [`V2_2_PLAN.md`](V2_2_PLAN.md)). It stopped being
+scope and sequencing in [`V2_2_PLAN.md`](../drafts/V2_2_PLAN.md)). It stopped being
 opportunistic: a declarative tab set is the config half of a 2.3 project
 definition.
 
