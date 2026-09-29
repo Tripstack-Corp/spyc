@@ -560,7 +560,10 @@ The project file is **untrusted** (spyc is routinely pointed at
 hostile content): its cosmetic/behavioural settings and plain
 rebindings are honoured, but *executing* keymap bindings (`unix`
 shell commands, `jump`) are dropped — those take effect only from
-`~/.spycrc.toml`. `^R` reload re-reads the project file from the
+`~/.spycrc.toml`. So are `[pane]` startup tabs, which spawn their
+commands at launch with no keypress; those are dropped with a warning,
+not an error, because an error would discard the trusted user file too.
+`^R` reload re-reads the project file from the
 **startup** cwd, never the browsed directory, so browsing into a
 hostile tree can't load its rc.
 

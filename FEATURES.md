@@ -481,6 +481,14 @@ Multiple tabs, each running an independent pty:
   child is a new process, so its `SPYC_PANE_ID`, agent conversation, and
   scrollback all start fresh
 - Activity indicator (**+**) on background tabs that have new output
+- **Startup tabs**: `[pane] tabs = ["claude", "zsh"]` (or `[[pane.tab]]`
+  tables with a per-tab `cwd` and `label`) opens those tabs at launch, the
+  config-driven version of pressing `^a c` once per tab. `spyc -r` restores
+  its saved tabs instead. Only `~/.spycrc.toml` may declare them, because they
+  run commands with no keypress; a project-local file's are ignored with a
+  warning. Reference: `CONFIGURATION.md` → "Startup tabs"
+- When the tabs overflow the divider, labels crop so every tab stays visible
+  and clickable
 - **Default command** for `^a c` resolves in this order:
   `$SPYC_PANE_CMD` env var → `[pane] default_command` in
   `.spycrc.toml` → built-in `"claude"` fallback. Switch your daily

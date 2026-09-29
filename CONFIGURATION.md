@@ -30,8 +30,10 @@ clobber your user defaults.
 
 **Security:** the *executing* keymap verbs (`unix`, `command`, `lua`, `jump`)
 only take effect from **`~/.spycrc.toml`** — a project-local `.spycrc.toml` in an
-untrusted clone can't bind a key to run code. Lua scripts load only from
-`~/.config/spyc/`.
+untrusted clone can't bind a key to run code. The same goes for
+[startup tabs](#startup-tabs--pane-tabs), which run their commands at launch
+with no keypress at all: a project file that declares them is ignored for that
+key, with a warning. Lua scripts load only from `~/.config/spyc/`.
 
 ---
 
@@ -46,6 +48,7 @@ vsplit_mode = "full_height"    # shape `^s |` opens a vertical split in; or "top
 
 [pane]
 default_command = "claude"     # pre-filled into the `^a c` new-tab prompt
+tabs = ["claude", "zsh"]       # open these tabs at launch (~/.spycrc.toml only; see below)
 new_tab_cwd = "worktree_root"  # focused column's worktree root (gw's target); or "project_home" (PROJECT_HOME), "browse_dir" (the focused column's dir)
 claude_transcript_scrollback = false  # `^a v` reads Claude's JSONL transcript instead of terminal scrollback
                                       # (only decides which comes up FIRST — `T` swaps in the view, and the
@@ -115,6 +118,40 @@ Aliases: `full` for the first, `half` / `half_height` / `top` for the second.
 second commander (`^s n`) ignores the setting and always opens `top_only` — two
 peer browsers normally want one full-width pane beneath them — and `^s f` is how
 you make that one full-height too.
+
+### Startup tabs — `[pane] tabs`
+
+Opens the bottom pane with tabs already in place at launch, the config-driven
+version of pressing `^a c` once per tab. The compact form lists commands:
+
+```toml
+[pane]
+tabs = ["claude", "zsh"]
+```
+
+The table form adds a working directory and a display label per tab:
+
+```toml
+[[pane.tab]]
+command = "claude"
+cwd = "~/Work/my-project"   # ~, absolute, or relative to the launch directory
+label = "coordinator"       # defaults from the command
+```
+
+- **Only `~/.spycrc.toml` may declare startup tabs.** They run commands with no
+  keypress, so a project-local file's `tabs` / `[[pane.tab]]` are ignored with
+  a warning and your own list stays in place. See the security note above.
+- Use one form per file. Setting both is an error at load, and so is more than
+  9 tabs (the `^a 1..9` reach) or an empty `command`.
+- A `cwd` that doesn't exist falls back to `[pane] new_tab_cwd`.
+- `spyc -r` wins: resuming a session restores its saved tabs and skips these.
+  Unset, nothing opens until the first `^a c`.
+- Startup doesn't take the keyboard. The first tab is active, focus stays on
+  the file list, and one flash summarizes the spawn, including any cwd
+  fallbacks or failed spawns.
+- When labels don't fit the divider, each tab is cropped so every tab stays
+  visible and clickable. A per-tab `label` is the way to keep tabs with a
+  shared prefix apart.
 
 ---
 
