@@ -5,8 +5,6 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::shell;
-
 use super::{App, ClipMsg, Effect, Message, PaneInput, PaneTarget, Wake};
 
 impl App {
@@ -69,58 +67,31 @@ impl App {
     }
 
     /// ^W s — write the current selection as shell-quoted paths to the
-    /// pane's stdin. A trailing space is appended so the user can keep
-    /// typing without concatenating against the last path. No newline
-    /// — let the user decide when to submit.
+    /// pane's stdin, anchored on that pane's cwd ([`pane_path_payload`]). A
+    /// trailing space is appended so the user can keep typing without
+    /// concatenating against the last path. No newline — let the user decide
+    /// when to submit.
     pub fn send_selection_to_pane(&mut self) -> Vec<Effect> {
         if self.runtime.pane_tabs.is_none() {
             self.state.flash_error("no pane open (Ctrl-\\ to open one)");
             return Vec::new();
         }
-        // Build the payload before grabbing the pane mut-borrow, so we
-        // can still call self.flash_* below without overlapping borrows.
-        // Clone project_home up front so the immutable borrow doesn't
-        // overlap with the selection_paths borrow below.
-        let project_home = self.state.project_home.clone();
-        let (payload, count) = {
-            let paths = self.state.selection_paths();
-            if paths.is_empty() {
-                self.state.flash_error("nothing selected");
-                return Vec::new();
-            }
-            let count = paths.len();
-            let mut out = String::new();
-            for (i, p) in paths.iter().enumerate() {
-                if i > 0 {
-                    out.push(' ');
-                }
-                // Anchor paths on PROJECT_HOME so what lands in the
-                // pane matches what an agent / shell session running
-                // inside that project would type. Outside-project
-                // paths stay absolute rather than walking up with
-                // `../../..`, which is rarely what the user wants.
-                let display = project_home
-                    .as_deref()
-                    .and_then(|home| p.strip_prefix(home).ok())
-                    .map_or_else(
-                        || p.to_path_buf(),
-                        |rel| {
-                            if rel.as_os_str().is_empty() {
-                                // path == project_home itself.
-                                std::path::PathBuf::from(".")
-                            } else {
-                                rel.to_path_buf()
-                            }
-                        },
-                    );
-                out.push_str(&shell::shell_quote(&display.to_string_lossy()));
-            }
-            out.push(' ');
-            (out, count)
-        };
+        let paths: Vec<PathBuf> = self
+            .state
+            .selection_paths()
+            .into_iter()
+            .map(Path::to_path_buf)
+            .collect();
+        if paths.is_empty() {
+            self.state.flash_error("nothing selected");
+            return Vec::new();
+        }
+        let count = paths.len();
+        // The anchor is the pane's cwd at delivery, which only the executor
+        // can read, so the paths travel unrendered.
         vec![Effect::SendToPane {
             target: PaneTarget::Active,
-            input: PaneInput::Bytes(payload.into_bytes()),
+            input: PaneInput::Paths(paths),
             on_ok: Some(format!("sent {count} path(s) to pane")),
             err_prefix: Some("send failed"),
         }]

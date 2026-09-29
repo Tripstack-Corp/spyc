@@ -209,7 +209,12 @@ spyc's workflow: browse files above, talk to Claude below.
 - **F9** open pane with `claude --resume`
 - **^a j / ^a k** switch focus between the file list and the pane
   (`^w` also works as an alias for `^a`)
-- **^a s** send the current selection (file paths) to the pane as stdin
+- **^a s** send the current selection (file paths) to the pane as stdin,
+  anchored on that pane's working directory, read at the moment you send.
+  A path under it goes out relative, so an agent working in its own
+  worktree can open it as typed. Anything else goes out absolute, never
+  `~`-collapsed. If the pane's directory can't be read, every path goes out
+  absolute.
 - **^a ↓** send a literal `^a` to the pane — the prefix is otherwise
   unreachable by the child, but Claude binds `^a` (e.g. to expand notes),
   so this is the tmux-style "send-prefix" escape hatch
