@@ -710,9 +710,17 @@ impl App {
                 }
                 let dir = self.state.cur().listing.dir.clone();
                 match crate::git::worktree::remove(&dir) {
-                    Ok(()) => {
-                        self.state
-                            .flash_info(format!("removed worktree: {}", dir.display()));
+                    Ok(removal) => {
+                        if removal.leftovers.is_empty() {
+                            self.state
+                                .flash_info(format!("removed worktree: {}", dir.display()));
+                        } else {
+                            self.state.flash_info(format!(
+                                "removed worktree: {} (a process was still writing, so {} is left to delete)",
+                                dir.display(),
+                                crate::git::worktree::show_paths(&removal.leftovers)
+                            ));
+                        }
                         // chdir the focused column to the parent (the deleted
                         // dir is gone). PROJECT_HOME is left untouched — it's the
                         // overall project anchor, not tied to a worktree.

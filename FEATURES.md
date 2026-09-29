@@ -1403,13 +1403,21 @@ Claude can query and control the workspace through these tools:
   path}`. Lets a skill spin up a worktree to work in a second column
   while the first stays on its branch.
 - **`remove_worktree(path)`** -- tear down a worktree by the path
-  `create_worktree` returned. Refuses a dirty/locked worktree or one a
-  column is currently open in; leaves the branch ref intact.
-- **`clean_worktree(path)`** -- like `remove_worktree`, but instead of
-  choking on untracked junk it archives the worktree's untracked files
-  into the graveyard (recoverable, under `<worktree>-<timestamp>`) and
-  then removes it. Still refuses uncommitted changes to *tracked* files
-  (commit/stash first) and a column-occupied worktree.
+  `create_worktree` returned, safe by default. It archives untracked and
+  uncommitted content into the graveyard (recoverable, under
+  `<worktree>-<timestamp>`), removes the worktree, and deletes the branch
+  only if it's merged into the integration base. A worktree claimed with
+  `claim_worktree` is refused; a column sitting inside is moved to
+  PROJECT_HOME rather than refused.
+  - **The removal can't strand a half-worktree.** The tree is renamed aside
+    before it's deleted, so a process still writing into `target/` can only
+    leave orphaned bytes, which the reply names.
+  - **A worktree an earlier spyc left half-removed is finished, not
+    refused.** That's one with its `.git` gone but its admin dir and branch
+    still there, and calling `remove_worktree` on it again completes the
+    job.
+- **`clean_worktree(path)`** -- an alias of `remove_worktree`, kept for the
+  tool name.
 - **`open_worktree(path)`** -- open the second spyc column (column `b`)
   at the worktree (re-targets `b` if already open), so the agent can
   work in it while the main column stays put. After this,

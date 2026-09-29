@@ -36,13 +36,34 @@ pub struct SafeRemoveReport {
     pub branch_deleted: bool,
     /// `Some(n)` when the branch was *kept* because it has `n` unmerged commits.
     pub kept_unmerged_ahead: Option<usize>,
+    /// `true` when this finished an earlier removal that failed partway.
+    pub resumed: bool,
+    /// What a process still writing into the worktree kept from being
+    /// deleted (`worktree::Removal::leftovers`). The removal itself succeeded.
+    pub leftovers: Vec<PathBuf>,
 }
 
 /// Archive the worktree's untracked + uncommitted-tracked content to the
 /// graveyard, force-remove it, then delete its branch iff merged. Errors —
 /// changing nothing — when `path` isn't a readable git worktree, is claimed
 /// (locked), or archiving fails.
-pub fn safe_remove_worktree(path: &Path) -> std::io::Result<SafeRemoveReport> {
+///
+/// `repo_hint` is any dir inside the worktree's repo. It finds a worktree
+/// whose `.git` is already gone (an earlier removal that failed partway), so
+/// this call finishes that removal instead of refusing it.
+pub fn safe_remove_worktree(
+    path: &Path,
+    repo_hint: Option<&Path>,
+) -> std::io::Result<SafeRemoveReport> {
+    // No `.git` but an admin dir that names this path: an earlier removal
+    // failed partway (#327). Finish it rather than refuse it.
+    if !path.join(".git").exists()
+        && let Some(hint) = repo_hint
+        && let Some(admin_dir) = worktree::stranded_admin_dir(path, hint)
+    {
+        return finish_stranded(path, &admin_dir, hint);
+    }
+
     // Distinguish the three ways this can fail, because they need different
     // responses from whoever reads the message: a wrong path, a directory that
     // isn't a worktree, or a status read that failed for a reason of its own
@@ -77,12 +98,7 @@ pub fn safe_remove_worktree(path: &Path) -> std::io::Result<SafeRemoveReport> {
 
     // Branch / merged-ness, resolved BEFORE removal (the branch ref must still
     // exist and the tree must still be present to read its status).
-    let (branch, repo_root, base) = resolve_branch_context(path);
-    let merged_status = match (repo_root.as_deref(), branch.as_deref(), base.as_deref()) {
-        (Some(root), Some(br), Some(base)) => crate::git::branch::branch_status(root, br, base),
-        _ => None,
-    };
-    let merged = merged_status.is_some_and(|s| s.merged);
+    let context = BranchContext::of(path);
 
     // Archive every dirty entry that still exists on disk. A deletion (tracked
     // file removed) leaves nothing to copy — it's recoverable from the commit /
@@ -97,50 +113,119 @@ pub fn safe_remove_worktree(path: &Path) -> std::io::Result<SafeRemoveReport> {
 
     // Tree is preserved → force past the dirty refusal. (A lease was ruled out
     // above; `remove_force` still re-checks it, harmlessly.)
-    worktree::remove_force(path)?;
-
-    // delete_branch: auto — delete iff merged, and never the base branch itself.
-    let branch_deleted = merged
-        && match (repo_root.as_deref(), branch.as_deref(), base.as_deref()) {
-            (Some(root), Some(br), Some(base)) if br != base => {
-                crate::git::branch::delete(root, br).is_ok()
-            }
-            _ => false,
-        };
-    let kept_unmerged_ahead = if merged {
-        None
-    } else {
-        merged_status.map(|s| s.ahead)
-    };
-
-    Ok(SafeRemoveReport {
-        archived,
-        label,
-        branch,
-        branch_deleted,
-        kept_unmerged_ahead,
-    })
+    let removal = worktree::remove_force(path)?;
+    Ok(context.finish(archived, label, removal, false))
 }
 
-/// Resolve a worktree's branch, its repo's MAIN root (from the shared common
-/// dir — survives whichever worktree `path` is), and the integration base.
-fn resolve_branch_context(path: &Path) -> (Option<String>, Option<PathBuf>, Option<String>) {
-    let Ok(repo) = gix::discover(path) else {
-        return (None, None, None);
-    };
-    let branch = repo
-        .head_name()
-        .ok()
-        .flatten()
-        .map(|n| n.shorten().to_string());
-    let repo_root = std::fs::canonicalize(repo.common_dir())
-        .ok()
-        .and_then(|cd| gix::open(&cd).ok())
-        .and_then(|main| main.workdir().map(Path::to_path_buf));
-    let base = repo_root
-        .as_deref()
-        .and_then(crate::git::branch::default_base);
-    (branch, repo_root, base)
+/// Finish a removal that failed partway: the `.git` gitfile is gone, so there
+/// is no status to read, and nothing is archived — the attempt that stranded
+/// it archived the work before it deleted anything, and what its delete left
+/// is a partial tree. The branch comes from the admin dir's `HEAD`.
+fn finish_stranded(
+    path: &Path,
+    admin_dir: &Path,
+    repo_hint: &Path,
+) -> std::io::Result<SafeRemoveReport> {
+    let mut context = gix::discover(repo_hint).map_or_else(
+        |_| BranchContext::default(),
+        |repo| BranchContext::from_repo(&repo),
+    );
+    context.branch = worktree::admin_branch(admin_dir);
+    context.resolve_merged();
+    let removal = worktree::finish_removal(path, admin_dir)?;
+    Ok(context.finish(0, None, removal, true))
+}
+
+/// A worktree's branch, its repo's MAIN root and integration base, and whether
+/// the branch is merged there: resolved before removal, used after it.
+#[derive(Default)]
+struct BranchContext {
+    branch: Option<String>,
+    repo_root: Option<PathBuf>,
+    base: Option<String>,
+    merged_status: Option<crate::git::branch::BranchStatus>,
+}
+
+impl BranchContext {
+    fn of(path: &Path) -> Self {
+        let Ok(repo) = gix::discover(path) else {
+            return Self::default();
+        };
+        let mut context = Self::from_repo(&repo);
+        context.branch = repo
+            .head_name()
+            .ok()
+            .flatten()
+            .map(|n| n.shorten().to_string());
+        context.resolve_merged();
+        context
+    }
+
+    /// The MAIN root (from the shared common dir, so it survives whichever
+    /// worktree `repo` is) and its integration base.
+    fn from_repo(repo: &gix::Repository) -> Self {
+        let repo_root = std::fs::canonicalize(repo.common_dir())
+            .ok()
+            .and_then(|cd| gix::open(&cd).ok())
+            .and_then(|main| main.workdir().map(Path::to_path_buf));
+        let base = repo_root
+            .as_deref()
+            .and_then(crate::git::branch::default_base);
+        Self {
+            branch: None,
+            repo_root,
+            base,
+            merged_status: None,
+        }
+    }
+
+    fn resolve_merged(&mut self) {
+        self.merged_status = match (
+            self.repo_root.as_deref(),
+            self.branch.as_deref(),
+            self.base.as_deref(),
+        ) {
+            (Some(root), Some(br), Some(base)) => crate::git::branch::branch_status(root, br, base),
+            _ => None,
+        };
+    }
+
+    /// delete_branch: auto — delete iff merged, and never the base branch
+    /// itself; then report.
+    fn finish(
+        self,
+        archived: usize,
+        label: Option<String>,
+        removal: worktree::Removal,
+        resumed: bool,
+    ) -> SafeRemoveReport {
+        let merged = self.merged_status.as_ref().is_some_and(|s| s.merged);
+        let branch_deleted = merged
+            && match (
+                self.repo_root.as_deref(),
+                self.branch.as_deref(),
+                self.base.as_deref(),
+            ) {
+                (Some(root), Some(br), Some(base)) if br != base => {
+                    crate::git::branch::delete(root, br).is_ok()
+                }
+                _ => false,
+            };
+        let kept_unmerged_ahead = if merged {
+            None
+        } else {
+            self.merged_status.map(|s| s.ahead)
+        };
+        SafeRemoveReport {
+            archived,
+            label,
+            branch: self.branch,
+            branch_deleted,
+            kept_unmerged_ahead,
+            resumed,
+            leftovers: removal.leftovers,
+        }
+    }
 }
 
 /// Copy the listed dirty entries into a temp staging tree (mirroring their
@@ -219,7 +304,7 @@ mod tests {
             let wt = worktree::add(&repo, "wt-clean", None).unwrap();
             std::fs::write(wt.join("scratch.log"), "junk\n").unwrap(); // untracked
 
-            let report = safe_remove_worktree(&wt).expect("safe-remove succeeds");
+            let report = safe_remove_worktree(&wt, None).expect("safe-remove succeeds");
             assert_eq!(report.archived, 1, "one untracked entry archived");
             let label = report.label.expect("a graveyard label");
             assert!(
@@ -250,7 +335,7 @@ mod tests {
             let wt = worktree::add(&repo, "wt-dirty", None).unwrap();
             std::fs::write(wt.join("f.txt"), "v2-uncommitted\n").unwrap(); // tracked edit
 
-            let report = safe_remove_worktree(&wt).expect("safe-remove archives & removes");
+            let report = safe_remove_worktree(&wt, None).expect("safe-remove archives & removes");
             assert_eq!(report.archived, 1, "the modified tracked file is archived");
             assert!(!wt.exists(), "worktree removed despite the tracked edit");
 
@@ -273,7 +358,7 @@ mod tests {
             run_git(&wt, &["add", "new.txt"]);
             run_git(&wt, &["commit", "-q", "-m", "ahead"]); // 1 commit past main
 
-            let report = safe_remove_worktree(&wt).expect("safe-remove succeeds");
+            let report = safe_remove_worktree(&wt, None).expect("safe-remove succeeds");
             assert!(!wt.exists(), "worktree removed");
             assert!(!report.branch_deleted, "unmerged branch kept");
             assert_eq!(
@@ -295,12 +380,72 @@ mod tests {
             let wt = worktree::add(&repo, "wt-leased", None).unwrap();
             worktree::lock(&wt, "agent B: busy").unwrap();
 
-            let err = safe_remove_worktree(&wt).unwrap_err();
+            let err = safe_remove_worktree(&wt, None).unwrap_err();
             assert!(
                 err.to_string().contains("agent B: busy"),
                 "cites lease: {err}"
             );
             assert!(wt.exists(), "leased worktree left intact");
+        });
+    }
+
+    /// The admin dir a worktree's `.git` gitfile points at.
+    fn admin_of(wt: &Path) -> PathBuf {
+        let gitfile = std::fs::read_to_string(wt.join(".git")).unwrap();
+        PathBuf::from(gitfile.trim().strip_prefix("gitdir:").unwrap().trim())
+    }
+
+    /// #327: a removal that failed partway (a background writer in `target/`
+    /// made `remove_dir_all` hit ENOTEMPTY) had already unlinked the `.git`
+    /// gitfile, leaving a half-deleted tree, its admin dir and its branch.
+    /// Removing it again finishes the job instead of refusing it as "not a git
+    /// worktree".
+    #[test]
+    fn a_partially_removed_worktree_is_finished_not_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
+            make_repo(&repo);
+            let wt = worktree::add(&repo, "wt-stranded", None).unwrap();
+            let admin = admin_of(&wt);
+            std::fs::remove_file(wt.join(".git")).unwrap();
+            std::fs::create_dir_all(wt.join("target/debug")).unwrap();
+            std::fs::write(wt.join("target/debug/leftover"), "x").unwrap();
+
+            let report = safe_remove_worktree(&wt, Some(&repo)).expect("finishes the removal");
+            assert!(!wt.exists(), "the half-deleted tree is gone");
+            assert!(!admin.exists(), "no admin dir left under .git/worktrees");
+            assert!(report.branch_deleted, "the merged branch is deleted");
+            assert!(!branch_exists(&repo, "wt-stranded"));
+            assert!(report.resumed, "reported as finishing an earlier removal");
+        });
+    }
+
+    /// Finishing a removal still honours a claim, and a plain directory no
+    /// admin dir points at is still refused, hint or not.
+    #[test]
+    fn finishing_a_removal_keeps_the_refusals() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let repo = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
+            make_repo(&repo);
+            let wt = worktree::add(&repo, "wt-claimed", None).unwrap();
+            let admin = admin_of(&wt);
+            std::fs::write(admin.join("locked"), "agent-7 is merging").unwrap();
+            std::fs::remove_file(wt.join(".git")).unwrap();
+            let err = safe_remove_worktree(&wt, Some(&repo))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("agent-7 is merging"), "{err}");
+            assert!(admin.is_dir(), "a claimed worktree is left alone");
+
+            let plain = repo.parent().unwrap().join("plain");
+            std::fs::create_dir(&plain).unwrap();
+            let err = safe_remove_worktree(&plain, Some(&repo))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("not a git worktree"), "{err}");
+            assert!(plain.is_dir(), "a plain dir is never deleted");
         });
     }
 
@@ -313,14 +458,16 @@ mod tests {
     fn safe_remove_refusals_name_their_cause_and_path() {
         let tmp = tempfile::tempdir().unwrap();
         let missing = tmp.path().join("nope");
-        let err = safe_remove_worktree(&missing).unwrap_err().to_string();
+        let err = safe_remove_worktree(&missing, None)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("no such path"), "missing path: {err}");
         assert!(err.contains("nope"), "names the path: {err}");
 
         // Exists, but isn't a worktree.
         let plain = tmp.path().join("plain");
         std::fs::create_dir(&plain).unwrap();
-        let err = safe_remove_worktree(&plain).unwrap_err().to_string();
+        let err = safe_remove_worktree(&plain, None).unwrap_err().to_string();
         assert!(err.contains("not a git worktree"), "plain dir: {err}");
         assert!(err.contains("plain"), "names the path: {err}");
         assert!(
