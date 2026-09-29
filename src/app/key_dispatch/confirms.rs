@@ -381,6 +381,59 @@ impl App {
         self.view.needs_full_repaint = true;
         Vec::new()
     }
+
+    /// `[y/n]` on a project-local startup-tab list. Only `y` runs it, and the
+    /// answer binds to this exact list, so an edited rc asks again. `n` is
+    /// remembered the same way; `Esc` answers nothing and asks next launch.
+    /// Both open the user's own tabs instead. Any other key re-raises the
+    /// prompt: unlike the hook consent there is no agent the key could have
+    /// been meant for, and a reflexive `Enter` must not approve a command.
+    pub(super) fn handle_project_tabs_consent_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        let prev_mode = std::mem::replace(&mut self.state.mode, Mode::Normal);
+        let Mode::Prompting(Prompt {
+            kind: PromptKind::ProjectTabsConsent { source, tabs },
+            prefix,
+            buffer,
+            editor,
+        }) = prev_mode
+        else {
+            return Vec::new();
+        };
+        let user_tabs = self.state.config.pane.tabs.clone();
+        match key.code {
+            KeyCode::Char('y' | 'Y') => {
+                crate::state::tab_consent::set_consent(&source, &tabs, true);
+                self.seed_startup_tabs(&tabs, Some("project startup tabs approved"));
+            }
+            KeyCode::Char('n' | 'N') => {
+                crate::state::tab_consent::set_consent(&source, &tabs, false);
+                self.seed_startup_tabs(
+                    &user_tabs,
+                    Some(
+                        "project startup tabs declined (`:startup-tabs forget` to be asked again)",
+                    ),
+                );
+            }
+            KeyCode::Esc => {
+                self.seed_startup_tabs(
+                    &user_tabs,
+                    Some("project startup tabs skipped — asks again next launch"),
+                );
+            }
+            _ => {
+                self.state.mode = Mode::Prompting(Prompt {
+                    kind: PromptKind::ProjectTabsConsent { source, tabs },
+                    prefix,
+                    buffer,
+                    editor,
+                });
+                self.state.flash_info("press y or n (Esc: not now)");
+                return Vec::new();
+            }
+        }
+        self.view.needs_full_repaint = true;
+        Vec::new()
+    }
 }
 
 #[cfg(test)]

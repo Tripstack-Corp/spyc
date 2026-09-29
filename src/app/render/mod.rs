@@ -440,8 +440,8 @@ impl App {
         self.render_visual_bell(frame, frame_area);
         // First-launch status-hooks consent — a centred modal pop-up drawn over
         // everything (chrome + HUD), so an auto-fired ask can't be mistaken for a
-        // frozen pane while the user's eyes are on the agent. No-op unless the
-        // `HookConsent` prompt is active.
+        // frozen pane while the user's eyes are on the agent. Also draws a
+        // project's startup-tab consent. No-op unless one of them is active.
         self.render_hook_consent_popup(frame, h_divider_row, v_divider_col);
         // Full-screen mermaid image overlay (the `i` key) — drawn last so it
         // sits on top of everything, including the HUD.

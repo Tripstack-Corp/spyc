@@ -129,6 +129,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     app("skill", App::cmd_skill),
     pure("sort"),
     pure("startdir"),
+    app("startup-tabs", App::cmd_startup_tabs),
     app("task", commands::cmd_task),
     app("task-to-pane", commands::cmd_task_to_pane),
     app("undo", commands::cmd_undo),

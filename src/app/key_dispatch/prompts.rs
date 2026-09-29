@@ -45,6 +45,12 @@ impl App {
         }
         if matches!(
             &self.state.mode,
+            Mode::Prompting(p) if matches!(p.kind, PromptKind::ProjectTabsConsent { .. })
+        ) {
+            return self.handle_project_tabs_consent_key(key);
+        }
+        if matches!(
+            &self.state.mode,
             Mode::Prompting(p) if matches!(p.kind, PromptKind::ClosePane)
         ) {
             return self.handle_close_pane_confirm_key(key);
