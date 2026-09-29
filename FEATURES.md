@@ -484,9 +484,12 @@ Multiple tabs, each running an independent pty:
 - **Startup tabs**: `[pane] tabs = ["claude", "zsh"]` (or `[[pane.tab]]`
   tables with a per-tab `cwd` and `label`) opens those tabs at launch, the
   config-driven version of pressing `^a c` once per tab. `spyc -r` restores
-  its saved tabs instead. Only `~/.spycrc.toml` may declare them, because they
-  run commands with no keypress; a project-local file's are ignored with a
-  warning. Reference: `CONFIGURATION.md` → "Startup tabs"
+  its saved tabs instead. Yours in `~/.spycrc.toml` open unasked. A
+  project-local `.spycrc.toml` list runs only after you approve it in a
+  pop-up (`y` run, `n` never, `Esc` not now). The approval binds to the
+  exact commands and cwds, so an edited list asks again. `:startup-tabs`
+  shows the answer, and `:startup-tabs forget` clears it. Reference:
+  `CONFIGURATION.md` → "Startup tabs"
 - When the tabs overflow the divider, labels crop so every tab stays visible
   and clickable
 - **Default command** for `^a c` resolves in this order:
@@ -1485,7 +1488,12 @@ jump from Claude's output back to the file list.
   bg-task / git / fs / mcp rates, pid/rss/threads, build identity —
   fixed-width so it doesn't bounce as rates rise and fall — plus an
   extended section tallying cumulative per-tool **MCP call counts**
-  (every agent `tools/call`, read tools included)
+  (every agent `tools/call`, read tools included). Transparent by
+  default: only the text is painted, in each row's colour on the
+  terminal background, so the file list or pane shows through the
+  padding (and a click there reaches it). `:activity solid` switches
+  to opaque colour bands; `:activity transparent` switches back —
+  either one also shows the monitor
 - **C** toggle between colour and mono themes
 - **:setenv NAME=VALUE** set an environment variable
 - **:dump-scrollback** write the active pane's scrollback snapshot

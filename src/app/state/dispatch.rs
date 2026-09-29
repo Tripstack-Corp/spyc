@@ -384,6 +384,7 @@ impl AppState {
             | PromptKind::ClaudeCrashRecover { .. }
             | PromptKind::HookConsent { .. }
             | PromptKind::SkillUpdate { .. }
+            | PromptKind::ProjectTabsConsent { .. }
             | PromptKind::ClosePane
             | PromptKind::RestartPane
             | PromptKind::LuaRunaway

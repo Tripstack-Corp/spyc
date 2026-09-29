@@ -533,14 +533,30 @@ pub fn cmd_archive(app: &mut App, arg: &str) -> Vec<Effect> {
 /// tab's dot is derived (the `:why-status` reasoning for ALL panes at once) —
 /// the `source` line is the crux: a live `report_status` self-report vs the
 /// output-timing fallback. Easy to yank/save and paste when debugging the dots.
+/// `:activity transparent|solid` picks how the overlay paints, and shows it.
 pub(super) fn cmd_activity(app: &mut App, args: &str) -> Vec<Effect> {
-    if args.trim() == "dump" {
-        let mut view = PagerView::new_plain("activity dump", activity_dump_lines(app));
-        view.saveable = true;
-        app.set_pager(view);
-        return Vec::new();
-    }
-    app.apply(&Action::ToggleActivity).unwrap_or_default()
+    use super::activity::HudStyle;
+    let (style, name) = match args.trim() {
+        "" => return app.apply(&Action::ToggleActivity).unwrap_or_default(),
+        "dump" => {
+            let mut view = PagerView::new_plain("activity dump", activity_dump_lines(app));
+            view.saveable = true;
+            app.set_pager(view);
+            return Vec::new();
+        }
+        "transparent" => (HudStyle::Transparent, "transparent"),
+        "solid" => (HudStyle::Solid, "solid"),
+        other => {
+            app.state.flash_error(format!(
+                "usage: :activity [dump|transparent|solid]  (got `{other}`)"
+            ));
+            return Vec::new();
+        }
+    };
+    app.view.activity_style = style;
+    app.view.show_activity = true;
+    app.state.flash_info(format!("activity monitor: {name}"));
+    Vec::new()
 }
 
 /// Build the `:activity dump` report (see [`cmd_activity`]). Reads the live
@@ -986,6 +1002,33 @@ mod tests {
         let mut app = App::test_app(std::env::temp_dir());
         app.view.pager = Some(PagerView::new_plain("t", vec!["line".to_string()]));
         app
+    }
+
+    /// Picking a style shows the monitor in it; a bad argument changes nothing
+    /// instead of toggling the overlay as a bare `:activity` would.
+    #[test]
+    fn activity_style_argument_sets_the_style_and_shows_the_monitor() {
+        use crate::app::activity::HudStyle;
+        let mut app = App::test_app(std::env::temp_dir());
+        assert_eq!(app.view.activity_style, HudStyle::Transparent, "default");
+
+        app.dispatch_command("activity solid");
+        assert!(app.view.show_activity);
+        assert_eq!(app.view.activity_style, HudStyle::Solid);
+
+        app.dispatch_command("activity transparent");
+        assert!(app.view.show_activity, "a style never hides the monitor");
+        assert_eq!(app.view.activity_style, HudStyle::Transparent);
+
+        app.view.show_activity = false;
+        app.dispatch_command("activity bogus");
+        assert!(!app.view.show_activity, "a bad argument must not toggle");
+        assert_eq!(app.view.activity_style, HudStyle::Transparent);
+        let flash = app.state.flash.as_ref().map(|f| f.text.as_str());
+        assert!(
+            flash.is_some_and(|t| t.contains("usage: :activity")),
+            "{flash:?}"
+        );
     }
 
     /// #166: with a pager on screen the status bar is occluded by it, so the

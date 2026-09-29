@@ -77,8 +77,10 @@
 # (the ^a 1..9 jump reach). Precedence at startup:
 # `spyc -r` restore (if you pick a session) > these tabs > single tab
 # on demand. Unset (default): today's behaviour, no pane until ^a c.
-# ~/.spycrc.toml only: these run commands at launch, so a project-local
-# .spycrc.toml's tabs are ignored with a warning.
+# A project-local .spycrc.toml may declare tabs too, but they run commands
+# you didn't write, so spyc lists them at launch and opens them only on
+# `y` (then in place of yours). The answer binds to the exact commands and
+# cwds, so an edited list asks again. `:startup-tabs forget` re-asks.
 [pane]
 # default_command = "claude"
 # tabs = ["claude", "bash"]

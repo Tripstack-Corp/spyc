@@ -159,6 +159,7 @@ mod scheduler;
 mod session;
 mod skill;
 mod sources;
+mod startup_tabs;
 pub mod state;
 mod status_hooks;
 mod streaming;

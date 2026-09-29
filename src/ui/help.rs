@@ -221,7 +221,7 @@ const SECTIONS: &[Section] = &[
             ),
             (
                 ":activity",
-                "toggle activity monitor; :activity dump → per-pane dot-status (why-status) report in a pager",
+                "toggle activity monitor; :activity transparent|solid → overlay style; :activity dump → per-pane dot-status (why-status) report in a pager",
             ),
             (":setenv NAME=VALUE", "set an environment variable"),
         ],
@@ -275,6 +275,10 @@ const SECTIONS: &[Section] = &[
             (
                 ":hooks on|on!|off",
                 "claude/codex/agy auto-status hooks (asked once on launch); on! restarts+resumes a claude pane",
+            ),
+            (
+                ":startup-tabs [forget]",
+                "where launch's pane tabs come from; forget re-asks about a project .spycrc.toml's list",
             ),
             (
                 ":mouse on|off|auto",

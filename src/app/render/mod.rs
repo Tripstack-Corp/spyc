@@ -31,6 +31,7 @@ use crate::ui::list_view::ListView;
 
 use super::{App, FrameLayout, View, state};
 
+mod activity_hud;
 mod chrome;
 mod inner;
 mod overlays;
@@ -439,8 +440,8 @@ impl App {
         self.render_visual_bell(frame, frame_area);
         // First-launch status-hooks consent — a centred modal pop-up drawn over
         // everything (chrome + HUD), so an auto-fired ask can't be mistaken for a
-        // frozen pane while the user's eyes are on the agent. No-op unless the
-        // `HookConsent` prompt is active.
+        // frozen pane while the user's eyes are on the agent. Also draws a
+        // project's startup-tab consent. No-op unless one of them is active.
         self.render_hook_consent_popup(frame, h_divider_row, v_divider_col);
         // Full-screen mermaid image overlay (the `i` key) — drawn last so it
         // sits on top of everything, including the HUD.
@@ -1209,7 +1210,8 @@ mod purity_guard {
     //! `mod_rs_stays_decomposed` / the `COMMAND_TABLE` build-error guard turn
     //! prose rules into failures.
     //!
-    //! Scope: the PURE DRAW modules only — `inner` / `chrome` / `overlays`.
+    //! Scope: the PURE DRAW modules only — `inner` / `chrome` / `overlays` /
+    //! `activity_hud`.
     //! `render/mod.rs` is deliberately NOT covered: it holds the `&mut`
     //! settle (`prepare_frame` / `prepare_panes`), which is exactly where the
     //! OS kicks legitimately live. As further off-thread fixes land (e.g. the
@@ -1225,6 +1227,7 @@ mod purity_guard {
         ("render/inner.rs", include_str!("inner.rs")),
         ("render/chrome.rs", include_str!("chrome.rs")),
         ("render/overlays.rs", include_str!("overlays.rs")),
+        ("render/activity_hud.rs", include_str!("activity_hud.rs")),
     ];
 
     /// High-signal tokens for blocking IO / OS access / thread spawning that
