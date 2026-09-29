@@ -344,7 +344,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "remove_worktree",
-                    "description": "Safely tear down a git worktree by path (the path create_worktree returned). Safe by default: archives any untracked + uncommitted changes to spyc's graveyard first (recoverable), removes the worktree, then deletes its branch ONLY if it is merged into the integration base — an unmerged branch's ref is kept (it's the commit backup). Refuses a worktree CLAIMED by another session (claim_worktree) — release it first. A spyc column sitting inside is reset to PROJECT_HOME, not refused. The teardown half of the worktree flow.",
+                    "description": "Safely tear down a git worktree by path (the path create_worktree returned). Safe by default: archives any untracked + uncommitted changes to spyc's graveyard first (recoverable), removes the worktree, then deletes its branch ONLY if it is merged into the integration base — an unmerged branch's ref is kept (it's the commit backup). Refuses a worktree CLAIMED by another session (claim_worktree) — release it first. A spyc column sitting inside is reset to PROJECT_HOME, not refused. If an earlier removal failed partway (its .git is gone), calling this again finishes it. The teardown half of the worktree flow.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {

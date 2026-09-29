@@ -131,13 +131,21 @@ ships with it (decisions log, 2026-09-29).
   The same PR fits every tab into the bar. Keeping shared-prefix labels
   distinct when they crop is
   [#483](https://github.com/Tripstack-Corp/spyc/issues/483).
-- **Three of the daily-driver bugs.** The first keystrokes into a fresh pane
+- **Four of the daily-driver bugs.** The first keystrokes into a fresh pane
   now reach the child (#464, closing
-  [#326](https://github.com/Tripstack-Corp/spyc/issues/326)), and
+  [#326](https://github.com/Tripstack-Corp/spyc/issues/326)).
   [#34](https://github.com/Tripstack-Corp/spyc/issues/34) closed on both
   halves: SGR 2 (#457, closing
   [#452](https://github.com/Tripstack-Corp/spyc/issues/452)) and the four
-  engine defects the swap fixes (#465).
+  engine defects the swap fixes (#465). And a `remove_worktree` that fails
+  partway no longer strands the worktree, while one an older spyc left
+  half-removed is finished on retry (closing
+  [#327](https://github.com/Tripstack-Corp/spyc/issues/327)).
+- **[#490](https://github.com/Tripstack-Corp/spyc/issues/490): crates.io
+  publishing.** The release job publishes `spyc-vt-sys` before spyc (#499),
+  0.1.0 is on crates.io, and CI packages both crates on every PR. The release
+  matrix hasn't run since the vendored archives landed, so `v2.2.0-rc.1` still
+  goes out before `v2.2.0`.
 
 **Open:**
 
@@ -158,8 +166,6 @@ ships with it (decisions log, 2026-09-29).
 - **[#71](https://github.com/Tripstack-Corp/spyc/issues/71) — prompt templates
   in `.spycrc.toml`**, with picks and inventory substituted.
 - **The rest of the daily-driver bug set:**
-  [#327](https://github.com/Tripstack-Corp/spyc/issues/327) (a partially-failed
-  `remove_worktree` strands the worktree),
   [#9](https://github.com/Tripstack-Corp/spyc/issues/9) (`^a s` anchors paths
   on PROJECT_HOME, so an agent in a worktree can't resolve them),
   [#22](https://github.com/Tripstack-Corp/spyc/issues/22) +
@@ -168,14 +174,6 @@ ships with it (decisions log, 2026-09-29).
 - **[#492](https://github.com/Tripstack-Corp/spyc/issues/492):
   `docs/drafts/PROJECTS_PLAN.md`**, authored in 2.2, design only. 2.3's scope
   depends on it being written and approved before code lands.
-- **[#490](https://github.com/Tripstack-Corp/spyc/issues/490): publish
-  `spyc-vt-sys` before spyc.** This is a tag blocker rather than scope. The
-  release job now publishes both in order, and CI packages them on every PR
-  (`make package-check`). What remains is the owner's one-time manual publish
-  of `spyc-vt-sys` plus its trusted-publisher entry (RELEASE_ENGINEERING.md
-  §5a). Until then the release's crates.io job would skip 2.2 while the other
-  channels ship it. The release matrix hasn't run since the vendored archives
-  landed, so `v2.2.0-rc.1` goes out before `v2.2.0`.
 
 ## The 2.3 horizon: Projects
 

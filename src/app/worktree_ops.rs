@@ -50,10 +50,18 @@ pub enum WorktreeJob {
     },
     /// `remove_worktree`: safe-by-default teardown of `target` — archive
     /// untracked + uncommitted content to the graveyard, force-remove, delete
-    /// the branch iff merged.
-    Remove { target: std::path::PathBuf },
+    /// the branch iff merged. `anchor` is a dir inside the repo (the focused
+    /// column's, as for `Create`), which is how a partially-removed `target`
+    /// with no `.git` left is still found.
+    Remove {
+        target: std::path::PathBuf,
+        anchor: std::path::PathBuf,
+    },
     /// `clean_worktree`: an alias of `Remove` (kept for the MCP tool name).
-    Clean { target: std::path::PathBuf },
+    Clean {
+        target: std::path::PathBuf,
+        anchor: std::path::PathBuf,
+    },
 }
 
 /// The outcome of running a [`WorktreeJob`] — the MCP reply, the (success-only)
@@ -140,8 +148,8 @@ pub fn run_worktree_job(job: WorktreeJob) -> WorktreeJobResult {
         // `clean` is folded into `remove`: both archive untracked + uncommitted
         // content to the graveyard, force-remove the tree, and delete the branch
         // iff merged (safe-by-default).
-        WorktreeJob::Remove { target } | WorktreeJob::Clean { target } => {
-            match crate::app::worktree_clean::safe_remove_worktree(&target) {
+        WorktreeJob::Remove { target, anchor } | WorktreeJob::Clean { target, anchor } => {
+            match crate::app::worktree_clean::safe_remove_worktree(&target, Some(&anchor)) {
                 Ok(report) => {
                     let message = safe_remove_message(&target, &report);
                     WorktreeJobResult {
@@ -164,7 +172,20 @@ fn safe_remove_message(
     target: &std::path::Path,
     report: &crate::app::worktree_clean::SafeRemoveReport,
 ) -> String {
-    let mut parts = vec![format!("removed worktree {}", target.display())];
+    let mut parts = vec![if report.resumed {
+        format!(
+            "finished removing worktree {} (an earlier removal had failed partway)",
+            target.display()
+        )
+    } else {
+        format!("removed worktree {}", target.display())
+    }];
+    if !report.leftovers.is_empty() {
+        parts.push(format!(
+            "a process was still writing into it, so {} is left to delete once it stops",
+            crate::git::worktree::show_paths(&report.leftovers)
+        ));
+    }
     if let Some(label) = &report.label {
         parts.push(format!(
             "archived {} uncommitted/untracked entr{} to the graveyard as '{label}'",
@@ -228,11 +249,17 @@ impl App {
                 }
             }
             McpCommand::RemoveWorktree { path } => match self.resolve_worktree_arg(path) {
-                Ok(target) => Ok(WorktreeJob::Remove { target }),
+                Ok(target) => Ok(WorktreeJob::Remove {
+                    target,
+                    anchor: self.state.worktree_anchor(),
+                }),
                 Err(message) => Err(McpResponse::Error { message }),
             },
             McpCommand::CleanWorktree { path } => match self.resolve_worktree_arg(path) {
-                Ok(target) => Ok(WorktreeJob::Clean { target }),
+                Ok(target) => Ok(WorktreeJob::Clean {
+                    target,
+                    anchor: self.state.worktree_anchor(),
+                }),
                 Err(message) => Err(McpResponse::Error { message }),
             },
             _ => return None,

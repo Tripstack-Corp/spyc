@@ -512,7 +512,7 @@ fn write_admin_files(admin_dir: &Path, target: &Path, branch: &str) -> std::io::
 /// refuse a dirty worktree (uncommitted/untracked changes), then delete both
 /// the worktree dir and its admin dir under `<common_dir>/worktrees/<name>`.
 /// The branch ref is left intact (git's `worktree remove` doesn't delete it).
-pub fn remove(path: &Path) -> std::io::Result<()> {
+pub fn remove(path: &Path) -> std::io::Result<Removal> {
     remove_inner(path, false)
 }
 
@@ -520,29 +520,44 @@ pub fn remove(path: &Path) -> std::io::Result<()> {
 /// already archived the worktree's uncommitted/untracked content to the
 /// graveyard. A *lease* (lock) is still honoured: `force` forces past dirt, not
 /// past another session's claim — release it first.
-pub fn remove_force(path: &Path) -> std::io::Result<()> {
+pub fn remove_force(path: &Path) -> std::io::Result<Removal> {
     remove_inner(path, true)
 }
 
-fn remove_inner(path: &Path, force_dirty: bool) -> std::io::Result<()> {
+/// What a removal left on disk.
+#[derive(Debug, Default)]
+pub struct Removal {
+    /// Directories a process still writing into the worktree kept from being
+    /// deleted: its renamed-aside copy, or the path itself when the writer
+    /// recreated it. Git's view is already consistent by then; these are
+    /// orphaned bytes, safe to delete once the writer stops.
+    pub leftovers: Vec<PathBuf>,
+}
+
+/// Backoff between attempts to delete a renamed-aside worktree. A background
+/// writer (rust-analyzer, cargo, an indexer) usually lets go within this.
+const DELETE_RETRY_MS: [u64; 3] = [25, 75, 200];
+
+fn remove_inner(path: &Path, force_dirty: bool) -> std::io::Result<Removal> {
+    remove_inner_with(
+        path,
+        force_dirty,
+        &|p| std::fs::remove_dir_all(p),
+        &DELETE_RETRY_MS,
+    )
+}
+
+fn remove_inner_with(
+    path: &Path,
+    force_dirty: bool,
+    delete: &dyn Fn(&Path) -> std::io::Result<()>,
+    retry_ms: &[u64],
+) -> std::io::Result<Removal> {
     #[cfg(test)]
     let _serial = serialize_worktree_mutation();
     // Resolve the admin dir from the worktree's `.git` gitfile.
     let admin_dir = admin_dir_of(path)?;
-
-    // SAFETY (always, even under force): refuse if locked (git refuses a locked
-    // worktree). spyc's `claim_worktree` lease writes this file with an owner
-    // reason, so surface it — a cooperating session sees WHO claimed it and why.
-    let locked = admin_dir.join("locked");
-    if locked.is_file() {
-        let reason = std::fs::read_to_string(&locked).unwrap_or_default();
-        let reason = reason.trim();
-        return Err(std::io::Error::other(if reason.is_empty() {
-            "worktree is locked (claimed) — release it to remove".to_string()
-        } else {
-            format!("worktree is locked (claimed): {reason} — release it to remove")
-        }));
-    }
+    refuse_if_locked(&admin_dir)?;
 
     // SAFETY: refuse a dirty worktree (uncommitted or untracked changes),
     // matching `git worktree remove` — unless the caller forces (safe-remove,
@@ -561,13 +576,170 @@ fn remove_inner(path: &Path, force_dirty: bool) -> std::io::Result<()> {
         }
     }
 
-    if path.exists() {
-        std::fs::remove_dir_all(path)?;
+    tear_down(path, &admin_dir, delete, retry_ms)
+}
+
+/// SAFETY (always, even under force): refuse a locked worktree, as git does.
+/// spyc's `claim_worktree` lease writes the lock with an owner reason, so
+/// surface it — a cooperating session sees WHO claimed it and why.
+fn refuse_if_locked(admin_dir: &Path) -> std::io::Result<()> {
+    let locked = admin_dir.join("locked");
+    if !locked.is_file() {
+        return Ok(());
     }
+    let reason = std::fs::read_to_string(&locked).unwrap_or_default();
+    let reason = reason.trim();
+    Err(std::io::Error::other(if reason.is_empty() {
+        "worktree is locked (claimed) — release it to remove".to_string()
+    } else {
+        format!("worktree is locked (claimed): {reason} — release it to remove")
+    }))
+}
+
+/// Delete a worktree without ever leaving half of one (#327). Deleting in
+/// place fails partway when something writes into `target/` mid-walk (macOS
+/// `ENOTEMPTY`), and by then the `.git` gitfile is gone, the marker every
+/// retry keys on. So the tree is renamed aside first (same parent, one atomic
+/// rename), the admin dir goes next, and only then is the renamed copy
+/// deleted. Git's view is consistent from the rename on; a failed delete
+/// strands orphaned bytes, reported as leftovers.
+fn tear_down(
+    path: &Path,
+    admin_dir: &Path,
+    delete: &dyn Fn(&Path) -> std::io::Result<()>,
+    retry_ms: &[u64],
+) -> std::io::Result<Removal> {
+    let moved = if path.exists() {
+        let aside = aside_path(path)?;
+        std::fs::rename(path, &aside).map_err(|e| {
+            std::io::Error::new(
+                e.kind(),
+                format!("moving {} aside to delete it: {e}", path.display()),
+            )
+        })?;
+        Some(aside)
+    } else {
+        None
+    };
     if admin_dir.exists() {
-        std::fs::remove_dir_all(&admin_dir)?;
+        std::fs::remove_dir_all(admin_dir).map_err(|e| {
+            std::io::Error::new(
+                e.kind(),
+                format!("removing admin dir {}: {e}", admin_dir.display()),
+            )
+        })?;
     }
-    Ok(())
+    let mut leftovers: Vec<PathBuf> = moved
+        .into_iter()
+        .filter(|aside| delete_with_retry(aside, delete, retry_ms).is_err())
+        .collect();
+    // A writer using absolute paths (cargo, rust-analyzer) recreates `path`
+    // under the rename. What it made was ours to delete; a `.git` means
+    // something else now lives there, and that is never touched.
+    if path.exists()
+        && !path.join(".git").exists()
+        && delete_with_retry(path, delete, retry_ms).is_err()
+    {
+        leftovers.push(path.to_path_buf());
+    }
+    Ok(Removal { leftovers })
+}
+
+/// Leftover paths for a message: comma-separated.
+pub fn show_paths(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// A hidden sibling of `path` to rename it to before deleting.
+fn aside_path(path: &Path) -> std::io::Result<PathBuf> {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return Err(std::io::Error::other(format!(
+            "can't remove {}: no parent directory",
+            path.display()
+        )));
+    };
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    Ok(parent.join(format!(
+        ".{}.spyc-removing-{}-{nanos}",
+        name.to_string_lossy(),
+        std::process::id()
+    )))
+}
+
+fn delete_with_retry(
+    dir: &Path,
+    delete: &dyn Fn(&Path) -> std::io::Result<()>,
+    retry_ms: &[u64],
+) -> std::io::Result<()> {
+    let mut result = delete(dir);
+    for ms in retry_ms {
+        if result.is_ok() || !dir.exists() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(*ms));
+        result = delete(dir);
+    }
+    if dir.exists() { result } else { Ok(()) }
+}
+
+/// The admin dir of a worktree at `path` whose `.git` gitfile is gone: an
+/// earlier removal that failed partway. Found by scanning the worktrees of the
+/// repo `repo_hint` sits in for the admin entry whose `gitdir` names `path`.
+pub fn stranded_admin_dir(path: &Path, repo_hint: &Path) -> Option<PathBuf> {
+    let repo = gix::discover(repo_hint).ok()?;
+    let worktrees = std::fs::canonicalize(repo.common_dir())
+        .ok()?
+        .join("worktrees");
+    let want = canonical_even_if_missing(path);
+    std::fs::read_dir(worktrees)
+        .ok()?
+        .flatten()
+        .find_map(|entry| {
+            let gitdir = std::fs::read_to_string(entry.path().join("gitdir")).ok()?;
+            let named = PathBuf::from(gitdir.trim());
+            (canonical_even_if_missing(named.parent()?) == want).then(|| entry.path())
+        })
+}
+
+/// Finish removing a worktree whose `.git` is already gone, keyed on the admin
+/// dir [`stranded_admin_dir`] found. The same teardown as [`remove_force`],
+/// and a lease is still honoured.
+pub fn finish_removal(path: &Path, admin_dir: &Path) -> std::io::Result<Removal> {
+    #[cfg(test)]
+    let _serial = serialize_worktree_mutation();
+    refuse_if_locked(admin_dir)?;
+    tear_down(
+        path,
+        admin_dir,
+        &|p| std::fs::remove_dir_all(p),
+        &DELETE_RETRY_MS,
+    )
+}
+
+/// The branch an admin dir's `HEAD` names (`None` when detached).
+pub fn admin_branch(admin_dir: &Path) -> Option<String> {
+    let head = std::fs::read_to_string(admin_dir.join("HEAD")).ok()?;
+    head.trim()
+        .strip_prefix("ref: refs/heads/")
+        .map(str::to_string)
+}
+
+/// `path` canonicalized, or when it no longer exists, its parent canonicalized
+/// with the name rejoined, so a deleted worktree still compares equal to the
+/// path its admin dir recorded (macOS `/var` vs `/private/var`).
+fn canonical_even_if_missing(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => {
+            std::fs::canonicalize(parent).map_or_else(|_| path.to_path_buf(), |p| p.join(name))
+        }
+        _ => path.to_path_buf(),
+    })
 }
 
 /// Lock a worktree using git's native mechanism: write `<admin>/locked` with
@@ -622,7 +794,7 @@ fn admin_dir_of(path: &Path) -> std::io::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{add, list, lock, lock_reason, remove, unlock};
+    use super::{add, list, lock, lock_reason, remove, remove_force, remove_inner_with, unlock};
     use crate::git::test_support::run_git;
     use std::path::{Path, PathBuf};
 
@@ -970,6 +1142,108 @@ mod tests {
                 "listing from {from:?} should flag only the main worktree"
             );
         }
+    }
+
+    /// Entries in `dir` whose name marks a renamed-aside worktree.
+    fn aside_copies(dir: &Path) -> Vec<PathBuf> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.to_string_lossy().contains(".spyc-removing-"))
+            .collect()
+    }
+
+    fn git_lists(main: &Path, name: &str) -> bool {
+        run_git(main, &["worktree", "list", "--porcelain"]).contains(name)
+    }
+
+    /// #327: a delete that fails partway (macOS `ENOTEMPTY` from a process
+    /// writing into `target/`) must strand bytes, never half a worktree. The
+    /// tree is renamed aside and its admin dir removed before the delete runs,
+    /// so git's view is already consistent when the delete fails, and the
+    /// renamed copy is reported rather than left as a mystery.
+    #[test]
+    fn a_failing_delete_strands_bytes_not_a_worktree() {
+        let (_tmp, main) = init_repo();
+        let target = add(&main, "feature", None).expect("add");
+        let admin_dir = admin_of(&target);
+        let enotempty = |_: &Path| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::DirectoryNotEmpty,
+                "Directory not empty (os error 66)",
+            ))
+        };
+        let removal = remove_inner_with(&target, false, &enotempty, &[0, 0])
+            .expect("the removal itself succeeds");
+        assert!(!target.exists(), "no half-worktree at the path");
+        assert!(!admin_dir.exists(), "admin dir removed before the delete");
+        assert!(!git_lists(&main, "feature"), "git no longer lists it");
+        let [aside] = removal.leftovers.as_slice() else {
+            panic!("the stranded copy is reported: {:?}", removal.leftovers);
+        };
+        assert!(aside.is_dir());
+        assert_eq!(aside.parent(), target.parent(), "renamed in place, same fs");
+    }
+
+    /// The race #327 hit, with a real writer: a thread keeps creating files
+    /// under `target/` by absolute path, as cargo and rust-analyzer do, while
+    /// the worktree is removed. Whichever way the race falls, git's view ends
+    /// consistent and the path never holds half a worktree.
+    #[test]
+    fn a_live_writer_never_leaves_half_a_worktree() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (_tmp, main) = init_repo();
+        let target = add(&main, "feature", None).expect("add");
+        let admin_dir = admin_of(&target);
+        let deep = target.join("target/debug/incremental");
+        std::fs::create_dir_all(&deep).unwrap();
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let writer = {
+            let stop = std::sync::Arc::clone(&stop);
+            std::thread::spawn(move || {
+                let mut n = 0u32;
+                while !stop.load(Ordering::Relaxed) {
+                    let dir = deep.join(format!("d{}", n % 64));
+                    let _ = std::fs::create_dir_all(&dir);
+                    let _ = std::fs::write(dir.join(format!("f{n}")), b"x");
+                    n = n.wrapping_add(1);
+                }
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let removed = remove_force(&target);
+        stop.store(true, Ordering::Relaxed);
+        writer.join().unwrap();
+        removed.expect("the removal succeeds whatever the writer does");
+        assert!(!admin_dir.exists(), "admin dir removed");
+        assert!(!target.join(".git").exists(), "never half a worktree");
+        assert!(!git_lists(&main, "feature"), "git no longer lists it");
+    }
+
+    /// A transient failure is retried, and a delete that gets there leaves
+    /// nothing behind.
+    #[test]
+    fn a_transient_delete_failure_is_retried() {
+        let (_tmp, main) = init_repo();
+        let target = add(&main, "feature", None).expect("add");
+        let attempts = std::cell::Cell::new(0);
+        let flaky = |p: &Path| {
+            attempts.set(attempts.get() + 1);
+            if attempts.get() == 1 {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::DirectoryNotEmpty,
+                    "Directory not empty (os error 66)",
+                ))
+            } else {
+                std::fs::remove_dir_all(p)
+            }
+        };
+        let removal = remove_inner_with(&target, false, &flaky, &[0]).expect("remove");
+        assert_eq!(attempts.get(), 2);
+        assert!(removal.leftovers.is_empty());
+        assert!(aside_copies(target.parent().unwrap()).is_empty());
+        assert!(!target.exists());
     }
 
     #[test]
