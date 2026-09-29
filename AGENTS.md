@@ -163,6 +163,7 @@ cargo build / cargo build --release   # or: make release
 make install      # release build + copy to ~/.local/bin
 make check        # fmt + clippy + test (CI gate; supply-chain is audit.yml)
 make lint-workflows # actionlint + shellcheck over .github/workflows (in CI's lint job)
+make package-check  # package both crates + build from the tarballs, as `cargo publish` will (CI's package job)
 make fuzz         # nightly + cargo-fuzz, on-demand (NOT in check)
 make changelog    # preview the pending CHANGELOG section
 make release-prep VERSION=x.y.z       # step 1, on a release branch: set version + changelog + commit
