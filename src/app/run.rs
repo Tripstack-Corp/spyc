@@ -916,6 +916,15 @@ impl App {
                 self.run_effects(mouse_fx, terminal, &foreground_exec);
             }
 
+            // Bring the process cwd to the focused column (#495). A focus
+            // change or an agent's `open_worktree` into `b` installs a column
+            // without the `chdir` a navigation does. One `getcwd`; nothing
+            // emitted when they agree.
+            let cwd_fx = self.settle_process_cwd();
+            if !cwd_fx.is_empty() {
+                self.run_effects(cwd_fx, terminal, &foreground_exec);
+            }
+
             // Re-install an agent pane's status hooks if something removed them
             // since it launched (a sibling spyc's teardown, a `git clean`).
             // Throttled and piggybacked on an iteration that was happening
