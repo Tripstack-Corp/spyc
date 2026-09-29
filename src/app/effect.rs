@@ -322,19 +322,32 @@ pub enum PaneTarget {
 /// What to deliver to the pane. `Key` routes through `Pane::send_key`
 /// (preserving its key-trace logging + empty-bytes guard); `Bytes` routes
 /// through `Pane::send_bytes` (its own key-trace logging) — so each former
-/// call site keeps its exact write path byte-for-byte.
+/// call site keeps its exact write path byte-for-byte. `Paths` is rendered at
+/// delivery, against the receiving pane's cwd.
 #[derive(Debug)]
 pub enum PaneInput {
     Bytes(Vec<u8>),
     Key(KeyEvent),
+    /// `^a s`: paths to type, anchored on the pane's cwd
+    /// (`shell::pane_path_payload`).
+    Paths(Vec<std::path::PathBuf>),
 }
 
 impl PaneInput {
     /// Deliver to `pane` via the matching write path.
-    fn send_to(self, pane: &mut Pane) -> Result<()> {
+    pub(crate) fn send_to(self, pane: &mut Pane) -> Result<()> {
         match self {
             Self::Bytes(bytes) => pane.send_bytes(&bytes),
             Self::Key(key) => pane.send_key(key),
+            Self::Paths(paths) => {
+                // Read fresh, not the tab's cached `live_cwd`: a shell that just
+                // ran `cd` would otherwise get paths relative to where it was,
+                // resolving to the wrong file. An unreadable cwd sends them all
+                // absolute.
+                let cwd = pane.process_id().and_then(crate::proc_cwd::cwd_for_pid);
+                let payload = crate::shell::pane_path_payload(&paths, cwd.as_deref());
+                pane.send_bytes(payload.as_bytes())
+            }
         }
     }
 
@@ -362,6 +375,7 @@ impl PaneInput {
                 _ => false,
             },
             Self::Bytes(b) => matches!(b.as_slice(), b"\r" | b"\n" | b"\r\n" | b"\x1b" | b"\x03"),
+            Self::Paths(_) => false,
         }
     }
 }

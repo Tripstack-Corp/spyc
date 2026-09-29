@@ -51,6 +51,27 @@ pub fn shell_quote(s: &str) -> String {
         .into_owned()
 }
 
+/// The `^a s` payload: each path shell-quoted and anchored on `cwd`, the
+/// directory of the pane receiving it (#9). A path under `cwd` goes out
+/// relative (`.` for `cwd` itself), which is what the pane's own process can
+/// resolve. Anything else stays absolute and is never `~`-collapsed, because
+/// agents don't reliably expand `~`. An unknown `cwd` sends every path
+/// absolute: verbose, but never resolving to the wrong file. Ends in a space
+/// so the user can keep typing.
+pub fn pane_path_payload(paths: &[PathBuf], cwd: Option<&Path>) -> String {
+    let mut out = String::new();
+    for p in paths {
+        let shown = match cwd.and_then(|c| p.strip_prefix(c).ok()) {
+            Some(rel) if rel.as_os_str().is_empty() => Path::new("."),
+            Some(rel) => rel,
+            None => p.as_path(),
+        };
+        out.push_str(&shell_quote(&shown.to_string_lossy()));
+        out.push(' ');
+    }
+    out
+}
+
 /// Substitute `%` in `template` with a space-separated, shell-quoted list
 /// of `targets`. `%%` is a literal percent.
 ///
@@ -91,6 +112,50 @@ pub fn expand_percent(template: &str, targets: &[&Path]) -> Result<String, NonUt
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    fn payload(paths: &[&str], cwd: Option<&str>) -> String {
+        let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+        pane_path_payload(&paths, cwd.map(Path::new))
+    }
+
+    #[test]
+    fn paths_under_the_pane_cwd_go_out_relative_and_the_rest_absolute() {
+        assert_eq!(
+            payload(
+                &["/w/app/src/main.rs", "/w/app", "/etc/hosts"],
+                Some("/w/app")
+            ),
+            "src/main.rs . /etc/hosts "
+        );
+    }
+
+    /// Unknown cwd: nothing can be anchored, so everything is absolute.
+    #[test]
+    fn an_unknown_cwd_sends_every_path_absolute() {
+        assert_eq!(
+            payload(&["/w/app/src/main.rs", "/w/other"], None),
+            "/w/app/src/main.rs /w/other "
+        );
+    }
+
+    /// Prefixes are matched by component: `/w/app2` is not under `/w/app`, so a
+    /// sibling whose name merely starts the same way stays absolute rather than
+    /// going out as a nonsense relative path.
+    #[test]
+    fn a_sibling_sharing_a_name_prefix_is_not_under_the_cwd() {
+        assert_eq!(payload(&["/w/app2/x.rs"], Some("/w/app")), "/w/app2/x.rs ");
+    }
+
+    /// The absolute tier stays literal: no `~` collapse, even for a path under
+    /// `$HOME`, and quoting still applies.
+    #[test]
+    fn absolute_paths_are_never_tilde_collapsed_and_are_quoted() {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/u".to_string());
+        let under_home = format!("{home}/notes/a b.md");
+        let out = payload(&[under_home.as_str()], Some("/w/app"));
+        assert!(!out.starts_with('~'), "{out}");
+        assert_eq!(out, format!("{} ", shell_quote(&under_home)));
+    }
 
     fn p(s: &str) -> PathBuf {
         PathBuf::from(s)

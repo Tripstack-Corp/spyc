@@ -319,7 +319,10 @@ const SECTIONS: &[Section] = &[
                 "^a g",
                 "image gallery popup: received + unsent pastes (Enter view, q close)",
             ),
-            ("^a s", "send selection paths to pane stdin"),
+            (
+                "^a s",
+                "send selection paths to pane stdin (relative to the pane's cwd)",
+            ),
             (
                 "^a ↓",
                 "send a literal ^a to the pane (e.g. so Claude receives it)",

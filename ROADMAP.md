@@ -131,7 +131,7 @@ ships with it (decisions log, 2026-09-29).
   The same PR fits every tab into the bar. Keeping shared-prefix labels
   distinct when they crop is
   [#483](https://github.com/Tripstack-Corp/spyc/issues/483).
-- **Four of the daily-driver bugs.** The first keystrokes into a fresh pane
+- **Five of the daily-driver bugs.** The first keystrokes into a fresh pane
   now reach the child (#464, closing
   [#326](https://github.com/Tripstack-Corp/spyc/issues/326)).
   [#34](https://github.com/Tripstack-Corp/spyc/issues/34) closed on both
@@ -139,8 +139,12 @@ ships with it (decisions log, 2026-09-29).
   [#452](https://github.com/Tripstack-Corp/spyc/issues/452)) and the four
   engine defects the swap fixes (#465). And a `remove_worktree` that fails
   partway no longer strands the worktree, while one an older spyc left
-  half-removed is finished on retry (closing
-  [#327](https://github.com/Tripstack-Corp/spyc/issues/327)).
+  half-removed is finished on retry (#500, closing
+  [#327](https://github.com/Tripstack-Corp/spyc/issues/327)). `^a s` anchors
+  paths on the receiving pane's own cwd, read at delivery, instead of on
+  PROJECT_HOME (closing [#9](https://github.com/Tripstack-Corp/spyc/issues/9)),
+  so [#71](https://github.com/Tripstack-Corp/spyc/issues/71)'s templates
+  inherit a settled anchor.
 - **[#490](https://github.com/Tripstack-Corp/spyc/issues/490): crates.io
   publishing.** The release job publishes `spyc-vt-sys` before spyc (#499),
   0.1.0 is on crates.io, and CI packages both crates on every PR. The release
@@ -166,8 +170,6 @@ ships with it (decisions log, 2026-09-29).
 - **[#71](https://github.com/Tripstack-Corp/spyc/issues/71) — prompt templates
   in `.spycrc.toml`**, with picks and inventory substituted.
 - **The rest of the daily-driver bug set:**
-  [#9](https://github.com/Tripstack-Corp/spyc/issues/9) (`^a s` anchors paths
-  on PROJECT_HOME, so an agent in a worktree can't resolve them),
   [#22](https://github.com/Tripstack-Corp/spyc/issues/22) +
   [#11](https://github.com/Tripstack-Corp/spyc/issues/11) (the MCP takeover
   prompt, and an integration test for multi-instance coexistence).
@@ -637,7 +639,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/drafts/VT_ENGINE_SPIKE.md` | The engine spike report plus its dated gate addendum: the evidence behind the libghostty-vt entries in the decisions log. Appended to, never rewritten. |
 | `docs/drafts/CLICKABLE_MENUS_PLAN.md` | Proposal, unscheduled and with no issue yet: make the which-key popup clickable instead of adding right-click context menus (#478). |
 | `docs/drafts/AUTO_APPROVAL_PLAN.md` | Pending design, unscheduled ([#57](https://github.com/Tripstack-Corp/spyc/issues/57)). |
-| `docs/drafts/PATH_HANDOFF_PLAN.md` | Split — Option A is 2.2 scope ([#9](https://github.com/Tripstack-Corp/spyc/issues/9)); the rest stays exploration ([#59](https://github.com/Tripstack-Corp/spyc/issues/59)). |
+| `docs/drafts/PATH_HANDOFF_PLAN.md` | Split — Option A shipped for 2.2 ([#9](https://github.com/Tripstack-Corp/spyc/issues/9)); the rest stays exploration ([#59](https://github.com/Tripstack-Corp/spyc/issues/59)). |
 | `docs/drafts/multi-question-bug-investigation.md` | Open bug, parked without a repro — an agent pane going deaf to input. Not in the tracker; this is the record. |
 | `docs/archive/LAUNCH_PLAN_2_0.md` | Archived — the 2.0 distribution/launch plan, every gate closed, plus what never shipped. |
 | `docs/archive/PANE_STARTUP_TABS_PLAN.md` | Archived design: startup pane tabs, shipped on `main` for 2.2 (#482, closing [#58](https://github.com/Tripstack-Corp/spyc/issues/58)). Its deferred half, true multi-split, stays deferred. |

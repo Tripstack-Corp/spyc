@@ -1228,14 +1228,7 @@ fn typing_into_a_fresh_agent_pane_is_not_eaten_by_the_consent_prompt() {
             for e in app.handle_key(key).unwrap() {
                 if let Effect::SendToPane { input, .. } = e {
                     let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
-                    match input {
-                        crate::app::effect::PaneInput::Bytes(b) => {
-                            tabs.active_mut().send_bytes(&b).unwrap();
-                        }
-                        crate::app::effect::PaneInput::Key(k) => {
-                            tabs.active_mut().send_key(k).unwrap();
-                        }
-                    }
+                    input.send_to(tabs.active_mut()).unwrap();
                 }
             }
         }

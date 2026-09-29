@@ -1,5 +1,14 @@
 # spyc → agent path handoff
 
+> **Option A shipped (2026-09-29, closing
+> [#9](https://github.com/Tripstack-Corp/spyc/issues/9)).** `^a s` anchors on
+> the receiving pane's cwd, read when the paths are delivered, so a shell
+> that just ran `cd` is anchored where it is now. Paths are relative under
+> that cwd and absolute otherwise, never `~`-collapsed, and all absolute when
+> the cwd can't be read. The rule is `shell::pane_path_payload`. The rest of
+> this document stays exploration under
+> [#59](https://github.com/Tripstack-Corp/spyc/issues/59).
+
 **Status (2026-08-19): split.** **Option A is in 2.2** —
 [#9](https://github.com/Tripstack-Corp/spyc/issues/9), scoped in
 [`V2_2_PLAN.md`](V2_2_PLAN.md) §6. Everything else in this document stays

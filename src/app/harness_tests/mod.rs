@@ -359,4 +359,5 @@ mod mcp;
 mod pane;
 mod per_column;
 mod second_commander;
+mod send_selection;
 mod vsplit;
