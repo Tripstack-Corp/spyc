@@ -148,6 +148,7 @@ mod pane_wake;
 mod paste_capture;
 mod preview_ops;
 mod proc;
+mod process_cwd;
 mod prompt;
 mod quick_select;
 mod render;

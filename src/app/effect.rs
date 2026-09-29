@@ -48,6 +48,9 @@ pub enum Effect {
     /// what the terminal is actually in — so this is idempotent by construction
     /// and never needs to be emitted speculatively.
     SetMouseMode { capture: bool },
+    /// Move the process cwd to the focused column's directory. Emitted only by
+    /// [`App::settle_process_cwd`], so it is idempotent by construction.
+    SetProcessCwd { dir: std::path::PathBuf },
     /// Tear the TUI down, run a child in the foreground, restore. The
     /// only TUI-tearing effect; == the former `PostAction::Spawn`.
     ForegroundExec {
@@ -761,6 +764,13 @@ impl App {
                 // documents why. `apply_clipboard_pastes` hands the text to
                 // `handle_paste` when it lands.
                 Effect::PasteFromClipboard => self.spawn_clipboard_read(),
+                Effect::SetProcessCwd { dir } => {
+                    // A failure (the dir vanished) leaves the settle seeing
+                    // divergence, so it retries once the column moves on.
+                    if let Err(e) = std::env::set_current_dir(&dir) {
+                        crate::spyc_debug!("process cwd → {}: {e}", dir.display());
+                    }
+                }
                 Effect::SetMouseMode { capture } => {
                     // Mutually exclusive with 1007 alternate-scroll: a terminal
                     // honouring both could deliver one wheel tick twice.
