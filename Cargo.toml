@@ -113,7 +113,9 @@ serde_json = "1"
 toml = { version = "1", default-features = false, features = ["parse", "display", "serde"] }
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 portable-pty = "0.9"
-spyc-vt-sys = { path = "crates/spyc-vt-sys" }
+# The version is what crates.io resolves; `path` is dropped from the packaged
+# manifest. Bump it with the crate's own version (RELEASE_ENGINEERING.md §5a).
+spyc-vt-sys = { version = "0.1.0", path = "crates/spyc-vt-sys" }
 vt100 = "0.16"
 ansi-to-tui = "8"
 pretty-hex = "0.4"

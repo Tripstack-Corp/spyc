@@ -169,9 +169,11 @@ ships with it (decisions log, 2026-09-29).
   `docs/drafts/PROJECTS_PLAN.md`**, authored in 2.2, design only. 2.3's scope
   depends on it being written and approved before code lands.
 - **[#490](https://github.com/Tripstack-Corp/spyc/issues/490): publish
-  `spyc-vt-sys` before spyc.** This is a tag blocker rather than scope.
-  `cargo package -p spyc` fails today because the new FFI crate isn't on
-  crates.io, so the release's crates.io job would skip 2.2 while the other
+  `spyc-vt-sys` before spyc.** This is a tag blocker rather than scope. The
+  release job now publishes both in order, and CI packages them on every PR
+  (`make package-check`). What remains is the owner's one-time manual publish
+  of `spyc-vt-sys` plus its trusted-publisher entry (RELEASE_ENGINEERING.md
+  §5a). Until then the release's crates.io job would skip 2.2 while the other
   channels ship it. The release matrix hasn't run since the vendored archives
   landed, so `v2.2.0-rc.1` goes out before `v2.2.0`.
 

@@ -1,9 +1,9 @@
 # spyc CI — fmt, clippy, tests, supply-chain (cargo-deny), coverage.
 #
 # Ported from the retired `bitbucket-pipelines.yml` (archived under
-# docs/archive/). Same contract:
-#   - PR                  → lint ∥ test
-#   - push to main (merge)→ lint ∥ test ∥ coverage
+# docs/archive/). Same contract, plus the package check:
+#   - PR                  → lint ∥ test ∥ package
+#   - push to main (merge)→ lint ∥ test ∥ package ∥ coverage
 #   - feature push, no PR → no CI (open the PR for feedback)
 #
 # Toolchain is pinned by `rust-toolchain.toml` (rustup auto-installs and
@@ -106,6 +106,21 @@ jobs:
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
           CARGO_PROFILE_TEST_DEBUG: line-tables-only
         run: make test
+
+  package:
+    name: Package (cargo package --workspace)
+    # The crates.io half of a release, run on every PR instead of first at a
+    # tag: both crates package, and each builds from its own tarball. v2.1.0's
+    # publish broke on a file the package left out (#426), and 2.2's would
+    # have on an FFI crate crates.io couldn't resolve (#490); both surface here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain + C compiler
+        run: rustc --version && cc --version
+      - uses: Swatinem/rust-cache@v2
+      - name: Package + build from the tarballs
+        run: make package-check
 
   coverage:
     name: Coverage (ratcheting floor)
