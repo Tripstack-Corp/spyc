@@ -20,24 +20,17 @@ impl AppState {
     /// [`Self::refresh_git_state_for`] for the per-column mechanics + the mtime
     /// short-circuit). Returns `true` iff any column's git changed.
     pub fn refresh_git_state(&mut self) -> bool {
-        // Refresh each active column independently (per-column git). Explicit
-        // sides rather than iterating `active_sides()` so the loop body can take
-        // `&mut self` without collecting the borrow first — and so each column's
-        // rebuild is addressed to ITS side. The row cache is per column, keyed on
-        // that column's own `list_generation`, so one `cur()`-targeted rebuild
-        // left the other column drawing stale markers until something else
-        // happened to bump its generation.
-        let left_changed = self.refresh_git_state_for(Side::Left);
-        if left_changed {
-            self.rebuild_rows_for(Side::Left);
-        }
-        let mut any = left_changed;
-        if self.right.is_some() {
-            let right_changed = self.refresh_git_state_for(Side::Right);
-            if right_changed {
-                self.rebuild_rows_for(Side::Right);
+        // Each column's rebuild is addressed to ITS side. The row cache is per
+        // column, keyed on that column's own `list_generation`, so one
+        // `cur()`-targeted rebuild left the other column drawing stale markers
+        // until something else happened to bump its generation.
+        let mut any = false;
+        for side in self.active_sides() {
+            let changed = self.refresh_git_state_for(side);
+            if changed {
+                self.rebuild_rows_for(side);
             }
-            any |= right_changed;
+            any |= changed;
         }
         any
     }
@@ -56,10 +49,7 @@ impl AppState {
     /// on success. Returns whether any column was flagged.
     pub fn flag_worktree_rewalk_for_path(&mut self, path: &Path) -> bool {
         let mut flagged = false;
-        for side in [Side::Left, Side::Right] {
-            if side == Side::Right && self.right.is_none() {
-                continue;
-            }
+        for side in self.active_sides() {
             if path.starts_with(&self.col(side).listing.dir) {
                 self.col_mut(side).git_cache.pending_worktree_rewalk = true;
                 flagged = true;

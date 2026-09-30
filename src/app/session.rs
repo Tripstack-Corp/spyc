@@ -217,7 +217,10 @@ impl App {
                         .right_pager
                         .as_ref()
                         .and_then(|p| p.source_path.clone()),
-                    right_cwd: self.state.right.as_ref().map(|c| c.listing.dir.clone()),
+                    right_cwd: self
+                        .state
+                        .get_col(Side::Right)
+                        .map(|c| c.listing.dir.clone()),
                 }),
             scope_claims: self.state.scope_registry.clone(),
         }
@@ -311,7 +314,7 @@ impl App {
             matches!(v.mode, VsplitMode::FullHeight).hash(&mut h);
             matches!(v.focus, Side::Right).hash(&mut h);
         }
-        if let Some(c) = self.state.right.as_ref() {
+        if let Some(c) = self.state.get_col(Side::Right) {
             c.listing.dir.hash(&mut h);
         }
         // P2: a scope-registry mutation (register/release) is session-relevant

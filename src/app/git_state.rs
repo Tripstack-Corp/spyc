@@ -54,19 +54,15 @@ impl App {
         let Some(tx) = self.runtime.git_worker_tx.as_ref() else {
             // No worker (test harness): the outboxes stay empty
             // (`git_worker_available` gates the push), so just defensively clear.
-            self.state.left.git_cache.pending_git_requests.clear();
-            if let Some(r) = self.state.right.as_mut() {
-                r.git_cache.pending_git_requests.clear();
+            for c in self.state.columns_mut() {
+                c.git_cache.pending_git_requests.clear();
             }
             return;
         };
         // Both columns share the one worker channel; each request carries its
         // `side` so the result routes back to the right column.
-        for req in self.state.left.git_cache.pending_git_requests.drain(..) {
-            let _ = tx.send(req);
-        }
-        if let Some(r) = self.state.right.as_mut() {
-            for req in r.git_cache.pending_git_requests.drain(..) {
+        for c in self.state.columns_mut() {
+            for req in c.git_cache.pending_git_requests.drain(..) {
                 let _ = tx.send(req);
             }
         }

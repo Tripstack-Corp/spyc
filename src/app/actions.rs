@@ -47,12 +47,8 @@ impl App {
     /// focus switch needs no reload — each column's list is already loaded for
     /// its own worktree, so `cur().harpoon` just resolves to the right one.
     pub fn reconcile_harpoon(&mut self) {
-        // Explicit Left + conditional Right (not `active_sides()`) so the
-        // immutable iterator borrow doesn't collide with the `&mut self` loop
-        // body — same shape as `refresh_git_state`.
-        self.reconcile_harpoon_for(state::Side::Left);
-        if self.state.right.is_some() {
-            self.reconcile_harpoon_for(state::Side::Right);
+        for side in self.state.active_sides() {
+            self.reconcile_harpoon_for(side);
         }
     }
 

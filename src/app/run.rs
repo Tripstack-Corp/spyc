@@ -162,22 +162,6 @@ impl App {
             .filter_map(|p| p.parent().map(std::path::Path::to_path_buf))
             .collect();
         let watch_tx = spawn_watch_worker(msg_tx, config_parents);
-        // Last listing dir we've asked the worker to watch (send-dedup key);
-        // seed it by sending the initial watch command.
-        let watched_listing = if let Some(tx) = watch_tx.as_ref() {
-            let dir = self.state.left.listing.dir.clone();
-            let _ = tx.send(WatchCommand::SyncListing {
-                gitdir: self.state.left.git_cache.current_gitdir.clone(),
-                dir: dir.clone(),
-                // No second commander or vertical-split preview at startup.
-                dir_right: None,
-                gitdir_right: None,
-                preview: None,
-            });
-            Some(dir)
-        } else {
-            None
-        };
 
         // MVU Phase 3a: the git-status worker (spawned in `new()`) keeps
         // sending onto its own channel; this forwarder bridges its results
@@ -227,9 +211,9 @@ impl App {
         // wake, not the pre-run no-op.
         self.runtime.pane_wake_tx = Some(msg_tx.clone());
 
-        RunCtx {
+        let mut ctx = RunCtx {
             watch_tx,
-            watched_listing,
+            watched_listing: None,
             watched_listing_right: None,
             watched_preview: None,
             // MVU Phase 2: advisory deadline scheduler — computes the
@@ -267,7 +251,9 @@ impl App {
                 dirty: true,
                 reason: 3,
             },
-        }
+        };
+        self.sync_watch(&mut ctx);
+        ctx
     }
 
     /// Dispatch one coalesced `effective` message. Extracted verbatim from
@@ -1070,42 +1056,7 @@ impl App {
                 break Err(e);
             }
 
-            // Re-point the watcher when the cwd OR the open vertical-split
-            // preview changed. The (un)watch syscalls run on the worker thread;
-            // we just send the new topology and record the send-dedup keys.
-            let preview = self
-                .view
-                .right_pager
-                .as_ref()
-                .and_then(|v| v.source_path.clone());
-            let listing_changed =
-                ctx.watched_listing.as_deref() != Some(self.state.left.listing.dir.as_path());
-            let preview_changed = ctx.watched_preview != preview;
-            // Column `b`'s listing dir (and its resolved gitdir), so its tree +
-            // index/HEAD get watched too. `None` when no second commander —
-            // closing `b` re-sends with `dir_right: None`, unwatching it.
-            let dir_right = self.state.right.as_ref().map(|c| c.listing.dir.clone());
-            let gitdir_right = self
-                .state
-                .right
-                .as_ref()
-                .and_then(|c| c.git_cache.current_gitdir.clone());
-            let right_changed = ctx.watched_listing_right != dir_right;
-            if (listing_changed || preview_changed || right_changed)
-                && let Some(tx) = ctx.watch_tx.as_ref()
-            {
-                let dir = self.state.left.listing.dir.clone();
-                let _ = tx.send(WatchCommand::SyncListing {
-                    gitdir: self.state.left.git_cache.current_gitdir.clone(),
-                    dir: dir.clone(),
-                    dir_right: dir_right.clone(),
-                    gitdir_right,
-                    preview: preview.clone(),
-                });
-                ctx.watched_listing = Some(dir);
-                ctx.watched_preview = preview;
-                ctx.watched_listing_right = dir_right;
-            }
+            self.sync_watch(&mut ctx);
 
             // Event-driven MCP context-file write — debounced + typing-burst
             // suppressed, with ContextWrite deadline arming (see

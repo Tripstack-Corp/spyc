@@ -321,11 +321,11 @@ impl super::super::App {
         let (cols, rows) = self.view.term_size;
         let layout = self.frame_layout(Rect::new(0, 0, cols, rows));
         let (area, cached, commander) = match side {
-            Side::Left => (layout.list, &self.view.cached_rows, &self.state.left),
+            Side::Left => (layout.list, &self.view.cached_rows, self.state.col(side)),
             Side::Right => (
                 layout.right?,
                 &self.view.right_cached_rows,
-                self.state.right.as_ref()?,
+                self.state.get_col(side)?,
             ),
         };
         crate::ui::list_view::ListView {

@@ -274,7 +274,10 @@ impl App {
         let mut app_state = app_state;
         // Per-column flag — only `left` exists at bootstrap. A second commander
         // copies this from `left` when it opens (`open_second_commander_at`).
-        app_state.left.git_cache.git_worker_available = true;
+        app_state
+            .col_mut(state::Side::Left)
+            .git_cache
+            .git_worker_available = true;
         let mut app = Self {
             state: app_state,
             // Write context once on startup so claude sees initial state
@@ -339,7 +342,7 @@ impl App {
         app.state.rebuild_rows();
         // Resolve + cache the repo root at startup so the first git read
         // (and the FSEvent exclude filter) have it before the user navigates.
-        let initial_cwd = app.state.left.listing.dir.clone();
+        let initial_cwd = app.state.col(state::Side::Left).listing.dir.clone();
         app.state.update_repo_root(state::Side::Left, &initial_cwd);
         // Re-key the seeded harpoon to the resolved worktree root (the seed
         // above used PROJECT_HOME, which differs when launched in a subdir of
@@ -350,7 +353,8 @@ impl App {
         // string is computed sync via gix (compute_git_info_fast ->
         // discovery::head_branch) so it's available on the first paint;
         // only the per-file markers and dirty flag wait for the worker.
-        app.state.left.git.info = app.state.compute_git_info_fast(state::Side::Left);
+        app.state.col_mut(state::Side::Left).git.info =
+            app.state.compute_git_info_fast(state::Side::Left);
         let _ = app
             .state
             .git_file_statuses_cached(state::Side::Left, &initial_cwd, false);
