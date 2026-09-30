@@ -15,6 +15,7 @@
 pub mod detect_rules;
 pub mod resume;
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -453,6 +454,22 @@ impl AgentProfile for ClaudeProfile {
     }
 }
 
+/// `cmd` with `--no-daemon` after its program, so codex runs this session
+/// itself instead of on its shared background server. That server spawns every
+/// session's hooks and MCP servers with the environment of whichever codex
+/// started it, which never has this pane's `SPYC_MCP_SOCK` or `SPYC_PANE_ID`.
+/// Unchanged when it already says so.
+pub fn codex_without_daemon(cmd: &str) -> Cow<'_, str> {
+    if cmd.split_whitespace().any(|t| t == "--no-daemon") {
+        return Cow::Borrowed(cmd);
+    }
+    let start = cmd.len() - cmd.trim_start().len();
+    let end = cmd[start..]
+        .find(char::is_whitespace)
+        .map_or(cmd.len(), |i| start + i);
+    Cow::Owned(format!("{} --no-daemon{}", &cmd[..end], &cmd[end..]))
+}
+
 pub struct CodexProfile;
 impl AgentProfile for CodexProfile {
     fn kind(&self) -> AgentKind {
@@ -872,6 +889,25 @@ pub fn detect(cmd: &str) -> &'static dyn AgentProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The flag goes straight after the program, which codex parses before a
+    /// subcommand as readily as after it, and the rest is kept verbatim.
+    #[test]
+    fn codex_without_daemon_inserts_after_the_program() {
+        assert_eq!(codex_without_daemon("codex"), "codex --no-daemon");
+        assert_eq!(
+            codex_without_daemon("/opt/bin/codex resume  abc"),
+            "/opt/bin/codex --no-daemon resume  abc"
+        );
+        assert_eq!(
+            codex_without_daemon("  codex -m o3"),
+            "  codex --no-daemon -m o3"
+        );
+        assert_eq!(
+            codex_without_daemon("codex --no-daemon x"),
+            "codex --no-daemon x"
+        );
+    }
 
     /// agy's tool-permission prompt must scrape as `Blocked` — the one way agy
     /// waits on the user that fires no hook.

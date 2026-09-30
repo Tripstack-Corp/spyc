@@ -236,6 +236,13 @@ pub struct PaneConfig {
     /// call. Status hooks still install (activity dots keep working); codex just
     /// loses spyc's MCP tools. Default true (integration on). Claude unaffected.
     pub codex_mcp: bool,
+    /// When false (the default), spyc starts a codex pane with `--no-daemon`.
+    /// Codex's shared background server spawns every session's MCP servers and
+    /// hooks with the environment of whichever codex started it, so a pane's
+    /// `SPYC_MCP_SOCK` and `SPYC_PANE_ID` never reach them: the hooks report to
+    /// the wrong spyc, or to none, and the MCP proxy can't tell panes apart.
+    /// True lets a codex pane join the shared server anyway.
+    pub codex_daemon: bool,
     /// When true, spyc reads the system clipboard as you paste an image into an
     /// agent pane, so `^a g` can show it before you send. The capture only ever
     /// runs on an agent that declares a paste key, and nothing is written to
@@ -288,6 +295,7 @@ impl Default for PaneConfig {
             claude_transcript_scrollback: false,
             agy_transcript_scrollback: true,
             codex_mcp: true,
+            codex_daemon: false,
             preview_pasted_images: true,
             tabs: Vec::new(),
             project_tabs: None,
@@ -325,6 +333,8 @@ struct FilePane {
     agy_transcript_scrollback: Option<bool>,
     #[serde(default)]
     codex_mcp: Option<bool>,
+    #[serde(default)]
+    codex_daemon: Option<bool>,
     #[serde(default)]
     preview_pasted_images: Option<bool>,
     /// Compact startup-tabs form: `tabs = ["claude", "bash"]`.
@@ -998,6 +1008,9 @@ impl Config {
         }
         if let Some(b) = file.pane.codex_mcp {
             self.pane.codex_mcp = b;
+        }
+        if let Some(b) = file.pane.codex_daemon {
+            self.pane.codex_daemon = b;
         }
         // Startup tabs: the two forms are mutually exclusive within one
         // file — merging them would hide an ambiguity, so surface it as a
