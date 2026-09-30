@@ -324,6 +324,110 @@ mod tests {
         assert!(parse("map z lua").is_err());
     }
 
+    /// Where spyc ships DSL lines a user may copy.
+    const EXAMPLE_SOURCES: &[&str] = &[
+        "src/config/default.spycrc.toml",
+        "CONFIGURATION.md",
+        "FEATURES.md",
+        "README.md",
+        "AGENTS.md",
+        "DESIGN.md",
+        "docs/KEYBINDINGS.md",
+    ];
+
+    /// How a DSL line appears in a doc: a quoted TOML array entry, a code
+    /// span, or a template comment `# map <KEY> ... — does`, which is a form.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Shape {
+        Quoted,
+        Span,
+        Form,
+    }
+
+    /// Every DSL line the docs and the `--print-config` template show, with
+    /// where it came from. A placeholder key or argument (`KEY`, `<glob>`)
+    /// gets a real value, so a form is checked for its shape, `=` included.
+    /// The grammar line itself (an `action` placeholder where the verb goes)
+    /// has nothing to check.
+    fn shipped_examples() -> Vec<(String, Shape, String)> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let shapes = [
+            (
+                Shape::Quoted,
+                regex::Regex::new(r#""(map [^"]+)""#).expect("regex"),
+            ),
+            (
+                Shape::Span,
+                regex::Regex::new(r"`(map [^`]+)`").expect("regex"),
+            ),
+            (
+                Shape::Form,
+                regex::Regex::new(r"^\s*#\s+(map .+?)\s+—").expect("regex"),
+            ),
+        ];
+        let mut out = Vec::new();
+        for &file in EXAMPLE_SOURCES {
+            let text = std::fs::read_to_string(root.join(file)).expect(file);
+            for (n, line) in text.lines().enumerate() {
+                for (shape, re) in &shapes {
+                    for cap in re.captures_iter(line) {
+                        let mut toks: Vec<String> =
+                            cap[1].split_whitespace().map(String::from).collect();
+                        if matches!(toks[1].as_str(), "KEY" | "<KEY>") {
+                            toks[1] = "x".to_string();
+                        }
+                        if toks
+                            .get(2)
+                            .is_none_or(|a| a == "action" || a.starts_with('<'))
+                        {
+                            continue;
+                        }
+                        for arg in toks.iter_mut().skip(3) {
+                            let bare = arg.trim_start_matches('=');
+                            if bare.starts_with('<') && bare.ends_with('>') {
+                                *arg = arg.replace(bare, "x");
+                            }
+                        }
+                        out.push((format!("{file}:{}", n + 1), *shape, toks.join(" ")));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// `--print-config` prints the template for the user to uncomment, and the
+    /// docs are what they copy from. One line the parser rejects fails the
+    /// whole config load, so a broken example locks the user out of the rest
+    /// of their config.
+    #[test]
+    fn every_shipped_keymap_example_parses() {
+        let examples = shipped_examples();
+        // A reader that stops matching checks nothing and passes, so each
+        // source and each shape must still turn something up.
+        for file in EXAMPLE_SOURCES {
+            assert!(
+                examples
+                    .iter()
+                    .any(|(at, ..)| at.starts_with(&format!("{file}:"))),
+                "no example found in {file}"
+            );
+        }
+        for shape in [Shape::Quoted, Shape::Span, Shape::Form] {
+            assert!(
+                examples.iter().any(|(at, s, _)| {
+                    *s == shape && at.starts_with("src/config/default.spycrc.toml:")
+                }),
+                "no {shape:?} example found in the template"
+            );
+        }
+        let broken: Vec<String> = examples
+            .iter()
+            .filter_map(|(at, _, line)| parse(line).err().map(|e| format!("{at}: `{line}`: {e}")))
+            .collect();
+        assert!(broken.is_empty(), "{}", broken.join("\n"));
+    }
+
     #[test]
     fn prompt_verb_parses_and_is_executing() {
         let b = parse("map <F6> prompt review").unwrap().unwrap();

@@ -367,11 +367,11 @@
 #   map <KEY> command <:cmd...>     — run a : command (e.g. graveyard)
 #   map <KEY> lua <name>            — run ~/.config/spyc/lua/<name>.lua
 #   map <KEY> prompt <name>         — type the [prompts] template <name> into the pane
-#   map <KEY> patternpick <glob>    — pick files matching a glob
-#   map <KEY> jump <path>           — jump to a directory
+#   map <KEY> patternpick =<glob>   — pick files matching a glob
+#   map <KEY> jump =<path>          — jump to a directory
 #
-# <KEY> can be a single char (`f`), a chord (`g x`), or a Ctrl-prefixed
-# binding (`^P`). Lines starting with `#` inside the array are comments.
+# <KEY> is one key: a char (`f`), a Ctrl-combo (`^P`), or a named key
+# (`<F2>`). Lines starting with `#` inside the array are comments.
 #
 # NOTE: `unix`, `command`, `lua`, `jump` and `prompt` only take effect in THIS file
 # (~/.spycrc.toml) — a project-local .spycrc.toml can't bind them (they could
@@ -394,7 +394,7 @@
 # keymap = [
 #   "map f unix file %",
 #   "map ^P unix ps aux",
-#   "map H patternpick *.hpp",
+#   "map H patternpick =*.hpp",
 #   "map A command activity",      # toggle the activity monitor
 #   "map ^Y command graveyard",    # recover soft-deleted files
 #   "map z lua mymacro",           # run ~/.config/spyc/lua/mymacro.lua
