@@ -187,7 +187,7 @@ impl App {
             (false, _) => Vec::new(),
         };
         match Pane::spawn_with_env(
-            cmd,
+            &self.spawn_command(cmd),
             rows,
             cols,
             cwd,
@@ -380,6 +380,18 @@ impl App {
         }
     }
 
+    /// What a pane actually runs for `cmd`: a codex pane gets `--no-daemon`
+    /// (`agent::codex_without_daemon`) unless `[pane] codex_daemon` lets it
+    /// join codex's shared server. The tab keeps `cmd` itself.
+    fn spawn_command<'a>(&self, cmd: &'a str) -> std::borrow::Cow<'a, str> {
+        let codex = crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex;
+        if codex && !self.state.config.pane.codex_daemon {
+            crate::agent::codex_without_daemon(cmd)
+        } else {
+            std::borrow::Cow::Borrowed(cmd)
+        }
+    }
+
     /// Respawn `cmd` (an agent) into the tab at `tab_idx`, replacing whatever
     /// is there, with the agent env (`SPYC_MCP_SOCK` + `SPYC_PANE_ID`) injected
     /// so the fresh process can report status — the same env `open_pane_tab_in`
@@ -416,7 +428,7 @@ impl App {
             extra_env.push(("SPYC_MCP_SOCK", sock));
         }
         match Pane::spawn_with_env(
-            cmd,
+            &self.spawn_command(cmd),
             rows,
             cols,
             cwd,

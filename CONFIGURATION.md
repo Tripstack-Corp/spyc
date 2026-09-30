@@ -54,6 +54,7 @@ claude_transcript_scrollback = false  # `^a v` reads Claude's JSONL transcript i
                                       # (only decides which comes up FIRST — `T` swaps in the view, and the
                                       #  transcript is used regardless when there's no terminal capture)
 codex_mcp = true               # register spyc's MCP server for codex panes
+codex_daemon = false           # false: codex panes run `--no-daemon`, so their hooks + MCP reach the spyc that launched them
 preview_pasted_images = true   # keep a copy of images you paste into an agent pane, for `^a g`
 
 [yank]
