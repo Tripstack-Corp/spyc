@@ -361,6 +361,12 @@ impl TabEntry {
             .unwrap_or_else(|| self.info.cwd.clone())
     }
 
+    /// Record that the child has moved to `cwd`, as a landed refresh would.
+    #[cfg(test)]
+    pub fn set_live_cwd(&mut self, cwd: PathBuf) {
+        self.live_cwd_cache = Some(cwd);
+    }
+
     /// `&mut` settle step (called from `prepare_panes`, NOT the draw): pick up
     /// any cwd a background refresh has landed, then kick a fresh lookup when
     /// the cached value is stale and none is in flight. `cwd_for_pid` is a

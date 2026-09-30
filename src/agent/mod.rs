@@ -43,6 +43,18 @@ pub struct RestorePlan {
     pub resume: ResumeAction,
 }
 
+/// What `^a F` makes of a tab running this agent.
+pub enum ForkMode {
+    /// Branch the tab's conversation: `(tab command, session id)` → the command
+    /// that opens a new conversation starting from that one's history.
+    Branch(fn(&str, &str) -> String),
+    /// Nothing to branch, so a fork is the same command again.
+    Duplicate,
+    /// The agent can resume a conversation but not branch it. Opening it twice
+    /// would be two clients of one session, which is not a fork.
+    Unsupported,
+}
+
 /// How an agent contributes to the on-quit exit-summary line.
 pub enum ExitSummaryMode {
     /// No summary line (Other).
@@ -194,6 +206,11 @@ pub trait AgentProfile: Sync {
             command: cmd.to_string(),
             resume: ResumeAction::None,
         }
+    }
+
+    /// FORK: how `^a F` branches this agent's conversation. Default: it can't.
+    fn fork_mode(&self) -> ForkMode {
+        ForkMode::Unsupported
     }
 
     /// Status-bar short id for the active pane. Default: none.
@@ -406,6 +423,9 @@ impl AgentProfile for ClaudeProfile {
             },
         }
     }
+    fn fork_mode(&self) -> ForkMode {
+        ForkMode::Branch(resume::claude_fork_command)
+    }
     fn resolve_short_id(&self, cwd: &Path, spawn_epoch_secs: u64) -> Option<String> {
         closest_short_id(
             crate::state::sessions::find_claude_sessions(cwd),
@@ -613,6 +633,9 @@ impl AgentProfile for CodexProfile {
             command,
             resume: ResumeAction::None,
         }
+    }
+    fn fork_mode(&self) -> ForkMode {
+        ForkMode::Branch(resume::codex_fork_command)
     }
     fn exit_summary_mode(&self) -> ExitSummaryMode {
         ExitSummaryMode::Count
@@ -851,6 +874,9 @@ impl AgentProfile for OtherProfile {
     }
     fn matches_command(&self, _cmd: &str) -> bool {
         false
+    }
+    fn fork_mode(&self) -> ForkMode {
+        ForkMode::Duplicate
     }
 }
 
@@ -1195,6 +1221,88 @@ mod tests {
         let plan = OtherProfile.reconstruct_restore("bash -lc 'make'", Some("ignored"), cwd);
         assert_eq!(plan.command, "bash -lc 'make'");
         assert!(matches!(plan.resume, ResumeAction::None));
+    }
+
+    // ── fork_mode per agent (`^a F`) ───────────────────────────────────
+
+    fn branch(profile: &dyn AgentProfile, cmd: &str, sid: &str) -> Option<String> {
+        match profile.fork_mode() {
+            ForkMode::Branch(fork) => Some(fork(cmd, sid)),
+            ForkMode::Duplicate | ForkMode::Unsupported => None,
+        }
+    }
+
+    /// Claude and codex each branch into a NEW session id that starts from the
+    /// old one's history, so a fork never leaves two tabs on one conversation.
+    #[test]
+    fn claude_and_codex_fork_into_a_new_conversation() {
+        assert_eq!(
+            branch(&ClaudeProfile, "claude --model opus", "SID").as_deref(),
+            Some("claude --model opus --resume SID --fork-session")
+        );
+        // A tab that was itself resumed or forked branches from the id it is
+        // running now, not the one on its command line.
+        assert_eq!(
+            branch(&ClaudeProfile, "claude --resume OLD --fork-session", "SID").as_deref(),
+            Some("claude --resume SID --fork-session")
+        );
+        assert_eq!(
+            branch(&CodexProfile, "codex --model o3", "SID").as_deref(),
+            Some("codex --model o3 fork SID")
+        );
+        assert_eq!(
+            branch(&CodexProfile, "codex resume OLD", "SID").as_deref(),
+            Some("codex fork SID")
+        );
+        assert_eq!(
+            branch(&CodexProfile, "codex fork OLD", "SID").as_deref(),
+            Some("codex fork SID")
+        );
+    }
+
+    /// agy and zot can resume a conversation but not branch one, and opening it
+    /// twice would be two clients of one session, not a fork. A non-agent tab
+    /// has no conversation, so its fork is a copy.
+    #[test]
+    fn agents_without_a_branch_refuse_and_other_tabs_duplicate() {
+        assert!(matches!(AgyProfile.fork_mode(), ForkMode::Unsupported));
+        assert!(matches!(ZotProfile.fork_mode(), ForkMode::Unsupported));
+        assert!(matches!(OtherProfile.fork_mode(), ForkMode::Duplicate));
+    }
+
+    /// A forked tab saves as its own conversation: the fork flags are stripped,
+    /// so restore resumes the fork's id instead of branching from the parent
+    /// again.
+    #[test]
+    fn a_forked_tab_restores_its_own_conversation() {
+        let cwd = Path::new("/tmp");
+        assert_eq!(
+            ClaudeProfile
+                .command_without_resume("claude --model opus --resume PARENT --fork-session"),
+            "claude --model opus"
+        );
+        let saved = CodexProfile.command_without_resume("codex --model o3 fork PARENT");
+        assert_eq!(saved, "codex --model o3");
+        assert_eq!(
+            CodexProfile
+                .reconstruct_restore(&saved, Some("FORK"), cwd)
+                .command,
+            "codex --model o3 resume FORK"
+        );
+    }
+
+    /// A codex fork's command names its PARENT's uuid. Launch pinning must not
+    /// take it for the tab's own session, or `^a v` and the next save would both
+    /// point the fork at the conversation it branched from.
+    #[test]
+    fn a_codex_fork_is_not_pinned_to_its_parent() {
+        let parent = "019e8b21-9e7c-7553-a118-d1cdada725fd";
+        let cmd = branch(&CodexProfile, "codex", parent).expect("codex branches");
+        assert_eq!(
+            crate::state::codex_transcript::resume_uuid_from_command(&cmd),
+            None
+        );
+        assert!(!crate::state::codex_transcript::is_resume_without_id(&cmd));
     }
 
     // ── kind → profile dispatch (restore-time) ────────────────────────

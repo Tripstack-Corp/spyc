@@ -195,6 +195,7 @@ impl Resolver {
                 Act("x", A::PaneCloseTab),
                 Act("r", A::PaneRenameTab),
                 Act("R", A::PaneRestartTab),
+                Act("F", A::PaneForkTab),
                 Act("z", A::TogglePaneZoom),
                 Act("v", A::PaneScrollEnter),
                 Act("+", A::PaneGrow),
@@ -311,7 +312,7 @@ impl Resolver {
                 KeyCode::Char('a' | 'A' | 'h') => ResolverOutcome::Action(Action::VsplitFocusLeft),
                 KeyCode::Char('b' | 'B' | 'l') => ResolverOutcome::Action(Action::VsplitFocusRight),
                 KeyCode::Char('|') => ResolverOutcome::Action(Action::VsplitToggle),
-                KeyCode::Char('f' | 'F') => ResolverOutcome::Action(Action::VsplitToggleHeight),
+                KeyCode::Char('f') => ResolverOutcome::Action(Action::VsplitToggleHeight),
                 KeyCode::Char('d' | 'D') => ResolverOutcome::Action(Action::ToggleDim),
                 // Tab navigation (screen-style + vim bracket style).
                 KeyCode::Char('n' | ']') => ResolverOutcome::Action(Action::PaneNextTab),
@@ -323,6 +324,7 @@ impl Resolver {
                 }
                 KeyCode::Char('r') => ResolverOutcome::Action(Action::PaneRenameTab),
                 KeyCode::Char('R') => ResolverOutcome::Action(Action::PaneRestartTab),
+                KeyCode::Char('F') => ResolverOutcome::Action(Action::PaneForkTab),
                 // Pane toggle / resize / scroll.
                 KeyCode::Char('\\' | 'C') => ResolverOutcome::Action(Action::TogglePane),
                 KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),

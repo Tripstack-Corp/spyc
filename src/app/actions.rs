@@ -333,6 +333,7 @@ impl App {
             | Action::PaneLastTab
             | Action::PaneRenameTab
             | Action::PaneRestartTab
+            | Action::PaneForkTab
             | Action::HarpoonJump(_)
             | Action::HarpoonAppend
             | Action::HarpoonRemove
@@ -471,6 +472,7 @@ impl App {
             }
 
             Action::PaneRestartTab => self.restart_active_tab(),
+            Action::PaneForkTab => self.fork_active_tab(),
 
             Action::PanePipeContent => effects = self.pipe_content_to_pane(false),
             Action::PanePipeInventory => effects = self.pipe_content_to_pane(true),

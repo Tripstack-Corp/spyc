@@ -230,7 +230,7 @@ pub fn is_resume_without_id(command: &str) -> bool {
 
 /// Find the rollout whose filename embeds `uuid` (codex names files
 /// `rollout-<ts>-<uuid>.jsonl`, and the uuid is unique).
-fn find_rollout_by_uuid(sessions_dir: &Path, uuid: &str) -> Option<PathBuf> {
+pub(super) fn find_rollout_by_uuid(sessions_dir: &Path, uuid: &str) -> Option<PathBuf> {
     rollout_files(sessions_dir).into_iter().find(|p| {
         p.file_name()
             .and_then(|n| n.to_str())
@@ -357,7 +357,8 @@ pub fn render_transcript(
     width: Option<usize>,
     show_tool_calls: bool,
 ) -> Vec<Line<'static>> {
-    let Ok(text) = crate::state::read_tail_lossy(path, crate::state::MAX_TRANSCRIPT_TAIL_BYTES)
+    let Ok(text) =
+        super::codex_history::read_with_history(path, crate::state::MAX_TRANSCRIPT_TAIL_BYTES)
     else {
         return Vec::new();
     };

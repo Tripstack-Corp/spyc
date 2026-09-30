@@ -485,6 +485,16 @@ Multiple tabs, each running an independent pty:
   same reason `^a x` does; an already-exited tab restarts silently. The new
   child is a new process, so its `SPYC_PANE_ID`, agent conversation, and
   scrollback all start fresh
+- **^a F** fork the active tab — its conversation carries on in a new tab as a
+  branch, and the original stays where it was. claude branches with
+  `--resume <id> --fork-session` and codex with `codex fork <id>`: a new
+  session that starts from the old one's history, which the agent replays on
+  screen and `^a v` reads back. Each needs a conversation on disk first, so a
+  tab that hasn't had a prompt has nothing to fork yet. agy and zot can resume
+  a conversation but not branch it, so `^a F` says so rather than opening one
+  conversation in two tabs. A tab running anything else forks into a copy of
+  its command, opened at the tab's current directory. `docs/HARNESS.md` §4
+  has the per-agent detail
 - Activity indicator (**+**) on background tabs that have new output
 - **Startup tabs**: `[pane] tabs = ["claude", "zsh"]` (or `[[pane.tab]]`
   tables with a per-tab `cwd` and `label`) opens those tabs at launch, the

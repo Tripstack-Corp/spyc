@@ -168,12 +168,16 @@ ships with it (decisions log, 2026-09-29).
   0.1.0 is on crates.io, and CI packages both crates on every PR. The release
   matrix hasn't run since the vendored archives landed, so `v2.2.0-rc.1` still
   goes out before `v2.2.0`.
+- **[#8](https://github.com/Tripstack-Corp/spyc/issues/8): session forking
+  (`^a F`)** (#516). The active tab's conversation carries on in a new tab as a
+  branch, and the original stays put: claude via `--resume <id>
+  --fork-session`, codex via `codex fork <id>`, and a tab with no conversation
+  as a copy of itself. agy and zot can't branch, and `^a F` says so rather
+  than opening one conversation twice. It took `F` because `^a f` already
+  flips the split's height from the pane.
 
 **Open:**
 
-- **[#8](https://github.com/Tripstack-Corp/spyc/issues/8) — session forking
-  (`^a f`)**, so an agent conversation can branch without losing the prior line
-  of inquiry.
 - **[#71](https://github.com/Tripstack-Corp/spyc/issues/71) — prompt templates
   in `.spycrc.toml`**, with picks and inventory substituted.
 - **[#492](https://github.com/Tripstack-Corp/spyc/issues/492):

@@ -142,6 +142,7 @@ mod navigate;
 mod pager_handler;
 mod pager_history;
 mod pager_stream;
+mod pane_fork;
 mod pane_scroll;
 mod pane_tabs;
 mod pane_wake;

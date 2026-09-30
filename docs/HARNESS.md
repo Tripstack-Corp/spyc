@@ -147,6 +147,13 @@ Inside either view:
 Transcript sources per agent live under `src/state/` (`claude_transcript.rs`,
 `codex_transcript.rs`, `agy_transcript.rs`). zot has none yet.
 
+**A forked codex thread's rollout holds only its own turns.** Its
+`session_meta.history_base` names the parent thread and the byte offset in the
+parent's rollout where the fork branched, instead of copying what came before.
+So `^a v` on a fork reads the parent's rollout up to that offset first, and
+further back for a fork of a fork (`src/state/codex_history.rs`). Without that
+walk a branch would show none of the history it was forked to keep.
+
 ---
 
 ## 4. Session recovery, per agent
@@ -160,6 +167,19 @@ resumes differs, and the differences leak:
 | **codex** | baked into the spawn command — `codex resume <uuid>`, or `resume --last`. The uuid comes from the tab's *pinned* rollout claim, not from codex's exit banner, so a tab that was still running at quit resumes exactly too. |
 | **agy** | baked into the spawn command — `--conversation <uuid>` when spyc has a pinned session id for the tab, falling back to `--continue` (the most recent for this cwd) when it does not. |
 | **zot** | `--continue`. spyc doesn't capture a specific session path yet, so restore always continues the most recent. |
+
+### Forking a tab (`^a F`)
+
+| agent | fork |
+|---|---|
+| **claude** | a new tab running `claude --resume <id> --fork-session`. That's the `--resume` flag restore avoids, because the typed `/resume` has no fork form; on claude 2.1.284 it mounts cleanly with a long conversation behind it. The branch writes nothing to disk until its first prompt, and its first hook report carries the branch's own session id, not the parent's. |
+| **codex** | a new tab running `codex fork <uuid>`. The branch writes its rollout straight away, with a new id and a start time at the fork, so spyc pins it like any fresh codex tab. |
+| **agy**, **zot** | none. Each can resume a conversation but not branch it, and two tabs on one conversation would be two clients of one session, not a fork. `^a F` says so and opens nothing. |
+
+A branch starts in the directory its parent was started in, where each agent
+looks its session up, whatever directory the pane has wandered to since. A
+tab running anything else has no conversation, so its fork is a copy of its
+command, opened at the tab's live cwd.
 
 ### The codex quirk that confuses everyone
 

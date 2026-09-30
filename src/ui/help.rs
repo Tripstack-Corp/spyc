@@ -269,6 +269,10 @@ const SECTIONS: &[Section] = &[
                 "restart active tab command in place (confirms if its child is still running)",
             ),
             (
+                "^a F",
+                "fork active tab: claude/codex branch its conversation into a new tab; a shell tab copies",
+            ),
+            (
                 "●  ■  ·",
                 "agent tab dot: pulse ● working, red square ■ blocked, teal square ■ done, dim · idle (:why-status)",
             ),

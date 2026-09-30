@@ -59,6 +59,40 @@ fn autosave_action(dirty: bool, due: Option<Instant>, now: Instant) -> AutosaveA
     }
 }
 
+/// The conversation a tab is running, and its name, as a save persists it.
+///
+/// Prefers the tab's PINNED session id — claude's `live_session_id` (set at
+/// restore from the exact `/resume <sid>`) or codex's `codex_session_id` (the
+/// rollout `codex_pin` claimed for it). That's the conversation this pane is
+/// definitively running, so it bypasses the spawn-proximity resolver that
+/// crosses panes restored together. Otherwise falls back to the profile
+/// resolver, whose exit-banner read finds nothing on a *live* tab, since both
+/// agents print their id only on the way out.
+///
+/// Never returns an id in `claimed`. Two tabs pinned to one conversation would
+/// otherwise both save it and both restore into it, which is the collapse this
+/// exists to prevent; `^a F` passes the other tabs' ids for the same reason.
+pub(super) fn tab_conversation(
+    tab: &crate::pane::tabs::TabEntry,
+    claimed: &std::collections::HashSet<String>,
+) -> (Option<String>, Option<String>) {
+    let profile = crate::agent::detect(&tab.info.command);
+    match tab
+        .info
+        .pinned_session_id()
+        .filter(|id| !claimed.contains(*id))
+        .and_then(|id| profile.validate_live_session_id(&tab.info.cwd, id))
+    {
+        Some((id, name)) => (Some(id), name),
+        None => profile.resolve_resume_target(
+            &tab.pane,
+            &tab.info.cwd,
+            tab.info.spawn_epoch_secs,
+            claimed,
+        ),
+    }
+}
+
 impl App {
     pub fn save_session(&mut self) {
         let session = self.build_session_snapshot();
@@ -110,36 +144,7 @@ impl App {
                     .map(|t| {
                         let profile = crate::agent::detect(&t.info.command);
                         let kind = profile.kind();
-                        // Resolve the (session_id, session_name) to persist.
-                        // Prefer this tab's PINNED session id — claude's
-                        // `live_session_id` (set at restore from the exact
-                        // `/resume <sid>`) or codex's `codex_session_id` (the
-                        // rollout `codex_pin` claimed for it). That's the
-                        // conversation this pane is definitively running, so it
-                        // bypasses the spawn-proximity resolver that crosses panes
-                        // restored together. Otherwise fall back to the profile
-                        // resolver, which honours `claimed` internally so multi-pane
-                        // saves don't collapse onto one conversation — and which
-                        // for a *live* tab has nothing to read, since both agents
-                        // only print their id on the way out.
-                        let (agent_session_id, agent_session_name) = match t
-                            .info
-                            .pinned_session_id()
-                            // The pinned path honours `claimed` too: two tabs
-                            // pinned to one conversation would otherwise both
-                            // save it and both restore into it, which is the
-                            // collapse this whole block exists to prevent.
-                            .filter(|id| !claimed.contains(*id))
-                            .and_then(|id| profile.validate_live_session_id(&t.info.cwd, id))
-                        {
-                            Some((id, name)) => (Some(id), name),
-                            None => profile.resolve_resume_target(
-                                &t.pane,
-                                &t.info.cwd,
-                                t.info.spawn_epoch_secs,
-                                &claimed,
-                            ),
-                        };
+                        let (agent_session_id, agent_session_name) = tab_conversation(t, &claimed);
                         if let Some(ref id) = agent_session_id {
                             claimed.insert(id.clone());
                         }

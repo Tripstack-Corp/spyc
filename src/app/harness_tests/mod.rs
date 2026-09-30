@@ -13,6 +13,44 @@ fn key(c: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty())
 }
 
+/// A stand-in agent `dir/bin/<name>` that writes the arguments it was started
+/// with to `dir/<name>.argv`, one per line, and waits. A path-qualified
+/// command is detected by its last component, so the pane treats it as `name`.
+fn fake_agent(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let exe = bin.join(name);
+    std::fs::write(
+        &exe,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexec sleep 30\n",
+            dir.join(format!("{name}.argv")).display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+    exe
+}
+
+/// The arguments [`fake_agent`] `name` was started with, once it has started.
+fn agent_argv(dir: &std::path::Path, name: &str) -> Vec<String> {
+    let path = dir.join(format!("{name}.argv"));
+    for _ in 0..300 {
+        if let Ok(text) = std::fs::read_to_string(&path)
+            && text.ends_with('\n')
+        {
+            return text
+                .lines()
+                .filter(|l| !l.is_empty())
+                .map(String::from)
+                .collect();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("the fake {name} never started");
+}
+
 /// Acceptance: a fresh harness starts with a deterministic cwd,
 /// listing, cursor, focus, and no pane/pager.
 #[test]
@@ -359,6 +397,7 @@ mod archive;
 mod focused_column;
 mod mcp;
 mod pane;
+mod pane_fork;
 mod per_column;
 mod second_commander;
 mod send_selection;
