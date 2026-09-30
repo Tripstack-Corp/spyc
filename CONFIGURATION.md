@@ -584,8 +584,8 @@ One string per binding in a `keymap = [ ... ]` array. Forms:
 | `map <KEY> command <:cmd...>` | run a `:` command (e.g. `graveyard`, `activity`) |
 | `map <KEY> lua <name>` | run `~/.config/spyc/lua/<name>.lua` |
 | `map <KEY> prompt <name>` | type the [`[prompts]`](#prompt-templates--prompts) template `<name>` into the active pane tab |
-| `map <KEY> patternpick <glob>` | multi-select files matching a glob |
-| `map <KEY> jump <path>` | jump the file list to a directory |
+| `map <KEY> patternpick =<glob>` | multi-select files matching a glob |
+| `map <KEY> jump =<path>` | jump the file list to a directory |
 
 `<KEY>` is a single char (`f`), a Ctrl-combo (`^P`), or a named key (`<F2>`). The
 DSL binds single keys — for multi-key chords, use `init.lua`'s `spyc.map`.
@@ -603,7 +603,7 @@ the keymap stays uncluttered — bind the ones you use:
 keymap = [
   "map f unix file %",             # `file` on the cursor/selection
   "map ^P unix ps aux",
-  "map H patternpick *.hpp",
+  "map H patternpick =*.hpp",
   "map A command activity",        # toggle the activity monitor
   "map ^Y command graveyard",      # recover soft-deleted files
   "map z lua mymacro",             # ~/.config/spyc/lua/mymacro.lua

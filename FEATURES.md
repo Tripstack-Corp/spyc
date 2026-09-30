@@ -1183,7 +1183,8 @@ unambiguous:
 (`.spycrc.toml` in the working directory) configuration:
 
 - **Keymap DSL** — `map KEY action [args]` syntax to rebind any key to
-  any action. Chord bindings (e.g., `^W n`) are supported. Beyond the
+  any action. A key is one key: a char, a Ctrl-combo (`^P`) or a named key
+  (`<F2>`); a multi-key chord binds from `init.lua` with `spyc.map`. Beyond the
   built-in actions, a key can run a `unix` shell template
   (`map ^P unix ps aux`), a `jump`/`patternpick`, or a **`:` command**
   (`map A command graveyard`), or a **Lua script**
