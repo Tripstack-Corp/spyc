@@ -366,13 +366,14 @@
 #   map <KEY> unix <command...>     — run shell command (% = selection)
 #   map <KEY> command <:cmd...>     — run a : command (e.g. graveyard)
 #   map <KEY> lua <name>            — run ~/.config/spyc/lua/<name>.lua
+#   map <KEY> prompt <name>         — type the [prompts] template <name> into the pane
 #   map <KEY> patternpick <glob>    — pick files matching a glob
 #   map <KEY> jump <path>           — jump to a directory
 #
 # <KEY> can be a single char (`f`), a chord (`g x`), or a Ctrl-prefixed
 # binding (`^P`). Lines starting with `#` inside the array are comments.
 #
-# NOTE: `unix`, `command`, `lua`, and `jump` only take effect in THIS file
+# NOTE: `unix`, `command`, `lua`, `jump` and `prompt` only take effect in THIS file
 # (~/.spycrc.toml) — a project-local .spycrc.toml can't bind them (they could
 # run arbitrary code on a single keypress in an untrusted clone). Lua scripts
 # load only from ~/.config/spyc/lua/; the engine runs them off-thread with an
@@ -397,4 +398,18 @@
 #   "map A command activity",      # toggle the activity monitor
 #   "map ^Y command graveyard",    # recover soft-deleted files
 #   "map z lua mymacro",           # run ~/.config/spyc/lua/mymacro.lua
+#   "map <F6> prompt review",      # type [prompts] review into the pane
 # ]
+
+# ── prompts ───────────────────────────────────────────────────────────
+# Prompt templates: a message typed into the active pane tab by
+# `map KEY prompt <name>` or `:prompt <name>`, with tokens filled in:
+#   %   the picks, else the cursor row     %i  the inventory
+#   %d  the focused column's directory     %%  a literal %
+# Paths go out relative to the pane's own cwd, the way `^a s` sends them.
+# Nothing is submitted: the pane gets the keyboard and Enter sends it.
+# Only this file (~/.spycrc.toml) may define them.
+#
+# [prompts]
+# review  = "Review % for bugs. Don't change anything yet."
+# explain = "Explain what %d does, starting from its entry point."

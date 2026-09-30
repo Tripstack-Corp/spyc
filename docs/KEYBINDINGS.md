@@ -323,6 +323,7 @@ to open them in the current listing dir.
 | `:startup-tabs` | Where launch's pane tabs come from; `forget` re-asks about a project `.spycrc.toml`'s list |
 | `:skill` | Agent skill: `status` / `update` / `remove` / `ask` |
 | `:lua` | Lua engine: `status` / `on` / `off` / `reload` |
+| `:prompt` | Type a `[prompts]` template into the active pane tab (`:prompt <name>`); bare `:prompt` lists them |
 | `:notify test` | Fire every notification channel to verify setup |
 | `:date` | Show date/time (UTC) |
 

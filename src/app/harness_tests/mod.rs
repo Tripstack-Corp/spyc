@@ -51,6 +51,35 @@ fn agent_argv(dir: &std::path::Path, name: &str) -> Vec<String> {
     panic!("the fake {name} never started");
 }
 
+/// Deliver `effects`' pane input to the active pane the way the executor does,
+/// then press Enter so a line-reading child hands the line over.
+fn deliver(app: &mut App, effects: Vec<Effect>) {
+    let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+    for e in effects {
+        if let Effect::SendToPane { input, .. } = e {
+            input.send_to(tabs.active_mut()).expect("send");
+        }
+    }
+    tabs.active_mut().send_bytes(b"\r").expect("enter");
+}
+
+/// What a `cat > file` pane child wrote, once it has a whole line.
+fn received(app: &mut App, got: &std::path::Path) -> String {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        if let Ok(s) = std::fs::read_to_string(got)
+            && s.ends_with('\n')
+        {
+            return s;
+        }
+        if let Some(tabs) = app.runtime.pane_tabs.as_mut() {
+            tabs.active_mut().drain_output();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    panic!("the pane child never received a line");
+}
+
 /// Acceptance: a fresh harness starts with a deterministic cwd,
 /// listing, cursor, focus, and no pane/pager.
 #[test]
@@ -399,6 +428,7 @@ mod mcp;
 mod pane;
 mod pane_fork;
 mod per_column;
+mod prompt_templates;
 mod second_commander;
 mod send_selection;
 mod vsplit;

@@ -28,9 +28,11 @@ restart** (`:lua reload` or `^R` re-runs `init.lua`). Project settings layer on
 top of user settings per-field, so a bare `[notify]` in a project file doesn't
 clobber your user defaults.
 
-**Security:** the *executing* keymap verbs (`unix`, `command`, `lua`, `jump`)
-only take effect from **`~/.spycrc.toml`** — a project-local `.spycrc.toml` in an
-untrusted clone can't bind a key to run code. A project file's
+**Security:** the *executing* keymap verbs (`unix`, `command`, `lua`, `jump`,
+`prompt`) only take effect from **`~/.spycrc.toml`** — a project-local
+`.spycrc.toml` in an untrusted clone can't bind a key to run code, and its
+[`[prompts]`](#prompt-templates--prompts) are ignored, so a repo can't choose
+what gets typed at your agent. A project file's
 [startup tabs](#startup-tabs--pane-tabs) run their commands at launch with no
 keypress at all, so they open only after you approve that exact list, and an
 edited list asks again. Lua scripts load only from `~/.config/spyc/`.
@@ -521,6 +523,57 @@ A pattern with an un-compilable regex is skipped with a warning, not a crash.
 
 ---
 
+## Prompt templates — `[prompts]`
+
+A prompt template is a message you send an agent over and over. One key types
+it into the active pane tab, with the selection filled in:
+
+```toml
+keymap = [
+  "map <F6> prompt review",
+  "map <F7> prompt explain",
+]
+
+[prompts]
+review  = "Review % for bugs. Don't change anything yet."
+explain = "Explain what %d does, starting from its entry point."
+tests   = """
+Write tests for %.
+Cover the error paths first."""
+```
+
+(`keymap` goes above `[prompts]`: in TOML, a key after a table header belongs to
+that table.)
+
+| Token | Becomes |
+|---|---|
+| `%` | the picks, else the cursor row — what `^a s` sends |
+| `%i` | the inventory's picked items, else all of them |
+| `%d` | the focused column's directory |
+| `%%` | a literal `%`, so "50%" in a template is written `50%%` |
+
+Paths are written the way `^a s` writes them: relative to the receiving pane's
+own cwd when they're under it (`.` for the cwd itself), absolute otherwise, and
+quoted when they hold a space.
+
+**The prompt is typed, not sent.** The pane gets the keyboard and **Enter**
+sends it, so you can read what was filled in, or finish the sentence, first. An
+agent that asked for bracketed paste (claude and codex both do) gets the
+template as one paste, so a multi-line template arrives whole rather than
+submitting at its first newline.
+
+A token with nothing behind it (`%` in an empty directory, `%i` with an empty
+inventory) is refused rather than typing a prompt about nothing, and so is a
+path that isn't valid UTF-8, since it can't be typed as itself.
+
+`:prompt <name>` types one without a key, and a bare `:prompt` lists them.
+
+**`[prompts]` loads only from `~/.spycrc.toml`.** A template is text typed at
+your agent, so a project-local file that defines one is ignored with a warning,
+and `prompt` is one of the executing verbs.
+
+---
+
 ## Keymap — the `keymap` DSL
 
 One string per binding in a `keymap = [ ... ]` array. Forms:
@@ -530,6 +583,7 @@ One string per binding in a `keymap = [ ... ]` array. Forms:
 | `map <KEY> unix <command...>` | run a shell command (`%` = current selection) |
 | `map <KEY> command <:cmd...>` | run a `:` command (e.g. `graveyard`, `activity`) |
 | `map <KEY> lua <name>` | run `~/.config/spyc/lua/<name>.lua` |
+| `map <KEY> prompt <name>` | type the [`[prompts]`](#prompt-templates--prompts) template `<name>` into the active pane tab |
 | `map <KEY> patternpick <glob>` | multi-select files matching a glob |
 | `map <KEY> jump <path>` | jump the file list to a directory |
 
@@ -556,8 +610,8 @@ keymap = [
 ]
 ```
 
-> Reminder: `unix` / `command` / `lua` / `jump` only bind from `~/.spycrc.toml`,
-> not a project file.
+> Reminder: `unix` / `command` / `lua` / `jump` / `prompt` only bind from
+> `~/.spycrc.toml`, not a project file.
 
 ---
 

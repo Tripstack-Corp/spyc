@@ -1187,13 +1187,22 @@ unambiguous:
   built-in actions, a key can run a `unix` shell template
   (`map ^P unix ps aux`), a `jump`/`patternpick`, or a **`:` command**
   (`map A command graveyard`), or a **Lua script**
-  (`map z lua mymacro` → runs `~/.config/spyc/lua/mymacro.lua`). The
+  (`map z lua mymacro` → runs `~/.config/spyc/lua/mymacro.lua`), or a
+  **prompt template** (`map <F6> prompt review`). The
   less-frequent features ship as
   `:` commands with no default key (graveyard, activity monitor,
   long-list, file-type, chmod) — `--print-config` lists them as
   commented `command` examples to copy-and-enable. `unix` / `command` /
-  `lua` / `jump` only take effect in `~/.spycrc.toml` (a project file can't
-  bind a single-keypress code runner in an untrusted clone).
+  `lua` / `jump` / `prompt` only take effect in `~/.spycrc.toml` (a project
+  file can't bind a single-keypress code runner in an untrusted clone).
+- **Prompt templates** — `[prompts]` in `~/.spycrc.toml` names the messages
+  you send an agent over and over; `map KEY prompt <name>` (or `:prompt
+  <name>`) types one into the active pane tab with `%` (the picks, else the
+  cursor row), `%i` (the inventory) and `%d` (the directory) filled in, paths
+  anchored on the pane's own cwd the way `^a s` sends them. It's typed, not
+  sent: the pane gets the keyboard and Enter sends it. A project file's
+  `[prompts]` is ignored with a warning. Reference: `CONFIGURATION.md` →
+  "Prompt templates"
 - **Lua scripting** — embed real logic in your config (`mlua`, vendored
   Lua 5.4). A `map KEY lua <name>` binding runs
   `~/.config/spyc/lua/<name>.lua`, which calls a `spyc.*` API: read context

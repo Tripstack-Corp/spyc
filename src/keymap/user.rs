@@ -127,6 +127,11 @@ pub enum BoundAction {
     /// [`is_executing`](Self::is_executing) (only `$HOME` config may bind it; a
     /// project `.spycrc.toml` cannot).
     Lua(String),
+    /// `map KEY prompt <name>` — type the `[prompts]` template `<name>` into
+    /// the active pane tab. [`is_executing`](Self::is_executing): a project
+    /// `.spycrc.toml` binding one would let a repo decide what gets typed at
+    /// your agent.
+    Prompt(String),
 }
 
 impl BoundAction {
@@ -140,6 +145,7 @@ impl BoundAction {
             Self::ToggleMaskFixed(n) => format!("toggle mask {n}"),
             Self::Command(cmd) => format!(":{cmd}"),
             Self::Lua(name) => format!("lua: {name}"),
+            Self::Prompt(name) => format!("prompt: {name}"),
         }
     }
 
@@ -150,11 +156,12 @@ impl BoundAction {
     /// copy/move/remove *prompts*, which carry no payload — the user still
     /// types the target) and the harmless `PatternPick`/`ToggleMaskFixed`
     /// are not executing. `Command` is — it dispatches arbitrary `:` input,
-    /// including the `:!`/`:;` shell symbols.
+    /// including the `:!`/`:;` shell symbols. `Prompt` is too — it types text
+    /// at an agent.
     pub const fn is_executing(&self) -> bool {
         matches!(
             self,
-            Self::UnixCmd(_) | Self::Jump(_) | Self::Command(_) | Self::Lua(_)
+            Self::UnixCmd(_) | Self::Jump(_) | Self::Command(_) | Self::Lua(_) | Self::Prompt(_)
         )
     }
 }

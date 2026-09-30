@@ -61,15 +61,20 @@ pub fn shell_quote(s: &str) -> String {
 pub fn pane_path_payload(paths: &[PathBuf], cwd: Option<&Path>) -> String {
     let mut out = String::new();
     for p in paths {
-        let shown = match cwd.and_then(|c| p.strip_prefix(c).ok()) {
-            Some(rel) if rel.as_os_str().is_empty() => Path::new("."),
-            Some(rel) => rel,
-            None => p.as_path(),
-        };
-        out.push_str(&shell_quote(&shown.to_string_lossy()));
+        out.push_str(&pane_path(p, cwd));
         out.push(' ');
     }
     out
+}
+
+/// One path of a [`pane_path_payload`], anchored and quoted the same way.
+pub fn pane_path(p: &Path, cwd: Option<&Path>) -> String {
+    let shown = match cwd.and_then(|c| p.strip_prefix(c).ok()) {
+        Some(rel) if rel.as_os_str().is_empty() => Path::new("."),
+        Some(rel) => rel,
+        None => p,
+    };
+    shell_quote(&shown.to_string_lossy())
 }
 
 /// Substitute `%` in `template` with a space-separated, shell-quoted list

@@ -36,6 +36,9 @@
 //!   into the pager); foreground_cmd (prompted, run in the foreground like `;`)
 //! - command CMD ($HOME only) — bind a key to a `:` command (e.g.
 //!   `command graveyard`, `command activity`)
+//! - lua NAME ($HOME only) — run `<config_root>/lua/NAME.lua`
+//! - prompt NAME ($HOME only) — type the `[prompts]` template NAME into the
+//!   active pane tab
 //! - longlist, file, copy, move, remove, makedirs
 //! - ignoretoggle =N, patternpick =GLOB, jump =PATH
 //! - panescroll, panesave
@@ -201,6 +204,16 @@ pub fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
             }
         }
 
+        // `prompt <name>` — type a `[prompts]` template into the active pane
+        // tab; `is_executing` (it types at an agent), so $HOME config only.
+        "prompt" => {
+            if tail.is_empty() {
+                Err("`prompt` needs a template name (e.g. `prompt review`)".to_string())
+            } else {
+                Ok(BoundAction::Prompt(tail.to_string()))
+            }
+        }
+
         "longlist" => Ok(BoundAction::Plain(Action::LongList)),
         "file" => Ok(BoundAction::Plain(Action::FileType)),
         "copy" => Ok(BoundAction::Plain(Action::CopyPrompt)),
@@ -309,6 +322,23 @@ mod tests {
     #[test]
     fn empty_lua_is_an_error() {
         assert!(parse("map z lua").is_err());
+    }
+
+    #[test]
+    fn prompt_verb_parses_and_is_executing() {
+        let b = parse("map <F6> prompt review").unwrap().unwrap();
+        match &b.action {
+            BoundAction::Prompt(s) => assert_eq!(s, "review"),
+            other => panic!("expected Prompt, got {other:?}"),
+        }
+        // A project `.spycrc.toml` binding one would let a repo decide what
+        // gets typed at your agent.
+        assert!(b.action.is_executing());
+    }
+
+    #[test]
+    fn empty_prompt_is_an_error() {
+        assert!(parse("map <F6> prompt").is_err());
     }
 
     #[test]

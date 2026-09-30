@@ -121,6 +121,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     app("pane-to-task", commands::cmd_pane_to_task),
     app("pause", commands::cmd_pause),
     pure("project"),
+    app("prompt", App::cmd_prompt),
     pure("q"),
     pure("quit"),
     app("resume", commands::cmd_resume),

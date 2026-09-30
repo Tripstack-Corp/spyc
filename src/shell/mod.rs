@@ -8,7 +8,7 @@
 
 pub mod expand;
 
-pub use expand::{expand_percent, pane_path_payload, shell_quote};
+pub use expand::{expand_percent, pane_path, pane_path_payload, shell_quote};
 
 use std::io::Read;
 use std::path::Path;
