@@ -16,6 +16,7 @@
 
 use std::path::PathBuf;
 
+use super::state::Side;
 use super::{App, View};
 use crate::state::graveyard::{Entry, Graveyard};
 
@@ -161,9 +162,7 @@ impl App {
                 Ok(()) => {
                     self.state
                         .flash_info(format!("undo: restored {filename} → {}", dest.display()));
-                    if matches!(self.state.left.view, View::Graveyard) {
-                        self.reload_graveyard_rows();
-                    }
+                    self.reload_graveyard_rows();
                     self.state.refresh_listing();
                 }
                 Err(e) => self.state.flash_error(format!(
@@ -205,12 +204,24 @@ impl App {
         }
     }
 
-    /// Reload the in-memory graveyard list from disk and re-clamp/rebuild the
-    /// rows so the open graveyard view reflects the mutation.
+    /// Reload the graveyard from disk into every column showing it, clamping
+    /// that column's cursor. A column listing a directory is not touched: its
+    /// cursor indexes files, not graveyard entries.
     fn reload_graveyard_rows(&mut self) {
+        let showing: Vec<Side> = self
+            .state
+            .active_sides()
+            .filter(|&s| self.state.col(s).view == View::Graveyard)
+            .collect();
+        if showing.is_empty() {
+            return;
+        }
         self.state.graveyard = Graveyard::load().entries;
-        self.state.left.cursor.clamp(self.state.graveyard.len());
-        self.state.rebuild_rows();
+        let n = self.state.graveyard.len();
+        for side in showing {
+            self.state.col_mut(side).cursor.clamp(n);
+            self.state.rebuild_rows_for(side);
+        }
     }
 }
 

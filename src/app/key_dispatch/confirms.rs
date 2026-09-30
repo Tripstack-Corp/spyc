@@ -42,7 +42,7 @@ impl App {
         // The picks are the items being removed — clear them now (they're
         // gone from the user's intent); the listing still shows the files
         // until the worker unlinks them and the refresh lands.
-        self.state.left.picks.clear();
+        self.state.cur_mut().picks.clear();
         // Optimistically ghost the removed rows so they don't momentarily
         // vanish before the off-thread `git status` re-adds a tracked file as a
         // struck-through ghost (the post-`R` list "bounce"). Only with a git

@@ -666,12 +666,10 @@ impl App {
             "cwd      : {}",
             crate::paths::display_tilde(&self.state.cur().listing.dir)
         ));
-        lines.push(format!(
-            "entries  : {}",
-            self.state.left.listing.entries.len()
-        ));
-        lines.push(format!("visible  : {}", self.state.left.rows.len()));
-        lines.push(format!("picks    : {}", self.state.left.picks.len()));
+        let col = self.state.cur();
+        lines.push(format!("entries  : {}", col.listing.entries.len()));
+        lines.push(format!("visible  : {}", col.rows.len()));
+        lines.push(format!("picks    : {}", col.picks.len()));
         lines.push(format!("inventory: {}", self.state.inventory.len()));
         lines.push(format!("marks    : {}", self.state.marks.entries.len()));
         lines.push(format!("rss      : {}", crate::sysinfo::format_rss()));
