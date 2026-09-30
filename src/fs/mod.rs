@@ -9,7 +9,7 @@ pub mod long_listing;
 pub mod ops;
 pub mod waking_sender;
 
-pub use atomic::write_atomic;
+pub use atomic::{copy_atomic, write_atomic};
 pub use entry::{Entry, EntryKind, target_is_dir};
 pub use listing::Listing;
 pub use waking_sender::WakingSender;
