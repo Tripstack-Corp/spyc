@@ -622,7 +622,8 @@ impl App {
     /// readable file, **not** a directory (huge files page truncated). `None`
     /// for a directory (or no row); the caller flashes the warning.
     pub(super) fn previewable_cursor_path(&self) -> Option<std::path::PathBuf> {
-        let row = self.state.left.rows.get(self.state.left.cursor.index)?;
+        let col = self.state.cur();
+        let row = col.rows.get(col.cursor.index)?;
         let path = row.path.clone();
         let is_dir = row.kind == EntryKind::Dir
             || (row.kind == EntryKind::Symlink && crate::fs::target_is_dir(&path));

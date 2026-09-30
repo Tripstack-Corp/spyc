@@ -524,10 +524,6 @@ impl App {
         }
     }
 
-    pub(super) fn build_rows(&self) -> Vec<Row> {
-        self.build_rows_for(&self.state.left)
-    }
-
     /// Build the styled display rows for one commander column `c` (its
     /// `rows`/`view`/`picks`), folding in this column's own git markers plus the
     /// app-wide overlays (inventory `taken`, pending-delete highlight).

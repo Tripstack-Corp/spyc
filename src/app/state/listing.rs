@@ -454,11 +454,7 @@ impl AppState {
     /// worktree a column is in — it relies on this.)
     pub fn reset_orphaned_columns_to_home(&mut self) {
         let home = self.project_home.clone().filter(|h| h.is_dir());
-        let mut sides = vec![Side::Left];
-        if self.right.is_some() {
-            sides.push(Side::Right);
-        }
-        for side in sides {
+        for side in self.active_sides() {
             let orphaned = self.col(side).listing.dir.clone();
             if orphaned.is_dir() {
                 continue; // still a valid directory — leave it

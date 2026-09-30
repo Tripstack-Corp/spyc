@@ -145,6 +145,13 @@ ships with it (decisions log, 2026-09-29).
   PROJECT_HOME (closing [#9](https://github.com/Tripstack-Corp/spyc/issues/9)),
   so [#71](https://github.com/Tripstack-Corp/spyc/issues/71)'s templates
   inherit a settled anchor.
+- **[#40](https://github.com/Tripstack-Corp/spyc/issues/40): columns are
+  addressed by handle** (#504), the projects prep. Only render and fs-watch
+  name `state.left` / `state.right`; everything else goes through `cur()`,
+  `col(side)` or `active_sides()`, and a guard holds it there. Widening that
+  guard first found nine places that acted on column a from column b, fixed
+  in #502: among them, a graveyard purge in b trashed the entry under a's
+  cursor.
 - **[#490](https://github.com/Tripstack-Corp/spyc/issues/490): crates.io
   publishing.** The release job publishes `spyc-vt-sys` before spyc (#499),
   0.1.0 is on crates.io, and CI packages both crates on every PR. The release
@@ -161,9 +168,6 @@ ships with it (decisions log, 2026-09-29).
   design the F1 decisions-log entry names, and lets `get_spyc_context` answer
   for the calling pane rather than for whichever column the user is browsing.
   Attribution, not authorization — SECURITY.md says which.
-- **[#40](https://github.com/Tripstack-Corp/spyc/issues/40) — one spyc per
-  agent.** Abstract the hardcoded `left`/`right` column references so what a
-  column holds can change. Projects prep, with standalone cleanup value.
 - **[#8](https://github.com/Tripstack-Corp/spyc/issues/8) — session forking
   (`^a f`)**, so an agent conversation can branch without losing the prior line
   of inquiry.
@@ -391,7 +395,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   guard-enforced, so lifting App state is a bounded question. Vsplit
   Stage 2 already runs a second full `Commander` in-process.
   Agent-status dots and notifications are already per-process. And #40
-  exists as the prep refactor. Depends on the pane-identity transport
+  landed as the prep refactor. Depends on the pane-identity transport
   (2.2) for project attribution; `docs/drafts/PROJECTS_PLAN.md`, a 2.2
   deliverable, is where it gets argued.
 - **The 3.0 horizon opens on durable sessions, via the daemonized

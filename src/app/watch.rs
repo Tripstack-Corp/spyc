@@ -18,7 +18,7 @@ use std::sync::mpsc::Sender;
 use notify::event::{AccessKind, AccessMode};
 use notify::{EventKind, RecursiveMode, Watcher};
 
-use super::Message;
+use super::{App, Message, RunCtx};
 
 /// True for a pure read/open watcher event — one that never changes a file's
 /// content or the directory structure, so a file manager has nothing to react
@@ -67,6 +67,43 @@ pub enum WatchCommand {
         /// which already delivers events for files beneath it.
         preview: Option<PathBuf>,
     },
+}
+
+impl App {
+    /// Re-point the worker when a column's listing dir or the open
+    /// vertical-split preview moved; the (un)watch syscalls run on the worker,
+    /// and `ctx` keeps the send-dedup keys. Names `a` and `b` by field rather
+    /// than by focus: each column's tree and gitdir are watched under their own
+    /// key whichever one has the keyboard.
+    pub(super) fn sync_watch(&self, ctx: &mut RunCtx) {
+        let preview = self
+            .view
+            .right_pager
+            .as_ref()
+            .and_then(|v| v.source_path.clone());
+        let dir = &self.state.left.listing.dir;
+        let dir_right = self.state.right.as_ref().map(|c| c.listing.dir.clone());
+        let unchanged = ctx.watched_listing.as_ref() == Some(dir)
+            && ctx.watched_preview == preview
+            && ctx.watched_listing_right == dir_right;
+        let Some(tx) = ctx.watch_tx.as_ref().filter(|_| !unchanged) else {
+            return;
+        };
+        let _ = tx.send(WatchCommand::SyncListing {
+            dir: dir.clone(),
+            gitdir: self.state.left.git_cache.current_gitdir.clone(),
+            dir_right: dir_right.clone(),
+            gitdir_right: self
+                .state
+                .right
+                .as_ref()
+                .and_then(|c| c.git_cache.current_gitdir.clone()),
+            preview: preview.clone(),
+        });
+        ctx.watched_listing = Some(dir.clone());
+        ctx.watched_preview = preview;
+        ctx.watched_listing_right = dir_right;
+    }
 }
 
 /// Spawn the watch-control worker. Returns the command sender, or `None` if

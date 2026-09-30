@@ -469,11 +469,9 @@ impl AppState {
                 // needs guarding. Mirrors the MCP `resolve_worktree_arg` check
                 // so the in-app key is no less safe than `remove_worktree`.
                 let target = self.cur().listing.dir.clone();
-                let other_inside = match self.focused_side() {
-                    super::Side::Left => self.right.as_ref(),
-                    super::Side::Right => Some(&self.left),
-                }
-                .is_some_and(|c| c.listing.dir.starts_with(&target));
+                let other_inside = self
+                    .get_col(self.focused_side().other())
+                    .is_some_and(|c| c.listing.dir.starts_with(&target));
                 if self.cur().git.info.is_none() {
                     self.flash_error("not in a git repository");
                 } else if other_inside {

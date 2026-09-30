@@ -27,7 +27,7 @@ use ratatui::Frame;
 
 use crate::config::StatusPosition;
 use crate::spyc_debug;
-use crate::ui::list_view::ListView;
+use crate::ui::list_view::{ListView, Row};
 
 use super::{App, FrameLayout, View, state};
 
@@ -653,6 +653,11 @@ impl App {
             view.scroll_to_bottom(rect.height);
             view.pending_scroll_to_bottom.set(false);
         }
+    }
+
+    /// Column `a`'s display rows: the ones `view.cached_rows` holds.
+    fn build_rows(&self) -> Vec<Row> {
+        self.build_rows_for(&self.state.left)
     }
 
     /// Rebuild the list-rows cache and run the `view_top`↔grid stabilization.
