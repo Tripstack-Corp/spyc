@@ -146,7 +146,7 @@ ships with it (decisions log, 2026-09-29).
   so [#71](https://github.com/Tripstack-Corp/spyc/issues/71)'s templates
   inherit a settled anchor.
 - **[#40](https://github.com/Tripstack-Corp/spyc/issues/40): columns are
-  addressed by handle** (#503), the projects prep. Only render and fs-watch
+  addressed by handle** (#504), the projects prep. Only render and fs-watch
   name `state.left` / `state.right`; everything else goes through `cur()`,
   `col(side)` or `active_sides()`, and a guard holds it there. Widening that
   guard first found nine places that acted on column a from column b, fixed

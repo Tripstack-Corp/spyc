@@ -35,7 +35,7 @@ load-bearing.
 | # | Item | Kind | Tracking | Status |
 |---|---|---|---|---|
 | 1 | Pane-identity transport (option B) | prep | [#491](https://github.com/Tripstack-Corp/spyc/issues/491), [proposal](pane-identity-transport-proposal.md) | open |
-| 2 | One spyc per agent — abstract the column references | prep | [#40](https://github.com/Tripstack-Corp/spyc/issues/40) | shipped (#503) |
+| 2 | One spyc per agent — abstract the column references | prep | [#40](https://github.com/Tripstack-Corp/spyc/issues/40) | shipped (#504) |
 | 3 | Configurable startup pane tabs | prep + feature | [#58](https://github.com/Tripstack-Corp/spyc/issues/58), [plan](../archive/PANE_STARTUP_TABS_PLAN.md) | shipped (#482) |
 | 4 | Session forking (`^a f`) | feature | [#8](https://github.com/Tripstack-Corp/spyc/issues/8) | open |
 | 5 | Prompt templates in `.spycrc.toml` | feature | [#71](https://github.com/Tripstack-Corp/spyc/issues/71) | open |
@@ -86,7 +86,7 @@ unattributed through at least one release; nothing may require the field.
 
 ## 2. #40 — one spyc per agent
 
-**Shipped (#503).** Widening the guard first found nine places that acted on
+**Shipped (#504).** Widening the guard first found nine places that acted on
 column `a` from column `b`, fixed separately in #502. The guard is now
 `columns_are_addressed_through_handles`, and its allowlist names
 `render/mod.rs`, `render/inner.rs` and `watch.rs`. The plan below is the
