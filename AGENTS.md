@@ -152,7 +152,14 @@ spyc is Model-View-Update. Keep these — they're what make it reason-about-able
   done
   ```
 
-  No `--delete-branch`: the repo's `delete_branch_on_merge` already removes the remote branch, and the flag also deletes the *local* one — after #497 and #503 the worktree was gone along with it before `remove_worktree` could run. Tear down with `remove_worktree`, which keeps a squash-merged branch's ref (its commit isn't an ancestor of the squash); confirm `git diff --stat <branch> main` is empty, then `git branch -D <branch>`.
+  No `--delete-branch`: the repo's `delete_branch_on_merge` already removes the remote branch, and the flag also deletes the *local* one — after #497 and #503 the worktree was gone along with it before `remove_worktree` could run. Tear down with `remove_worktree`, which keeps a squash-merged branch's ref (its commit isn't an ancestor of the squash), then `git branch -D <branch>` once every file the branch touched matches `main`:
+
+  ```sh
+  git diff -z --name-only $(git merge-base <branch> main) <branch> |
+    xargs -0 git diff --stat <branch> main --   # empty == landed
+  ```
+
+  Scoped to the branch's own files, because a whole-tree `git diff <branch> main` is never empty after the loop ran `gh pr update-branch`: the local ref lacks what that merged in (#511 showed 37 files for a 5-file PR). NUL-separated, because some tracked paths contain spaces and an unquoted list silently drops them — as does collecting the list in a zsh variable first, which zsh passes as one argument that matches nothing.
 
   Bound the loop: `BLOCKED` covers *running* and *failed* alike, so an unbounded wait spins forever on a red PR. `gh pr checks` has three fail-open shapes and all three have shipped here — an empty list (`all` over nothing is `true`, reported as `no checks reported on the branch`), a truncated list, and the one that beat the guard against those two on both PRs of the #467-#469 train: the **previous** head's checks, still reported and still green. A check list says what you know about some commit; `mergeStateStatus` says whether this PR may merge now.
 - **Version-line conflicts are extinct on CURRENT.** A static `N.M.0-CURRENT` means no PR touches the version line, so concurrent PRs can't collide on it. The `spyc-semver` merge driver (`src/merge_driver.rs`, installed into git config on spyc launch via `.gitattributes`) therefore sits dormant here; it still earns its keep on release branches, where patch bumps resume. It parses plain `MAJOR.MINOR.PATCH` only — a conflict against a `-CURRENT` line is declined and reported as a real conflict, which is correct, since a version-line conflict on CURRENT means something unexpected happened. `Cargo.lock` keeps `merge=ours` + a `cargo` regen.
