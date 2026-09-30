@@ -37,7 +37,7 @@ load-bearing.
 | 1 | Pane-identity transport (option B) | prep | [#491](https://github.com/Tripstack-Corp/spyc/issues/491), [proposal](pane-identity-transport-proposal.md) | shipped (#507); per-pane roots dropped |
 | 2 | One spyc per agent — abstract the column references | prep | [#40](https://github.com/Tripstack-Corp/spyc/issues/40) | shipped (#504) |
 | 3 | Configurable startup pane tabs | prep + feature | [#58](https://github.com/Tripstack-Corp/spyc/issues/58), [plan](../archive/PANE_STARTUP_TABS_PLAN.md) | shipped (#482) |
-| 4 | Session forking (`^a F`) | feature | [#8](https://github.com/Tripstack-Corp/spyc/issues/8) | shipped |
+| 4 | Session forking (`^a F`) | feature | [#8](https://github.com/Tripstack-Corp/spyc/issues/8) | shipped (#516) |
 | 5 | Prompt templates in `.spycrc.toml` | feature | [#71](https://github.com/Tripstack-Corp/spyc/issues/71) | open |
 | 6 | The daily-driver bug set | fix | [#326](https://github.com/Tripstack-Corp/spyc/issues/326), [#327](https://github.com/Tripstack-Corp/spyc/issues/327), [#9](https://github.com/Tripstack-Corp/spyc/issues/9), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#22](https://github.com/Tripstack-Corp/spyc/issues/22), [#11](https://github.com/Tripstack-Corp/spyc/issues/11) | shipped: #326 (#464), #452 (#457), #34 (#465), #327 (#500), #9, #22 + #11 (#509) |
 | 7 | Author `docs/drafts/PROJECTS_PLAN.md` | design | [#492](https://github.com/Tripstack-Corp/spyc/issues/492), this doc, §7 | open |
@@ -155,7 +155,7 @@ schema is worth getting right here.
 
 ## 4. #8 — session forking (`^a F`)
 
-**Shipped.** claude branches with `--resume <id> --fork-session` and codex
+**Shipped (#516).** claude branches with `--resume <id> --fork-session` and codex
 with `codex fork <id>`, each into a new session id, so neither answer to the
 first question below is a shared session. agy and zot have no branch, and `^a F`
 says so. The scrollback question answered itself: both agents replay the

@@ -170,7 +170,7 @@ ships with it (decisions log, 2026-09-29).
   goes out before `v2.2.0`.
 
 - **[#8](https://github.com/Tripstack-Corp/spyc/issues/8): session forking
-  (`^a F`).** The active tab's conversation carries on in a new tab as a
+  (`^a F`)** (#516). The active tab's conversation carries on in a new tab as a
   branch, and the original stays put: claude via `--resume <id>
   --fork-session`, codex via `codex fork <id>`, and a tab with no conversation
   as a copy of itself. agy and zot can't branch, and `^a F` says so rather
