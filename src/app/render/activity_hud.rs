@@ -84,7 +84,7 @@ impl App {
             git_last,
             self.view.activity.snap.watcher_events,
             self.view.activity.snap.mcp_reqs,
-            self.state.left.listing.entries.len(),
+            self.state.cur().listing.entries.len(),
             pager_state,
         );
 

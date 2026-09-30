@@ -127,7 +127,7 @@ impl App {
             );
             if is_search {
                 if !buffer.is_empty() {
-                    self.state.left.temp_filter = Some(format!("{buffer}*"));
+                    self.state.cur_mut().temp_filter = Some(format!("{buffer}*"));
                     self.state.rebuild_rows();
                 }
             } else if matches!(

@@ -1130,7 +1130,7 @@ impl App {
         let title = crate::term_title::compose(
             self.state.project_home.as_deref(),
             self.state.session_name.as_deref(),
-            &self.state.left.listing.dir,
+            &self.state.cur().listing.dir,
         );
         if self.view.last_term_title.as_deref() == Some(&title) {
             return None;

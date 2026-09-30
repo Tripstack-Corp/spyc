@@ -1043,6 +1043,28 @@ mod render_tests {
         });
     }
 
+    /// The `A` overlay's `list:` counts the focused column's entries, like the
+    /// status bar beside it. It counted column `a`'s.
+    #[test]
+    fn the_activity_hud_counts_the_focused_columns_listing() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let a = std::fs::canonicalize(tmp.path()).unwrap();
+            let b = a.join("b");
+            std::fs::create_dir(&b).unwrap();
+            for name in ["one", "two", "three"] {
+                std::fs::write(b.join(name), name).unwrap();
+            }
+            let mut app = App::test_app(a);
+            app.state.refresh_listing(); // a holds just `b`
+            app.open_second_commander_at(&b);
+            app.view.show_activity = true;
+
+            let out = render_to_string(&mut app, 140, 24);
+            assert!(out.contains("list:3 "), "{out}");
+        });
+    }
+
     /// A prompt opened from `b` must still render when `a` has a `D` TopPane
     /// pager filling its column — the pager branch returns early, so the prompt
     /// is painted into its reserved bottom row rather than swallowed. (Reported:
