@@ -263,6 +263,31 @@ impl App {
         }
     }
 
+    /// Where the tab with `pane_id` runs, for an MCP connection bound to it:
+    /// the tab's live cwd and that cwd's worktree root and branch, not the
+    /// column the user is browsing. `None` when no live tab has the id.
+    fn pane_context(&self, pane_id: &str) -> Option<serde_json::Value> {
+        let tabs = self.runtime.pane_tabs.as_ref()?;
+        let (index, entry) = tabs
+            .tabs()
+            .iter()
+            .enumerate()
+            .find(|(_, t)| t.info.id == pane_id)?;
+        let cwd = entry.live_cwd();
+        let worktree_root = super::state::find_repo_root(&cwd);
+        let git_branch = worktree_root
+            .as_deref()
+            .and_then(crate::git::discovery::head_branch);
+        Some(serde_json::json!({
+            "id": pane_id,
+            "tab": index + 1,
+            "label": entry.info.label,
+            "cwd": cwd,
+            "worktree_root": worktree_root,
+            "git_branch": git_branch,
+        }))
+    }
+
     /// Write the context file (best-effort, errors are silently ignored).
     /// Skips the disk write when the serialized JSON is unchanged.
     pub fn write_context(&mut self) {
@@ -624,6 +649,14 @@ impl App {
             // here — answer defensively rather than panic if that ever changes.
             McpCommand::WaitForScopeClear { .. } => McpResponse::Error {
                 message: "wait_for_scope_clear is handled by the loop's park path".into(),
+            },
+            McpCommand::PaneContext { pane_id } => match self.pane_context(&pane_id) {
+                Some(pane) => McpResponse::Ok {
+                    message: pane.to_string(),
+                },
+                None => McpResponse::Error {
+                    message: format!("no pane with id {pane_id} (closed?)"),
+                },
             },
             McpCommand::Disconnected { new_pid } => {
                 self.view.mcp_running = false;

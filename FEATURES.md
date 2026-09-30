@@ -1381,14 +1381,17 @@ Claude can query and control the workspace through these tools:
   active filter, git branch, `project_home`, `session_name`, plus the
   running spyc's `pid` and `version` (`<x.y.z> (<git-sha>)`). The version
   string lets a client spot a stale server (a tool it expects is
-  missing → compare the git SHA to the repo HEAD → restart spyc)
+  missing → compare the git SHA to the repo HEAD → restart spyc). Called
+  from an agent pane it also returns `pane`, the caller's own tab (id,
+  index, label, live cwd, worktree root, branch), so an agent in worktree
+  X learns X while the user browses Y
 - **`get_file_content`** -- reads a file's text content (up to 100KB)
 
 **Write tools (Claude can mutate the TUI):**
 - **`report_status(status, [pane], [ttl_ms])`** -- self-report activity for
   your pane's dot: `working` / `blocked` (the "needs me" hot-red dot) / `done` /
-  `idle`. Overrides spyc's output-timing guess; targets the focused tab by
-  default.
+  `idle`. Overrides spyc's output-timing guess; targets the caller's own tab
+  by default (the focused tab for a connection that named none).
 - **`register_scope(paths, intent, [pr], [note])`** / **`list_scopes`** /
   **`release_scope(id)`** / **`wait_for_scope_clear(paths, [timeout_ms])`** --
   merge-coordination registry (P2). Declare the files/globs you're touching and

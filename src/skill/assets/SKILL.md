@@ -20,6 +20,10 @@ Call `get_spyc_context` before doing anything that depends on location. It
 returns the user's cwd, cursor file, picked files, active filter, git branch,
 `project_home`, session name, and the running spyc's pid + version.
 
+From an agent pane it also returns `pane`: your own tab's id, cwd, worktree
+root and branch. That is where you run, which need not be where the user is
+looking; the other fields describe the user's view.
+
 This is what lets you skip asking "which file?" — the cursor and picks usually
 *are* the answer. Relative paths you pass to other tools resolve against spyc's
 cwd, so grounding first also makes those calls correct.

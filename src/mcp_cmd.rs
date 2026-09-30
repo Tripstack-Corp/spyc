@@ -52,8 +52,10 @@ pub enum McpCommand {
     /// Agent self-reports its activity for the per-tab dot (P1 semantic
     /// channel). `status` is `working`/`blocked`/`idle`/`done`. Targeting, in
     /// priority order: `pane_id` (the stable `SPYC_PANE_ID` uuid — what the
-    /// auto-hook sends), else `pane` (a 1-based divider `[N]`), else the focused
-    /// tab. `ttl_ms` overrides the backstop expiry. Overrides output timing.
+    /// auto-hook sends, and what the socket thread fills in from an attributed
+    /// connection when the call names no target), else `pane` (a 1-based
+    /// divider `[N]`), else the focused tab. `ttl_ms` overrides the backstop
+    /// expiry. Overrides output timing.
     ReportStatus {
         pane_id: Option<String>,
         pane: Option<usize>,
@@ -99,6 +101,12 @@ pub enum McpCommand {
         paths: Vec<String>,
         timeout_ms: u64,
     },
+    /// The tab whose `SPYC_PANE_ID` is `pane_id`, as JSON: its id, 1-based
+    /// index, label, live cwd, worktree root and branch. `Error` when no live
+    /// tab has that id. A connection asks once when its `initialize` names a
+    /// pane (binding the id only if this succeeds), then again for each
+    /// `get_spyc_context`, since the tab can close or move under it.
+    PaneContext { pane_id: String },
     /// Another spyc instance has taken over the MCP socket for this
     /// directory. The TUI should warn the user.
     Disconnected { new_pid: u32 },
