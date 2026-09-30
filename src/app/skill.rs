@@ -4,6 +4,24 @@
 use crate::app::{App, Effect, Mode, Prompt, PromptKind};
 use crate::skill;
 
+/// The update offer's question for `who` (e.g. `claude + codex skill`).
+/// Staleness is a content hash, and a `-CURRENT` build keeps one version for
+/// the whole cycle, so equal versions still mean this build's copy changed.
+fn offer_text(who: &str, installed: &str, available: &str, overwrites_edits: bool) -> String {
+    let why = if installed == available {
+        format!("this build's copy changed; both say {available}")
+    } else {
+        format!("installed {installed}, available {available}")
+    };
+    if overwrites_edits {
+        format!(
+            "{who} 'spyc' is out of date ({why}) — but you have local edits an update would REPLACE. Update anyway?"
+        )
+    } else {
+        format!("{who} 'spyc' is out of date ({why}). Update it?")
+    }
+}
+
 impl App {
     /// Raise the `[Y/n]` update offer if there is one to make. Called once at
     /// startup; the decision of *whether* to offer is
@@ -42,17 +60,7 @@ impl App {
             .iter()
             .find_map(|(_, s)| s.installed_version())
             .unwrap_or("unknown");
-        let prompt = if overwrites_edits {
-            format!(
-                "{who} 'spyc' is out of date (installed {installed}, available {}) — but you have local edits an update would REPLACE. Update anyway?",
-                skill::embedded_version()
-            )
-        } else {
-            format!(
-                "{who} 'spyc' is out of date (installed {installed}, available {}). Update it?",
-                skill::embedded_version()
-            )
-        };
+        let prompt = offer_text(&who, installed, skill::embedded_version(), overwrites_edits);
         self.state.mode = Mode::Prompting(Prompt::simple(
             PromptKind::SkillUpdate {
                 fingerprint,
@@ -144,5 +152,39 @@ impl App {
             )),
         }
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::offer_text;
+
+    /// Staleness is a content hash, and a `-CURRENT` build keeps one version
+    /// string for the whole cycle, so an offer between two copies of that build
+    /// must not read "installed X, available X" — which says nothing changed.
+    #[test]
+    fn an_offer_between_equal_versions_says_the_contents_changed() {
+        let text = offer_text("claude skill", "2.2.0-CURRENT", "2.2.0-CURRENT", false);
+        assert_eq!(text.matches("2.2.0-CURRENT").count(), 1, "{text}");
+        assert!(text.contains("changed"), "{text}");
+        assert!(text.ends_with("Update it?"), "{text}");
+    }
+
+    #[test]
+    fn an_offer_between_versions_names_both() {
+        let text = offer_text("claude skill", "2.1.1", "2.2.0", false);
+        assert!(text.contains("installed 2.1.1, available 2.2.0"), "{text}");
+    }
+
+    #[test]
+    fn an_offer_over_local_edits_says_they_would_be_replaced() {
+        for (installed, available) in [("2.2.0-CURRENT", "2.2.0-CURRENT"), ("2.1.1", "2.2.0")] {
+            let text = offer_text("codex skill", installed, available, true);
+            assert!(
+                text.contains("local edits an update would REPLACE"),
+                "{text}"
+            );
+            assert!(text.ends_with("Update anyway?"), "{text}");
+        }
     }
 }
