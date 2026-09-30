@@ -1359,6 +1359,14 @@ it. The entry names no socket itself; codex's lists
 `env_vars = ["SPYC_MCP_SOCK", "SPYC_PANE_ID"]`, because codex hands
 an MCP server only the variables it is told to.
 
+spyc starts codex panes with **`--no-daemon`**, so codex runs the session
+itself rather than on its shared background server. That server spawns every
+session's hooks and MCP servers with the environment of whichever codex
+started it, so they couldn't reach the spyc, or name the tab, that launched a
+pane. **`[pane] codex_daemon = true`** lets codex panes join it anyway, at the
+cost of their activity dots and MCP attribution. See
+[`docs/HARNESS.md`](docs/HARNESS.md) → "codex's shared daemon".
+
 **`[pane] codex_mcp = false`** (`.spycrc.toml`) stops spyc from registering
 its MCP server for codex — an escape hatch for a codex `/review` bug
 ([openai/codex#25856](https://github.com/openai/codex/issues/25856)) where
@@ -1504,7 +1512,12 @@ jump from Claude's output back to the file list.
   bg-task / git / fs / mcp rates, pid/rss/threads, build identity —
   fixed-width so it doesn't bounce as rates rise and fall — plus an
   extended section tallying cumulative per-tool **MCP call counts**
-  (every agent `tools/call`, read tools included). Transparent by
+  (every agent `tools/call`, read tools included), led by the live
+  agent connections and how many are bound to a tab (`conn:2 bound:1`).
+  `:activity dump` lists each connection with its tab (or
+  `unattributed`, an older proxy), when it connected, and its call
+  count, which is how to tell which agents are talking to *this*
+  spyc. Transparent by
   default: only the text is painted, in each row's colour on the
   terminal background, so the file list or pane shows through the
   padding (and a click there reaches it). `:activity solid` switches

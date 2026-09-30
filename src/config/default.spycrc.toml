@@ -101,6 +101,12 @@
 #   approval elicitation and spins forever. Status hooks still install, so
 #   activity dots keep working — codex just loses spyc's MCP tools. Claude
 #   is unaffected.
+# codex_daemon = false
+#   spyc starts codex panes with `--no-daemon`. Codex's shared background
+#   server spawns every session's hooks and MCP servers with the environment of
+#   whichever codex started it, so they can't reach the spyc (or tell apart the
+#   tab) that launched a pane: activity dots go dark or light the wrong tab.
+#   Set true to let codex panes join the shared server anyway.
 
 # ── yank ──────────────────────────────────────────────────────────────
 # Pager yank (`y` / `Y` / visual-mode `y`) behaviour.

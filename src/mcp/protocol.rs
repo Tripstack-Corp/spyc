@@ -86,7 +86,37 @@ pub(super) const PANE_ID_META: &str = "spyc/paneId";
 /// fallback), which behaves as every caller did before attribution existed.
 #[derive(Debug, Default)]
 pub(super) struct Caller {
+    /// This socket connection's number; `None` in the read-only fallback.
+    conn: Option<u64>,
     pane_id: Option<String>,
+    /// Whether it has sent `initialize`, which is what makes it an agent's
+    /// session rather than the status hook's one-shot call.
+    initialized: bool,
+}
+
+impl Caller {
+    pub(super) fn connection(conn: u64) -> Self {
+        Self {
+            conn: Some(conn),
+            ..Self::default()
+        }
+    }
+
+    /// Tell the loop this connection is gone, if it was ever an agent's.
+    pub(super) fn close(&self, cmd_tx: &std::sync::mpsc::Sender<McpRequest>) {
+        if let (true, Some(conn)) = (self.initialized, self.conn) {
+            tell(cmd_tx, McpCommand::ConnectionClosed { conn });
+        }
+    }
+}
+
+/// Send the loop a command whose reply nobody reads.
+fn tell(tx: &std::sync::mpsc::Sender<McpRequest>, command: McpCommand) {
+    let (reply_tx, _) = std::sync::mpsc::channel();
+    let _ = tx.send(McpRequest {
+        command,
+        reply: reply_tx,
+    });
 }
 
 /// The live tab `pane_id` names, as the main loop describes it; `None` once
@@ -197,6 +227,18 @@ fn handle_initialize(
         } else {
             mcp_log(&format!("initialize: no live pane {pane_id}; unattributed"));
         }
+    }
+    if !caller.initialized
+        && let (Some(tx), Some(conn)) = (cmd_tx, caller.conn)
+    {
+        caller.initialized = true;
+        tell(
+            tx,
+            McpCommand::ConnectionInitialized {
+                conn,
+                pane_id: caller.pane_id.clone(),
+            },
+        );
     }
     send_result(
         w,
@@ -674,6 +716,7 @@ fn handle_tools_call(
         let _ = tx.send(McpRequest {
             command: McpCommand::ToolCalled {
                 name: name.to_string(),
+                conn: caller.conn,
             },
             reply: reply_tx,
         });

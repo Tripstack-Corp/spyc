@@ -640,7 +640,29 @@ impl App {
                     message: "acknowledged".into(),
                 }
             }
-            McpCommand::ToolCalled { name } => {
+            McpCommand::ConnectionInitialized { conn, pane_id } => {
+                self.view.activity.mcp_connections.insert(
+                    conn,
+                    super::activity::McpConnection {
+                        pane_id,
+                        since: crate::sysinfo::format_now(),
+                        calls: 0,
+                    },
+                );
+                McpResponse::Ok {
+                    message: "ok".into(),
+                }
+            }
+            McpCommand::ConnectionClosed { conn } => {
+                self.view.activity.mcp_connections.remove(&conn);
+                McpResponse::Ok {
+                    message: "ok".into(),
+                }
+            }
+            McpCommand::ToolCalled { name, conn } => {
+                if let Some(c) = conn.and_then(|c| self.view.activity.mcp_connections.get_mut(&c)) {
+                    c.calls += 1;
+                }
                 // Telemetry only: bump the cumulative per-tool tally (for the `A`
                 // overlay) + the 1 Hz aggregate `mcp:N/s` rate. Sent for every
                 // tools/call (reads included), so this is the SOLE `mcp_reqs`

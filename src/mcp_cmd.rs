@@ -116,7 +116,19 @@ pub enum McpCommand {
     /// are otherwise served on the socket thread and never reach the main
     /// loop), so the `A` overlay can show cumulative per-tool call counts. The
     /// reply is ignored.
-    ToolCalled { name: String },
+    ToolCalled {
+        name: String,
+        /// The socket connection it came over (`None` in the read-only stdio
+        /// fallback), so `:activity dump` can count calls per connection.
+        conn: Option<u64>,
+    },
+    /// A socket connection sent its first `initialize`: an agent's MCP session
+    /// began. `pane_id` is the tab it bound to, `None` when unattributed. The
+    /// status hook's one-shot `report_status` calls never initialize, so they
+    /// never appear here. The reply is ignored.
+    ConnectionInitialized { conn: u64, pane_id: Option<String> },
+    /// An initialized connection closed. The reply is ignored.
+    ConnectionClosed { conn: u64 },
     /// The socket server received a message it couldn't frame/parse and dropped
     /// it. Surfaced as a status-line warning so a silent drop can't hide a
     /// client/framing bug (a bare-newline `--report-status` reporter went

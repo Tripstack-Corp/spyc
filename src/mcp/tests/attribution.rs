@@ -279,3 +279,66 @@ fn the_proxy_passes_everything_else_through_verbatim() {
         assert_eq!(annotate_initialize(msg, pane), msg, "{msg} / {pane:?}");
     }
 }
+
+/// The loop hears when an agent's connection starts, which pane it bound to,
+/// which connection each call came over, and when it ends.
+#[test]
+fn the_loop_hears_a_connection_start_and_end() {
+    let (tx, seen) = fake_loop(&["abc"]);
+    let mut conn = Conn::open(tx);
+    conn.initialize(Some("abc"));
+    conn.tool("git_status", json!({}));
+    drop(conn);
+
+    let mut started = None;
+    let mut called = None;
+    let mut ended = None;
+    while ended.is_none() {
+        match seen
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the close")
+        {
+            McpCommand::ConnectionInitialized { conn, pane_id } => started = Some((conn, pane_id)),
+            McpCommand::ToolCalled { conn, .. } => called = conn,
+            McpCommand::ConnectionClosed { conn } => ended = Some(conn),
+            _ => {}
+        }
+    }
+    let (id, pane) = started.expect("initialize was reported");
+    assert_eq!(pane.as_deref(), Some("abc"));
+    assert_eq!(called, Some(id), "the call names its connection");
+    assert_eq!(ended, Some(id));
+}
+
+/// An older proxy's connection is reported too, as unattributed.
+#[test]
+fn an_unattributed_connection_is_reported_without_a_pane() {
+    let (tx, seen) = fake_loop(&["abc"]);
+    let mut conn = Conn::open(tx);
+    conn.initialize(None);
+    drop(conn);
+    let reported = std::iter::from_fn(|| seen.recv_timeout(std::time::Duration::from_secs(5)).ok())
+        .find_map(|c| match c {
+            McpCommand::ConnectionInitialized { pane_id, .. } => Some(pane_id),
+            _ => None,
+        });
+    assert_eq!(reported, Some(None));
+}
+
+/// The status hook's one-shot `report_status` never initializes. It is not an
+/// agent's session, so it never shows up as a connection.
+#[test]
+fn a_connection_that_never_initializes_is_not_listed() {
+    let (tx, seen) = fake_loop(&["abc"]);
+    let mut conn = Conn::open(tx);
+    conn.tool("report_status", json!({"status": "working"}));
+    drop(conn);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let listed = seen.try_iter().any(|c| {
+        matches!(
+            c,
+            McpCommand::ConnectionInitialized { .. } | McpCommand::ConnectionClosed { .. }
+        )
+    });
+    assert!(!listed);
+}
