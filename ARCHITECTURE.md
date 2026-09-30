@@ -206,6 +206,19 @@ Goal: 0 draws-per-second at idle. Implementation:
   truecolor claim it can't honour) else keys off `$COLORTERM`. On the
   buffer, not the theme, so it catches syntect / diffs / ANSI
   passthrough too; a no-op at `TrueColor`.
+- Per-frame: emoji width pinning. When a VS16 emoji's cell (`🌶️`,
+  `❤️`) changes, ratatui's diff also rewrites the column it covers,
+  and the crossterm backend sends that write with no cursor move. A
+  terminal that draws the emoji two wide (Ghostty) is already past
+  that column, so the rest of the run lands one column right and its
+  last glyph survives the next frame's clear. That was a stray `)`
+  after the `gV` version flash replaced the `g-` chord hint.
+  `ui::emoji_diff::pin_emoji_widths` marks each such cell
+  `ForcedWidth`, so the diff skips the covered column as it does for
+  CJK, and the next write starts with a cursor move. It runs on the
+  buffer because the emoji arrives from flashes, file names and agent
+  output alike. Its tests replay ratatui's real diff and backend bytes
+  through libghostty-vt and compare the screen to the buffer.
 - Caching: `build_rows()` and grid stabilization keyed by a
   `list_generation` counter that increments on any listing /
   cursor / pick / mask change.
