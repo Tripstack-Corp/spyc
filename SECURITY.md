@@ -95,13 +95,16 @@ and the threat this section describes is the deliberate one, a
 prompt-injected agent under a harness that auto-approves MCP calls.
 Precisely the actor who would forge an id.
 
-That is not an argument against building attribution: it would make
-`get_spyc_context` answer for the caller instead of the focused column,
-let a scope claim bind to a pane, and make `mcp_log` able to say which
-pane read what. Those are ergonomics and auditability, which are worth
-having. It is an argument against describing it as a boundary once it
-exists. Real containment needs OS-level isolation — a separate uid, a
-container — which is outside spyc's scope.
+spyc attributes calls anyway, because attribution is useful without
+being a boundary. The `spyc --mcp` proxy sends its `SPYC_PANE_ID` in the
+`initialize` handshake, and the server binds that connection to the tab
+if a live one carries the id. That lets `get_spyc_context` describe the
+caller's own tab, lets `report_status` and a scope claim land on the
+caller's tab rather than whichever one has focus, and puts the binding in
+`mcp.log`. Those are ergonomics and auditability. The id is exactly as
+forgeable as the list above says, and the read tools' allowed set does
+not depend on it. Real containment needs OS-level isolation — a separate
+uid, a container — which is outside spyc's scope.
 
 ## Supply-chain controls (what we do)
 

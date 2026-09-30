@@ -1,6 +1,7 @@
 //! Unix-socket transport: discovery, the listener/serve loop, the stdio
 //! proxy, and connection handling. Split out of mcp.rs verbatim.
 
+use std::borrow::Cow;
 use std::io::{self, BufRead, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -10,7 +11,9 @@ use serde_json::{Value, json};
 
 use crate::mcp_cmd::{McpCommand, McpRequest};
 
-use super::protocol::{dispatch, read_lsp_message, send_message};
+use super::protocol::{
+    Caller, PANE_ID_META, dispatch, dispatch_for, read_lsp_message, send_message,
+};
 use super::{
     PROXY_IO_TIMEOUT, log_bodies, mcp_log, resolve_context_path, root_marker_path_in, socket_path,
     socket_path_for, state_dir,
@@ -239,14 +242,53 @@ pub(super) fn run_direct(project_root: PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `msg` with `pane_id` under `params._meta` when it is an `initialize`
+/// request, so the server can bind this connection to the pane; anything
+/// else, or no pane id, passes through untouched.
+pub(super) fn annotate_initialize<'a>(msg: &'a str, pane_id: Option<&str>) -> Cow<'a, str> {
+    let Some(pane_id) = pane_id.filter(|p| !p.is_empty()) else {
+        return Cow::Borrowed(msg);
+    };
+    let Ok(mut request) = serde_json::from_str::<Value>(msg) else {
+        return Cow::Borrowed(msg);
+    };
+    if request["method"] != "initialize" || request.get("id").is_none() {
+        return Cow::Borrowed(msg);
+    }
+    let meta = request
+        .as_object_mut()
+        .map(|r| r.entry("params").or_insert_with(|| json!({})))
+        .and_then(Value::as_object_mut)
+        .map(|p| p.entry("_meta").or_insert_with(|| json!({})))
+        .and_then(Value::as_object_mut);
+    let Some(meta) = meta else {
+        return Cow::Borrowed(msg);
+    };
+    meta.insert(PANE_ID_META.into(), Value::String(pane_id.into()));
+    Cow::Owned(request.to_string())
+}
+
 /// Proxy stdin/stdout ↔ Unix socket. Messages use Content-Length
 /// framing on both sides.
-#[allow(clippy::significant_drop_tightening)]
 pub(super) fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
-    let stdin = io::stdin();
-    let stdout = io::stdout();
-    let mut stdin_reader = stdin.lock();
-    let mut stdout_writer = stdout.lock();
+    // Read once: the connection's attribution is fixed at its `initialize`.
+    let pane_id = std::env::var("SPYC_PANE_ID").ok();
+    proxy_io(
+        io::stdin().lock(),
+        io::stdout().lock(),
+        stream,
+        pane_id.as_deref(),
+    )
+}
+
+/// [`run_proxy`] over any agent-side reader and writer, naming `pane_id` in
+/// the `initialize` it forwards.
+pub(super) fn proxy_io(
+    mut stdin_reader: impl BufRead,
+    mut stdout_writer: impl Write,
+    stream: UnixStream,
+    pane_id: Option<&str>,
+) -> anyhow::Result<()> {
     let sock_clone = match stream.try_clone() {
         Ok(c) => c,
         Err(e) => {
@@ -286,6 +328,7 @@ pub(super) fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
         if msg.is_empty() {
             continue; // skip blank lines
         }
+        let msg = &*annotate_initialize(msg, pane_id);
         if log_bodies() {
             mcp_log(&format!(
                 "proxy: stdin → socket ({} bytes): {}",
@@ -489,6 +532,7 @@ pub(super) fn handle_socket_connection(
     // for the next request, which is idle for minutes between agent calls.
     let _ = stream.set_write_timeout(Some(PROXY_IO_TIMEOUT));
     let mut writer = stream;
+    let mut caller = Caller::default();
 
     loop {
         let msg = match read_lsp_message(&mut reader) {
@@ -512,7 +556,7 @@ pub(super) fn handle_socket_connection(
                 break;
             }
         };
-        dispatch(&mut writer, &msg, ctx_path, Some(cmd_tx))?;
+        dispatch_for(&mut writer, &msg, ctx_path, Some(cmd_tx), &mut caller)?;
     }
     Ok(())
 }

@@ -38,7 +38,8 @@ You are running inside spyc, a terminal file/worktree manager, with its tools \
 on this server. Prefer them over shell equivalents — even mid-task, not only \
 when answering questions about the user's view:\n\
 - Call `get_spyc_context` first to ground yourself: the user's cwd, cursor \
-file, picks, filter, git branch, and the running spyc's pid + version.\n\
+file, picks, filter, git branch, and the running spyc's pid + version. Its \
+`pane`, when present, is your own tab: where you run, not what the user views.\n\
 - `search_content` / `search_paths` instead of `Bash rg` / `find`, and \
 `git_status` / `git_log` / `git_diff` instead of shelling out to git — all \
 in-process, gitignore-aware, and structured. `git_diff` has three scopes: \

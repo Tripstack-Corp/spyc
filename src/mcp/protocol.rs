@@ -15,7 +15,7 @@ use super::readers::{
 };
 use super::{
     CONTEXT_URI, PROTOCOL_VERSION, PROXY_IO_TIMEOUT, SERVER_INSTRUCTIONS, SERVER_NAME,
-    SERVER_VERSION,
+    SERVER_VERSION, mcp_log,
 };
 
 /// Per-call ceiling for the read tools that walk the filesystem / git (search,
@@ -75,14 +75,71 @@ where
         .map_err(|_| "timed out".to_string())
 }
 
-/// Dispatch a JSON-RPC request and write the response to `w`.
-/// `cmd_tx` is `Some` when running as the socket server
-/// (writable actions available), `None` for read-only fallback.
+/// The `initialize` `_meta` key the `spyc --mcp` proxy puts its
+/// `$SPYC_PANE_ID` under.
+pub(super) const PANE_ID_META: &str = "spyc/paneId";
+
+/// Who is on the other end of one connection: the pane its `initialize`
+/// named, once the main loop has confirmed that tab is live. Bound once, for
+/// the connection's lifetime, and never taken from a tool call. `None` is an
+/// unattributed caller (an older proxy, the status hook, the read-only
+/// fallback), which behaves as every caller did before attribution existed.
+#[derive(Debug, Default)]
+pub(super) struct Caller {
+    pane_id: Option<String>,
+}
+
+/// The live tab `pane_id` names, as the main loop describes it; `None` once
+/// that tab is gone (or the loop doesn't answer).
+fn pane_context(tx: &std::sync::mpsc::Sender<McpRequest>, pane_id: &str) -> Option<Value> {
+    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+    tx.send(McpRequest {
+        command: McpCommand::PaneContext {
+            pane_id: pane_id.to_string(),
+        },
+        reply: reply_tx,
+    })
+    .ok()?;
+    match reply_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .ok()?
+    {
+        McpResponse::Ok { message } => serde_json::from_str(&message).ok(),
+        McpResponse::Error { .. } => None,
+    }
+}
+
+/// The tab a targeting call (`report_status`, the scope tools) means by
+/// `pane_id`: the one it names, else this connection's own unless it named a
+/// `pane` index instead. `None` leaves the loop's fallback, the focused tab.
+fn target_pane_id(args: &Value, caller: &Caller) -> Option<String> {
+    match args["pane_id"].as_str() {
+        Some(p) => Some(p.to_string()),
+        None if args["pane"].is_null() => caller.pane_id.clone(),
+        None => None,
+    }
+}
+
+/// [`dispatch_for`] an unattributed caller.
 pub(super) fn dispatch(
     w: &mut impl Write,
     msg: &str,
     ctx_path: &Path,
     cmd_tx: Option<&std::sync::mpsc::Sender<McpRequest>>,
+) -> io::Result<()> {
+    dispatch_for(w, msg, ctx_path, cmd_tx, &mut Caller::default())
+}
+
+/// Dispatch a JSON-RPC request and write the response to `w`.
+/// `cmd_tx` is `Some` when running as the socket server
+/// (writable actions available), `None` for read-only fallback. `caller` is
+/// this connection's attribution, bound by its `initialize`.
+pub(super) fn dispatch_for(
+    w: &mut impl Write,
+    msg: &str,
+    ctx_path: &Path,
+    cmd_tx: Option<&std::sync::mpsc::Sender<McpRequest>>,
+    caller: &mut Caller,
 ) -> io::Result<()> {
     let parsed: Value = match serde_json::from_str(msg) {
         Ok(v) => v,
@@ -109,11 +166,11 @@ pub(super) fn dispatch(
     let method = parsed["method"].as_str().unwrap_or("");
 
     match method {
-        "initialize" => handle_initialize(w, &id, &parsed["params"]),
+        "initialize" => handle_initialize(w, &id, &parsed["params"], cmd_tx, caller),
         "resources/list" => handle_resources_list(w, &id),
         "resources/read" => handle_resources_read(w, &id, &parsed["params"], ctx_path),
         "tools/list" => handle_tools_list(w, &id),
-        "tools/call" => handle_tools_call(w, &id, &parsed["params"], ctx_path, cmd_tx),
+        "tools/call" => handle_tools_call(w, &id, &parsed["params"], ctx_path, cmd_tx, caller),
         "ping" => send_result(w, &id, json!({})),
         _ => send_error(w, id, -32601, &format!("Method not found: {method}")),
     }
@@ -121,7 +178,26 @@ pub(super) fn dispatch(
 
 // ── Protocol handlers ────────────────────────────────────────────
 
-fn handle_initialize(w: &mut impl Write, id: &Value, _params: &Value) -> io::Result<()> {
+fn handle_initialize(
+    w: &mut impl Write,
+    id: &Value,
+    params: &Value,
+    cmd_tx: Option<&std::sync::mpsc::Sender<McpRequest>>,
+    caller: &mut Caller,
+) -> io::Result<()> {
+    if caller.pane_id.is_none()
+        && let Some(tx) = cmd_tx
+        && let Some(pane_id) = params["_meta"][PANE_ID_META]
+            .as_str()
+            .filter(|p| !p.is_empty())
+    {
+        if pane_context(tx, pane_id).is_some() {
+            mcp_log(&format!("initialize: connection bound to pane {pane_id}"));
+            caller.pane_id = Some(pane_id.to_string());
+        } else {
+            mcp_log(&format!("initialize: no live pane {pane_id}; unattributed"));
+        }
+    }
     send_result(
         w,
         id,
@@ -192,7 +268,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
             "tools": [
                 {
                     "name": "get_spyc_context",
-                    "description": "Get the current spyc file manager state: working directory, cursor position, picked files, inventory, active filter, git branch, project_home (sticky project root), session_name, plus the running spyc's pid and version ('<x.y.z> (<git-sha>)'). Use this to understand what the user is looking at — and to detect a stale server: if a tool you expect is missing, compare version's git SHA against the repo HEAD and ask the user to restart spyc (pid identifies the process).",
+                    "description": "Get the current spyc file manager state: working directory, cursor position, picked files, inventory, active filter, git branch, project_home (sticky project root), session_name, plus the running spyc's pid and version ('<x.y.z> (<git-sha>)'). Use this to understand what the user is looking at — and to detect a stale server: if a tool you expect is missing, compare version's git SHA against the repo HEAD and ask the user to restart spyc (pid identifies the process). From an agent pane it also returns `pane`: YOUR own tab (id, tab, label, cwd, worktree_root, git_branch) — where you run, which can differ from the directory the user is browsing.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {},
@@ -201,7 +277,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                 },
                 {
                     "name": "report_status",
-                    "description": "Report YOUR current activity so spyc shows it as a live dot on your pane tab — the 'which agent needs me' signal. Call it as your turn changes: 'working' when you start a non-trivial task, 'blocked' when you stop to ask the user a question or for permission (this is the one that earns attention), 'done' when you finish, 'idle' when waiting with nothing pending. Overrides spyc's output-timing guess and keeps your dot accurate through silent thinking. Targets your own (focused) tab by default; pass `pane` for a specific tab. Cheap and idempotent — call it freely.",
+                    "description": "Report YOUR current activity so spyc shows it as a live dot on your pane tab — the 'which agent needs me' signal. Call it as your turn changes: 'working' when you start a non-trivial task, 'blocked' when you stop to ask the user a question or for permission (this is the one that earns attention), 'done' when you finish, 'idle' when waiting with nothing pending. Overrides spyc's output-timing guess and keeps your dot accurate through silent thinking. Targets your own tab by default (the focused tab if your connection named none); pass `pane` for a specific tab. Cheap and idempotent — call it freely.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -236,7 +312,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                             "intent": {"type": "string", "enum": ["editing", "merging"], "description": "editing = informational; merging = blocks another agent's wait_for_scope_clear on overlapping paths."},
                             "pr": {"type": "string", "description": "Optional PR identifier this claim is for (e.g. '#661')."},
                             "note": {"type": "string", "description": "Optional free-text note shown in list_scopes / the orchestration screen."},
-                            "pane_id": {"type": "string", "description": "Optional stable pane id (SPYC_PANE_ID); defaults to your focused tab."},
+                            "pane_id": {"type": "string", "description": "Optional stable pane id (SPYC_PANE_ID); defaults to your own tab."},
                             "pane": {"type": "integer", "description": "Optional 1-based tab number; defaults to the focused tab."}
                         },
                         "required": ["paths", "intent"]
@@ -264,7 +340,7 @@ fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
                         "properties": {
                             "paths": {"type": "array", "items": {"type": "string"}, "description": "File paths/globs to wait on (usually the same set you register_scope'd)."},
                             "timeout_ms": {"type": "integer", "description": "Max wait in ms (default 300000, capped 600000). Returns outcome='timed_out' if it elapses."},
-                            "pane_id": {"type": "string", "description": "Optional stable pane id (SPYC_PANE_ID); defaults to your focused tab."},
+                            "pane_id": {"type": "string", "description": "Optional stable pane id (SPYC_PANE_ID); defaults to your own tab."},
                             "pane": {"type": "integer", "description": "Optional 1-based tab number; defaults to the focused tab."}
                         },
                         "required": ["paths"]
@@ -581,6 +657,7 @@ fn handle_tools_call(
     params: &Value,
     ctx_path: &Path,
     cmd_tx: Option<&std::sync::mpsc::Sender<McpRequest>>,
+    caller: &Caller,
 ) -> io::Result<()> {
     let name = params["name"].as_str().unwrap_or("");
     let args = &params["arguments"];
@@ -605,6 +682,11 @@ fn handle_tools_call(
     match name {
         "get_spyc_context" => {
             let text = read_context_or_empty(ctx_path);
+            let own = caller.pane_id.as_deref().zip(cmd_tx);
+            let text = match own.and_then(|(pane_id, tx)| pane_context(tx, pane_id)) {
+                Some(pane) => with_pane(text, pane),
+                None => text,
+            };
             send_tool_result(w, id, &text)
         }
         "get_file_content" => {
@@ -846,7 +928,7 @@ fn handle_tools_call(
                             "status must be one of: working, blocked, idle, done",
                         );
                     }
-                    let pane_id = args["pane_id"].as_str().map(String::from);
+                    let pane_id = target_pane_id(args, caller);
                     let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
                     let ttl_ms = args["ttl_ms"].as_u64();
                     // Piggybacked by the status-hook reporter (Claude's hook
@@ -935,7 +1017,7 @@ fn handle_tools_call(
                     if !matches!(intent.as_str(), "editing" | "merging") {
                         return send_tool_error(w, id, "intent must be 'editing' or 'merging'");
                     }
-                    let pane_id = args["pane_id"].as_str().map(String::from);
+                    let pane_id = target_pane_id(args, caller);
                     let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
                     let pr = args["pr"].as_str().map(String::from);
                     let note = args["note"].as_str().map(String::from);
@@ -967,7 +1049,7 @@ fn handle_tools_call(
                     if paths.is_empty() {
                         return send_tool_error(w, id, "missing required parameter: paths");
                     }
-                    let pane_id = args["pane_id"].as_str().map(String::from);
+                    let pane_id = target_pane_id(args, caller);
                     let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
                     let timeout_ms = args["timeout_ms"]
                         .as_u64()
@@ -1027,6 +1109,18 @@ fn handle_tools_call(
             }
         }
         _ => send_tool_error(w, id, &format!("unknown tool: {name}")),
+    }
+}
+
+/// The context file's JSON with the caller's own tab under `pane`, beside the
+/// fields that describe what the user is looking at.
+fn with_pane(context: String, pane: Value) -> String {
+    match serde_json::from_str::<Value>(&context) {
+        Ok(Value::Object(mut map)) => {
+            map.insert("pane".into(), pane);
+            Value::Object(map).to_string()
+        }
+        _ => context,
     }
 }
 

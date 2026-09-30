@@ -656,6 +656,21 @@ uncommitted content goes to the graveyard; a branch is deleted only if merged),
 and a worktree can be **leased** (`claim_worktree` writes git's native lock) so a
 second agent's cleanup refuses it.
 
+**A connection is attributed to the pane that opened it.** An agent pane's env
+carries `SPYC_PANE_ID`; its `spyc --mcp` proxy reads it once and adds it to the
+`initialize` it forwards, under `params._meta["spyc/paneId"]`. The connection
+thread asks the loop whether a live tab carries that id
+(`McpCommand::PaneContext`) and binds it only if one does: once, for the
+connection's lifetime, and never from a tool argument, since a per-call id is
+one an agent can forget to send. A bound connection's `get_spyc_context` adds
+`pane`, that tab's live cwd, worktree root and branch, beside the fields that
+describe the user's view; `report_status`, `register_scope` and
+`wait_for_scope_clear` default to that tab instead of the focused one. An
+unbound connection (an older proxy, the status hook, an id no live tab has) is
+served exactly as before, and the read tools' default scope and allowed roots
+don't depend on attribution at all. It is attribution, not authorization —
+SECURITY.md says why.
+
 ## Mouse routing
 
 `src/app/mouse/`. The layer is split pure/impure on the `route.rs` / `focus.rs`

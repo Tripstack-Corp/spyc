@@ -732,3 +732,50 @@ fn mcp_create_worktree_works_while_the_column_is_inside_an_archive() {
         }
     });
 }
+
+/// `PaneContext` describes the tab, not the column: an agent tab started in
+/// worktree X is told X — its cwd, root and branch — while the user browses Y.
+/// An id no live tab carries is an error, so a connection never binds to it.
+#[test]
+fn pane_context_answers_for_the_tab_while_the_user_browses_elsewhere() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let (wt, y) = (root.join("wt"), root.join("y"));
+        std::fs::create_dir(&wt).unwrap();
+        std::fs::create_dir(&y).unwrap();
+        crate::git::test_support::run_git(&wt, &["init", "-q", "-b", "feat/x"]);
+        let mut app = App::test_app(y.clone());
+        assert!(app.open_pane_tab_in("cat", &wt));
+        let id = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+            .info
+            .id
+            .clone();
+
+        let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::PaneContext {
+            pane_id: id.clone(),
+        });
+        let crate::mcp_cmd::McpResponse::Ok { message } = resp else {
+            panic!("a live tab resolves: {resp:?}");
+        };
+        let pane: serde_json::Value = serde_json::from_str(&message).unwrap();
+        assert_eq!(pane["id"], id.as_str());
+        assert_eq!(pane["tab"], 1);
+        assert_eq!(pane["cwd"], wt.to_str().unwrap());
+        assert_eq!(pane["worktree_root"], wt.to_str().unwrap());
+        assert_eq!(pane["git_branch"], "feat/x");
+        assert_eq!(
+            app.snapshot_context().cwd,
+            y,
+            "the user's view is unchanged"
+        );
+
+        let gone = app.execute_mcp_command(crate::mcp_cmd::McpCommand::PaneContext {
+            pane_id: "no-such-pane".into(),
+        });
+        assert!(
+            matches!(gone, crate::mcp_cmd::McpResponse::Error { .. }),
+            "{gone:?}"
+        );
+    });
+}

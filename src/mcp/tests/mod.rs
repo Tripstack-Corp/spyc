@@ -18,6 +18,8 @@ use super::server::{
 };
 use super::*;
 
+mod attribution;
+
 fn make_request(id: u64, method: &str, params: Value) -> String {
     let body = json!({
         "jsonrpc": "2.0",
