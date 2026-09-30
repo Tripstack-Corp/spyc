@@ -138,6 +138,7 @@ pub enum Action {
     PaneLastTab,        // ^a ^a — jump to the previously-active tab (screen/tmux last-window)
     PaneRenameTab,      // ^W r — rename the active tab
     PaneRestartTab,     // ^W R — restart the active tab's command
+    PaneForkTab,        // ^W F — fork the active tab's conversation into a new tab
     PanePipeContent,    // ^W p — send file contents of selection to pane
     PanePipeInventory,  // ^W i — send file contents of inventory to pane
 
@@ -273,6 +274,7 @@ impl Action {
             | Self::PaneLastTab
             | Self::PaneRenameTab
             | Self::PaneRestartTab
+            | Self::PaneForkTab
             | Self::PanePipeContent
             | Self::PanePipeInventory
             | Self::VsplitToggle
@@ -374,6 +376,7 @@ impl Action {
             Self::PaneLastTab => "last pane tab",
             Self::PaneRenameTab => "rename pane tab",
             Self::PaneRestartTab => "restart pane tab command",
+            Self::PaneForkTab => "fork pane tab's conversation",
             Self::PanePipeContent => "pipe file contents to pane",
             Self::PanePipeInventory => "pipe inventory contents to pane",
             Self::VsplitToggle => "vertical split: open / close",
@@ -540,6 +543,7 @@ impl Action {
             Self::PaneLastTab => "pane_last_tab",
             Self::PaneRenameTab => "pane_rename_tab",
             Self::PaneRestartTab => "pane_restart_tab",
+            Self::PaneForkTab => "pane_fork_tab",
             Self::PanePipeContent => "pane_pipe_content",
             Self::PanePipeInventory => "pane_pipe_inventory",
             // Vertical split.
@@ -702,6 +706,7 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         "pane_last_tab" => Action::PaneLastTab,
         "pane_rename_tab" => Action::PaneRenameTab,
         "pane_restart_tab" => Action::PaneRestartTab,
+        "pane_fork_tab" => Action::PaneForkTab,
         "pane_pipe_content" => Action::PanePipeContent,
         "pane_pipe_inventory" => Action::PanePipeInventory,
         // Vertical split. `vsplit_cycle` was the pre-toggle name for the same

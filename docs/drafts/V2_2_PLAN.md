@@ -37,7 +37,7 @@ load-bearing.
 | 1 | Pane-identity transport (option B) | prep | [#491](https://github.com/Tripstack-Corp/spyc/issues/491), [proposal](pane-identity-transport-proposal.md) | shipped (#507); per-pane roots dropped |
 | 2 | One spyc per agent — abstract the column references | prep | [#40](https://github.com/Tripstack-Corp/spyc/issues/40) | shipped (#504) |
 | 3 | Configurable startup pane tabs | prep + feature | [#58](https://github.com/Tripstack-Corp/spyc/issues/58), [plan](../archive/PANE_STARTUP_TABS_PLAN.md) | shipped (#482) |
-| 4 | Session forking (`^a f`) | feature | [#8](https://github.com/Tripstack-Corp/spyc/issues/8) | open |
+| 4 | Session forking (`^a F`) | feature | [#8](https://github.com/Tripstack-Corp/spyc/issues/8) | shipped |
 | 5 | Prompt templates in `.spycrc.toml` | feature | [#71](https://github.com/Tripstack-Corp/spyc/issues/71) | open |
 | 6 | The daily-driver bug set | fix | [#326](https://github.com/Tripstack-Corp/spyc/issues/326), [#327](https://github.com/Tripstack-Corp/spyc/issues/327), [#9](https://github.com/Tripstack-Corp/spyc/issues/9), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#22](https://github.com/Tripstack-Corp/spyc/issues/22), [#11](https://github.com/Tripstack-Corp/spyc/issues/11) | shipped: #326 (#464), #452 (#457), #34 (#465), #327 (#500), #9, #22 + #11 (#509) |
 | 7 | Author `docs/drafts/PROJECTS_PLAN.md` | design | [#492](https://github.com/Tripstack-Corp/spyc/issues/492), this doc, §7 | open |
@@ -153,7 +153,16 @@ Two things the plan predates:
 and reproducible — is the config half of a 2.3 project definition, so the
 schema is worth getting right here.
 
-## 4. #8 — session forking (`^a f`)
+## 4. #8 — session forking (`^a F`)
+
+**Shipped.** claude branches with `--resume <id> --fork-session` and codex
+with `codex fork <id>`, each into a new session id, so neither answer to the
+first question below is a shared session. agy and zot have no branch, and `^a F`
+says so. The scrollback question answered itself: both agents replay the
+branch's history on screen, and `^a v` reads it from the transcript, following
+a codex fork's `history_base` back into its parent's rollout. The key is `F`
+because `^a f` had become the pane-side split-height flip (#352) after the
+issue was filed. `docs/HARNESS.md` §4 has the per-agent table.
 
 Duplicate a pane tab so an agent conversation can branch without losing the
 prior line of inquiry. The issue's assessment — "implementable on current
@@ -179,7 +188,7 @@ Two questions the implementation has to answer:
   `^a v`'s source selection (capture vs on-disk transcript, `T` to swap) is the
   existing machinery.
 
-`^a f` is a **pane-tier** binding, so it belongs on the `^a` prefix and its
+`^a F` is a **pane-tier** binding, so it belongs on the `^a` prefix and its
 `Action::tier()` must be `Pane`. The guard
 `leader_and_pane_namespaces_respect_tiers` fails the build otherwise.
 
@@ -685,7 +694,7 @@ fresh launch, and `spyc -r` still restores the saved set instead. Exit: both
 paths covered, `--print-config` emits the new keys with comments, and
 CONFIGURATION.md documents them in the same commit.
 
-**#8 —** `^a f` on a live agent tab produces a second tab on that conversation,
+**#8 —** `^a F` on a live agent tab produces a second tab on that conversation,
 with its history readable. Exit: `docs/HARNESS.md` documents the per-agent
 behaviour, including which agents give a shared session rather than a branch.
 

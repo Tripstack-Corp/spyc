@@ -12,10 +12,12 @@
 /// any other flags the user had on their original `claude` invocation but drop
 /// the resume itself so the fallback doesn't fail for the same reason.
 ///
-/// Handles all of claude's forms: `--resume`/`-r` (optional `[sessionId]`) and
-/// `--continue`/`-c` (no argument). For `--resume`/`-r` the following token is
-/// dropped **only** when it's an id, not another flag — `claude --resume
-/// --verbose` must keep `--verbose` rather than eating it.
+/// Handles all of claude's forms: `--resume`/`-r` (optional `[sessionId]`),
+/// `--continue`/`-c` (no argument), and the `--fork-session` that turns either
+/// into a branch — a saved fork resumes its own conversation. For
+/// `--resume`/`-r` the following token is dropped **only** when it's an id, not
+/// another flag — `claude --resume --verbose` must keep `--verbose` rather than
+/// eating it.
 pub fn command_without_resume(cmd: &str) -> String {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     let mut out: Vec<&str> = Vec::with_capacity(parts.len());
@@ -29,7 +31,7 @@ pub fn command_without_resume(cmd: &str) -> String {
                     i += 1;
                 }
             }
-            "--continue" | "-c" => {} // no argument to drop
+            "--continue" | "-c" | "--fork-session" => {} // no argument to drop
             other => out.push(other),
         }
         i += 1;
@@ -42,8 +44,8 @@ pub fn command_without_resume(cmd: &str) -> String {
     }
 }
 
-/// Strip codex's `resume [...args]` subcommand and any of its flags
-/// from a command line, leaving the bare `codex` invocation. Used at
+/// Strip codex's `resume [...args]` or `fork [...args]` subcommand and any of
+/// its flags from a command line, leaving the bare `codex` invocation. Used at
 /// session-save time so a saved tab restores cleanly even if the
 /// user had explicitly typed `codex resume <UUID>`. Mirrors
 /// `command_without_resume` for claude. The id we'll resume to is
@@ -53,8 +55,8 @@ pub fn command_without_codex_resume(cmd: &str) -> String {
     let mut out: Vec<&str> = Vec::with_capacity(parts.len());
     let mut hit_resume = false;
     for p in parts {
-        if !hit_resume && p == "resume" {
-            // Drop "resume" and everything after it — typically a UUID
+        if !hit_resume && matches!(p, "resume" | "fork") {
+            // Drop the subcommand and everything after it — typically a UUID
             // and/or `--last`/`--all`/`--include-non-interactive` flags
             // that only make sense with `resume`.
             hit_resume = true;
@@ -71,6 +73,21 @@ pub fn command_without_codex_resume(cmd: &str) -> String {
     } else {
         stripped
     }
+}
+
+/// `^a F` for claude: a new session that starts from `sid`'s history. Goes
+/// through the CLI flag, unlike restore's typed `/resume`, because the slash
+/// command has no fork form.
+pub fn claude_fork_command(cmd: &str, sid: &str) -> String {
+    format!(
+        "{} --resume {sid} --fork-session",
+        command_without_resume(cmd)
+    )
+}
+
+/// `^a F` for codex: `codex fork <uuid>` starts a new thread from `sid`'s.
+pub fn codex_fork_command(cmd: &str, sid: &str) -> String {
+    format!("{} fork {sid}", command_without_codex_resume(cmd))
 }
 
 /// Strip Antigravity's `--conversation <UUID>`, `-c <UUID>`, and `--continue` flags from a command line.
