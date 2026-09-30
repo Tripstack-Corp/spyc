@@ -6,6 +6,7 @@ use std::io::{self, BufRead, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
 
@@ -504,21 +505,6 @@ pub(super) fn pid_from_sock_path(path: &str) -> Option<u32> {
     stripped.parse().ok()
 }
 
-/// Try to send a `spyc/disconnected` notification to the old instance's
-/// socket. Best-effort — if it fails, we proceed with takeover anyway.
-pub(super) fn notify_disconnect(old_sock: &Path, new_pid: u32) {
-    let Ok(mut stream) = UnixStream::connect(old_sock) else {
-        return;
-    };
-    let notification = json!({
-        "jsonrpc": "2.0",
-        "method": "spyc/disconnected",
-        "params": { "new_pid": new_pid }
-    });
-    let _ = send_message(&mut stream, &notification.to_string());
-    mcp_log(&format!("sent spyc/disconnected to {}", old_sock.display()));
-}
-
 /// Handle a single Unix socket connection. Uses the same Content-Length
 /// framing as the stdio transport.
 pub(super) fn handle_socket_connection(
@@ -532,10 +518,25 @@ pub(super) fn handle_socket_connection(
     // for the next request, which is idle for minutes between agent calls.
     let _ = stream.set_write_timeout(Some(PROXY_IO_TIMEOUT));
     let mut writer = stream;
-    let mut caller = Caller::default();
+    let mut caller = Caller::connection(NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed));
+    let served = serve_connection(&mut reader, &mut writer, ctx_path, cmd_tx, &mut caller);
+    caller.close(cmd_tx);
+    served
+}
 
+/// Numbers each accepted connection for `:activity dump`.
+static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
+
+/// [`handle_socket_connection`]'s read-dispatch loop, until the client closes.
+fn serve_connection(
+    reader: &mut impl BufRead,
+    writer: &mut UnixStream,
+    ctx_path: &Path,
+    cmd_tx: &std::sync::mpsc::Sender<McpRequest>,
+    caller: &mut Caller,
+) -> io::Result<()> {
     loop {
-        let msg = match read_lsp_message(&mut reader) {
+        let msg = match read_lsp_message(reader) {
             Ok(msg) => msg,
             Err(e) => {
                 if e.kind() == io::ErrorKind::UnexpectedEof {
@@ -556,7 +557,7 @@ pub(super) fn handle_socket_connection(
                 break;
             }
         };
-        dispatch_for(&mut writer, &msg, ctx_path, Some(cmd_tx), &mut caller)?;
+        dispatch_for(writer, &msg, ctx_path, Some(cmd_tx), caller)?;
     }
     Ok(())
 }

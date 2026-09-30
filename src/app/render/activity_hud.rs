@@ -139,13 +139,14 @@ impl App {
             .map(|(name, c)| format!("{name}:{c}"))
             .collect();
         let mcp_color = self.view.theme.take;
+        let conns = self.view.activity.mcp_connection_summary();
         if entries.is_empty() {
-            rows.push((" mcp  (no tool calls yet) ".to_string(), mcp_color));
+            rows.push((format!(" mcp {conns}  (no tool calls yet) "), mcp_color));
         } else {
             let total: u64 = calls.values().sum();
             let cont_prefix = "        "; // continuation lines indent under the tokens
             let avail = maxw.saturating_sub(2); // keep a trailing space inside the block
-            let mut cur = format!(" mcp \u{2211}{total} ");
+            let mut cur = format!(" mcp {conns} \u{2211}{total} ");
             let mut prefix_w = crate::ui::display_width(&cur); // this line's indent width
             let mut cur_w = prefix_w;
             for tok in &entries {

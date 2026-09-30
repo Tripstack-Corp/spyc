@@ -269,11 +269,6 @@ pub struct ViewState {
     pub(super) context_dirty: bool,
     /// Whether the MCP socket server is running.
     pub(super) mcp_running: bool,
-    /// Whether this instance may take over the MCP socket from another spyc
-    /// when it writes a client config. Captured once at startup (the
-    /// `App::new` arg) and read at agent-launch time, when we actually write
-    /// `.mcp.json` / `.codex/config.toml`.
-    pub(super) mcp_takeover_allowed: bool,
     /// When a focus-switch chord just completed: (when, completing key) —
     /// the next dispatch drops a Press/Repeat of that key within ~60 ms.
     pub(super) focus_chord_completed: Option<(std::time::Instant, KeyCode)>,
@@ -474,7 +469,6 @@ impl ViewState {
             mcp_running,
             // Set from the `App::new` arg in bootstrap; the test harness never
             // writes client configs, so the default is fine there.
-            mcp_takeover_allowed: false,
             focus_chord_completed: None,
             show_activity: false,
             activity_style: activity::HudStyle::default(),

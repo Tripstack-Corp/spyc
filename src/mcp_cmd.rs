@@ -107,15 +107,28 @@ pub enum McpCommand {
     /// pane (binding the id only if this succeeds), then again for each
     /// `get_spyc_context`, since the tab can close or move under it.
     PaneContext { pane_id: String },
-    /// Another spyc instance has taken over the MCP socket for this
-    /// directory. The TUI should warn the user.
+    /// An older spyc, one that still pins its own socket in the agents' MCP
+    /// entry, rewrote this directory's entry and said so (`spyc/disconnected`).
+    /// Nothing this version sends; the TUI tells the user who owns the entry.
     Disconnected { new_pid: u32 },
     /// Fire-and-forget telemetry: an agent invoked the named MCP tool. Sent by
     /// the socket dispatch for EVERY `tools/call` (read tools included, which
     /// are otherwise served on the socket thread and never reach the main
     /// loop), so the `A` overlay can show cumulative per-tool call counts. The
     /// reply is ignored.
-    ToolCalled { name: String },
+    ToolCalled {
+        name: String,
+        /// The socket connection it came over (`None` in the read-only stdio
+        /// fallback), so `:activity dump` can count calls per connection.
+        conn: Option<u64>,
+    },
+    /// A socket connection sent its first `initialize`: an agent's MCP session
+    /// began. `pane_id` is the tab it bound to, `None` when unattributed. The
+    /// status hook's one-shot `report_status` calls never initialize, so they
+    /// never appear here. The reply is ignored.
+    ConnectionInitialized { conn: u64, pane_id: Option<String> },
+    /// An initialized connection closed. The reply is ignored.
+    ConnectionClosed { conn: u64 },
     /// The socket server received a message it couldn't frame/parse and dropped
     /// it. Surfaced as a status-line warning so a silent drop can't hide a
     /// client/framing bug (a bare-newline `--report-status` reporter went

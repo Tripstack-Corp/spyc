@@ -54,6 +54,7 @@ sudo -v && python3 -c "import json;print(json.load(open('/Library/Application Su
 | `[mouse] capture` | `true` (default) | The wheel scrolls whatever the pointer is over, including panes whose child ignores mouse reports. Costs your terminal's native click-drag select — hold **Shift** (most terminals) or **Option/Fn** (iTerm2), or `:mouse off` for the session. |
 | status hooks | on | Per-agent hooks let the agent *report* `working`/`blocked`/`done`, which is what makes the tab dots trustworthy instead of guesses from output timing. `:hooks` shows state. |
 | `[notify]` | `desktop = true` | The "which agent needs me" ping. `Blocked` fires every enabled channel; the routine `Done` only fires channels that opt in via `*_done`. Details in [`AGENT_ORCHESTRATION.md`](AGENT_ORCHESTRATION.md). |
+| `[pane] codex_daemon` | `false` (default) | spyc starts codex panes with `--no-daemon`. See "codex's shared daemon" below. |
 | `[clipboard] command` | set it on WSL | No X display by default under WSL2 — point it at `clip.exe`. Alternatively `[clipboard] via = "osc52"`. |
 
 ---
@@ -173,6 +174,22 @@ and why two codex panes in the same directory is the case that breaks it. See
 necessarily starts when the pane does) while keeping mtime primary for a
 resume-without-id, because those are opposite tells.
 
+### codex's shared daemon
+
+**Recent codex (seen on 0.158.0) runs sessions on one shared background server,
+`codex app-server --managed-daemon`, started by the first codex you launch.**
+That server spawns every session's MCP servers and hooks, and gives them its
+own environment, not the environment of the codex in the tab. spyc's status
+hooks and MCP proxy find their spyc and their tab through `SPYC_MCP_SOCK` and
+`SPYC_PANE_ID` in the pane's env, so on the shared server they all get the
+values of whichever pane happened to start it. Reports go to a spyc that has
+since exited, or light the wrong tab's dot.
+
+So spyc starts codex panes with `--no-daemon` (added after the program, the
+tab keeps what you typed). `[pane] codex_daemon = true` turns that off, at the
+cost of the dots and MCP attribution. A codex started outside spyc is
+unaffected either way.
+
 ### The autosave window
 
 Beyond the save on quit, spyc keeps a debounced crash-sufficient autosave —
@@ -186,8 +203,8 @@ idle spyc still does no work.
 ## 5. Multiple spyc instances
 
 Instances coexist — the MCP server uses a **PID-scoped** Unix socket
-(`~/.local/state/spyc/mcp-<pid>.sock`), and if another instance already owns an
-agent's config entry you get a takeover prompt rather than a silent fight.
+(`~/.local/state/spyc/mcp-<pid>.sock`), and an agent's config entry names no
+instance, so every agent reaches the spyc that launched it.
 
 The thing that genuinely breaks is **concurrent agents of the same kind in the
 same directory**, because that's what makes session resolution ambiguous — same

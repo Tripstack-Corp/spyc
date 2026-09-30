@@ -167,9 +167,7 @@ mod server;
 
 pub use config::{
     ConfigCleanup, McpConfigStatus, cleanup_agy_mcp_config, cleanup_codex_config, cleanup_mcp_json,
-    detect_existing_spyc, detect_existing_spyc_agy, detect_existing_spyc_codex,
-    ensure_agy_mcp_config, ensure_codex_config_toml, ensure_mcp_json, enterprise_defines_spyc,
-    sweep_orphan_spyc_configs,
+    ensure_agy_mcp_config, ensure_codex_config_toml, ensure_mcp_json, sweep_orphan_spyc_configs,
 };
 pub use hooks::{
     cleanup_agy_status_hooks, cleanup_claude_status_hooks, cleanup_codex_status_hooks,
@@ -357,7 +355,8 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
 /// Unix socket is available, proxies through it for writable access.
 ///
 /// Socket resolution order:
-/// 1. `$SPYC_MCP_SOCK` (set in `.mcp.json`'s `env` block) — exact match
+/// 1. `$SPYC_MCP_SOCK`, from the agent pane's env (spyc sets it when it launches
+///    the agent) — the spyc that launched this agent
 /// 2. Project-scoped discovery: walk `caller_cwd` upward looking for
 ///    `.spyc-context-<pid>.json` markers; map those PIDs to live
 ///    sockets. Refuses cross-project attachment (a spyc running in

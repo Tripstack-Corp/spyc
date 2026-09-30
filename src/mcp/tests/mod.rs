@@ -19,6 +19,7 @@ use super::server::{
 use super::*;
 
 mod attribution;
+mod coexistence;
 
 fn make_request(id: u64, method: &str, params: Value) -> String {
     let body = json!({
@@ -211,7 +212,7 @@ fn tools_call_forwards_tool_called_telemetry() {
     .unwrap();
     let req = rx.try_recv().expect("a ToolCalled was forwarded");
     match req.command {
-        McpCommand::ToolCalled { name } => assert_eq!(name, "get_spyc_context"),
+        McpCommand::ToolCalled { name, .. } => assert_eq!(name, "get_spyc_context"),
         other => panic!("expected ToolCalled, got {other:?}"),
     }
 }
@@ -996,21 +997,23 @@ fn get_file_content_resolves_relative_against_search_root() {
 #[test]
 fn codex_config_writes_fresh_when_missing() {
     let tmp = tempfile::tempdir().unwrap();
-    let status = ensure_codex_config_toml(tmp.path(), true).unwrap();
+    let status = ensure_codex_config_toml(tmp.path()).unwrap();
     assert!(matches!(status, McpConfigStatus::Configured));
     let written = std::fs::read_to_string(tmp.path().join(".codex").join("config.toml"))
         .expect("config.toml created");
     let parsed: toml::Value = toml::from_str(&written).unwrap();
-    // Schema check: mcp_servers.spyc.{command,args,env.SPYC_MCP_SOCK}
+    // Schema check: mcp_servers.spyc.{command,args,env_vars}, and no pinned socket.
     let spyc = &parsed["mcp_servers"]["spyc"];
     assert!(spyc["command"].as_str().unwrap_or("").contains("spyc"));
     assert_eq!(spyc["args"][0].as_str(), Some("--mcp"));
-    assert!(
-        spyc["env"]["SPYC_MCP_SOCK"]
-            .as_str()
-            .unwrap_or("")
-            .contains("mcp-")
-    );
+    let passed: Vec<&str> = spyc["env_vars"]
+        .as_array()
+        .expect("env_vars")
+        .iter()
+        .filter_map(toml::Value::as_str)
+        .collect();
+    assert_eq!(passed, ["SPYC_MCP_SOCK", "SPYC_PANE_ID"]);
+    assert!(spyc.get("env").is_none(), "no socket pinned");
 }
 
 #[test]
@@ -1032,7 +1035,7 @@ KEY = "val"
 "#,
     )
     .unwrap();
-    ensure_codex_config_toml(tmp.path(), true).unwrap();
+    ensure_codex_config_toml(tmp.path()).unwrap();
     let written = std::fs::read_to_string(&path).unwrap();
     let parsed: toml::Value = toml::from_str(&written).unwrap();
     // Both servers present.
@@ -1054,7 +1057,7 @@ fn codex_config_fresh_rewrite_on_malformed_input() {
     let path = codex_dir.join("config.toml");
     std::fs::write(&path, "not_a_section = 1\nrandom = \"junk\"\n").unwrap();
     // Don't crash; either splice into the (now-empty) file or rewrite.
-    let status = ensure_codex_config_toml(tmp.path(), true).unwrap();
+    let status = ensure_codex_config_toml(tmp.path()).unwrap();
     assert!(matches!(status, McpConfigStatus::Configured));
     let written = std::fs::read_to_string(&path).unwrap();
     let parsed: toml::Value = toml::from_str(&written).unwrap();
@@ -1087,7 +1090,7 @@ fn mcp_json_refuses_to_overwrite_invalid_json() {
 }"#;
     std::fs::write(&path, original).unwrap();
 
-    let err = ensure_agy_mcp_config(tmp.path(), true)
+    let err = ensure_agy_mcp_config(tmp.path())
         .expect_err("an unparseable existing config must not be overwritten");
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     assert!(
@@ -1119,7 +1122,7 @@ fn codex_config_refuses_to_overwrite_invalid_toml() {
     let original = "model = \"o3\"\napproval_policy = \"never\"\n}}}}{{{ not toml";
     std::fs::write(&path, original).unwrap();
 
-    let err = ensure_codex_config_toml(tmp.path(), true)
+    let err = ensure_codex_config_toml(tmp.path())
         .expect_err("an unparseable existing config must not be overwritten");
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     assert!(
@@ -1146,7 +1149,7 @@ fn codex_config_writes_fresh_over_a_blank_file() {
         std::fs::create_dir_all(&codex_dir).unwrap();
         let path = codex_dir.join("config.toml");
         std::fs::write(&path, content).unwrap();
-        let status = ensure_codex_config_toml(tmp.path(), true)
+        let status = ensure_codex_config_toml(tmp.path())
             .expect("a blank file carries no user data to lose");
         assert!(matches!(status, McpConfigStatus::Configured));
         let parsed: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();

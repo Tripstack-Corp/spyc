@@ -187,7 +187,7 @@ impl App {
             (false, _) => Vec::new(),
         };
         match Pane::spawn_with_env(
-            cmd,
+            &self.spawn_command(cmd),
             rows,
             cols,
             cwd,
@@ -289,7 +289,7 @@ impl App {
     ///
     /// Also claims the dir in the cross-instance owner registry, so a *sibling*
     /// spyc quitting can't delete the hooks this session's panes are still
-    /// reporting through (`state::hook_owners`).
+    /// reporting through (`state::dir_owners`).
     pub(super) fn install_status_hooks(
         &mut self,
         cwd: &std::path::Path,
@@ -299,7 +299,11 @@ impl App {
             return;
         };
         if (support.ensure)(cwd) {
-            crate::state::hook_owners::claim(cwd, std::process::id());
+            crate::state::dir_owners::claim(
+                crate::state::dir_owners::Shared::StatusHooks,
+                cwd,
+                std::process::id(),
+            );
             if !self.runtime.mcp_config_dirs.iter().any(|d| d == cwd) {
                 self.runtime.mcp_config_dirs.push(cwd.to_path_buf());
             }
@@ -342,7 +346,11 @@ impl App {
                 // with a sibling spyc still claiming the dir: the user is
                 // revoking consent for the project, and consent is what the
                 // sibling's own re-heal consults before re-installing.
-                let _ = crate::state::hook_owners::release(cwd, std::process::id());
+                let _ = crate::state::dir_owners::release(
+                    crate::state::dir_owners::Shared::StatusHooks,
+                    cwd,
+                    std::process::id(),
+                );
                 (support.cleanup)(cwd);
                 self.runtime.mcp_config_dirs.retain(|d| d != cwd);
             }
@@ -377,6 +385,18 @@ impl App {
             " — note: build-dir binary, `make install` for a stable hook path".to_string()
         } else {
             String::new()
+        }
+    }
+
+    /// What a pane actually runs for `cmd`: a codex pane gets `--no-daemon`
+    /// (`agent::codex_without_daemon`) unless `[pane] codex_daemon` lets it
+    /// join codex's shared server. The tab keeps `cmd` itself.
+    fn spawn_command<'a>(&self, cmd: &'a str) -> std::borrow::Cow<'a, str> {
+        let codex = crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex;
+        if codex && !self.state.config.pane.codex_daemon {
+            crate::agent::codex_without_daemon(cmd)
+        } else {
+            std::borrow::Cow::Borrowed(cmd)
         }
     }
 
@@ -416,7 +436,7 @@ impl App {
             extra_env.push(("SPYC_MCP_SOCK", sock));
         }
         match Pane::spawn_with_env(
-            cmd,
+            &self.spawn_command(cmd),
             rows,
             cols,
             cwd,

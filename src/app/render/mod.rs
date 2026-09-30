@@ -1070,6 +1070,28 @@ mod render_tests {
         });
     }
 
+    /// The HUD's `mcp` row leads with the live connection count and how many
+    /// are bound to a tab, before any tool has been called.
+    #[test]
+    fn the_activity_hud_counts_mcp_connections() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.execute_mcp_command(crate::mcp_cmd::McpCommand::ConnectionInitialized {
+                conn: 1,
+                pane_id: Some("p".into()),
+            });
+            app.execute_mcp_command(crate::mcp_cmd::McpCommand::ConnectionInitialized {
+                conn: 2,
+                pane_id: None,
+            });
+            app.view.show_activity = true;
+
+            let out = render_to_string(&mut app, 140, 24);
+            assert!(out.contains("mcp conn:2 bound:1"), "{out}");
+        });
+    }
+
     /// A prompt opened from `b` must still render when `a` has a `D` TopPane
     /// pager filling its column — the pager branch returns early, so the prompt
     /// is painted into its reserved bottom row rather than swallowed. (Reported:

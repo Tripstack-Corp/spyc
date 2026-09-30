@@ -6,8 +6,8 @@ this document's proposal.
 **Measured against:** `9df4d7a` (`main`, `2.2.0-CURRENT`).
 **Predecessor:** [`docs/archive/LAUNCH_PLAN_2_0.md`](../archive/LAUNCH_PLAN_2_0.md)
 (the 2.0 distribution pass). Strategy context: `ROADMAP.md` → "Road to 2.2".
-**Progress (2026-09-30):** §1, §2, §3, §8, and five of §6's bugs (#326, #452,
-#34, #327, #9) are on `main`. §4, §5, §7, and #22 + #11 are still open; the
+**Progress (2026-09-30):** §1, §2, §3, §8, and all of §6's bugs (#326, #452,
+#34, #327, #9, #22, #11) are on `main`. §4, §5 and §7 are still open; the
 Status column below tracks each item. 2.2 tags once all of it is done, per the
 ROADMAP decisions log (2026-09-29). The one release blocker outside the scope,
 [#490](https://github.com/Tripstack-Corp/spyc/issues/490) (publishing
@@ -39,7 +39,7 @@ load-bearing.
 | 3 | Configurable startup pane tabs | prep + feature | [#58](https://github.com/Tripstack-Corp/spyc/issues/58), [plan](../archive/PANE_STARTUP_TABS_PLAN.md) | shipped (#482) |
 | 4 | Session forking (`^a f`) | feature | [#8](https://github.com/Tripstack-Corp/spyc/issues/8) | open |
 | 5 | Prompt templates in `.spycrc.toml` | feature | [#71](https://github.com/Tripstack-Corp/spyc/issues/71) | open |
-| 6 | The daily-driver bug set | fix | [#326](https://github.com/Tripstack-Corp/spyc/issues/326), [#327](https://github.com/Tripstack-Corp/spyc/issues/327), [#9](https://github.com/Tripstack-Corp/spyc/issues/9), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#22](https://github.com/Tripstack-Corp/spyc/issues/22), [#11](https://github.com/Tripstack-Corp/spyc/issues/11) | #326 (#464), #452 (#457), #34 (#465), #327 (#500) and #9 shipped; #22, #11 open |
+| 6 | The daily-driver bug set | fix | [#326](https://github.com/Tripstack-Corp/spyc/issues/326), [#327](https://github.com/Tripstack-Corp/spyc/issues/327), [#9](https://github.com/Tripstack-Corp/spyc/issues/9), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#22](https://github.com/Tripstack-Corp/spyc/issues/22), [#11](https://github.com/Tripstack-Corp/spyc/issues/11) | shipped: #326 (#464), #452 (#457), #34 (#465), #327 (#500), #9, #22 + #11 (#509) |
 | 7 | Author `docs/drafts/PROJECTS_PLAN.md` | design | [#492](https://github.com/Tripstack-Corp/spyc/issues/492), this doc, §7 | open |
 | 8 | The VT engine — libghostty-vt replaces vt100 | prep + fix | [spike](VT_ENGINE_SPIKE.md), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#453](https://github.com/Tripstack-Corp/spyc/issues/453) | shipped (PRs 10–16: #457–#462, #465); the vt100 deletion (#453) is the first commit after the tag |
 
@@ -340,6 +340,12 @@ than deferred — if drift survives stages 2 and 6, it gets a fresh issue with a
 fresh reproduction.
 
 ### #22 + #11 — MCP takeover and multi-instance coexistence
+
+**Shipped (#509), not as planned below.** The investigation found the takeover
+itself was the defect: the agents' MCP entry pinned its writer's socket. It
+now pins nothing, each agent reaches the spyc that launched it, and the prompt
+has nothing to ask (ROADMAP decisions log, 2026-09-30). The #11 test checks
+that two live instances in one directory each keep their own agents.
 
 One investigation. The takeover prompt (`prompt_mcp_takeover_if_needed`,
 `src/lib.rs`) runs once, at startup, before `App::new`, and only when
