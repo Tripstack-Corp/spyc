@@ -175,11 +175,15 @@ ships with it (decisions log, 2026-09-29).
   as a copy of itself. agy and zot can't branch, and `^a F` says so rather
   than opening one conversation twice. It took `F` because `^a f` already
   flips the split's height from the pane.
+- **[#71](https://github.com/Tripstack-Corp/spyc/issues/71): prompt
+  templates.** `[prompts]` in `~/.spycrc.toml` names the messages you send an
+  agent over and over, and `map KEY prompt <name>` or `:prompt <name>` types
+  one into the active pane tab with the picks (`%`), the inventory (`%i`) or
+  the directory (`%d`) filled in, anchored the way `^a s` anchors paths. It is
+  typed, not sent, and a project file can neither bind one nor define one.
 
 **Open:**
 
-- **[#71](https://github.com/Tripstack-Corp/spyc/issues/71) — prompt templates
-  in `.spycrc.toml`**, with picks and inventory substituted.
 - **[#492](https://github.com/Tripstack-Corp/spyc/issues/492):
   `docs/drafts/PROJECTS_PLAN.md`**, authored in 2.2, design only. 2.3's scope
   depends on it being written and approved before code lands.

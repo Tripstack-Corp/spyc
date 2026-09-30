@@ -331,6 +331,9 @@ pub enum PaneInput {
     /// `^a s`: paths to type, anchored on the pane's cwd
     /// (`shell::pane_path_payload`).
     Paths(Vec<std::path::PathBuf>),
+    /// A `[prompts]` template, rendered against the pane's cwd like `Paths`
+    /// and pasted the way the child takes a paste.
+    Prompt(super::prompt_templates::PromptText),
 }
 
 impl PaneInput {
@@ -347,6 +350,16 @@ impl PaneInput {
                 let cwd = pane.process_id().and_then(crate::proc_cwd::cwd_for_pid);
                 let payload = crate::shell::pane_path_payload(&paths, cwd.as_deref());
                 pane.send_bytes(payload.as_bytes())
+            }
+            Self::Prompt(text) => {
+                // Fresh, for the reason `Paths` reads it fresh.
+                let cwd = pane.process_id().and_then(crate::proc_cwd::cwd_for_pid);
+                let text = text.render(cwd.as_deref());
+                let bytes = super::key_dispatch::paste_bytes_for_pane(
+                    &text,
+                    pane.bracketed_paste_enabled(),
+                );
+                pane.send_bytes(&bytes)
             }
         }
     }
@@ -375,7 +388,7 @@ impl PaneInput {
                 _ => false,
             },
             Self::Bytes(b) => matches!(b.as_slice(), b"\r" | b"\n" | b"\r\n" | b"\x1b" | b"\x03"),
-            Self::Paths(_) => false,
+            Self::Paths(_) | Self::Prompt(_) => false,
         }
     }
 }

@@ -370,6 +370,10 @@ const SECTIONS: &[Section] = &[
                 ":lua",
                 "status|on|off|reload — engine control (init.lua: spyc.map/spyc.command/spyc.on events)",
             ),
+            (
+                ":prompt",
+                "<name> — type a [prompts] template into the pane (bare: list them)",
+            ),
         ],
     },
     Section {

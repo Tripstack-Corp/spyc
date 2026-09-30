@@ -151,6 +151,7 @@ mod preview_ops;
 mod proc;
 mod process_cwd;
 mod prompt;
+mod prompt_templates;
 mod quick_select;
 mod render;
 mod route;

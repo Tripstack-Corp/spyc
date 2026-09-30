@@ -44,7 +44,7 @@ fn bracketed_paste(text: &str) -> Vec<u8> {
 /// the `Capture` sink already does: a shell that never enabled DECSET 2004
 /// (a remote `/bin/sh` over ssh, `csh`) takes the literal `\e[200~`/`\e[201~`
 /// bytes as input and runs a multi-line paste line-by-line.
-fn paste_bytes_for_pane(text: &str, child_bracketed: bool) -> Vec<u8> {
+pub(super) fn paste_bytes_for_pane(text: &str, child_bracketed: bool) -> Vec<u8> {
     if child_bracketed {
         bracketed_paste(text)
     } else {
@@ -768,6 +768,7 @@ impl App {
                 // `Message::Wake(Wake::Lua)` → `handle_lua_done`.
                 return Ok(self.apply_lua_binding(name));
             }
+            BoundAction::Prompt(name) => return Ok(self.send_prompt(name)),
             BoundAction::ToggleMaskFixed(n) => {
                 if *n == 1 {
                     self.state.cur_mut().masks.toggle_mask1();
