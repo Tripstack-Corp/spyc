@@ -1355,6 +1355,14 @@ Both registrations re-exec `spyc --mcp` as a stdio proxy that
 forwards to the same socket, so a single server backs both agents.
 Both files carry `SPYC_MCP_SOCK` in the env block.
 
+spyc starts codex panes with **`--no-daemon`**, so codex runs the session
+itself rather than on its shared background server. That server spawns every
+session's hooks and MCP servers with the environment of whichever codex
+started it, so they couldn't reach the spyc, or name the tab, that launched a
+pane. **`[pane] codex_daemon = true`** lets codex panes join it anyway, at the
+cost of their activity dots and MCP attribution. See
+[`docs/HARNESS.md`](docs/HARNESS.md) → "codex's shared daemon".
+
 **`[pane] codex_mcp = false`** (`.spycrc.toml`) stops spyc from registering
 its MCP server for codex — an escape hatch for a codex `/review` bug
 ([openai/codex#25856](https://github.com/openai/codex/issues/25856)) where
