@@ -16,8 +16,8 @@ mod seam_contract {
         e
     }
 
-    // The seam's contract suite, against the shipped engine. The same five
-    // run against vt100 in `engine_vt100`; one contract, both impls.
+    // The seam's contract suite, against the shipped engine. The same suite
+    // runs against vt100 in `engine_vt100`; one contract, both impls.
     #[test]
     fn reports_what_the_engine_holds() {
         conformance::reports_what_the_engine_holds::<GhosttyEngine>();
@@ -41,6 +41,11 @@ mod seam_contract {
     #[test]
     fn reports_the_modes_the_pane_branches_on() {
         conformance::reports_the_modes_the_pane_branches_on::<GhosttyEngine>();
+    }
+
+    #[test]
+    fn contents_between_stops_before_its_end_column() {
+        conformance::contents_between_stops_before_its_end_column::<GhosttyEngine>();
     }
 
     /// A frame filled by the render state and one filled by coordinate must be

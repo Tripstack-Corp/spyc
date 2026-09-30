@@ -157,6 +157,30 @@ const fn selected(sel: Option<((u16, u16), (u16, u16))>, row: u16, col: u16) -> 
     after_start && before_end
 }
 
+/// The text of a selection from `start` to `end`, for a clipboard copy. Both
+/// ends are included, as [`selected`] highlights them; `contents_between` stops
+/// before its end column, so the end is widened by one.
+///
+/// Built on the seam's `contents_between` rather than a cell walk: it reads the
+/// rows the widget drew (the pane's current scroll position), and it breaks a
+/// line only at a hard line end — a cell walk puts a `\n` in the middle of
+/// every soft-wrapped line.
+///
+/// Trailing whitespace is trimmed per line: the grid is space-padded to its full
+/// width, so an untrimmed copy pastes a ragged block of spaces.
+pub(super) fn selection_text<S: TerminalScreen>(
+    screen: &S,
+    start: (u16, u16),
+    end: (u16, u16),
+) -> String {
+    screen
+        .contents_between(start.0, start.1, end.0, end.1.saturating_add(1))
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[cfg(test)]
 mod attribute_tests {
     #[allow(unused_imports)]
@@ -245,11 +269,81 @@ mod attribute_tests {
 
 #[cfg(test)]
 mod selection_tests {
-    use super::selected;
-    #[allow(unused_imports)]
+    use proptest::prelude::*;
+
+    use super::{selected, selection_text};
     use crate::pane::PaneEngine;
-    #[allow(unused_imports)]
-    use crate::pane::engine::{Engine as EngineT, TerminalScreen as _};
+    use crate::pane::engine::{Engine as EngineT, TerminalScreen, Wide};
+
+    const ROWS: u16 = 5;
+    const COLS: u16 = 40;
+    /// Prose ending in punctuation, a blank line and a wide glyph, none of
+    /// which wraps.
+    const LINES: [&str; 4] = [
+        "  The issue lays out the removal check:",
+        "",
+        "a \u{3042} b",
+        "tail",
+    ];
+
+    fn screen() -> PaneEngine {
+        let mut e = <PaneEngine as EngineT>::new(ROWS, COLS, 0);
+        e.process(LINES.join("\r\n").as_bytes());
+        e
+    }
+
+    /// What the highlight shows: the text of every cell `selected` paints,
+    /// read cell by cell, one line per row, trimmed as a copy is.
+    fn highlighted<S: TerminalScreen>(screen: &S, sel: ((u16, u16), (u16, u16))) -> String {
+        let ((sr, _), (er, _)) = sel;
+        let mut text = String::new();
+        (sr..=er)
+            .map(|row| {
+                let mut line = String::new();
+                for col in 0..COLS {
+                    let tail = screen
+                        .cell_style(row, col)
+                        .is_some_and(|s| s.wide == Wide::Tail);
+                    if tail || !selected(Some(sel), row, col) {
+                        continue;
+                    }
+                    text.clear();
+                    screen.cell_text(row, col, &mut text);
+                    line.push_str(if text.is_empty() { " " } else { &text });
+                }
+                line.trim_end().to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The report: a drag across a line to its closing colon highlighted the
+    /// colon and copied everything before it.
+    #[test]
+    fn a_copy_includes_the_cell_the_drag_ended_on() {
+        let e = screen();
+        assert_eq!(
+            selection_text(e.screen(), (0, 2), (0, 38)),
+            "The issue lays out the removal check:"
+        );
+    }
+
+    proptest! {
+        /// A copy is exactly what the highlight covers, for any selection,
+        /// ordered as `finish_pane_selection` orders one.
+        #[test]
+        fn a_copy_is_what_the_highlight_shows(
+            a in (0..ROWS, 0..COLS),
+            b in (0..ROWS, 0..COLS),
+        ) {
+            let (start, end) = if a <= b { (a, b) } else { (b, a) };
+            let e = screen();
+            prop_assert_eq!(
+                selection_text(e.screen(), start, end),
+                highlighted(e.screen(), (start, end))
+            );
+        }
+    }
 
     /// A multi-row selection takes the tail of the first row, all of the middle, and
     /// the head of the last — not a rectangle.
