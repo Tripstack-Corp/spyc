@@ -6,8 +6,8 @@ this document's proposal.
 **Measured against:** `9df4d7a` (`main`, `2.2.0-CURRENT`).
 **Predecessor:** [`docs/archive/LAUNCH_PLAN_2_0.md`](../archive/LAUNCH_PLAN_2_0.md)
 (the 2.0 distribution pass). Strategy context: `ROADMAP.md` → "Road to 2.2".
-**Progress (2026-09-30):** §2, §3, §8, and five of §6's bugs (#326, #452, #34,
-#327, #9) are on `main`. §1, §4, §5, §7, and #22 + #11 are still open; the
+**Progress (2026-09-30):** §1, §2, §3, §8, and five of §6's bugs (#326, #452,
+#34, #327, #9) are on `main`. §4, §5, §7, and #22 + #11 are still open; the
 Status column below tracks each item. 2.2 tags once all of it is done, per the
 ROADMAP decisions log (2026-09-29). The one release blocker outside the scope,
 [#490](https://github.com/Tripstack-Corp/spyc/issues/490) (publishing
@@ -34,7 +34,7 @@ load-bearing.
 
 | # | Item | Kind | Tracking | Status |
 |---|---|---|---|---|
-| 1 | Pane-identity transport (option B) | prep | [#491](https://github.com/Tripstack-Corp/spyc/issues/491), [proposal](pane-identity-transport-proposal.md) | transport shipped (#507); F1 root narrowing open |
+| 1 | Pane-identity transport (option B) | prep | [#491](https://github.com/Tripstack-Corp/spyc/issues/491), [proposal](pane-identity-transport-proposal.md) | shipped (#507); per-pane roots dropped |
 | 2 | One spyc per agent — abstract the column references | prep | [#40](https://github.com/Tripstack-Corp/spyc/issues/40) | shipped (#504) |
 | 3 | Configurable startup pane tabs | prep + feature | [#58](https://github.com/Tripstack-Corp/spyc/issues/58), [plan](../archive/PANE_STARTUP_TABS_PLAN.md) | shipped (#482) |
 | 4 | Session forking (`^a f`) | feature | [#8](https://github.com/Tripstack-Corp/spyc/issues/8) | open |
@@ -47,10 +47,11 @@ load-bearing.
 
 ## 1. Pane-identity transport
 
-**Transport shipped (#507).** A connection binds to the live tab its
-`initialize` names; `get_spyc_context` adds that tab as `pane`, and the
-targeting tools default to it. Per-pane root narrowing, the F1 half, is not
-built and waits on a decision.
+**Shipped (#507).** A connection binds to the live tab its `initialize`
+names; `get_spyc_context` adds that tab as `pane`, and the targeting tools
+default to it. Per-pane root narrowing, the F1 half, is dropped: it restricts
+nothing and would reject the worktrees an agent creates (ROADMAP decisions log,
+2026-09-30).
 
 Implement **option B** from
 [`pane-identity-transport-proposal.md`](pane-identity-transport-proposal.md):

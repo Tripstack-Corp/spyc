@@ -152,6 +152,14 @@ ships with it (decisions log, 2026-09-29).
   guard first found nine places that acted on column a from column b, fixed
   in #502: among them, a graveyard purge in b trashed the entry under a's
   cursor.
+- **[#491](https://github.com/Tripstack-Corp/spyc/issues/491): pane-identity
+  transport** (#507), option B of
+  [`docs/drafts/pane-identity-transport-proposal.md`](docs/drafts/pane-identity-transport-proposal.md).
+  The `spyc --mcp` proxy sends its `$SPYC_PANE_ID` in `initialize` and the
+  server binds that connection to the tab. `get_spyc_context` adds the caller's
+  own tab as `pane`, and `report_status` and the scope tools default to it.
+  Narrowing a `root` override to the calling pane is dropped (decisions log,
+  2026-09-30). Attribution, not authorization — SECURITY.md says which.
 - **[#490](https://github.com/Tripstack-Corp/spyc/issues/490): crates.io
   publishing.** The release job publishes `spyc-vt-sys` before spyc (#499),
   0.1.0 is on crates.io, and CI packages both crates on every PR. The release
@@ -160,15 +168,6 @@ ships with it (decisions log, 2026-09-29).
 
 **Open:**
 
-- **[#491](https://github.com/Tripstack-Corp/spyc/issues/491): pane-identity
-  transport**, option B of
-  [`docs/drafts/pane-identity-transport-proposal.md`](docs/drafts/pane-identity-transport-proposal.md):
-  the `spyc --mcp` proxy sends its `$SPYC_PANE_ID` in the `initialize`
-  handshake and the server binds it to that connection. The transport shipped
-  in #507: `get_spyc_context` adds the caller's own tab as `pane`, and
-  `report_status` and the scope tools default to it. The F1 half, narrowing a
-  `root` override to the calling pane's worktree, is not built. Attribution,
-  not authorization — SECURITY.md says which.
 - **[#8](https://github.com/Tripstack-Corp/spyc/issues/8) — session forking
   (`^a f`)**, so an agent conversation can branch without losing the prior line
   of inquiry.
@@ -622,6 +621,32 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   `PROJECTS_PLAN.md` (#492) still decides what a project definition holds.
   This settles only how a repo-declared command earns the right to run.
 
+- **Pane attribution ships; per-pane root narrowing is dropped**
+  (2026-09-30). #507 built the transport the third F1 constraint above was
+  waiting on: the `spyc --mcp` proxy names its `SPYC_PANE_ID` in `initialize`,
+  and the connection binds to that tab if a live one has the id. It is used for
+  what attribution is good at. `get_spyc_context` adds the caller's own tab as
+  `pane`, and `report_status` and the scope tools default to that tab. It is
+  not used for the narrowing F1 called the target design, for two reasons,
+  either of which is enough:
+  1. **It restricts nothing.** The id comes from an environment the agent
+     controls, so narrowing stops an accident and never an attempt, as
+     SECURITY.md says. And F1's first constraint names what an over-tight set
+     buys: the rejected call goes to an unscoped `Bash rg`.
+  2. **It breaks the ordinary workflow.** An agent in the main checkout works
+     in worktrees it created, passing each as `root`. Its pane's worktree is
+     the main checkout, so narrowing rejects exactly those calls unless spyc
+     also tracks which worktrees each agent made, which is machinery with no
+     security return.
+
+  The durable-session horizon doesn't change this. A daemon keeps one uid on
+  one machine, so the id stays forgeable. Agents working unattended while no
+  client is attached make containment more tempting, and the answer is still
+  OS-level isolation: a separate uid, a container. Remote support, when it
+  comes, rides SSH rather than a custom protocol, so SSH authenticates the
+  client and the host is still one uid. The boundary worth designing then is
+  who may attach, and pane attribution isn't that either.
+
 ## Doc map
 
 | Doc | Role |
@@ -640,7 +665,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/BRAND.md` | Brand & identity — the name story, palette, voice. |
 | `docs/AGENT_ORCHESTRATION.md` | How the agent activity-dots / notifications / session-resume / scope registry fit together (living reference). |
 | `docs/drafts/V2_2_PLAN.md` | The 2.2 scope, sequencing and exit criteria — the plan behind "Road to 2.2". |
-| `docs/drafts/pane-identity-transport-proposal.md` | Option B shipped in #507 ([#491](https://github.com/Tripstack-Corp/spyc/issues/491)): the pane id goes in the MCP `initialize` handshake. Per-pane roots are not built. It is also the attribution mechanism Projects extends. |
+| `docs/drafts/pane-identity-transport-proposal.md` | Option B shipped in #507 ([#491](https://github.com/Tripstack-Corp/spyc/issues/491)): the pane id goes in the MCP `initialize` handshake. Per-pane roots are dropped (decisions log, 2026-09-30). It is also the attribution mechanism Projects extends. |
 | `docs/drafts/VT_ENGINE_SPIKE.md` | The engine spike report plus its dated gate addendum: the evidence behind the libghostty-vt entries in the decisions log. Appended to, never rewritten. |
 | `docs/drafts/CLICKABLE_MENUS_PLAN.md` | Proposal, unscheduled and with no issue yet: make the which-key popup clickable instead of adding right-click context menus (#478). |
 | `docs/drafts/AUTO_APPROVAL_PLAN.md` | Pending design, unscheduled ([#57](https://github.com/Tripstack-Corp/spyc/issues/57)). |
