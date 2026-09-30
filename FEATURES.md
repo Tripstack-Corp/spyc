@@ -1343,17 +1343,21 @@ Manage it in-app with `:skill`:
 ## MCP server (Claude + Codex integration)
 
 spyc runs a background MCP server on a PID-scoped Unix domain socket
-(`~/.local/state/spyc/mcp-<PID>.sock`). On startup it writes two
-config files so each agent discovers spyc automatically — no
-`--mcp-config` flag needed:
+(`~/.local/state/spyc/mcp-<PID>.sock`). When an agent pane launches it
+writes that agent's config so the agent discovers spyc automatically —
+no `--mcp-config` flag needed:
 
 - **`.mcp.json`** for Claude Code (JSON, `mcpServers.spyc` shape).
 - **`.codex/config.toml`** for the codex CLI (TOML,
   `[mcp_servers.spyc]` shape).
+- **`.agents/mcp_config.json`** for agy (the `.mcp.json` shape).
 
-Both registrations re-exec `spyc --mcp` as a stdio proxy that
-forwards to the same socket, so a single server backs both agents.
-Both files carry `SPYC_MCP_SOCK` in the env block.
+Each registration re-execs `spyc --mcp` as a stdio proxy, which
+connects to the socket named by the agent pane's own env
+(`SPYC_MCP_SOCK`), so an agent always reaches the spyc that launched
+it. The entry names no socket itself; codex's lists
+`env_vars = ["SPYC_MCP_SOCK", "SPYC_PANE_ID"]`, because codex hands
+an MCP server only the variables it is told to.
 
 **`[pane] codex_mcp = false`** (`.spycrc.toml`) stops spyc from registering
 its MCP server for codex — an escape hatch for a codex `/review` bug
@@ -1362,14 +1366,10 @@ codex mis-resolves the MCP tool-call approval elicitation and hangs on the
 first spyc tool call. Status hooks still install (activity dots keep working);
 codex just loses spyc's MCP tools. Claude is unaffected. Default on.
 
-Multiple spyc instances coexist safely; when a new instance opens
-in a directory already owned by a live spyc, it prompts on stderr
-before taking over (`PID N already owns MCP here. Take over?
-[Y/n]`, default Y). The detection checks both `.mcp.json` and
-`.codex/config.toml`. On takeover it sends a `spyc/disconnected`
-notification to the old instance and rewrites both files; on
-decline (`n`), the old instance keeps ownership and the new spyc
-starts without MCP. Non-tty stdin (scripts/CI) auto-takes-over.
+Multiple spyc instances coexist in one directory with nothing to
+take over: they write the same entry, and each one's agents reach it.
+The entry stays until the last spyc relying on it exits. An agent
+started outside spyc finds the spyc rooted in its project.
 Enterprise `managed-settings.json` policies
 (`deniedMcpServers`/`allowedMcpServers`) are respected for the
 claude side; codex has no equivalent enterprise hook.

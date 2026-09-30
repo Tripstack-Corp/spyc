@@ -504,21 +504,6 @@ pub(super) fn pid_from_sock_path(path: &str) -> Option<u32> {
     stripped.parse().ok()
 }
 
-/// Try to send a `spyc/disconnected` notification to the old instance's
-/// socket. Best-effort — if it fails, we proceed with takeover anyway.
-pub(super) fn notify_disconnect(old_sock: &Path, new_pid: u32) {
-    let Ok(mut stream) = UnixStream::connect(old_sock) else {
-        return;
-    };
-    let notification = json!({
-        "jsonrpc": "2.0",
-        "method": "spyc/disconnected",
-        "params": { "new_pid": new_pid }
-    });
-    let _ = send_message(&mut stream, &notification.to_string());
-    mcp_log(&format!("sent spyc/disconnected to {}", old_sock.display()));
-}
-
 /// Handle a single Unix socket connection. Uses the same Content-Length
 /// framing as the stdio transport.
 pub(super) fn handle_socket_connection(

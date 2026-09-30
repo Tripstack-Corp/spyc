@@ -186,8 +186,8 @@ idle spyc still does no work.
 ## 5. Multiple spyc instances
 
 Instances coexist — the MCP server uses a **PID-scoped** Unix socket
-(`~/.local/state/spyc/mcp-<pid>.sock`), and if another instance already owns an
-agent's config entry you get a takeover prompt rather than a silent fight.
+(`~/.local/state/spyc/mcp-<pid>.sock`), and an agent's config entry names no
+instance, so every agent reaches the spyc that launched it.
 
 The thing that genuinely breaks is **concurrent agents of the same kind in the
 same directory**, because that's what makes session resolution ambiguous — same
