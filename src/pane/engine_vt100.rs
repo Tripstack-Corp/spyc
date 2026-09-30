@@ -185,4 +185,9 @@ mod tests {
     fn reports_the_modes_the_pane_branches_on() {
         conformance::reports_the_modes_the_pane_branches_on::<vt100::Parser>();
     }
+
+    #[test]
+    fn contents_between_stops_before_its_end_column() {
+        conformance::contents_between_stops_before_its_end_column::<vt100::Parser>();
+    }
 }
