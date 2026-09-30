@@ -38,7 +38,7 @@ load-bearing.
 | 2 | One spyc per agent — abstract the column references | prep | [#40](https://github.com/Tripstack-Corp/spyc/issues/40) | shipped (#504) |
 | 3 | Configurable startup pane tabs | prep + feature | [#58](https://github.com/Tripstack-Corp/spyc/issues/58), [plan](../archive/PANE_STARTUP_TABS_PLAN.md) | shipped (#482) |
 | 4 | Session forking (`^a F`) | feature | [#8](https://github.com/Tripstack-Corp/spyc/issues/8) | shipped (#516) |
-| 5 | Prompt templates in `.spycrc.toml` | feature | [#71](https://github.com/Tripstack-Corp/spyc/issues/71) | shipped |
+| 5 | Prompt templates in `.spycrc.toml` | feature | [#71](https://github.com/Tripstack-Corp/spyc/issues/71) | shipped (#517) |
 | 6 | The daily-driver bug set | fix | [#326](https://github.com/Tripstack-Corp/spyc/issues/326), [#327](https://github.com/Tripstack-Corp/spyc/issues/327), [#9](https://github.com/Tripstack-Corp/spyc/issues/9), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#22](https://github.com/Tripstack-Corp/spyc/issues/22), [#11](https://github.com/Tripstack-Corp/spyc/issues/11) | shipped: #326 (#464), #452 (#457), #34 (#465), #327 (#500), #9, #22 + #11 (#509) |
 | 7 | Author `docs/drafts/PROJECTS_PLAN.md` | design | [#492](https://github.com/Tripstack-Corp/spyc/issues/492), this doc, §7 | open |
 | 8 | The VT engine — libghostty-vt replaces vt100 | prep + fix | [spike](VT_ENGINE_SPIKE.md), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#453](https://github.com/Tripstack-Corp/spyc/issues/453) | shipped (PRs 10–16: #457–#462, #465); the vt100 deletion (#453) is the first commit after the tag |
@@ -194,7 +194,7 @@ Two questions the implementation has to answer:
 
 ## 5. #71 — prompt templates in `.spycrc.toml`
 
-**Shipped.** A `[prompts]` table of name → text, a `prompt <name>` DSL verb,
+**Shipped (#517).** A `[prompts]` table of name → text, a `prompt <name>` DSL verb,
 and `:prompt [name]`. The expander is its own rather than `expand_percent`,
 because that one shell-quotes for `sh -c` and anchors nothing. The template is
 split at its tokens on the keypress (`%` the selection, `%i` the inventory,

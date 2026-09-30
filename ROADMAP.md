@@ -176,7 +176,7 @@ ships with it (decisions log, 2026-09-29).
   than opening one conversation twice. It took `F` because `^a f` already
   flips the split's height from the pane.
 - **[#71](https://github.com/Tripstack-Corp/spyc/issues/71): prompt
-  templates.** `[prompts]` in `~/.spycrc.toml` names the messages you send an
+  templates** (#517). `[prompts]` in `~/.spycrc.toml` names the messages you send an
   agent over and over, and `map KEY prompt <name>` or `:prompt <name>` types
   one into the active pane tab with the picks (`%`), the inventory (`%i`) or
   the directory (`%d`) filled in, anchored the way `^a s` anchors paths. It is
