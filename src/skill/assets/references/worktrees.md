@@ -68,12 +68,20 @@ commit on main. So `remove_worktree`'s ancestry check reports
 `kept branch '<name>' (1 commit not in base)` even though the content shipped.
 That is conservative, not wrong.
 
-To confirm it really landed before deleting the ref:
+To confirm it really landed before deleting the ref, compare only the files the
+branch touched:
 
 ```
-git diff --stat <branch> main     # empty output == content identical
+git diff -z --name-only $(git merge-base <branch> main) <branch> |
+  xargs -0 git diff --stat <branch> main --     # empty output == landed
 git branch -D <branch>
 ```
+
+A whole-tree `git diff <branch> main` is the wrong check: if the PR was brought
+up to date on the server (`gh pr update-branch`), the local ref lacks what that
+merged in, so the diff lists other people's changes and is never empty. The
+names are NUL-separated so a path with a space survives; don't collect them in a
+shell variable first, since zsh passes an unquoted variable as one argument.
 
 Check the diff first. Don't force-delete on the assumption that a merged PR means
 a merged ref.
