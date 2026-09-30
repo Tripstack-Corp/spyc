@@ -122,7 +122,10 @@ impl Inventory {
         let _ = std::fs::create_dir_all(&dir);
         let dat_path = dir.join(format!("{id}.dat"));
         let json_path = dir.join(format!("{id}.json"));
-        std::fs::copy(read, &dat_path).map_err(|e| format!("copy failed: {e}"))?;
+        // Replaced, not written into: the copy keeps `read`'s mode, so a read-only
+        // file's earlier `.dat` refuses a write.
+        crate::fs::copy_atomic(read, &dat_path)
+            .map_err(|e| format!("can't copy {} to the inventory: {e}", record_as.display()))?;
         let json = serde_json::to_string_pretty(&item).map_err(|e| format!("json: {e}"))?;
         crate::fs::write_atomic(&json_path, json.as_bytes())
             .map_err(|e| format!("write meta: {e}"))?;
@@ -338,6 +341,50 @@ mod tests {
         let path = dir.join(name);
         std::fs::write(&path, content).unwrap();
         path
+    }
+
+    /// The cached copy carries the source's mode, so a read-only file leaves a
+    /// read-only `.dat`, which the next yank of the same path has to replace.
+    #[test]
+    fn a_read_only_file_yanks_again_and_keeps_its_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let set_mode = |p: &Path, mode| {
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut inv = Inventory::new();
+            let file = make_test_file(tmp.path(), "ro.txt", "first");
+            set_mode(&file, 0o444);
+            inv.yank(&file).unwrap();
+
+            set_mode(&file, 0o644);
+            std::fs::write(&file, "second").unwrap();
+            set_mode(&file, 0o444);
+            inv.yank(&file).unwrap();
+            assert_eq!(inv.len(), 1);
+
+            let dest = tmp.path().join("dest");
+            std::fs::create_dir(&dest).unwrap();
+            let (count, _, err) = inv.put_to(&dest);
+            assert_eq!((count, err), (1, None));
+            let put = dest.join("ro.txt");
+            assert_eq!(std::fs::read_to_string(&put).unwrap(), "second");
+            let mode = std::fs::metadata(&put).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o444);
+        });
+    }
+
+    #[test]
+    fn a_failed_yank_names_the_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let file = make_test_file(tmp.path(), "sealed.txt", "x");
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+            let err = Inventory::new().yank(&file).unwrap_err();
+            assert!(err.contains("sealed.txt"), "{err}");
+        });
     }
 
     // All sub-cases share one tempdir/Inventory to keep state contiguous.
