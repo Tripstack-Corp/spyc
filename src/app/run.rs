@@ -464,6 +464,9 @@ impl App {
                 // terminals pay nothing; catches theme + syntect + diff + ANSI
                 // passthrough alike since it runs on the finished buffer.
                 crate::ui::color_depth::downgrade_buffer(frame.buffer_mut(), self.view.color_depth);
+                // Here and not in a renderer: a VS16 emoji reaches the buffer
+                // from a flash, a file name and an agent's output alike.
+                crate::ui::emoji_diff::pin_emoji_widths(frame.buffer_mut());
                 if self.view.show_activity {
                     let us = u64::try_from(render_start.elapsed().as_micros()).unwrap_or(u64::MAX);
                     self.view.activity.peaks_live.render_us =
