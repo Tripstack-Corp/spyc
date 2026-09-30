@@ -221,7 +221,7 @@ const SECTIONS: &[Section] = &[
             ),
             (
                 ":activity",
-                "toggle activity monitor; :activity transparent|solid → overlay style; :activity dump → per-pane dot-status (why-status) report in a pager",
+                "toggle activity monitor; :activity transparent|solid → overlay style; :activity dump → per-pane dot-status (why-status) report + MCP connections in a pager",
             ),
             (":setenv NAME=VALUE", "set an environment variable"),
         ],

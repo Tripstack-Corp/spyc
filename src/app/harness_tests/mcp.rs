@@ -34,6 +34,7 @@ fn mcp_tool_called_tallies_per_tool_counts() {
         for name in ["search_content", "search_content", "navigate_to"] {
             app.execute_mcp_command(crate::mcp_cmd::McpCommand::ToolCalled {
                 name: name.to_string(),
+                conn: None,
             });
         }
         let calls = &app.view.activity.mcp_tool_calls;
@@ -776,6 +777,75 @@ fn pane_context_answers_for_the_tab_while_the_user_browses_elsewhere() {
         assert!(
             matches!(gone, crate::mcp_cmd::McpResponse::Error { .. }),
             "{gone:?}"
+        );
+    });
+}
+
+/// `:activity dump` lists every live MCP connection with the tab it is bound
+/// to and its call count, and the HUD summary counts them. The question it
+/// answers is "which of my agents is actually talking to this spyc?".
+#[test]
+fn the_activity_dump_lists_each_mcp_connection_and_its_tab() {
+    use crate::mcp_cmd::McpCommand;
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let mut app = App::test_app(dir.clone());
+        assert!(app.open_pane_tab_in("cat", &dir));
+        let id = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+            .info
+            .id
+            .clone();
+        app.execute_mcp_command(McpCommand::ConnectionInitialized {
+            conn: 7,
+            pane_id: Some(id),
+        });
+        app.execute_mcp_command(McpCommand::ConnectionInitialized {
+            conn: 8,
+            pane_id: None,
+        });
+        for _ in 0..2 {
+            app.execute_mcp_command(McpCommand::ToolCalled {
+                name: "git_status".into(),
+                conn: Some(7),
+            });
+        }
+        assert_eq!(app.view.activity.mcp_connection_summary(), "conn:2 bound:1");
+
+        let dump = |app: &mut App| -> Vec<String> {
+            app.dispatch_command("activity dump");
+            let pager = app.view.pager.as_ref().expect("dump opened");
+            pager
+                .lines
+                .iter()
+                .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+                .collect()
+        };
+        let lines = dump(&mut app);
+        let conn = |n: &str| {
+            lines
+                .iter()
+                .find(|l| l.trim_start().starts_with(n))
+                .cloned()
+        };
+        let seven = conn("#7").unwrap_or_else(|| panic!("{lines:#?}"));
+        assert!(
+            seven.contains("tab [1] \"cat\"") && seven.contains("calls:2"),
+            "{seven}"
+        );
+        let eight = conn("#8").unwrap_or_else(|| panic!("{lines:#?}"));
+        assert!(
+            eight.contains("unattributed") && eight.contains("calls:0"),
+            "{eight}"
+        );
+
+        app.execute_mcp_command(McpCommand::ConnectionClosed { conn: 7 });
+        assert_eq!(app.view.activity.mcp_connection_summary(), "conn:1 bound:0");
+        app.view.pager = None;
+        let lines = dump(&mut app);
+        assert!(
+            !lines.iter().any(|l| l.trim_start().starts_with("#7")),
+            "{lines:#?}"
         );
     });
 }

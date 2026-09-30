@@ -6,6 +6,7 @@ use std::io::{self, BufRead, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
 
@@ -532,10 +533,25 @@ pub(super) fn handle_socket_connection(
     // for the next request, which is idle for minutes between agent calls.
     let _ = stream.set_write_timeout(Some(PROXY_IO_TIMEOUT));
     let mut writer = stream;
-    let mut caller = Caller::default();
+    let mut caller = Caller::connection(NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed));
+    let served = serve_connection(&mut reader, &mut writer, ctx_path, cmd_tx, &mut caller);
+    caller.close(cmd_tx);
+    served
+}
 
+/// Numbers each accepted connection for `:activity dump`.
+static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
+
+/// [`handle_socket_connection`]'s read-dispatch loop, until the client closes.
+fn serve_connection(
+    reader: &mut impl BufRead,
+    writer: &mut UnixStream,
+    ctx_path: &Path,
+    cmd_tx: &std::sync::mpsc::Sender<McpRequest>,
+    caller: &mut Caller,
+) -> io::Result<()> {
     loop {
-        let msg = match read_lsp_message(&mut reader) {
+        let msg = match read_lsp_message(reader) {
             Ok(msg) => msg,
             Err(e) => {
                 if e.kind() == io::ErrorKind::UnexpectedEof {
@@ -556,7 +572,7 @@ pub(super) fn handle_socket_connection(
                 break;
             }
         };
-        dispatch_for(&mut writer, &msg, ctx_path, Some(cmd_tx), &mut caller)?;
+        dispatch_for(writer, &msg, ctx_path, Some(cmd_tx), caller)?;
     }
     Ok(())
 }
