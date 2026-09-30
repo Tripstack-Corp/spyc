@@ -10,6 +10,7 @@ use unicode_width::UnicodeWidthStr;
 pub mod blame_render;
 pub mod color_depth;
 pub mod diff_render;
+pub mod emoji_diff;
 pub mod help;
 pub mod hex;
 pub mod json;
