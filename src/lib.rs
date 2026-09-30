@@ -693,9 +693,8 @@ pub fn run() -> Result<()> {
             .map_err(|e| anyhow::anyhow!(e))?,
         None => config::ColorMode::default(),
     };
-    let mcp_takeover_allowed = prompt_mcp_takeover_if_needed();
     let mut terminal = setup_terminal()?;
-    let mut app = App::new(cli.resume, mcp_takeover_allowed, color_mode);
+    let mut app = App::new(cli.resume, color_mode);
     // Detect the terminal's graphics protocol (Kitty/iTerm2/Sixel/halfblocks +
     // font cell size) for inline diagram rendering — ONCE, here, before the
     // input reader spawns, because `from_query_stdio` reads stdin/cursor
@@ -717,52 +716,6 @@ pub fn run() -> Result<()> {
 }
 
 pub type Tui = Terminal<CrosstermBackend<io::Stdout>>;
-
-/// If another live spyc owns MCP for the current directory, ask the
-/// user whether to take it over. Default Y on empty input. Returns
-/// `false` to mean "leave the existing instance alone."
-///
-/// Non-tty stdin (CI, piped input) keeps the historical auto-takeover
-/// behaviour — there's no one to prompt.
-fn prompt_mcp_takeover_if_needed() -> bool {
-    use std::io::{BufRead, IsTerminal, Write};
-
-    // Under enterprise control we don't write `.mcp.json` at all, so
-    // there's nothing to take over and the prompt would just confuse.
-    if mcp::enterprise_defines_spyc() {
-        return true;
-    }
-    let Ok(cwd) = std::env::current_dir() else {
-        return true;
-    };
-    // Either claude's `.mcp.json` or codex's `.codex/config.toml`
-    // can hold a stale-by-PID spyc entry; check both so the takeover
-    // prompt fires regardless of which agent the prior instance had
-    // configured.
-    let Some(old_pid) = mcp::detect_existing_spyc(&cwd)
-        .or_else(|| mcp::detect_existing_spyc_codex(&cwd))
-        .or_else(|| mcp::detect_existing_spyc_agy(&cwd))
-    else {
-        return true;
-    };
-    if !io::stdin().is_terminal() {
-        return true;
-    }
-
-    let mut stderr = io::stderr();
-    let _ = write!(
-        stderr,
-        "\u{1f336}\u{fe0f} spyc: PID {old_pid} already owns MCP here. Take over? [Y/n] "
-    );
-    let _ = stderr.flush();
-
-    let mut line = String::new();
-    if io::stdin().lock().read_line(&mut line).is_err() {
-        return true;
-    }
-    let trimmed = line.trim();
-    !matches!(trimmed, "n" | "N" | "no" | "No" | "NO")
-}
 
 /// Hide the mouse pointer while the TUI is active. Uses the "pointer
 /// mode" extension supported by xterm, iTerm2, Kitty, WezTerm, and

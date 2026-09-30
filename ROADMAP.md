@@ -131,7 +131,7 @@ ships with it (decisions log, 2026-09-29).
   The same PR fits every tab into the bar. Keeping shared-prefix labels
   distinct when they crop is
   [#483](https://github.com/Tripstack-Corp/spyc/issues/483).
-- **Five of the daily-driver bugs.** The first keystrokes into a fresh pane
+- **The daily-driver bug set.** The first keystrokes into a fresh pane
   now reach the child (#464, closing
   [#326](https://github.com/Tripstack-Corp/spyc/issues/326)).
   [#34](https://github.com/Tripstack-Corp/spyc/issues/34) closed on both
@@ -144,7 +144,10 @@ ships with it (decisions log, 2026-09-29).
   paths on the receiving pane's own cwd, read at delivery, instead of on
   PROJECT_HOME (closing [#9](https://github.com/Tripstack-Corp/spyc/issues/9)),
   so [#71](https://github.com/Tripstack-Corp/spyc/issues/71)'s templates
-  inherit a settled anchor.
+  inherit a settled anchor. Two spycs in one directory each keep their own
+  agents, with nothing to take over (#509, closing
+  [#22](https://github.com/Tripstack-Corp/spyc/issues/22) and
+  [#11](https://github.com/Tripstack-Corp/spyc/issues/11)).
 - **[#40](https://github.com/Tripstack-Corp/spyc/issues/40): columns are
   addressed by handle** (#504), the projects prep. Only render and fs-watch
   name `state.left` / `state.right`; everything else goes through `cur()`,
@@ -173,10 +176,6 @@ ships with it (decisions log, 2026-09-29).
   of inquiry.
 - **[#71](https://github.com/Tripstack-Corp/spyc/issues/71) — prompt templates
   in `.spycrc.toml`**, with picks and inventory substituted.
-- **The rest of the daily-driver bug set:**
-  [#22](https://github.com/Tripstack-Corp/spyc/issues/22) +
-  [#11](https://github.com/Tripstack-Corp/spyc/issues/11) (the MCP takeover
-  prompt, and an integration test for multi-instance coexistence).
 - **[#492](https://github.com/Tripstack-Corp/spyc/issues/492):
   `docs/drafts/PROJECTS_PLAN.md`**, authored in 2.2, design only. 2.3's scope
   depends on it being written and approved before code lands.
@@ -646,6 +645,22 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   comes, rides SSH rather than a custom protocol, so SSH authenticates the
   client and the host is still one uid. The boundary worth designing then is
   who may attach, and pane attribution isn't that either.
+
+- **The agents' MCP entry names no spyc, so there is nothing to take over**
+  (2026-09-30). #22 asked for the second spyc in a directory to prompt before
+  taking MCP from the first. The takeover existed only because the one entry
+  in a directory's agent config pinned whichever spyc wrote it last, and that
+  pin outranked the socket each agent's pane already carried. So the last
+  writer received every new agent there, the other spyc's included. The entry
+  now pins nothing and the pane's own env decides, so each spyc keeps its own
+  agents and the prompt has nothing to ask. Codex strips the environment it
+  gives an MCP server, so its entry lists the two names to pass through
+  (`env_vars`). This was probed against codex, agy and Claude before the change
+  rather than assumed. An org-deployed `managed-mcp.json` already had this
+  shape, which is why the bug never appeared under one. Removing the entry is
+  now refcounted like the status hooks, so only the last spyc out removes it.
+  The alternative, a prompt at agent launch, would have kept one owner per
+  directory and still sent the losing spyc's new agents to the winner.
 
 ## Doc map
 

@@ -24,11 +24,7 @@ impl App {
         self.runtime.picker = picker;
     }
 
-    pub fn new(
-        resume: bool,
-        mcp_takeover_allowed: bool,
-        cli_color: crate::config::ColorMode,
-    ) -> Self {
+    pub fn new(resume: bool, cli_color: crate::config::ColorMode) -> Self {
         let (cwd, start_error) = if let Ok(d) = std::env::current_dir() {
             (d, None)
         } else {
@@ -398,13 +394,11 @@ impl App {
         if !resume {
             app.maybe_offer_skill_update();
         }
-        // The MCP client config (`.mcp.json` / `.codex/config.toml`) is no
-        // longer written here; it's written lazily when an agent pane launches
-        // (`open_pane_tab_in` → `ensure_agent_mcp_config`), so we don't create a
-        // config dir in directories where no agent is ever run. Stash the
-        // takeover decision for that later write. (Restored agent panes go
+        // The MCP client config (`.mcp.json` / `.codex/config.toml`) is
+        // written lazily when an agent pane launches (`open_pane_tab_in` →
+        // `ensure_agent_mcp_config`), so we don't create a config dir in
+        // directories where no agent is ever run. (Restored agent panes go
         // through the same launch path, so they pick up their config too.)
-        app.view.mcp_takeover_allowed = mcp_takeover_allowed;
         app
     }
 }

@@ -206,10 +206,7 @@ The generated `.mcp.json` looks like this:
   "mcpServers": {
     "spyc": {
       "command": "/Users/you/.local/bin/spyc",
-      "args": ["--mcp"],
-      "env": {
-        "SPYC_MCP_SOCK": "/Users/you/.local/state/spyc/mcp-12345.sock"
-      }
+      "args": ["--mcp"]
     }
   }
 }
@@ -220,15 +217,17 @@ The generated `.mcp.json` looks like this:
 - **`args`** — `--mcp` runs spyc in stdio MCP proxy mode. Claude
   Code spawns this process; it proxies JSON-RPC to the running
   instance's Unix socket.
-- **`env.SPYC_MCP_SOCK`** — tells the proxy which socket to
-  connect to (PID-scoped, so multiple instances don't collide).
+- **No `env`** — the proxy connects to the socket named by the
+  agent pane's `SPYC_MCP_SOCK`, which spyc sets when it launches the
+  agent, so each agent reaches the spyc that launched it. (Codex's
+  entry adds `env_vars = ["SPYC_MCP_SOCK", "SPYC_PANE_ID"]`, since
+  codex passes an MCP server only the variables listed there.)
 
 **You should not need to edit these files.** spyc manages them
 automatically, including:
 
-- **Instance takeover** — if a second spyc opens in the same
-  directory, it updates both files to point at its own socket and
-  notifies the old instance.
+- **Several instances in one directory** — they share the entry; each
+  one's agents reach it, and the last one to exit removes it.
 - **Cleanup** — the socket file is removed on normal exit.
 
 Both are runtime artifacts — add them to `.gitignore`:

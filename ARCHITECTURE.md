@@ -618,25 +618,28 @@ the same dispatch:
 - **In-process socket listener** — the running spyc accepts
   connections from the stdio proxy.
 
-`.mcp.json` (claude) and `.codex/config.toml` (codex) carry
-`SPYC_MCP_SOCK` in the `env` block so the proxy connects to the
-right instance. spyc writes the client config **when an agent pane
-launches** (`open_pane_tab_in` → `ensure_agent_mcp_config`), not at
-startup — so a directory where no agent is ever run doesn't get a
-stray `.mcp.json` / `.codex/` written into it. On startup, if another
-live spyc already owns the entry, spyc prompts on stderr (`PID N
-already owns MCP here. Take over? [Y/n]`); decline keeps the old
-instance as MCP owner and the launch-time write leaves its entry in
-place. Non-tty stdin auto-takes-over so CI isn't blocked.
+The agents' MCP `spyc` entry — `.mcp.json` (claude), `.codex/config.toml`
+(codex), `.agents/mcp_config.json` (agy) — names **no instance**, just
+`spyc --mcp`. An agent pane's env carries its spyc's `SPYC_MCP_SOCK` and its
+own `SPYC_PANE_ID`, and the proxy connects to that socket, so an agent always
+reaches the spyc that launched it and two spycs in one directory each keep
+their own agents (see "The agents' MCP entry names no instance" below). An
+agent started outside spyc has no socket in its env and falls back to
+project-scoped discovery. spyc writes the entry **when an agent pane
+launches** (`open_pane_tab_in` → `ensure_agent_mcp_config`), not at startup —
+so a directory where no agent is ever run doesn't get a stray `.mcp.json` /
+`.codex/` written into it.
 
-On exit, teardown (`cleanup_written_mcp_configs`, run from
-`run_teardown` after the terminal is restored) removes the entries
-*we* wrote — our socket is about to die, so a lingering registration
-would point at nothing. It only touches an entry whose `SPYC_MCP_SOCK`
-is still ours (a successor that took over is left alone), deletes a
-file/`.codex/` dir left empty, preserves any other servers/config the
-user has, and refuses to modify a **git-tracked** config (warning on
-stderr instead) — we never dirty something the user committed.
+Every spyc in a directory shares that one entry, so removing it is
+refcounted like the status hooks (`state::dir_owners`): writing it claims the
+directory, and teardown (`cleanup_written_mcp_configs`, run from
+`run_teardown` after the terminal is restored) removes it only when no other
+live spyc still claims it. It deletes a file/`.codex/`/`.agents/` dir left
+empty, preserves any other servers/config the user has, leaves an entry an
+older spyc pinned to its own live socket, and refuses to modify a
+**git-tracked** config (warning on stderr instead) — we never dirty something
+the user committed. The startup orphan sweep reaps an unclaimed entry that a
+killed spyc left.
 
 Enterprise managed-settings.json policies
 (`deniedMcpServers`/`allowedMcpServers`) are honoured.
@@ -670,6 +673,28 @@ unbound connection (an older proxy, the status hook, an id no live tab has) is
 served exactly as before, and the read tools' default scope and allowed roots
 don't depend on attribution at all. It is attribution, not authorization —
 SECURITY.md says why.
+
+## The agents' MCP entry names no instance
+
+<!-- SPYC-TRAP: mcp-entry-names-no-socket -->
+The `spyc` entry spyc writes into an agent's MCP config must never set
+`SPYC_MCP_SOCK`, or any other per-instance value, in its `env`. One file per
+directory serves every spyc there. It used to pin the writer's socket, and
+claude and agy give an entry's `env` precedence over their own environment, so
+whichever spyc wrote last received every agent launched in that directory —
+including agents the other spyc launched, whose `SPYC_PANE_ID` then matched no
+tab there and left them unattributed (#22). Nothing reported it: the agent's
+tools worked, against the wrong instance, and a startup-only takeover prompt
+couldn't see a directory that had no config yet.
+
+The pane's env already names the right socket, so the entry only has to let it
+through. Claude and agy pass their environment to an MCP server as it is;
+codex clears it to a fixed allow-list, so its entry lists both names in
+`env_vars`. An org-deployed `managed-mcp.json` has always had this shape
+(`command` + `--mcp`, no `env`), which is why the bug never appeared under
+one. `two_spycs_in_one_directory_each_keep_their_own_agents`
+(`src/mcp/tests/coexistence.rs`) holds it, against a model of each agent's env
+handling as probed on 2026-09-30.
 
 ## Mouse routing
 

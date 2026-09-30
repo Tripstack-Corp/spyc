@@ -4,7 +4,7 @@
 //! afterwards — a sibling spyc's teardown, a `git clean -xfd`, a hand edit —
 //! left every live agent pane reporting nothing for the rest of the session,
 //! with no signal beyond the dots quietly falling back to output timing. This
-//! is the reconcile that notices, and the `state::hook_owners` refcount is what
+//! is the reconcile that notices, and the `state::dir_owners` refcount is what
 //! makes the common cause rare in the first place.
 //!
 //! Shaped like `settle_mouse_mode`: called at loop bottom, compares desired

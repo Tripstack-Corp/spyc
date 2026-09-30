@@ -31,57 +31,31 @@ impl App {
         if !self.view.mcp_running {
             return;
         }
-        let takeover = self.view.mcp_takeover_allowed;
-        // True only when *we* wrote our own entry (Configured / TookOver) — then
-        // we record the dir so teardown removes our (now-dead-socket) entry. A
-        // skipped takeover, enterprise block, or managed env leaves nothing of
-        // ours to clean, so those don't record.
-        let wrote_ours = match crate::agent::detect(cmd).kind() {
-            crate::state::sessions::AgentKind::Claude => {
-                match crate::mcp::ensure_mcp_json(cwd, takeover) {
-                    Ok(crate::mcp::McpConfigStatus::Configured) => true,
-                    Ok(crate::mcp::McpConfigStatus::TookOver { old_pid }) => {
-                        self.state
-                            .flash_info(format!("MCP: took over from PID {old_pid}"));
-                        true
-                    }
-                    Ok(crate::mcp::McpConfigStatus::SkippedTakeover { old_pid }) => {
-                        self.state.flash_info(format!(
-                            "MCP: kept PID {old_pid} as owner (Claude here will talk to it)"
-                        ));
-                        false
-                    }
-                    Ok(crate::mcp::McpConfigStatus::BlockedByEnterprise) => {
-                        self.state.flash_error(
-                            "MCP: blocked by enterprise policy (deniedMcpServers or allowedMcpServers)",
-                        );
-                        false
-                    }
-                    Ok(crate::mcp::McpConfigStatus::ManagedByEnterprise) => {
-                        self.state
-                            .flash_info("MCP: enterprise-managed (skipped local .mcp.json)");
-                        false
-                    }
-                    Err(e) => {
-                        self.state.flash_error(format!(".mcp.json: {e:#}"));
-                        false
-                    }
+        // The entry names no instance (`mcp-entry-names-no-socket`), so writing
+        // it is safe whichever spyc wrote it last; what we record is that this
+        // one relies on it, so a sibling's teardown leaves it in place.
+        let wrote = match crate::agent::detect(cmd).kind() {
+            crate::state::sessions::AgentKind::Claude => match crate::mcp::ensure_mcp_json(cwd) {
+                Ok(crate::mcp::McpConfigStatus::Configured) => true,
+                Ok(crate::mcp::McpConfigStatus::BlockedByEnterprise) => {
+                    self.state.flash_error(
+                        "MCP: blocked by enterprise policy (deniedMcpServers or allowedMcpServers)",
+                    );
+                    false
                 }
-            }
-
+                Ok(crate::mcp::McpConfigStatus::ManagedByEnterprise) => {
+                    self.state
+                        .flash_info("MCP: enterprise-managed (skipped local .mcp.json)");
+                    false
+                }
+                Err(e) => {
+                    self.state.flash_error(format!(".mcp.json: {e:#}"));
+                    false
+                }
+            },
             crate::state::sessions::AgentKind::Agy => {
-                match crate::mcp::ensure_agy_mcp_config(cwd, takeover) {
+                match crate::mcp::ensure_agy_mcp_config(cwd) {
                     Ok(crate::mcp::McpConfigStatus::Configured) => true,
-                    Ok(crate::mcp::McpConfigStatus::TookOver { old_pid }) => {
-                        self.state
-                            .flash_info(format!("Agy MCP: took over from PID {old_pid}"));
-                        true
-                    }
-                    Ok(crate::mcp::McpConfigStatus::SkippedTakeover { old_pid }) => {
-                        self.state
-                            .flash_info(format!("Agy MCP: kept PID {old_pid} as owner"));
-                        false
-                    }
                     Ok(_) => false,
                     Err(e) => {
                         self.state.flash_error(format!("mcp_config.json: {e:#}"));
@@ -89,10 +63,6 @@ impl App {
                     }
                 }
             }
-            // Codex equivalent: both agents share the same socket; the writer
-            // just registers a stdio entry that re-execs `spyc --mcp` to proxy.
-            // Enterprise-flavoured statuses are claude-specific; codex shouldn't
-            // return them, but if it ever does we treat them as a no-op.
             // `[pane] codex_mcp = false`: skip registering our MCP server for
             // codex and strip any entry we wrote before, so codex has no spyc
             // tool to call — the escape hatch for codex's /review elicitation
@@ -104,19 +74,10 @@ impl App {
                     .flash_info("codex MCP off ([pane] codex_mcp=false) — /review workaround");
                 false
             }
+            // Enterprise-flavoured statuses are claude-specific; codex shouldn't
+            // return them, but if it ever does we treat them as a no-op.
             crate::state::sessions::AgentKind::Codex => {
-                match crate::mcp::ensure_codex_config_toml(cwd, takeover) {
-                    Ok(crate::mcp::McpConfigStatus::TookOver { old_pid }) => {
-                        self.state
-                            .flash_info(format!("codex MCP: took over from PID {old_pid}"));
-                        true
-                    }
-                    Ok(crate::mcp::McpConfigStatus::SkippedTakeover { old_pid }) => {
-                        self.state.flash_info(format!(
-                            "codex MCP: kept PID {old_pid} as owner (codex here will talk to it)"
-                        ));
-                        false
-                    }
+                match crate::mcp::ensure_codex_config_toml(cwd) {
                     Ok(crate::mcp::McpConfigStatus::Configured) => true,
                     Ok(_) => false,
                     Err(e) => {
@@ -127,53 +88,62 @@ impl App {
             }
             _ => false,
         };
-        if wrote_ours && !self.runtime.mcp_config_dirs.iter().any(|d| d == cwd) {
-            self.runtime.mcp_config_dirs.push(cwd.to_path_buf());
+        if wrote {
+            crate::state::dir_owners::claim(
+                crate::state::dir_owners::Shared::McpEntry,
+                cwd,
+                std::process::id(),
+            );
+            if !self.runtime.mcp_config_dirs.iter().any(|d| d == cwd) {
+                self.runtime.mcp_config_dirs.push(cwd.to_path_buf());
+            }
         }
     }
 
-    /// Teardown: remove the MCP client config entries *we* wrote (a `.mcp.json`
-    /// / `.codex/config.toml` pointing at our now-dead socket) from every dir we
-    /// launched an agent in, deleting a file/`.codex` dir left empty. A
+    /// Teardown: in every dir we launched an agent in, remove the agents' MCP
+    /// `spyc` entries and the status hooks — each only when this is the last
+    /// live spyc relying on it (`state::dir_owners`), since both are shared by
+    /// every spyc there. A file or `.codex`/`.agents` dir left empty goes too. A
     /// git-tracked config is left in place with a stderr warning — we never
     /// dirty or delete something the user committed. Best-effort; called from
     /// `run_teardown` after the terminal is restored, so warnings are visible.
     pub fn cleanup_written_mcp_configs(&mut self) {
+        use crate::state::dir_owners::{Shared, release};
         let me = std::process::id();
         for dir in std::mem::take(&mut self.runtime.mcp_config_dirs) {
-            // Try each shape per dir; each is a no-op unless it finds an entry
-            // that's *ours*, so attempting the wrong one is harmless.
-            let mut tracked: Vec<std::path::PathBuf> = [
-                matches!(
-                    crate::mcp::cleanup_mcp_json(&dir),
-                    crate::mcp::ConfigCleanup::SkippedTracked
-                )
-                .then(|| dir.join(".mcp.json")),
-                matches!(
-                    crate::mcp::cleanup_agy_mcp_config(&dir),
-                    crate::mcp::ConfigCleanup::SkippedTracked
-                )
-                .then(|| dir.join(".agents").join("mcp_config.json")),
-                matches!(
-                    crate::mcp::cleanup_codex_config(&dir),
-                    crate::mcp::ConfigCleanup::SkippedTracked
-                )
-                .then(|| dir.join(".codex").join("config.toml")),
-            ]
-            .into_iter()
-            .flatten()
-            .collect();
+            let mut tracked: Vec<std::path::PathBuf> = Vec::new();
+            // Try each shape per dir; one an agent never used is a no-op.
+            if release(Shared::McpEntry, &dir, me) {
+                tracked.extend(
+                    [
+                        matches!(
+                            crate::mcp::cleanup_mcp_json(&dir),
+                            crate::mcp::ConfigCleanup::SkippedTracked
+                        )
+                        .then(|| dir.join(".mcp.json")),
+                        matches!(
+                            crate::mcp::cleanup_agy_mcp_config(&dir),
+                            crate::mcp::ConfigCleanup::SkippedTracked
+                        )
+                        .then(|| dir.join(".agents").join("mcp_config.json")),
+                        matches!(
+                            crate::mcp::cleanup_codex_config(&dir),
+                            crate::mcp::ConfigCleanup::SkippedTracked
+                        )
+                        .then(|| dir.join(".codex").join("config.toml")),
+                    ]
+                    .into_iter()
+                    .flatten(),
+                );
+            }
             // The status hooks (claude `.claude/settings.json`, codex's hooks in
-            // the shared `.codex/config.toml`, agy's `.agents/hooks.json`) ride
-            // the same dir set but are SHARED, not ours alone: one file serves
-            // every spyc, because the reporter targets whichever socket the
-            // pane's env names. Removing them while another instance still has
-            // live panes there silently drops its dots to output-timing for the
-            // rest of its run, so the last owner out is the only one that may.
-            // (Codex's MCP entry and its status hooks live in one file; cleaning
-            // either leaves the other, and whichever empties it last deletes the
-            // file/dir.)
-            if crate::state::hook_owners::release(&dir, me) {
+            // the shared `.codex/config.toml`, agy's `.agents/hooks.json`) are
+            // counted apart from the MCP entry: removing them while another
+            // instance still has live panes there silently drops its dots to
+            // output-timing for the rest of its run. (Codex's MCP entry and its
+            // status hooks live in one file; cleaning either leaves the other,
+            // and whichever empties it last deletes the file/dir.)
+            if release(Shared::StatusHooks, &dir, me) {
                 tracked.extend(
                     [
                         matches!(
@@ -658,10 +628,13 @@ impl App {
                     message: format!("no pane with id {pane_id} (closed?)"),
                 },
             },
+            // Keep serving: agents this spyc launches still reach it through
+            // their pane's env, and the next one it launches rewrites the entry
+            // to pin nothing again.
             McpCommand::Disconnected { new_pid } => {
-                self.view.mcp_running = false;
-                self.state.flash_error(format!(
-                    "MCP taken over by spyc PID {new_pid} — Claude is connected to that instance"
+                self.state.flash_info(format!(
+                    "MCP: an older spyc (PID {new_pid}) pinned this dir's agent config to \
+                     itself; agents started outside spyc will reach it"
                 ));
                 McpResponse::Ok {
                     message: "acknowledged".into(),
@@ -870,6 +843,37 @@ mod tests {
     /// The regression: a second spyc quitting used to delete the status hooks
     /// out from under the first one's live panes. Teardown removes them only
     /// once it is the last live owner of the dir.
+    /// The agents' MCP entry is shared the same way: writing it claims the
+    /// dir, so a sibling can't remove it from under our agents, our exit leaves
+    /// it for a live sibling, and the last one out removes it.
+    #[test]
+    fn teardown_leaves_the_mcp_entry_a_live_sibling_still_needs() {
+        use crate::state::dir_owners::{Shared, claim, release};
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
+        crate::state::with_state_root(&dir.join("state"), || {
+            let mut app = App::test_app(dir.clone());
+            app.view.mcp_running = true;
+            app.ensure_agent_mcp_config("agy", &dir);
+            let entry = dir.join(".agents").join("mcp_config.json");
+            assert!(entry.exists(), "launching an agent writes it");
+
+            claim(Shared::McpEntry, &dir, 1);
+            assert!(
+                !release(Shared::McpEntry, &dir, 1),
+                "our claim keeps a sibling's exit from removing it"
+            );
+            claim(Shared::McpEntry, &dir, 1);
+            app.cleanup_written_mcp_configs();
+            assert!(entry.exists(), "a live sibling's agents still need it");
+
+            assert!(release(Shared::McpEntry, &dir, 1));
+            app.runtime.mcp_config_dirs.push(dir.clone());
+            app.cleanup_written_mcp_configs();
+            assert!(!entry.exists(), "the last one out removes it");
+        });
+    }
+
     #[test]
     fn teardown_leaves_the_hooks_a_live_sibling_still_needs() {
         let tmp = tempfile::tempdir().unwrap();
@@ -882,7 +886,7 @@ mod tests {
             assert!(settings.exists(), "install must write them");
 
             // A sibling spyc claims the same dir (pid 1 is always live).
-            crate::state::hook_owners::claim(&dir, 1);
+            crate::state::dir_owners::claim(crate::state::dir_owners::Shared::StatusHooks, &dir, 1);
             app.cleanup_written_mcp_configs();
             assert!(
                 settings.exists(),
@@ -890,7 +894,11 @@ mod tests {
             );
 
             // Sibling gone: the next instance out is free to clean up.
-            assert!(crate::state::hook_owners::release(&dir, 1));
+            assert!(crate::state::dir_owners::release(
+                crate::state::dir_owners::Shared::StatusHooks,
+                &dir,
+                1
+            ));
             app.runtime.mcp_config_dirs.push(dir.clone());
             app.cleanup_written_mcp_configs();
             assert!(!settings.exists(), "the last one out must clean up");
