@@ -164,10 +164,11 @@ ships with it (decisions log, 2026-09-29).
   transport**, option B of
   [`docs/drafts/pane-identity-transport-proposal.md`](docs/drafts/pane-identity-transport-proposal.md):
   the `spyc --mcp` proxy sends its `$SPYC_PANE_ID` in the `initialize`
-  handshake and the server binds it to that connection. Closes the target
-  design the F1 decisions-log entry names, and lets `get_spyc_context` answer
-  for the calling pane rather than for whichever column the user is browsing.
-  Attribution, not authorization — SECURITY.md says which.
+  handshake and the server binds it to that connection. The transport shipped
+  in #507: `get_spyc_context` adds the caller's own tab as `pane`, and
+  `report_status` and the scope tools default to it. The F1 half, narrowing a
+  `root` override to the calling pane's worktree, is not built. Attribution,
+  not authorization — SECURITY.md says which.
 - **[#8](https://github.com/Tripstack-Corp/spyc/issues/8) — session forking
   (`^a f`)**, so an agent conversation can branch without losing the prior line
   of inquiry.
@@ -639,7 +640,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/BRAND.md` | Brand & identity — the name story, palette, voice. |
 | `docs/AGENT_ORCHESTRATION.md` | How the agent activity-dots / notifications / session-resume / scope registry fit together (living reference). |
 | `docs/drafts/V2_2_PLAN.md` | The 2.2 scope, sequencing and exit criteria — the plan behind "Road to 2.2". |
-| `docs/drafts/pane-identity-transport-proposal.md` | Accepted for 2.2 ([#491](https://github.com/Tripstack-Corp/spyc/issues/491)): the pane id goes in the MCP `initialize` handshake (option B). It is also the attribution mechanism Projects extends. |
+| `docs/drafts/pane-identity-transport-proposal.md` | Option B shipped in #507 ([#491](https://github.com/Tripstack-Corp/spyc/issues/491)): the pane id goes in the MCP `initialize` handshake. Per-pane roots are not built. It is also the attribution mechanism Projects extends. |
 | `docs/drafts/VT_ENGINE_SPIKE.md` | The engine spike report plus its dated gate addendum: the evidence behind the libghostty-vt entries in the decisions log. Appended to, never rewritten. |
 | `docs/drafts/CLICKABLE_MENUS_PLAN.md` | Proposal, unscheduled and with no issue yet: make the which-key popup clickable instead of adding right-click context menus (#478). |
 | `docs/drafts/AUTO_APPROVAL_PLAN.md` | Pending design, unscheduled ([#57](https://github.com/Tripstack-Corp/spyc/issues/57)). |
