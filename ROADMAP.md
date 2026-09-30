@@ -168,7 +168,6 @@ ships with it (decisions log, 2026-09-29).
   0.1.0 is on crates.io, and CI packages both crates on every PR. The release
   matrix hasn't run since the vendored archives landed, so `v2.2.0-rc.1` still
   goes out before `v2.2.0`.
-
 - **[#8](https://github.com/Tripstack-Corp/spyc/issues/8): session forking
   (`^a F`)** (#516). The active tab's conversation carries on in a new tab as a
   branch, and the original stays put: claude via `--resume <id>
