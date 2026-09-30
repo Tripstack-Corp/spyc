@@ -1504,7 +1504,12 @@ jump from Claude's output back to the file list.
   bg-task / git / fs / mcp rates, pid/rss/threads, build identity —
   fixed-width so it doesn't bounce as rates rise and fall — plus an
   extended section tallying cumulative per-tool **MCP call counts**
-  (every agent `tools/call`, read tools included). Transparent by
+  (every agent `tools/call`, read tools included), led by the live
+  agent connections and how many are bound to a tab (`conn:2 bound:1`).
+  `:activity dump` lists each connection with its tab (or
+  `unattributed`, an older proxy), when it connected, and its call
+  count, which is how to tell which agents are talking to *this*
+  spyc. Transparent by
   default: only the text is painted, in each row's colour on the
   terminal background, so the file list or pane shows through the
   padding (and a click there reaches it). `:activity solid` switches

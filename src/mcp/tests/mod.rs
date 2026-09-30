@@ -211,7 +211,7 @@ fn tools_call_forwards_tool_called_telemetry() {
     .unwrap();
     let req = rx.try_recv().expect("a ToolCalled was forwarded");
     match req.command {
-        McpCommand::ToolCalled { name } => assert_eq!(name, "get_spyc_context"),
+        McpCommand::ToolCalled { name, .. } => assert_eq!(name, "get_spyc_context"),
         other => panic!("expected ToolCalled, got {other:?}"),
     }
 }

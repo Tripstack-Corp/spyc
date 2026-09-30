@@ -597,6 +597,30 @@ fn activity_dump_lines(app: &App) -> Vec<String> {
             tally.join("  ")
         }
     ));
+    out.push(format!(
+        "mcp connections: {}",
+        app.view.activity.mcp_connection_summary()
+    ));
+    for (conn, c) in &app.view.activity.mcp_connections {
+        let tab = c.pane_id.as_deref().and_then(|id| {
+            app.runtime
+                .pane_tabs
+                .as_ref()?
+                .tabs()
+                .iter()
+                .enumerate()
+                .find(|(_, t)| t.info.id == id)
+        });
+        let who = match (c.pane_id.as_deref(), tab) {
+            (_, Some((i, t))) => format!("tab [{}] \"{}\"", i + 1, t.info.label),
+            (Some(id), None) => format!("pane {id} (tab closed)"),
+            (None, None) => "unattributed (an older proxy, or no live tab had its id)".into(),
+        };
+        out.push(format!(
+            "  #{conn}  {who}  since {}  calls:{}",
+            c.since, c.calls
+        ));
+    }
     out.push(String::new());
 
     let Some(tabs) = app.runtime.pane_tabs.as_ref() else {

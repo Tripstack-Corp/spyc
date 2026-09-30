@@ -316,7 +316,7 @@ to open them in the current listing dir.
 | `^L` | Redraw |
 | `^R` | Reload config (also auto-reloads on save) |
 | `Esc` (×2) | Cancel a prompt (`Esc`→Normal→`Esc`→cancel) |
-| `:activity` | Toggle the activity monitor; `:activity transparent\|solid` → overlay style (transparent by default); `:activity dump` → per-pane why-status report |
+| `:activity` | Toggle the activity monitor; `:activity transparent\|solid` → overlay style (transparent by default); `:activity dump` → per-pane why-status report, plus each MCP connection and the tab it's bound to |
 | `:archive` | Mounted archives: `info` / `list` / `write` / `discard` / `unmount` / `cancel` (mounting is `Enter` on the archive) |
 | `:hooks` | Agent status-hook consent (`on` / `on!` / `off`) |
 | `:startup-tabs` | Where launch's pane tabs come from; `forget` re-asks about a project `.spycrc.toml`'s list |
