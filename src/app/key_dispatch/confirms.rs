@@ -208,62 +208,6 @@ impl App {
         Vec::new()
     }
 
-    /// Single-key confirmation for the auto-fired claude crash recovery
-    /// prompt. `y` / `Y` / Enter kills the broken tab and replaces it with
-    /// a fresh `claude` (the user can then `/resume` manually); anything
-    /// else kills it and removes the tab so the dump is off-screen.
-    pub(super) fn handle_claude_crash_recover_key(&mut self, key: KeyEvent) -> Vec<Effect> {
-        let confirmed = matches!(key.code, KeyCode::Char('y' | 'Y') | KeyCode::Enter);
-        let prev_mode = std::mem::replace(&mut self.state.mode, Mode::Normal);
-        let Mode::Prompting(Prompt {
-            kind: PromptKind::ClaudeCrashRecover { tab_idx },
-            ..
-        }) = prev_mode
-        else {
-            return Vec::new();
-        };
-
-        // Snapshot cwd + fallback from the tab and best-effort kill the
-        // child (bunfs claude is often still alive post-crash; an
-        // already-closed pane errors here, ignored).
-        let Some((cwd, fallback)) = self.runtime.pane_tabs.as_mut().and_then(|tabs| {
-            let entry = tabs.tabs_mut().get_mut(tab_idx)?;
-            entry.pane.try_kill();
-            let fallback = entry
-                .info
-                .restore_fallback
-                .clone()
-                .unwrap_or_else(|| "claude".to_string());
-            Some((entry.info.cwd.clone(), fallback))
-        }) else {
-            return Vec::new();
-        };
-
-        if !confirmed {
-            if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
-                let still_have_tabs = tabs.remove_at(tab_idx);
-                if !still_have_tabs {
-                    self.runtime.pane_tabs = None;
-                }
-            }
-            // Reclaim the dismissed tab's parked scrollback stream (if any).
-            self.prune_orphaned_pager_streams();
-            self.state.flash_info("claude crash dismissed; tab closed");
-            self.view.needs_full_repaint = true;
-            return Vec::new();
-        }
-
-        // Respawn fresh claude into the tab with the agent env injected (so
-        // the recovered pane can report status via its hooks) — shared with
-        // `:hooks on!`. No `/resume` arm here: the user types it manually after
-        // a crash so they can decide whether to recover or start clean.
-        if self.spawn_agent_into_tab(tab_idx, &fallback, &cwd, None) {
-            self.state
-                .flash_info("started fresh claude — type /resume to recover");
-        }
-        Vec::new()
-    }
-
     /// First-launch consent before spyc writes Claude status hooks. Only an
     /// explicit `y`/`n` records a decision — `y` installs the hooks for the
     /// launching cwd, `n` remembers the denial.

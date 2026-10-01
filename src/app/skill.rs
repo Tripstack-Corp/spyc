@@ -27,8 +27,8 @@ impl App {
     /// startup; the decision of *whether* to offer is
     /// [`skill::startup_offer`] (pure, tested there).
     pub(super) fn maybe_offer_skill_update(&mut self) {
-        // Don't displace a prompt already on screen (e.g. a restored session's
-        // crash-recovery confirm) — the skill offer is the least urgent thing
+        // Don't displace a prompt already on screen (e.g. a project's
+        // startup-tabs consent) — the skill offer is the least urgent thing
         // spyc could ask about.
         if !matches!(self.state.mode, Mode::Normal) {
             return;

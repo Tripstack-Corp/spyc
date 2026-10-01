@@ -141,11 +141,6 @@ pub struct TabInfo {
     /// or `None`. Overrides output timing per the [`ReportedStatus`] authority
     /// model; settle clears it once expired / superseded by fresh output.
     pub reported: Option<ReportedStatus>,
-    /// Set when the tab was spawned by session restore as a `claude
-    /// --resume`. On a non-zero exit shortly after spawn we treat the
-    /// resume as failed and replace the tab with a fresh spawn of this
-    /// fallback command.
-    pub restore_fallback: Option<String>,
     /// Set on session restore when we want claude to resume a specific
     /// conversation: spawn a *fresh* `claude` (the `--resume` CLI flag
     /// trips a known regression that crashes at mount), then once
@@ -240,7 +235,6 @@ impl TabInfo {
             notified: AgentActivity::Unknown,
             suspended: false,
             reported: None,
-            restore_fallback: None,
             pending_resume_send: None,
             anim_phase_offset,
             spawn_at: std::time::Instant::now(),

@@ -27,12 +27,6 @@ impl App {
         }
         if matches!(
             &self.state.mode,
-            Mode::Prompting(p) if matches!(p.kind, PromptKind::ClaudeCrashRecover { .. })
-        ) {
-            return self.handle_claude_crash_recover_key(key);
-        }
-        if matches!(
-            &self.state.mode,
             Mode::Prompting(p) if matches!(p.kind, PromptKind::HookConsent { .. })
         ) {
             return self.handle_hook_consent_key(key);
