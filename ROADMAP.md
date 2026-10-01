@@ -181,6 +181,11 @@ ships with it (decisions log, 2026-09-29).
   one into the active pane tab with the picks (`%`), the inventory (`%i`) or
   the directory (`%d`) filled in, anchored the way `^a s` anchors paths. It is
   typed, not sent, and a project file can neither bind one nor define one.
+- **The status bar shows only what differs from rest** (#521). The suffix
+  listed every field on every frame, as wide as a path; now
+  `[picks:0 inv:0 m1:on m2:on hidden:1 sort:name]` is `[hidden:1]`, short
+  forms (`[h:1]`) take over when the words would cut the path, and
+  `[layout] status_flags = "full"` keeps the old bar.
 
 **Open:**
 
