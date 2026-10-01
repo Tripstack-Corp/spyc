@@ -1,8 +1,8 @@
 ---
-source: src/app/render.rs
+source: src/app/render/mod.rs
 expression: "render_to_string(&mut app, 80, 24)"
 ---
- 🌶️   /projects/demo  [picks:0 inv:0 m1:on m2:on hidden:0 sort:name]           
+ 🌶️   /projects/demo                                                            
   file-110.txt    file-132.txt    file-154.txt    file-176.txt    file-198.txt  
   file-111.txt    file-133.txt    file-155.txt    file-177.txt    file-199.txt  
   file-112.txt    file-134.txt    file-156.txt    file-178.txt                  

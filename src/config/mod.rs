@@ -161,6 +161,9 @@ pub struct LayoutConfig {
     /// Shape a `^s |` / `^a |` preview split opens in: `full_height` (default)
     /// or `top_only`. See [`VsplitMode`].
     pub vsplit_mode: VsplitMode,
+    /// How the status bar writes its state suffix: `auto` (default), `short`
+    /// or `full`. See [`crate::ui::status_flags::FlagsMode`].
+    pub status_flags: crate::ui::status_flags::FlagsMode,
 }
 
 impl Default for LayoutConfig {
@@ -170,6 +173,7 @@ impl Default for LayoutConfig {
             chord_hint_delay_ms: 300,
             color_depth: ColorMode::default(),
             vsplit_mode: VsplitMode::default(),
+            status_flags: crate::ui::status_flags::FlagsMode::default(),
         }
     }
 }
@@ -189,6 +193,8 @@ struct FileLayout {
     color_depth: Option<ColorMode>,
     #[serde(default)]
     vsplit_mode: Option<VsplitMode>,
+    #[serde(default)]
+    status_flags: Option<crate::ui::status_flags::FlagsMode>,
 }
 
 /// Working directory a freshly-spawned pane tab opens in (the `^a c`
@@ -995,6 +1001,9 @@ impl Config {
         if let Some(m) = file.layout.vsplit_mode {
             self.layout.vsplit_mode = m;
         }
+        if let Some(f) = file.layout.status_flags {
+            self.layout.status_flags = f;
+        }
 
         // Pane: per-field merge for the same reason.
         if let Some(cmd) = file.pane.default_command {
@@ -1738,6 +1747,27 @@ mod tests {
             let cfg = Config::load_from(&[Some(&path)]).unwrap();
             assert_eq!(cfg.layout.color_depth, want, "toml={toml}");
         }
+    }
+
+    #[test]
+    fn status_flags_default_to_auto_and_parse_every_mode() {
+        use crate::ui::status_flags::FlagsMode;
+        assert_eq!(Config::default().layout.status_flags, FlagsMode::Auto);
+        for (toml, want) in [
+            ("\"auto\"", FlagsMode::Auto),
+            ("\"short\"", FlagsMode::Short),
+            ("\"full\"", FlagsMode::Full),
+        ] {
+            let tmp = tempdir().unwrap();
+            let path = tmp.path().join("rc.toml");
+            std::fs::write(&path, format!("[layout]\nstatus_flags = {toml}\n")).unwrap();
+            let cfg = Config::load_from(&[Some(&path)]).unwrap();
+            assert_eq!(cfg.layout.status_flags, want, "toml={toml}");
+        }
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[layout]\nstatus_flags = \"compact\"\n").unwrap();
+        assert!(Config::load_from(&[Some(&path)]).is_err());
     }
 
     #[test]

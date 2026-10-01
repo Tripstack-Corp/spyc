@@ -153,6 +153,26 @@ fn cmd_set_sort() {
     assert_eq!(s.left.sort_order, SortMode::Mtime);
 }
 
+/// `:set flags=` overrides `[layout] status_flags` for the run, as `:mouse`
+/// does `[mouse] capture`, so a config reload doesn't undo it.
+#[test]
+fn cmd_set_flags_overrides_the_config_for_the_run() {
+    use crate::ui::status_flags::FlagsMode;
+    let mut s = test_state();
+    assert_eq!(s.status_flags(), FlagsMode::Auto);
+    s.dispatch_command("set flags=short");
+    assert_eq!(s.status_flags(), FlagsMode::Short);
+    s.config.layout.status_flags = FlagsMode::Full;
+    assert_eq!(
+        s.status_flags(),
+        FlagsMode::Short,
+        "survives a config change"
+    );
+    s.dispatch_command("set flags=wide");
+    assert!(matches!(s.flash.as_ref().unwrap().kind, FlashKind::Error));
+    assert_eq!(s.status_flags(), FlagsMode::Short);
+}
+
 #[test]
 fn cmd_set_unknown_key() {
     let mut s = test_state();

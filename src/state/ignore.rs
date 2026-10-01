@@ -29,13 +29,28 @@ pub struct IgnoreMasks {
     pub mask2: Mask,
 }
 
+/// Both built-in masks start on, so the listing isn't cluttered.
+const BUILTIN_ON: bool = true;
+
+/// Whether mask `group` (1 or 2) starts on, as [`IgnoreMasks::apply_config`]
+/// leaves it: the built-in default, unless `[[ignore_masks]]` configures that
+/// group, in which case on if any of its entries is.
+pub fn default_enabled(configs: &[crate::config::IgnoreMask], group: u8) -> bool {
+    let mut entries = configs.iter().filter(|m| m.group == group).peekable();
+    if entries.peek().is_none() {
+        BUILTIN_ON
+    } else {
+        entries.any(|m| m.enabled)
+    }
+}
+
 impl Default for IgnoreMasks {
     fn default() -> Self {
         Self {
-            // Dotfiles — on by default so the listing is not cluttered.
-            mask1: Mask::new(&[".*"], true),
-            // Build/VCS artifacts — on by default for the same reason. Flip
-            // off with `o` when you need to see them.
+            // Dotfiles.
+            mask1: Mask::new(&[".*"], BUILTIN_ON),
+            // Build/VCS artifacts. Flip off with `o` when you need to see
+            // them.
             mask2: Mask::new(
                 &[
                     "*.o",
@@ -48,7 +63,7 @@ impl Default for IgnoreMasks {
                     "Makedepend",
                     "tags",
                 ],
-                true,
+                BUILTIN_ON,
             ),
         }
     }
@@ -83,16 +98,14 @@ impl IgnoreMasks {
                 .iter()
                 .flat_map(|m| m.patterns.iter().map(String::as_str))
                 .collect();
-            let enabled = group1.iter().any(|m| m.enabled);
-            self.mask1 = Mask::new(&pats, enabled);
+            self.mask1 = Mask::new(&pats, default_enabled(configs, 1));
         }
         if !group2.is_empty() {
             let pats: Vec<&str> = group2
                 .iter()
                 .flat_map(|m| m.patterns.iter().map(String::as_str))
                 .collect();
-            let enabled = group2.iter().any(|m| m.enabled);
-            self.mask2 = Mask::new(&pats, enabled);
+            self.mask2 = Mask::new(&pats, default_enabled(configs, 2));
         }
     }
 }
@@ -172,6 +185,27 @@ mod tests {
         // Both off — nothing hidden
         assert!(!masks.hides(".git"));
         assert!(!masks.hides("foo.o"));
+    }
+
+    /// A mask starts on unless its group is configured, and then on if any of
+    /// that group's entries is. Checked against values, not against
+    /// `apply_config`, which calls this and would agree with any answer.
+    #[test]
+    fn default_enabled_follows_the_configured_groups() {
+        let entry = |group, enabled| crate::config::IgnoreMask {
+            group,
+            patterns: vec!["*.tmp".into()],
+            enabled,
+        };
+        for (configs, want) in [
+            (vec![], (true, true)),
+            (vec![entry(1, false)], (false, true)),
+            (vec![entry(2, true), entry(2, false)], (true, true)),
+            (vec![entry(1, false), entry(2, false)], (false, false)),
+        ] {
+            let got = (default_enabled(&configs, 1), default_enabled(&configs, 2));
+            assert_eq!(got, want, "{configs:?}");
+        }
     }
 
     #[test]

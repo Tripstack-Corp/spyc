@@ -31,11 +31,18 @@
 # itself to the left column; "top_only" (aliases "half", "top") splits just the
 # file-list region and leaves the pane full-width below both columns. `^s f`
 # flips an open split either way, whatever it opened as.
+#
+# status_flags (default "auto"): how the status bar writes the focused
+# column's state. "auto" lists only what differs from rest, in words, and
+# switches to short forms (`[p:3 h:14]`) when the words would cut the path.
+# "short" always uses the short forms; "full" shows every field on every
+# frame. `:set flags=` changes it for the rest of the run.
 [layout]
 # status_position = "top"
 # chord_hint_delay_ms = 300
 # color_depth = "auto"
 # vsplit_mode = "full_height"
+# status_flags = "auto"
 
 # ── pane ──────────────────────────────────────────────────────────────
 # Default command pre-filled into the `^a c` (new pane tab) prompt.

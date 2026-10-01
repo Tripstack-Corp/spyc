@@ -172,6 +172,7 @@ impl App {
             config,
             // No runtime `:mouse` toggle yet — follow the config.
             mouse_capture_override: None,
+            status_flags_override: None,
             mode: Mode::Normal,
             project_home,
             session_name,
