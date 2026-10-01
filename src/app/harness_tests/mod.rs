@@ -16,16 +16,21 @@ fn key(c: char) -> KeyEvent {
 /// A stand-in agent `dir/bin/<name>` that writes the arguments it was started
 /// with to `dir/<name>.argv`, one per line, and waits. A path-qualified
 /// command is detected by its last component, so the pane treats it as `name`.
+///
+/// The list is written beside the file and renamed into place. Written in
+/// place, a reader could catch it after its first line, since nothing stops a
+/// shell writing `printf`'s lines one at a time.
 fn fake_agent(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let exe = bin.join(name);
+    let argv = dir.join(format!("{name}.argv"));
     std::fs::write(
         &exe,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexec sleep 30\n",
-            dir.join(format!("{name}.argv")).display()
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{argv}.tmp'\nmv '{argv}.tmp' '{argv}'\nexec sleep 30\n",
+            argv = argv.display()
         ),
     )
     .unwrap();
