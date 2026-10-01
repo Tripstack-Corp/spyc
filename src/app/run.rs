@@ -802,17 +802,14 @@ impl App {
             self.snapshot_pane_routing();
 
             // MVU Phase 2: one clock read for all PRE-recv timers
-            // (send_pending_resumes / find_crashed_restore_tab /
-            // watcher-stamp / refresh / git poll), matching their old
+            // (send_pending_resumes / watcher-stamp / refresh / git poll), matching their old
             // pre-recv local reads. POST-recv timers (activity rollover,
             // context-write) use `now_post` captured after recv returns.
             let now_pre = std::time::Instant::now();
 
-            // Session-restore: deferred `/resume` sends + crash-recovery prompt
-            // (see `handle_restore_resumes`).
-            if self.handle_restore_resumes(now_pre, &mut ctx) {
-                ctx.draw.mark(3);
-            }
+            // Session-restore: deferred `/resume` sends (see
+            // `handle_restore_resumes`).
+            self.handle_restore_resumes(now_pre, &mut ctx);
 
             // Drain buffered FsEvents + run the trailing-debounce listing
             // refresh (see `ingest_fs_and_maybe_refresh`).

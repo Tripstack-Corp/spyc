@@ -6,8 +6,6 @@
 //! `pager_handler`, `loop_steps`, `session`), so they're `pub` (or
 //! `pub(super)` for the one that only a sibling needs).
 
-use std::time::Duration;
-
 use super::{
     App, Effect, Mode, Pane, PaneTabs, Prompt, PromptKind, RESTORE_RESUME_ENTER_DELAY,
     RESTORE_RESUME_VERIFY_DELAY, RESTORE_RESUME_VERIFY_RETRIES, RESTORE_RESUME_VERIFY_TAIL,
@@ -635,41 +633,6 @@ impl App {
         }
     }
 
-    /// Locate a `claude --resume` tab from session restore that looks
-    /// broken (non-zero exit, or alive-but-printed-a-crash-dump within
-    /// the 30s window). Disarms the marker on tabs whose window has
-    /// passed without trouble, so a real user-driven exit later isn't
-    /// mistaken for a restore failure. Returns the index of the first
-    /// crashed tab found, if any.
-    pub fn find_crashed_restore_tab(&mut self, now: std::time::Instant) -> Option<usize> {
-        let tabs = self.runtime.pane_tabs.as_mut()?;
-        let window = Duration::from_secs(30);
-        let dump_grace = Duration::from_secs(3);
-        for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
-            if entry.info.restore_fallback.is_none() {
-                continue;
-            }
-            let age = now.duration_since(entry.info.spawn_at);
-            if age > window {
-                entry.info.restore_fallback = None;
-                continue;
-            }
-            let bad_exit = entry.pane.is_closed()
-                && entry.pane.exit_status().is_some_and(|s| s.exit_code() != 0);
-            // Always re-scan once dump_grace has elapsed: claude often
-            // prints the entire crash dump in <1s then sits quiescent,
-            // and `output_dirty` gets cleared on every render — gating
-            // on it would silently swallow the prompt.
-            let dump_signature = !entry.pane.is_closed()
-                && age >= dump_grace
-                && pane_has_crash_marker(&entry.pane.recent_lines(200));
-            if bad_exit || dump_signature {
-                return Some(i);
-            }
-        }
-        None
-    }
-
     pub fn start_new_tab_prompt(&mut self) {
         // Precedence: $SPYC_PANE_CMD > [pane] default_command in
         // .spycrc.toml > "claude" fallback. Env var wins so a user
@@ -1103,22 +1066,6 @@ impl App {
         let top = usable.saturating_sub(bottom);
         (top.max(1), cols.max(1))
     }
-}
-
-/// True when scrollback contains a known Claude/bun crash signature.
-/// These markers don't appear in healthy Claude startup output.
-fn pane_has_crash_marker(lines: &[String]) -> bool {
-    const MARKERS: &[&str] = &[
-        // bun's single-file runtime path; appears in unhandled-exception dumps.
-        "/$bunfs/root/",
-        // e.g. `g9H is not a function` on the resume path regression.
-        "is not a function",
-        // sandbox helper failed and `failIfUnavailable` is set.
-        "Error: sandbox required but unavailable",
-    ];
-    lines
-        .iter()
-        .any(|line| MARKERS.iter().any(|m| line.contains(m)))
 }
 
 #[cfg(test)]
