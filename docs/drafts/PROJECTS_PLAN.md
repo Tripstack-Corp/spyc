@@ -9,6 +9,13 @@ tree as of `main` after #518. Facts about today's code
 carry a `file:line`; where a decision needs the owner's call rather than an
 argument, it is listed under [Open questions](#open-questions-for-review).
 
+**Owner decisions so far** (2026-10-01; the rest of the doc is still in review):
+
+- Per-project configuration lives under `~/.config/spyc/`, not in the
+  project's directory (§1f). The same principle moves the MCP context marker
+  out of the working directory (§2).
+- The attention key is `Space !` (§4).
+
 The goal, from [ROADMAP.md](../../ROADMAP.md) → "The 2.3 horizon": stop managing
 several terminal windows. One spyc process holds several projects, each with its
 own columns, pane tabs and agents; a switcher moves between them; one attention
@@ -110,7 +117,7 @@ never serialized), **T** transient (dropped).
 | `project_home` | project, as `home` | It is the project's identity field now, and required: a project without a home has nothing to name it. `:project clear` goes away; `:project <path>` re-homes. | R |
 | `start_dir` | project | The `` ` `` target, and today the anchor for the project-local config layer and the context file (`bootstrap.rs:210`). All three are per-project meanings. Defaults to the home. | R |
 | `prev_dir` | project | `''` means "back where this column was", not "wherever I was in another project". | A |
-| `config` | project (`Arc`) | The project-local `.spycrc.toml` is by definition that project's. The `$HOME` layer is shared by reference; the merge is per project. See open question 2. | C (rebuilt from files) |
+| `config` | project (`Arc`) | Each project merges the `$HOME` layer (shared by reference) with its own per-project file under `~/.config/spyc/projects/` (§1f). | C (rebuilt from files) |
 | `user_keymap` | project | Derived from that project's `config.bindings`. | C |
 | `scope_registry` | **global**, with a change | Claims coordinate merges, and two projects can be worktrees of one repo. That is precisely the case coordination exists for. But a claim's `paths` are raw strings resolved against nothing (`scope_registry.rs:44-56`), so `src/*.rs` in one repo conflicts with `src/*.rs` in an unrelated one. 2.3 adds the claimant's repository (the common gitdir) to `ScopeClaim`, and `conflicts` compares within one repository only. | R |
 | `mounts` | global | Keyed by archive path. Two projects browsing one archive share its journal, which is the consistent answer: there is one container on disk. | A |
@@ -207,6 +214,41 @@ has: restoring a stale pick set is worse than restoring none.
   the one cost that scales with projects rather than with what's on screen, and
   the activity HUD should show the total.
 
+### 1f. Per-project configuration lives under `~/.config` (owner decision)
+
+A project's own settings go in a file the user owns, beside the rest of spyc's
+config, never in the project's directory:
+
+```
+~/.config/spyc/projects/<label>.toml        # config_root(), i.e. $XDG_CONFIG_HOME/spyc
+```
+
+```toml
+home = "~/src/spyc"          # which project this file configures
+
+[pane]
+tabs = ["claude", "zsh"]     # startup tabs when this project opens
+
+[colors]
+dir = "#88c0d0"              # e.g. tint each project so a glance says which one
+```
+
+- **Matching is by `home`, not by file name.** The file name is the project's
+  default label, and a home claimed by two files is a load warning naming both.
+  `Space n` on a directory with no file creates nothing: a project needs no file
+  until the user wants to configure it.
+- **It is trusted.** The file sits in the user's own config directory, as
+  `~/.spycrc.toml` and `init.lua` do (`state::config_root`, `state/mod.rs:84`),
+  so it is `Trust::Trusted`. Executing bindings, `[prompts]` and startup tabs work
+  from it without the consent a repo's file needs. That consent exists because a
+  repo is someone else's text; this file is the user's.
+- **Layering**, lowest first: `~/.spycrc.toml`, then the repo's `.spycrc.toml` if
+  one exists (`Trust::Project`, unchanged, for repos that ship one), then the
+  per-project file. The user's own per-project choice wins over the repo's.
+- **The schema is `.spycrc.toml`'s,** plus `home`. Reload watches the active
+  project's file along with `~/.spycrc.toml`. Nothing new is written into any
+  working directory.
+
 ---
 
 ## 2. MCP socket topology (question 2)
@@ -229,26 +271,32 @@ What changes:
 1. **Binding resolves to a project.** `McpCommand::PaneContext` searches every
    project's tabs (today it searches the one list, `app/mcp.rs:239-259`) and
    returns the project id with the tab. `Caller` stores it.
-2. **One context file per project, in its home.** Today one file lives at
-   `<start_dir>/.spyc-context-<pid>.json`, fixed at bootstrap
-   (`bootstrap.rs:210`; nothing reassigns it). One consequence: `spyc -r` from
-   another directory leaves the trusted root at the launch directory, not the
-   restored project. With projects, each home holds its own
-   `.spyc-context-<pid>.json`, written from that project's focused column. It
-   moves on re-home and is removed on close. Each pane's `SPYC_CONTEXT` names its
-   own project's file.
+2. **One context file per project, in the state directory.** Today one file
+   lives at `<start_dir>/.spyc-context-<pid>.json`, inside the working directory,
+   fixed at bootstrap (`bootstrap.rs:210`; nothing reassigns it). One
+   consequence: `spyc -r` from another directory leaves the trusted root at the
+   launch directory, not the restored project. With projects, each project's
+   context moves to the owner-private state directory, as
+   `<state>/context-<pid>-<project id>.json`, written from that project's focused
+   column and removed on close. Each pane's `SPYC_CONTEXT` names its own
+   project's file. Projects would otherwise multiply the one file spyc writes
+   into a working directory for its own sake, which §1f's principle rules out.
 3. **Read tools answer from the caller's project.** They run on the socket
    thread from the context file, with no `App` (`ARCHITECTURE.md`, "MCP
    server"), so the bound project decides which file. `search_root`, the `root`
    override and `allowed_roots` (`readers.rs:52-91`) are all computed from that
    project's file: its home is the trusted root, and its worktrees and focused
    column's chain extend it.
-4. **The trusted-root sidecar lists every home.** `mcp-<pid>.root` holds one
-   root today (`write_root_marker`, `server.rs:157-170`). It becomes one line
-   per open project, rewritten atomically on open, close and re-home. Marker
-   discovery (`collect_project_pids_in`) accepts a marker whose directory is
-   any listed root. The planted-marker defence is unchanged: a marker only
-   counts if the pid's own sidecar names its directory.
+4. **The trusted-root sidecar lists every home, and becomes the discovery
+   index.** `mcp-<pid>.root` holds one root today (`write_root_marker`,
+   `server.rs:157-170`). It becomes one line per open project, rewritten
+   atomically on open, close and re-home. With the context file out of the
+   working directory there is no in-tree marker to find, so discovery for an
+   agent started outside spyc reads the sidecars instead. It looks for a live
+   pid whose listed root contains the agent's cwd, nearest root first. The
+   planted-marker attack (`collect_project_pids_in`'s reason for cross-checking
+   a marker against the sidecar) no longer needs a defence, because it can't
+   happen: nothing an attacker can write into a repo is consulted.
 5. **Driving tools act on the caller's project, not the user's view.**
    `navigate_to`, `pick_files`, `set_filter` and `open_worktree` move the
    columns of the agent's own project. An agent in a background project must not
@@ -265,6 +313,18 @@ What changes:
    process the user runs, and SECURITY.md already says which.
 7. **Unattributed fallbacks stay "the focused tab"**, meaning the active tab of
    the active project (`resolve_report_target`, `app/mcp.rs:819-836`).
+
+**The same principle, applied further (a follow-up, not 2.3 scope).** spyc
+still writes agent config into working directories: `.mcp.json`,
+`.codex/config.toml`, `.agents/mcp_config.json` and the status hooks. They're
+there because each agent reads its project scope from there. But since #509 the
+MCP entry names no socket and the pane's env decides, so one entry in each
+agent's *user* scope would serve every pane. An org-deployed
+`managed-mcp.json` with that shape already works for claude (decisions log,
+2026-09-30). Moving them would stop
+the per-directory writes and the refcounted cleanup entirely. It changes what an
+agent started outside spyc sees: a spyc server that runs read-only, or none.
+That is why it wants its own issue and its own decision.
 
 What doesn't change: MCP entries still name no socket (SPYC-TRAP
 `mcp-entry-names-no-socket`), so there is nothing to take over. #509 deleted the
@@ -375,7 +435,22 @@ The leader today holds `w` (worktree submenu), `p`, `P`, `s`/`S`, `?` and `a`
 | `Space ]` / `Space [` | next / previous project | the bracket pair spyc uses for next/previous everywhere |
 | `Space n` | new project: prompt for a directory, defaulting to the focused column's worktree root; switches if that home is open | `n` is new, as in `Space w n` |
 | `Space x` | close the active project, with the live-children confirm `^a x` uses (`needs_live_child_confirm`) | `x` is close, as in `^a x` |
-| `Space !` | go to the agent that needs you: the oldest blocked tab in any project, then unseen done ones, switching project and tab and focusing the pane | see open question 3 |
+| `Space !` | go to the agent that needs you: the oldest blocked tab in any project, then unseen done ones, switching project and tab and focusing the pane | "urgent"; owner decision, 2026-10-01 |
+
+**From the pane, the leader is `^a Space`.** `Space` is literal text to the
+agent, so while the pane has the keyboard spyc sees only its prefixes
+(`is_spyc_meta_when_pane_focused`). `^a` wakes spyc, and `Space` then enters the
+leader, so every key above is `^a Space <key>` from inside an agent:
+`^a Space !` is three keys. That bridge is the only way a `Tier::Global` action
+reaches the pane, and the tier guard keeps it so. The attention jump is the one
+key a user reaches for *from* an agent pane, so it may earn `Tier::Meta` (the
+tier `Help` and `Quit` share), which may bind on both prefixes, making it
+`^a !` as well. See open question 2.
+
+Outside spyc — another terminal window, another app — no key reaches it. A
+terminal program can't register a system-wide hotkey. The signals that do
+reach the user there are the terminal title (§5) and the desktop notification
+(§6), whose job is to bring them back.
 
 **`Space p` and `Space P` keep their meanings,** scoped to the active project.
 `Space p` jumps the focused column to the project's home. `Space P` (and `gP`)
@@ -549,9 +624,10 @@ PR:
    project-level code names `projects[…]`.
 2. **Route results by project.** Git worker results carry `(ProjectId, Side)`;
    worktree job results carry the caller's project.
-3. **Per-project MCP.** A context file per home, `PaneContext` returning the
-   project, reads and driving tools on the caller's project, the sidecar as a
-   list, and `spyc/cwd` for unbound connections. Tests land first, against two
+3. **Per-project MCP.** A context file per project in the state directory,
+   `PaneContext` returning the project, reads and driving tools on the caller's
+   project, the sidecar as a list and as the discovery index, and `spyc/cwd`
+   for unbound connections. Tests land first, against two
    projects in one test app.
 4. **Manifest v2.** The v1 reader, `left_cwd`, `pid` and the picker labels.
 5. **Open, close and switch.** The `Space` keys, the switcher, stashing on a
@@ -559,7 +635,7 @@ PR:
    activation.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text and `Space !`.
-7. **The per-project config layer** (open question 2).
+7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).
 8. **Recently-closed projects in the switcher.**
 
 Steps 1 and 2 are invisible and can land as soon as this doc is approved. Steps
@@ -574,11 +650,10 @@ Steps 1 and 2 are invisible and can land as soon as this doc is approved. Steps
    save (`-r`'s "session picker", `:name`, the `session` segment, `Space s`).
    This doc calls the file a manifest and leaves the UI words alone. Renaming
    user-facing terms is its own change, and it wants the owner's word.
-2. **Per-project config.** §1 gives each project its own merge of `$HOME` and
-   its home's `.spycrc.toml`, so a project's colours and cosmetic bindings apply
-   while it's active. The alternative keeps today's single project-local layer
-   from the launch directory, which is simpler but ignores every other project's
-   file. The per-project merge is the recommendation, and it's the one
-   decision here that changes behaviour for a user who opens a second project.
-3. **The attention key.** `Space !` is free and reads as "urgent". The owner may
-   prefer a letter. The requirement is only that it sit on the leader.
+2. **`^a !` for the attention jump.** `Space !` is decided. Whether the jump
+   also earns `Tier::Meta`, so `^a !` reaches it in two keys from an agent pane
+   instead of `^a Space !`'s three, is a taxonomy call: Meta is today reserved
+   for help, quit and display toggles (§4).
+3. **Agent config in user scope.** Whether the follow-up in §2, one MCP entry
+   and one set of status hooks per agent's user scope instead of per directory,
+   gets an issue.
