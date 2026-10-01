@@ -47,6 +47,7 @@ status_position = "top"        # or "bottom" (vim/tmux convention; prompt sits a
 chord_hint_delay_ms = 300      # ms holding a chord (g, ^a, H) before the which-key popup; 0 disables
 color_depth = "auto"           # "auto" (truecolor if $COLORTERM says so, else 256), "truecolor", or "256"
 vsplit_mode = "full_height"    # shape `^s |` opens a vertical split in; or "top_only" (pane stays full-width below)
+status_flags = "auto"          # status-bar state: only what differs, short when tight; or "short", "full"
 
 [pane]
 default_command = "claude"     # pre-filled into the `^a c` new-tab prompt
@@ -121,6 +122,32 @@ Aliases: `full` for the first, `half` / `half_height` / `top` for the second.
 second commander (`^s n`) ignores the setting and always opens `top_only` — two
 peer browsers normally want one full-width pane beneath them — and `^s f` is how
 you make that one full-height too.
+
+### Status-bar state — `[layout] status_flags`
+
+The status bar ends with the focused column's state, and lists only what
+differs from rest:
+
+| full | short | shown when |
+|---|---|---|
+| `picks:3` | `p:3` | anything is picked |
+| `inv:2` | `i:2` | the inventory has items |
+| `m1:off` / `m2:on` | the same | a mask differs from its configured default |
+| `limit:*.rs` | `l:*.rs` | a `=` / `:limit` filter is active (`limit:picks` for `=!`) |
+| `hidden:14` | `h:14` | the masks or the filter hide entries |
+| `sort:mtime↑` | `s:t↑` | the sort isn't by name, ascending (`n` name, `s` size, `t` time, `e` ext) |
+
+An archive mount's badge, background tasks (when there's no pane divider to
+show them) and `[ZOOM]` appear as before.
+
+| value | behaviour |
+|-------|----------|
+| `auto` (default) | the full words, or the short forms when the words would cut the path |
+| `short` | always the short forms |
+| `full` | every field on every frame, `[picks:0 inv:0 m1:on m2:on hidden:14 sort:name]` — the bar before this setting |
+
+`:set flags=auto|short|full` changes it for the rest of the run; a config
+reload doesn't undo it.
 
 ### Startup tabs — `[pane] tabs`
 
