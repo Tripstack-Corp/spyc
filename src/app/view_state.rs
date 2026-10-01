@@ -259,12 +259,12 @@ pub struct ViewState {
     pub(super) scroll_pending_g: bool,
     // Module-private (type `PagerReturn` is module-private).
     pub(super) pending_pager_return: Option<PagerReturn>,
-    /// Path to the `.spyc-context.json` file (written each loop for MCP).
+    /// This process's MCP context file (`context::process_context_path`).
     pub(super) context_path: PathBuf,
     /// Last context snapshot written to disk — skip the write when the new
     /// snapshot compares equal (avoids serializing just to diff).
     pub(super) last_context: Option<crate::context::SpycContext>,
-    /// `.spyc-context.json` is stale and should be rewritten (debounced +
+    /// The context file is stale and should be rewritten (debounced +
     /// typing-burst-guarded).
     pub(super) context_dirty: bool,
     /// Whether the MCP socket server is running.

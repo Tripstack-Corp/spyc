@@ -613,8 +613,7 @@ impl App {
         // `break`s its result out of this loop so `run_teardown` ALWAYS runs.
         // The early `return`s that used to live here skipped teardown,
         // orphaning pane children (no graceful SIGTERM) and leaking the
-        // `.spyc-context-<pid>.json` marker on reader-death / handler-error
-        // exits.
+        // context file on reader-death / handler-error exits.
         let exit_result: Result<()> = loop {
             if self.state.should_quit {
                 break Ok(());

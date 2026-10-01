@@ -138,10 +138,9 @@ fn socket_path_in(state_dir: Option<PathBuf>, pid: u32) -> Option<PathBuf> {
 
 /// Trusted-root sidecar path for a PID, in the given state dir:
 /// `<state_dir>/mcp-<pid>.root`. The running spyc writes the directory
-/// it is rooted at here (next to its socket); discovery cross-checks a
-/// `.spyc-context-<pid>.json` marker's location against it so a planted
-/// marker — which an attacker *can* write into a repo, but whose pid is
-/// really rooted elsewhere — can't redirect attachment cross-project.
+/// it is rooted at here (next to its socket), and rewrites it when the root
+/// moves; it is discovery's only record of where a spyc is rooted, so nothing
+/// an attacker can write into a repo takes part.
 /// Parameterized on `state_dir` so tests can inject a temp dir (no env).
 pub fn root_marker_path_in(state_dir: &Path, pid: u32) -> PathBuf {
     state_dir.join(format!("mcp-{pid}.root"))
@@ -174,7 +173,7 @@ pub use hooks::{
     ensure_agy_status_hooks, ensure_claude_status_hooks, ensure_codex_status_hooks,
     set_status_trace,
 };
-pub use server::{cleanup_socket, start_socket_server};
+pub use server::{cleanup_socket, record_root, start_socket_server, sweep_orphan_root_markers};
 
 use server::{discover_live_socket, run_direct, run_proxy};
 
@@ -357,10 +356,10 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
 /// Socket resolution order:
 /// 1. `$SPYC_MCP_SOCK`, from the agent pane's env (spyc sets it when it launches
 ///    the agent) — the spyc that launched this agent
-/// 2. Project-scoped discovery: walk `caller_cwd` upward looking for
-///    `.spyc-context-<pid>.json` markers; map those PIDs to live
-///    sockets. Refuses cross-project attachment (a spyc running in
-///    a different project tree can no longer be picked up).
+/// 2. Project-scoped discovery: the live spycs whose recorded root
+///    (`mcp-<pid>.root`) contains `caller_cwd`, nearest first. Refuses
+///    cross-project attachment (a spyc rooted in a different project tree
+///    is never picked up).
 /// 3. Falls back to read-only direct mode if nothing matches.
 pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
     // Try explicit socket path from env first.

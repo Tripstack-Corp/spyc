@@ -147,7 +147,10 @@ ships with it (decisions log, 2026-09-29).
   inherit a settled anchor. Two spycs in one directory each keep their own
   agents, with nothing to take over (#509, closing
   [#22](https://github.com/Tripstack-Corp/spyc/issues/22) and
-  [#11](https://github.com/Tripstack-Corp/spyc/issues/11)).
+  [#11](https://github.com/Tripstack-Corp/spyc/issues/11)). And a `spyc -r`
+  that restores a project elsewhere anchors its agents' MCP on that project,
+  not the launch directory, with the context file out of the working tree
+  (#525, closing [#523](https://github.com/Tripstack-Corp/spyc/issues/523)).
 - **[#40](https://github.com/Tripstack-Corp/spyc/issues/40): columns are
   addressed by handle** (#504), the projects prep. Only render and fs-watch
   name `state.left` / `state.right`; everything else goes through `cur()`,
