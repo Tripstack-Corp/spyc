@@ -459,6 +459,7 @@ mod tests {
 
     fn dummy_snapshot() -> SpycContext {
         SpycContext {
+            root: PathBuf::from("/tmp"),
             cwd: PathBuf::from("/tmp"),
             cursor_file: None,
             picks: Vec::new(),

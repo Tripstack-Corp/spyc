@@ -208,7 +208,7 @@ impl App {
             user_host: user_host_string(),
             should_quit: false,
         };
-        let context_path = crate::context::context_path(&app_state.start_dir);
+        let context_path = crate::context::process_context_path(&app_state.start_dir);
         // Reap orphaned artifacts left by instances that exited WITHOUT running
         // teardown (SIGKILL / crash / `kill -9`): stale `.spyc-context-<pid>.json`
         // files and dead-PID `spyc` MCP entries in `.mcp.json` / `.codex/config.toml`.
@@ -217,8 +217,15 @@ impl App {
         // config), so this is safe to run before we write our own. Clean exits
         // still self-clean via `run_teardown`; this just stops orphans piling up.
         let our_pid = std::process::id();
+        // The launch dir is swept for the in-tree markers spyc wrote before
+        // #523 moved the context into the state dir.
+        let state_swept = crate::state::state_root().map_or(0, |dir| {
+            crate::context::sweep_orphan_context_files(&dir, our_pid)
+                + crate::mcp::sweep_orphan_root_markers(&dir, our_pid)
+        });
         let swept = crate::context::sweep_orphan_context_files(&app_state.start_dir, our_pid)
-            + crate::mcp::sweep_orphan_spyc_configs(&app_state.start_dir, our_pid);
+            + crate::mcp::sweep_orphan_spyc_configs(&app_state.start_dir, our_pid)
+            + state_swept;
         if swept > 0 {
             spyc_debug!("startup: reaped {swept} orphaned spyc artifact(s)");
         }
@@ -226,14 +233,15 @@ impl App {
         let (mcp_cmd_tx, mcp_cmd_rx) = std::sync::mpsc::channel();
         // Start the MCP Unix socket server so `spyc --mcp` (spawned by
         // Claude Code) can proxy to us for full read/write MCP access.
-        let mcp_running = crate::mcp::start_socket_server(context_path.clone(), mcp_cmd_tx)
-            .map_or_else(
-                |e| {
-                    spyc_debug!("MCP socket server failed to start: {e}");
-                    false
-                },
-                |()| true,
-            );
+        let mcp_running =
+            crate::mcp::start_socket_server(context_path.clone(), &app_state.start_dir, mcp_cmd_tx)
+                .map_or_else(
+                    |e| {
+                        spyc_debug!("MCP socket server failed to start: {e}");
+                        false
+                    },
+                    |()| true,
+                );
         // Background git-status worker. Owns the in-process gix
         // status read (status::repo_status) on cache miss so the chdir
         // UI returns immediately. Lives for the lifetime of the

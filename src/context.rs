@@ -12,6 +12,11 @@ use serde::Serialize;
 /// Snapshot of spyc's user-visible state, serialized to JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SpycContext {
+    /// The session's root: `start_dir`, which `spyc -r` moves to the restored
+    /// session's directory. The read tools trust it and the repo's worktrees
+    /// as `root` arguments (`mcp::readers::allowed_roots`), and the
+    /// `mcp-<pid>.root` sidecar records it for discovery.
+    pub root: PathBuf,
     /// Current working directory shown in the file list.
     pub cwd: PathBuf,
     /// Name of the file/dir under the cursor (if any).
@@ -69,11 +74,19 @@ pub struct ArchiveMountRef {
 /// server reads context from the correct spyc instance.
 pub const CONTEXT_ENV_VAR: &str = "SPYC_CONTEXT";
 
-/// Return the context file path for a given project root.
-/// Includes the PID so multiple spyc instances don't collide.
-pub fn context_path(project_root: &Path) -> PathBuf {
+/// The context file in `dir`, named for this process so instances don't
+/// collide.
+pub fn context_path(dir: &Path) -> PathBuf {
     let pid = std::process::id();
-    project_root.join(format!(".spyc-context-{pid}.json"))
+    dir.join(format!(".spyc-context-{pid}.json"))
+}
+
+/// Where this process keeps its context: the owner-private state dir, so
+/// nothing lands in the directory the user works in, and the path stays put
+/// when the root moves. With no state dir there is no MCP socket either, and
+/// the file goes in `launch_dir` for `SPYC_CONTEXT`'s direct mode.
+pub fn process_context_path(launch_dir: &Path) -> PathBuf {
+    context_path(&crate::state::state_root().unwrap_or_else(|| launch_dir.to_path_buf()))
 }
 
 /// Write context atomically: write to a temp file in the same directory,
@@ -82,6 +95,7 @@ pub fn context_path(project_root: &Path) -> PathBuf {
 pub fn write_context_file(path: &Path, ctx: &SpycContext) -> std::io::Result<()> {
     let json = serde_json::to_string_pretty(ctx).map_err(std::io::Error::other)?;
     let dir = path.parent().unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir)?;
     let tmp = dir.join(format!(".spyc-context-{}.tmp", std::process::id()));
     std::fs::write(&tmp, json.as_bytes())?;
     std::fs::rename(&tmp, path)?;
@@ -132,11 +146,24 @@ pub fn sweep_orphan_context_files(dir: &Path, our_pid: u32) -> usize {
 mod tests {
     use super::*;
 
+    /// #523: the context lives in the owner-private state dir, never in the
+    /// directory the user launched spyc from.
+    #[test]
+    fn the_context_file_lives_in_the_state_dir() {
+        let state = tempfile::tempdir().unwrap();
+        let launch = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(state.path(), || {
+            let path = process_context_path(launch.path());
+            assert_eq!(path.parent(), Some(state.path()));
+        });
+    }
+
     #[test]
     fn round_trip_context() {
         let tmp = tempfile::tempdir().unwrap();
         let path = context_path(tmp.path());
         let ctx = SpycContext {
+            root: PathBuf::from("/home/user/project"),
             cwd: PathBuf::from("/home/user/project"),
             cursor_file: Some("main.rs".into()),
             picks: vec![PathBuf::from("src/lib.rs"), PathBuf::from("src/main.rs")],
@@ -170,6 +197,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = context_path(tmp.path());
         let ctx = SpycContext {
+            root: tmp.path().to_path_buf(),
             cwd: PathBuf::from("/tmp"),
             cursor_file: None,
             picks: vec![],
@@ -232,6 +260,7 @@ mod tests {
     #[test]
     fn struct_equality_tracks_serialized_json() {
         let base = SpycContext {
+            root: PathBuf::from("/p"),
             cwd: PathBuf::from("/p"),
             cursor_file: Some("a.rs".into()),
             picks: vec![PathBuf::from("src/lib.rs")],

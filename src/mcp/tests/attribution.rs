@@ -40,6 +40,7 @@ fn fake_loop(live: &'static [&'static str]) -> (Sender<McpRequest>, Receiver<Mcp
 /// A context file saying the user is browsing `/user/y`.
 fn user_browsing_y(tmp: &tempfile::TempDir) -> PathBuf {
     let ctx = context::SpycContext {
+        root: tmp.path().to_path_buf(),
         cwd: PathBuf::from("/user/y"),
         cursor_file: None,
         picks: vec![],
