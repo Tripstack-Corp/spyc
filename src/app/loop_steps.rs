@@ -9,9 +9,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::{
-    App, ChordHint, Deadline, Mode, Prompt, PromptKind, RunCtx, arm_resume_deadlines, state,
-};
+use super::{App, ChordHint, Deadline, RunCtx, arm_resume_deadlines, state};
 
 impl App {
     /// One-shot full-repaint bookkeeping at the top of each iteration.
@@ -240,32 +238,13 @@ impl App {
     }
 
     /// MVU Phase 6 PR-C: pre-recv session-restore handling. Send any deferred
-    /// `/resume <sid>` for restored tabs whose banner has settled, arm the
-    /// RestoreSettle/ResumeEnter deadlines, and — if a restored claude tab
-    /// looks crashed (bad exit / crash dump) while in Normal mode — open the
-    /// crash-recovery prompt. Returns whether a redraw is needed (the prompt).
-    pub(crate) fn handle_restore_resumes(&mut self, now_pre: Instant, ctx: &mut RunCtx) -> bool {
+    /// `/resume <sid>` for restored tabs whose banner has settled, and arm the
+    /// RestoreSettle/ResumeEnter deadlines.
+    pub(crate) fn handle_restore_resumes(&mut self, now_pre: Instant, ctx: &mut RunCtx) {
         self.send_pending_resumes(now_pre);
         // Arm RestoreSettle/ResumeEnter at the earliest pending resume across
         // all tabs so the wait can wake for it.
         arm_resume_deadlines(&mut ctx.scheduler, self.runtime.pane_tabs.as_ref());
-
-        let crash_idx = self.find_crashed_restore_tab(now_pre);
-        if let Some(tab_idx) = crash_idx
-            && matches!(self.state.mode, Mode::Normal)
-        {
-            if let Some(tabs) = self.runtime.pane_tabs.as_mut()
-                && let Some(entry) = tabs.tabs_mut().get_mut(tab_idx)
-            {
-                entry.info.restore_fallback = None;
-            }
-            self.state.mode = Mode::Prompting(Prompt::simple(
-                PromptKind::ClaudeCrashRecover { tab_idx },
-                "claude crash detected — start fresh and recover with /resume? [Y/n] ",
-            ));
-            return true;
-        }
-        false
     }
 
     /// MVU Phase 6 PR-C: post-recv MCP context-file write. Event-driven via

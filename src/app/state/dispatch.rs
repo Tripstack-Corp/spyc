@@ -390,7 +390,6 @@ impl AppState {
                 PromptResult::Handled
             }
             PromptKind::RemoveConfirm
-            | PromptKind::ClaudeCrashRecover { .. }
             | PromptKind::HookConsent { .. }
             | PromptKind::SkillUpdate { .. }
             | PromptKind::ProjectTabsConsent { .. }

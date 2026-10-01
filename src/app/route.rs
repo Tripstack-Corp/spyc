@@ -147,8 +147,7 @@ pub(super) struct RouteSnapshot {
 /// non-meta arm the bottom pane / scrollback / scroll-pager would otherwise
 /// own (2b, 3, 4, 5) carries `!snap.is_prompting` and falls through to the
 /// Prompt arm. Without it, a prompt opened while the pane is focused and
-/// closed/scrolling (e.g. the `claude` crash-recovery `[Y/n]`) is shadowed
-/// and unanswerable.
+/// closed or scrolling is shadowed and unanswerable.
 pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSink {
     // Modal layer — a single typed value (precedence decided by `active_modal`)
     // maps straight to its sink. Eats every input kind before the content layer.
@@ -613,10 +612,9 @@ mod tests {
 
     #[test]
     fn prompt_wins_over_exited_pane() {
-        // The headline bug: a saved-focused pane crashes, the
-        // ClaudeCrashRecover `[Y/n]` prompt opens — but focus is still
-        // Pane and pane_closed is true, so arm 4 (PaneExitedFlash) used to
-        // swallow every y/n/Enter/Esc, making the prompt unanswerable.
+        // A prompt opened while focus is still on a pane that has exited:
+        // arm 4 (PaneExitedFlash) used to swallow every y/n/Enter/Esc,
+        // making the prompt unanswerable.
         let snap = RouteSnapshot {
             is_prompting: true,
             has_pane_tabs: true,
