@@ -149,20 +149,25 @@ impl BoundAction {
         }
     }
 
-    /// True for bindings that, on a single keypress, run a shell command or
-    /// act on an arbitrary baked-in path — the capabilities an untrusted
-    /// project-local `.spycrc.toml` must not be able to introduce (see
-    /// `Config::load_default`). `Plain` built-in actions (incl. the
-    /// copy/move/remove *prompts*, which carry no payload — the user still
-    /// types the target) and the harmless `PatternPick`/`ToggleMaskFixed`
-    /// are not executing. `Command` is — it dispatches arbitrary `:` input,
-    /// including the `:!`/`:;` shell symbols. `Prompt` is too — it types text
-    /// at an agent.
+    /// True for bindings that, on a single keypress, run a shell command, act
+    /// on an arbitrary baked-in path or type text at an agent — the
+    /// capabilities an untrusted project-local `.spycrc.toml` must not be able
+    /// to introduce (see `Config::load_default`). `Command` dispatches
+    /// arbitrary `:` input, including the `:!`/`:;` shell symbols, and
+    /// `Prompt` types a template at an agent. A `Plain` built-in action is
+    /// executing only when it [writes to a pane](Action::writes_to_pane); the
+    /// copy/move/remove *prompts* carry no payload (the user still types the
+    /// target), and `PatternPick`/`ToggleMaskFixed` are harmless.
     pub const fn is_executing(&self) -> bool {
-        matches!(
-            self,
-            Self::UnixCmd(_) | Self::Jump(_) | Self::Command(_) | Self::Lua(_) | Self::Prompt(_)
-        )
+        match self {
+            Self::UnixCmd(_)
+            | Self::Jump(_)
+            | Self::Command(_)
+            | Self::Lua(_)
+            | Self::Prompt(_) => true,
+            Self::Plain(a) => a.writes_to_pane(),
+            Self::PatternPick(_) | Self::ToggleMaskFixed(_) => false,
+        }
     }
 }
 

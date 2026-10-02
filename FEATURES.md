@@ -1189,8 +1189,12 @@ unambiguous:
 (`.spycrc.toml` in the working directory) configuration:
 
 - **Keymap DSL** — `map KEY action [args]` syntax to rebind any key to
-  any action. A key is one key: a char, a Ctrl-combo (`^P`) or a named key
-  (`<F2>`); a multi-key chord binds from `init.lua` with `spyc.map`. Beyond the
+  any action by its snake_case name, the names `spyc.action` takes (listed
+  in CONFIGURATION.md → "Action names"; one with a parameter takes it as
+  `=value`, e.g. `map <F8> harpoon_jump =2`). `unmap KEY` makes a key do
+  nothing, and a later `map` binds it again. A key is one key: a char, a
+  Ctrl-combo (`^P`) or a named key (`<F2>`); a multi-key chord binds from
+  `init.lua` with `spyc.map`. Beyond the
   built-in actions, a key can run a `unix` shell template
   (`map ^P unix ps aux`), a `jump`/`patternpick`, or a **`:` command**
   (`map A command graveyard`), or a **Lua script**
@@ -1200,7 +1204,9 @@ unambiguous:
   `:` commands with no default key (graveyard, activity monitor,
   long-list, file-type, chmod) — `--print-config` lists them as
   commented `command` examples to copy-and-enable. `unix` / `command` /
-  `lua` / `jump` / `prompt` only take effect in `~/.spycrc.toml` (a project
+  `lua` / `jump` / `prompt`, and the four actions that type at the pane
+  (`pane_send_selection`, `pane_send_prefix`, `pane_pipe_content`,
+  `pane_pipe_inventory`), only take effect in `~/.spycrc.toml` (a project
   file can't bind a single-keypress code runner in an untrusted clone).
 - **Prompt templates** — `[prompts]` in `~/.spycrc.toml` names the messages
   you send an agent over and over; `map KEY prompt <name>` (or `:prompt
@@ -1221,8 +1227,8 @@ unambiguous:
   readers; a failure — bad path, not-a-repo, invalid regex — raises a Lua
   error, "nothing here" is an empty table); drive the view (`navigate` / `pick`
   / `filter` / `report_status`), invoke any built-in action by its
-  canonical snake_case name — the full keymap vocabulary, not just the
-  curated DSL verbs (`spyc.action("git_blame")`, `spyc.action("down", 3)`;
+  canonical snake_case name — the same names a `.spycrc.toml` `map` takes
+  (`spyc.action("git_blame")`, `spyc.action("down", 3)`;
   `set_mark` / `jump_mark` are excluded, since they need a mark letter with
   no sensible default — use `spyc.cmd(":…")` there) — or a `:` command
   (`spyc.cmd(":grep foo")`),
