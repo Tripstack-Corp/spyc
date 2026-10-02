@@ -12,6 +12,7 @@
 //! meet at [`profile_for`] (kind → profile, for restored tabs) and
 //! [`detect`] (command → profile, for live panes).
 
+pub mod chrome;
 pub mod detect_rules;
 pub mod resume;
 
@@ -272,6 +273,15 @@ pub trait AgentProfile: Sync {
         &[]
     }
 
+    /// How many of `lines` (a pane's recent text, oldest first) are what the
+    /// agent printed, the rest being its own chrome pinned below them: input
+    /// box, status line. `gf` and `J` scan only the printed part, or claude's
+    /// status line (`1 CLAUDE.md | 1 MCPs`) outranks every path above it.
+    /// Default: all of them.
+    fn output_len(&self, lines: &[String]) -> usize {
+        lines.len()
+    }
+
     /// Which keypresses scroll this agent's own view, for an agent that does
     /// **not** speak mouse.
     ///
@@ -471,6 +481,9 @@ impl AgentProfile for ClaudeProfile {
             config_label: ".claude/settings.json",
             live_reload: true,
         })
+    }
+    fn output_len(&self, lines: &[String]) -> usize {
+        chrome::claude_output_len(lines)
     }
 }
 

@@ -26,6 +26,10 @@ pub struct Prompt {
     pub buffer: String,
     /// When set, this prompt uses the vi line editor with history.
     pub editor: Option<LineEditor>,
+    /// What an empty buffer submits, drawn dimmed in its place (`J` offers
+    /// the last path the pane printed). Typing hides it; `→`/`End` on the
+    /// empty buffer loads it for editing. Honoured by the vi-editor prompts.
+    pub suggestion: Option<String>,
 }
 
 impl Prompt {
@@ -36,6 +40,7 @@ impl Prompt {
             prefix: prefix.into(),
             buffer: String::new(),
             editor: None,
+            suggestion: None,
         }
     }
 
@@ -46,6 +51,23 @@ impl Prompt {
             prefix: prefix.into(),
             buffer: String::new(),
             editor: Some(LineEditor::new()),
+            suggestion: None,
+        }
+    }
+
+    /// The renderer's view of this prompt. One constructor for the draw and
+    /// for the layout's height reservation, so the two can't wrap differently.
+    pub fn line<'a>(
+        &'a self,
+        theme: &'a crate::ui::theme::Theme,
+    ) -> crate::ui::prompt::PromptLine<'a> {
+        crate::ui::prompt::PromptLine {
+            prefix: &self.prefix,
+            buffer: &self.buffer,
+            theme,
+            cursor_pos: self.editor.as_ref().map(|e| e.cursor),
+            vi_mode: self.editor.as_ref().map(|e| e.mode),
+            suggestion: self.suggestion.as_deref(),
         }
     }
 }

@@ -27,7 +27,7 @@ bound too, and on by default — see [Mouse](#mouse).
 | `u` / `-` | Climb to parent |
 | `/` | Search current listing (incremental; glob-aware, `^`/`$` anchors) |
 | `~` / `Home` | Jump to home (`H` is the harpoon prefix) |
-| `J` | Jump to any path |
+| `J` | Jump to any path; with nothing typed, `Enter` takes the newest path the pane printed |
 | `F` | Project-wide fuzzy filename finder (gitignore-aware) |
 | `:grep <pat>` | Project-wide content search (embedded ripgrep matcher) |
 

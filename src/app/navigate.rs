@@ -17,6 +17,21 @@ use crate::spyc_debug;
 use super::file_ops::PagerDest;
 use super::{ActivateIntent, App, Effect, EntryKind, PostAction, View, state};
 
+/// The path reference `gf` and `J` act on: the newest one in `lines` that
+/// exists, resolved against the pane's cwd and then spyc's — an agent prints
+/// paths relative to the project root whatever its shell's cwd is.
+pub(super) fn find_path_ref(
+    lines: &[String],
+    pane_cwd: &Path,
+    spyc_cwd: &Path,
+) -> Option<crate::pane::pathref::PathRef> {
+    crate::pane::pathref::extract_path_ref(lines, pane_cwd).or_else(|| {
+        (pane_cwd != spyc_cwd)
+            .then(|| crate::pane::pathref::extract_path_ref(lines, spyc_cwd))
+            .flatten()
+    })
+}
+
 impl App {
     /// Navigate spyc to a path matched in the pane (uppercase intent
     /// for a Path match). Mirrors `goto_file_navigate`'s post-resolve
@@ -100,13 +115,7 @@ impl App {
             }
         }
 
-        let pathref = crate::pane::pathref::extract_path_ref(&lines, &pane_cwd).or_else(|| {
-            (pane_cwd != spyc_cwd)
-                .then(|| crate::pane::pathref::extract_path_ref(&lines, &spyc_cwd))
-                .flatten()
-        });
-
-        let Some(pathref) = pathref else {
+        let Some(pathref) = find_path_ref(&lines, &pane_cwd, &spyc_cwd) else {
             self.state
                 .flash_error("no path reference found in pane output");
             return;

@@ -177,6 +177,11 @@ pub enum Wake {
     /// `ClipboardPasteDone`; `apply_clipboard_writes` drains the slot in the
     /// pre-recv scan and flashes anything that failed.
     ClipboardCopy,
+    /// `J`'s off-thread default (`spawn_jump_default`) found its path, or
+    /// didn't, and pushed the answer onto `runtime.jump_default_results`.
+    /// Payloadless, same shape as `ClipboardPasteDone`; `apply_jump_defaults`
+    /// drains the slot in the pre-recv scan.
+    JumpDefault,
     /// An off-thread inventory op (`Effect::Inventory`) finished.
     Inventory,
     /// An off-thread MCP worktree op (create/remove/clean) finished and pushed

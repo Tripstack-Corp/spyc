@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::keymap::Action;
 
 use crate::app::file_ops::FileOp;
-use crate::app::{Effect, Mode, PostAction, Prompt, PromptKind, View};
+use crate::app::{Effect, Mode, PaneTextKind, PaneTextSink, PostAction, Prompt, PromptKind, View};
 
 use super::{AppState, ApplyResult};
 
@@ -235,6 +235,12 @@ impl AppState {
                 // it before submitting -- e.g. recall ~/src/spyc
                 // and append `/src` before pressing Enter.
                 self.mode = Mode::Prompting(Prompt::shell(PromptKind::Jump, "jump to: "));
+                // The default it offers is read from the pane, which the
+                // Model can't see.
+                return ApplyResult::Post(vec![Effect::ReadPaneText {
+                    kind: PaneTextKind::Pickable(200),
+                    then: PaneTextSink::JumpDefault,
+                }]);
             }
 
             // -- File operation prompts --

@@ -78,7 +78,10 @@ const SECTIONS: &[Section] = &[
             ("D", "open in pager (top pane, bottom pane stays visible)"),
             ("u  -", "climb to parent"),
             ("~  Home", "go to home directory ($HOME)"),
-            ("J", "jump to a path (~, $VAR expanded; ? for history)"),
+            (
+                "J",
+                "jump to a path (~, $VAR; ? history; offers the pane's last path)",
+            ),
             (
                 "F",
                 "find file (project-wide fuzzy: gitignore-aware walk, type to filter)",

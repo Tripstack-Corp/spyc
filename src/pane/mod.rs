@@ -527,10 +527,11 @@ impl Pane {
     /// the viewport are still found.
     pub fn recent_lines(&self, max_lines: usize) -> Vec<String> {
         // The seam's `contents()` is viewport-only — it returns at most
-        // terminal_height rows at the current scrollback offset. Walking the
-        // full scrollback requires the page-walk in `lines_from_scrollback`.
-        let all: Vec<String> = self.with_screen_mut(|s| {
-            crate::ui::scrollback::lines_from_scrollback(s)
+        // terminal_height rows at the current scrollback offset. Reaching
+        // into the scrollback requires the page-walk in
+        // `tail_lines_from_scrollback`.
+        self.with_screen_mut(|s| {
+            crate::ui::scrollback::tail_lines_from_scrollback(s, max_lines)
                 .into_iter()
                 .map(|l| {
                     l.spans
@@ -539,12 +540,7 @@ impl Pane {
                         .collect::<String>()
                 })
                 .collect()
-        });
-        if all.len() > max_lines {
-            all[all.len() - max_lines..].to_vec()
-        } else {
-            all
-        }
+        })
     }
 
     // ---- Scroll mode ------------------------------------------------

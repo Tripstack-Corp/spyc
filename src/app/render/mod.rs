@@ -522,13 +522,7 @@ impl App {
         if layout.prompt.width == 0 || layout.prompt.height == 0 {
             return;
         }
-        let pl = crate::ui::prompt::PromptLine {
-            prefix: &p.prefix,
-            buffer: &p.buffer,
-            theme: &self.view.theme,
-            cursor_pos: p.editor.as_ref().map(|e| e.cursor),
-            vi_mode: p.editor.as_ref().map(|e| e.mode),
-        };
+        let pl = p.line(&self.view.theme);
         let cap = (area.height / 2).max(1);
         let lines = pl.line_count(layout.prompt.width).min(cap);
         if lines <= layout.prompt.height {

@@ -125,6 +125,7 @@ mod harpoon;
 mod image_gallery;
 pub mod image_ops;
 mod inventory_ops;
+mod jump_default;
 mod key_dispatch;
 mod loop_steps;
 mod lua;

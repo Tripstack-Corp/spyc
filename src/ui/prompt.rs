@@ -15,6 +15,8 @@ pub struct PromptLine<'a> {
     pub cursor_pos: Option<usize>,
     /// Vi mode indicator (None = simple prompt).
     pub vi_mode: Option<ViMode>,
+    /// Drawn dimmed while `buffer` is empty: what Enter would submit.
+    pub suggestion: Option<&'a str>,
 }
 
 impl PromptLine<'_> {
@@ -34,6 +36,10 @@ impl PromptLine<'_> {
             .fg(self.theme.prompt_prefix)
             .add_modifier(Modifier::BOLD);
         let text_style = Style::default().fg(self.theme.status_path);
+        let ghost_style = text_style.add_modifier(Modifier::DIM);
+        let ghost = self
+            .suggestion
+            .filter(|s| self.buffer.is_empty() && !s.is_empty());
 
         let mode_tag = match self.vi_mode {
             Some(ViMode::Normal) => "[V] ",
@@ -46,7 +52,18 @@ impl PromptLine<'_> {
             (self.prefix.to_string(), prefix_style),
         ];
 
-        if let Some(pos) = self.cursor_pos {
+        if let (Some(_), Some(ghost)) = (self.cursor_pos, ghost) {
+            // The cursor sits on the suggestion's first character, the way a
+            // shell autosuggestion reads: typing starts here and replaces it.
+            let mut chars = ghost.chars();
+            let first = chars.next().map(String::from).unwrap_or_default();
+            let cursor_style = match self.vi_mode {
+                Some(ViMode::Normal) => ghost_style.bg(self.theme.cursor_bg),
+                _ => ghost_style.add_modifier(Modifier::UNDERLINED),
+            };
+            runs.push((first, cursor_style));
+            runs.push((chars.as_str().to_string(), ghost_style));
+        } else if let Some(pos) = self.cursor_pos {
             // Vi-mode prompt: highlight the char under `pos` (block in Normal,
             // underline in Insert); the rest is plain buffer text.
             let chars: Vec<char> = self.buffer.chars().collect();
@@ -90,6 +107,9 @@ impl PromptLine<'_> {
                     .fg(self.theme.status_suffix)
                     .add_modifier(Modifier::SLOW_BLINK),
             ));
+            if let Some(ghost) = ghost {
+                runs.push((ghost.to_string(), ghost_style));
+            }
         }
         runs
     }
@@ -190,6 +210,7 @@ mod tests {
             theme: &theme,
             cursor_pos: Some(10),
             vi_mode: Some(ViMode::Insert),
+            suggestion: None,
         };
         assert_eq!(prompt.line_count(200), 1, "fits on one row when wide");
         let narrow = prompt.line_count(20);
@@ -208,6 +229,7 @@ mod tests {
             theme: &theme,
             cursor_pos: None,
             vi_mode: None,
+            suggestion: None,
         };
         let rows = render_prompt_rows(&prompt, 20, prompt.line_count(20));
         assert!(
@@ -232,6 +254,7 @@ mod tests {
             theme: &theme,
             cursor_pos: None,
             vi_mode: None,
+            suggestion: None,
         };
         let out = render_prompt_to_string(&prompt, 40);
         insta::assert_snapshot!(out);
@@ -251,6 +274,7 @@ mod tests {
             theme: &theme,
             cursor_pos: Some(14), // one past the final `t`
             vi_mode: Some(ViMode::Insert),
+            suggestion: None,
         };
         assert_eq!(render_prompt_to_string(&prompt, 40), "[I] !this is a test_");
     }
@@ -266,6 +290,7 @@ mod tests {
             theme: &theme,
             cursor_pos: Some(5), // on the `i` of `is`
             vi_mode: Some(ViMode::Insert),
+            suggestion: None,
         };
         assert_eq!(render_prompt_to_string(&prompt, 40), "[I] !this is a test");
     }
@@ -283,6 +308,7 @@ mod tests {
                 theme: &theme,
                 cursor_pos: Some(pos),
                 vi_mode: Some(ViMode::Normal),
+                suggestion: None,
             };
             let out = render_prompt_to_string(&prompt, 40);
             assert!(
@@ -291,6 +317,61 @@ mod tests {
             );
             assert_eq!(out, format!("[V] !{buffer}"));
         }
+    }
+
+    fn jump_prompt<'a>(theme: &'a Theme, buffer: &'a str, mode: ViMode) -> PromptLine<'a> {
+        PromptLine {
+            prefix: "jump to: ",
+            buffer,
+            theme,
+            cursor_pos: Some(buffer.chars().count()),
+            vi_mode: Some(mode),
+            suggestion: Some("~/src/spyc/Cargo.toml"),
+        }
+    }
+
+    /// The suggestion stands where the typing would go, with the cursor on its
+    /// first character and no `_` beside it, and every glyph of it is dimmed.
+    #[test]
+    fn empty_buffer_draws_the_suggestion_dimmed_under_the_cursor() {
+        let theme = Theme::default();
+        for mode in [ViMode::Insert, ViMode::Normal] {
+            let prompt = jump_prompt(&theme, "", mode);
+            let out = render_prompt_to_string(&prompt, 60);
+            assert!(
+                out.ends_with("jump to: ~/src/spyc/Cargo.toml"),
+                "{mode:?}: {out:?}"
+            );
+            let ghost: String = prompt.wrapped_lines(60)[0]
+                .spans
+                .iter()
+                .filter(|s| s.style.add_modifier.contains(Modifier::DIM))
+                .map(|s| s.content.as_ref())
+                .collect();
+            assert_eq!(ghost, "~/src/spyc/Cargo.toml", "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn typing_hides_the_suggestion() {
+        let theme = Theme::default();
+        let out = render_prompt_to_string(&jump_prompt(&theme, "~/d", ViMode::Insert), 60);
+        assert_eq!(out, "[I] jump to: ~/d_");
+    }
+
+    /// The layout reserves rows from the same runs, so a long suggestion grows
+    /// the prompt instead of being cut off.
+    #[test]
+    fn a_long_suggestion_wraps_like_typed_text() {
+        let theme = Theme::default();
+        let prompt = jump_prompt(&theme, "", ViMode::Insert);
+        let typed = PromptLine {
+            buffer: "~/src/spyc/Cargo.toml",
+            suggestion: None,
+            ..jump_prompt(&theme, "", ViMode::Insert)
+        };
+        assert_eq!(prompt.line_count(12), typed.line_count(12));
+        assert!(prompt.line_count(12) > 1);
     }
 
     #[test]
@@ -302,6 +383,7 @@ mod tests {
             theme: &theme,
             cursor_pos: Some(5),
             vi_mode: Some(ViMode::Insert),
+            suggestion: None,
         };
         let out = render_prompt_to_string(&prompt, 40);
         insta::assert_snapshot!(out);
@@ -316,6 +398,7 @@ mod tests {
             theme: &theme,
             cursor_pos: Some(0),
             vi_mode: Some(ViMode::Normal),
+            suggestion: None,
         };
         let out = render_prompt_to_string(&prompt, 40);
         insta::assert_snapshot!(out);
