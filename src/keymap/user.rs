@@ -1,8 +1,9 @@
 //! User-supplied keymap bindings — the target of `.spycrc` parsing.
 //!
 //! A user binding marries a `KeyChord` (how the binding is triggered) to a
-//! `BoundAction` (what to do). The `Resolver` consults the user table
-//! first; if nothing matches, it falls back to the built-in defaults.
+//! `BoundAction` (what to do). For a key that doesn't complete a pending
+//! chord, the `Resolver` consults the user table first; if nothing matches,
+//! it falls back to the built-in defaults.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
