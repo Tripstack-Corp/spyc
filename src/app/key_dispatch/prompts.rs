@@ -335,6 +335,21 @@ impl App {
             }
         }
 
+        // `→`/`End` on an empty buffer load the suggestion for editing: the
+        // keys a shell autosuggestion is taken with, and no-ops otherwise when
+        // nothing is typed.
+        if matches!(key.code, KeyCode::Right | KeyCode::End)
+            && let Mode::Prompting(p) = &mut self.state.mode
+            && p.buffer.is_empty()
+            && let Some(suggestion) = p.suggestion.clone()
+        {
+            if let Some(editor) = p.editor.as_mut() {
+                editor.set_content_keep_mode(&suggestion);
+            }
+            p.buffer = suggestion;
+            return Vec::new();
+        }
+
         // Feed key to the editor.
         let result = {
             let Mode::Prompting(prompt) = &mut self.state.mode else {
@@ -349,10 +364,17 @@ impl App {
 
         match result {
             EditResult::Submit => {
-                let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal)
+                let Mode::Prompting(mut p) = std::mem::replace(&mut self.state.mode, Mode::Normal)
                 else {
                     return Vec::new();
                 };
+                // An empty buffer is showing the suggestion, so that's what it
+                // submits — and what history records.
+                if p.buffer.is_empty()
+                    && let Some(suggestion) = p.suggestion.take()
+                {
+                    p.buffer = suggestion;
+                }
                 // Push to the appropriate history before dispatching.
                 // Buckets stay isolated -- shell, pane command, pane
                 // cwd, jump destinations, and `:` commands don't

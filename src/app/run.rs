@@ -726,6 +726,11 @@ impl App {
                 self.run_effects(paste_fx, terminal, &foreground_exec);
             }
 
+            // `J`'s default path landed (woke via `Message::Wake(Wake::JumpDefault)`).
+            if self.apply_jump_defaults() {
+                ctx.draw.mark(3);
+            }
+
             // Drain finished Lua runs (woke via `Message::Wake(Wake::Lua)`): apply the
             // requests the script produced, running any effects they translate to.
             let (lua_draw, lua_fx) = self.handle_lua_done();

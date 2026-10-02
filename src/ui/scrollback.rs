@@ -52,6 +52,16 @@ use crate::pane::engine::{TerminalScreen, Wide};
 /// restored before returning. Callers can keep their own scroll
 /// state across the call.
 pub fn lines_from_scrollback<S: TerminalScreen>(screen: &mut S) -> Vec<Line<'static>> {
+    tail_lines_from_scrollback(screen, usize::MAX)
+}
+
+/// The newest `max` lines of [`lines_from_scrollback`], reading only the
+/// scrollback pages that hold them: `gf` and `J` want the last couple of
+/// hundred rows of a 10,000-row history, not all of it rendered and dropped.
+pub fn tail_lines_from_scrollback<S: TerminalScreen>(
+    screen: &mut S,
+    max: usize,
+) -> Vec<Line<'static>> {
     let saved_offset = screen.scrollback();
     let (rows_u16, cols_u16) = screen.size();
     let rows_len = rows_u16 as usize;
@@ -69,13 +79,14 @@ pub fn lines_from_scrollback<S: TerminalScreen>(screen: &mut S) -> Vec<Line<'sta
     screen.set_scrollback(usize::MAX);
     let scrollback_len = screen.scrollback();
 
-    let mut out = Vec::with_capacity(scrollback_len + rows_len);
+    let history = max.saturating_sub(rows_len).min(scrollback_len);
+    let mut out = Vec::with_capacity(history + rows_len);
 
-    // Walk scrollback in `rows_len`-sized pages from oldest to
-    // newest. Each iteration reads exactly `chunk` rows of pure
-    // scrollback content, where `chunk` is `rows_len` for full
-    // pages and the remainder on the partial last page.
-    let mut remaining = scrollback_len;
+    // Walk the newest `history` rows of scrollback in `rows_len`-sized
+    // pages from oldest to newest. Each iteration reads exactly `chunk`
+    // rows of pure scrollback content, where `chunk` is `rows_len` for
+    // full pages and the remainder on the partial last page.
+    let mut remaining = history;
     while remaining > 0 {
         let chunk = remaining.min(rows_len);
         screen.set_scrollback(remaining);
@@ -103,6 +114,9 @@ pub fn lines_from_scrollback<S: TerminalScreen>(screen: &mut S) -> Vec<Line<'sta
     // positioning of text jumps when entering ^a-v". Mirroring
     // the screen geometry verbatim makes ^a-v feel like a frozen
     // copy of the live pty.
+    if out.len() > max {
+        out.drain(..out.len() - max);
+    }
     out
 }
 
@@ -364,6 +378,25 @@ mod tests {
         let mut expected: Vec<String> = (1..=20).map(|i| format!("line{i:02}")).collect();
         expected.push(String::new());
         assert_eq!(plain, expected);
+    }
+
+    /// Every tail length, including ones that end mid-page and ones shorter
+    /// than the live screen, is exactly the end of the full walk.
+    #[test]
+    fn tail_walk_is_the_end_of_the_full_walk() {
+        let payload: String = (1..=20).fold(String::new(), |mut acc, i| {
+            use std::fmt::Write as _;
+            let _ = write!(acc, "line{i:02}\r\n");
+            acc
+        });
+        let mut p = parser_with(3, 20, 100, payload.as_bytes());
+        p.screen_mut().set_scrollback(4);
+        let full = plain_lines(&lines_from_scrollback(p.screen_mut()));
+        for max in 0..=full.len() + 2 {
+            let tail = plain_lines(&tail_lines_from_scrollback(p.screen_mut(), max));
+            assert_eq!(tail, full[full.len().saturating_sub(max)..], "max = {max}");
+            assert_eq!(p.screen().scrollback(), 4, "offset restored, max = {max}");
+        }
     }
 
     #[test]

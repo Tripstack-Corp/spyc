@@ -72,7 +72,12 @@ do from here?", modelled on Neovim's which-key.
 - **u / -** climb to the parent directory (cursor returns to the dir you came from)
 - **~ / Home** jump to home (`H` is the harpoon prefix — see Harpoon)
 - **J** jump to any path (with `~` and `$VAR` expansion, frecency-ranked
-  suggestions from visit history)
+  suggestions from visit history). With nothing typed it offers the
+  newest path the active pane printed — the one `gf` would find — dimmed
+  in the prompt: `Enter` goes there (a file opens its directory with the
+  cursor on it), `→`/`End` loads it for editing, and typing replaces it.
+  The paths are checked on a worker thread, so the prompt opens at once
+  even when one of them sits on a mount that's stopped answering.
 - **F** project-wide fuzzy filename finder. Walks the focused
   commander's worktree root (its repo root, else `PROJECT_HOME`,
   else the current dir) honouring `.gitignore`, ranks
@@ -465,6 +470,10 @@ spyc's workflow: browse files above, talk to Claude below.
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of
   output (including scrollback) so paths in large diffs are still found.
+  A path wrapped onto the next row — by the terminal, or by the agent's
+  own line wrapping — is put back together. In a claude pane the scan
+  stops at its input box, so the status line under it (which names
+  `CLAUDE.md`) can't outrank what claude printed.
 
 ### Multi-tab
 
