@@ -376,13 +376,18 @@
 #   map <KEY> prompt <name>         — type the [prompts] template <name> into the pane
 #   map <KEY> patternpick =<glob>   — pick files matching a glob
 #   map <KEY> jump =<path>          — jump to a directory
+#   map <KEY> <action>              — any built-in action by name (CONFIGURATION.md → Action names)
+#   map <KEY> <action> =<value>     — one with a parameter, e.g. harpoon_jump =3
+#   unmap <KEY>                     — the key does nothing (a later map rebinds it)
 #
 # <KEY> is one key: a char (`f`), a Ctrl-combo (`^P`), or a named key
 # (`<F2>`). Lines starting with `#` inside the array are comments.
 #
 # NOTE: `unix`, `command`, `lua`, `jump` and `prompt` only take effect in THIS file
 # (~/.spycrc.toml) — a project-local .spycrc.toml can't bind them (they could
-# run arbitrary code on a single keypress in an untrusted clone). Lua scripts
+# run arbitrary code on a single keypress in an untrusted clone). Nor can it bind
+# the four actions that type at the pane: `pane_send_selection`,
+# `pane_send_prefix`, `pane_pipe_content` and `pane_pipe_inventory`. Lua scripts
 # load only from ~/.config/spyc/lua/; the engine runs them off-thread with an
 # instruction-budget + ceiling kill switch, and `:lua off` / `--no-lua` disable
 # it entirely.
@@ -406,6 +411,9 @@
 #   "map ^Y command graveyard",    # recover soft-deleted files
 #   "map z lua mymacro",           # run ~/.config/spyc/lua/mymacro.lua
 #   "map <F6> prompt review",      # type [prompts] review into the pane
+#   "map <F7> git_blame",          # any action by name
+#   "map <F8> harpoon_jump =2",    # one with a parameter
+#   "unmap q",                     # silence the reserved macro key
 # ]
 
 # ── prompts ───────────────────────────────────────────────────────────

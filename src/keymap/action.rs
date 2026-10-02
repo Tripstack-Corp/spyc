@@ -239,6 +239,19 @@ pub enum Tier {
 }
 
 impl Action {
+    /// Writes to the active pane's input: a path list, a file's contents or the
+    /// prefix byte. A project `.spycrc.toml` may not bind these
+    /// ([`super::BoundAction::is_executing`]), since they type text at an agent.
+    pub const fn writes_to_pane(&self) -> bool {
+        matches!(
+            self,
+            Self::PaneSendSelection
+                | Self::PaneSendPrefix
+                | Self::PanePipeContent
+                | Self::PanePipeInventory
+        )
+    }
+
     /// The binding-taxonomy tier this action belongs to. Explicitly enumerates
     /// the `Global` / `Pane` / `Meta` actions; everything else is `Frame` (the
     /// default), so a new global/pane action must be tagged here or the
@@ -428,10 +441,10 @@ impl Action {
     }
 
     /// A stable, machine-readable snake_case name for this action — the vocabulary
-    /// the Lua `spyc.action(name)` bridge (and any future name-addressed dispatch)
-    /// resolves against. Distinct from [`Action::describe`] (human prose) and the
-    /// curated `.spycrc` DSL verbs in [`crate::config::dsl::parse_action`] (a
-    /// smaller, alias-rich set): this covers **every** variant.
+    /// the Lua `spyc.action(name)` bridge and a `.spycrc` `map` resolve against.
+    /// Distinct from [`Action::describe`] (human prose) and the curated `.spycrc`
+    /// DSL verbs in [`crate::config::dsl::parse_action`] (a smaller, alias-rich
+    /// set matched first): this covers **every** variant.
     ///
     /// The `match self` is exhaustive on purpose — that's the completeness guard.
     /// A new variant won't compile until it's named here, and the
@@ -592,8 +605,9 @@ impl Action {
 /// Resolve a snake_case [`Action::canonical_name`] back to an [`Action`],
 /// constructing parametric variants with sensible defaults (`up` → `Up(1)`,
 /// `remove_prompt` → `RemovePrompt(None)`, `harpoon_jump` → `HarpoonJump(1)`,
-/// …). This is the resolver behind Lua's `spyc.action(name)` — it accepts the
-/// **full** action vocabulary, unlike the curated `.spycrc` DSL verbs.
+/// …). This is the resolver behind Lua's `spyc.action(name)` and the `.spycrc`
+/// DSL's fallback past its curated verbs; the DSL takes a parametric action's
+/// parameter as `=value` instead of these defaults.
 ///
 /// Stays in lockstep with [`Action::canonical_name`] via the
 /// `action_names_round_trip` guard test: every variant's canonical name must
@@ -822,8 +836,7 @@ mod tests {
         }
     }
 
-    /// The headline promise of PR-A: full-vocabulary actions the curated DSL
-    /// never exposed are now resolvable by snake_case name.
+    /// Actions outside the curated DSL verbs resolve by snake_case name.
     #[test]
     fn full_vocabulary_actions_resolve() {
         assert_eq!(action_from_name("git_blame"), Some(Action::GitBlame));

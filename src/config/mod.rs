@@ -1934,6 +1934,40 @@ dir = "#aabbcc"
         );
     }
 
+    /// The actions that write to a pane's input type the repo's own text at
+    /// your agent, so a project rc may not bind them; the rest of the action
+    /// vocabulary binds from one, and all of it from `$HOME`.
+    #[test]
+    fn project_config_may_not_bind_an_action_that_writes_to_a_pane() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join(".spycrc.toml");
+        std::fs::write(
+            &path,
+            r#"keymap = [
+    "map j pane_pipe_content",
+    "map k pane_pipe_inventory",
+    "map l pane_send_selection",
+    "map m pane_send_prefix",
+    "map K git_blame",
+]
+"#,
+        )
+        .unwrap();
+
+        let mut project = Config::default();
+        project.load_one(&path, Trust::Project).unwrap();
+        let kept: Vec<String> = project
+            .bindings
+            .iter()
+            .map(|b| b.action.describe())
+            .collect();
+        assert_eq!(kept, ["git blame (cursor file)"]);
+
+        let mut home = Config::default();
+        home.load_one(&path, Trust::Trusted).unwrap();
+        assert_eq!(home.bindings.len(), 5);
+    }
+
     /// A prompt template is text typed at your agent, so only `$HOME` may
     /// define one: a project rc's `[prompts]` would otherwise put a repo's
     /// words behind a key you bound yourself. It is dropped, and the warning
