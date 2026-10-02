@@ -114,8 +114,10 @@ foundations work continues throughout.
 2.2 lands the prerequisites Projects needs and closes the bugs a daily driver
 hits weekly. Every item is one or the other. Scope and sequencing:
 [`docs/drafts/V2_2_PLAN.md`](docs/drafts/V2_2_PLAN.md). **2.2 tags once the
-whole list is done, and not before.** Everything else already merged to `main`
-ships with it (decisions log, 2026-09-29).
+whole list is done, and not before.** For `PROJECTS_PLAN.md`, done means
+authored: its approval gates 2.3, not the tag (decisions log, 2026-10-02).
+Everything else already merged to `main` ships with it (decisions log,
+2026-09-29).
 
 **Shipped on `main`:**
 
@@ -677,6 +679,16 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   now refcounted like the status hooks, so only the last spyc out removes it.
   The alternative, a prompt at agent launch, would have kept one owner per
   directory and still sent the losing spyc's new agents to the winner.
+- **`PROJECTS_PLAN.md` gates 2.3, not the 2.2 tag** (2026-10-02). The
+  2026-09-29 entry declined an engine-only 2.2 because it would ship neither
+  the prerequisites nor `PROJECTS_PLAN.md`; the bar it set was shipping the
+  doc. The plan's own exit criterion puts approval "before 2.3 opens", but its
+  progress note said the tag waited for all of it, so the two disagreed about
+  which gate it was. The weaker one wins. Every line of 2.2 code is on `main`,
+  and the engine's case for landing in 2.2 is soak, which is worth more with
+  crates.io users on it than with one daily driver. Holding the tag on a
+  design review adds nothing to the code under it. The doc ships authored and
+  in review, and 2.3 opens only once it is approved.
 
 ## Doc map
 
