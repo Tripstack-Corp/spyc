@@ -77,17 +77,64 @@ fn user_binding_wins_over_builtin() {
     );
 }
 
+/// Every chord prefix the resolver arms, by the key that arms it.
+fn chord_prefixes() -> Vec<KeyEvent> {
+    vec![
+        key('g'),
+        ctrl('a'),
+        ctrl('w'),
+        ctrl('s'),
+        key('['),
+        key(']'),
+        key('H'),
+        key('W'),
+        key('m'),
+        key('\''),
+        key('y'),
+        key('d'),
+        key('Z'),
+        key(' '),
+    ]
+}
+
+/// The second key of a chord completes the chord, whatever the user bound
+/// that key to on its own: `map f unix file %` must leave `gf` jumping to the
+/// file. Walks every continuation the which-key popup lists, so a chord added
+/// later is covered too.
 #[test]
-fn user_binding_resets_pending() {
-    let mut r = Resolver::new();
-    feed(&mut r, key('g')); // enter pending G
-    assert!(r.is_pending());
-    let user = UserKeymap::from_bindings(vec![crate::keymap::user::UserBinding {
-        chord: crate::keymap::user::KeyChord::Char('g'),
-        action: BoundAction::Plain(Action::Noop),
-    }]);
-    r.feed(key('g'), &user);
-    assert!(!r.is_pending());
+fn no_user_binding_preempts_a_chords_second_key() {
+    let mut checked = 0;
+    for prefix in chord_prefixes() {
+        let mut armed = Resolver::new();
+        feed(&mut armed, prefix);
+        assert!(armed.is_pending(), "{prefix:?} arms no chord");
+        for entry in armed.continuations() {
+            let ChordEntry::Act(label, want) = entry else {
+                continue;
+            };
+            // A label lists alternatives (`n ]`); a range (`1-9`) or a named
+            // key (`↓`) isn't one char to bind.
+            for c in label.split(' ').filter_map(|t| {
+                let mut chars = t.chars();
+                matches!((chars.next(), chars.next()), (Some(c), None) if c.is_ascii_graphic())
+                    .then(|| t.chars().next().expect("one char"))
+            }) {
+                let user = UserKeymap::from_bindings(vec![crate::keymap::user::UserBinding {
+                    chord: crate::keymap::user::KeyChord::Char(c),
+                    action: BoundAction::UnixCmd("user".to_string()),
+                }]);
+                let mut r = Resolver::new();
+                feed(&mut r, prefix);
+                assert_eq!(
+                    r.feed(key(c), &user),
+                    ResolverOutcome::Action(want.clone()),
+                    "{prefix:?} then `{c}` with `{c}` user-bound"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 50, "only {checked} continuations checked");
 }
 
 // Regression: when a built-in chord prefix is pending (^a, ], y, …),
@@ -234,21 +281,40 @@ fn user_binding_for_letter_does_not_preempt_worktree_chord() {
     assert_eq!(out, ResolverOutcome::Action(Action::WorktreeList));
 }
 
+/// The `--print-config` template's own first example, `map f unix file %`,
+/// used to turn `gf` into `file %`.
 #[test]
-fn g_chord_remains_user_overridable() {
-    // Counter-test: `g` is the deliberate exception. A user binding
-    // for the second char of a g-chord still wins.
+fn a_user_binding_for_f_leaves_gf_jumping_to_the_file() {
     let mut r = Resolver::new();
     let user = UserKeymap::from_bindings(vec![crate::keymap::user::UserBinding {
-        chord: crate::keymap::user::KeyChord::Char('d'),
-        action: BoundAction::UnixCmd("custom-d".to_string()),
+        chord: crate::keymap::user::KeyChord::Char('f'),
+        action: BoundAction::UnixCmd("file %".to_string()),
     }]);
-    r.feed(key('g'), &user);
-    let out = r.feed(key('d'), &user);
+    assert_eq!(r.feed(key('g'), &user), ResolverOutcome::Pending);
     assert_eq!(
-        out,
-        ResolverOutcome::User(BoundAction::UnixCmd("custom-d".to_string()))
+        r.feed(key('f'), &user),
+        ResolverOutcome::Action(Action::GotoFile)
     );
+    // At the top level the binding is the user's.
+    assert_eq!(
+        r.feed(key('f'), &user),
+        ResolverOutcome::User(BoundAction::UnixCmd("file %".to_string()))
+    );
+}
+
+/// A binding for the prefix key itself fires before its chord can arm.
+#[test]
+fn a_user_binding_for_a_prefix_key_wins() {
+    let mut r = Resolver::new();
+    let user = UserKeymap::from_bindings(vec![crate::keymap::user::UserBinding {
+        chord: crate::keymap::user::KeyChord::Char('g'),
+        action: BoundAction::Plain(Action::Noop),
+    }]);
+    assert_eq!(
+        r.feed(key('g'), &user),
+        ResolverOutcome::User(BoundAction::Plain(Action::Noop))
+    );
+    assert!(!r.is_pending());
 }
 
 // ── special keys ──────────────────────────────────────────────

@@ -245,22 +245,15 @@ impl Resolver {
     /// Feed a key through the resolver, first consulting the user keymap
     /// and falling through to the built-in default bindings.
     pub fn feed(&mut self, ev: KeyEvent, user: &UserKeymap) -> ResolverOutcome {
-        // User bindings win at the top level (and for the `g` chord —
-        // see below). For the explicit chord prefixes (`^a`, `[`, `]`,
-        // `H`, `W`, `m`, `'`, `y`), the pending state wins so the
-        // second key completes the chord. Without this, any user
-        // binding for a single letter (e.g. `n`, `p`, `g`, `1`) would
-        // silently break the corresponding chord (`^a-n`, `]g`, `H1`,
-        // `yp`, etc.) — the user reported `^a-n`/`^a-p` flashing the
-        // pending indicator and then disappearing because their `n`/`p`
-        // bindings preempted the chord resolution.
-        //
-        // `g` is the deliberate exception: bare `g` is also a vi motion
-        // fragment that users may want to remap (the
-        // `user_binding_resets_pending` test covers this), so chords
-        // built on `g` (`gd`, `gf`, …) remain user-overridable.
-        let chord_locked = !matches!(self.pending, PendingSeq::Normal | PendingSeq::G);
-        if !chord_locked && let Some(action) = user.find(&ev) {
+        // User bindings win at the top level only. Once a chord prefix is
+        // pending, the next key completes the chord: a user binding is for a
+        // single key, so letting it win there would break every chord built on
+        // that key (`map f …` breaking `gf`, `map n …` breaking `^a n`). A
+        // user binding for a prefix key itself (`map g …`) still wins, since
+        // it fires before the chord can arm.
+        if self.pending == PendingSeq::Normal
+            && let Some(action) = user.find(&ev)
+        {
             self.reset();
             return ResolverOutcome::User(action.clone());
         }

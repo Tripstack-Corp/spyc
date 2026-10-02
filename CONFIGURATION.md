@@ -621,7 +621,9 @@ One string per binding in a `keymap = [ ... ]` array. Forms:
 `<KEY>` is a single char (`f`), a Ctrl-combo (`^P`), or a named key (`<F2>`). The
 DSL binds single keys — for multi-key chords, use `init.lua`'s `spyc.map`.
 Later lines win, so a `map` after an `unmap` of the same key binds it again.
-`unmap` of a chord prefix (`g`, `y`, `H`) silences the whole chord.
+`unmap` of a chord prefix (`g`, `y`, `H`) silences the whole chord, but a
+binding for any other key leaves the chords that end in it alone:
+`map f unix file %` doesn't change `gf`.
 
 > **`^a` and `^w` are reserved.** spyc intercepts both as chord prefixes, so a
 > shell (or tmux) running inside the pane never sees readline's
