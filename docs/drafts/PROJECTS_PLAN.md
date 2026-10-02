@@ -12,8 +12,9 @@ argument, it is listed under [Open questions](#open-questions-for-review).
 **Owner decisions so far** (2026-10-01; the rest of the doc is still in review):
 
 - Per-project configuration lives under `~/.config/spyc/`, not in the
-  project's directory (§1f). The same principle moves the MCP context marker
-  out of the working directory (§2).
+  project's directory (§1f). The same principle moved the MCP context marker
+  out of the working directory, which landed in 2.2 for the one root a spyc
+  has today (§2, #525).
 - The attention key is `Space !` (§4).
 
 The goal, from [ROADMAP.md](../../ROADMAP.md) → "The 2.3 horizon": stop managing
@@ -266,37 +267,47 @@ bound connection already knows its project. That is the lookup the
 pane-identity proposal promised: "which pane called" and "which project it
 belongs to" are one lookup.
 
+**Already landed (2.2, #525, closing #523).** Items 2 and 4 below shipped
+for the one root a spyc has today, because the launch-anchored marker was a
+bug before it was a projects problem: `spyc -r` from another directory left
+the trusted root behind.
+
+- The context file lives in the state directory,
+  `<state>/.spyc-context-<pid>.json`, and nothing is written into the working
+  directory for it.
+- `SpycContext::root` carries the root (`start_dir`, which restore moves).
+  `allowed_roots` trusts that root, not the file's location.
+- `write_context` rewrites the sidecar when the root moves.
+- Discovery reads only the sidecars.
+
+What 2.3 adds is the plural: a file per project, and a sidecar line per
+home.
+
 What changes:
 
 1. **Binding resolves to a project.** `McpCommand::PaneContext` searches every
    project's tabs (today it searches the one list, `app/mcp.rs:239-259`) and
    returns the project id with the tab. `Caller` stores it.
-2. **One context file per project, in the state directory.** Today one file
-   lives at `<start_dir>/.spyc-context-<pid>.json`, inside the working directory,
-   fixed at bootstrap (`bootstrap.rs:210`; nothing reassigns it). One
-   consequence: `spyc -r` from another directory leaves the trusted root at the
-   launch directory, not the restored project. With projects, each project's
-   context moves to the owner-private state directory, as
-   `<state>/context-<pid>-<project id>.json`, written from that project's focused
-   column and removed on close. Each pane's `SPYC_CONTEXT` names its own
-   project's file. Projects would otherwise multiply the one file spyc writes
-   into a working directory for its own sake, which §1f's principle rules out.
+2. **One context file per project, in the state directory.** Since #525 a spyc
+   keeps one file, `<state>/.spyc-context-<pid>.json`, whose `root` is the
+   session's. With projects, each project gets its own,
+   `<state>/.spyc-context-<pid>-<project id>.json`, with that project's home as
+   `root`. Each is written from its project's focused column and removed when
+   the project closes. Each pane's `SPYC_CONTEXT` names its own project's file.
 3. **Read tools answer from the caller's project.** They run on the socket
    thread from the context file, with no `App` (`ARCHITECTURE.md`, "MCP
    server"), so the bound project decides which file. `search_root`, the `root`
-   override and `allowed_roots` (`readers.rs:52-91`) are all computed from that
-   project's file: its home is the trusted root, and its worktrees and focused
-   column's chain extend it.
-4. **The trusted-root sidecar lists every home, and becomes the discovery
-   index.** `mcp-<pid>.root` holds one root today (`write_root_marker`,
-   `server.rs:157-170`). It becomes one line per open project, rewritten
-   atomically on open, close and re-home. With the context file out of the
-   working directory there is no in-tree marker to find, so discovery for an
-   agent started outside spyc reads the sidecars instead. It looks for a live
-   pid whose listed root contains the agent's cwd, nearest root first. The
-   planted-marker attack (`collect_project_pids_in`'s reason for cross-checking
-   a marker against the sidecar) no longer needs a defence, because it can't
-   happen: nothing an attacker can write into a repo is consulted.
+   override and `allowed_roots` are all computed from that project's file.
+   `allowed_roots` already trusts the root a context names (#525), so a
+   project's home is its trusted root with no further change, and its worktrees
+   and focused column's chain extend it.
+4. **The trusted-root sidecar lists every home.** Since #525 the sidecar is
+   discovery's index: `collect_project_pids_in` reads the sidecars and nothing
+   in the caller's tree, takes the live pids whose root contains the agent's
+   cwd, and keeps the nearest root. So the planted-marker attack can't happen
+   at all. `mcp-<pid>.root` holds one root. With projects it becomes one line
+   per open project, rewritten atomically on open, close and re-home, and
+   discovery matches against every line.
 5. **Driving tools act on the caller's project, not the user's view.**
    `navigate_to`, `pick_files`, `set_filter` and `open_worktree` move the
    columns of the agent's own project. An agent in a background project must not
@@ -329,9 +340,10 @@ That is why it wants its own issue and its own decision.
 What doesn't change: MCP entries still name no socket (SPYC-TRAP
 `mcp-entry-names-no-socket`), so there is nothing to take over. #509 deleted the
 takeover machinery the §7 brief asks about. `dir_owners` stays keyed by pid.
-Status-hook consent stays keyed by project root. The orphan sweep, which runs in
-`start_dir` today (`bootstrap.rs:218-223`), runs in each home as its project
-opens.
+Status-hook consent stays keyed by project root. The orphan sweep already runs
+in the state directory (#525), where dead spycs' context files, sidecars and
+sockets now live, so it needs nothing per project. Its pass over the launch
+directory only clears markers that older spycs wrote there.
 
 ---
 
@@ -408,11 +420,11 @@ documents how each one does it. Shell tabs lose their scrollback on restart,
 exactly as they do today. The daemon is the answer to that (3.0), not the
 manifest.
 
-**Found while answering this:** `TabInfo.restore_fallback` is never set to
-`Some` anywhere in `src/`, so `find_crashed_restore_tab` skips every tab and the
-`ClaudeCrashRecover` prompt can't fire. Either it's wired up or it's deleted
-before 2.3 builds on the restore path. That's a separate issue, not this doc's
-call.
+**Found while answering this, and since fixed:** `TabInfo.restore_fallback`
+was never set, so the `ClaudeCrashRecover` prompt couldn't fire. It guarded a
+`claude --resume` mount crash that restore stopped risking in v1.17.9. The
+dead machinery was deleted in 2.2 (#524, closing #522), so 2.3 builds on a
+restore path without it.
 
 ---
 
@@ -624,10 +636,10 @@ PR:
    project-level code names `projects[…]`.
 2. **Route results by project.** Git worker results carry `(ProjectId, Side)`;
    worktree job results carry the caller's project.
-3. **Per-project MCP.** A context file per project in the state directory,
-   `PaneContext` returning the project, reads and driving tools on the caller's
-   project, the sidecar as a list and as the discovery index, and `spyc/cwd`
-   for unbound connections. Tests land first, against two
+3. **Per-project MCP.** A context file per project (the single-root version
+   landed in #525), `PaneContext` returning the project, reads and driving tools
+   on the caller's project, the sidecar as a list of homes, and `spyc/cwd` for
+   unbound connections. Tests land first, against two
    projects in one test app.
 4. **Manifest v2.** The v1 reader, `left_cwd`, `pid` and the picker labels.
 5. **Open, close and switch.** The `Space` keys, the switcher, stashing on a
