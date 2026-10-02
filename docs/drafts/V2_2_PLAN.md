@@ -1,15 +1,17 @@
 # spyc 2.2 — projects-prep and the daily-driver loop
 
-**Status:** accepted scope, sequencing draft. The seven items below are
-decided; the ordering, the per-item technical detail and the exit criteria are
-this document's proposal.
+**Status:** shipped, apart from §7's approval. Reconciled against `fed859b7`
+on 2026-10-02: each item's section, the exit criteria and the docs list say
+what shipped, and a section's plan, where kept, is the record of what was
+proposed. Archived when 2.2 tags.
 **Measured against:** `9df4d7a` (`main`, `2.2.0-CURRENT`).
 **Predecessor:** [`docs/archive/LAUNCH_PLAN_2_0.md`](../archive/LAUNCH_PLAN_2_0.md)
 (the 2.0 distribution pass). Strategy context: `ROADMAP.md` → "Road to 2.2".
-**Progress (2026-09-30):** §1, §2, §3, §8, and all of §6's bugs (#326, #452,
-#34, #327, #9, #22, #11) are on `main`. §4, §5 and §7 are still open; the
-Status column below tracks each item. 2.2 tags once all of it is done, per the
-ROADMAP decisions log (2026-09-29). The one release blocker outside the scope,
+**Progress (2026-10-02):** every item is on `main`. §7's deliverable,
+`PROJECTS_PLAN.md`, is authored (#520) and in the owner's review. The tag waits
+for the doc to ship, not for its approval: approval gates 2.3, which is where
+its exit criterion always put it (ROADMAP decisions log, 2026-10-02). The one
+release blocker outside the scope,
 [#490](https://github.com/Tripstack-Corp/spyc/issues/490) (publishing
 `spyc-vt-sys` to crates.io), is closed.
 
@@ -68,16 +70,19 @@ file, which carries no pane identity.
 
 What this closes:
 
-- **The F1 target design.** The decisions-log entry names per-pane root
-  validation as where the MCP `root` override should end up, blocked on this
-  transport. With attribution, the session-wide allowed set stays as the
-  fallback and per-pane roots narrow it.
+- **The F1 target design, decided the other way.** The decisions-log entry
+  named per-pane root validation as where the MCP `root` override should end
+  up, blocked on this transport. With the transport built, narrowing was
+  dropped (decisions log, 2026-09-30): the id is forgeable, so it restricts
+  nothing, and it would reject the worktrees an agent creates. The
+  session-wide allowed set is the only one.
 - **`get_spyc_context` answering for the caller.** Today it reports the focused
   column, so an agent working in worktree X is told about worktree Y whenever
   the user browses elsewhere.
-- **Scope-registry ownership.** `register_scope` claims are owner-labelled by
-  convention. Attribution lets a claim bind to a pane, and `release_scope`
-  refuse one the caller doesn't own.
+- **Scope-registry ownership, as a default.** `register_scope` and
+  `wait_for_scope_clear` take the caller's own tab when the call names none
+  (#507). `release_scope` still drops a claim by id whoever asks: attribution,
+  not authorization, as SECURITY.md says.
 
 The proposal's four conditions on B all hold: bind the id to the connection and
 never re-read it per call; validate it against live tabs on receipt and drop it
@@ -231,10 +236,17 @@ dictate what gets typed at an agent, so decide this explicitly and default to
 
 ## 6. The daily-driver bug set
 
-Six issues. Each paragraph says where the behaviour lives and what is already
-known. None of them is a fix design.
+Seven issues, in five subsections: #452 is #34's adapter half, and #22 + #11
+were one investigation. Each subsection opens with what shipped; the rest is
+the pre-fix investigation, kept as the record.
 
 ### #326 — the first keystrokes into a fresh pane are dropped
+
+**Shipped (#464).** The cause was not a pty race. The status-hook consent
+prompt, raised after the pane spawned and took focus, swallowed every key that
+wasn't `y`/`n`, so a fresh agent's first words never reached it, and a `y`
+among them granted consent. The investigation below is the record of what was
+suspected first.
 
 A fixed-length prefix (10 characters in the reported run) never reaches the
 child. Reproducible on demand: it was found re-recording the README hero GIF,
@@ -261,6 +273,11 @@ without `-i`. Land the failing test first.
 
 ### #327 — a partially-failed `remove_worktree` strands the worktree
 
+**Shipped (#500).** The tree is renamed aside and its admin dir removed
+before the delete runs, so a delete that fails partway strands bytes, never
+half a worktree, and running `remove_worktree` again finishes one an older
+spyc left half-removed.
+
 The issue carries a complete diagnosis, verified against the tree.
 `remove_inner` (`src/git/worktree.rs`) removes in two non-atomic steps —
 `remove_dir_all(path)`, then `remove_dir_all(admin_dir)` — and on macOS the
@@ -283,6 +300,9 @@ Frequency understates it: `create_worktree`/`remove_worktree` is the workflow
 AGENTS.md tells every agent to use, and recovery is three manual git commands.
 
 ### #9 — `^a s` anchors paths on PROJECT_HOME, not on the pane's cwd
+
+**Shipped (#501), as planned.** Paths go out relative under the receiving
+pane's live cwd, read when the text is delivered, and absolute otherwise.
 
 Option A of [`PATH_HANDOFF_PLAN.md`](PATH_HANDOFF_PLAN.md), and nothing else
 from it. `send_selection_to_pane` (`src/app/clipboard.rs`) makes each selected
@@ -314,7 +334,10 @@ topology argument, the consumer-aware `^a s`/`^a S` split — stays under
 
 ### #34 — Claude PTY scrollback artifacts
 
-This was the least certain scope of the six bugs and the spike settled it: it
+**Shipped across both halves:** SGR 2 in the adapter (#457, closing #452),
+and the four engine defects with the engine swap (#465).
+
+This was the least certain scope of these bugs and the spike settled it: it
 is **one adapter defect and a set of engine defects**, and they are fixed in
 different stages of §8. The adapter half is split out as
 [#452](https://github.com/Tripstack-Corp/spyc/issues/452); #34 is retitled to
@@ -389,6 +412,12 @@ the end-to-end takeover behaviour". No such test exists. Write it, confirm it
 fails against the behaviour above, then fix the prompt.
 
 ## 7. Author `docs/drafts/PROJECTS_PLAN.md`
+
+**Authored (#520), in review.** All seven questions are answered. The owner's
+first decisions are recorded in it: per-project config under `~/.config`, the
+context marker out of the working tree (which landed early, #525), and
+`Space !` as the attention key. Approval gates 2.3, not the 2.2 tag
+(decisions log, 2026-10-02).
 
 A tracked 2.2 deliverable, design only. 2.3's scope depends on it being written
 and approved before any code lands.
@@ -560,13 +589,6 @@ is **"≥ budget minus one page"** — never an exact count. PR 13 runs `sbprobe
 with the **shipped** configuration, not a probe-only one, so the number in the
 addendum is the number users get.
 
-The addendum must also say, in so many words, that **~840 rows is a number two
-unrelated causes produce**: the inert `max_scrollback` at `f4c68d65`, and a
-default byte cap binding ahead of the line limit at the shipping pin. Both were
-measured during this work. Recorded because a future harness run that recognises
-840 as "the expected ghostty number" and stops looking is exactly the trap this
-series already fell into once.
-
 **The threading resolution is open until PR 15 prices it.** The bindings'
 `Terminal` is `!Send` — a conservative binding choice, not a C-library
 constraint — and spyc parses on a dedicated worker thread behind a mutex.
@@ -632,7 +654,9 @@ to the pin's constructor and that is in scope for `spikes/`, but nothing under
 
 ## Staging
 
-One PR per numbered item unless the tree argues otherwise. Three hard
+The order the series was planned in, kept as the record; the scope table's
+Status column and each section's "Shipped" line say what landed and where. One
+PR per numbered item unless the tree argues otherwise. Three hard
 dependencies; the rest is scheduling.
 
 | PR | Item | Depends on | Why here |
@@ -673,69 +697,83 @@ test, per this table's PR 1 — it is not pulled into the engine work.
 
 ## Exit criteria
 
-**#326 —** Type into a pane the instant `^a c` returns and every character
-reaches the child. Pinned by a test that fails on the current tree: spawn a
-pane, write bytes, compare what the child received byte-for-byte. Exit: the VHS
-tape records the question it was meant to depict, with no compensating repaint
-in `fake-claude.sh`.
+Each criterion as it shipped, with the test that holds it. Where what shipped
+differs from what was planned, the criterion says what shipped and why.
 
-**#327 —** A `remove_worktree` interrupted mid-delete leaves git's view
-consistent, and re-running it finishes the job. Exit: a test that fails the
-first removal (a directory that regains an entry during the walk) and asserts
-the second succeeds, deletes the branch, and leaves no `.git/worktrees/` admin
-dir behind.
+**#326 — met in code, not on tape.** Text typed into a pane the instant `^a c`
+returns reaches the child. The cause was the status-hook consent prompt
+swallowing those keys, not a pty race (#464).
+`typing_into_a_fresh_agent_pane_is_not_eaten_by_the_consent_prompt`
+(`src/app/harness_tests/pane.rs`) pins it. The planned second half is not
+done: the VHS tape still depends on the compensating repaint in
+`docs/assets/demo/fake-claude.sh`. Removing it waits on a re-record of the tape,
+on the demo-harness branch (#473).
 
-**#40 —** Addressing a column goes through a handle everywhere it isn't
-legitimately naming a specific one. Exit: the widened
-`state_left_listing_dir_uses_are_allowlisted` guard (now
-`columns_are_addressed_through_handles`) passes with an allowlist
-naming only render and fs-watch, each with a why.
+**#327 — met.** A `remove_worktree` interrupted mid-delete leaves git's view
+consistent, and re-running it finishes the job (#500).
+`a_failing_delete_strands_bytes_not_a_worktree` and
+`a_live_writer_never_leaves_half_a_worktree` (`src/git/worktree.rs`) cover the
+interrupted delete, the second with a real writer racing it.
+`a_partially_removed_worktree_is_finished_not_refused`
+(`src/app/worktree_clean.rs`) covers the retry.
 
-**Pane identity —** An agent in worktree X gets X from `get_spyc_context` while
-the user browses Y. Exit: an older proxy that omits the field still works,
-proved by a test that drives the server with an `initialize` carrying no pane
-id; and SECURITY.md's attribution-is-not-authorization paragraph still holds.
+**#40 — met.** A column is reached through a handle everywhere it isn't
+legitimately naming a specific one (#504). The widened guard,
+`columns_are_addressed_through_handles`, allowlists only render and fs-watch,
+each with a why, and an entry that stops matching fails too.
 
-**#22 + #11 —** Two spyc instances in one directory coexist, and the second to
-want MCP asks before taking it. Exit: an integration test that stands up two
-instances, exercises the live-socket `TookOver` and `Skipped` branches
-end-to-end, and fails against today's tree.
+**Pane identity — met.** An agent in worktree X gets X from `get_spyc_context`
+while the user browses Y (#507). An older proxy that omits the id still works:
+`an_initialize_without_a_pane_id_is_served_as_before`
+(`src/mcp/tests/attribution.rs`). SECURITY.md's attribution-is-not-
+authorization paragraph holds, and the narrowing it would have argued against
+was dropped (§1).
 
-**#58 —** `[pane] startup_tabs` in `.spycrc.toml` opens the declared tabs on a
-fresh launch, and `spyc -r` still restores the saved set instead. Exit: both
-paths covered, `--print-config` emits the new keys with comments, and
-CONFIGURATION.md documents them in the same commit.
+**#22 + #11 — met, as redefined.** Two spyc instances in one directory each
+keep their own agents, and there is nothing to take over, so nothing asks
+(#509). The planned prompt and its `TookOver` / `Skipped` branches were the
+defect, not the fix (§6). `two_spycs_in_one_directory_each_keep_their_own_agents`
+(`src/mcp/tests/coexistence.rs`) is the integration test #11 asked for.
 
-**#8 —** `^a F` on a live agent tab produces a second tab on that conversation,
-with its history readable. Exit: `docs/HARNESS.md` documents the per-agent
-behaviour, including which agents give a shared session rather than a branch.
+**#58 — met.** `[pane] tabs` (or `[[pane.tab]]`) opens the declared tabs on a
+fresh launch, and `spyc -r` restores the saved set instead (#482):
+`resume_neither_asks_nor_seeds` (`src/app/startup_tabs.rs`), plus the parse
+tests in `src/config/mod.rs`. A project-local list runs only after a consent
+bound to the exact list (#496). `--print-config` and CONFIGURATION.md document
+the keys.
 
-**#9 —** `^a s` from a worktree pane produces a path the agent can `cat` from
-its own cwd without a `cd`. Exit: a test where the pane's cwd differs from
-`PROJECT_HOME` asserts the relative form resolves under the pane, plus one
-where `live_cwd` is unknown asserts the absolute-tier fallback. The absolute
-tier is not `~`-collapsed.
+**#8 — met.** `^a F` on a claude or codex tab opens a branch of its
+conversation in a new tab, a new session that starts from the old one's history
+and is readable through `^a v` (#516). agy and zot can't branch and say so,
+rather than opening one conversation twice. `docs/HARNESS.md` §4 documents each
+agent. The key is `F`, not the planned `f` (§4).
 
-**#71 —** A template bound in `~/.spycrc.toml` sends a composed prompt with
-picks substituted, and a project-local `.spycrc.toml` cannot bind one. Exit:
-the DSL verb is `is_executing`, CONFIGURATION.md documents the token set, and
-the substitution refuses a non-UTF-8 path the way `expand_percent` does.
+**#9 — met.** `^a s` from a worktree pane sends a path the agent can `cat`
+from its own cwd (#501): `send_selection_anchors_on_the_panes_cwd_not_project_home`
+(`src/app/harness_tests/send_selection.rs`), and
+`an_unknown_cwd_sends_every_path_absolute` (`src/shell/expand.rs`) for the
+absolute fallback, which is not `~`-collapsed.
 
-**#34 —** Closed across both halves, each pinned by a test that fails on the
-tree before it. **Adapter (PR 10):** a cell carrying SGR 2 reaches the ratatui
-buffer with `Modifier::DIM` on a focused pane. Asserted against the buffer's
-cell styles rather than a glyph snapshot — a snapshot compares symbols and
-cannot see a modifier at all, which is the same blind spot #493–#504 recorded
-for styling. **Engine (PR 15):** the four engine
-defects the spike names are gone at the default engine — SCS box drawing draws
-boxes, a row written before a DECSTBM region survives, a scroll-region child
-accumulates scrollback, and a tag-sequence grapheme survives past 18 bytes —
-each as a differential case in the spike harness that vt100 fails and the
-shipped engine passes. The issue's own suggestion (pin the CLI to the bottom)
-is explicitly **not** an exit criterion; see §"#34" for why it is dropped.
+**#71 — met.** A template from `~/.spycrc.toml` types a composed prompt with
+picks substituted, and a project-local file can neither bind one nor define one
+(#517). The verb is `is_executing` (`prompt_verb_parses_and_is_executing`), a
+project's `[prompts]` is dropped (`prompt_templates_come_only_from_home`), a
+non-UTF-8 path is refused (`a_non_utf8_path_is_refused_where_it_is_named`), and
+CONFIGURATION.md documents the tokens.
 
-**`PROJECTS_PLAN.md` —** All seven questions in §7 answered, with a decision and
-a reason for each, and the doc approved before 2.3 opens.
+**#34 — met.** Both halves are pinned by tests. **Adapter (#457):** SGR 2 reaches the ratatui buffer as `Modifier::DIM`,
+asserted against the buffer's cell styles (`sgr_2_reaches_the_buffer_as_dim`,
+`src/pane/widget.rs`), because a glyph snapshot can't see a modifier.
+**Engine (#465):** the four defects the spike names are gone at the shipped
+engine: `scs_box_drawing_draws_boxes`, `a_row_written_before_decstbm_survives`,
+`a_top_anchored_scroll_region_accumulates_scrollback` and
+`a_tag_sequence_grapheme_survives_past_eighteen_bytes`
+(`src/pane/engine_ghostty/tests.rs`). The issue's own suggestion (pin the CLI to
+the bottom) was never a criterion; see §6.
+
+**`PROJECTS_PLAN.md` — authored; approval open.** All seven questions in §7
+answered, each with a decision and a reason (#520). The owner's review is in
+progress, and approval gates 2.3, not the 2.2 tag.
 
 ## Docs each PR must carry (same commit, not a follow-up)
 
@@ -756,8 +794,8 @@ architectural decision and the losing option needs to stay refuted (PR 15) —
 plus a `SPYC-TRAP` rationale section if the unsafe option wins, since the anchor
 and its section share a slug. `CONFIGURATION.md` and `--print-config` take nothing:
 `[pane] engine` was dropped rather than built (decisions log). `deny.toml` documents the vendored archives and
-`SECURITY.md` the pin and its checksum verification (PR 12). `INSTALL.md` gets
-the MSRV bump (PR 12). `docs/drafts/VT_ENGINE_SPIKE.md` takes the dated addendum
+`SECURITY.md` the pin and its checksum verification (PR 12). The MSRV did not
+move (§8), so `INSTALL.md` took nothing. `docs/drafts/VT_ENGINE_SPIKE.md` takes the dated addendum
 (PR 13) — appended, never rewritten. `CHANGELOG.md` is generated, so what
 matters is that each engine PR's **title** is typed for the section it belongs
 in: `fix(pane)` for the adapter half, `feat(pane)` for the flip, `chore` for the
