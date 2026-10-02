@@ -325,8 +325,11 @@ impl super::App {
             pane_closed: self.state.pane.pane_snapshot.is_closed,
             pane_scroll_keys: self.active_pane_wheel_scroll().is_some(),
             // Only resolved over the divider: the width walk allocates, and a
-            // wheel tick over the pane has no use for it.
-            tab_under_pointer: if matches!(region, Some(route::Region::Divider)) {
+            // wheel tick over the pane has no use for it. Not while the prompt
+            // row has taken the divider, since there are no tabs on it then.
+            tab_under_pointer: if matches!(region, Some(route::Region::Divider))
+                && self.displaced_prompt_row(&layout) != layout.divider
+            {
                 let bar_width = layout.divider.map_or(0, |d| d.width);
                 let widths: Vec<u16> = self
                     .runtime

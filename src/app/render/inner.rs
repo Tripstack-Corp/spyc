@@ -12,7 +12,17 @@ use crate::ui::list_view::ListView;
 use crate::ui::pager;
 use crate::ui::status::StatusBar;
 
-use crate::app::{App, FlashKind, FrameLayout, Mode, View, path_basename_display, state};
+use crate::app::{
+    App, FlashKind, FlashMessage, FrameLayout, Mode, View, path_basename_display, state,
+};
+
+/// What the prompt row shows: the open prompt, else a flash, else the
+/// chord-arming hint.
+enum PromptRow<'a> {
+    Prompt(&'a crate::app::Prompt),
+    Flash(&'a FlashMessage),
+    Arming(String),
+}
 
 impl App {
     pub(super) fn render_inner(&self, frame: &mut Frame, layout: FrameLayout) {
@@ -83,7 +93,10 @@ impl App {
             // is the `^a v` scrollback (`view.scroll_pager`) if open, else the
             // live pane — so a top overlay and a bottom scrollback coexist (the
             // shared helper is what makes `^a v` work while an editor is open).
-            if let Some(divider_rect) = layout.divider {
+            let displaced = self.displaced_prompt_row(&layout);
+            if let Some(divider_rect) = layout.divider
+                && displaced != Some(divider_rect)
+            {
                 self.render_pane_status_line(frame, divider_rect);
             }
             if let Some(rect) = layout.pane {
@@ -96,11 +109,14 @@ impl App {
             // vertical split is open; keep the OTHER column (its list / the
             // preview) visible beside it.
             self.render_column_beside_overlay(frame, &layout);
-            // A prompt opened from the OTHER (focused) column must still show —
-            // this branch returns early, so paint the prompt line into its
-            // reserved bottom row (split only; full-screen overlay has none).
+            // This branch returns early, so the prompt line is painted here: into
+            // the row a split reserves below its columns, else wherever
+            // `displaced_prompt_row` moved it.
             if self.state.vsplit.is_some() {
                 self.render_prompt_line(frame, layout.prompt);
+            } else if let Some(rect) = displaced {
+                frame.render_widget(ratatui::widgets::Clear, rect);
+                self.render_prompt_line(frame, rect);
             }
             // A centred `Overlay` pager (help / grep / git-view / version, …)
             // opened while the editor is up must still draw. The user switched
@@ -128,18 +144,8 @@ impl App {
         // slot — peek into the stash so the user doesn't see the
         // pane "jump" back to live-pty / file-list rendering for
         // the lifetime of the help overlay.
-        let in_help = self
-            .view
-            .pager
-            .as_ref()
-            .is_some_and(|v| v.title == crate::ui::pager::PAGER_HELP_TITLE);
-        let top_pager = if in_help {
-            self.view.pager_help_stash.as_ref()
-        } else {
-            self.view.pager.as_ref()
-        }
-        .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::TopPane));
-        if top_pager {
+        let in_help = self.pager_help_is_open();
+        if self.top_pane_pager_is_open() {
             // Same spyc-unit region as the `;cmd` overlay above (see the
             // `top_unit` note); anchoring at `status.y` panics under
             // `status_position = "bottom"`.
@@ -165,7 +171,10 @@ impl App {
             // Divider + bottom region render normally below. The bottom region
             // is the `^a v` scrollback (`view.scroll_pager`) if open, else the
             // live pane — so a `D` top pager and a bottom scrollback coexist.
-            if let Some(divider_rect) = layout.divider {
+            let displaced = self.displaced_prompt_row(&layout);
+            if let Some(divider_rect) = layout.divider
+                && displaced != Some(divider_rect)
+            {
                 self.render_pane_status_line(frame, divider_rect);
             }
             if let Some(rect) = layout.pane {
@@ -175,11 +184,12 @@ impl App {
             // when a vertical split is open; keep the OTHER column visible
             // beside it.
             self.render_column_beside_overlay(frame, &layout);
-            // A prompt opened from the OTHER (focused) column must still show —
-            // this branch returns early, so paint the prompt line into its
-            // reserved bottom row (split only).
+            // As in the overlay branch above.
             if self.state.vsplit.is_some() {
                 self.render_prompt_line(frame, layout.prompt);
+            } else if let Some(rect) = displaced {
+                frame.render_widget(ratatui::widgets::Clear, rect);
+                self.render_prompt_line(frame, rect);
             }
             // The TopPane branch returns early — if the pager-help
             // overlay is up over a TopPane pager, render it here on
@@ -306,56 +316,108 @@ impl App {
         }
     }
 
-    /// Paint the bottom prompt/flash/arming line into `rect` (the spyc command
-    /// line). Renders the active prompt's `PromptLine`, else a flash, else the
-    /// chord-arming hint — or nothing when idle. Called by the default draw and
-    /// (in a vsplit) by the overlay / `D`-pager branches, which return early but
-    /// must still surface a prompt opened from the OTHER column.
+    /// The pager-help overlay is up; the pager it covers is stashed.
+    fn pager_help_is_open(&self) -> bool {
+        self.view
+            .pager
+            .as_ref()
+            .is_some_and(|v| v.title == crate::ui::pager::PAGER_HELP_TITLE)
+    }
+
+    /// A `TopPane` pager (`D`) owns the spyc unit, counting one the pager-help
+    /// overlay has stashed.
+    fn top_pane_pager_is_open(&self) -> bool {
+        if self.pager_help_is_open() {
+            self.view.pager_help_stash.as_ref()
+        } else {
+            self.view.pager.as_ref()
+        }
+        .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::TopPane))
+    }
+
+    /// What the prompt row has to show, if anything. The consent prompts have
+    /// none: they draw as a centred pop-up, so the ask reads as a modal, not a
+    /// status line lost beneath the pane.
+    fn prompt_row(&self) -> Option<PromptRow<'_>> {
+        if let Mode::Prompting(p) = &self.state.mode {
+            return (!matches!(
+                p.kind,
+                crate::app::PromptKind::HookConsent { .. }
+                    | crate::app::PromptKind::ProjectTabsConsent { .. }
+            ))
+            .then_some(PromptRow::Prompt(p));
+        }
+        if let Some(flash) = &self.state.flash {
+            return Some(PromptRow::Flash(flash));
+        }
+        self.state.resolver.pending_display().map(PromptRow::Arming)
+    }
+
+    /// Where the prompt row goes while a full-screen `V` editor or `D` pager
+    /// paints over it: the pane's tab bar, which gives way as the status bar
+    /// does for a zoomed pane, so the surface's own text is never covered; with
+    /// no pane open, the surface's last row. `None` when the row is idle, when
+    /// nothing covers it, or in a split, which reserves the row below its
+    /// columns.
+    pub(crate) fn displaced_prompt_row(
+        &self,
+        layout: &FrameLayout,
+    ) -> Option<ratatui::layout::Rect> {
+        let covered = self.runtime.top_overlay.is_some() || self.top_pane_pager_is_open();
+        if !covered || self.state.vsplit.is_some() || self.prompt_row().is_none() {
+            return None;
+        }
+        let top = layout.top_unit;
+        Some(layout.divider.unwrap_or(ratatui::layout::Rect {
+            y: top.y + top.height.saturating_sub(1),
+            height: top.height.min(1),
+            ..top
+        }))
+    }
+
+    /// Paint the prompt/flash/arming line into `rect` (the spyc command line),
+    /// or nothing when [`Self::prompt_row`] is idle. Called by the default draw
+    /// and by the overlay / `D`-pager branches, which return early.
     fn render_prompt_line(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
         use ratatui::{
             style::{Modifier, Style},
             text::{Line, Span},
         };
-        if let Mode::Prompting(p) = &self.state.mode {
-            // HookConsent is shown as a centred pop-up (`render_hook_consent_popup`),
-            // not this one-line bar — leave the prompt row blank so the ask reads
-            // as a modal, not a status line lost beneath the pane.
-            if matches!(
-                p.kind,
-                crate::app::PromptKind::HookConsent { .. }
-                    | crate::app::PromptKind::ProjectTabsConsent { .. }
-            ) {
-                return;
+        match self.prompt_row() {
+            Some(PromptRow::Prompt(p)) => {
+                // Same wrapping PromptLine::render would do, but drawn row-by-row
+                // through the chrome funnel so the text is selectable. A long `:`
+                // command wraps, and each visible row is independently selectable.
+                let lines = p.line(&self.view.theme).wrapped_lines(rect.width);
+                self.draw_chrome_rows(frame, rect, lines);
             }
-            // Same wrapping PromptLine::render would do, but drawn row-by-row
-            // through the chrome funnel so the text is selectable. A long `:`
-            // command wraps, and each visible row is independently selectable.
-            let lines = p.line(&self.view.theme).wrapped_lines(rect.width);
-            self.draw_chrome_rows(frame, rect, lines);
-        } else if let Some(flash) = &self.state.flash {
-            let color = match flash.kind {
-                // Progress reads as info: the difference is how long it lives,
-                // not how it looks.
-                FlashKind::Info | FlashKind::Progress => self.view.theme.take,
-                FlashKind::Error => self.view.theme.cursor_bg,
-            };
-            let line = Line::from(Span::styled(
-                flash.text.clone(),
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ));
-            // A flashed error is the single most copy-worthy string spyc
-            // produces — it carries the whole `source()` chain (see the
-            // `flashed_errors_render_their_whole_chain` guard), and it is
-            // exactly what someone pastes into a bug report.
-            self.draw_chrome_line(frame, rect, line);
-        } else if let Some(pending) = self.state.resolver.pending_display() {
-            let line = Line::from(Span::styled(
-                pending,
-                Style::default()
-                    .fg(self.view.theme.prompt_prefix)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            self.draw_chrome_line(frame, rect, line);
+            Some(PromptRow::Flash(flash)) => {
+                let color = match flash.kind {
+                    // Progress reads as info: the difference is how long it lives,
+                    // not how it looks.
+                    FlashKind::Info | FlashKind::Progress => self.view.theme.take,
+                    FlashKind::Error => self.view.theme.cursor_bg,
+                };
+                let line = Line::from(Span::styled(
+                    flash.text.clone(),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ));
+                // A flashed error is the single most copy-worthy string spyc
+                // produces — it carries the whole `source()` chain (see the
+                // `flashed_errors_render_their_whole_chain` guard), and it is
+                // exactly what someone pastes into a bug report.
+                self.draw_chrome_line(frame, rect, line);
+            }
+            Some(PromptRow::Arming(pending)) => {
+                let line = Line::from(Span::styled(
+                    pending,
+                    Style::default()
+                        .fg(self.view.theme.prompt_prefix)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                self.draw_chrome_line(frame, rect, line);
+            }
+            None => {}
         }
     }
 
