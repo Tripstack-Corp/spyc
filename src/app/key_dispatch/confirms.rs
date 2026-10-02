@@ -281,6 +281,7 @@ impl App {
             prefix,
             buffer,
             editor,
+            suggestion,
         }) = prev_mode
         else {
             return Vec::new();
@@ -317,6 +318,7 @@ impl App {
                     prefix,
                     buffer,
                     editor,
+                    suggestion,
                 });
                 self.state.flash_info("press y or n");
                 return Vec::new();
@@ -339,6 +341,7 @@ impl App {
             prefix,
             buffer,
             editor,
+            suggestion,
         }) = prev_mode
         else {
             return Vec::new();
@@ -370,6 +373,7 @@ impl App {
                     prefix,
                     buffer,
                     editor,
+                    suggestion,
                 });
                 self.state.flash_info("press y or n (Esc: not now)");
                 return Vec::new();

@@ -332,6 +332,8 @@ impl App {
                 archive_mount_then: None,
                 file_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 clipboard_paste_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                jump_default_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                jump_default_seq: 0,
                 clipboard_copy_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 listing_refresh_inflight: false,
                 listing_refresh_dirty: false,

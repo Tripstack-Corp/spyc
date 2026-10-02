@@ -307,6 +307,10 @@ pub enum PaneTextSink {
     /// in the pager at the referenced line. Paired with
     /// [`PaneTextKind::Pickable`].
     GotoFile { open_at_line: bool },
+    /// `J`: offer the newest path reference in the read lines as the jump
+    /// prompt's default (`spawn_jump_default`). With no pane open there's
+    /// nothing to offer, which isn't an error.
+    JumpDefault,
 }
 
 /// Which pane a [`Effect::SendToPane`] targets. `Active` is the active
@@ -643,16 +647,20 @@ impl App {
                 // behind one borrow that ends before we flash / copy / navigate
                 // — byte-identical flash strings, same `Event::Key` tick.
                 Effect::ReadPaneText { kind, then } => {
-                    let Some((lines, pane_cwd)) = self.runtime.pane_tabs.as_mut().map(|tabs| {
-                        let lines = match kind {
-                            PaneTextKind::Visible => tabs.active_mut().visible_lines(),
-                            PaneTextKind::Scrollback(n) => tabs.active_mut().recent_lines(n),
-                            PaneTextKind::Pickable(n) => tabs.active_mut().pickable_text(n),
-                        };
-                        let pane_cwd = tabs.active_info().cwd.clone();
-                        (lines, pane_cwd)
-                    }) else {
-                        self.state.flash_error("no pane open");
+                    let Some((mut lines, pane_cwd, agent)) =
+                        self.runtime.pane_tabs.as_mut().map(|tabs| {
+                            let lines = match kind {
+                                PaneTextKind::Visible => tabs.active_mut().visible_lines(),
+                                PaneTextKind::Scrollback(n) => tabs.active_mut().recent_lines(n),
+                                PaneTextKind::Pickable(n) => tabs.active_mut().pickable_text(n),
+                            };
+                            let info = tabs.active_info();
+                            (lines, info.cwd.clone(), crate::agent::detect(&info.command))
+                        })
+                    else {
+                        if !matches!(then, PaneTextSink::JumpDefault) {
+                            self.state.flash_error("no pane open");
+                        }
                         continue;
                     };
                     match then {
@@ -689,7 +697,12 @@ impl App {
                         // pickable lines and navigate to it (synchronous, same
                         // tick); gF also opens it in the pager at the line.
                         PaneTextSink::GotoFile { open_at_line } => {
+                            lines.truncate(agent.output_len(&lines));
                             self.goto_file_navigate(lines, pane_cwd, open_at_line);
+                        }
+                        PaneTextSink::JumpDefault => {
+                            lines.truncate(agent.output_len(&lines));
+                            self.spawn_jump_default(lines, pane_cwd);
                         }
                     }
                 }

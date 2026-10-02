@@ -10,7 +10,6 @@ use ratatui::Frame;
 use crate::pane::PaneWidget;
 use crate::ui::list_view::ListView;
 use crate::ui::pager;
-use crate::ui::prompt::PromptLine;
 use crate::ui::status::StatusBar;
 
 use crate::app::{App, FlashKind, FrameLayout, Mode, View, path_basename_display, state};
@@ -331,14 +330,7 @@ impl App {
             // Same wrapping PromptLine::render would do, but drawn row-by-row
             // through the chrome funnel so the text is selectable. A long `:`
             // command wraps, and each visible row is independently selectable.
-            let lines = PromptLine {
-                prefix: &p.prefix,
-                buffer: &p.buffer,
-                theme: &self.view.theme,
-                cursor_pos: p.editor.as_ref().map(|e| e.cursor),
-                vi_mode: p.editor.as_ref().map(|e| e.mode),
-            }
-            .wrapped_lines(rect.width);
+            let lines = p.line(&self.view.theme).wrapped_lines(rect.width);
             self.draw_chrome_rows(frame, rect, lines);
         } else if let Some(flash) = &self.state.flash {
             let color = match flash.kind {

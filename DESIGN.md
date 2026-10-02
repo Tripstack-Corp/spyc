@@ -55,7 +55,10 @@ These are the names. Use them in code and when writing.
   prefix character indicates mode: `:` command line, `!` captured
   shell, `;` interactive shell, `$` interactive shell handoff, `/`
   search, `=` limit filter, `J` jump, `T` glob pick, `c`/`M` copy/
-  move target, `+` mkdir, `O` new file, etc.
+  move target, `+` mkdir, `O` new file, etc. A prompt can carry a
+  *suggestion*, drawn dimmed where the typing goes: it's what `Enter`
+  submits while nothing is typed (`J` offers the last path the pane
+  printed). Typing replaces it; `→`/`End` loads it for editing.
 - **Divider** — pane separator. Rule with tab indicators (`─[1*] claude
   ─[2+] bash`) and the active tab's *live* cwd (`── ↪ /tmp` if
   drifted from spawn). `[SCROLL]` tag right-aligned when in pane
