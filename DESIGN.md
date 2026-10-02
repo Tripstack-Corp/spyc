@@ -92,6 +92,12 @@ rather than create a new modal type.
   prompt (`y`/`n`). Used by destructive operations (`R` remove,
   worktree delete) and interrupt-on-quit. Do not introduce a
   separate dialog box — extend confirm.
+- **The prompt row is never hidden.** A full-screen `V` editor or `D`
+  pager paints over it, so while it has something to show (a prompt, a
+  flash, an armed chord) it borrows the pane's tab bar, spyc's own
+  chrome, as the status bar gives way for a zoomed pane; with no pane
+  open, the surface's last row. The editor's text is never what gets
+  covered.
 - **Activity HUD** — tiny right-anchored debug overlay (`A`
   toggle). Reports dps, bytes/sec, poll period. Transparent by
   default — coloured text only, so what's beneath shows through the
