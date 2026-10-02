@@ -199,6 +199,7 @@ impl App {
         let cur = self.state.cur();
         let cursor_file = cur.rows.get(cur.cursor.index).map(|r| r.display.clone());
         crate::context::SpycContext {
+            root: self.state.start_dir.clone(),
             cwd: cur.listing.dir.clone(),
             cursor_file,
             picks: cur.picks.iter().cloned().collect(),
@@ -277,6 +278,16 @@ impl App {
         // into a stale file. (The 500ms cap used to mask this by re-running the
         // debounced writer; it's gone now.)
         if crate::context::write_context_file(&self.view.context_path, &ctx).is_ok() {
+            // The sidecar is discovery's record of the root, so it moves when
+            // the root does (a `spyc -r` restoring a project elsewhere, #523).
+            let moved = self
+                .view
+                .last_context
+                .as_ref()
+                .is_none_or(|c| c.root != ctx.root);
+            if moved && self.view.mcp_running {
+                crate::mcp::record_root(&ctx.root);
+            }
             self.view.last_context = Some(ctx);
         }
     }

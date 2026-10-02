@@ -88,12 +88,6 @@ pub enum PromptKind {
     Limit,
     /// `:` — vim-style command line.
     Command,
-    /// Auto-fired when a restored `claude --resume` tab looks broken;
-    /// y/Enter respawns into the same slot. Cwd and fallback command
-    /// live on the tab's `TabInfo` and are read at confirm time.
-    ClaudeCrashRecover {
-        tab_idx: usize,
-    },
     /// First-launch consent (per project, saved) before spyc writes an agent's
     /// status hooks into `root`'s config (claude `.claude/settings.json` /
     /// codex `.codex/config.toml`). `y`/`Y` → remember-allow + install hooks for
@@ -848,7 +842,6 @@ mod tests {
             ("WorktreeNewBranch", K::WorktreeNewBranch),
             ("WorktreeDeleteConfirm", K::WorktreeDeleteConfirm),
             ("Limit", K::Limit),
-            ("ClaudeCrashRecover", K::ClaudeCrashRecover { tab_idx: 0 }),
             (
                 "HookConsent",
                 K::HookConsent {

@@ -749,7 +749,8 @@ end).
 - **`:sort <mode>`** — sort listing by `name`, `size`, `mtime`, or `ext`
   (persists across chdir); **`:sort reverse`** toggles reverse order
 - **`:marks`** — show all marks in a pager popup
-- **`:set key=value`** — runtime settings (e.g. `:set sort=mtime`)
+- **`:set key=value`** — runtime settings: `:set sort=mtime`, and
+  `:set flags=auto|short|full` for how the status bar writes its state
 - **`:bprev`** / **`:bnext`** — navigate pager buffer history (also `[b`/`]b` in pager)
 - **`:mouse on|off|auto`** — real mouse reporting: the wheel scrolls whatever is under
   the pointer, left-click focuses that region (and clicks through to a mouse-aware
@@ -1135,12 +1136,17 @@ The status bar uses powerline-style segments in this order:
 - Session name in all caps (hidden when empty)
 - Current path (intelligently truncated)
 - Git branch with dirty flag (`main*`)
-- Active state: pick counts, inventory counts, mask status, hidden
-  file count, active filter
+- The active tab's agent
+- Column state, only what differs from rest: picks, inventory items, a
+  mask switched from its default, the hidden-entry count, the filter, a
+  sort other than by name (`[picks:3 hidden:14]`). A column at rest shows
+  none of it.
 
-Under width pressure, segments are dropped in reverse priority:
-suffix → path becomes basename → git branch. `PROJECT_HOME` and
-session name are retained as the primary workspace identifiers.
+Under width pressure the suffix switches to short forms (`[p:3 h:14]`)
+before the path is cut; past that, the path is shortened in the middle.
+`[layout] status_flags` sets how the suffix is written (`auto`, `short`,
+or `full` for every field on every frame), and `:set flags=` changes it
+for the rest of the run.
 
 `user@host` is no longer in the top bar — run `:whoami` to flash it
 in the status line, or open the `I` info

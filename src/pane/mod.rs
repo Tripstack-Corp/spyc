@@ -107,10 +107,10 @@ impl Pane {
     /// the working directory. `context_path` points at *App's* live
     /// context file (the one the main loop writes to) so the child's
     /// `SPYC_CONTEXT` always resolves to a real file regardless of
-    /// where the pane itself spawns — App writes one canonical
-    /// `<start_dir>/.spyc-context-<pid>.json`, but a pane can spawn
-    /// in any subdir, and recomputing from `cwd` would point at a
-    /// path nobody writes.
+    /// where the pane itself spawns — App writes one canonical file
+    /// (`context::process_context_path`), but a pane can spawn in any
+    /// subdir, and recomputing from `cwd` would point at a path nobody
+    /// writes.
     pub fn spawn(
         command: &str,
         rows: u16,

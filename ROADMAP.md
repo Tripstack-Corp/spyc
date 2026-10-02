@@ -147,7 +147,10 @@ ships with it (decisions log, 2026-09-29).
   inherit a settled anchor. Two spycs in one directory each keep their own
   agents, with nothing to take over (#509, closing
   [#22](https://github.com/Tripstack-Corp/spyc/issues/22) and
-  [#11](https://github.com/Tripstack-Corp/spyc/issues/11)).
+  [#11](https://github.com/Tripstack-Corp/spyc/issues/11)). And a `spyc -r`
+  that restores a project elsewhere anchors its agents' MCP on that project,
+  not the launch directory, with the context file out of the working tree
+  (#525, closing [#523](https://github.com/Tripstack-Corp/spyc/issues/523)).
 - **[#40](https://github.com/Tripstack-Corp/spyc/issues/40): columns are
   addressed by handle** (#504), the projects prep. Only render and fs-watch
   name `state.left` / `state.right`; everything else goes through `cur()`,
@@ -181,6 +184,11 @@ ships with it (decisions log, 2026-09-29).
   one into the active pane tab with the picks (`%`), the inventory (`%i`) or
   the directory (`%d`) filled in, anchored the way `^a s` anchors paths. It is
   typed, not sent, and a project file can neither bind one nor define one.
+- **The status bar shows only what differs from rest** (#521). The suffix
+  listed every field on every frame, as wide as a path; now
+  `[picks:0 inv:0 m1:on m2:on hidden:1 sort:name]` is `[hidden:1]`, short
+  forms (`[h:1]`) take over when the words would cut the path, and
+  `[layout] status_flags = "full"` keeps the old bar.
 
 **Open:**
 

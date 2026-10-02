@@ -23,6 +23,38 @@ fn snapshot_context_announces_pid_and_version() {
     });
 }
 
+/// #523: the MCP root is `start_dir`, which `spyc -r` moves to the restored
+/// session's directory. Both records of it follow: the context's `root`, which
+/// the read tools validate `root` arguments against, and the sidecar
+/// discovery matches an agent's cwd against.
+#[test]
+fn the_mcp_root_follows_start_dir() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    let state = base.join("state");
+    let launch = base.join("launch");
+    let restored = base.join("restored");
+    for d in [&state, &launch, &restored] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    crate::state::with_state_root(&state, || {
+        let mut app = App::test_app(launch.clone());
+        app.view.mcp_running = true;
+        let sidecar = crate::mcp::root_marker_path_in(&state, std::process::id());
+        let recorded = || std::fs::read_to_string(&sidecar).unwrap_or_default();
+
+        app.write_context();
+        assert_eq!(app.snapshot_context().root, launch);
+        assert_eq!(recorded(), launch.to_string_lossy());
+
+        // What `restore_session` does to it.
+        app.state.start_dir.clone_from(&restored);
+        app.write_context();
+        assert_eq!(app.snapshot_context().root, restored);
+        assert_eq!(recorded(), restored.to_string_lossy());
+    });
+}
+
 /// MCP telemetry: each `ToolCalled` bumps the cumulative per-tool tally the
 /// `A` overlay renders, plus the aggregate `mcp:N/s` rate. A read tool the
 /// socket thread serves still flows through here, so reads are counted too.

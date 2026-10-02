@@ -46,9 +46,9 @@ pub(super) fn effective_root(args: &Value, ctx_path: &Path) -> Result<PathBuf, S
 /// sends the agent to unscoped `Bash rg` — bypass, not safety
 /// (ROADMAP.md decisions log).
 ///
-/// Anchored on the directory holding the context file, which is the same
-/// trusted root `write_root_marker` records for marker discovery — one root
-/// concept, not two.
+/// Anchored on the root the context names (`SpycContext::root`), which is
+/// the same root the `mcp-<pid>.root` sidecar records for discovery — one
+/// root concept, not two. Where the file itself sits says nothing.
 fn allowed_roots(ctx_path: &Path) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     let mut push = |p: PathBuf| {
@@ -57,33 +57,29 @@ fn allowed_roots(ctx_path: &Path) -> Vec<PathBuf> {
         }
     };
 
-    // The trusted root: where this spyc writes its context marker.
-    let trusted = ctx_path.parent().map(Path::to_path_buf);
-    if let Some(t) = trusted.clone() {
-        push(t);
-    }
+    let ctx: Value = std::fs::read_to_string(ctx_path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or(Value::Null);
 
-    // Every worktree of the repo at that root — a sibling worktree the agent
-    // was handed by `create_worktree` is a legitimate target.
-    if let Some(t) = trusted
-        && let Some(wts) = crate::git::worktree::list(&t)
-    {
-        for wt in wts {
+    // The trusted root, and every worktree of the repo at it — a sibling
+    // worktree the agent was handed by `create_worktree` is a legitimate target.
+    if let Some(root) = ctx["root"].as_str().filter(|s| !s.is_empty()) {
+        let root = PathBuf::from(root);
+        let worktrees = crate::git::worktree::list(&root);
+        push(root);
+        for wt in worktrees.into_iter().flatten() {
             push(wt.path);
         }
     }
 
     // The focused column's chain. Included, but never the whole set: these
     // move with the user's cursor.
-    if let Ok(text) = std::fs::read_to_string(ctx_path)
-        && let Ok(v) = serde_json::from_str::<Value>(&text)
-    {
-        for key in ["search_root", "project_home", "cwd"] {
-            if let Some(s) = v[key].as_str()
-                && !s.is_empty()
-            {
-                push(PathBuf::from(s));
-            }
+    for key in ["search_root", "project_home", "cwd"] {
+        if let Some(s) = ctx[key].as_str()
+            && !s.is_empty()
+        {
+            push(PathBuf::from(s));
         }
     }
 
@@ -92,8 +88,8 @@ fn allowed_roots(ctx_path: &Path) -> Vec<PathBuf> {
 
 /// True when `candidate` is one of `allowed` or sits inside one. Compared in
 /// canonical form so a symlinked worktree path doesn't false-reject; falls
-/// back to a literal compare when either side can't be canonicalized, mirroring
-/// [`crate::mcp::server::root_matches`]. Narrowing to a subdirectory of an
+/// back to a literal compare when either side can't be canonicalized, as
+/// discovery does. Narrowing to a subdirectory of an
 /// allowed root stays legal — it scopes down, never out.
 fn is_within_allowed(candidate: &Path, allowed: &[PathBuf]) -> bool {
     let cand = std::fs::canonicalize(candidate).unwrap_or_else(|_| candidate.to_path_buf());
@@ -935,6 +931,37 @@ mod tests {
         assert_eq!(log[0]["subject"], json!("first"));
     }
 
+    /// The trusted root is the one the context names, not the directory the
+    /// file sits in. After a `spyc -r` elsewhere the root is the restored
+    /// project, and the file hasn't moved.
+    #[test]
+    fn the_trusted_root_is_the_one_the_context_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let state = dir.join("state");
+        let restored = dir.join("restored");
+        let sub = restored.join("sub");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::create_dir_all(&sub).unwrap();
+        let ctx = state.join("ctx.json");
+        std::fs::write(
+            &ctx,
+            json!({ "root": restored.display().to_string() }).to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            effective_root(&json!({ "root": sub.display().to_string() }), &ctx).unwrap(),
+            sub
+        );
+        let err =
+            effective_root(&json!({ "root": state.display().to_string() }), &ctx).unwrap_err();
+        assert!(
+            err.contains("outside this spyc session's roots"),
+            "got {err}"
+        );
+    }
+
     #[test]
     fn effective_root_prefers_explicit_root_else_search_root() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1012,12 +1039,13 @@ mod tests {
         std::fs::create_dir(&agent_dir).unwrap();
         let far_away = tempfile::tempdir().unwrap();
 
-        // Context marker lives in `dir` (the trusted root), but every
+        // The context names `dir` as the trusted root, but every
         // cursor-tracking field points at an unrelated project.
         let ctx = dir.join("ctx.json");
         std::fs::write(
             &ctx,
             json!({
+                "root": dir.display().to_string(),
                 "cwd": far_away.path().display().to_string(),
                 "project_home": far_away.path().display().to_string(),
                 "search_root": far_away.path().display().to_string(),

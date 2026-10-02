@@ -887,6 +887,39 @@ mod render_tests {
         insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
     }
 
+    /// The bar reports only what differs from rest, and `:set flags=` changes
+    /// how it's written.
+    #[test]
+    fn the_status_bar_reports_what_differs_and_follows_set_flags() {
+        let mut app = demo_app(&files());
+        app.state
+            .left
+            .picks
+            .insert(&PathBuf::from("/projects/demo/README.md"));
+        let bar = |app: &mut App| {
+            render_to_string(app, 80, 24)
+                .lines()
+                .next()
+                .unwrap()
+                .to_string()
+        };
+        assert!(bar(&mut app).contains("[picks:1]"), "{}", bar(&mut app));
+        // Too narrow for the words beside the uncut path, wide enough for the
+        // short forms: auto keeps the path whole.
+        let narrow = render_to_string(&mut app, 31, 24);
+        let narrow = narrow.lines().next().unwrap();
+        assert!(narrow.contains("[p:1]"), "{narrow}");
+        assert!(narrow.contains("/projects/demo"), "{narrow}");
+        app.state.dispatch_command("set flags=short");
+        assert!(bar(&mut app).contains("[p:1]"), "{}", bar(&mut app));
+        app.state.dispatch_command("set flags=full");
+        assert!(
+            bar(&mut app).contains("[picks:1 inv:0 m1:on m2:on hidden:0 sort:name]"),
+            "{}",
+            bar(&mut app)
+        );
+    }
+
     #[test]
     fn snapshot_frame_status_bottom() {
         let mut app = demo_app(&files());

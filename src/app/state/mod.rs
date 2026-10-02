@@ -673,6 +673,9 @@ pub struct AppState {
     /// save of a watched config file — including the automatic fs-watch reload.
     /// `:mouse auto` clears it and hands control back to the config.
     pub mouse_capture_override: Option<bool>,
+    /// `:set flags=` for the rest of the run. Outside `Config` for the same
+    /// reason as `mouse_capture_override`: a config reload would revert it.
+    pub status_flags_override: Option<crate::ui::status_flags::FlagsMode>,
     pub mode: Mode,
     pub start_dir: PathBuf,
     pub project_home: Option<PathBuf>,
@@ -807,6 +810,13 @@ impl AppState {
     /// `cur()` so a focused second commander is honoured — and so a pane
     /// launched from the pane view follows the last-focused column, the one
     /// `^a k` returns to (`columns_are_addressed_through_handles`).
+    /// How the status bar writes its state suffix: `:set flags=`, else
+    /// `[layout] status_flags`.
+    pub fn status_flags(&self) -> crate::ui::status_flags::FlagsMode {
+        self.status_flags_override
+            .unwrap_or(self.config.layout.status_flags)
+    }
+
     pub fn default_pane_cwd(&self) -> std::path::PathBuf {
         match self.config.pane.new_tab_cwd {
             crate::config::NewTabCwd::WorktreeRoot => self
@@ -1159,6 +1169,7 @@ impl AppState {
             user_keymap: UserKeymap::default(),
             config: Config::default(),
             mouse_capture_override: None,
+            status_flags_override: None,
             mode: Mode::Normal,
             start_dir: cwd,
             project_home: None,

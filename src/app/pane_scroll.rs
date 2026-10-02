@@ -235,7 +235,7 @@ impl App {
     /// and [`restore_active_tab_scrollback_pager`](Self::restore_active_tab_scrollback_pager)
     /// is the *only* other drain. So a tab dropped while stashed — closed
     /// (`^W x`), restarted (`^a R`), demoted (`:pane-to-task`), or replaced
-    /// (claude crash-recover) — would leak its stream forever. The `pane` layer
+    /// (`:hooks on!`) — would leak its stream forever. The `pane` layer
     /// can't reach `runtime` (the one-way `app → pane` rule), so the owning side
     /// reclaims here, *after* the tab is gone. Idempotent and path-independent: a
     /// call from any removal site sweeps every now-orphaned stream, so a future
