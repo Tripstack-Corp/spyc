@@ -114,8 +114,10 @@ foundations work continues throughout.
 2.2 lands the prerequisites Projects needs and closes the bugs a daily driver
 hits weekly. Every item is one or the other. Scope and sequencing:
 [`docs/drafts/V2_2_PLAN.md`](docs/drafts/V2_2_PLAN.md). **2.2 tags once the
-whole list is done, and not before.** Everything else already merged to `main`
-ships with it (decisions log, 2026-09-29).
+whole list is done, and not before.** For `PROJECTS_PLAN.md`, done means
+authored: its approval gates 2.3, not the tag (decisions log, 2026-10-02).
+Everything else already merged to `main` ships with it (decisions log,
+2026-09-29).
 
 **Shipped on `main`:**
 
@@ -677,6 +679,16 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   now refcounted like the status hooks, so only the last spyc out removes it.
   The alternative, a prompt at agent launch, would have kept one owner per
   directory and still sent the losing spyc's new agents to the winner.
+- **`PROJECTS_PLAN.md` gates 2.3, not the 2.2 tag** (2026-10-02). The
+  2026-09-29 entry declined an engine-only 2.2 because it would ship neither
+  the prerequisites nor `PROJECTS_PLAN.md`; the bar it set was shipping the
+  doc. The plan's own exit criterion puts approval "before 2.3 opens", but its
+  progress note said the tag waited for all of it, so the two disagreed about
+  which gate it was. The weaker one wins. Every line of 2.2 code is on `main`,
+  and the engine's case for landing in 2.2 is soak, which is worth more with
+  crates.io users on it than with one daily driver. Holding the tag on a
+  design review adds nothing to the code under it. The doc ships authored and
+  in review, and 2.3 opens only once it is approved.
 
 ## Doc map
 
@@ -696,6 +708,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/BRAND.md` | Brand & identity — the name story, palette, voice. |
 | `docs/AGENT_ORCHESTRATION.md` | How the agent activity-dots / notifications / session-resume / scope registry fit together (living reference). |
 | `docs/drafts/V2_2_PLAN.md` | The 2.2 scope, sequencing and exit criteria — the plan behind "Road to 2.2". |
+| `docs/drafts/PROJECTS_PLAN.md` | The 2.3 Projects design, in review ([#492](https://github.com/Tripstack-Corp/spyc/issues/492)): the per-project state inventory, one MCP socket answering per project, the recovery manifest, the `Space` keys, the `projects` segment, attention across projects, and what an attach snapshot carries. #99's code waits on its approval. |
 | `docs/drafts/pane-identity-transport-proposal.md` | Option B shipped in #507 ([#491](https://github.com/Tripstack-Corp/spyc/issues/491)): the pane id goes in the MCP `initialize` handshake. Per-pane roots are dropped (decisions log, 2026-09-30). It is also the attribution mechanism Projects extends. |
 | `docs/drafts/VT_ENGINE_SPIKE.md` | The engine spike report plus its dated gate addendum: the evidence behind the libghostty-vt entries in the decisions log. Appended to, never rewritten. |
 | `docs/drafts/CLICKABLE_MENUS_PLAN.md` | Proposal, unscheduled and with no issue yet: make the which-key popup clickable instead of adding right-click context menus (#478). |
