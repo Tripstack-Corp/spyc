@@ -23,18 +23,34 @@ pub struct PathRef {
     pub line: Option<usize>,
 }
 
+/// [`extract_path_ref_under`] with one base. Test-only: production always
+/// has several.
+#[cfg(test)]
+pub fn extract_path_ref(lines: &[String], resolve_base: &Path) -> Option<PathRef> {
+    extract_path_ref_under(lines, &[resolve_base])
+}
+
 /// Scan recent terminal lines for the most relevant path reference.
 ///
 /// `lines` should be the visible screen lines (and optionally a few
 /// scrollback lines), ordered top-to-bottom. We scan **bottom-up** so
-/// the most recent output wins. `resolve_base` is the directory to
-/// resolve relative paths against (typically the pane tab's cwd or the
-/// project root).
-pub fn extract_path_ref(lines: &[String], resolve_base: &Path) -> Option<PathRef> {
+/// the most recent output wins. `bases` are the directories to resolve
+/// relative paths against, best first. The newest row that resolves under
+/// any of them wins, so an older path under an earlier base can't beat a
+/// newer one; within a row, a path wrapped onto it is tried under every base
+/// before the row's own tokens, since a wrapped path's tail alone can name
+/// some other file under an earlier base.
+pub fn extract_path_ref_under<P: AsRef<Path>>(lines: &[String], bases: &[P]) -> Option<PathRef> {
     // Scan bottom-to-top: most recent output is most relevant.
     (0..lines.len()).rev().find_map(|i| {
-        wrapped_ref(&lines[..=i], resolve_base)
-            .or_else(|| extract_from_line(&lines[i], resolve_base))
+        bases
+            .iter()
+            .find_map(|base| wrapped_ref(&lines[..=i], base.as_ref()))
+            .or_else(|| {
+                bases
+                    .iter()
+                    .find_map(|base| extract_from_line(&lines[i], base.as_ref()))
+            })
     })
 }
 
@@ -283,6 +299,34 @@ mod tests {
         fs::write(tmp.path().join("Cargo.toml"), "[package]").unwrap();
         fs::write(tmp.path().join("README.md"), "# readme").unwrap();
         tmp
+    }
+
+    // ── several bases ─────────────────────────────────────────────
+
+    /// A path wrapped across rows resolves under a later base before its own
+    /// tail is taken under an earlier one: the tail alone names some other
+    /// file.
+    #[test]
+    fn a_wrapped_path_under_a_later_base_beats_its_tail_under_an_earlier_one() {
+        let near = setup_tree();
+        let far = tempdir().unwrap();
+        fs::create_dir_all(far.path().join("deep/src")).unwrap();
+        fs::write(far.path().join("deep/src/main.rs"), "").unwrap();
+        let lines = vec!["see deep/".to_string(), "src/main.rs".to_string()];
+        let found = extract_path_ref_under(&lines, &[near.path(), far.path()]);
+        assert_eq!(
+            found.map(|r| r.path),
+            Some(far.path().join("deep/src/main.rs"))
+        );
+    }
+
+    #[test]
+    fn within_a_row_the_earlier_base_wins() {
+        let near = setup_tree();
+        let far = setup_tree();
+        let lines = vec!["src/main.rs".to_string()];
+        let found = extract_path_ref_under(&lines, &[near.path(), far.path()]);
+        assert_eq!(found.map(|r| r.path), Some(near.path().join("src/main.rs")));
     }
 
     // ── split_path_line ───────────────────────────────────────────
