@@ -17,44 +17,85 @@ use crate::spyc_debug;
 use super::file_ops::PagerDest;
 use super::{ActivateIntent, App, Effect, EntryKind, PostAction, View, state};
 
+/// The directories a path printed in the pane resolves against, best first:
+/// the pane's cwd, then its worktree root, since a tool run from a
+/// subdirectory (`cargo` in `src/`) prints paths relative to the root; then
+/// the focused column's directory and its worktree root, then PROJECT_HOME.
+/// Finding the pane's root `stat`s up the tree, so `J` builds this on its
+/// worker.
+pub(super) fn path_ref_bases(
+    pane_cwd: &Path,
+    column_dir: &Path,
+    column_root: Option<&Path>,
+    project_home: Option<&Path>,
+) -> Vec<PathBuf> {
+    let pane_root = super::state::find_repo_root(pane_cwd);
+    let mut bases: Vec<PathBuf> = Vec::new();
+    for base in [
+        Some(pane_cwd),
+        pane_root.as_deref(),
+        Some(column_dir),
+        column_root,
+        project_home,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if !bases.iter().any(|b| b == base) {
+            bases.push(base.to_path_buf());
+        }
+    }
+    bases
+}
+
 /// The path reference `gf` and `J` act on: the newest one in `lines` that
-/// exists, resolved against the pane's cwd and then spyc's — an agent prints
-/// paths relative to the project root whatever its shell's cwd is.
+/// exists under any of `bases` ([`path_ref_bases`]).
 pub(super) fn find_path_ref(
     lines: &[String],
-    pane_cwd: &Path,
-    spyc_cwd: &Path,
+    bases: &[PathBuf],
 ) -> Option<crate::pane::pathref::PathRef> {
-    crate::pane::pathref::extract_path_ref(lines, pane_cwd).or_else(|| {
-        (pane_cwd != spyc_cwd)
-            .then(|| crate::pane::pathref::extract_path_ref(lines, spyc_cwd))
-            .flatten()
-    })
+    crate::pane::pathref::extract_path_ref_under(lines, bases)
 }
 
 impl App {
+    /// [`path_ref_bases`] for a pane whose cwd is `pane_cwd`, against the
+    /// focused column.
+    fn path_ref_bases_for(&self, pane_cwd: &Path) -> Vec<PathBuf> {
+        let col = self.state.cur();
+        path_ref_bases(
+            pane_cwd,
+            &col.listing.dir,
+            col.git_cache.current_repo_root.as_deref(),
+            self.state.project_home.as_deref(),
+        )
+    }
+
+    /// `raw` as the pane printed it, resolved against the bases `gf` uses;
+    /// with none holding it, under the listing dir, so the miss names a path.
+    fn resolve_pane_path(&self, raw: &str) -> PathBuf {
+        let path = PathBuf::from(raw);
+        if path.is_absolute() {
+            return path;
+        }
+        let column_dir = self.state.cur().listing.dir.clone();
+        let tab_cwd = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .map_or_else(|| column_dir.clone(), |t| t.active_info().cwd.clone());
+        self.path_ref_bases_for(&tab_cwd)
+            .into_iter()
+            .map(|base| base.join(&path))
+            .find(|p| p.exists())
+            .unwrap_or_else(|| column_dir.join(&path))
+    }
+
     /// Navigate spyc to a path matched in the pane (uppercase intent
     /// for a Path match). Mirrors `goto_file_navigate`'s post-resolve
     /// flow but starts from a pre-extracted path string rather than
     /// running pathref again.
     pub fn jump_to_pane_path(&mut self, raw: &str) {
-        let path = std::path::PathBuf::from(raw);
-        let resolved = if path.is_absolute() {
-            path
-        } else {
-            // Resolve against the active pane tab's cwd first, falling
-            // back to spyc's listing dir — same precedence `gf` uses.
-            let tab_cwd = self
-                .runtime
-                .pane_tabs
-                .as_ref()
-                .map(|t| t.active_info().cwd.clone());
-            let candidate = tab_cwd.as_ref().map(|c| c.join(&path));
-            match candidate {
-                Some(p) if p.exists() => p,
-                _ => self.state.cur().listing.dir.join(&path),
-            }
-        };
+        let resolved = self.resolve_pane_path(raw);
         if !resolved.exists() {
             self.state
                 .flash_error(format!("path not found: {}", resolved.display()));
@@ -96,26 +137,18 @@ impl App {
         pane_cwd: PathBuf,
         open_at_line: bool,
     ) {
-        // Also try resolving against the spyc cwd (project root), not just
-        // the pane tab's cwd — Claude often prints paths relative to the
-        // project root regardless of the shell's cwd.
-        let spyc_cwd = self.state.cur().listing.dir.clone();
+        let bases = self.path_ref_bases_for(&pane_cwd);
 
         // Debug: dump visible lines to the debug log so we can see what
         // the vt100 screen actually contains.
-        spyc_debug!(
-            "gf: {} lines from pane, pane_cwd={}, spyc_cwd={}",
-            lines.len(),
-            pane_cwd.display(),
-            spyc_cwd.display()
-        );
+        spyc_debug!("gf: {} lines from pane, bases={bases:?}", lines.len());
         for (i, line) in lines.iter().enumerate() {
             if !line.trim().is_empty() {
                 spyc_debug!("gf line[{i}]: {:?}", line);
             }
         }
 
-        let Some(pathref) = find_path_ref(&lines, &pane_cwd, &spyc_cwd) else {
+        let Some(pathref) = find_path_ref(&lines, &bases) else {
             self.state
                 .flash_error("no path reference found in pane output");
             return;
@@ -356,6 +389,106 @@ mod tests {
         });
     }
 
+    /// An app whose column lists `dir`, read straight in: `test_app` starts
+    /// empty, and `chdir` would `set_current_dir`.
+    fn app_listing(dir: &Path) -> App {
+        let mut app = App::test_app(dir.to_path_buf());
+        app.state.cur_mut().listing = crate::fs::listing::Listing::read(dir).unwrap();
+        app.state.rebuild_rows();
+        app
+    }
+
+    /// The file the focused column's cursor is on.
+    fn cursor_file(app: &App) -> PathBuf {
+        let col = app.state.cur();
+        col.rows
+            .get(col.cursor.index)
+            .expect("a cursor row")
+            .path
+            .clone()
+    }
+
+    /// A repo at `<tmp>/repo` with `src/main.rs` and `src/app/x.rs`, plus a
+    /// decoy `src/app/a.rs` that sorts first, so the cursor lands on `x.rs`
+    /// only if `gf` put it there.
+    /// Canonical, as a pane's cwd is: the listing holds canonical paths, and
+    /// macOS's temp dir sits behind the `/var` symlink.
+    ///
+    /// The tests below open their column in the target's own directory: `gf`
+    /// then lands without a `chdir`, which `set_current_dir`s, and a process
+    /// cwd left in a dropped temp dir breaks every gix test running beside it.
+    fn repo(tmp: &Path) -> PathBuf {
+        let root = tmp.canonicalize().unwrap().join("repo");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("src/app")).unwrap();
+        std::fs::write(root.join("src/main.rs"), "").unwrap();
+        std::fs::write(root.join("src/app/x.rs"), "").unwrap();
+        std::fs::write(root.join("src/app/a.rs"), "").unwrap();
+        root
+    }
+
+    /// #6: a tool run from a subdirectory (`cargo` in `src/`) prints paths
+    /// relative to the worktree root, which neither the pane's cwd nor the
+    /// column's directory resolves.
+    #[test]
+    fn gf_resolves_a_path_relative_to_the_panes_worktree_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let root = repo(tmp.path());
+            let mut app = app_listing(&root.join("src/app"));
+            let lines = vec!["error[E0308]: --> src/app/x.rs:3:5".to_string()];
+            app.goto_file_navigate(lines, root.join("src"), false);
+            assert_eq!(cursor_file(&app), root.join("src/app/x.rs"));
+        });
+    }
+
+    /// With nothing nearer resolving a path, PROJECT_HOME does.
+    #[test]
+    fn gf_falls_back_to_project_home() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let base = tmp.path().canonicalize().unwrap();
+            let home = base.join("project");
+            std::fs::create_dir_all(home.join("docs")).unwrap();
+            std::fs::write(home.join("docs/a.md"), "").unwrap();
+            std::fs::write(home.join("docs/0.md"), "").unwrap();
+            let elsewhere = base.join("elsewhere");
+            std::fs::create_dir(&elsewhere).unwrap();
+            let mut app = app_listing(&home.join("docs"));
+            app.state.project_home = Some(home.clone());
+            app.goto_file_navigate(vec!["see docs/a.md".to_string()], elsewhere, false);
+            assert_eq!(cursor_file(&app), home.join("docs/a.md"));
+        });
+    }
+
+    /// The newest line wins whichever base resolves it: an older path under the
+    /// pane's cwd doesn't beat a newer one only the worktree root resolves.
+    #[test]
+    fn gf_takes_the_newest_path_whichever_base_resolves_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let root = repo(tmp.path());
+            let mut app = app_listing(&root.join("src/app"));
+            let lines = vec!["main.rs".to_string(), "src/app/x.rs:3".to_string()];
+            app.goto_file_navigate(lines, root.join("src"), false);
+            assert_eq!(cursor_file(&app), root.join("src/app/x.rs"));
+        });
+    }
+
+    /// `^a u`'s uppercase open resolves a picked path against the same bases.
+    #[test]
+    fn a_quick_select_open_resolves_against_the_worktree_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let root = repo(tmp.path());
+            let app = app_listing(&root.join("src/app"));
+            assert_eq!(
+                app.resolve_pane_path("src/app/x.rs"),
+                root.join("src/app/x.rs")
+            );
+        });
+    }
+
     /// gF refuses a non-regular target (here: a path that doesn't resolve to a
     /// regular file) rather than reading it — the guard against a hostile
     /// /dev/zero / FIFO in pane output. Uses a directory reference, which is
@@ -364,11 +497,14 @@ mod tests {
     fn gf_directory_reference_does_not_open_a_pager() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
+            // Cargo's own cwd for the test binary: the `chdir` this makes
+            // `set_current_dir`s, and into a temp dir it would leave every
+            // gix test after it in a deleted directory.
+            let target = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
             let dir = tmp.path().to_path_buf();
-            std::fs::create_dir(dir.join("sub")).unwrap();
             let mut app = App::test_app(dir.clone());
 
-            app.goto_file_navigate(vec!["sub".to_string()], dir, true);
+            app.goto_file_navigate(vec![target.display().to_string()], dir, true);
 
             assert!(
                 app.view.pager.is_none(),

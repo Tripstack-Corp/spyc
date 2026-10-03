@@ -473,7 +473,12 @@ spyc's workflow: browse files above, talk to Claude below.
   A path wrapped onto the next row — by the terminal, or by the agent's
   own line wrapping — is put back together. In a claude pane the scan
   stops at its input box, so the status line under it (which names
-  `CLAUDE.md`) can't outrank what claude printed.
+  `CLAUDE.md`) can't outrank what claude printed. A relative path resolves
+  against the pane's cwd, then its worktree root (a `cargo` run from `src/`
+  prints paths relative to the root), then the focused column's directory
+  and its worktree root, then PROJECT_HOME; the newest line that resolves
+  under any of them wins. `J`'s default and `^a u`'s uppercase open use the
+  same order.
 
 ### Multi-tab
 

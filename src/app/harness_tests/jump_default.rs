@@ -181,7 +181,8 @@ fn claudes_footer_does_not_outrank_its_output() {
     .map(String::from)
     .collect();
 
-    let uncut = crate::app::navigate::find_path_ref(&lines, &root, &root).map(|r| r.path);
+    let uncut =
+        crate::app::navigate::find_path_ref(&lines, std::slice::from_ref(&root)).map(|r| r.path);
     assert_eq!(
         uncut,
         Some(root.join("CLAUDE.md")),
@@ -189,6 +190,7 @@ fn claudes_footer_does_not_outrank_its_output() {
     );
 
     let n = crate::agent::detect("claude").output_len(&lines);
-    let cut = crate::app::navigate::find_path_ref(&lines[..n], &root, &root).map(|r| r.path);
+    let cut = crate::app::navigate::find_path_ref(&lines[..n], std::slice::from_ref(&root))
+        .map(|r| r.path);
     assert_eq!(cut, Some(root.join("tasks/run.output")));
 }

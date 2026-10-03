@@ -26,11 +26,20 @@ impl App {
     pub(super) fn spawn_jump_default(&mut self, lines: Vec<String>, pane_cwd: PathBuf) {
         self.runtime.jump_default_seq += 1;
         let seq = self.runtime.jump_default_seq;
-        let spyc_cwd = self.state.cur().listing.dir.clone();
+        let col = self.state.cur();
+        let column_dir = col.listing.dir.clone();
+        let column_root = col.git_cache.current_repo_root.clone();
+        let project_home = self.state.project_home.clone();
         let results = Arc::clone(&self.runtime.jump_default_results);
         let wake = self.runtime.pane_wake_tx.clone();
         std::thread::spawn(move || {
-            let path = super::navigate::find_path_ref(&lines, &pane_cwd, &spyc_cwd)
+            let bases = super::navigate::path_ref_bases(
+                &pane_cwd,
+                &column_dir,
+                column_root.as_deref(),
+                project_home.as_deref(),
+            );
+            let path = super::navigate::find_path_ref(&lines, &bases)
                 .map(|r| crate::paths::display_tilde(&r.path));
             results
                 .lock()
