@@ -839,6 +839,11 @@ end).
 The `:` prompt shares history with other shell prompts, so Up/Down
 cycles through previous commands.
 
+**`spyc -c <cmd>`** runs a `:` command from the shell once spyc is up:
+after `init.lua` loads, a `-r` session is picked, and any startup question is
+answered. Repeatable, run in order, the `:` optional
+(`spyc -c "sort mtime" -c "limit *.rs"`).
+
 ## Background tasks
 
 Long-running captured commands (`!cargo test`, `!find ...`) don't have

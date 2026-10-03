@@ -897,6 +897,13 @@ impl App {
             // idle.
             self.settle_lua_events();
 
+            // `spyc -c` commands, once startup has settled. A no-op after the
+            // first run, since the queue is empty.
+            if let Some(startup_fx) = self.settle_startup_commands() {
+                ctx.draw.mark(3);
+                self.run_effects(startup_fx, terminal, &foreground_exec);
+            }
+
             // Reconcile the terminal's mouse mode against `[mouse] capture`. One
             // bool compare — emits nothing when they agree, so idle stays 0 dps
             // and this covers startup / `:mouse` / config reload /
