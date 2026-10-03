@@ -56,6 +56,10 @@ pub fn git_command(dir: &Path) -> std::process::Command {
     let mut cmd = std::process::Command::new("git");
     cmd.arg("-C")
         .arg(dir)
+        // No auto-maintenance: a commit otherwise leaves a detached
+        // `git maintenance run --auto` behind, whose `worktree-prune` deletes
+        // a half-built worktree admin dir under a test that's still running.
+        .args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"])
         // Pin the process cwd to a stable, never-deleted dir: sibling tests
         // `set_current_dir` and drop their tempdirs, which can transiently
         // invalidate an inherited cwd mid-spawn.
@@ -101,6 +105,20 @@ pub fn run_git(dir: &Path, args: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{GIT_REDIRECT_ENV, git_command};
+
+    /// A scratch repo gets no background git process outliving the command
+    /// that made it.
+    #[test]
+    fn git_command_turns_off_auto_maintenance() {
+        let cmd = git_command(std::path::Path::new("/tmp"));
+        let args: Vec<&str> = cmd.get_args().filter_map(|a| a.to_str()).collect();
+        for setting in ["maintenance.auto=false", "gc.auto=0"] {
+            assert!(
+                args.windows(2).any(|w| w == ["-c", setting]),
+                "{setting} missing: {args:?}"
+            );
+        }
+    }
 
     #[test]
     fn git_command_strips_the_ambient_repo_redirect() {
