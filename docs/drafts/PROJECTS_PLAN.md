@@ -108,11 +108,6 @@ several terminal windows. One spyc process holds several projects, each with its
 own columns, pane tabs and agents; a switcher moves between them; one attention
 signal covers every agent in every project; and recovery restores all of them.
 
-What stays out, permanently: peer discovery, frame mirroring, input forwarding,
-headless peers, and any CounterTop revival. Two spyc processes remain two
-separate things, which #509 made safe; one spyc never finds, adopts or talks to
-another.
-
 ---
 
 ## 0. What a project is
