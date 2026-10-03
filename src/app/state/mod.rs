@@ -735,6 +735,9 @@ pub struct AppState {
     pub pending_new_tab_cmd: Option<String>,
     pub pending_worktrees: Option<Vec<PathBuf>>,
     pub pending_sessions: Option<Vec<crate::state::sessions::Session>>,
+    /// `spyc -c` commands not yet run: they wait for startup to settle
+    /// (`App::settle_startup_commands`).
+    pub startup_commands: Vec<String>,
     pub frecency: Frecency,
     /// Which surface owns the keyboard. Replaces the old `pane_focused:
     /// bool`; read the derived bool via `self.pane_focused()`.
@@ -1193,6 +1196,7 @@ impl AppState {
             pending_new_tab_cmd: None,
             pending_worktrees: None,
             pending_sessions: None,
+            startup_commands: Vec::new(),
             frecency: Frecency::default(),
             focus: Focus::FileList,
             pane: PaneLayout {

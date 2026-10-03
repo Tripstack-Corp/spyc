@@ -482,6 +482,13 @@ struct Cli {
     #[arg(short, long)]
     resume: bool,
 
+    /// Run a `:` command once spyc has started: after `init.lua` loads, a `-r`
+    /// session is picked, and any startup question is answered. Repeatable,
+    /// run in order; the leading `:` is optional:
+    ///   spyc -c "sort mtime" -c "limit *.rs"
+    #[arg(short = 'c', long = "cmd", value_name = "CMD")]
+    cmd: Vec<String>,
+
     /// Write debug log to an owner-only spyc-debug-<ts>.log in the state dir
     #[arg(short, long)]
     debug: bool,
@@ -695,6 +702,7 @@ pub fn run() -> Result<()> {
     };
     let mut terminal = setup_terminal()?;
     let mut app = App::new(cli.resume, color_mode);
+    app.queue_startup_commands(cli.cmd);
     // Detect the terminal's graphics protocol (Kitty/iTerm2/Sixel/halfblocks +
     // font cell size) for inline diagram rendering — ONCE, here, before the
     // input reader spawns, because `from_query_stdio` reads stdin/cursor
