@@ -1,5 +1,91 @@
 # Projects — one spyc, many project homes (2.3 design)
 
+**TL;DR for reviewers.** One spyc process holds several **projects**. A project
+is a home directory plus its columns, split, pane tabs and agents. One project is
+active, meaning drawn and driven by the keyboard, and the others keep running.
+With one project open, spyc looks and behaves exactly as it does today.
+
+What approving this doc agrees to:
+
+- **State (§1).** `AppState`, `Runtime` and `ViewState` each gain a per-project
+  part, keyed by a `ProjectId` (a uuid, never an index or a path).
+  - **Moves into the project:** columns, split, focus, pane layout, tabs,
+    overlays, pagers and config.
+  - **Stays global:** the user's toolkit (inventory, marks, histories, graveyard,
+    frecency) and the process resources (one git worker, one Lua engine, one MCP
+    socket).
+  - **Call sites keep working:** the column handles (`cur()`, `col(side)`) become
+    project-relative, so the code that uses them doesn't change.
+  - **Only the active project is watched and git-polled.** A switch re-lists its
+    columns.
+  - **Scope claims gain their repository,** so `src/*.rs` in two unrelated repos
+    no longer conflicts.
+- **Per-project config (§1f, decided).** `~/.config/spyc/projects/<label>.toml`,
+  matched by its `home` key and trusted like `~/.spycrc.toml`. It layers over a
+  repo's own `.spycrc.toml`. Nothing is written into a project's directory.
+- **MCP (§2).** Still one socket per process.
+  - A connection already knows its pane (#507), and a pane belongs to one
+    project, so a connection knows its project.
+  - Read tools answer from that project.
+  - Driving tools (`navigate_to`, `pick_files`, …) move that project's columns,
+    never the view the user is looking at.
+  - An agent started outside spyc goes to the project whose home contains its
+    cwd.
+- **Recovery (§3).** One save file per process holds every project. It's a
+  version 2 format, and today's files load as one-project saves.
+  - `spyc -r` restores every project.
+  - Single projects come back from the switcher's recently-closed list.
+  - Column `a`'s directory is now saved; today's save drops it.
+  - Pane screens still aren't saved: agents replay their own history, as today.
+- **Keys (§4).** All on the `Space` leader, or `^a Space` from a pane:
+
+  | keys | does |
+  |---|---|
+  | `Space j` | project switcher |
+  | `Space Space` | last project |
+  | `Space 1`–`9` | project N |
+  | `Space ]` / `Space [` | next / previous project |
+  | `Space n` | new project |
+  | `Space x` | close the active project |
+  | `Space !` (decided) | jump to the agent that needs you, in any project |
+
+- **Status bar (§5).** The `project` segment becomes `projects`: each label with
+  its attention glyph, as in `spyc ■ · web ● · api`.
+  - With several projects open, it takes the session name's place.
+  - It shrinks in three steps when the bar is narrow, but never hides a blocked
+    agent.
+  - The terminal title adds a count of blocked agents.
+- **Attention (§6).** The dot, hook and notification machinery is reused
+  unchanged; it now walks every project's tabs.
+  - Each project rolls up to its most urgent tab: blocked, then unseen done, then
+    working, then idle.
+  - A notification names its project.
+- **3.0 attach (§7).** Every field in §1 is tagged for one of five fates:
+  - saved to disk;
+  - sent only when a 3.0 client attaches to a running spyc;
+  - rebuilt from the attaching terminal;
+  - kept by the background process;
+  - dropped.
+
+  Pane screens are only ever sent to an attaching client, never saved to disk,
+  because the engine's snapshot format is valid only for the same binary.
+
+**Rollout (Sequencing for 2.3).** Eight steps, one PR each.
+
+- **Steps 1–2 change no behaviour** and can land once this doc is approved. Step
+  1 introduces `Project`, holding today's single set of state. Step 2 tags
+  background results with the project they belong to.
+- **Steps 3–6 are the release:** per-project MCP, the new save format,
+  open/close/switch, and attention.
+
+**Needs your call** ([Open questions](#open-questions-for-review)):
+
+- What to call the saved file: "session", as the UI says today, or "manifest".
+- Whether the attention jump also gets `^a !`.
+- Whether moving agent MCP and hook config to user scope gets its own issue.
+
+---
+
 **Status: draft for review.** A 2.2 deliverable
 ([#492](https://github.com/Tripstack-Corp/spyc/issues/492)); 2.3's implementation
 ([#99](https://github.com/Tripstack-Corp/spyc/issues/99)) starts once this doc is
@@ -21,11 +107,6 @@ The goal, from [ROADMAP.md](../../ROADMAP.md) → "The 2.3 horizon": stop managi
 several terminal windows. One spyc process holds several projects, each with its
 own columns, pane tabs and agents; a switcher moves between them; one attention
 signal covers every agent in every project; and recovery restores all of them.
-
-What stays out, permanently: peer discovery, frame mirroring, input forwarding,
-headless peers, and any CounterTop revival. Two spyc processes remain two
-separate things, which #509 made safe; one spyc never finds, adopts or talks to
-another.
 
 ---
 
