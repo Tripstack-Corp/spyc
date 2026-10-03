@@ -247,14 +247,41 @@ fn materialize_worktree(
     admin_dir: &Path,
     branch: &str,
 ) -> std::io::Result<()> {
+    materialize_worktree_with(repo, tree_id, target, admin_dir, branch, &|| {})
+}
+
+/// [`materialize_worktree`], calling `mid_add` once the admin dir exists and
+/// before the checkout starts: the window a concurrent prune lands in.
+fn materialize_worktree_with(
+    repo: gix::Repository,
+    tree_id: gix::ObjectId,
+    target: &Path,
+    admin_dir: &Path,
+    branch: &str,
+    mid_add: &dyn Fn(),
+) -> std::io::Result<()> {
     std::fs::create_dir_all(target)?;
     std::fs::create_dir_all(admin_dir)?;
-    if let Err(e) = checkout_and_write(repo, tree_id, target, admin_dir, branch) {
+    // Locked until built, as `git worktree add` does: `gitdir` is written last,
+    // and a prune deletes an admin dir without one, and the emptied
+    // `worktrees/` with it. `git commit`'s detached auto-maintenance runs that
+    // prune, so any commit in the repo can land in this window.
+    let locked = admin_dir.join("locked");
+    let built = std::fs::write(&locked, "initializing").and_then(|()| {
+        mid_add();
+        checkout_and_write(repo, tree_id, target, admin_dir, branch)
+    });
+    if let Err(e) = built {
         let _ = std::fs::remove_dir_all(target);
         let _ = std::fs::remove_dir_all(admin_dir);
         return Err(e);
     }
-    Ok(())
+    std::fs::remove_file(&locked).map_err(|e| {
+        std::io::Error::new(
+            e.kind(),
+            format!("unlocking the new worktree {}: {e}", target.display()),
+        )
+    })
 }
 
 /// Build the worktree index from `tree_id`, check it out into `target`, write
@@ -1403,6 +1430,41 @@ mod tests {
         // cleanup, the empty `target` would block a same-name retry.
         assert!(!target.exists(), "partial target dir not cleaned up");
         assert!(!admin_dir.exists(), "partial admin dir not cleaned up");
+    }
+
+    /// A prune between the admin dir's creation and its `gitdir` file, which
+    /// `add` writes last, used to delete the dir and the emptied `worktrees/`
+    /// with it, failing the index write with "nearest existing ancestor:
+    /// .git". `git commit` runs that prune in the background (its detached
+    /// `maintenance run --auto` includes `worktree-prune`), so it raced the
+    /// worktree tests on slow CI, and can race a real `add` the same way.
+    #[test]
+    fn a_prune_during_add_leaves_the_worktree_being_built() {
+        let (_tmp, main) = init_repo();
+        let target = main
+            .parent()
+            .unwrap()
+            .join("repo.worktrees")
+            .join("feature");
+        let admin_dir = main.join(".git").join("worktrees").join("feature");
+        let repo = gix::open(&main).expect("open repo");
+        let tree = repo
+            .head_commit()
+            .expect("head commit")
+            .tree_id()
+            .expect("tree id")
+            .detach();
+
+        super::materialize_worktree_with(repo, tree, &target, &admin_dir, "feature", &|| {
+            run_git(&main, &["worktree", "prune"]);
+        })
+        .expect("a prune mid-add must leave the worktree being built");
+
+        assert!(admin_dir.join("gitdir").is_file());
+        assert!(
+            !admin_dir.join("locked").exists(),
+            "the lock is released once the worktree is built"
+        );
     }
 
     #[test]
