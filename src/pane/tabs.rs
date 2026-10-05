@@ -82,16 +82,16 @@ pub enum AgentActivity {
 ///
 /// Authority model (`App::effective_activity`): a report wins over the timing
 /// fallback until it expires (`expiry`, a backstop against a crashed agent's
-/// stale report) or the tab produces fresh output after it (`at` — new output
-/// means the agent resumed, so timing takes over). `at` also lets a newer
-/// report supersede an older.
+/// stale report). Output supersedes non-blocked reports only for agents with
+/// scrape rules, whose uncovered prompts need that fallback. Other agents keep
+/// semantic reports through redraws and silent tool waits.
 #[derive(Clone, Copy, Debug)]
 pub struct ReportedStatus {
     /// The reported state (`Working` / `Blocked` / `Idle` / `Done`).
     pub status: AgentActivity,
-    /// When the report was received (monotonic) — beaten by newer output.
+    /// When the report was received (monotonic).
     pub at: std::time::Instant,
-    /// Backstop expiry; after this the dot falls back to output timing.
+    /// Non-blocked backstop expiry; blocked remains latched until settled.
     pub expiry: std::time::Instant,
 }
 
@@ -141,6 +141,14 @@ pub struct TabInfo {
     /// or `None`. Overrides output timing per the [`ReportedStatus`] authority
     /// model; settle clears it once expired / superseded by fresh output.
     pub reported: Option<ReportedStatus>,
+    /// Most recent received semantic report, retained for diagnostics after
+    /// expiry or dismissal. It is not evidence of hook execution or trust.
+    pub last_reported: Option<ReportedStatus>,
+    /// Whether status-hook definitions were found before this process spawned.
+    /// Presence does not establish that the agent loaded or trusted them.
+    pub status_hooks_at_spawn: bool,
+    /// A startup-only hook config changed after this process spawned.
+    pub status_hooks_restart_needed: bool,
     /// Set on session restore when we want claude to resume a specific
     /// conversation: spawn a *fresh* `claude` (the `--resume` CLI flag
     /// trips a known regression that crashes at mount), then once
@@ -235,6 +243,9 @@ impl TabInfo {
             notified: AgentActivity::Unknown,
             suspended: false,
             reported: None,
+            last_reported: None,
+            status_hooks_at_spawn: false,
+            status_hooks_restart_needed: false,
             pending_resume_send: None,
             anim_phase_offset,
             spawn_at: std::time::Instant::now(),

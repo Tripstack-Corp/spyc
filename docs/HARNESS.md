@@ -192,6 +192,16 @@ command, opened at the tab's live cwd.
 
 ### The codex quirk that confuses everyone
 
+**Activity diagnostics distinguish setup from execution.** `:activity dump`
+shows the last received semantic report, hook-file marker presence, whether
+hooks existed at launch, and known config changes that require a restart.
+An MCP connection or hook file alone does not prove hooks ran. After first
+consenting to spyc's hooks, restart Codex and review `/hooks` and project trust.
+New/changed hooks need review; spyc does not authorize them for you. Codex and
+Claude reports survive redraws and quiet tool waits until TTL expiry or a newer
+report; Codex cancellation reports `idle` through `Interrupt`. Without a live
+report, timing-only `idle` means silence, not confirmed completion.
+
 **Restore and fork retain Codex's launch settings**, including model, profile,
 sandbox, approval policy, working directory, repeated config overrides and
 extra writable directories. General options on either side of `resume` or

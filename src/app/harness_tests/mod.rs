@@ -426,6 +426,7 @@ fn agent_transition_notifies_even_when_activity_preset_by_report() {
     });
 }
 
+mod agent_readiness;
 mod agent_spawn;
 mod archive;
 mod focused_column;

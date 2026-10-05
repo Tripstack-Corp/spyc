@@ -120,8 +120,10 @@ free optimization — a live report outranks the scrape result in
 of *when* the two settles run. Both fire pre-recv in the same iteration:
 `drain_pane_output` stamps `last_output_at` and sets `scrape_dirty`, then
 `settle_scrape_quiet`, then `settle_agent_activity` — which drops that very
-report through `report_superseded_by_output` (any output newer than a
-non-`Blocked` report supersedes it). So consuming the dirty flag on the
+report through `report_superseded_by_output` (for agents with scrape rules,
+output newer than a non-`Blocked` report supersedes it). Agents without scrape
+rules retain semantic reports through output until expiry or a newer report.
+So consuming the dirty flag on the
 report's behalf discarded the scan for a report that no longer existed by the
 end of the tick.
 

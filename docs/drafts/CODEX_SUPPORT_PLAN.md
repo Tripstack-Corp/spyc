@@ -1,8 +1,9 @@
 # Codex Support and Session HUD Plan
 
-**Status:** Draft for review. Remediation recommended for the release candidate;
-the new HUD is proposed, unscheduled follow-up scope. Neither implementation nor
-a change to the accepted release gates is implied by this document.
+**Status:** Track A implementation in progress, delivered through local-build
+acceptance before integration. The new HUD is proposed follow-up scope; its
+design review and telemetry spike remain open. This document does not change
+the accepted release gates.
 
 **Evidence date:** 2026-10-05. Assessment of the release-candidate code and current
 `main`, against the locally installed Codex CLI 0.160.0. These are historical
@@ -40,7 +41,7 @@ Two tracks keep the RC manageable:
   The user confirmed working conversation scrollback in the isolated release
   build and approved it for integration. Fork history has automated coverage;
   other slices and the HUD are not implemented by this change.
-- A2 is implemented on `fix/codex-resume-options`, local build accepted.
+- A2 landed through PR #541 after local-build acceptance.
   Save, restore and fork share token-aware option preservation; resume pinning
   distinguishes selectors from option values. Ambiguous launches are refused,
   and restore preflights before replacing any live tabs. Profile and real-PTY
@@ -52,6 +53,28 @@ Two tracks keep the RC manageable:
   dump shows distinct explicit session ids pinned to both restored panes.
   Non-default settings have automated argv coverage, not a separate live
   settings confirmation.
+- A3a is implemented on `fix/codex-activity-readiness`, with the local build
+  accepted for integration: Codex/Claude semantic reports survive output, agy's approval
+  scrape retains its existing precedence, and per-pane diagnostics separate
+  installation/startup facts from received reports. Codex's `Interrupt` hook
+  reports cancellation as `idle`. Hook trust is never inferred or changed.
+  Working-through-silence and readiness regressions failed before the fix.
+  Six focused harness tests pass, and `make check` passed with 2723 library
+  tests plus integration/VT tests. Deliberate mutations verified report-history
+  and pre-launch capture coverage; a negation-sensitive assertion was tightened,
+  and the correct production code restored.
+  During local testing, the user reviewed the new `Interrupt` hook in `/hooks`;
+  Codex displayed it as trusted. Their before/after activity dumps show a
+  semantic `done` report before cancellation and an authoritative `idle` report
+  afterward. The latter survived newer pane output, and the other tabs retained
+  their states. This verifies the observed cancellation outcome, not automatic
+  hook provenance: diagnostics deliberately cannot distinguish hook reports
+  from agent MCP reports. Subsequent dumps demonstrate normal
+  `done` → `working` → `done` transitions, with newer output leaving the reports
+  authoritative. The user accepted the build for integration. Long quiet tool
+  waits have automated coverage, not a separate live confirmation.
+  Question/plan tool coverage and live onboarding/lifecycle evidence remain
+  A3 follow-up work; this slice does not claim the whole A3 gate is met.
 
 ### Baseline
 

@@ -166,6 +166,9 @@ impl App {
         // pane knows its session id immediately — pin it now so `^a v` is exact
         // from the first keypress (the spawn-time scan handles fresh codex panes).
         let mut info = TabInfo::new(cmd, cwd);
+        info.status_hooks_at_spawn = crate::agent::detect(cmd)
+            .status_hooks()
+            .is_some_and(|support| support.installed(cwd));
         let is_agent = crate::agent::detect(cmd).kind() != crate::state::sessions::AgentKind::Other;
         if crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex {
             info.codex_session_id = crate::state::codex_transcript::resume_uuid_from_command(cmd);
@@ -247,8 +250,13 @@ impl App {
                         agent: kind,
                     },
                     format!(
-                        "Show this agent's live status on its tab? spyc will write status hooks to {} (removed when the pane exits).",
-                        support.config_label
+                        "Show this agent's live status on its tab? spyc will write status hooks to {} (removed when the pane exits).{}",
+                        support.config_label,
+                        if kind == crate::state::sessions::AgentKind::Codex {
+                            " Restart Codex, then review /hooks and project trust; spyc does not approve hooks."
+                        } else {
+                            ""
+                        }
                     ),
                 ));
             }
@@ -296,7 +304,20 @@ impl App {
         let Some(support) = crate::agent::profile_for(kind).status_hooks() else {
             return;
         };
+        let path = cwd.join(support.config_label);
+        let before = (!support.live_reload).then(|| std::fs::read(&path).ok());
         if (support.ensure)(cwd) {
+            if before.is_some_and(|content| content != std::fs::read(&path).ok())
+                && let Some(tabs) = self.runtime.pane_tabs.as_mut()
+            {
+                for entry in tabs.tabs_mut() {
+                    if entry.info.cwd == cwd
+                        && crate::agent::detect(&entry.info.command).kind() == kind
+                    {
+                        entry.info.status_hooks_restart_needed = true;
+                    }
+                }
+            }
             crate::state::dir_owners::claim(
                 crate::state::dir_owners::Shared::StatusHooks,
                 cwd,
@@ -357,7 +378,7 @@ impl App {
         if enable {
             let note = Self::ephemeral_hook_binary_note();
             self.state.flash_info(format!(
-                "status hooks ON for {proj} ({} pane(s)) — claude live next message, codex on next launch (`:hooks on!` force-restarts claude){note}",
+                "status hook consent ON for {proj} ({} pane(s)) — claude reloads next message; restart codex and review /hooks; check `:activity dump` (`:hooks on!` restarts claude){note}",
                 panes.len()
             ));
         } else {

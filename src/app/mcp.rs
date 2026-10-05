@@ -13,9 +13,9 @@
 use super::App;
 
 /// Backstop expiry for a `report_status` self-report (5 min) when the agent
-/// gives no `ttl_ms`: long enough that a genuinely-blocked agent's dot persists
-/// until answered, short enough that a crashed agent's stale `working`/`blocked`
-/// eventually falls back to output timing. Overridable per-report.
+/// gives no `ttl_ms`. Non-blocked reports eventually fall back to output timing
+/// if the agent stops reporting; blocked is latched until answered or superseded
+/// by a newer report. Overridable per-report.
 const DEFAULT_REPORT_TTL_MS: u64 = 300_000;
 
 impl App {
@@ -511,6 +511,7 @@ impl App {
                     at: now,
                     expiry: now + ttl,
                 });
+                entry.info.last_reported = entry.info.reported;
                 // Apply immediately so this frame reflects it; `settle_agent_activity`
                 // maintains it (and falls back to timing once it expires).
                 entry.info.activity = activity;

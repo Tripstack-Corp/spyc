@@ -65,12 +65,20 @@ const AGENT_ANIM_INTERVAL: Duration = Duration::from_millis(250);
 /// keeps redrawing itself while it waits — those redraws are pane output, so any
 /// output-based supersede (even behind a grace window) eventually bounces the
 /// dot off red and back to the working pulse. Blocked is cleared only by its
-/// TTL, a newer report, or the user settling the prompt — answering it with
+/// a newer report or the user settling the prompt — answering it with
 /// Enter or dismissing it with Esc / `^c` (the `SendToPane` handler in
 /// `run_effects` drops it on any of those keystrokes).
-/// Every other status is superseded by any output after it.
-fn report_superseded_by_output(r: ReportedStatus, last_output_at: Option<Instant>) -> bool {
-    if r.status == AgentActivity::Blocked {
+/// Agents without scrape rules retain all semantic reports through output;
+/// redraws do not establish a new turn or completion. Agents with scrape rules
+/// yield to output so an uncovered approval prompt can become authoritative.
+fn report_superseded_by_output(
+    r: ReportedStatus,
+    last_output_at: Option<Instant>,
+    kind: AgentKind,
+) -> bool {
+    if r.status == AgentActivity::Blocked
+        || crate::agent::profile_for(kind).detection_rules().is_empty()
+    {
         return false;
     }
     last_output_at.is_some_and(|o| o > r.at)
@@ -405,8 +413,9 @@ impl App {
     /// The authority resolution (P1, testable core): a live semantic
     /// [`ReportedStatus`] wins over the P1-2 scrape fallback, which wins over
     /// the output-timing fallback. A report is *live* until it expires or the
-    /// tab produces output **after** it (the agent resumed → timing takes back
-    /// over). `scrape` is the tab's scrape-inferred state, written only by the
+    /// tab with scrape rules produces output **after** it. Agents without those
+    /// rules retain reports through redraws and silent tool waits. `scrape` is
+    /// the tab's scrape-inferred state, written only by the
     /// debounced [`Self::settle_scrape_quiet`]; it's a fallback for agents with
     /// no live report, never consulted while one is authoritative (the caller
     /// clears it the instant a report exists — see `settle_agent_activity`).
@@ -415,20 +424,20 @@ impl App {
     fn effective_activity(
         reported: Option<ReportedStatus>,
         scrape: Option<AgentActivity>,
-        is_agent: bool,
+        kind: AgentKind,
         last_output_at: Option<Instant>,
         now: Instant,
     ) -> AgentActivity {
-        if !is_agent {
+        if kind == AgentKind::Other {
             return AgentActivity::Unknown;
         }
         if let Some(r) = reported {
             // `Blocked` is latched: no TTL expiry and output never supersedes it
             // (`report_superseded_by_output` returns false), so it holds until the
             // user answers the pane (Enter, in `run_effects`) or a newer report
-            // lands. Every other status expires or yields to later output.
+            // lands. Other statuses expire; only scrape-rule agents yield to output.
             let expired = r.status != AgentActivity::Blocked && now >= r.expiry;
-            let superseded = report_superseded_by_output(r, last_output_at);
+            let superseded = report_superseded_by_output(r, last_output_at, kind);
             if !expired && !superseded {
                 return r.status;
             }
@@ -439,7 +448,7 @@ impl App {
         if let Some(s) = scrape {
             return s;
         }
-        Self::activity_for(is_agent, last_output_at, now)
+        Self::activity_for(true, last_output_at, now)
     }
 
     /// P1-2 pure debounce step for one dirty tab: skip it, scan its screen now,
@@ -577,15 +586,15 @@ impl App {
         let mut status_transitions: Vec<(String, AgentActivity)> = Vec::new();
         let mut live_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
-            let is_agent = crate::agent::detect(&entry.info.command).kind() != AgentKind::Other;
+            let kind = crate::agent::detect(&entry.info.command).kind();
             // Drop a report that's no longer authoritative (expired, or the tab
-            // resumed output after it) so state + `:why-status` stay honest. A
+            // emitted output that supersedes it) so diagnostics stay honest. A
             // `Blocked` report is latched — it never expires here and output
             // never supersedes it (see `effective_activity`); only the Enter-on-
             // pane clear in `run_effects` or a newer report drops it.
             if let Some(r) = entry.info.reported
                 && ((r.status != AgentActivity::Blocked && now >= r.expiry)
-                    || report_superseded_by_output(r, entry.info.last_output_at))
+                    || report_superseded_by_output(r, entry.info.last_output_at, kind))
             {
                 entry.info.reported = None;
             }
@@ -599,7 +608,7 @@ impl App {
             let new = Self::effective_activity(
                 entry.info.reported,
                 entry.info.scrape_status.map(|(s, _)| s),
-                is_agent,
+                kind,
                 entry.info.last_output_at,
                 now,
             );
@@ -839,7 +848,7 @@ mod tests {
             App::effective_activity(
                 report(AgentActivity::Working, base, base + Duration::from_secs(60)),
                 None,
-                true,
+                AgentKind::Agy,
                 None,
                 base,
             ),
@@ -850,7 +859,7 @@ mod tests {
             App::effective_activity(
                 report(AgentActivity::Blocked, base, base + Duration::from_secs(60)),
                 None,
-                true,
+                AgentKind::Agy,
                 Some(base),
                 base + Duration::from_secs(1),
             ),
@@ -862,7 +871,7 @@ mod tests {
             App::effective_activity(
                 report(AgentActivity::Working, base, base + Duration::from_secs(1)),
                 None,
-                true,
+                AgentKind::Agy,
                 None,
                 base + Duration::from_secs(2),
             ),
@@ -874,7 +883,7 @@ mod tests {
             App::effective_activity(
                 report(AgentActivity::Idle, base, base + Duration::from_secs(60)),
                 None,
-                true,
+                AgentKind::Agy,
                 Some(later),
                 later,
             ),
@@ -885,7 +894,7 @@ mod tests {
             App::effective_activity(
                 report(AgentActivity::Working, base, base + Duration::from_secs(60)),
                 None,
-                false,
+                AgentKind::Other,
                 None,
                 base,
             ),
@@ -905,13 +914,25 @@ mod tests {
 
         // No report, no output → timing alone would say Idle; scrape overrides.
         assert_eq!(
-            App::effective_activity(None, Some(AgentActivity::Blocked), true, None, base),
+            App::effective_activity(
+                None,
+                Some(AgentActivity::Blocked),
+                AgentKind::Agy,
+                None,
+                base
+            ),
             AgentActivity::Blocked
         );
         // Scrape is trusted even with recent output (settle_scrape_quiet
         // handles the timing — effective_activity just reads the result).
         assert_eq!(
-            App::effective_activity(None, Some(AgentActivity::Blocked), true, Some(base), base),
+            App::effective_activity(
+                None,
+                Some(AgentActivity::Blocked),
+                AgentKind::Agy,
+                Some(base),
+                base
+            ),
             AgentActivity::Blocked
         );
         // A live report still wins over a scrape guess.
@@ -921,17 +942,29 @@ mod tests {
             expiry: base + Duration::from_secs(60),
         });
         assert_eq!(
-            App::effective_activity(report, Some(AgentActivity::Blocked), true, None, base),
+            App::effective_activity(
+                report,
+                Some(AgentActivity::Blocked),
+                AgentKind::Agy,
+                None,
+                base
+            ),
             AgentActivity::Working
         );
         // No scrape guess either → falls all the way through to timing.
         assert_eq!(
-            App::effective_activity(None, None, true, None, base),
+            App::effective_activity(None, None, AgentKind::Agy, None, base),
             AgentActivity::Idle
         );
         // Non-agent tab ignores scrape too (dots are agent-only).
         assert_eq!(
-            App::effective_activity(None, Some(AgentActivity::Blocked), false, None, base),
+            App::effective_activity(
+                None,
+                Some(AgentActivity::Blocked),
+                AgentKind::Other,
+                None,
+                base
+            ),
             AgentActivity::Unknown
         );
     }
@@ -1021,7 +1054,7 @@ mod tests {
             App::effective_activity(
                 Some(report),
                 Some(AgentActivity::Blocked),
-                true,
+                AgentKind::Agy,
                 None,
                 base + Duration::from_millis(20)
             ),
@@ -1038,7 +1071,7 @@ mod tests {
             App::effective_activity(
                 Some(report),
                 Some(AgentActivity::Blocked),
-                true,
+                AgentKind::Agy,
                 Some(output_after),
                 output_after + Duration::from_millis(1)
             ),
@@ -1069,7 +1102,7 @@ mod tests {
         // waits) does NOT supersede — the dot stays Blocked.
         let later = base + Duration::from_secs(30);
         assert_eq!(
-            App::effective_activity(blocked, None, true, Some(later), later),
+            App::effective_activity(blocked, None, AgentKind::Agy, Some(later), later),
             AgentActivity::Blocked,
             "blocked is latched — prompt redraws must not bounce it to working"
         );
@@ -1083,7 +1116,13 @@ mod tests {
             expiry: base + Duration::from_secs(1),
         });
         assert_eq!(
-            App::effective_activity(stale, None, true, None, base + Duration::from_secs(600)),
+            App::effective_activity(
+                stale,
+                None,
+                AgentKind::Agy,
+                None,
+                base + Duration::from_secs(600)
+            ),
             AgentActivity::Blocked,
             "blocked has no TTL — it stays until answered"
         );
@@ -1099,7 +1138,7 @@ mod tests {
             App::effective_activity(
                 done,
                 None,
-                true,
+                AgentKind::Agy,
                 Some(base + Duration::from_millis(200)),
                 base + Duration::from_millis(300),
             ),
