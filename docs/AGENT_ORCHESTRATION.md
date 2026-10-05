@@ -105,6 +105,21 @@ execution or trust. Codex needs project trust and review of new/changed hooks
 in `/hooks`; spyc neither approves them nor edits trust records. See the
 [official Codex hooks documentation](https://learn.chatgpt.com/docs/hooks).
 
+`:activity dump` also retains up to eight bounded hook-event summaries per
+pane, oldest first, after status expiry or dismissal. A restart clears them.
+The reporter forwards only event/tool names, notification subtype and available
+turn/call ids; it excludes arguments, prompts, response text and tool output.
+Control characters, malformed identifiers and oversized fields are discarded.
+`--status-trace` logs this sanitized metadata instead of the raw stdin payload.
+This is claimed metadata, not authenticated hook provenance. Missing metadata
+can mean an older reporter or an absent/malformed payload, not a missing hook.
+
+The current official hook contract supplies `tool_use_id` for `PreToolUse` and
+`PostToolUse`, but does not list it for `PermissionRequest`. An absent id stays
+absent. A generic tool completion cannot establish which permission/question
+was answered, and metadata alone does not clear `blocked`. Question/plan tool
+coverage still needs real-CLI evidence; no broad tool-completion hook is added.
+
 ### How the hooks get written
 
 Each agent's hook writer/cleaner pair (`mcp::{ensure,cleanup}_{codex,agy}_status_hooks`)

@@ -61,6 +61,7 @@ fn report(app: &mut App, status: &str) {
             status: status.into(),
             ttl_ms: Some(120_000),
             session_id: None,
+            hook_event: None,
         }),
         McpResponse::Ok { .. }
     ));
@@ -290,6 +291,7 @@ fn codex_report_history_is_pane_local_and_not_carried_into_a_restart() {
             status: "blocked".into(),
             ttl_ms: Some(1),
             session_id: None,
+            hook_event: None,
         });
         let at = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
             .info
@@ -318,5 +320,132 @@ fn codex_report_history_is_pane_local_and_not_carried_into_a_restart() {
                 .last_reported
                 .is_none()
         );
+    });
+}
+
+#[test]
+fn status_hook_event_history_is_bounded_pane_local_and_cleared_on_restart() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let mut app = agent_app(&dir, "codex");
+        let first = app
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info()
+            .id
+            .clone();
+        assert!(app.open_pane_tab_in("cat", &dir));
+        for index in 0..10 {
+            let event = crate::agent::status_hook::StatusHookEvent::from_value(&serde_json::json!({
+                "hook_event_name":"PermissionRequest", "tool_name":"Bash", "turn_id":format!("turn-{index}"),
+                "tool_input": {"command":"private-command"}
+            })).unwrap();
+            assert!(matches!(
+                app.execute_mcp_command(McpCommand::ReportStatus {
+                    pane_id: Some(first.clone()),
+                    pane: None,
+                    status: "blocked".into(),
+                    ttl_ms: Some(1),
+                    session_id: None,
+                    hook_event: Some(event),
+                }),
+                McpResponse::Ok { .. }
+            ));
+        }
+        let tabs = app.runtime.pane_tabs.as_ref().unwrap();
+        let history = &tabs.tabs()[0].info.recent_hook_events;
+        assert_eq!(history.len(), 8);
+        assert_eq!(
+            history.front().unwrap().0.turn_id.as_deref(),
+            Some("turn-2")
+        );
+        assert_eq!(history.back().unwrap().0.turn_id.as_deref(), Some("turn-9"));
+        assert!(tabs.active_info().recent_hook_events.is_empty());
+        let lines = dump(&mut app);
+        assert!(
+            lines.contains("reported metadata (unverified; oldest first)"),
+            "{lines}"
+        );
+        assert!(
+            lines.contains(
+                "event=PermissionRequest status=blocked tool=Bash turn=turn-9 call=not-reported"
+            ),
+            "{lines}"
+        );
+        assert!(!lines.contains("turn=turn-0 "), "{lines}");
+        assert!(!lines.contains("private-command"));
+
+        let command = fake_agent(&dir, "codex").display().to_string();
+        assert!(app.spawn_agent_into_tab(0, &command, &dir, None));
+        assert!(
+            app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+                .info
+                .recent_hook_events
+                .is_empty()
+        );
+    });
+}
+
+#[test]
+fn status_hook_event_metadata_does_not_infer_permission_answers_or_hook_trust() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "codex");
+        let event = crate::agent::status_hook::StatusHookEvent::from_value(&serde_json::json!({
+            "hook_event_name":"PostToolUse", "tool_name":"Bash", "turn_id":"turn-1", "tool_use_id":"unrelated-call"
+        })).unwrap();
+        assert!(matches!(
+            app.execute_mcp_command(McpCommand::ReportStatus {
+                pane_id: None,
+                pane: None,
+                status: "blocked".into(),
+                ttl_ms: Some(1),
+                session_id: None,
+                hook_event: Some(event),
+            }),
+            McpResponse::Ok { .. }
+        ));
+        let at = app
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info()
+            .reported
+            .unwrap()
+            .at;
+        let mut ctx = RunCtx::for_test();
+        app.settle_agent_activity(at + Duration::from_secs(60), &mut ctx);
+        assert_eq!(
+            app.runtime
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .activity,
+            AgentActivity::Blocked
+        );
+        report(&mut app, "done");
+        let at = app
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info()
+            .reported
+            .unwrap()
+            .at;
+        app.settle_agent_activity(at + Duration::from_secs(121), &mut ctx);
+        let lines = dump(&mut app);
+        assert!(lines.contains("execution/trust unverified"), "{lines}");
+        assert!(
+            lines.contains("event=PostToolUse status=blocked"),
+            "{lines}"
+        );
+        assert!(lines.contains("last_report: status=done"), "{lines}");
+        assert!(lines.contains("no longer authoritative"), "{lines}");
     });
 }

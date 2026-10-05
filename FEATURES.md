@@ -318,6 +318,11 @@ spyc's workflow: browse files above, talk to Claude below.
   after expiry, distinguishes hook-file presence from startup/restart facts,
   and never treats a self-report or bound MCP connection as proof of hook
   execution or trust.
+  Each pane also retains up to eight reported hook-event summaries (event,
+  tool and available turn/call ids), without arguments, prompts or responses.
+  These are claimed metadata, not verified execution; an older reporter may
+  omit them. `--status-trace` logs the same sanitized metadata rather than raw
+  hook input. Metadata does not infer that a permission/question was answered.
   **`:why-git`** opens a saveable pager dumping each column's git-marker refresh
   state — repo root / resolved gitdir, the cached poll key vs the live on-disk
   one (`index`'s mtime plus the latest of `HEAD`, its branch ref, and the shared

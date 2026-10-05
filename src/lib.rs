@@ -501,7 +501,8 @@ struct Cli {
     key_trace: bool,
 
     /// Trace the agent status-reporter to mcp.log: each `--report-status` hook
-    /// invocation + the env it actually saw (SPYC_MCP_SOCK / SPYC_PANE_ID). Bakes
+    /// invocation, bounded event metadata and routing env (SPYC_MCP_SOCK /
+    /// SPYC_PANE_ID), never hook arguments, prompts or responses. Bakes
     /// `--status-trace` into the status hooks spyc installs, so it logs even if
     /// Claude sanitizes the hook env. Off by default (the reporter fires every
     /// agent turn). Diagnose with `grep report-status <state-dir>/mcp.log`.

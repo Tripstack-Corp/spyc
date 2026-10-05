@@ -53,8 +53,8 @@ Two tracks keep the RC manageable:
   dump shows distinct explicit session ids pinned to both restored panes.
   Non-default settings have automated argv coverage, not a separate live
   settings confirmation.
-- A3a is implemented on `fix/codex-activity-readiness`, with the local build
-  accepted for integration: Codex/Claude semantic reports survive output, agy's approval
+- A3a landed through PR #542 after local-build acceptance:
+  Codex/Claude semantic reports survive output, agy's approval
   scrape retains its existing precedence, and per-pane diagnostics separate
   installation/startup facts from received reports. Codex's `Interrupt` hook
   reports cancellation as `idle`. Hook trust is never inferred or changed.
@@ -75,6 +75,35 @@ Two tracks keep the RC manageable:
   waits have automated coverage, not a separate live confirmation.
   Question/plan tool coverage and live onboarding/lifecycle evidence remain
   A3 follow-up work; this slice does not claim the whole A3 gate is met.
+- A3b1 adds bounded, pane-local reported hook-event diagnostics and replaces
+  raw status-trace payload logging with sanitized metadata on
+  `fix/codex-attention-lifecycle`, accepted for integration after local testing
+  on 2026-10-05. The full
+  `RUST_TEST_THREADS=1 make check` gate passes: 2729 library tests, one existing
+  ignored test, integration tests (including three real reporter-binary tests)
+  and VT-system tests. Default parallel runs hit fake-agent PTY startup flakes
+  also reproduced on unchanged `main`; the cause is not established. New
+  metadata, dispatch and pane-history tests were observed failing against
+  scaffolds or mutations, and real reporter tests exposed missing metadata and
+  raw-payload trace leakage before the fixes.
+  The installed CLI remains `0.160.0`. The current official hook contract lists
+  call ids for `PreToolUse`/`PostToolUse` but not `PermissionRequest`, and does
+  not explicitly establish question-tool coverage. This is instrumentation for
+  those gaps, not an inferred approval-answer transition or complete A3 fix.
+  Existing hook definitions and trust state are unchanged. Older reporters
+  remain compatible but cannot supply metadata; local tests must resolve the
+  supplied build on `PATH` for the one-shot reporter as well as the host.
+  The first live run received statuses without metadata. A shell-resolution
+  probe reproduced interactive zsh selecting the older installed reporter
+  despite the test directory's initial `PATH` precedence. A fresh session
+  launched with `SHELL=/bin/sh` then received bounded event summaries:
+  `PermissionRequest` reported authoritative `blocked`, a later
+  `UserPromptSubmit` reported authoritative `working`, and `Stop` reported
+  authoritative `done` despite newer output. Each event arrived twice; duplicate
+  delivery remains unexplained and must not be hidden by heuristic deduplication.
+  The intermediate message/approval sequence was not captured precisely enough
+  to establish an approval-only recovery transition. Question-tool handling,
+  quiet post-approval work and multi-pane live isolation remain unverified.
 
 ### Baseline
 

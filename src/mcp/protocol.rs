@@ -977,12 +977,15 @@ fn handle_tools_call(
                     // Piggybacked by the status-hook reporter (Claude's hook
                     // stdin carries `session_id`); absent on a direct agent call.
                     let session_id = args["session_id"].as_str().map(String::from);
+                    let hook_event =
+                        crate::agent::status_hook::StatusHookEvent::from_value(&args["hook_event"]);
                     McpCommand::ReportStatus {
                         pane_id,
                         pane,
                         status,
                         ttl_ms,
                         session_id,
+                        hook_event,
                     }
                 }
                 "navigate_to" => {

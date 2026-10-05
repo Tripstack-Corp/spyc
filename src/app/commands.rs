@@ -680,6 +680,24 @@ fn activity_dump_lines(app: &App) -> Vec<String> {
             )),
             None => out.push("    last_report: none received".to_string()),
         }
+        if info.recent_hook_events.is_empty() {
+            out.push(
+                "    hook_events: none received (older reporters may omit metadata)".to_string(),
+            );
+        } else {
+            out.push("    hook_events: reported metadata (unverified; oldest first)".to_string());
+            for (event, status, at) in &info.recent_hook_events {
+                out.push(format!(
+                    "      event={} status={} tool={} turn={} call={} received {:.1}s ago",
+                    event.hook_event_name,
+                    state_str(*status),
+                    event.tool_name.as_deref().unwrap_or("not-reported"),
+                    event.turn_id.as_deref().unwrap_or("not-reported"),
+                    event.tool_use_id.as_deref().unwrap_or("not-reported"),
+                    at.elapsed().as_secs_f32(),
+                ));
+            }
+        }
         match info.last_output_at {
             Some(at) => out.push(format!(
                 "    last_output: {:.1}s ago",

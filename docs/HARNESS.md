@@ -202,6 +202,19 @@ Claude reports survive redraws and quiet tool waits until TTL expiry or a newer
 report; Codex cancellation reports `idle` through `Interrupt`. Without a live
 report, timing-only `idle` means silence, not confirmed completion.
 
+The dump includes up to eight reported hook-event summaries per pane. Event,
+tool and available turn/call ids help diagnose permission transitions without
+copying command arguments or conversation content. Metadata is unverified and
+does not change the configured status. Older reporter binaries still report
+status but omit event metadata: for a local test build, put its directory first
+on `PATH` before launching spyc so hooks invoking `spyc` use that build too.
+The pane's interactive shell can reorder `PATH` during startup. If reports
+arrive without metadata, check which `spyc` that shell resolves; launching the
+test with `SHELL=/bin/sh` can preserve the test directory's precedence without
+editing shell configuration. This temporarily changes the pane launch shell,
+not the user's permanent shell settings.
+`--status-trace` records sanitized summaries, not raw hook payloads.
+
 **Restore and fork retain Codex's launch settings**, including model, profile,
 sandbox, approval policy, working directory, repeated config overrides and
 extra writable directories. General options on either side of `resume` or

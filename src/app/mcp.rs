@@ -475,6 +475,7 @@ impl App {
                 status,
                 ttl_ms,
                 session_id,
+                hook_event,
             } => {
                 use crate::pane::{AgentActivity, ReportedStatus};
                 let activity = match status.as_str() {
@@ -512,6 +513,13 @@ impl App {
                     expiry: now + ttl,
                 });
                 entry.info.last_reported = entry.info.reported;
+                if let Some(event) = hook_event {
+                    let history = &mut entry.info.recent_hook_events;
+                    if history.len() >= crate::agent::status_hook::HISTORY_LIMIT {
+                        history.pop_front();
+                    }
+                    history.push_back((event, activity, now));
+                }
                 // Apply immediately so this frame reflects it; `settle_agent_activity`
                 // maintains it (and falls back to timing once it expires).
                 entry.info.activity = activity;

@@ -282,7 +282,7 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
     // it — `effective_report_state` downgrades an `idle_prompt` Notification
     // from `blocked` to `done`. Guarded on `!is_terminal()` so a manual
     // `spyc --report-status …` from a shell never blocks on read, and capped so
-    // a pathological payload can't balloon mcp.log.
+    // a pathological payload can't balloon reporter memory.
     let payload = {
         use std::io::{IsTerminal, Read};
         let stdin = std::io::stdin();
@@ -290,15 +290,19 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
             String::new()
         } else {
             let mut s = String::new();
-            let _ = stdin.lock().take(8192).read_to_string(&mut s);
+            let _ = stdin
+                .lock()
+                .take(crate::agent::status_hook::PAYLOAD_LIMIT as u64)
+                .read_to_string(&mut s);
             s.trim().to_string()
         }
     };
-    if trace && !payload.is_empty() {
-        // Max-info diagnostic: see EXACTLY which event fired this report (the
-        // hook *command* is identical across PermissionRequest / Notification /
-        // PreToolUse, so the event name only lives in the payload).
-        trace_log(&format!("report-status: hook stdin: {payload}"));
+    let hook_event = crate::agent::status_hook::StatusHookEvent::from_payload(&payload);
+    if trace {
+        trace_log(&format!(
+            "report-status: hook metadata: {}",
+            serde_json::json!(hook_event)
+        ));
     }
     // An idle Notification means "finished, waiting" → `done`, not the alarming
     // `blocked` square (the false-red-on-idle bug); permission stays `blocked`.
@@ -308,8 +312,8 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
     let session_id = session_id_from_hook_payload(&payload);
     if trace {
         trace_log(&format!("report-status: effective state={state}"));
-        if let Some(sid) = session_id.as_deref() {
-            trace_log(&format!("report-status: session_id={sid}"));
+        if session_id.is_some() {
+            trace_log("report-status: session_id=set");
         }
     }
     if sock.is_empty() {
@@ -327,7 +331,7 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
         "method": "tools/call",
         "params": {
             "name": "report_status",
-            "arguments": { "status": state, "pane_id": pane_id, "session_id": session_id },
+            "arguments": { "status": state, "pane_id": pane_id, "session_id": session_id, "hook_event": hook_event },
         },
     })
     .to_string();
