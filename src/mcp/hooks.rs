@@ -321,17 +321,18 @@ pub fn cleanup_claude_status_hooks(dir: &Path) -> ConfigCleanup {
 // Codex's hooks are inline `[[hooks.<Event>]]` tables in the same
 // `.codex/config.toml` as the MCP entry (see [`super::config`]), not a separate
 // file. `UserPromptSubmit` → working, `PermissionRequest` → blocked, `Stop` →
-// done; codex has no Notification/idle event. It reads config once at startup
+// done, `Interrupt` → idle. It reads config once at startup
 // (no live reload), so hooks are written pre-spawn; a first-launch `yes` only
 // takes effect on codex's next launch.
 
 /// Codex's (event, reported-state). No matcher: these events aren't
 /// tool-scoped, and the `--report-status` command string is the "ours" marker
 /// for cleanup (a user isn't expected to author their own).
-const CODEX_STATUS_HOOKS: [(&str, &str); 3] = [
+const CODEX_STATUS_HOOKS: [(&str, &str); 4] = [
     ("UserPromptSubmit", "working"),
     ("PermissionRequest", "blocked"),
     ("Stop", "done"),
+    ("Interrupt", "idle"),
 ];
 
 /// TOML counterpart of [`group_is_ours`]: a `{ hooks = [{ command = … }] }`

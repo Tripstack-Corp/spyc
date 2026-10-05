@@ -240,9 +240,11 @@ impl App {
                 let live = profile.status_hooks().is_some_and(|s| s.live_reload);
                 let name = profile.name();
                 self.state.flash_info(if live {
-                    format!("status hooks on — {name} reports its live activity (saved; `:hooks off` to undo)")
+                    format!("status hook consent saved — {name} reloads next message; check `:activity dump` (`:hooks off` to undo)")
+                } else if agent == crate::state::sessions::AgentKind::Codex {
+                    "status hook consent saved — restart codex, review /hooks and project trust; check `:activity dump`".to_string()
                 } else {
-                    format!("status hooks on — active on {name}'s next launch (saved; `:hooks off` to undo)")
+                    format!("status hook consent saved — restart {name}; check `:activity dump` (`:hooks off` to undo)")
                 });
             }
             KeyCode::Char('n' | 'N') => {

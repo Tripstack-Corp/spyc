@@ -24,6 +24,36 @@ use crate::state::sessions::AgentKind;
 /// rather than the session.
 const RECHECK_EVERY: Duration = Duration::from_secs(30);
 
+/// Report installation facts without treating config presence or an agent's
+/// self-report as proof that a lifecycle hook was trusted and executed.
+pub(super) fn status_hooks_diagnostic(info: &crate::pane::TabInfo) -> Option<String> {
+    let profile = crate::agent::detect(&info.command);
+    let support = profile.status_hooks()?;
+    let presence = if support.installed(&info.cwd) {
+        "reporter marker found"
+    } else {
+        "MISSING (`:hooks on`)"
+    };
+    let startup = if support.live_reload {
+        "live reload supported"
+    } else if info.status_hooks_restart_needed {
+        "restart needed (changed after launch)"
+    } else if info.status_hooks_at_spawn {
+        "present at launch"
+    } else {
+        "not present at launch"
+    };
+    let verification = if profile.kind() == AgentKind::Codex {
+        "execution/trust unverified; review /hooks and project trust"
+    } else {
+        "hook execution unverified"
+    };
+    Some(format!(
+        "{presence} in {}; {startup}; {verification}",
+        support.config_label
+    ))
+}
+
 impl App {
     /// Every hook-supporting agent pane as a deduplicated `(cwd, kind)` list.
     /// Two tabs in one dir are one entry — installing is idempotent, so the

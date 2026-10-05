@@ -35,6 +35,13 @@ three tiers; a higher tier always wins:
 3. **Output timing** — with neither of the above, output flowing = `working`,
    silence = `idle`.
 
+Codex and Claude retain semantic reports through output and footer redraws.
+Silent tool waits do not erase `working`; the default five-minute TTL remains
+a backstop, and newer reports replace older ones. Agents with scrape rules
+(agy) still yield non-blocked reports to fresh output so their uncovered
+approval prompts can be detected. Timing-only `idle` means quiet, not proof
+that a turn stopped or finished.
+
 **Glyphs** (shape = liveness, colour = urgency):
 
 | Dot | Meaning |
@@ -58,6 +65,10 @@ needs-permission→blocked, turn-end→done): **claude** (`.claude/settings.json
 **codex** (`.codex/config.toml`), **agy** (`.agents/hooks.json` — working/done only;
 agy has no approval event, so its `blocked` comes from spyc reading the approval
 prompt off the pane).
+
+Codex also reports `idle` through its `Interrupt` hook when the main turn is
+cancelled. No general tool-completion hook clears `blocked`: a concurrent tool
+finishing is not proof that a separate permission/question prompt was answered.
 
 agy's `done` needs **agy >= 1.1.10**: earlier versions evaluated `hooks.json` after
 their own termination checks, so the `Stop` handler spyc installs was unreachable
@@ -85,6 +96,14 @@ user was not typing at.
 
 **Debug:** **`:why-status`** flashes the active tab's state + source; **`:activity
 dump`** opens a pager with every pane's derivation.
+
+The dump retains the last received semantic report after expiry or dismissal;
+its source can be a hook or the agent itself. Hook diagnostics separate the
+reporter marker found in a file, presence before launch, and known post-launch
+config changes requiring a restart. These facts do **not** establish loading,
+execution or trust. Codex needs project trust and review of new/changed hooks
+in `/hooks`; spyc neither approves them nor edits trust records. See the
+[official Codex hooks documentation](https://learn.chatgpt.com/docs/hooks).
 
 ### How the hooks get written
 

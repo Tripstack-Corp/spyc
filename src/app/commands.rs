@@ -231,12 +231,8 @@ pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
         // as the answer ("idle (output-timing)") when the real story is that
         // nothing can report — the exact ambiguity that turned one removal into
         // a forensics session.
-        let hooks = match crate::agent::detect(&info.command).status_hooks() {
-            Some(s) if !s.installed(&info.cwd) => {
-                format!(" — NO status hooks in {} (`:hooks on`)", s.config_label)
-            }
-            _ => String::new(),
-        };
+        let hooks = super::status_hooks::status_hooks_diagnostic(info)
+            .map_or_else(String::new, |message| format!(" — hooks: {message}"));
         format!(
             "why-status [{}]: {state} ({source}) — {age}{hooks}",
             info.label
@@ -641,24 +637,23 @@ fn activity_dump_lines(app: &App) -> Vec<String> {
         ));
         out.push(format!("    command: {}", info.command));
         out.push(format!("    cwd: {}", info.cwd.display()));
-        if let Some(support) = crate::agent::detect(&info.command).status_hooks() {
-            out.push(format!(
-                "    hooks: {} in {}",
-                if support.installed(&info.cwd) {
-                    "installed"
-                } else {
-                    "MISSING (`:hooks on`)"
-                },
-                support.config_label,
-            ));
+        if let Some(message) = super::status_hooks::status_hooks_diagnostic(info) {
+            out.push(format!("    hooks: {message}"));
         }
         // The crux: live self-report > P1-2 scrape fallback > output timing.
         match (info.reported, info.scrape_status) {
             (Some(r), _) => out.push(format!(
-                "    source: SELF-REPORT status={} set {:.1}s ago, expires in {:.0}s",
+                "    source: SELF-REPORT status={} set {:.1}s ago, {}",
                 state_str(r.status),
                 r.at.elapsed().as_secs_f32(),
-                r.expiry.saturating_duration_since(now).as_secs_f32(),
+                if r.status == AgentActivity::Blocked {
+                    "latched until answered/dismissed or a newer report".to_string()
+                } else {
+                    format!(
+                        "expires in {:.0}s",
+                        r.expiry.saturating_duration_since(now).as_secs_f32()
+                    )
+                },
             )),
             (None, Some((s, hint))) => out.push(format!(
                 "    source: SCRAPE-FALLBACK status={}{}",
@@ -671,6 +666,19 @@ fn activity_dump_lines(app: &App) -> Vec<String> {
             (None, None) => {
                 out.push("    source: output-timing (no live report)".to_string());
             }
+        }
+        match info.last_reported {
+            Some(report) => out.push(format!(
+                "    last_report: status={} received {:.1}s ago (hook or agent; {})",
+                state_str(report.status),
+                report.at.elapsed().as_secs_f32(),
+                if info.reported.is_some() {
+                    "authoritative"
+                } else {
+                    "no longer authoritative"
+                },
+            )),
+            None => out.push("    last_report: none received".to_string()),
         }
         match info.last_output_at {
             Some(at) => out.push(format!(

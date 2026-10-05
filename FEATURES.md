@@ -259,8 +259,10 @@ spyc's workflow: browse files above, talk to Claude below.
     calm teal square `■`). Shape carries meaning: a **circle `●`** is live /
     animated (working), a **square `■`** is a *settled, waiting* state (blocked
     or done) — so you can tell "needs me / finished" from "busy" at a glance.
-    A live `working`/`done` report overrides the timing guess until it expires
-    or the agent resumes output. **`blocked` is latched**: it stays a steady red
+    For Codex and Claude, live reports survive output and footer redraws until
+    a newer report or TTL expiry; quiet tool waits do not erase `working`.
+    Agents with scrape rules still yield non-blocked reports to fresh output
+    so an uncovered approval prompt can be detected. **`blocked` is latched**: it stays a steady red
     square — no TTL, no output or animation revives it — until you actually
     answer the pane by pressing **Enter** in it (or the agent files a newer
     report). Non-agent tabs (a plain shell) get no dot.
@@ -271,7 +273,9 @@ spyc's workflow: browse files above, talk to Claude below.
     config: **claude** writes `.claude/settings.json` (JSON, reloaded live);
     **codex** writes inline `[[hooks.*]]` into the same `.codex/config.toml` that
     already holds the MCP entry (read once at startup, so for an already-consented
-    repo the hooks are written *before* codex spawns); **agy** (Antigravity)
+    repo the hooks are written *before* codex spawns). Codex's `Interrupt` hook
+    reports `idle` after cancellation. Project trust and `/hooks` review are
+    separate from spyc's consent; spyc never auto-approves hooks. **agy** (Antigravity)
     writes a `spyc-status` set into `.agents/hooks.json` and is **partial** — it
     covers `working`, `done`, and `blocked` for agy's own `ask_question` tool
     (a `PreToolUse` hook sees that one exactly when it's called). The *other*
@@ -309,7 +313,11 @@ spyc's workflow: browse files above, talk to Claude below.
     degradation.
 
   **`:why-status`** flashes the active tab's state, its source (self-reported /
-  scrape-fallback / output-timing), and seconds since last output, for debugging.
+  scrape-fallback / output-timing), seconds since last output and hook setup
+  facts. **`:activity dump`** retains each pane's last received report even
+  after expiry, distinguishes hook-file presence from startup/restart facts,
+  and never treats a self-report or bound MCP connection as proof of hook
+  execution or trust.
   **`:why-git`** opens a saveable pager dumping each column's git-marker refresh
   state — repo root / resolved gitdir, the cached poll key vs the live on-disk
   one (`index`'s mtime plus the latest of `HEAD`, its branch ref, and the shared
