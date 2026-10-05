@@ -147,6 +147,15 @@ Inside either view:
 Transcript sources per agent live under `src/state/` (`claude_transcript.rs`,
 `codex_transcript.rs`, `agy_transcript.rs`). zot has none yet.
 
+Codex scrollback accepts both legacy message/function-call events and current
+`item_completed` user/agent, command and MCP items, plus custom-tool calls.
+Structured content contributes text only; wire user-message instructions and
+reasoning records are not conversation prose. Records with the same item/call
+identity and kind appear once within a session; identical text with different
+identities still appears each time. Calls and results remain separate entries,
+and `t` hides both. Distinct wrapper and nested-tool identities are not guessed
+to be duplicates.
+
 **A forked codex thread's rollout holds only its own turns.** Its
 `session_meta.history_base` names the parent thread and the byte offset in the
 parent's rollout where the fork branched, instead of copying what came before.

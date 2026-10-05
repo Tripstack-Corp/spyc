@@ -13,6 +13,7 @@
 //! [`detect`] (command → profile, for live panes).
 
 pub mod chrome;
+pub mod codex_records;
 pub mod detect_rules;
 pub mod resume;
 

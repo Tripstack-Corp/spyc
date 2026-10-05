@@ -174,6 +174,38 @@ mod tests {
     }
 
     #[test]
+    fn current_messages_inherit_only_the_history_before_the_fork() {
+        let current_user = |text: &str| {
+            serde_json::json!({"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","content":[{"type":"text","text":text}]}}}).to_string() + "\n"
+        };
+        let directory = tempfile::tempdir().expect("temporary sessions directory");
+        let before = meta(PARENT, None) + &current_user("current inherited prompt");
+        rollout(
+            directory.path(),
+            PARENT,
+            &(before.clone() + &current_user("parent after fork")),
+        );
+        let fork = rollout(
+            directory.path(),
+            FORK,
+            &(meta(FORK, Some((PARENT, before.len()))) + &current_user("current child prompt")),
+        );
+        let lines = super::super::codex_transcript::render_transcript(
+            &fork,
+            &crate::ui::theme::Theme::default(),
+            None,
+            false,
+        );
+        let text: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|span| span.content.as_ref()))
+            .collect();
+        assert!(text.contains("current inherited prompt"), "{text}");
+        assert!(text.contains("current child prompt"), "{text}");
+        assert!(!text.contains("parent after fork"), "{text}");
+    }
+
+    #[test]
     fn a_missing_parent_leaves_the_fork_readable() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let fork = rollout(

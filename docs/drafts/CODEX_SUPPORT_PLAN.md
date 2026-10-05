@@ -26,6 +26,23 @@ Two tracks keep the RC manageable:
 
 ## Assessment record
 
+### Implementation progress
+
+- The plan and worktree-first house rule landed through PR #539.
+- A1 is implemented on `fix/codex-current-transcript`, local build accepted:
+  shared current/legacy
+  normalization, transcript integration and identified-record deduplication.
+  Four new public-renderer regressions failed against the unchanged reader.
+  The focused Codex suite passed (72 tests), followed by `make check`. Deliberate
+  mutations confirmed identity, reasoning exclusion and fork-history coverage;
+  the correct implementation was restored. A temporary read-only smoke rendered
+  the active CLI rollout and verified recent user/agent text, then was removed.
+  The user confirmed working conversation scrollback in the isolated release
+  build and approved it for integration. Fork history has automated coverage;
+  other slices and the HUD are not implemented by this change.
+
+### Baseline
+
 The shared foundation already works: MCP context/search/git tools are attributed
 to the Codex pane, skills are installed for Codex, daemon bypass preserves
 per-pane routing, and restore/fork and transcript-history infrastructure exist.

@@ -79,7 +79,7 @@ Deep design decisions live in [`ARCHITECTURE.md`](ARCHITECTURE.md) (sync-only, M
 
 **Other crates:**
 
-- **`src/agent/`** — agent profile registry; one `AgentProfile` impl per hosted agent (claude/codex/agy/zot). Adding an agent = one impl + one `REGISTRY` entry. Per-agent **P1-2 scrape-fallback** rules (for a state an agent's hooks can't report) live in `detect_rules.rs` (`Region`/`Matcher`/`DetectionRule`), returned by `AgentProfile::detection_rules()` — today just agy's approval-prompt→`Blocked` rule. `chrome.rs` finds where an agent's own input box starts (`AgentProfile::output_len`), so `gf`/`J` read only what it printed, not claude's status line.
+- **`src/agent/`** — agent profile registry; one `AgentProfile` impl per hosted agent (claude/codex/agy/zot). Adding an agent = one impl + one `REGISTRY` entry. Per-agent **P1-2 scrape-fallback** rules (for a state an agent's hooks can't report) live in `detect_rules.rs` (`Region`/`Matcher`/`DetectionRule`), returned by `AgentProfile::detection_rules()` — today just agy's approval-prompt→`Blocked` rule. `chrome.rs` finds where an agent's own input box starts (`AgentProfile::output_len`), so `gf`/`J` read only what it printed, not claude's status line. `codex_records.rs` normalizes current and legacy rollout messages/tool records without OS or App dependencies; transcript rendering deduplicates identified records within each session.
 - **`src/archive/`** — archive browsing: a mount is an **index, not a directory**, so entering a large zip writes zero bytes. `mod` (format detect), `index` (the entry table + the name normalization that makes a zip-slip *name* structurally impossible), `scan` (oddities → `Capability`), `budget` (mount/confirm/refuse), `journal` (pending changes), `listing` (index + journal → an `fs::Listing`), `read` (index a seekable container, stream a compressed tar into staging, materialize one member — **extraction never traverses a symlink, and a link target is judged the same way**), `write` (the repack: temp file, verified by reading it back, then an atomic rename). Containment rules, the permissions split, and the streaming trade: ARCHITECTURE.md → "Archive mounts". Design history in [`docs/archive/ARCHIVE_BROWSING_PLAN.md`](docs/archive/ARCHIVE_BROWSING_PLAN.md).
 - **`crates/spyc-vt-sys/`** — the FFI to libghostty-vt, at a spyc-owned pinned ghostty commit, with prebuilt static archives vendored per target. Everything C has one home here: the pin (`pin.rs`, plus the bump policy — a pin bump owes a full harness re-run), the bindgen-generated bindings (`bindings.rs`, checked in so neither bindgen nor libclang is a build dependency; ~371 compile-time layout assertions catch ABI drift), the row-budget→limits derivation (`scrollback.rs` — **rows are the UX contract, bytes are a safety valve**, and neither may be left at its default), and `build.rs`, which verifies each archive's SHA-256 before it links. Five targets, not four: CI's test host (`x86_64-unknown-linux-gnu`) is not a release artifact but still needs an archive. Rationale in the crate's README; posture in SECURITY.md and deny.toml.
 - **`src/keymap/`** — `Action` enum (`action.rs` — the full vocabulary of behaviours, each tagged with its `tier()`), resolver, DSL parser, default bindings.
@@ -122,9 +122,14 @@ main checkout. An exception requires explicit user approval.
    path as `root` to read tools and use an explicit worktree directory for shell
    commands; the pane's launch cwd may still be the main checkout.
 4. Validate and hand off from that worktree, naming its branch and path. Do not
-   commit, push or merge unless requested. Release file scopes when done; retain
-   the worktree claim while the task remains active. After integration, release
-   its claim and clean up through spyc's `remove_worktree` safety checks.
+   commit, push or merge unless requested. For runnable changes, provide a local
+   test build and its exact binary path after automated checks pass. The loop is
+   **build → user tests locally → user approves → merge → next plan slice**.
+   Do not merge or advance to the next slice before the user accepts the build.
+   If code changes after testing, provide a fresh build for re-testing.
+5. Release file scopes when done; retain the worktree claim while the task
+   remains active. After integration, release its claim and clean up through
+   spyc's `remove_worktree` safety checks.
 
 If spyc or required filesystem approval is unavailable, ask before editing —
 do not fall back to modifying the main checkout.
