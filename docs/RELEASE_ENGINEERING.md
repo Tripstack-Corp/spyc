@@ -97,8 +97,18 @@ SemVer, with FreeBSD's patch-level mapping made explicit:
     the real `2.1.0` — the same ordering rule the `2.0.0~rc.N` debs rely on.
   - After a minor ships, a follow-up PR opens the next cycle by setting `main`
     to the following `-CURRENT`.
+  - **During a release candidate's soak, `main` carries that rc's version**
+    (`2.2.0-rc.1`). The rc's release PR sets it, a fix merged during the soak
+    builds as `2.2.0-rc.1 (<sha>)`, and the next rc or the release itself is
+    another release PR. Returning to `-CURRENT` between rcs would cost a second
+    PR per rc and buy nothing the SHA doesn't already give.
 - **Prereleases:** `vN.M.0-beta.1`, `vN.M.0-rc.1` — published as GitHub
-  *pre-releases* (the "Latest" badge stays on the last stable).
+  *pre-releases* (the "Latest" badge stays on the last stable), and cut with the
+  same two `make` steps as a release (§5). A prerelease gets no `CHANGELOG.md`
+  section: `cliff.toml`'s `tag_pattern` matches stable tags only, so the final
+  release's section covers the whole cycle instead of only the commits after
+  its last rc. Its GitHub release notes are every commit since the last stable
+  release.
 - **Breaking changes** bump MAJOR and (Stage 2) start a new `stable/N`.
 - **Reproducibility:** the pinned `rust-toolchain.toml` + `--locked` mean a tag
   rebuilds bit-stable across runners.
@@ -144,9 +154,15 @@ tag RELEASEs directly off `main` until a second major needs `stable/`.
 
 1. Development accrues on `main`, which sits at `N.M.0-CURRENT` (§3); CI green
    on every PR.
-2. **Cut RC:** tag `vN.M.0-rc.1` on `main`. `release.yml` builds + publishes a
-   GitHub *pre-release* with full artifacts. Soak (e.g., 3–7 days / dogfood).
-3. Fix blockers on `main`; re-tag `-rc.2` as needed.
+2. **Cut RC:** the two steps in 4, with `VERSION=N.M.0-rc.1`. The tag has to
+   sit on a commit whose `Cargo.toml` says `N.M.0-rc.1`: the crates job
+   publishes whatever version the manifest carries, and the binaries report it.
+   The release PR sets it, and `make release-tag` checks it. `release.yml` then
+   builds + publishes a GitHub *pre-release* with full artifacts, and the
+   Homebrew tap, apt and crates.io all take it. Soak (e.g., 3–7 days /
+   dogfood).
+3. Fix blockers on `main`, which stays at `N.M.0-rc.1` (§3); cut `-rc.2` the
+   same way as needed.
 4. **Release — two steps, because `main` only takes PRs.** A single
    bump-commit-and-tag would put the tag on a release-branch commit that the
    squash-merge then orphans, leaving it outside `main`'s history:
@@ -344,7 +360,10 @@ are the source of truth — Actions *call them* so local and CI never drift.
   secret).
 - **Notes:** `make changelog` (git-cliff) for the generated section + a hand-
   written highlights block (the 1Password/Slack "changelog for humans" style the
-  backlog calls for).
+  backlog calls for). As built: a stable tag's notes are `git cliff --latest`,
+  its whole cycle. A prerelease tag isn't a git-cliff boundary (§3), so its
+  notes are `git cliff --unreleased --tag <tag>`, every commit since the last
+  stable release.
 - **Publish:** create the GitHub Release, attach `spyc-vN.M.P-<target>.tar.gz` ×4,
   `SHA256SUMS`, signatures. Then **dispatch** `homebrew.yml` + `apt.yml`: a
   GITHUB_TOKEN-created release does NOT fire their `on: release` triggers (GitHub

@@ -178,7 +178,9 @@ We use [SemVer](https://semver.org/). The version lives in
 (FreeBSD's `-CURRENT`; see `docs/RELEASE_ENGINEERING.md`) and carries the
 *next* minor with a `-CURRENT` suffix — e.g. `2.1.0-CURRENT` while 2.1 is
 in development. It stays there for the whole cycle: the release PR is
-what strips the suffix down to `2.1.0`.
+what strips the suffix down to `2.1.0`. The one exception is a release
+candidate's soak, when `main` carries the rc's version (`2.1.0-rc.1`), set
+by the rc's own release PR.
 
 So a feature PR touches no version line at all. Two things follow:
 

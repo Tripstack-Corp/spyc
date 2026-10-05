@@ -165,7 +165,18 @@ jobs:
         uses: taiki-e/install-action@v2.87.15
         with:
           tool: git-cliff
-      - run: git cliff --config cliff.toml --latest --strip header > RELEASE_NOTES.md
+      - name: Write this tag's notes
+        # cliff.toml's `tag_pattern` matches stable tags only, so `--latest`
+        # gives a stable tag its whole cycle, and a prerelease tag is no
+        # boundary at all: its notes are every commit since the last stable
+        # release, titled with this tag.
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            *-alpha*|*-beta*|*-rc*)
+              git cliff --config cliff.toml --unreleased --tag "${GITHUB_REF_NAME}" --strip header > RELEASE_NOTES.md ;;
+            *)
+              git cliff --config cliff.toml --latest --strip header > RELEASE_NOTES.md ;;
+          esac
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
