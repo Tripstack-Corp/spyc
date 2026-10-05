@@ -17,6 +17,7 @@ pub mod codex_command;
 pub mod codex_records;
 pub mod detect_rules;
 pub mod resume;
+pub mod status_hook;
 
 use std::borrow::Cow;
 use std::collections::HashSet;
