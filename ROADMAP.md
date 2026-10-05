@@ -223,12 +223,12 @@ per-process, so aggregating attention across projects costs little. And the
 pane-identity transport (2.2) gives every MCP connection an identity that
 extends to project attribution.
 
-Out of scope permanently: frame mirroring, input forwarding, cross-process
-discovery, and any CounterTop revival. Headless needs the finer distinction.
-Headless *peers* are dead with the rest of that list — a second spyc that
-another spyc discovers, mirrors or forwards to. The daemonized *monolith*
-returns in 3.0, and it is not a peer: one process, nothing mirrored, and the
-client is a renderer rather than an instance. See "The 3.0 horizon" below.
+Deferred, and not part of Projects v1: frame mirroring, input forwarding,
+cross-process discovery, headless *peers* (a second spyc that another spyc
+discovers, mirrors or forwards to) and CounterTop. They may be revisited later.
+The daemonized *monolith* is a different thing: it returns in 3.0, and it is not
+a peer. It is one process with nothing mirrored, and its client is a renderer
+rather than an instance. See "The 3.0 horizon" below.
 `docs/drafts/PROJECTS_PLAN.md` — a 2.2 deliverable — is where the design gets
 argued. Tracked as [#99](https://github.com/Tripstack-Corp/spyc/issues/99).
 
