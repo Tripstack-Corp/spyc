@@ -44,35 +44,10 @@ pub fn command_without_resume(cmd: &str) -> String {
     }
 }
 
-/// Strip codex's `resume [...args]` or `fork [...args]` subcommand and any of
-/// its flags from a command line, leaving the bare `codex` invocation. Used at
-/// session-save time so a saved tab restores cleanly even if the
-/// user had explicitly typed `codex resume <UUID>`. Mirrors
-/// `command_without_resume` for claude. The id we'll resume to is
-/// stored separately in `agent_session_id`.
+/// Strip Codex's old conversation selector, preserving general options and
+/// quoting. Unsupported commands remain verbatim for restore diagnostics.
 pub fn command_without_codex_resume(cmd: &str) -> String {
-    let parts: Vec<&str> = cmd.split_whitespace().collect();
-    let mut out: Vec<&str> = Vec::with_capacity(parts.len());
-    let mut hit_resume = false;
-    for p in parts {
-        if !hit_resume && matches!(p, "resume" | "fork") {
-            // Drop the subcommand and everything after it — typically a UUID
-            // and/or `--last`/`--all`/`--include-non-interactive` flags
-            // that only make sense with `resume`.
-            hit_resume = true;
-            continue;
-        }
-        if hit_resume {
-            continue;
-        }
-        out.push(p);
-    }
-    let stripped = out.join(" ");
-    if stripped.is_empty() {
-        "codex".to_string()
-    } else {
-        stripped
-    }
+    super::codex_command::baseline(cmd).unwrap_or_else(|_| cmd.to_string())
 }
 
 /// `^a F` for claude: a new session that starts from `sid`'s history. Goes
@@ -86,8 +61,8 @@ pub fn claude_fork_command(cmd: &str, sid: &str) -> String {
 }
 
 /// `^a F` for codex: `codex fork <uuid>` starts a new thread from `sid`'s.
-pub fn codex_fork_command(cmd: &str, sid: &str) -> String {
-    format!("{} fork {sid}", command_without_codex_resume(cmd))
+pub fn codex_fork_command(cmd: &str, sid: &str) -> anyhow::Result<String> {
+    super::codex_command::fork(cmd, sid)
 }
 
 /// Strip Antigravity's `--conversation <UUID>`, `-c <UUID>`, and `--continue` flags from a command line.

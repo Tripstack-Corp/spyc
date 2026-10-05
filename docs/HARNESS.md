@@ -192,6 +192,23 @@ command, opened at the tab's live cwd.
 
 ### The codex quirk that confuses everyone
 
+**Restore and fork retain Codex's launch settings**, including model, profile,
+sandbox, approval policy, working directory, repeated config overrides and
+extra writable directories. General options on either side of `resume` or
+`fork` are preserved, with their quoting and shell expansions intact. Only the
+old subcommand, selector and picker switches are removed; the captured session
+id supplies the new selector. An option value such as `resume` is not mistaken
+for a subcommand, and a fork's parent id is never pinned as its own conversation.
+
+Automatic reconstruction supports a bare or path-qualified `codex` executable
+and recognized interactive options. Shell operators, substitutions, wrappers,
+unknown options, repeated singleton options, initial prompts and initial image
+inputs require a manual reopen rather than a guessed launch or replayed input.
+A refused fork opens nothing. Restore preflights every tab: an unsupported
+Codex command refuses the entire restore before replacing existing tabs or
+session identity, and names the affected tab and reason. The saved command is
+retained verbatim when it cannot be normalized.
+
 **A resumed codex session appends to its original rollout file and leaves
 `session_meta` frozen at the original creation time.** So a rollout created a
 month ago can be the live one, and its recorded start time tells you nothing

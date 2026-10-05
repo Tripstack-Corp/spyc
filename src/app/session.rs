@@ -435,6 +435,31 @@ impl App {
     }
 
     pub fn restore_session(&mut self, session: &crate::state::sessions::Session) -> Vec<Effect> {
+        let plans: Vec<_> = session
+            .tabs
+            .iter()
+            .map(|tab| {
+                let cwd = if tab.cwd.is_dir() {
+                    &tab.cwd
+                } else {
+                    &session.cwd
+                };
+                crate::agent::profile_for(tab.effective_kind()).reconstruct_restore(
+                    &tab.command,
+                    tab.agent_session_id.as_deref(),
+                    cwd,
+                )
+            })
+            .collect();
+        for (index, plan) in plans.iter().enumerate() {
+            if let crate::agent::ResumeAction::Refuse { reason } = &plan.resume {
+                self.state.flash_error(format!(
+                    "session restore refused for tab {}: {reason}",
+                    index + 1
+                ));
+                return Vec::new();
+            }
+        }
         // Restore working directory and update start_dir so backtick (`)
         // jumps to the session's home, not where spyc was launched from.
         let mut effects = Vec::new();
@@ -473,13 +498,12 @@ impl App {
         self.state.pane.pane_height_pct = session.pane_height_pct;
         if !session.tabs.is_empty() {
             self.runtime.pane_tabs = None;
-            for tab in &session.tabs {
+            for (tab, plan) in session.tabs.iter().zip(plans) {
                 let cwd = if tab.cwd.is_dir() {
                     &tab.cwd
                 } else {
                     &session.cwd
                 };
-                let kind = tab.effective_kind();
                 // Codex restores by spawning `codex resume <UUID>`
                 // directly — the CLI flag works, no `/resume` stdin
                 // dance needed. Claude has a regression on the CLI
@@ -491,11 +515,6 @@ impl App {
                 // claude spawns fresh and arms the `/resume <sid>` stdin
                 // send below (its `--resume` CLI flag crashes at mount
                 // with non-empty initialMessages).
-                let plan = crate::agent::profile_for(kind).reconstruct_restore(
-                    &tab.command,
-                    tab.agent_session_id.as_deref(),
-                    cwd,
-                );
                 // Only arm the `/resume` injection when the spawn actually
                 // added a tab — `last_mut()` is "the tab we just pushed". If
                 // the spawn failed, the last tab is a *different*, already-
@@ -868,13 +887,14 @@ mod tests {
                     .expect("a tab was opened")
                     .tabs_mut()[0]
                     .info;
-                info.command = "codex".to_string();
+                info.command = "codex resume OLD --model test --sandbox read-only".to_string();
                 info.codex_session_id = Some(UUID.to_string());
             }
 
             let snapshot = app.build_session_snapshot();
             let saved = &snapshot.tabs[0];
             assert_eq!(saved.agent_session_id.as_deref(), Some(UUID));
+            assert_eq!(saved.command, "codex --model test --sandbox read-only");
             // And the id has to survive into the spawn, or saving it changed
             // nothing the user can see.
             assert_eq!(
@@ -885,7 +905,7 @@ mod tests {
                         tmp.path()
                     )
                     .command,
-                format!("codex resume {UUID}"),
+                format!("codex --model test --sandbox read-only resume {UUID}"),
                 "a restored tab must resume that exact rollout, not --last"
             );
         });

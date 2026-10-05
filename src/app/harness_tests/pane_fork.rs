@@ -93,6 +93,130 @@ fn a_codex_tab_with_no_conversation_yet_is_not_forked() {
     });
 }
 
+#[test]
+fn codex_fork_preserves_the_requested_settings_in_the_child_argv() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let mut app = agent_tab(&dir, "codex");
+        let source = &mut app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0];
+        source.info.command = format!(
+            r#"{} resume OLD --profile team --sandbox read-only -a never -c 'model="test model"' --add-dir 'shared dir'"#,
+            source.info.command
+        );
+        source.info.codex_session_id = Some(PARENT.into());
+
+        app.apply(&Action::PaneForkTab).unwrap();
+
+        assert_eq!(
+            agent_argv(&dir, "codex"),
+            [
+                "--no-daemon",
+                "--profile",
+                "team",
+                "--sandbox",
+                "read-only",
+                "-a",
+                "never",
+                "-c",
+                "model=\"test model\"",
+                "--add-dir",
+                "shared dir",
+                "fork",
+                PARENT
+            ]
+        );
+    });
+}
+
+#[test]
+fn codex_restore_preserves_the_requested_settings_in_the_child_argv() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let mut app = agent_tab(&dir, "codex");
+        let command = format!(
+            r#"{} fork OLD --model test --profile team --sandbox read-only -a never -c 'model_reasoning_effort="high"'"#,
+            tabs(&app).tabs()[0].info.command
+        );
+        let saved: crate::state::sessions::Session = serde_json::from_value(serde_json::json!({
+            "id": 1, "saved_at": "", "epoch_secs": 0, "cwd": env!("CARGO_MANIFEST_DIR"),
+            "tabs": [{ "command": command, "label": "codex", "cwd": dir,
+                "agent_kind": "codex", "agent_session_id": PARENT }],
+            "active_tab": 0, "pane_height_pct": 50, "pane_focused": true
+        }))
+        .unwrap();
+
+        app.restore_session(&saved);
+
+        assert_eq!(
+            agent_argv(&dir, "codex"),
+            [
+                "--no-daemon",
+                "--model",
+                "test",
+                "--profile",
+                "team",
+                "--sandbox",
+                "read-only",
+                "-a",
+                "never",
+                "-c",
+                "model_reasoning_effort=\"high\"",
+                "resume",
+                PARENT
+            ]
+        );
+        assert_eq!(
+            tabs(&app).tabs()[0].info.codex_session_id.as_deref(),
+            Some(PARENT)
+        );
+    });
+}
+
+#[test]
+fn codex_refuses_ambiguous_fork_and_restore_without_replacing_live_tabs() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let mut app = agent_tab(&dir, "codex");
+        let source = &mut app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0];
+        source.info.command = format!("{} --future-option resume", source.info.command);
+        source.info.codex_session_id = Some(PARENT.into());
+        let original_id = source.info.id.clone();
+        let command = source.info.command.clone();
+        let original_name = app.state.session_name.clone();
+        let saved: crate::state::sessions::Session = serde_json::from_value(serde_json::json!({
+            "id": 999, "name": "REFUSED_SESSION", "saved_at": "", "epoch_secs": 0, "cwd": env!("CARGO_MANIFEST_DIR"),
+            "tabs": [{ "command": "cat", "label": "shell", "cwd": dir },
+                { "command": command, "label": "codex", "cwd": dir,
+                    "agent_kind": "codex", "agent_session_id": PARENT }],
+            "active_tab": 1, "pane_height_pct": 75, "pane_focused": true
+        }))
+        .unwrap();
+
+        app.apply(&Action::PaneForkTab).unwrap();
+        assert_eq!(tabs(&app).tabs().len(), 1);
+        assert!(
+            app.flash_text()
+                .unwrap()
+                .contains("unsupported Codex option")
+        );
+
+        assert!(app.restore_session(&saved).is_empty());
+        assert_eq!(tabs(&app).tabs().len(), 1);
+        assert_eq!(tabs(&app).tabs()[0].info.id, original_id);
+        assert_eq!(tabs(&app).tabs()[0].info.command, command);
+        assert_eq!(app.state.session_name, original_name);
+        assert!(
+            app.flash_text()
+                .unwrap()
+                .contains("session restore refused for tab 2")
+        );
+        assert!(!dir.join("codex.argv").exists());
+    });
+}
+
 /// agy can resume its conversation but not branch it. A second tab on the same
 /// conversation would be two clients of one session, so `^a F` opens nothing.
 #[test]
