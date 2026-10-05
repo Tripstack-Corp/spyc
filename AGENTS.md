@@ -104,6 +104,31 @@ spyc is Model-View-Update. Keep these — they're what make it reason-about-able
 - **One message channel, event-driven.** Every source pushes `Message`s into one `mpsc::Receiver`; the loop blocks on `recv` (0 wakes at idle). No `event::poll` / busy-polling.
 - **Dependency direction one-way.** `app` → `agent`, never the reverse; the Model never depends on `App`.
 
+## Repository workflow
+
+**Worktree-first for every change.** Do not edit the main checkout. This applies
+to code, documentation, configuration, tests, fixtures and temporary regression
+probes — a small change is not an exception. Read-only assessments may use the
+main checkout. An exception requires explicit user approval.
+
+1. Ground yourself with `get_spyc_context` and inspect `list_worktrees`. Before
+   creating a worktree, check that the local integration base is current.
+2. Create an isolated worktree through spyc's `create_worktree`, or reuse your
+   own task's existing worktree. Never use `git worktree` or create a task branch
+   in the main checkout. Leave the user's view alone unless opening the worktree
+   is wanted.
+3. Claim it with `claim_worktree` and declare files with `register_scope` before
+   editing. A scope claim does not replace worktree isolation. Pass the returned
+   path as `root` to read tools and use an explicit worktree directory for shell
+   commands; the pane's launch cwd may still be the main checkout.
+4. Validate and hand off from that worktree, naming its branch and path. Do not
+   commit, push or merge unless requested. Release file scopes when done; retain
+   the worktree claim while the task remains active. After integration, release
+   its claim and clean up through spyc's `remove_worktree` safety checks.
+
+If spyc or required filesystem approval is unavailable, ask before editing —
+do not fall back to modifying the main checkout.
+
 ## Conventions
 
 - **Rust house style (load-bearing divergences — don't "modernize" away):** sync-only — `std::thread` + `mpsc`, no async runtime; off-thread work is a detached thread that wakes the loop with a `Message`. Errors are **`anyhow`** (app, not library). `.unwrap()`/`.expect()` allowed in production **with a comment stating the invariant** (`SPYC-TRAP` when the failure is silent) — no blanket ban, *except* `deny(clippy::unwrap_used)` in `src/app/state/` and `src/app/render/` (write `.expect("invariant")`).
