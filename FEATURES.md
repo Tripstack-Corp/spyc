@@ -425,7 +425,14 @@ spyc's workflow: browse files above, talk to Claude below.
     (`agy`, under `~/.gemini/antigravity-cli/`) — get the actual
     conversation instead of a screen capture: user turns, agent
     replies, and tool calls rendered in the pager, titled
-    `(transcript)` rather than `(history)`. Tool calls are
+    `(transcript)` rather than `(history)`.
+
+    Codex reads current structured message/command/MCP records and legacy
+    events, including custom-tool calls. Repeated records with matching
+    identities are shown once per session; instruction injections and reasoning
+    records are excluded.
+
+    Tool calls are
     labelled with their salient argument — `⚙ Bash(Find foo call
     sites)`, `⚙ Edit(src/lib.rs)` — and each result shows a dim
     one-line output preview with a `(+N lines)` count. The

@@ -14,10 +14,12 @@
 //! renders a clean, structured conversation for the pager. Better
 //! than terminal capture: real text, no grid artifacts, searchable.
 //!
-//! ## Rollout JSONL shape (codex 0.133)
+//! ## Rollout JSONL shape
 //!
 //! Each line: `{ "timestamp": ..., "type": <T>, "payload": {...} }`.
-//! We render from the subset that maps to a readable conversation:
+//! Current `event_msg/item_completed` records carry structured user/agent
+//! messages and command/MCP items. The shared `agent::codex_records` normalizer
+//! also accepts the legacy subset that maps to a readable conversation:
 //! - `event_msg` / `user_message` → the user's typed text
 //!   (`payload.message`). Preferred over the `response_item` user
 //!   message, which is prefixed with the giant AGENTS.md system
@@ -28,10 +30,13 @@
 //!   (`payload.name` + `payload.arguments`).
 //! - `response_item` / `function_call_output` → tool result
 //!   (`payload.output`), truncated.
+//! - `response_item` / `custom_tool_call` and `custom_tool_call_output` → custom
+//!   tool input and result.
 //!
 //! Everything else (reasoning [encrypted], token_count, turn_context,
 //! session_meta, …) is skipped.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use ratatui::{
@@ -39,6 +44,7 @@ use ratatui::{
     text::{Line, Span},
 };
 
+use crate::agent::codex_records::{self, RecordKind};
 use crate::ui::theme::Theme;
 
 /// Clock-jitter tolerance (seconds) when deciding whether a rollout was
@@ -373,6 +379,8 @@ pub fn render_transcript(
 
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut last_was_blank = true; // suppress leading blank
+    let mut seen = HashSet::new();
+    let mut session = String::new();
 
     for line in text.lines() {
         let line = line.trim();
@@ -382,45 +390,56 @@ pub fn render_transcript(
         let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
-        let top = val["type"].as_str().unwrap_or("");
-        let payload = &val["payload"];
-        let ptype = payload["type"].as_str().unwrap_or("");
-
-        match (top, ptype) {
-            ("event_msg", "user_message") => {
-                let msg = payload["message"].as_str().unwrap_or("");
-                crate::state::push_transcript_prompt(
-                    &mut out,
-                    &mut last_was_blank,
-                    msg,
-                    user_style,
-                );
+        if val["type"] == "session_meta" {
+            val["payload"]["id"]
+                .as_str()
+                .or_else(|| val["payload"]["session_id"].as_str())
+                .unwrap_or_default()
+                .clone_into(&mut session);
+        }
+        for record in codex_records::decode(&val) {
+            if let Some(id) = record.id
+                && !seen.insert((session.clone(), std::mem::discriminant(&record.kind), id))
+            {
+                continue;
             }
-            ("event_msg", "agent_message") => {
-                let msg = payload["message"].as_str().unwrap_or("");
-                crate::state::push_agent_markdown(&mut out, &mut last_was_blank, msg, theme, width);
+            match record.kind {
+                RecordKind::User(msg) => {
+                    crate::state::push_transcript_prompt(
+                        &mut out,
+                        &mut last_was_blank,
+                        &msg,
+                        user_style,
+                    );
+                }
+                RecordKind::Agent(msg) => {
+                    crate::state::push_agent_markdown(
+                        &mut out,
+                        &mut last_was_blank,
+                        &msg,
+                        theme,
+                        width,
+                    );
+                }
+                RecordKind::ToolCall { name, arguments } if show_tool_calls => {
+                    let args_summary = summarize_args(&arguments);
+                    out.push(Line::from(Span::styled(
+                        format!("\u{2699} {name}({args_summary})"),
+                        tool_style,
+                    )));
+                    last_was_blank = false;
+                }
+                RecordKind::ToolOutput(output) if show_tool_calls => {
+                    let first = output.lines().next().unwrap_or("");
+                    let summary = crate::state::truncate_chars(first, 100);
+                    out.push(Line::from(Span::styled(
+                        format!("  \u{2514} {summary}"),
+                        dim_style,
+                    )));
+                    last_was_blank = false;
+                }
+                _ => {}
             }
-            ("response_item", "function_call") if show_tool_calls => {
-                let name = payload["name"].as_str().unwrap_or("?");
-                let args = payload["arguments"].as_str().unwrap_or("");
-                let args_summary = summarize_args(args);
-                out.push(Line::from(Span::styled(
-                    format!("\u{2699} {name}({args_summary})"),
-                    tool_style,
-                )));
-                last_was_blank = false;
-            }
-            ("response_item", "function_call_output") if show_tool_calls => {
-                let output = payload["output"].as_str().unwrap_or("");
-                let first = output.lines().next().unwrap_or("");
-                let summary = crate::state::truncate_chars(first, 100);
-                out.push(Line::from(Span::styled(
-                    format!("  \u{2514} {summary}"),
-                    dim_style,
-                )));
-                last_was_blank = false;
-            }
-            _ => {}
         }
     }
     out
@@ -432,6 +451,10 @@ fn summarize_args(args: &str) -> String {
     let flat = args.split_whitespace().collect::<Vec<_>>().join(" ");
     crate::state::truncate_chars(&flat, 80)
 }
+
+#[cfg(test)]
+#[path = "codex_transcript_tests.rs"]
+mod record_tests;
 
 #[cfg(test)]
 mod tests {
