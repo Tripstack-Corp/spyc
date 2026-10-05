@@ -42,7 +42,14 @@ impl App {
                 };
                 // The agent finds a session by the directory it was started in,
                 // which its own cwd never leaves.
-                (fork(&entry.info.command, &sid), entry.info.cwd.clone())
+                let command = match fork(&entry.info.command, &sid) {
+                    Ok(command) => command,
+                    Err(error) => {
+                        self.state.flash_error(format!("fork: {error:#}"));
+                        return;
+                    }
+                };
+                (command, entry.info.cwd.clone())
             }
             ForkMode::Duplicate => (entry.info.command.clone(), entry.live_cwd()),
             ForkMode::Unsupported => {

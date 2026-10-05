@@ -214,16 +214,9 @@ fn file_mtime_secs(path: &Path) -> Option<u64> {
 /// `pub` so the pane-launch path can pin a resumed session immediately
 /// ([`crate::app`]'s `codex_pin`).
 pub fn resume_uuid_from_command(command: &str) -> Option<String> {
-    let mut toks = command.split_whitespace();
-    while let Some(tok) = toks.next() {
-        if tok == "resume"
-            && let Some(next) = toks.next()
-            && crate::state::sessions::is_uuid(next)
-        {
-            return Some(next.to_string());
-        }
-    }
-    None
+    crate::agent::codex_command::resume_selector(command)?
+        .selector
+        .filter(|id| crate::state::sessions::is_uuid(id))
 }
 
 /// True when `command` resumes a codex session without naming it — `resume
@@ -231,7 +224,11 @@ pub fn resume_uuid_from_command(command: &str) -> Option<String> {
 /// the only codex tabs Signal 1 cannot pin: `codex resume <UUID>` carries its
 /// identity, and a fresh `codex` writes a rollout that postdates the pane.
 pub fn is_resume_without_id(command: &str) -> bool {
-    command.split_whitespace().any(|t| t == "resume") && resume_uuid_from_command(command).is_none()
+    crate::agent::codex_command::resume_selector(command).is_some_and(|selection| {
+        selection
+            .selector
+            .is_none_or(|id| !crate::state::sessions::is_uuid(&id))
+    })
 }
 
 /// Find the rollout whose filename embeds `uuid` (codex names files

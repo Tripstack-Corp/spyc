@@ -513,8 +513,10 @@ Multiple tabs, each running an independent pty:
   screen and `^a v` reads back. Each needs a conversation on disk first, so a
   tab that hasn't had a prompt has nothing to fork yet. agy and zot can resume
   a conversation but not branch it, so `^a F` says so rather than opening one
-  conversation in two tabs. A tab running anything else forks into a copy of
-  its command, opened at the tab's current directory. `docs/HARNESS.md` §4
+  conversation in two tabs. Codex preserves launch options and quoting even
+  after an old `resume`/`fork` selector; ambiguous commands are refused rather
+  than launching with different settings. A tab running anything else forks
+  into a copy of its command, opened at the tab's current directory. `docs/HARNESS.md` §4
   has the per-agent detail
 - Activity indicator (**+**) on background tabs that have new output
 - **Startup tabs**: `[pane] tabs = ["claude", "zsh"]` (or `[[pane.tab]]`

@@ -13,6 +13,7 @@
 //! [`detect`] (command → profile, for live panes).
 
 pub mod chrome;
+pub mod codex_command;
 pub mod codex_records;
 pub mod detect_rules;
 pub mod resume;
@@ -37,6 +38,8 @@ pub enum ResumeAction {
     /// the banner settles (the `--resume` CLI flag has a mount-crash
     /// regression). The event loop arms `pending_resume_send`.
     ClaudeStdin { session_id: String },
+    /// Refuse an ambiguous reconstruction without launching a different command.
+    Refuse { reason: String },
 }
 
 /// Reconstructed restore command for a saved tab.
@@ -49,7 +52,7 @@ pub struct RestorePlan {
 pub enum ForkMode {
     /// Branch the tab's conversation: `(tab command, session id)` → the command
     /// that opens a new conversation starting from that one's history.
-    Branch(fn(&str, &str) -> String),
+    Branch(fn(&str, &str) -> anyhow::Result<String>),
     /// Nothing to branch, so a fork is the same command again.
     Duplicate,
     /// The agent can resume a conversation but not branch it. Opening it twice
@@ -435,7 +438,7 @@ impl AgentProfile for ClaudeProfile {
         }
     }
     fn fork_mode(&self) -> ForkMode {
-        ForkMode::Branch(resume::claude_fork_command)
+        ForkMode::Branch(|cmd, sid| Ok(resume::claude_fork_command(cmd, sid)))
     }
     fn resolve_short_id(&self, cwd: &Path, spawn_epoch_secs: u64) -> Option<String> {
         closest_short_id(
@@ -638,14 +641,17 @@ impl AgentProfile for CodexProfile {
         resume::command_without_codex_resume(cmd)
     }
     fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, _cwd: &Path) -> RestorePlan {
-        let base = resume::command_without_codex_resume(cmd);
-        let command = match sid {
-            Some(s) => format!("{base} resume {s}"),
-            None => format!("{base} resume --last"),
-        };
-        RestorePlan {
-            command,
-            resume: ResumeAction::None,
+        match codex_command::restore(cmd, sid) {
+            Ok(command) => RestorePlan {
+                command,
+                resume: ResumeAction::None,
+            },
+            Err(error) => RestorePlan {
+                command: cmd.to_string(),
+                resume: ResumeAction::Refuse {
+                    reason: format!("{error:#}"),
+                },
+            },
         }
     }
     fn fork_mode(&self) -> ForkMode {
@@ -1211,6 +1217,16 @@ mod tests {
         assert_eq!(none.command, "codex resume --last");
     }
 
+    #[test]
+    fn codex_restore_preserves_options_after_the_old_selector() {
+        let command = r#"codex -m old resume OLD --profile team --sandbox read-only -a never -c 'model="new model"' --add-dir "$HOME/shared dir""#;
+        let saved = CodexProfile.command_without_resume(command);
+        let expected = r#"codex -m old --profile team --sandbox read-only -a never -c 'model="new model"' --add-dir "$HOME/shared dir""#;
+        assert_eq!(saved, expected);
+        let restored = CodexProfile.reconstruct_restore(&saved, Some("CURRENT"), Path::new("/tmp"));
+        assert_eq!(restored.command, format!("{expected} resume CURRENT"));
+    }
+
     /// Agy: `--conversation <sid>` with an id, `--continue` without.
     #[test]
     fn agy_restore_bakes_conversation_or_continues() {
@@ -1241,7 +1257,7 @@ mod tests {
 
     fn branch(profile: &dyn AgentProfile, cmd: &str, sid: &str) -> Option<String> {
         match profile.fork_mode() {
-            ForkMode::Branch(fork) => Some(fork(cmd, sid)),
+            ForkMode::Branch(fork) => fork(cmd, sid).ok(),
             ForkMode::Duplicate | ForkMode::Unsupported => None,
         }
     }

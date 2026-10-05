@@ -29,7 +29,7 @@ Two tracks keep the RC manageable:
 ### Implementation progress
 
 - The plan and worktree-first house rule landed through PR #539.
-- A1 is implemented on `fix/codex-current-transcript`, local build accepted:
+- A1 landed through PR #540 after local-build acceptance:
   shared current/legacy
   normalization, transcript integration and identified-record deduplication.
   Four new public-renderer regressions failed against the unchanged reader.
@@ -40,6 +40,18 @@ Two tracks keep the RC manageable:
   The user confirmed working conversation scrollback in the isolated release
   build and approved it for integration. Fork history has automated coverage;
   other slices and the HUD are not implemented by this change.
+- A2 is implemented on `fix/codex-resume-options`, local build accepted.
+  Save, restore and fork share token-aware option preservation; resume pinning
+  distinguishes selectors from option values. Ambiguous launches are refused,
+  and restore preflights before replacing any live tabs. Profile and real-PTY
+  argv regressions demonstrated the original loss before the fix. Automated
+  tests include shell quoting/expansion, selector safety and refusal paths;
+  the installed CLI's help verifies the recognized option vocabulary. The full
+  `make check` gate passed, including 2717 library tests. The user confirmed
+  restoration of forked sessions in the isolated release build; their activity
+  dump shows distinct explicit session ids pinned to both restored panes.
+  Non-default settings have automated argv coverage, not a separate live
+  settings confirmation.
 
 ### Baseline
 
@@ -105,6 +117,28 @@ Real CLI launches confirm the requested settings after session restore and
 `^a F`. Retain default per-pane daemon isolation.
 
 ### A3. Make hook readiness and attention truthful
+
+During A2 the user observed a stopped-looking Codex tab while the agent was
+still working. Capture `:why-status` / `:activity dump` in the next live
+reproduction to establish the actual source. Audit working-report supersession
+by pane output and fallback-to-idle during quiet tool waits; reporting a longer
+TTL alone cannot fix a report that output supersedes. Include this in A3's
+acceptance rather than inferring work completion from silence.
+
+A2 local testing also showed a transient Codex startup cycle that initially
+did not accept input; the user reported that the cycle subsequently cleared.
+The supplied startup-warning screen names an ignored `approval_policy` field
+under the project's hook state in `~/.codex/config.toml`. Read-only inspection
+confirmed the setting is misplaced inside a hook-trust table rather than at
+the root or in a profile; the adjacent `trusted_hash` is a separate trust record.
+This is not proof that the warning caused the startup cycle.
+Check input recovery, startup/MCP readiness and hook-state compatibility
+separately. Do not remove trust records or edit the user's configuration
+without approval. A2's forked-session restore was subsequently accepted. The
+restored-session dump shows two pane-bound MCP connections, no tool calls and
+output-timing fallback after 27 seconds of silence. Installed hooks and a bound
+connection alone do not establish hook execution or explain the earlier false
+idle observation during work.
 
 Treat **file installed**, **restart needed**, and **status actually reported**
 as different facts. The existing installed-file check is not evidence that
