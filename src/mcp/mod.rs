@@ -170,8 +170,8 @@ pub use config::{
 };
 pub use hooks::{
     cleanup_agy_status_hooks, cleanup_claude_status_hooks, cleanup_codex_status_hooks,
-    ensure_agy_status_hooks, ensure_claude_status_hooks, ensure_codex_status_hooks,
-    set_status_trace,
+    codex_legacy_hook_diagnostic, ensure_agy_status_hooks, ensure_claude_status_hooks,
+    ensure_codex_status_hooks, set_status_trace,
 };
 pub use server::{cleanup_socket, record_root, start_socket_server, sweep_orphan_root_markers};
 

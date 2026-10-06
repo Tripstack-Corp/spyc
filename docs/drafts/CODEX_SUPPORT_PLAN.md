@@ -75,10 +75,9 @@ Two tracks keep the RC manageable:
   waits have automated coverage, not a separate live confirmation.
   Question/plan tool coverage and live onboarding/lifecycle evidence remain
   A3 follow-up work; this slice does not claim the whole A3 gate is met.
-- A3b1 adds bounded, pane-local reported hook-event diagnostics and replaces
-  raw status-trace payload logging with sanitized metadata on
-  `fix/codex-attention-lifecycle`, accepted for integration after local testing
-  on 2026-10-05. The full
+- A3b1 landed through PR #543 (`14b04924`) after local-build acceptance
+  on 2026-10-05. It adds bounded, pane-local reported hook-event diagnostics
+  and replaces raw status-trace payload logging with sanitized metadata. The full
   `RUST_TEST_THREADS=1 make check` gate passes: 2729 library tests, one existing
   ignored test, integration tests (including three real reporter-binary tests)
   and VT-system tests. Default parallel runs hit fake-agent PTY startup flakes
@@ -104,6 +103,55 @@ Two tracks keep the RC manageable:
   The intermediate message/approval sequence was not captured precisely enough
   to establish an approval-only recovery transition. Question-tool handling,
   quiet post-approval work and multi-pane live isolation remain unverified.
+
+- A3b2 was accepted for integration on 2026-10-06 on
+  `fix/codex-hook-recovery`, based on merged #543.
+  Read-only inspection on 2026-10-06 found spyc reporters in both the project's
+  `.codex/config.toml` and `.codex/hooks.json` for `UserPromptSubmit`,
+  `PermissionRequest` and `Stop`. Codex independently loads both representations;
+  this explains duplicate delivery for those events without suppressing reports
+  heuristically. The installed CLI is now `0.160.1`; A3b1's `0.160.0` conditions
+  above remain historical evidence.
+  The test build migrates only owned reporters from the legacy JSON source,
+  preserves other handlers even in shared matcher groups, and refuses tracked,
+  malformed or unreadable legacy sources before adding canonical reporters.
+  Cleanup covers legacy-only installations. JSON-only changes require restart;
+  diagnostics name duplicate sources and actionable refusal reasons. No hook
+  trust records are changed, and no new question or approval hooks are installed.
+  Four migration regressions failed against the unchanged behaviour before the
+  fix. Deliberate mutations verified JSON-only restart detection, precise TOML
+  handler preservation, legacy cleanup and shared ownership. A separate
+  legacy-only ownership regression reproduced a sibling-cleanup hazard when
+  migration was refused; presence checks now include that reporter source.
+  The full `RUST_TEST_THREADS=1 make check` gate passed: 2740 library tests,
+  one existing ignored test, integration tests (including the real reporter
+  tests) and VT-system tests. The user accepted the supplied local build for
+  integration after the prompt/stop test below; integration is pending.
+  The user's test instance (PID 62116) was verified running the supplied binary.
+  Read-only config inspection found only the worktree guard remaining in the
+  legacy JSON file, with spyc's reporters in TOML. The startup dump had a bound
+  MCP connection and no semantic report. The 2026-10-06 10:19:58 UTC dump then
+  showed exactly one `UserPromptSubmit` → `working` and one `Stop` → `done`,
+  both for the same turn and pane, with two total status calls. The final report
+  stayed authoritative after newer output. This demonstrates single delivery
+  for that observed prompt/stop turn, not permission delivery or quiet recovery.
+  The recovery audit found that the local Codex source at `f380b487` routes
+  `request_user_input` through `PreToolUse` and successful `PostToolUse`, with the
+  same call id; the handler waits for its response. Its failure/cancellation
+  paths do not guarantee a post event. `PermissionRequest` still has no call id
+  in the official contract. A generic tool completion cannot safely establish
+  which pending approval was answered, especially with parallel calls.
+  Next A3 work must capture the real question lifecycle and approval-only
+  recovery, correlate question completion by pane/session/turn/call, and retain
+  the blocked state for unrelated completions. Silence or pane output alone
+  remains insufficient evidence. Restart the CLI after migration and review
+  `/hooks`; live permission single-delivery, quiet recovery and multi-pane
+  acceptance remain open. The user also observed a self-reported `blocked`
+  square while this agent was still working, with output age `0.0s`; this records the symptom,
+  without attributing that report to hooks rather than MCP. The separate
+  [pager request #545](https://github.com/Tripstack-Corp/spyc/issues/545) will
+  make `:why-status` easier to inspect. See the
+  [official hook contract](https://learn.chatgpt.com/docs/hooks).
 
 ### Baseline
 
@@ -247,6 +295,14 @@ do not guess a footer from one arbitrary glyph.
 **Acceptance:** `gf`, `J` and output-based selection prefer paths actually
 printed by the agent over paths in an unfinished prompt. Terminal scrollback
 and transcript navigation retain their separate semantics.
+
+### Deferred shell-tab agent tracking
+
+[Feature request #544](https://github.com/Tripstack-Corp/spyc/issues/544) records
+the shell → known agent → shell → relaunch expectation, including bash, zsh and
+other shells. Design is deferred at the maintainer's request. Direct agent tabs
+and configured direct startup tabs remain the A3 scope; dynamic shell-tab
+identity is a separate feature and does not expand the Codex compatibility gate.
 
 ## Track B — a native Codex session HUD
 

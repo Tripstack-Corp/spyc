@@ -48,9 +48,20 @@ pub(super) fn status_hooks_diagnostic(info: &crate::pane::TabInfo) -> Option<Str
     } else {
         "hook execution unverified"
     };
+    let legacy = if profile.kind() == AgentKind::Codex {
+        crate::mcp::codex_legacy_hook_diagnostic(&info.cwd)
+            .map(|note| format!("; {note}"))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
     Some(format!(
-        "{presence} in {}; {startup}; {verification}",
-        support.config_label
+        "{presence} in {}; {startup}; {verification}{legacy}",
+        if profile.kind() == AgentKind::Codex {
+            ".codex/config.toml or .codex/hooks.json"
+        } else {
+            support.config_label
+        }
     ))
 }
 
