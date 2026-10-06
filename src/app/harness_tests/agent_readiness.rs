@@ -449,3 +449,89 @@ fn status_hook_event_metadata_does_not_infer_permission_answers_or_hook_trust() 
         assert!(lines.contains("no longer authoritative"), "{lines}");
     });
 }
+
+#[test]
+fn codex_legacy_only_hook_migration_requires_restart_and_clears_duplicate_diagnostics() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "codex");
+        app.install_status_hooks(tmp.path(), crate::state::sessions::AgentKind::Codex);
+        let canonical = tmp.path().join(".codex/config.toml");
+        let before = std::fs::read(&canonical).unwrap();
+        app.runtime
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut()
+            .status_hooks_restart_needed = false;
+        std::fs::write(
+            tmp.path().join(".codex/hooks.json"),
+            r#"{"hooks":{"Stop":[{"hooks":[{"command":"spyc --report-status done"}]}]}}"#,
+        )
+        .unwrap();
+        assert!(dump(&mut app).contains("additional spyc reporters"));
+        app.install_status_hooks(tmp.path(), crate::state::sessions::AgentKind::Codex);
+        let after = dump(&mut app);
+        assert!(
+            after.contains("restart needed"),
+            "a JSON-only change requires restart: {after}"
+        );
+        assert!(!after.contains("additional spyc reporters"), "{after}");
+        assert_eq!(
+            std::fs::read(canonical).unwrap(),
+            before,
+            "canonical hooks were already current"
+        );
+        assert!(
+            after.contains("execution/trust unverified"),
+            "migration cannot establish trust: {after}"
+        );
+    });
+}
+
+#[test]
+fn codex_refused_migration_retains_shared_ownership_of_existing_reporters() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        assert!(crate::mcp::ensure_codex_status_hooks(tmp.path()));
+        std::fs::write(tmp.path().join(".codex/hooks.json"), "{broken").unwrap();
+        let mut app = agent_app(tmp.path(), "codex");
+        app.install_status_hooks(tmp.path(), crate::state::sessions::AgentKind::Codex);
+        assert!(dump(&mut app).contains("legacy .codex/hooks.json is malformed"));
+        assert!(
+            !crate::state::dir_owners::release(
+                crate::state::dir_owners::Shared::StatusHooks,
+                tmp.path(),
+                1
+            ),
+            "a sibling must not be allowed to remove this pane's existing reporters"
+        );
+        assert!(tmp.path().join(".codex/config.toml").exists());
+    });
+}
+
+#[test]
+fn codex_refused_migration_retains_shared_ownership_of_legacy_only_reporters() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        std::fs::create_dir_all(tmp.path().join(".codex")).unwrap();
+        std::fs::write(tmp.path().join(".codex/config.toml"), "{broken").unwrap();
+        let legacy = tmp.path().join(".codex/hooks.json");
+        std::fs::write(
+            &legacy,
+            r#"{"hooks":{"Stop":[{"hooks":[{"command":"spyc --report-status done"}]}]}}"#,
+        )
+        .unwrap();
+        let mut app = agent_app(tmp.path(), "codex");
+        app.install_status_hooks(tmp.path(), crate::state::sessions::AgentKind::Codex);
+        assert!(
+            !crate::state::dir_owners::release(
+                crate::state::dir_owners::Shared::StatusHooks,
+                tmp.path(),
+                1
+            ),
+            "a refused migration must retain ownership of legacy-only reporters"
+        );
+        assert!(legacy.exists());
+    });
+}

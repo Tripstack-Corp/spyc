@@ -304,20 +304,32 @@ impl App {
         let Some(support) = crate::agent::profile_for(kind).status_hooks() else {
             return;
         };
-        let path = cwd.join(support.config_label);
-        let before = (!support.live_reload).then(|| std::fs::read(&path).ok());
-        if (support.ensure)(cwd) {
-            if before.is_some_and(|content| content != std::fs::read(&path).ok())
-                && let Some(tabs) = self.runtime.pane_tabs.as_mut()
-            {
-                for entry in tabs.tabs_mut() {
-                    if entry.info.cwd == cwd
-                        && crate::agent::detect(&entry.info.command).kind() == kind
-                    {
-                        entry.info.status_hooks_restart_needed = true;
-                    }
+        let snapshot = || {
+            let mut files = vec![std::fs::read(cwd.join(support.config_label)).ok()];
+            if kind == crate::state::sessions::AgentKind::Codex {
+                files.push(std::fs::read(cwd.join(".codex/hooks.json")).ok());
+            }
+            files
+        };
+        let before = if support.live_reload {
+            None
+        } else {
+            Some(snapshot())
+        };
+        let installed = (support.ensure)(cwd);
+        if before.is_some_and(|content| content != snapshot())
+            && let Some(tabs) = self.runtime.pane_tabs.as_mut()
+        {
+            for entry in tabs.tabs_mut() {
+                if entry.info.cwd == cwd && crate::agent::detect(&entry.info.command).kind() == kind
+                {
+                    entry.info.status_hooks_restart_needed = true;
                 }
             }
+        }
+        // A refused migration can leave existing reporters in use by this pane.
+        // Retain their shared ownership so sibling cleanup cannot remove them.
+        if installed || support.installed(cwd) {
             crate::state::dir_owners::claim(
                 crate::state::dir_owners::Shared::StatusHooks,
                 cwd,

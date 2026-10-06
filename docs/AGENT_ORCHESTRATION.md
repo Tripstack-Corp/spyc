@@ -120,6 +120,24 @@ absent. A generic tool completion cannot establish which permission/question
 was answered, and metadata alone does not clear `blocked`. Question/plan tool
 coverage still needs real-CLI evidence; no broad tool-completion hook is added.
 
+### Duplicate Codex hook sources
+
+Codex loads `.codex/hooks.json` alongside inline hooks in `.codex/config.toml`.
+If both contain spyc reporters, each matching event can report twice. At
+installation, spyc migrates its `--report-status` handlers out of the JSON file
+and keeps its reporters in TOML. Other handlers, matcher fields and trust records
+are preserved. An emptied legacy file is removed; user-only files are not
+rewritten. `:hooks off` and last-owner cleanup also remove legacy reporters.
+
+Legacy files containing tracked reporters, or malformed/unreadable files,
+block migration; `:activity dump`
+names the source and repair action. Use `:hooks on` to migrate a valid untracked
+file, then restart Codex and review `/hooks`. A running CLI may retain its old
+hook definitions, so removing a duplicate file does not establish single
+delivery before restart. A JSON-only change also sets the restart diagnostic.
+Migration does not approve hooks or infer that a pending question or permission
+request was answered.
+
 ### How the hooks get written
 
 Each agent's hook writer/cleaner pair (`mcp::{ensure,cleanup}_{codex,agy}_status_hooks`)

@@ -151,14 +151,18 @@ impl StatusHookSupport {
     /// Keys on the same `--report-status` marker `cleanup` uses to identify its
     /// own entries, so "installed" and "removable" can never disagree. Format-
     /// agnostic on purpose: every agent's hooks embed that token, so one
-    /// substring check covers claude's JSON, codex's TOML and agy's named set
-    /// without three parsers. Deliberately blind to *which* spyc wrote them —
-    /// the reporter targets the pane's own socket, so any instance's hooks work
+    /// substring check covers claude's JSON, codex's TOML/legacy JSON and
+    /// agy's named set without separate parsers. Deliberately blind to *which*
+    /// spyc wrote them — the reporter targets the pane's own socket, so any instance's hooks work
     /// for any instance's pane.
     #[must_use]
     pub fn installed(&self, dir: &Path) -> bool {
-        std::fs::read_to_string(dir.join(self.config_label))
-            .is_ok_and(|text| text.contains("--report-status"))
+        let present = |label| {
+            std::fs::read_to_string(dir.join(label))
+                .is_ok_and(|text| text.contains("--report-status"))
+        };
+        present(self.config_label)
+            || (self.config_label == ".codex/config.toml" && present(".codex/hooks.json"))
     }
 }
 

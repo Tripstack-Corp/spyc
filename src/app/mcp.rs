@@ -150,7 +150,7 @@ impl App {
                             crate::mcp::cleanup_codex_status_hooks(&dir),
                             crate::mcp::ConfigCleanup::SkippedTracked
                         )
-                        .then(|| dir.join(".codex").join("config.toml")),
+                        .then(|| dir.join(".codex")),
                         matches!(
                             crate::mcp::cleanup_claude_status_hooks(&dir),
                             crate::mcp::ConfigCleanup::SkippedTracked
