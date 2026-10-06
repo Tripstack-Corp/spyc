@@ -77,3 +77,21 @@ Spec: planner-architecture
 Entries below this one whose title begins "CONFORMANCE —" form this stage's conformance ledger (Intent-Alignment Protocol v1.1, Part 1 practice 1, intent-alignment-canon:0 (01KY9E1522TCHESYTNNTG4FNP4)). One per PR (or tightly coupled PR set), posted at PR-open, citing the ratified plan entry + section it implements, the items covered, and its deviations — each deviation having its own entry, born when it appears. "None" is a claim. Until a plan is ratified on this thread, no CONFORMANCE entry can be valid, because there is nothing to conform to.
 
 <!-- Entry-ID: 01M48BZQAKE5D9A9YVH6K4T7YH -->
+
+---
+Entry: Claude Code (calebjacksonhoward) 2026-10-06T10:26:33Z
+Index: 2
+Role: planner
+Type: Note
+Title: ORIENTATION — research phase open
+
+Spec: planner-architecture
+
+# ORIENTATION — research phase open (2026-10-06)
+
+- **Ratified:** nothing for this feature. Requirement source is Tripstack-Corp/spyc#544, quoted in feature-shell-tab-agent-tracking:0 (01M48BZ7TDCKKA5QTKG9N7YDC8), "CHARTER — Shell-tab agent tracking". The issue defers implementation design.
+- **Landed:** nothing.
+- **In flight:** research into the issue's three open questions (foreground-process/lifecycle detection; nested shells and wrappers; explicit agent hint in startup-tab config) — findings to follow as the next entry.
+- **Reserved:** none opened yet. Expected candidates once research lands: whether shell tabs get per-tab MCP/hook attribution env, and whether a startup-tab agent hint key is added.
+
+<!-- Entry-ID: 01M48C0CMNR07TGPV5B6QJD6PJ -->
