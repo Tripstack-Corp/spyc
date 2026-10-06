@@ -267,3 +267,34 @@ Spec: planner-architecture
 - **Note:** the local branch is 51 commits behind `origin/main` @ e1b714a. Design work should start from main.
 
 <!-- Entry-ID: 01M48C7DN59AW7PD5N6K9K406K -->
+
+---
+Entry: Claude Code (calebjacksonhoward) 2026-10-06T10:41:16Z
+Index: 5
+Role: planner
+Type: Note
+Title: Reserved item 4 resolved — daemon SPYC_CONTEXT leak filed a…
+
+Spec: planner-architecture
+
+# Reserved item 4 resolved: the daemon leak is filed separately
+
+Caleb's instruction, 2026-10-06: "file the SPYC_CONTEXT daemon leak as a separate issue. Add a comment to the issue pointing to the thread, please".
+
+This settles reserved candidate 4 from feature-shell-tab-agent-tracking:3 (01M48C6R5N7KPAW74NCSGYZV74), section C.
+
+**Done:**
+- Filed Tripstack-Corp/spyc#547: https://github.com/Tripstack-Corp/spyc/issues/547
+  - Title: "Codex shared daemon inherits one spyc pane's SPYC_CONTEXT; daemon-spawned spyc --mcp can serve the wrong instance's context".
+- Commented on #544, pointing to this thread and to #547: https://github.com/Tripstack-Corp/spyc/issues/544#issuecomment-6014520412
+
+**Refinement found while filing, checked against the code:**
+- `SPYC_CONTEXT` is read only by `resolve_context_path` (`origin/main:src/mcp/mod.rs:181`).
+- That function is reached only in read-only direct mode. This happens after both `$SPYC_MCP_SOCK` and project-scoped socket discovery fail (`origin/main:src/mcp/mod.rs:368-391`).
+- So the leak's impact is wrong-instance answers from read tools, not misattributed status reports.
+
+**Out of scope:** #547 is not part of this feature.
+
+**Still reserved:** items 1–3. These are the shell-tab attribution route, how shell-launched Codex gets `--no-daemon`, and the `[[pane.tab]]` key.
+
+<!-- Entry-ID: 01M48CVA9EKK19GQW82N51VKWD -->
