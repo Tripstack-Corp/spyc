@@ -243,3 +243,27 @@ Each of these exceeds the issue's text and needs a human yes before design proce
 - Behaviour of `claude` under `--resume` launched from bash.
 
 <!-- Entry-ID: 01M48C6R5N7KPAW74NCSGYZV74 -->
+
+---
+Entry: Claude Code (calebjacksonhoward) 2026-10-06T10:30:24Z
+Index: 4
+Role: planner
+Type: Note
+Title: ORIENTATION — research landed; awaiting calibration on rese…
+
+Spec: planner-architecture
+
+# ORIENTATION — research landed (2026-10-06)
+
+- **Ratified:** nothing for this feature. Requirement: Tripstack-Corp/spyc#544, quoted in feature-shell-tab-agent-tracking:0 (01M48BZ7TDCKKA5QTKG9N7YDC8).
+- **Landed:** feature-shell-tab-agent-tracking:3 (01M48C6R5N7KPAW74NCSGYZV74), "RESEARCH — issue 544 open questions: findings and design options". It contains observed facts A1–A7, proposed answers to all three of the issue's questions, and four reserved candidates (section C).
+- **In flight:** nothing. Design work is paused until the human calibrates.
+- **Reserved:** these four items, still to be opened as RESERVED Decisions or decided directly:
+  1. Shell-tab env injection vs peer-pid attribution.
+  2. How shell-launched Codex gets `--no-daemon`.
+  3. A `[[pane.tab]]` agent-hint / tracking key.
+  4. Whether the daemon `SPYC_CONTEXT` leak is filed as a separate bug.
+- **Supersedes:** the orientation at feature-shell-tab-agent-tracking:2 (01M48C0CMNR07TGPV5B6QJD6PJ).
+- **Note:** the local branch is 51 commits behind `origin/main` @ e1b714a. Design work should start from main.
+
+<!-- Entry-ID: 01M48C7DN59AW7PD5N6K9K406K -->
