@@ -375,6 +375,15 @@ reopens the second commander there.
 - Pane subprocesses run under their own slave PTY (allocated via
   `portable_pty`). The pane is a VT-emulated rectangle inside
   spyc's TUI; the child has a real tty, ours is unaffected.
+- **Child input never waits for the child on the UI thread.** `PtyHost`
+  queues keys, wheel commands and complete pastes to its private input worker.
+  The queue holds at most 512 waiting batches and 8 MiB including the batch
+  being written. Acceptance means queued, not consumed by the child. A full
+  queue rejects the whole new batch and reports that the input was not sent;
+  it never waits or sends a prefix of a rejected paste. The worker preserves
+  FIFO order and owns both the OS writer and its destructor (which may write
+  EOF). Host close does not join that worker; the existing process-group
+  teardown releases a write blocked by a stopped or non-reading child.
 - `!` captured commands also use a slave PTY now (since v1.12.0),
   so programs that open `/dev/tty` for prompts (sudo, ssh, gpg)
   flow through the master into the pager instead of bleeding onto

@@ -371,17 +371,17 @@ pub enum PaneInput {
 
 impl PaneInput {
     /// Deliver to `pane` via the matching write path.
-    pub(crate) fn send_to(self, pane: &mut Pane) -> Result<()> {
+    pub(crate) fn send_to(&self, pane: &mut Pane) -> Result<()> {
         match self {
-            Self::Bytes(bytes) => pane.send_bytes(&bytes),
-            Self::Key(key) => pane.send_key(key),
+            Self::Bytes(bytes) => pane.send_bytes(bytes),
+            Self::Key(key) => pane.send_key(*key),
             Self::Paths(paths) => {
                 // Read fresh, not the tab's cached `live_cwd`: a shell that just
                 // ran `cd` would otherwise get paths relative to where it was,
                 // resolving to the wrong file. An unreadable cwd sends them all
                 // absolute.
                 let cwd = pane.process_id().and_then(crate::proc_cwd::cwd_for_pid);
-                let payload = crate::shell::pane_path_payload(&paths, cwd.as_deref());
+                let payload = crate::shell::pane_path_payload(paths, cwd.as_deref());
                 pane.send_bytes(payload.as_bytes())
             }
             Self::Prompt(text) => {
@@ -735,7 +735,7 @@ impl App {
                         }
                     }
                 }
-                // A-class: deliver input to the target pane (same tick).
+                // A-class: queue input for the target pane (same tick).
                 // Resolve the target; if it's gone, skip silently (matches
                 // the former `if let Some(…)` guards). Like the others,
                 // never `?`-propagate — flash `err_prefix` (if any) and
@@ -760,12 +760,16 @@ impl App {
                     // Identified Codex questions wait for their matching completion.
                     let result = match target {
                         PaneTarget::Active => self.runtime.pane_tabs.as_mut().map(|t| {
-                            // Settling an ordinary prompt clears its latch. Codex
-                            // questions require matching completion instead.
-                            let info = t.active_info_mut();
-                            let recovery = self.state.codex_recovery.get_mut(&info.id);
-                            clear_blocked_for_input(info, &input, recovery);
-                            input.send_to(t.active_mut())
+                            let result = input.send_to(t.active_mut());
+                            // Rejected input did not answer anything. Accepted
+                            // ordinary prompt input retires its latch; identified
+                            // Codex questions still require matching completion.
+                            if result.is_ok() {
+                                let info = t.active_info_mut();
+                                let recovery = self.state.codex_recovery.get_mut(&info.id);
+                                clear_blocked_for_input(info, &input, recovery);
+                            }
+                            result
                         }),
                         PaneTarget::Overlay => {
                             // Route to the focused column's overlay slot: `b`'s
@@ -791,20 +795,25 @@ impl App {
                         Some(Err(e)) => {
                             if let Some(prefix) = err_prefix {
                                 self.state.flash_error(format!("{prefix}: {e:#}"));
+                            } else if e
+                                .downcast_ref::<std::io::Error>()
+                                .is_some_and(|error| error.kind() == std::io::ErrorKind::WouldBlock)
+                            {
+                                self.state.flash_error(format!("pane input: {e:#}"));
                             }
                         }
                         None => {}
                     }
                 }
-                // A-class: write to the running capture child's master writer
+                // A-class: queue input for the running capture child
                 // (raw — captures rarely enable bracketed paste). A vanished
                 // `pending_capture` skips silently, matching the former inline
                 // `if let Some(capture)` write in the key/paste handlers.
                 Effect::SendToCapture { bytes } => {
-                    if let Some(capture) = self.runtime.pending_capture.as_mut() {
-                        use std::io::Write as _;
-                        let _ = capture.host.writer.write_all(&bytes);
-                        let _ = capture.host.writer.flush();
+                    if let Some(capture) = self.runtime.pending_capture.as_mut()
+                        && let Err(e) = capture.host.write_all(&bytes)
+                    {
+                        self.state.flash_error(format!("capture input: {e:#}"));
                     }
                 }
                 // A-class: the only side effect of a terminal-title update;

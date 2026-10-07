@@ -431,3 +431,18 @@ sharp edge, and prefer distinct worktrees.
 | Reclaim native text selection | hold Shift (or Option/Fn on iTerm2), or `:mouse off` |
 | Check which build you're on | `:about`, `:version`, or `gV` |
 | See who's editing what, across agents | `:agent list` / `:agent registry` |
+
+## Child input backpressure
+
+A stopped or non-reading child must leave spyc navigation, tab controls and
+pagers responsive. Child input is queued in order off the UI thread. The input
+queue is bounded to 512 waiting batches and 8 MiB including the in-flight write.
+If it fills, spyc reports that the new input was not sent; retry after the child
+resumes reading. Accepted input can remain queued while the child is stopped.
+Closing its tab retains the normal process-group shutdown.
+
+`scripts/pane-input-smoke.py` uses a dedicated `tui-test` session and a disposable
+raw-mode child that does not read stdin. A synthetic paste fills the PTY while
+spyc's own activity pager must still open. It also checks capture input and a
+pane producing continuous output. A failure can capture a macOS stack sample
+before killing the owned test child. It never drives the user's current pane.
