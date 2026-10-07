@@ -266,8 +266,8 @@ Two tracks keep the RC manageable:
   recordings, viewport captures, extracted dumps and binary manifests remain
   local artifacts. Single-delivery counts are asserted per observed test turn.
 
-- A3b4 was accepted for integration on 2026-10-07 on
-  `fix/codex-mixed-prompt-recovery`, based on #548.
+- A3b4 landed through PR #549 (`eff0bce1`) after local-build acceptance
+  on 2026-10-07, based on #548.
   The real CLI `0.160.1` mixed approval → native question test failed against
   the accepted A3b3 binary on 2026-10-07. Its permission and question shared a
   turn; exactly one native start and matching completion were received. Enter
@@ -293,8 +293,9 @@ Two tracks keep the RC manageable:
   remained output-timing recovery after Enter, rather than a correlated semantic
   permission completion. No loop called agent `report_status`, approved hook
   trust or edited trust records. The user launched the supplied new version
-  and requested continuing, accepting the build for integration. Integration
-  is pending; the remaining A3 gaps below are not closed by this slice.
+  and requested continuing, accepting the build for integration. GitHub lint,
+  tests and packaging passed before the squash merge. The remaining A3 gaps
+  below are not closed by this slice.
   A read-only exact-version upstream audit confirms that
   [`request_user_input_async`](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
   posts an async message and immediately returns acceptance without awaiting
@@ -307,6 +308,73 @@ Two tracks keep the RC manageable:
   keyboard recovery state without inventing correlated permission completion.
   Fresh trust onboarding, async attention and live parallel-pane isolation
   remain A3 acceptance gaps.
+
+- A3b5 was locally accepted on 2026-10-07 on `test/codex-attention-isolation`,
+  based on #549, and is ready for integration.
+  The accepted A3b4 artifact passed the real two-pane native-question loop:
+  both questions blocked, answering the second restored only that pane, the
+  first remained blocked until answered, and both independently reached done.
+  The two MCP connections and pane/session/turn/call ids were distinct; each
+  pane received one prompt, one question start/completion and one Stop. Replay
+  mutations detected recovery of the unanswered pane, a changed completion
+  call and cross-bound sessions.
+
+  The user's continuing-work dump then exposed a separate false block:
+  `PermissionRequest` had latched blocked after automatic review of a completed
+  MCP tool, with no human answer required. An exact `0.160.1` source audit of
+  [permission events](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/hooks/src/events/permission_request.rs)
+  and [approval routing](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/approvals.rs)
+  confirms that the hook precedes hook allow/deny decisions, automatic review
+  and user review. It supplies no call id, and `permission_mode` describes
+  approval policy rather than reviewer identity. A real automatic-review
+  `sleep 30` regression failed against the accepted A3b4 artifact with no
+  dialogue open and an authoritative blocked report.
+
+  The worktree records metadata-bearing permission reports as observations,
+  leaving existing working/question reports intact. Owned hook command bytes
+  remain unchanged, preserving trust hashes. A captured complete command
+  approval at the viewport bottom supplies a narrow UI fallback that
+  temporarily overrides non-blocked reports; those reports resume after the
+  dialogue closes. Activity settling and both diagnostics share this policy.
+  Explicit agent blocks and native questions retain semantic precedence.
+  Clipped/customized dialogues, other approval types and async-answer attention
+  remain outside this verified rule. No generic post-tool hook or invented
+  permission correlation is added.
+
+  Five permanent regressions failed before the fix, then passed. The library
+  suite passed 2767 tests with one existing ignored test. The first fixed
+  artifact passed the real automatic-review loop without an approval key or
+  agent `report_status`. Fresh `CODEX_HOME` discovery separately confirmed that
+  an untrusted project's six hook declarations are ignored, with Codex's trust
+  warning and no trust configuration written. This negative probe does not
+  establish execution after trust approval. The scanner call-site guard caught
+  a deliberate production mutation to scrollback and the source was restored.
+  An expanded complete-dialogue fixture also failed with a twelve-line region;
+  the rule now reads the bounded current viewport and still requires the exact
+  modal footer at its bottom, excluding prior dialogue above the composer.
+
+  The final unpiped `RUST_TEST_THREADS=1 make check` gate passed: 2768 library
+  tests, one existing ignored test, all integration tests and six VT-system
+  tests. All five real-CLI loops passed against the exact final artifact:
+  automatic review, human command approval, mixed approval → native question,
+  standalone native question and parallel questions. Automatic review retained
+  authoritative working without an approval key; human approval used the
+  labelled UI fallback, then resumed the retained working report. Questions
+  recovered only their matching pane/session/turn/call. The parallel run had
+  two bound connections and eight reports; the unanswered pane stayed blocked
+  while the other worked and finished. None called agent `report_status`,
+  approved hook trust or edited trust records.
+  The final binary is
+  `/private/tmp/spyc-codex-a3b5-final.5yj63yev/spyc`, SHA-256
+  `a809801d0a13d0dba6783efd0817bc14caf025905764891ae22bf46edef33cc1`.
+  Its `test.sh` launcher selects the worktree and prepends that binary to
+  `PATH`, so both the host and hook reporter use the supplied build. Local
+  artifacts retain manifests, recordings, viewport captures, extracted dumps
+  and step logs. The live host and MCP proxy were verified against the exact
+  artifact hash. The user reported that it was working well and requested
+  continuing, accepting the build for integration.
+  Full fresh-trust execution, async attention and other approval-dialogue
+  formats remain A3 acceptance gaps; parallel native-question isolation passed.
 
 ### Baseline
 

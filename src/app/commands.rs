@@ -215,9 +215,13 @@ pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
             AgentActivity::Done => "done",
             AgentActivity::Unknown => "unknown",
         };
-        // Priority: a live self-report wins, then the P1-2 scrape fallback,
-        // then output timing (`effective_activity`'s exact order).
-        let source = if info.reported.is_some() {
+        // Match `effective_activity`, including Codex's temporary modal override.
+        let source = if info.reported.is_some()
+            && !crate::agent::codex_approval::overrides_report(
+                info.reported,
+                info.scrape_status.map(|(status, _)| status),
+                crate::agent::detect(&info.command).kind(),
+            ) {
             "self-reported".to_string()
         } else if let Some((_, hint)) = info.scrape_status {
             match hint {
@@ -640,8 +644,15 @@ fn activity_dump_lines(app: &App) -> Vec<String> {
         if let Some(message) = super::status_hooks::status_hooks_diagnostic(info) {
             out.push(format!("    hooks: {message}"));
         }
-        // The crux: live self-report > P1-2 scrape fallback > output timing.
-        match (info.reported, info.scrape_status) {
+        // Match the effective source, including Codex's visible approval modal.
+        let reported = info.reported.filter(|_| {
+            !crate::agent::codex_approval::overrides_report(
+                info.reported,
+                info.scrape_status.map(|(status, _)| status),
+                crate::agent::detect(&info.command).kind(),
+            )
+        });
+        match (reported, info.scrape_status) {
             (Some(r), _) => out.push(format!(
                 "    source: SELF-REPORT status={} set {:.1}s ago, {}",
                 state_str(r.status),
@@ -674,8 +685,10 @@ fn activity_dump_lines(app: &App) -> Vec<String> {
                 report.at.elapsed().as_secs_f32(),
                 match info.last_report_ignored {
                     Some(reason) => format!("not applied: {reason}"),
-                    None if info.reported.is_some_and(|live| live.at == report.at) =>
+                    None if reported.is_some_and(|live| live.at == report.at) =>
                         "authoritative".into(),
+                    None if info.reported.is_some_and(|live| live.at == report.at) =>
+                        "retained behind visible approval".into(),
                     None => "no longer authoritative".into(),
                 },
             )),

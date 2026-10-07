@@ -82,9 +82,9 @@ pub enum AgentActivity {
 ///
 /// Authority model (`App::effective_activity`): a report wins over the timing
 /// fallback until it expires (`expiry`, a backstop against a crashed agent's
-/// stale report). Output supersedes non-blocked reports only for agents with
-/// scrape rules, whose uncovered prompts need that fallback. Other agents keep
-/// semantic reports through redraws and silent tool waits.
+/// stale report). Agy yields non-blocked reports to fresh output. Codex's
+/// visible approval modal temporarily overrides a non-blocked report without
+/// discarding it. Other reports survive redraws and silent tool waits.
 #[derive(Clone, Copy, Debug)]
 pub struct ReportedStatus {
     /// The reported state (`Working` / `Blocked` / `Idle` / `Done`).
@@ -206,12 +206,10 @@ pub struct TabInfo {
     /// reported id); [`Self::pinned_session_id`] reads whichever is set.
     pub live_session_id: Option<String>,
     /// P1-2 scrape-inferred status (state + `:why-status` hint) from the last
-    /// settled screen scan. Third-tier input to `effective_activity`
-    /// (self-report > this > output timing). Cleared the instant a live
-    /// `report_status` self-report exists for this tab — a report always wins,
-    /// and scrape must not hold a stale guess behind one that could resurface if
-    /// the report later expires. Also cleared when the user answers the pane
-    /// with Enter, same as a latched `Blocked` report.
+    /// settled screen scan. Normally below a live report and above output
+    /// timing. Codex's visible approval overrides a non-blocked report while
+    /// retaining it for recovery; other live reports discard stale guesses.
+    /// Also cleared by prompt-settling input.
     pub scrape_status: Option<(AgentActivity, Option<&'static str>)>,
     /// P1-2 scrape-fallback dirty flag: set `true` on output for agent tabs
     /// with detection rules. Consumed by `settle_scrape_quiet` after
