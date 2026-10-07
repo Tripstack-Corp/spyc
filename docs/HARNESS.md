@@ -263,15 +263,24 @@ This instruments the question tool's attempt/completion, not authenticated
 proof that a dialogue opened. Invalid/cancelled calls may have no post event;
 `Stop`, `Interrupt` or an explicit newer report retires the wait. Correlated semantic
 permission recovery remains unresolved because `PermissionRequest` supplies no
-call id. Enter clears the permission wait and resumes output-timing activity.
+call id. Prompt-settling input clears an ordinary permission latch and resumes
+output-timing activity. It also retires that latch in the question correlation
+state, so a later question in the same turn can recover on matching completion.
+Typing, pasting text and pane output do not retire an unanswered permission.
+Identified questions still require matching completion instead of Enter.
 Real-CLI native question and quiet-after-answer checks passed through the
 automated TUI harness with already trusted hooks. Fresh hook trust onboarding
 remains a separate acceptance case.
 
 `request_user_input_async` is a separate question path. Its immediate completion
 acknowledges posting a question; it does not establish that the user answered.
-These native question hooks do not instrument that path. Async-answer lifecycle
-coverage remains open in A3.
+These native question hooks do not instrument that path. The
+[`0.160.1` async handler](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
+posts an async message and immediately returns `accepted`; the
+[TUI reply parser](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/tui/src/async_question_reply.rs)
+handles the answer as a later user message. A blocked latch tied to the tool's
+completion would misrepresent an agent that continues working. Async-answer
+lifecycle coverage remains open in A3.
 
 For a native-hook test, restart Codex after any restart-needed diagnostic and
 review the new hooks in `/hooks`. Enter `/plan` as an actual CLI slash command
@@ -291,6 +300,7 @@ own session. The output directory must be new for each run.
 ```sh
 python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-question-run
 python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-approval-run --scenario approval
+python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-mixed-run --scenario mixed
 ```
 
 The question scenario selects Plan mode and asserts blocked while the native
@@ -304,9 +314,14 @@ The approval scenario uses a test-only CLI invocation with user-reviewed
 approvals and a read-only sandbox. It approves only the displayed `sleep 30`
 command once, verifies the existing Enter recovery and working dot, then done.
 Working after an approval currently comes from output timing; this scenario
-does not claim correlated semantic permission completion. Neither scenario
-approves hook trust or changes trust records. Hooks must already be trusted;
-fresh onboarding is a separate manual acceptance case. These real-model smoke
+does not claim correlated semantic permission completion. The mixed scenario
+first approves the displayed `sleep 1` once, then answers a native question in
+the same turn. It checks matching completion, authoritative working during
+`sleep 30` and done. It catches stale approval state poisoning question recovery.
+The driver waits for diagnostic text to render before submitting it, preventing
+Codex's paste-burst handling from leaving a long prompt in the composer.
+None of the scenarios approves hook trust or changes trust records. Hooks
+must already be trusted; fresh onboarding is a separate manual acceptance case. These real-model smoke
 tests run on demand rather than in CI.
 
 ### Duplicate Codex hook sources

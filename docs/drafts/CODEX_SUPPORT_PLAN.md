@@ -154,13 +154,14 @@ Two tracks keep the RC manageable:
   make `:why-status` easier to inspect. See the
   [official hook contract](https://learn.chatgpt.com/docs/hooks).
 
-- A3b3 was accepted for integration on 2026-10-07 on
-  `fix/codex-question-recovery`, based on #546.
+- A3b3 landed through PR #548 (`9f24dd4b`) after local-build acceptance
+  on 2026-10-07, based on #546.
   The source-routing and protocol fixes passed `RUST_TEST_THREADS=1 make check`:
   2760 library tests, one existing ignored test, all integration tests (including
   four actual reporter-binary tests) and VT-system tests. Automated local native
   question and keyboard approval loops passed on the fresh build. The user
-  accepted that result and requested continuing; integration is pending.
+  accepted that result and requested continuing. GitHub lint, tests and
+  packaging passed before the squash merge.
   The local CLI is `0.160.1`; the local source audit at `f380b487` and the
   official generic-function hook contract support narrowly scoped
   `request_user_input` start/completion instrumentation. Real native execution
@@ -264,6 +265,48 @@ Two tracks keep the RC manageable:
   The repeatable driver is `scripts/codex-tui-smoke.py`; its isolated-session
   recordings, viewport captures, extracted dumps and binary manifests remain
   local artifacts. Single-delivery counts are asserted per observed test turn.
+
+- A3b4 was accepted for integration on 2026-10-07 on
+  `fix/codex-mixed-prompt-recovery`, based on #548.
+  The real CLI `0.160.1` mixed approval → native question test failed against
+  the accepted A3b3 binary on 2026-10-07. Its permission and question shared a
+  turn; exactly one native start and matching completion were received. Enter
+  had cleared the visible ordinary permission latch, but its correlation state
+  still retained an uncorrelated blocker. The completion was recorded as
+  unapplied and the dot remained blocked at output age `0.0s`.
+  A permanent harness regression reproduced the same stale state before the
+  fix. Prompt-settling input now retires both representations of that ordinary
+  latch together. It preserves pending identified questions and overflow;
+  typing or pasting does not recover an unanswered permission. The TUI driver
+  includes the mixed sequence and waits for long diagnostic text to render
+  before submission. The full `RUST_TEST_THREADS=1 make check` gate passed:
+  2762 library tests, one existing ignored test, integration and VT-system tests.
+  Deliberate production mutations were caught for model retirement, executor
+  wiring and non-settling input; production was restored before the gate.
+  The fresh `x5d5b_lq` artifact has SHA-256
+  `4f77eb5907fd208a782ace6d6fbee6eb117ad3691393c10cd6db1874137f2da4`.
+  The real-CLI mixed sequence passed: one prompt, one permission request,
+  one question start/completion with matching pane/session/turn/call, and one
+  Stop. Question completion restored authoritative working, retained during
+  the quiet `sleep 30`, followed by authoritative done. The standalone question
+  and approval loops passed against the same artifact. Approval-only working
+  remained output-timing recovery after Enter, rather than a correlated semantic
+  permission completion. No loop called agent `report_status`, approved hook
+  trust or edited trust records. The user launched the supplied new version
+  and requested continuing, accepting the build for integration. Integration
+  is pending; the remaining A3 gaps below are not closed by this slice.
+  A read-only exact-version upstream audit confirms that
+  [`request_user_input_async`](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
+  posts an async message and immediately returns acceptance without awaiting
+  an answer. The
+  [TUI reply parser](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/tui/src/async_question_reply.rs)
+  recognizes answers in a later user message. This rules out using async tool
+  completion as answer recovery, and a blocking start would misrepresent
+  continuing work. The ordinary permission hook still has no call id in the
+  [official contract](https://learn.chatgpt.com/docs/hooks); this slice repairs
+  keyboard recovery state without inventing correlated permission completion.
+  Fresh trust onboarding, async attention and live parallel-pane isolation
+  remain A3 acceptance gaps.
 
 ### Baseline
 

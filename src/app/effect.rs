@@ -327,14 +327,22 @@ pub enum PaneTarget {
 pub(super) fn clear_blocked_for_input(
     info: &mut crate::pane::tabs::TabInfo,
     input: &PaneInput,
-    question_waiting: bool,
+    recovery: Option<&mut crate::agent::codex_recovery::CodexRecovery>,
 ) {
     if !input.settles_prompt() {
         return;
     }
+    let question_waiting = recovery
+        .as_ref()
+        .is_some_and(|state| state.question_waiting());
     let blocked = |status| status == crate::pane::AgentActivity::Blocked;
     if !question_waiting && info.reported.is_some_and(|report| blocked(report.status)) {
         info.reported = None;
+        // Retire the same ordinary latch in the correlation model. Otherwise a
+        // later question completion would inherit an already answered approval.
+        if let Some(recovery) = recovery {
+            *recovery = crate::agent::codex_recovery::CodexRecovery::default();
+        }
     }
     if info
         .scrape_status
@@ -755,11 +763,8 @@ impl App {
                             // Settling an ordinary prompt clears its latch. Codex
                             // questions require matching completion instead.
                             let info = t.active_info_mut();
-                            let question_waiting =
-                                self.state.codex_recovery.get(&info.id).is_some_and(
-                                    crate::agent::codex_recovery::CodexRecovery::question_waiting,
-                                );
-                            clear_blocked_for_input(info, &input, question_waiting);
+                            let recovery = self.state.codex_recovery.get_mut(&info.id);
+                            clear_blocked_for_input(info, &input, recovery);
                             input.send_to(t.active_mut())
                         }),
                         PaneTarget::Overlay => {
@@ -1464,8 +1469,8 @@ mod tests {
             .unwrap()
             .1;
         let active = active.split_once("PaneTarget::Overlay =>").unwrap().0;
-        assert!(active.contains("clear_blocked_for_input(info, &input, question_waiting);"));
-        assert!(active.contains("self.state.codex_recovery.get(&info.id)"));
+        assert!(active.contains("clear_blocked_for_input(info, &input, recovery);"));
+        assert!(active.contains("self.state.codex_recovery.get_mut(&info.id)"));
     }
 
     #[test]
