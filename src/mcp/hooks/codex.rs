@@ -10,8 +10,10 @@ use super::{
 // The app passes the root-checkout source Codex consumes; this writer operates
 // on that literal directory. Ordinary MCP config can remain worktree-local.
 // Codex also loads `.codex/hooks.json`; spyc migrates its reporters out of it.
-// `UserPromptSubmit` → working, `PermissionRequest` → blocked, `Stop` → done,
-// `Interrupt` → idle. It reads config once at startup
+// `UserPromptSubmit` → working, `Stop` → done, `Interrupt` → idle.
+// `PermissionRequest` retains its wire command for hook-trust stability; a
+// metadata-capable host records it observationally because it precedes both
+// automatic and human review. It reads config once at startup
 // (no live reload), so hooks are written pre-spawn; a first-launch `yes` only
 // takes effect on codex's next launch.
 

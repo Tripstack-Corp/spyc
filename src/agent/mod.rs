@@ -13,6 +13,7 @@
 //! [`detect`] (command → profile, for live panes).
 
 pub mod chrome;
+pub mod codex_approval;
 pub mod codex_command;
 pub mod codex_records;
 pub mod codex_recovery;
@@ -276,9 +277,9 @@ pub trait AgentProfile: Sync {
     }
 
     /// P1-2 scrape fallback: priority-ordered pane-text detection rules for an
-    /// agent that can't (or doesn't yet) self-report — consulted only while no
-    /// live semantic report is authoritative for the tab (`report_status`
-    /// always wins; see `app::agent_status::effective_activity`). Default:
+    /// state the agent cannot self-report. Codex's verified command approval
+    /// temporarily overrides non-blocked reports; semantic blocks retain
+    /// precedence (see `app::agent_status::effective_activity`). Default:
     /// empty — no fallback beyond P0 output timing, which is correct for any
     /// agent whose prompt text isn't verified here (guessing at UI text spyc
     /// hasn't observed would be worse than no fallback).
@@ -519,6 +520,9 @@ pub fn codex_without_daemon(cmd: &str) -> Cow<'_, str> {
 
 pub struct CodexProfile;
 impl AgentProfile for CodexProfile {
+    fn detection_rules(&self) -> &'static [DetectionRule] {
+        codex_approval::RULES
+    }
     fn kind(&self) -> AgentKind {
         AgentKind::Codex
     }

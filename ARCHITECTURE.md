@@ -120,9 +120,9 @@ free optimization — a live report outranks the scrape result in
 of *when* the two settles run. Both fire pre-recv in the same iteration:
 `drain_pane_output` stamps `last_output_at` and sets `scrape_dirty`, then
 `settle_scrape_quiet`, then `settle_agent_activity` — which drops that very
-report through `report_superseded_by_output` (for agents with scrape rules,
-output newer than a non-`Blocked` report supersedes it). Agents without scrape
-rules retain semantic reports through output until expiry or a newer report.
+report through `report_superseded_by_output` (for agy, output newer than a
+non-`Blocked` report supersedes it). Codex and Claude retain semantic reports
+through output until expiry or a newer report.
 So consuming the dirty flag on the
 report's behalf discarded the scan for a report that no longer existed by the
 end of the tick.
@@ -137,11 +137,20 @@ single case it exists to serve, and the symptom is a dot that quietly decays
 to Idle instead of going red, which nobody reports as a bug.
 
 `scrape_step` takes `has_rules` rather than a report precisely so the pure
-decision cannot express the skip. Scanning behind a genuinely live report is
-harmless: `settle_agent_activity` clears `scrape_status` while a report is
-still authoritative (so a stale guess can't resurface when the report later
-expires), and a tab with no detection rules — claude, codex, zot, whose hooks
-report every state they have — returns `Skip` before any screen read.
+decision cannot express the skip. Other live reports discard scrape guesses
+so they cannot resurface stale after expiry. A tab without detection rules
+returns `Skip` before any screen read.
+
+Codex's `PermissionRequest` precedes both automatic review and a human
+approval dialogue, and supplies no call id. Its metadata-bearing report is
+observational rather than a semantic user wait. A verified command-approval
+dialogue at the viewport bottom temporarily overrides a non-blocked report;
+the report remains stored and resumes when the dialogue disappears. This
+also requires scanning behind a live report. Native question blocks and
+explicit agent blocks retain semantic precedence. `codex_approval::overrides_report`
+is shared by activity settling and both status diagnostics, so the dot and
+its explanation agree. The rule requires a complete default dialogue;
+clipped or customized screens and other approval types produce no guess.
 
 ## Update model: Elm-architecture (MVU)
 

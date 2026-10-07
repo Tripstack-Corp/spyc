@@ -246,7 +246,7 @@ spyc's workflow: browse files above, talk to Claude below.
   inert while zoomed (only `^a z` exits), and the prior split is restored on
   un-zoom.
 - **Agent-activity dots** — each **agent** pane tab shows a live activity dot
-  in the divider, from these layered sources (a later one always wins):
+  in the divider, from these layered sources:
   - **Output timing** (no hooks, no screen-scraping): a **spicy heat-pulse `●`**
     — a pepper-red → ember → orange → spark color *breath* (~4 Hz) — while
     output is flowing, fading to a quiet `·` once the agent goes silent. The
@@ -261,8 +261,9 @@ spyc's workflow: browse files above, talk to Claude below.
     or done) — so you can tell "needs me / finished" from "busy" at a glance.
     For Codex and Claude, live reports survive output and footer redraws until
     a newer report or TTL expiry; quiet tool waits do not erase `working`.
-    Agents with scrape rules still yield non-blocked reports to fresh output
-    so an uncovered approval prompt can be detected. **`blocked` is latched**: it stays a steady red
+    Agy yields non-blocked reports to fresh output for uncovered approvals.
+    Codex's complete command-approval dialogue temporarily overrides a
+    non-blocked report while retaining it for recovery. **`blocked` is latched**: it stays a steady red
     square — no TTL, no output or animation revives it — until you actually
     answer the pane by pressing **Enter** in it (or the agent files a newer
     report). Identified Codex questions instead wait for their matching tool
@@ -277,7 +278,11 @@ spyc's workflow: browse files above, talk to Claude below.
     hook source. Linked worktrees use the corresponding directory in the root
     checkout, while their MCP entry stays worktree-local. Hooks are read once at
     startup, so an already-consented source is written *before* codex spawns.
-    Codex's `Interrupt` hook
+    Codex's metadata-bearing `PermissionRequest` is observational: it fires
+    before automatic or human review, so it cannot establish a human wait.
+    Command approvals use a complete default dialogue at the viewport bottom;
+    diagnostics identify this `scrape-fallback`. Clipped/customized dialogues
+    and other approval types produce no guess. Codex's `Interrupt` hook
     reports `idle` after cancellation. Its `request_user_input` hooks report
     `blocked` on start and recover `working` only for the same pending
     pane/session/turn/call; other waits stay blocked. Project trust and `/hooks`
@@ -307,16 +312,15 @@ spyc's workflow: browse files above, talk to Claude below.
     spyc is a throwaway build-dir binary whose path went stale), **`:hooks on!`**
     force-restarts the active claude pane and resumes the conversation so the
     hooks load from launch.
-  - **Scrape fallback** (for a state an agent's hooks can't report) — when an
-    agent has no self-report, spyc reads its **visible screen** for a known
-    prompt and infers status. Today that's `agy`'s tool-approval prompt lighting
-    the red `blocked` square, because agy exposes no approval event to hook.
-    Deliberately last-resort: any live self-report always wins; it waits for the
-    pane to go quiet so a half-drawn prompt can't flip the dot; it requires
-    *several* phrases of a prompt spyc has actually verified, so an agent merely
-    discussing permissions doesn't trip it; and answering with Enter clears it.
-    This is the one place spyc reads the screen, and only as a graceful
-    degradation.
+  - **Scrape fallback** (for a state an agent's hooks can't report) — spyc
+    reads the **visible screen** for verified approval prompts. Agy exposes no
+    approval event. Codex's permission event precedes both automatic and human
+    review, so only a complete default command-approval dialogue establishes
+    its user wait. That dialogue temporarily overrides a non-blocked report;
+    semantic question/agent blocks retain precedence. The scan waits for quiet
+    output and requires several prompt phrases. Codex also requires the exact
+    modal footer at the viewport bottom, excluding old dialogues above the
+    normal composer. Prompt-settling input clears the detected wait.
 
   **`:why-status`** flashes the active tab's state, its source (self-reported /
   scrape-fallback / output-timing), seconds since last output and hook setup

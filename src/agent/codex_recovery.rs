@@ -36,6 +36,11 @@ impl CodexRecovery {
         session: Option<&str>,
         event: Option<&StatusHookEvent>,
     ) -> Result<AgentActivity, &'static str> {
+        // This hook precedes automatic review as well as the human dialogue.
+        // It lacks a call id and cannot establish or retire a user wait.
+        if event.is_some_and(|event| event.hook_event_name == "PermissionRequest") {
+            return Err("PermissionRequest precedes review; human wait unverified");
+        }
         let expected = match signal {
             QUESTION_START => ("PreToolUse", AgentActivity::Blocked),
             QUESTION_END => ("PostToolUse", AgentActivity::Working),
@@ -169,16 +174,7 @@ mod tests {
         );
         assert!(state.question_waiting());
         state
-            .report(
-                "blocked",
-                AgentActivity::Blocked,
-                Some("session-1"),
-                Some(
-                    &StatusHookEvent::from_value(&json!({"hook_event_name":"PermissionRequest",
-                "tool_name":"Bash", "turn_id":"turn-1"}))
-                    .unwrap(),
-                ),
-            )
+            .report("blocked", AgentActivity::Blocked, Some("session-1"), None)
             .unwrap();
         assert!(
             state

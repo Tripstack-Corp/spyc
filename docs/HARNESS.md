@@ -262,12 +262,25 @@ new hooks in `/hooks`; spyc never approves them or edits trust records.
 This instruments the question tool's attempt/completion, not authenticated
 proof that a dialogue opened. Invalid/cancelled calls may have no post event;
 `Stop`, `Interrupt` or an explicit newer report retires the wait. Correlated semantic
-permission recovery remains unresolved because `PermissionRequest` supplies no
-call id. Prompt-settling input clears an ordinary permission latch and resumes
-output-timing activity. It also retires that latch in the question correlation
-state, so a later question in the same turn can recover on matching completion.
-Typing, pasting text and pane output do not retire an unanswered permission.
-Identified questions still require matching completion instead of Enter.
+permission completion cannot be correlated because `PermissionRequest` has
+no call id. It runs before hook decisions, automatic review or a human dialogue,
+as shown by the exact-version
+[permission event](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/hooks/src/events/permission_request.rs)
+and [review path](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/approvals.rs).
+Metadata-bearing permission reports are recorded as observational
+(`not applied: PermissionRequest precedes review; human wait unverified`). They
+cannot latch blocked or interfere with a later question. The existing hook
+command remains unchanged, preserving its trust hash; the host and reporter
+on `PATH` must both support lifecycle metadata.
+
+Command approvals use a narrow fallback: a complete default approval dialogue
+at the bottom of the current viewport, after 250 ms of quiet, temporarily
+overrides a non-blocked report. `:why-status` and `:activity dump` identify
+`scrape-fallback` as the source. The silent-work report remains stored and
+resumes after the dialogue closes. Clipped/customized dialogues and other
+approval types are not inferred. This is verified UI detection, not semantic
+permission completion. Explicit agent blocks retain their ordinary input
+recovery; identified questions require matching completion instead of Enter.
 Real-CLI native question and quiet-after-answer checks passed through the
 automated TUI harness with already trusted hooks. Fresh hook trust onboarding
 remains a separate acceptance case.
@@ -301,6 +314,8 @@ own session. The output directory must be new for each run.
 python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-question-run
 python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-approval-run --scenario approval
 python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-mixed-run --scenario mixed
+python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-auto-run --scenario auto
+python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-parallel-run --scenario parallel
 ```
 
 The question scenario selects Plan mode and asserts blocked while the native
@@ -312,17 +327,30 @@ log, captures, extracted dumps, recording and result are saved beside each run.
 
 The approval scenario uses a test-only CLI invocation with user-reviewed
 approvals and a read-only sandbox. It approves only the displayed `sleep 30`
-command once, verifies the existing Enter recovery and working dot, then done.
-Working after an approval currently comes from output timing; this scenario
-does not claim correlated semantic permission completion. The mixed scenario
+command once, verifies the visible-dialogue fallback and retained working
+report after Enter, then done. This does not claim correlated semantic
+permission completion. The mixed scenario
 first approves the displayed `sleep 1` once, then answers a native question in
 the same turn. It checks matching completion, authoritative working during
 `sleep 30` and done. It catches stale approval state poisoning question recovery.
 The driver waits for diagnostic text to render before submitting it, preventing
 Codex's paste-burst handling from leaving a long prompt in the composer.
+The auto scenario requests the same harmless sleep under automatic review,
+presses no approval key, and checks that the permission observation cannot
+latch blocked. The parallel scenario opens two Codex panes in one worktree,
+holds both native questions open, answers the second first, then the first.
+It checks distinct pane/session/turn/call identities, matching completions,
+quiet working and done without recovering the unanswered pane.
 None of the scenarios approves hook trust or changes trust records. Hooks
 must already be trusted; fresh onboarding is a separate manual acceptance case. These real-model smoke
 tests run on demand rather than in CI.
+
+`scripts/codex-hook-readiness-smoke.py --output /tmp/spyc-codex-fresh-run`
+creates a temporary project and empty `CODEX_HOME`, then reads `hooks/list`
+without starting a turn or approving trust. It verifies that project hook
+declarations remain unavailable and Codex explains the untrusted-project
+gate. This negative discovery case does not establish trusted hook execution;
+the full onboarding flow remains a separate acceptance case.
 
 ### Duplicate Codex hook sources
 

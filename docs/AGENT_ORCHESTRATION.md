@@ -24,21 +24,22 @@ in-memory view coordinates them all.
 ## 1. Activity dots — "which agent needs me?"
 
 Each **agent** pane tab carries a live dot in the divider. Its state comes from
-three tiers; a higher tier always wins:
+three tiers, with a narrow Codex approval exception:
 
 1. **Semantic self-report** (best) — the agent calls the `report_status` MCP tool
    (or its lifecycle hook does): `working` / `blocked` / `done` / `idle`.
 2. **Scrape fallback** — for a state an agent's hooks can't report, spyc reads
-   its *visible screen* for a known prompt (today: agy's tool-approval prompt →
-   `blocked`, since agy has no approval event). Second-class; a live report
-   always overrides it, and it only scans once the pane goes quiet.
+   its *visible screen* for a known prompt: agy's tool approval or Codex's
+   complete command-approval dialogue. It scans once the pane goes quiet.
+   Codex's verified dialogue temporarily overrides a non-blocked report;
+   semantic question/agent blocks retain precedence.
 3. **Output timing** — with neither of the above, output flowing = `working`,
    silence = `idle`.
 
 Codex and Claude retain semantic reports through output and footer redraws.
 Silent tool waits do not erase `working`; the default five-minute TTL remains
-a backstop, and newer reports replace older ones. Agents with scrape rules
-(agy) still yield non-blocked reports to fresh output so their uncovered
+a backstop, and newer reports replace older ones. Agy still yields non-blocked
+reports to fresh output so their uncovered
 approval prompts can be detected. Timing-only `idle` means quiet, not proof
 that a turn stopped or finished.
 
@@ -52,7 +53,7 @@ that a turn stopped or finished.
 | calm **teal** square `■` | **done** — finished a turn |
 | `💤` | `^z`-suspended |
 
-`blocked` is **latched**: it stays red until you settle the prompt in that pane —
+Semantically reported `blocked` is **latched**: it stays red until you settle the prompt in that pane —
 **Enter** to answer it, **Esc** or **`^c`** to dismiss it — or the agent files a
 newer report. No timer or stray output bounces it off. The dismissal keys count
 because no hook reports one: Claude Code ends a declined turn as a user
@@ -139,12 +140,25 @@ new hooks in `/hooks`; spyc never approves them or edits trust records.
 This instruments the question tool's attempt/completion, not authenticated
 proof that a dialogue opened. Invalid/cancelled calls may have no post event;
 `Stop`, `Interrupt` or an explicit newer report retires the wait. Correlated semantic
-permission recovery remains unresolved because `PermissionRequest` supplies no
-call id. Prompt-settling input clears an ordinary permission latch and resumes
-output-timing activity. It also retires that latch in the question correlation
-state, so a later question in the same turn can recover on matching completion.
-Typing, pasting text and pane output do not retire an unanswered permission.
-Identified questions still require matching completion instead of Enter.
+permission completion cannot be correlated because `PermissionRequest` has
+no call id. It runs before hook decisions, automatic review or a human dialogue,
+as shown by the exact-version
+[permission event](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/hooks/src/events/permission_request.rs)
+and [review path](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/approvals.rs).
+Metadata-bearing permission reports are recorded as observational
+(`not applied: PermissionRequest precedes review; human wait unverified`). They
+cannot latch blocked or interfere with a later question. The existing hook
+command remains unchanged, preserving its trust hash; the host and reporter
+on `PATH` must both support lifecycle metadata.
+
+Command approvals use a narrow fallback: a complete default approval dialogue
+at the bottom of the current viewport, after 250 ms of quiet, temporarily
+overrides a non-blocked report. `:why-status` and `:activity dump` identify
+`scrape-fallback` as the source. The silent-work report remains stored and
+resumes after the dialogue closes. Clipped/customized dialogues and other
+approval types are not inferred. This is verified UI detection, not semantic
+permission completion. Explicit agent blocks retain their ordinary input
+recovery; identified questions require matching completion instead of Enter.
 Real-CLI native question and quiet-after-answer checks passed through the
 automated TUI harness with already trusted hooks. Fresh hook trust onboarding
 remains a separate acceptance case; see `docs/HARNESS.md` for the driver.
