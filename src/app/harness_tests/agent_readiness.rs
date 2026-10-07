@@ -598,12 +598,19 @@ fn codex_question_recovery_waits_for_completion_instead_of_enter() {
             KeyCode::Enter,
             KeyModifiers::empty(),
         ));
-        let id = &app.runtime.pane_tabs.as_ref().unwrap().active_info().id;
-        let waiting = app.state.codex_recovery.get(id).unwrap().question_waiting();
+        let id = app
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info()
+            .id
+            .clone();
+        let recovery = app.state.codex_recovery.get_mut(&id);
         crate::app::effect::clear_blocked_for_input(
             app.runtime.pane_tabs.as_mut().unwrap().active_info_mut(),
             &input,
-            waiting,
+            recovery,
         );
         assert!(dump(&mut app).contains("source: SELF-REPORT status=blocked"));
         question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
@@ -723,5 +730,65 @@ fn codex_question_recovery_prunes_a_replaced_pane_without_carrying_its_wait() {
                 .reported
                 .is_none()
         );
+    });
+}
+
+#[test]
+fn answered_codex_permission_does_not_poison_the_next_question_in_the_same_turn() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "codex");
+        report(&mut app, "blocked");
+        let id = app
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info()
+            .id
+            .clone();
+        let recovery = app.state.codex_recovery.get_mut(&id);
+        crate::app::effect::clear_blocked_for_input(
+            app.runtime.pane_tabs.as_mut().unwrap().active_info_mut(),
+            &crate::app::effect::PaneInput::Key(KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::empty(),
+            )),
+            recovery,
+        );
+        assert!(
+            app.runtime
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .reported
+                .is_none()
+        );
+        question_report(&mut app, "codex-question-start", "PreToolUse", "call-1");
+        question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
+        assert!(dump(&mut app).contains("source: SELF-REPORT status=working"));
+        assert!(!dump(&mut app).contains("not applied:"));
+    });
+}
+
+#[test]
+fn typing_or_pasting_does_not_retire_an_unanswered_codex_permission() {
+    use crate::app::effect::{PaneInput, clear_blocked_for_input};
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "codex");
+        for input in [
+            PaneInput::Key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::empty())),
+            PaneInput::Bytes(b"answer\r".to_vec()),
+        ] {
+            report(&mut app, "blocked");
+            let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+            clear_blocked_for_input(info, &input, app.state.codex_recovery.get_mut(&info.id));
+            assert!(dump(&mut app).contains("source: SELF-REPORT status=blocked"));
+            question_report(&mut app, "codex-question-start", "PreToolUse", "call-1");
+            question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
+            assert!(dump(&mut app).contains("another question or uncorrelated blocked report"));
+        }
     });
 }

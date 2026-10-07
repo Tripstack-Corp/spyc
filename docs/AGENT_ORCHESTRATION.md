@@ -140,15 +140,24 @@ This instruments the question tool's attempt/completion, not authenticated
 proof that a dialogue opened. Invalid/cancelled calls may have no post event;
 `Stop`, `Interrupt` or an explicit newer report retires the wait. Correlated semantic
 permission recovery remains unresolved because `PermissionRequest` supplies no
-call id. Enter clears the permission wait and resumes output-timing activity.
+call id. Prompt-settling input clears an ordinary permission latch and resumes
+output-timing activity. It also retires that latch in the question correlation
+state, so a later question in the same turn can recover on matching completion.
+Typing, pasting text and pane output do not retire an unanswered permission.
+Identified questions still require matching completion instead of Enter.
 Real-CLI native question and quiet-after-answer checks passed through the
 automated TUI harness with already trusted hooks. Fresh hook trust onboarding
 remains a separate acceptance case; see `docs/HARNESS.md` for the driver.
 
 `request_user_input_async` is a separate question path. Its immediate completion
 acknowledges posting a question; it does not establish that the user answered.
-These native question hooks do not instrument that path. Async-answer lifecycle
-coverage remains open in A3.
+These native question hooks do not instrument that path. The
+[`0.160.1` async handler](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
+posts an async message and immediately returns `accepted`; the
+[TUI reply parser](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/tui/src/async_question_reply.rs)
+handles the answer as a later user message. A blocked latch tied to the tool's
+completion would misrepresent an agent that continues working. Async-answer
+lifecycle coverage remains open in A3.
 
 ### Duplicate Codex hook sources
 

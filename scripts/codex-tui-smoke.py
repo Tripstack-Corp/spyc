@@ -45,6 +45,8 @@ class Smoke:
 
     def prompt(self, text):
         self.cli("type", text)
+        self.cli("expect", "text", text, "--whitespace", "normalize",
+                 "--match", "any", "--timeout", "5000")
         # Codex treats Enter arriving in the same paste burst as pasted text.
         # Wait for the composer to render before sending its submission key.
         time.sleep(0.5)
@@ -94,6 +96,9 @@ class Smoke:
                     "Use native request_user_input to ask one question with Proceed and Cancel choices. "
                     "After I answer, use exec_command to run sleep 30, then reply exactly "
                     "SPYC_QUESTION_DIAGNOSTIC_COMPLETE. Do not use request_user_input_async.")
+        self.finish_question("SPYC_QUESTION_DIAGNOSTIC_COMPLETE")
+
+    def finish_question(self, marker):
         self.wait("Question 1/1")
         self.capture("question-open")
         blocked = self.dump("question-blocked")
@@ -123,7 +128,7 @@ class Smoke:
         time.sleep(8)
         self.status(self.dump("question-quiet-working"), "working")
         # Match the final response beneath a bullet, not the marker in the prompt.
-        self.wait("• SPYC_QUESTION_DIAGNOSTIC_COMPLETE", 45000)
+        self.wait("• " + marker, 45000)
         assert "• Ran sleep 30" in self.capture("question-finished")
         assert time.monotonic() - answered_at >= 29, "quiet sleep did not last 30 seconds"
         # Final text can render before the asynchronous Stop reporter arrives.
@@ -138,16 +143,7 @@ class Smoke:
                     "'May I run the read-only spyc approval diagnostic?' to run sleep 30. "
                     "After it completes reply exactly SPYC_APPROVAL_DIAGNOSTIC_COMPLETE. "
                     "Do not request a persistent command prefix.")
-        self.wait("Would you like to run the following command?")
-        opened = self.capture("approval-open")
-        modal = opened.split("Would you like to run the following command?", 1)[1]
-        assert re.findall(r"(?m)^\s*\$\s+(.+)$", modal) == ["sleep 30"], modal
-        assert "› 1. Yes, proceed (y)" in modal, "one-time approval is not selected"
-        blocked = self.dump("approval-blocked")
-        self.status(blocked, "blocked")
-        assert len(self.events(blocked, "PermissionRequest")) == 1, blocked
-        # Approve only this diagnostic's sleep, never a general prefix or hook trust.
-        self.key("Enter")
+        self.answer_approval("sleep 30")
         time.sleep(6)
         self.status(self.dump("approval-after-answer"), "working", semantic=False)
         time.sleep(8)
@@ -156,6 +152,40 @@ class Smoke:
         done = self.wait_dump("approval-done", "done")
         self.status(done, "done")
         assert len(self.events(done, "Stop")) == 1, done
+
+    def answer_approval(self, command):
+        self.wait("Would you like to run the following command?")
+        opened = self.capture("approval-open")
+        modal = opened.split("Would you like to run the following command?", 1)[1]
+        assert re.findall(r"(?m)^\s*\$\s+(.+)$", modal) == [command], modal
+        assert "› 1. Yes, proceed (y)" in modal, "one-time approval is not selected"
+        blocked = self.dump("approval-blocked")
+        self.status(blocked, "blocked")
+        assert len(self.events(blocked, "PermissionRequest")) == 1, blocked
+        # Approve only this diagnostic's sleep, never a general prefix or hook trust.
+        self.key("Enter")
+        return blocked
+
+    def mixed(self):
+        self.prompt("/plan")
+        self.wait("Vim: Insert | Plan mode", 15000)
+        self.prompt("For this diagnostic, do not call spyc report_status or edit files. "
+                    "First use exec_command with sandbox_permissions=require_escalated to run sleep 1, "
+                    "with justification 'May I run the read-only spyc mixed prompt diagnostic?' "
+                    "and no persistent command prefix. After that command completes, use native "
+                    "request_user_input to ask one question with Proceed and Cancel choices. "
+                    "After I answer the question, run sleep 30 using exec_command without escalation, "
+                    "then reply exactly SPYC_MIXED_DIAGNOSTIC_COMPLETE. "
+                    "Use the question only after the approved command returns. "
+                    "Do not use request_user_input_async.")
+        approval = self.answer_approval("sleep 1")
+        self.wait("Question 1/1")
+        question = self.dump("mixed-question")
+        permission = self.events(approval, "PermissionRequest")
+        start = self.events(question, "PreToolUse")
+        assert len(permission) == len(start) == 1, question
+        assert permission[0][2] == start[0][2], "approval and question must share a turn"
+        self.finish_question("SPYC_MIXED_DIAGNOSTIC_COMPLETE")
 
     def run(self):
         binary = self.args.binary.resolve()
@@ -194,7 +224,7 @@ def main():
     parser.add_argument("--binary", required=True, type=Path)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--scenario", choices=("question", "approval"), default="question")
+    parser.add_argument("--scenario", choices=("question", "approval", "mixed"), default="question")
     parser.add_argument("--session", default="spyc-codex-" + uuid.uuid4().hex[:10])
     args = parser.parse_args()
     smoke = Smoke(args)
