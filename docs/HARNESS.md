@@ -243,6 +243,72 @@ and why two codex panes in the same directory is the case that breaks it. See
 necessarily starts when the pane does) while keeping mtime primary for a
 resume-without-id, because those are opposite tells.
 
+### Codex question-tool recovery
+
+Codex's `request_user_input` tool has narrowly matched `PreToolUse` and
+`PostToolUse` reporters. A start reports `blocked`; successful completion
+restores `working` only when pane, session, turn and call match a pending
+question. Other questions or uncorrelated blocked reports retain attention.
+Enter alone does not clear an identified question, and unrelated or late
+completions are recorded as unapplied with a reason in `:activity dump`.
+
+Correlation is bounded to eight pending questions per pane, with overflow
+remaining blocked until a lifecycle or explicit agent report. It is reset for
+replaced panes and never stores question arguments or answers. The hook wire
+values require a capable host and metadata-bearing reporter; older components
+cannot silently apply an uncorrelated completion. Restart Codex and review both
+new hooks in `/hooks`; spyc never approves them or edits trust records.
+
+This instruments the question tool's attempt/completion, not authenticated
+proof that a dialogue opened. Invalid/cancelled calls may have no post event;
+`Stop`, `Interrupt` or an explicit newer report retires the wait. Correlated semantic
+permission recovery remains unresolved because `PermissionRequest` supplies no
+call id. Enter clears the permission wait and resumes output-timing activity.
+Real-CLI native question and quiet-after-answer checks passed through the
+automated TUI harness with already trusted hooks. Fresh hook trust onboarding
+remains a separate acceptance case.
+
+`request_user_input_async` is a separate question path. Its immediate completion
+acknowledges posting a question; it does not establish that the user answered.
+These native question hooks do not instrument that path. Async-answer lifecycle
+coverage remains open in A3.
+
+For a native-hook test, restart Codex after any restart-needed diagnostic and
+review the new hooks in `/hooks`. Enter `/plan` as an actual CLI slash command
+before asking for the diagnostic question. Confirm that `:activity dump` records
+`PreToolUse` for `request_user_input` while waiting, then a matching `PostToolUse`
+after answering. An async question call does not exercise this transition.
+
+### Automate Codex attention smoke tests
+
+`scripts/codex-tui-smoke.py` drives the installed Microsoft `tui-test` CLI with
+its Ghostty backend. It creates a dedicated named session, launches the supplied
+spyc binary, opens a real Codex pane and captures the UI and `:activity dump`.
+The driver stays alive while its daemon runs because tool runners can reap
+detached descendants when their launching command exits. It closes only its
+own session. The output directory must be new for each run.
+
+```sh
+python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-question-run
+python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-approval-run --scenario approval
+```
+
+The question scenario selects Plan mode and asserts blocked while the native
+question is open, a single matching start/completion pair, authoritative working
+after the answer and during `sleep 30`, then a single Stop reporting done.
+Final text and the Stop reporter are asynchronous, so it waits for both. Checks
+read the current viewport rather than stale scrollback. The binary hash, step
+log, captures, extracted dumps, recording and result are saved beside each run.
+
+The approval scenario uses a test-only CLI invocation with user-reviewed
+approvals and a read-only sandbox. It approves only the displayed `sleep 30`
+command once, verifies the existing Enter recovery and working dot, then done.
+Working after an approval currently comes from output timing; this scenario
+does not claim correlated semantic permission completion. Neither scenario
+approves hook trust or changes trust records. Hooks must already be trusted;
+fresh onboarding is a separate manual acceptance case. These real-model smoke
+tests run on demand rather than in CI.
+
 ### Duplicate Codex hook sources
 
 Codex loads `.codex/hooks.json` alongside inline hooks in `.codex/config.toml`.
@@ -260,6 +326,17 @@ hook definitions, so removing a duplicate file does not establish single
 delivery before restart. A JSON-only change also sets the restart diagnostic.
 Migration does not approve hooks or infer that a pending question or permission
 request was answered.
+
+### Codex hooks in linked worktrees
+
+Codex takes project hook definitions from the corresponding root-checkout
+directory, while ordinary config and the MCP entry stay worktree-local. spyc
+therefore installs and refcounts those hooks at the root-checkout source, using
+that project's saved consent. `:activity dump` names the actual source for a
+linked worktree; a reporter marker in the worktree's ignored file is insufficient.
+After a hook change, restart Codex and review `/hooks` from the new session.
+Native `request_user_input` has exact start/completion hooks; the async question
+tool's immediate acknowledgement is not an answer signal.
 
 ### codex's shared daemon
 

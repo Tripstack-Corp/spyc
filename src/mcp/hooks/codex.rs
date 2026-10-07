@@ -6,22 +6,24 @@ use super::{
 
 // ── Codex status hooks ────────────────────────────────────────────────
 //
-// Codex's hooks are inline `[[hooks.<Event>]]` tables in the same
-// `.codex/config.toml` as the MCP entry (see [`crate::mcp::config`]).
+// Codex's hooks are inline `[[hooks.<Event>]]` tables in `.codex/config.toml`.
+// The app passes the root-checkout source Codex consumes; this writer operates
+// on that literal directory. Ordinary MCP config can remain worktree-local.
 // Codex also loads `.codex/hooks.json`; spyc migrates its reporters out of it.
 // `UserPromptSubmit` → working, `PermissionRequest` → blocked, `Stop` → done,
 // `Interrupt` → idle. It reads config once at startup
 // (no live reload), so hooks are written pre-spawn; a first-launch `yes` only
 // takes effect on codex's next launch.
 
-/// Codex's (event, reported-state). No matcher: these events aren't
-/// tool-scoped, and the `--report-status` command string is the "ours" marker
-/// for cleanup (a user isn't expected to author their own).
-const CODEX_STATUS_HOOKS: [(&str, &str); 4] = [
+/// Lifecycle events are unfiltered; tool hooks match only `request_user_input`.
+/// The `--report-status` command string identifies owned handlers for cleanup.
+const CODEX_STATUS_HOOKS: [(&str, &str); 6] = [
     ("UserPromptSubmit", "working"),
     ("PermissionRequest", "blocked"),
     ("Stop", "done"),
     ("Interrupt", "idle"),
+    ("PreToolUse", crate::agent::codex_recovery::QUESTION_START),
+    ("PostToolUse", crate::agent::codex_recovery::QUESTION_END),
 ];
 
 /// TOML counterpart of [`super::group_is_ours`]: a `{ hooks = [{ command = … }] }`
@@ -40,7 +42,7 @@ fn codex_group_is_ours(group: &toml::Value) -> bool {
 }
 
 /// Codex counterpart of [`super::ensure_claude_status_hooks`]: merge spyc's status
-/// hooks into `<dir>/.codex/config.toml` (the same file as the MCP entry),
+/// hooks into `<dir>/.codex/config.toml` at the caller's resolved hook source,
 /// preserving everything else. Legacy JSON reporters are removed only after
 /// the canonical file is durable; an unsafe legacy source refuses installation.
 /// Other handlers survive even when they share a matcher group with a reporter.
@@ -104,6 +106,12 @@ pub(super) fn merged_codex_status_hooks_toml(
             toml::Value::String(reporter_command(exe, state, trace)),
         );
         let mut group = toml::Table::new();
+        if matches!(event, "PreToolUse" | "PostToolUse") {
+            group.insert(
+                "matcher".into(),
+                toml::Value::String("^request_user_input$".into()),
+            );
+        }
         group.insert(
             "hooks".into(),
             toml::Value::Array(vec![toml::Value::Table(handler)]),

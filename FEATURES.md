@@ -265,17 +265,23 @@ spyc's workflow: browse files above, talk to Claude below.
     so an uncovered approval prompt can be detected. **`blocked` is latched**: it stays a steady red
     square — no TTL, no output or animation revives it — until you actually
     answer the pane by pressing **Enter** in it (or the agent files a newer
-    report). Non-agent tabs (a plain shell) get no dot.
+    report). Identified Codex questions instead wait for their matching tool
+    completion; Enter alone does not clear them. Non-agent tabs (a plain shell)
+    get no dot.
   - **Auto-reporting (claude + codex; agy partial)** — so it works without the
     agent choosing to call the tool, spyc installs lifecycle hooks (prompt-submit
     → working, needs-permission/approval → blocked, turn-end → done) that run
     `spyc --report-status`. The agents share the same event idea, with per-agent
     config: **claude** writes `.claude/settings.json` (JSON, reloaded live);
-    **codex** writes inline `[[hooks.*]]` into the same `.codex/config.toml` that
-    already holds the MCP entry (read once at startup, so for an already-consented
-    repo the hooks are written *before* codex spawns). Codex's `Interrupt` hook
-    reports `idle` after cancellation. Project trust and `/hooks` review are
-    separate from spyc's consent; spyc never auto-approves hooks. **agy** (Antigravity)
+    **codex** writes inline `[[hooks.*]]` into `.codex/config.toml` at its actual
+    hook source. Linked worktrees use the corresponding directory in the root
+    checkout, while their MCP entry stays worktree-local. Hooks are read once at
+    startup, so an already-consented source is written *before* codex spawns.
+    Codex's `Interrupt` hook
+    reports `idle` after cancellation. Its `request_user_input` hooks report
+    `blocked` on start and recover `working` only for the same pending
+    pane/session/turn/call; other waits stay blocked. Project trust and `/hooks`
+    review are separate from spyc's consent; spyc never auto-approves hooks. **agy** (Antigravity)
     writes a `spyc-status` set into `.agents/hooks.json` and is **partial** — it
     covers `working`, `done`, and `blocked` for agy's own `ask_question` tool
     (a `PreToolUse` hook sees that one exactly when it's called). The *other*

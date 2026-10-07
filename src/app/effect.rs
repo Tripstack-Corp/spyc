@@ -323,6 +323,27 @@ pub enum PaneTarget {
     Overlay,
 }
 
+/// Apply prompt-settling input to semantic and scrape-derived attention.
+pub(super) fn clear_blocked_for_input(
+    info: &mut crate::pane::tabs::TabInfo,
+    input: &PaneInput,
+    question_waiting: bool,
+) {
+    if !input.settles_prompt() {
+        return;
+    }
+    let blocked = |status| status == crate::pane::AgentActivity::Blocked;
+    if !question_waiting && info.reported.is_some_and(|report| blocked(report.status)) {
+        info.reported = None;
+    }
+    if info
+        .scrape_status
+        .is_some_and(|(status, _)| blocked(status))
+    {
+        info.scrape_status = None;
+    }
+}
+
 /// What to deliver to the pane. `Key` routes through `Pane::send_key`
 /// (preserving its key-trace logging + empty-bytes guard); `Bytes` routes
 /// through `Pane::send_bytes` (its own key-trace logging) — so each former
@@ -728,30 +749,17 @@ impl App {
                     // Esc / `^c` to dismiss. A latched `blocked` dot stays red through
                     // navigation / typing / pastes and clears only on one of those
                     // (or a newer report).
-                    let clears_blocked = input.settles_prompt();
+                    // Identified Codex questions wait for their matching completion.
                     let result = match target {
                         PaneTarget::Active => self.runtime.pane_tabs.as_mut().map(|t| {
-                            // The user pressed Enter on the active pane (answering a
-                            // Yes/No permission prompt, a question, or submitting a
-                            // prompt) → it no longer "needs me": drop the latched
-                            // `blocked` self-report so the dot leaves red and follows
-                            // the agent's resumed output again.
+                            // Settling an ordinary prompt clears its latch. Codex
+                            // questions require matching completion instead.
                             let info = t.active_info_mut();
-                            let blocked = |s: crate::pane::AgentActivity| {
-                                s == crate::pane::AgentActivity::Blocked
-                            };
-                            if clears_blocked && info.reported.is_some_and(|r| blocked(r.status)) {
-                                info.reported = None;
-                            }
-                            // Same for a scrape-derived `blocked` (agy's only source
-                            // for it — no hook event covers approval). Without this
-                            // the dot can't clear until the tab goes quiet enough for
-                            // the next debounced scan, so answering a prompt and
-                            // watching the agent work still reads as "needs me".
-                            if clears_blocked && info.scrape_status.is_some_and(|(s, _)| blocked(s))
-                            {
-                                info.scrape_status = None;
-                            }
+                            let question_waiting =
+                                self.state.codex_recovery.get(&info.id).is_some_and(
+                                    crate::agent::codex_recovery::CodexRecovery::question_waiting,
+                                );
+                            clear_blocked_for_input(info, &input, question_waiting);
                             input.send_to(t.active_mut())
                         }),
                         PaneTarget::Overlay => {
@@ -1446,6 +1454,18 @@ mod tests {
             ClipMsg::Prompt.success(&over),
             format!("yanked prompt: {preview}…")
         );
+    }
+
+    #[test]
+    fn identified_question_input_guard_is_used_by_the_effect_executor() {
+        let production = crate::guard_support::production_half(include_str!("effect.rs"));
+        let active = production
+            .split_once("PaneTarget::Active => self.runtime.pane_tabs.as_mut()")
+            .unwrap()
+            .1;
+        let active = active.split_once("PaneTarget::Overlay =>").unwrap().0;
+        assert!(active.contains("clear_blocked_for_input(info, &input, question_waiting);"));
+        assert!(active.contains("self.state.codex_recovery.get(&info.id)"));
     }
 
     #[test]

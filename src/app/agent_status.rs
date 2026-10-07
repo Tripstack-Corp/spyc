@@ -67,7 +67,8 @@ const AGENT_ANIM_INTERVAL: Duration = Duration::from_millis(250);
 /// dot off red and back to the working pulse. Blocked is cleared only by its
 /// a newer report or the user settling the prompt — answering it with
 /// Enter or dismissing it with Esc / `^c` (the `SendToPane` handler in
-/// `run_effects` drops it on any of those keystrokes).
+/// `run_effects` drops ordinary blocks on those keystrokes). Identified Codex
+/// questions instead require their matching tool completion or a newer report.
 /// Agents without scrape rules retain all semantic reports through output;
 /// redraws do not establish a new turn or completion. Agents with scrape rules
 /// yield to output so an uncovered approval prompt can become authoritative.
@@ -568,6 +569,7 @@ impl App {
         // during the borrow, fire after it drops (fire needs `&mut self`).
         let track_status = self.lua_wants_agent_status_event();
         let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+            self.state.codex_recovery.clear();
             ctx.scheduler.disarm(Deadline::AgentIdle);
             ctx.scheduler.disarm(Deadline::AgentAnim);
             if track_status {
@@ -576,6 +578,9 @@ impl App {
             }
             return (false, Vec::new());
         };
+        self.state
+            .codex_recovery
+            .retain(|id, _| tabs.tabs().iter().any(|tab| tab.info.id == *id));
         let active_idx = tabs.active_index();
 
         let mut changed = false;

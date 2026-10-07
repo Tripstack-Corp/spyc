@@ -731,6 +731,9 @@ pub struct AppState {
     /// `spyc -r`), never file-backed — every agent pane in one spyc shares this
     /// one registry. Advisory only: nothing here blocks a merge.
     pub scope_registry: Vec<crate::state::scope_registry::ScopeClaim>,
+    /// Pure question correlation keyed by ephemeral pane id; never persisted.
+    pub codex_recovery:
+        std::collections::HashMap<String, crate::agent::codex_recovery::CodexRecovery>,
     pub user_host: String,
     pub pending_new_tab_cmd: Option<String>,
     pub pending_worktrees: Option<Vec<PathBuf>>,
@@ -1192,6 +1195,7 @@ impl AppState {
             pending_delete_preview: None,
             graveyard: Vec::new(),
             scope_registry: Vec::new(),
+            codex_recovery: std::collections::HashMap::new(),
             user_host: "test@host".to_string(),
             pending_new_tab_cmd: None,
             pending_worktrees: None,
