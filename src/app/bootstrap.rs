@@ -188,6 +188,7 @@ impl App {
             pending_delete_preview: None,
             graveyard: Vec::new(),
             scope_registry: Vec::new(),
+            codex_recovery: std::collections::HashMap::new(),
             pending_new_tab_cmd: None,
             last_captured_cmd: None,
             pending_worktrees: None,

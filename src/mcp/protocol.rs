@@ -964,7 +964,15 @@ fn handle_tools_call(
             let command = match name {
                 "report_status" => {
                     let status = args["status"].as_str().unwrap_or("").to_string();
-                    if !matches!(status.as_str(), "working" | "blocked" | "idle" | "done") {
+                    if !matches!(
+                        status.as_str(),
+                        "working"
+                            | "blocked"
+                            | "idle"
+                            | "done"
+                            | crate::agent::codex_recovery::QUESTION_START
+                            | crate::agent::codex_recovery::QUESTION_END
+                    ) {
                         return send_tool_error(
                             w,
                             id,

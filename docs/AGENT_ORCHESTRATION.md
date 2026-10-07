@@ -117,8 +117,38 @@ can mean an older reporter or an absent/malformed payload, not a missing hook.
 The current official hook contract supplies `tool_use_id` for `PreToolUse` and
 `PostToolUse`, but does not list it for `PermissionRequest`. An absent id stays
 absent. A generic tool completion cannot establish which permission/question
-was answered, and metadata alone does not clear `blocked`. Question/plan tool
-coverage still needs real-CLI evidence; no broad tool-completion hook is added.
+was answered. No broad tool-completion hook is added; narrowly correlated
+question recovery is described below.
+
+### Codex question-tool recovery
+
+Codex's `request_user_input` tool has narrowly matched `PreToolUse` and
+`PostToolUse` reporters. A start reports `blocked`; successful completion
+restores `working` only when pane, session, turn and call match a pending
+question. Other questions or uncorrelated blocked reports retain attention.
+Enter alone does not clear an identified question, and unrelated or late
+completions are recorded as unapplied with a reason in `:activity dump`.
+
+Correlation is bounded to eight pending questions per pane, with overflow
+remaining blocked until a lifecycle or explicit agent report. It is reset for
+replaced panes and never stores question arguments or answers. The hook wire
+values require a capable host and metadata-bearing reporter; older components
+cannot silently apply an uncorrelated completion. Restart Codex and review both
+new hooks in `/hooks`; spyc never approves them or edits trust records.
+
+This instruments the question tool's attempt/completion, not authenticated
+proof that a dialogue opened. Invalid/cancelled calls may have no post event;
+`Stop`, `Interrupt` or an explicit newer report retires the wait. Correlated semantic
+permission recovery remains unresolved because `PermissionRequest` supplies no
+call id. Enter clears the permission wait and resumes output-timing activity.
+Real-CLI native question and quiet-after-answer checks passed through the
+automated TUI harness with already trusted hooks. Fresh hook trust onboarding
+remains a separate acceptance case; see `docs/HARNESS.md` for the driver.
+
+`request_user_input_async` is a separate question path. Its immediate completion
+acknowledges posting a question; it does not establish that the user answered.
+These native question hooks do not instrument that path. Async-answer lifecycle
+coverage remains open in A3.
 
 ### Duplicate Codex hook sources
 
@@ -137,6 +167,21 @@ hook definitions, so removing a duplicate file does not establish single
 delivery before restart. A JSON-only change also sets the restart diagnostic.
 Migration does not approve hooks or infer that a pending question or permission
 request was answered.
+
+### Codex linked-worktree hook sources
+
+Codex loads project hooks from the corresponding directory in the root checkout,
+even when launched in a linked worktree. For example, `repo.worktrees/fix/src/`
+uses `repo/src/.codex/config.toml` and `repo/src/.codex/hooks.json`. Ordinary
+project config and spyc's MCP entry remain worktree-local. Worktree-local hook
+declarations are ignored; their reporter marker cannot establish readiness.
+
+spyc resolves that source for installation, consent, diagnostics, re-healing and
+shared ownership. Consent belongs to the actual source's project root; a prior
+worktree-only grant cannot authorize a write in the root checkout. The consent
+popup names the file, and linked-worktree diagnostics show its full path. A
+source change marks all affected Codex tabs as needing restart. Review `/hooks`
+in the fresh CLI; definition presence still does not establish execution/trust.
 
 ### How the hooks get written
 

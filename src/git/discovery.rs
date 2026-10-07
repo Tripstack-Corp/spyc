@@ -85,6 +85,33 @@ pub fn is_tracked(path: &Path) -> bool {
     index.entry_by_path(gix::bstr::BStr::new(&rela)).is_some()
 }
 
+/// Directory corresponding to `cwd` in the root checkout. Codex loads hooks
+/// there even when ordinary project config comes from a linked worktree.
+/// Preserve the checkout-relative subdirectory; leave other repositories and
+/// undiscoverable paths alone rather than guessing a writable hook location.
+pub fn root_checkout_dir(cwd: &Path) -> PathBuf {
+    let resolve = || -> Option<PathBuf> {
+        let repo = gix::discover(cwd).ok()?;
+        let common = std::fs::canonicalize(repo.common_dir()).ok()?;
+        if std::fs::canonicalize(repo.git_dir()).ok()? == common {
+            return None;
+        }
+        let workdir = std::fs::canonicalize(repo.workdir()?).ok()?;
+        let main = gix::open(common).ok()?;
+        let root = std::fs::canonicalize(main.workdir()?).ok()?;
+        let cwd = std::fs::canonicalize(cwd).ok()?;
+        let relative = cwd.strip_prefix(workdir).ok()?;
+        // Avoid a trailing slash for the root: persistent consent and owner
+        // keys compare path strings, so `root/` would become a separate owner.
+        Some(if relative.as_os_str().is_empty() {
+            root
+        } else {
+            root.join(relative)
+        })
+    };
+    resolve().unwrap_or_else(|| cwd.to_path_buf())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

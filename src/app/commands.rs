@@ -672,10 +672,11 @@ fn activity_dump_lines(app: &App) -> Vec<String> {
                 "    last_report: status={} received {:.1}s ago (hook or agent; {})",
                 state_str(report.status),
                 report.at.elapsed().as_secs_f32(),
-                if info.reported.is_some() {
-                    "authoritative"
-                } else {
-                    "no longer authoritative"
+                match info.last_report_ignored {
+                    Some(reason) => format!("not applied: {reason}"),
+                    None if info.reported.is_some_and(|live| live.at == report.at) =>
+                        "authoritative".into(),
+                    None => "no longer authoritative".into(),
                 },
             )),
             None => out.push("    last_report: none received".to_string()),

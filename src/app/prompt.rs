@@ -113,10 +113,10 @@ pub enum PromptKind {
     /// First-launch consent (per project, saved) before spyc writes an agent's
     /// status hooks into `root`'s config (claude `.claude/settings.json` /
     /// codex `.codex/config.toml`). `y`/`Y` → remember-allow + install hooks for
-    /// `cwd`; `n`/`N` → remember-deny. Any other key (including Esc) keeps the
-    /// prompt open — y/n is required. `root` keys the persisted consent
-    /// (`state::hook_consent`); `cwd` is the launching pane's dir (where the
-    /// hooks are written); `agent` picks the installer (which config + format).
+    /// `cwd`; `n`/`N` → remember-deny. Any other key (including Esc) defers the
+    /// prompt without recording consent. `root` keys the persisted consent (`state::hook_consent`);
+    /// `cwd` is the launching pane's dir, resolved to the actual hook source by
+    /// `agent`'s support profile (including Codex's root-checkout routing).
     HookConsent {
         root: std::path::PathBuf,
         cwd: std::path::PathBuf,

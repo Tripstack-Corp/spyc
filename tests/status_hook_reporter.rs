@@ -8,6 +8,10 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 fn run_reporter(payload: &str) -> (Value, String) {
+    run_reporter_for("blocked", payload)
+}
+
+fn run_reporter_for(state: &str, payload: &str) -> (Value, String) {
     let temp = tempfile::Builder::new()
         .prefix("spyc-hook-")
         .tempdir_in("/tmp")
@@ -50,7 +54,7 @@ fn run_reporter(payload: &str) -> (Value, String) {
         serde_json::from_slice::<Value>(&body).unwrap()
     });
     let mut child = Command::new(env!("CARGO_BIN_EXE_spyc"))
-        .args(["--report-status", "blocked", "--status-trace"])
+        .args(["--report-status", state, "--status-trace"])
         .env("SPYC_MCP_SOCK", &socket)
         .env("SPYC_PANE_ID", "pane-1")
         .env("XDG_STATE_HOME", temp.path().join("state"))
@@ -128,5 +132,29 @@ fn status_hook_reporter_preserves_legacy_remap_and_malformed_payload_fallback() 
         assert_eq!(request["params"]["arguments"]["status"], "blocked");
         assert!(request["params"]["arguments"]["hook_event"].is_null());
         assert!(!log.contains("private-"), "{log}");
+    }
+}
+
+#[test]
+fn question_hook_reporter_preserves_guarded_wire_values_and_correlation() {
+    for (state, event) in [
+        ("codex-question-start", "PreToolUse"),
+        ("codex-question-end", "PostToolUse"),
+    ] {
+        let (request, log) = run_reporter_for(state, &json!({
+            "hook_event_name":event, "tool_name":"request_user_input", "turn_id":"turn-1",
+            "tool_use_id":"call-1", "session_id":"session-1", "tool_input":{"questions":"private-question"},
+            "tool_response":"private-answer"
+        }).to_string());
+        let args = &request["params"]["arguments"];
+        assert_eq!(
+            args["status"], state,
+            "older hosts must reject the guarded status"
+        );
+        assert_eq!(args["hook_event"]["tool_use_id"], "call-1");
+        assert_eq!(args["hook_event"]["turn_id"], "turn-1");
+        assert_eq!(args["session_id"], "session-1");
+        assert!(!request.to_string().contains("private-"));
+        assert!(!log.contains("private-"));
     }
 }

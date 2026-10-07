@@ -5,7 +5,8 @@
 //! it merely reads — so spyc asks the user first (a `[Y/n]` popup) and remembers
 //! the answer **per project root, forever**. This is that store: a tiny
 //! `{root_path: allowed}` JSON map in the XDG state dir, keyed by the project
-//! root (so every dir/worktree under a consented repo shares one decision).
+//! root of the actual hook source. Codex linked worktrees share root-checkout
+//! consent; a grant for an ignored worktree source cannot authorize that write.
 //!
 //! `None` = never asked (→ prompt), `Some(true)` = allowed (→ install hooks),
 //! `Some(false)` = denied (→ never install). Best-effort like the other state

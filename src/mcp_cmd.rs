@@ -50,7 +50,7 @@ pub enum McpCommand {
     /// Re-targets `b` if it's already open. The "work in it in b" step.
     OpenWorktree { path: String },
     /// Agent self-reports its activity for the per-tab dot (P1 semantic
-    /// channel). `status` is `working`/`blocked`/`idle`/`done`. Targeting, in
+    /// channel). `status` is an activity name or a correlated Codex question signal. Targeting, in
     /// priority order: `pane_id` (the stable `SPYC_PANE_ID` uuid — what the
     /// auto-hook sends, and what the socket thread fills in from an attributed
     /// connection when the call names no target), else `pane` (a 1-based

@@ -141,7 +141,7 @@ impl App {
             // counted apart from the MCP entry: removing them while another
             // instance still has live panes there silently drops its dots to
             // output-timing for the rest of its run. (Codex's MCP entry and its
-            // status hooks live in one file; cleaning either leaves the other,
+            // status hooks can share one file; cleaning either leaves the other,
             // and whichever empties it last deletes the file/dir.)
             if release(Shared::StatusHooks, &dir, me) {
                 tracked.extend(
@@ -479,8 +479,12 @@ impl App {
             } => {
                 use crate::pane::{AgentActivity, ReportedStatus};
                 let activity = match status.as_str() {
-                    "working" => AgentActivity::Working,
-                    "blocked" => AgentActivity::Blocked,
+                    "working" | crate::agent::codex_recovery::QUESTION_END => {
+                        AgentActivity::Working
+                    }
+                    "blocked" | crate::agent::codex_recovery::QUESTION_START => {
+                        AgentActivity::Blocked
+                    }
                     "idle" => AgentActivity::Idle,
                     "done" => AgentActivity::Done,
                     other => {
@@ -507,12 +511,38 @@ impl App {
                 let now = std::time::Instant::now();
                 let ttl = std::time::Duration::from_millis(ttl_ms.unwrap_or(DEFAULT_REPORT_TTL_MS));
                 let entry = &mut tabs.tabs_mut()[idx];
-                entry.info.reported = Some(ReportedStatus {
+                let kind = crate::agent::detect(&entry.info.command).kind();
+                let question_signal = matches!(
+                    status.as_str(),
+                    crate::agent::codex_recovery::QUESTION_START
+                        | crate::agent::codex_recovery::QUESTION_END
+                );
+                let decision = if kind == crate::state::sessions::AgentKind::Codex {
+                    self.state
+                        .codex_recovery
+                        .entry(entry.info.id.clone())
+                        .or_default()
+                        .report(
+                            &status,
+                            activity,
+                            session_id.as_deref(),
+                            hook_event.as_ref(),
+                        )
+                } else if question_signal {
+                    Err("Codex question hook requires a Codex pane")
+                } else {
+                    Ok(activity)
+                };
+                let received = ReportedStatus {
                     status: activity,
                     at: now,
                     expiry: now + ttl,
-                });
-                entry.info.last_reported = entry.info.reported;
+                };
+                entry.info.last_reported = Some(received);
+                entry.info.last_report_ignored = decision.err();
+                if decision.is_ok() {
+                    entry.info.reported = Some(received);
+                }
                 if let Some(event) = hook_event {
                     let history = &mut entry.info.recent_hook_events;
                     if history.len() >= crate::agent::status_hook::HISTORY_LIMIT {
@@ -522,14 +552,16 @@ impl App {
                 }
                 // Apply immediately so this frame reflects it; `settle_agent_activity`
                 // maintains it (and falls back to timing once it expires).
-                entry.info.activity = activity;
+                if decision.is_ok() {
+                    entry.info.activity = activity;
+                }
                 // P1-3: a live session id piggybacked on the hook report supersedes
                 // the spawn-proximity resolver at save time — route it to the id
                 // field for this tab's agent. claude reports `session_id` and agy
                 // `conversationId` (both land in `live_session_id`); codex has its
                 // own spawn-ordered rollout claim.
-                if let Some(sid) = session_id {
-                    match crate::agent::detect(&entry.info.command).kind() {
+                if let Some(sid) = session_id.filter(|_| decision.is_ok()) {
+                    match kind {
                         crate::state::sessions::AgentKind::Claude
                         | crate::state::sessions::AgentKind::Agy => {
                             entry.info.live_session_id = Some(sid);
@@ -542,7 +574,13 @@ impl App {
                 }
                 let label = entry.info.label.clone();
                 McpResponse::Ok {
-                    message: format!("status '{status}' set for pane {} ({label})", idx + 1),
+                    message: match decision {
+                        Ok(_) => format!("status '{status}' set for pane {} ({label})", idx + 1),
+                        Err(reason) => format!(
+                            "status '{status}' recorded for pane {} ({label}); not applied: {reason}",
+                            idx + 1
+                        ),
+                    },
                 }
             }
             McpCommand::RegisterScope {

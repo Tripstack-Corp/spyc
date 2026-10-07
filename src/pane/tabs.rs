@@ -144,6 +144,8 @@ pub struct TabInfo {
     /// Most recent received semantic report, retained for diagnostics after
     /// expiry or dismissal. It is not evidence of hook execution or trust.
     pub last_reported: Option<ReportedStatus>,
+    /// Why the most recent received hook report was not applied, if any.
+    pub last_report_ignored: Option<&'static str>,
     /// Bounded reported lifecycle metadata, oldest first. No arguments or
     /// conversation content; reset on spawn, not persisted or proof of trust.
     pub recent_hook_events: std::collections::VecDeque<(
@@ -251,6 +253,7 @@ impl TabInfo {
             suspended: false,
             reported: None,
             last_reported: None,
+            last_report_ignored: None,
             recent_hook_events: std::collections::VecDeque::new(),
             status_hooks_at_spawn: false,
             status_hooks_restart_needed: false,
