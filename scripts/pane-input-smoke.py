@@ -16,7 +16,7 @@ def main():
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--session", required=True)
-    parser.add_argument("--scenario", choices=("pane", "capture", "firehose", "resume"), required=True)
+    parser.add_argument("--scenario", choices=("pane", "capture", "firehose", "resume", "pipe"), required=True)
     args = parser.parse_args()
     binary = args.binary.resolve()
     root = args.output.resolve()
@@ -56,7 +56,7 @@ def main():
             "--env", "SPYC_MCP_SOCK=", "--env", "SPYC_PANE_ID=",
             "--env", "SPYC_PANE_CMD=python3 " + str(child), *command)
         started = True
-        wait("🌶️")
+        wait(root.name)
 
     def open_pane():
         key("Ctrl+a", "c")
@@ -64,7 +64,8 @@ def main():
         key("Enter")
         wait("pane cwd:")
         key("Enter")
-        wait("NON_READING_CHILD_READY" if args.scenario != "firehose" else "OUTPUT_FIREHOSE")
+        wait("PIPE_READER_READY" if args.scenario == "pipe" else
+             "OUTPUT_FIREHOSE" if args.scenario == "firehose" else "NON_READING_CHILD_READY")
 
     def activity():
         key("Ctrl+a", "k")
@@ -76,11 +77,28 @@ def main():
         key("Ctrl+a", "j")
 
     child = root / "child.py"
-    code = ("import os,sys,time,tty\nfrom pathlib import Path\n"
+    code = ("import os,sys,time,tty,subprocess\nfrom pathlib import Path\n"
             "tty.setraw(sys.stdin.fileno())\n"
             f"Path({str(root / 'child-pid')!r}).write_text(str(os.getpid()))\n"
-            f"Path({str(root / 'host-pid')!r}).write_text(str(os.getppid()))\n")
-    if args.scenario == "firehose":
+            "host=os.getppid()\n"
+            "for _ in range(8):\n"
+            " name=subprocess.check_output(['ps','-o','comm=','-p',str(host)],text=True).strip()\n"
+            " if Path(name).name == 'spyc': break\n"
+            " host=int(subprocess.check_output(['ps','-o','ppid=','-p',str(host)],text=True))\n"
+            "else: raise RuntimeError('test spyc ancestor not found')\n"
+            f"Path({str(root / 'host-pid')!r}).write_text(str(host))\n")
+    expected_pipe = None
+    if args.scenario == "pipe":
+        source = root / "large.txt"
+        source.write_bytes(b"x" * (9 * 1_048_576))
+        expected_pipe = b"\x1b[200~" + f"[file: {source}]\n".encode() + source.read_bytes() + b"\x1b[201~"
+        code += ("print('PIPE_READER_READY',flush=True)\n"
+                 "received=bytearray()\n"
+                 f"while len(received)<{len(expected_pipe)}:\n"
+                 " received.extend(os.read(0,65536))\n"
+                 f"Path({str(root / 'received.bin')!r}).write_bytes(received)\n"
+                 "print('PIPE_RECEIVED',flush=True)\ntime.sleep(120)\n")
+    elif args.scenario == "firehose":
         code += ("end=time.monotonic()+45\n"
                  "while time.monotonic()<end:\n"
                  " os.write(1,b'OUTPUT_FIREHOSE '+b'x'*120+b'\\r\\n')\n")
@@ -124,7 +142,25 @@ def main():
             child_pid = int((root / "child-pid").read_text())
             key("Ctrl+a", "j")
         capture("ready")
-        if args.scenario == "firehose":
+        if args.scenario == "pipe":
+            key("Ctrl+a", "k")
+            cli("type", ":limit large.txt")
+            key("Enter")
+            key("Ctrl+a", "P")
+            wait("Pipe 9.0 MiB")
+            capture("confirmation")
+            assert not (root / "received.bin").exists(), "content sent before confirmation"
+            key("Enter")
+            wait("pipe cancelled")
+            assert not (root / "received.bin").exists(), "cancelled pipe sent content"
+            key("Ctrl+a", "P")
+            wait("Pipe 9.0 MiB")
+            key("y")
+            wait("PIPE_RECEIVED", 15000)
+            assert (root / "received.bin").read_bytes() == expected_pipe, "pipe was truncated or reordered"
+            capture("received")
+            activity()
+        elif args.scenario == "firehose":
             # Drive both input and scrollback while the parser consumes a
             # continuous byte stream. Each host command has a bounded wait.
             for _ in range(3):

@@ -24,6 +24,7 @@ use super::PaneWake;
 
 mod input_writer;
 use input_writer::InputWriter;
+pub use input_writer::MAX_BYTES as MAX_INPUT_BYTES;
 
 /// How long [`PtyHost::reap_exit`] polls for a cleanly-exiting child after
 /// EOF before it concludes the child is the EOF-but-alive case and SIGKILLs
@@ -218,13 +219,14 @@ impl PtyHost {
             cmd.env(k, v);
         }
 
+        // Start the writer before spawning the child, so a failed worker spawn
+        // cannot strand a running child. No child input exists at this point.
+        let reader = pair.master.try_clone_reader()?;
+        let input = InputWriter::new(pair.master.take_writer()?)?;
         let child = pair.slave.spawn_command(cmd)?;
         // We don't need our own handle on the slave — once the child
         // exits, the master read side will see EOF.
         drop(pair.slave);
-
-        let reader = pair.master.try_clone_reader()?;
-        let writer = pair.master.take_writer()?;
 
         // Background thread pumps reader → channel. The render loop
         // drains the channel without blocking on child output. The channel is
@@ -254,7 +256,7 @@ impl PtyHost {
         Ok(Self {
             wake,
             master: pair.master,
-            input: InputWriter::new(writer),
+            input,
             child,
             event_rx: Some(event_rx),
             closed_atomic,
@@ -428,6 +430,12 @@ impl PtyHost {
     /// Accepted batches retain their order; a full queue rejects the whole batch.
     pub fn write_all(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
         self.input.enqueue(bytes)?;
+        Ok(())
+    }
+
+    /// Queue an explicitly confirmed large file pipe without copying it.
+    pub(crate) fn write_confirmed_pipe(&mut self, bytes: Vec<u8>) -> anyhow::Result<()> {
+        self.input.enqueue_confirmed_pipe(bytes)?;
         Ok(())
     }
 

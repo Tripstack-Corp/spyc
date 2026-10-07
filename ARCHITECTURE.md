@@ -377,13 +377,19 @@ reopens the second commander there.
   spyc's TUI; the child has a real tty, ours is unaffected.
 - **Child input never waits for the child on the UI thread.** `PtyHost`
   queues keys, wheel commands and complete pastes to its private input worker.
-  The queue holds at most 512 waiting batches and 8 MiB including the batch
-  being written. Acceptance means queued, not consumed by the child. A full
-  queue rejects the whole new batch and reports that the input was not sent;
-  it never waits or sends a prefix of a rejected paste. The worker preserves
+  Ordinary input is bounded to 512 waiting batches and 8 MiB including the
+  batch being written. A single larger paste is rejected with a size-limit
+  error; queue pressure has a separate retryable error. File piping (`^a P`)
+  above that limit asks for explicit confirmation of the payload size. A
+  confirmed large pipe requires an empty queue and moves its existing allocation
+  to the worker as one exclusive batch, preserving its bracketed-paste envelope.
+  No other input is accepted until that batch finishes. Acceptance means queued,
+  not consumed by the child; prompt tracking and attention settlement commit
+  only after acceptance. A rejected batch sends no prefix. The worker preserves
   FIFO order and owns both the OS writer and its destructor (which may write
-  EOF). Host close does not join that worker; the existing process-group
-  teardown releases a write blocked by a stopped or non-reading child.
+  EOF). Host close never joins it. Process-group teardown normally releases the
+  blocked write, but a background job in another group can retain the slave and
+  leave the detached writer blocked until that job closes it.
 - `!` captured commands also use a slave PTY now (since v1.12.0),
   so programs that open `/dev/tty` for prompts (sudo, ssh, gpg)
   flow through the master into the pager instead of bleeding onto
@@ -850,3 +856,16 @@ resolves to a marker here, and every marker has a code referrer. This is
 a sparse discoverability signal for agents and humans — **not** a
 comment-style change; ordinary "why" comments stay inline. See AGENTS.md
 → "Load-bearing trap anchors" for the authoring protocol.
+
+<!-- SPYC-TRAP: pty-input-never-waits -->
+### Child input must not wait on the UI thread
+
+A child that stops reading can fill its PTY. Blocking writes or a writer
+whose destructor sends EOF must belong to the private `pty-input` worker,
+including for captured commands. The UI enqueues complete batches with
+`try_send`, never waits for capacity and never joins the writer on tab close.
+A confirmed large file pipe changes only admission of that one allocation;
+it cannot change the execution thread. A real raw-mode non-reading child
+regression reaches the pane executor and `PtyHost::write_all`, with an owned-child
+watchdog so a regression fails within a deadline. Rejected input must flash its
+cause, preserve attention and leave prompt replay unchanged.

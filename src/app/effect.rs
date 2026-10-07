@@ -130,9 +130,8 @@ pub enum Effect {
     },
 
     /// A-class. Deliver `input` (pre-encoded key or pre-built bytes) to a
-    /// pane, then flash `on_ok` on success / `"{err_prefix}: {e}"` on
-    /// failure — each `None` means "ignore that outcome silently" (the
-    /// `send_key` forwards do, matching their former `let _ = …`). The
+    /// pane, then flash `on_ok` when accepted. Failures always show their cause,
+    /// using `err_prefix` or the default "pane input" prefix. The
     /// target is resolved at executor time; safe because exactly one
     /// `SendToPane` is emitted per key and no converted site switches
     /// tabs in its own body (a `Tab`/`SinkId` target is Phase 5).
@@ -361,6 +360,16 @@ pub(super) fn clear_blocked_for_input(
 pub enum PaneInput {
     Bytes(Vec<u8>),
     Key(KeyEvent),
+    /// Text tracking commits only after the child input queue accepts the paste.
+    Paste {
+        bytes: Vec<u8>,
+        text: String,
+    },
+    /// Large file content explicitly confirmed for this exact recipient.
+    ConfirmedPipe {
+        bytes: Vec<u8>,
+        tab_id: String,
+    },
     /// `^a s`: paths to type, anchored on the pane's cwd
     /// (`shell::pane_path_payload`).
     Paths(Vec<std::path::PathBuf>),
@@ -371,9 +380,10 @@ pub enum PaneInput {
 
 impl PaneInput {
     /// Deliver to `pane` via the matching write path.
-    pub(crate) fn send_to(&self, pane: &mut Pane) -> Result<()> {
+    pub(crate) fn send_to(&mut self, pane: &mut Pane) -> Result<()> {
         match self {
-            Self::Bytes(bytes) => pane.send_bytes(bytes),
+            Self::Bytes(bytes) | Self::Paste { bytes, .. } => pane.send_bytes(bytes),
+            Self::ConfirmedPipe { bytes, .. } => pane.send_confirmed_pipe(std::mem::take(bytes)),
             Self::Key(key) => pane.send_key(*key),
             Self::Paths(paths) => {
                 // Read fresh, not the tab's cached `live_cwd`: a shell that just
@@ -421,7 +431,9 @@ impl PaneInput {
                 _ => false,
             },
             Self::Bytes(b) => matches!(b.as_slice(), b"\r" | b"\n" | b"\r\n" | b"\x1b" | b"\x03"),
-            Self::Paths(_) | Self::Prompt(_) => false,
+            Self::Paths(_) | Self::Prompt(_) | Self::Paste { .. } | Self::ConfirmedPipe { .. } => {
+                false
+            }
         }
     }
 }
@@ -737,73 +749,15 @@ impl App {
                 }
                 // A-class: queue input for the target pane (same tick).
                 // Resolve the target; if it's gone, skip silently (matches
-                // the former `if let Some(…)` guards). Like the others,
-                // never `?`-propagate — flash `err_prefix` (if any) and
-                // survive. `on_ok`/`err_prefix` of `None` flash nothing
-                // (the `send_key` forwards ignored their result).
+                // the former `if let Some(…)` guards). Errors flash their cause
+                // without aborting the loop; rejected input changes no prompt state.
                 Effect::SendToPane {
                     target,
                     input,
                     on_ok,
                     err_prefix,
                 } => {
-                    // Echo-latency probe (A-monitor only): stamp when a
-                    // keystroke is forwarded to the active pane; the pre-recv
-                    // pane scan measures forward→echo on the agent's reply.
-                    if self.view.show_activity && matches!(target, PaneTarget::Active) {
-                        self.view.pane_send_at = Some(std::time::Instant::now());
-                    }
-                    // Only settling the prompt answers the pane — Enter to commit,
-                    // Esc / `^c` to dismiss. A latched `blocked` dot stays red through
-                    // navigation / typing / pastes and clears only on one of those
-                    // (or a newer report).
-                    // Identified Codex questions wait for their matching completion.
-                    let result = match target {
-                        PaneTarget::Active => self.runtime.pane_tabs.as_mut().map(|t| {
-                            let result = input.send_to(t.active_mut());
-                            // Rejected input did not answer anything. Accepted
-                            // ordinary prompt input retires its latch; identified
-                            // Codex questions still require matching completion.
-                            if result.is_ok() {
-                                let info = t.active_info_mut();
-                                let recovery = self.state.codex_recovery.get_mut(&info.id);
-                                clear_blocked_for_input(info, &input, recovery);
-                            }
-                            result
-                        }),
-                        PaneTarget::Overlay => {
-                            // Route to the focused column's overlay slot: `b`'s
-                            // own when the right column owns the keyboard, else
-                            // the left / single slot. (Focus is `Overlay` here,
-                            // so this is never pane-focused.)
-                            let slot = if self.focused_side() == crate::app::state::Side::Right
-                                && self.runtime.top_overlay_right.is_some()
-                            {
-                                self.runtime.top_overlay_right.as_mut()
-                            } else {
-                                self.runtime.top_overlay.as_mut()
-                            };
-                            slot.map(|ov| input.send_to(ov))
-                        }
-                    };
-                    match result {
-                        Some(Ok(())) => {
-                            if let Some(msg) = on_ok {
-                                self.state.flash_info(msg);
-                            }
-                        }
-                        Some(Err(e)) => {
-                            if let Some(prefix) = err_prefix {
-                                self.state.flash_error(format!("{prefix}: {e:#}"));
-                            } else if e
-                                .downcast_ref::<std::io::Error>()
-                                .is_some_and(|error| error.kind() == std::io::ErrorKind::WouldBlock)
-                            {
-                                self.state.flash_error(format!("pane input: {e:#}"));
-                            }
-                        }
-                        None => {}
-                    }
+                    self.execute_pane_input(target, input, on_ok, err_prefix);
                 }
                 // A-class: queue input for the running capture child
                 // (raw — captures rarely enable bracketed paste). A vanished
@@ -1472,7 +1426,7 @@ mod tests {
 
     #[test]
     fn identified_question_input_guard_is_used_by_the_effect_executor() {
-        let production = crate::guard_support::production_half(include_str!("effect.rs"));
+        let production = crate::guard_support::production_half(include_str!("pane_input.rs"));
         let active = production
             .split_once("PaneTarget::Active => self.runtime.pane_tabs.as_mut()")
             .unwrap()

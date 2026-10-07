@@ -436,13 +436,24 @@ sharp edge, and prefer distinct worktrees.
 
 A stopped or non-reading child must leave spyc navigation, tab controls and
 pagers responsive. Child input is queued in order off the UI thread. The input
-queue is bounded to 512 waiting batches and 8 MiB including the in-flight write.
-If it fills, spyc reports that the new input was not sent; retry after the child
-resumes reading. Accepted input can remain queued while the child is stopped.
-Closing its tab retains the normal process-group shutdown.
+queue normally holds at most 512 waiting batches and 8 MiB including the
+in-flight write. If it fills, spyc reports that the new input was not sent;
+retry after the child resumes reading. A single paste over 8 MiB gets a separate
+size-limit error; retrying that paste cannot help.
+
+File piping (`^a P`) above 8 MiB shows the size and asks `y/N` before sending.
+Only an unmodified `y`/`Y` proceeds; Enter, Esc and other keys cancel without
+sending content. Confirmation permits one large payload only when the queue is
+empty. It keeps the original bracketed paste together on the worker and accepts
+no further input until that batch finishes. It does not wait on the UI thread.
+Accepted input can remain queued while the child is stopped. Closing its tab
+retains process-group shutdown; an independently grouped background job can keep
+a detached writer alive if it retains the slave PTY.
+
 
 `scripts/pane-input-smoke.py` uses a dedicated `tui-test` session and a disposable
 raw-mode child that does not read stdin. A synthetic paste fills the PTY while
-spyc's own activity pager must still open. It also checks capture input and a
-pane producing continuous output. A failure can capture a macOS stack sample
+spyc's own activity pager must still open. It also checks capture input, a
+pane producing continuous output, session restore and cancellation/complete
+byte delivery of a confirmed 9 MiB file pipe. A failure can capture a macOS stack sample
 before killing the owned test child. It never drives the user's current pane.
