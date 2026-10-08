@@ -11,6 +11,25 @@
 
 use std::path::Path;
 
+// Counts `with_checker` calls so tests can assert how often a code path pays
+// for one: each opens the repo and reads and SHA-1-verifies the whole index.
+// Thread-local so parallel test cases don't mix their counts.
+#[cfg(test)]
+thread_local! {
+    pub static CHECKER_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Checker builds counted on this thread since [`reset_checker_builds`].
+#[cfg(test)]
+pub fn checker_builds() -> usize {
+    CHECKER_BUILDS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub fn reset_checker_builds() {
+    CHECKER_BUILDS.with(|c| c.set(0));
+}
+
 /// Open the repo at `repo_root`, build its exclude stack once, and hand a
 /// `is_excluded(absolute_path) -> bool` checker to `f`.
 ///
@@ -21,6 +40,8 @@ pub fn with_checker<R>(
     repo_root: &Path,
     f: impl FnOnce(&mut dyn FnMut(&Path) -> bool) -> R,
 ) -> Option<R> {
+    #[cfg(test)]
+    CHECKER_BUILDS.with(|c| c.set(c.get() + 1));
     let repo = gix::open(repo_root).ok()?;
     // `index_or_empty` tolerates a fresh repo with no `.git/index` yet (the
     // `Worktree::excludes()` shortcut errors there). Gitignore rules come from
