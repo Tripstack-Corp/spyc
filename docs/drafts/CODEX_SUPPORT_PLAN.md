@@ -379,10 +379,10 @@ Two tracks keep the RC manageable:
   Full fresh-trust execution, async attention and other approval-dialogue
   formats remain A3 acceptance gaps; parallel native-question isolation passed.
 
-- A3b6 is ready for integration on `fix/codex-edit-approval`, refreshed onto
-  merged PTY input-backpressure PR #551 and main's subsequent refactors
-  (`f334affc`).
-  the earlier #550-based build is superseded for the next handoff.
+- A3b6 landed through PR #560 (`fdd3c884`) on 2026-10-08 under the user's
+  authorization to proceed with added automated TUI coverage while deferring
+  manual testing. It was refreshed onto merged PTY input-backpressure PR #551
+  and main's subsequent refactors (`f334affc`); earlier builds remain historical.
   A real Codex `0.160.1` file-edit approval failed against A3b5: the complete
   dialogue was open but the dot remained working. Its captured modal became
   a fixture and the regression failed before the fix. The initial file-edit-only
@@ -431,7 +431,7 @@ Two tracks keep the RC manageable:
   file-edit attempts; those runs do not establish a native file-edit dialogue
   on the new build. The recorded native file-edit fixture regression passes.
 
-  The fresh binary is `/private/tmp/spyc-codex-a3b6-current.umb6tuwn/spyc`,
+  The earlier refreshed binary was `/private/tmp/spyc-codex-a3b6-current.umb6tuwn/spyc`,
   SHA-256 `fe4628a0416a9d53495bb09093d85d89c470880a5e11e7a679c7a00755067ea5`.
   Its `test.sh` selects this worktree and places the exact binary/reporter on
   `PATH`. The manifest records the source head, build-time changed-file hashes,
@@ -444,6 +444,38 @@ Two tracks keep the RC manageable:
   modified; live semantic-hook recovery requires user review of that trust state.
   Generic MCP elicitation, extra-permission and stdin-write forms, a live native
   network approval, async attention and fresh-trust execution remain A3 gaps.
+
+  The final PR head `e6f1cb9a` passed the full gate (2788 library tests, one
+  ignored, all integration and VT-system tests), GitHub lint/tests/packaging and
+  four repeated native UI-only cases: MCP approve/cancel at 200 columns, command
+  approval at 40 columns and MCP approval at 40 columns. `mergeStateStatus` was
+  `CLEAN` immediately before squash. The final artifact is
+  `/private/tmp/spyc-codex-pr560.nc0h2ab1/spyc`, SHA-256
+  `cc99774e5ca81c56c70fedfdaf561652af34ae8ed92eb691d593006c040464d4`.
+  The previous handoff launcher forwards to its `test.sh`, which selects main
+  after the worktree's removal. Manual testing remains deferred.
+
+- A3b7 is ready for integration on `fix/codex-hook-payload-metadata`, based on
+  merged #560, under the same deferred-manual-test authorization.
+  Real reporter regressions reproduced loss of permission/question correlation
+  and a false blocked idle notification when stdin exceeded 8 KiB. The reader
+  now validates the complete JSON while retaining only bounded root metadata;
+  tool arguments and responses are streamed past rather than stored or traced.
+  Recorded native normalized metadata supplies the regression fixtures, with
+  explicitly synthetic large bodies and provenance separate from raw captures.
+  A controlled PTY/real reporter/host TUI replay failed against #560: the large
+  permission request lost its event and latched blocked during automatic review.
+  The question replay also failed against #560: the start lost its correlation
+  and stayed working while waiting. Both replay cases pass on the fixed debug
+  and release builds. Question coverage includes silence while blocked, Enter
+  without completion, a wrong-call completion, matching recovery, quiet semantic
+  working and Stop/done. The release replays also verify trace/dump privacy.
+  The full `RUST_TEST_THREADS=1 make check` gate passed: 2793 library tests, one
+  ignored, all integration suites (six real reporter tests) and six VT-system
+  tests. Bounds/depth and metadata-capture mutations failed their regressions;
+  production was restored. Integration and CI remain pending. These replays do
+  not establish native CLI hook execution or fresh trust. The generic
+  pre-question agent `blocked` latch remains a separate recovery issue.
 
 ### Baseline
 
