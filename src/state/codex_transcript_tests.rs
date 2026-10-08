@@ -114,3 +114,75 @@ fn record_ids_are_scoped_to_each_rollout_in_inherited_history() {
         "{rendered}"
     );
 }
+
+fn recorded_shell_record() -> serde_json::Value {
+    serde_json::from_str(include_str!(
+        "../../tests/fixtures/codex-shell-rollout.jsonl"
+    ))
+    .expect("recorded command fixture")
+}
+
+#[test]
+fn recorded_argv_command_and_output_are_visible_in_the_public_transcript() {
+    let rendered = render_records(&[recorded_shell_record()], true);
+    assert!(rendered.contains("shell("), "{rendered}");
+    assert!(rendered.contains("/bin/zsh -lc"), "{rendered}");
+    assert!(rendered.contains("codex --version"), "{rendered}");
+    assert!(rendered.contains("WARNING: proceeding"), "{rendered}");
+}
+
+#[test]
+fn recorded_argv_commands_keep_identity_deduplication_and_tool_visibility() {
+    let command = recorded_shell_record();
+    let mut distinct = command.clone();
+    distinct["payload"]["item"]["id"] = serde_json::json!("command-version-two");
+    let prompt = serde_json::json!({"type":"event_msg","payload":{"type":"user_message","message":"recorded history prompt"}});
+    let records = [prompt, command.clone(), command, distinct];
+    let rendered = render_records(&records, true);
+    assert_eq!(rendered.matches("codex --version").count(), 2, "{rendered}");
+    assert_eq!(
+        rendered.matches("WARNING: proceeding").count(),
+        2,
+        "{rendered}"
+    );
+    let hidden = render_records(&records, false);
+    assert!(hidden.contains("recorded history prompt"), "{hidden}");
+    assert!(!hidden.contains("codex --version"), "{hidden}");
+    assert!(!hidden.contains("WARNING"), "{hidden}");
+}
+
+#[test]
+fn argv_display_preserves_argument_boundaries_and_refuses_malformed_records() {
+    let mut record = recorded_shell_record();
+    record["payload"]["item"]["command"] =
+        serde_json::json!(["printf", "%s", "a b", "", "$HOME;literal", "é"]);
+    let decoded = crate::agent::codex_records::decode(&record);
+    assert_eq!(
+        decoded.len(),
+        2,
+        "valid argv must retain both command and output"
+    );
+    let RecordKind::ToolCall { arguments, .. } = &decoded[0].kind else {
+        panic!("expected recorded command")
+    };
+    assert_eq!(
+        shlex::split(arguments).unwrap(),
+        ["printf", "%s", "a b", "", "$HOME;literal", "é"]
+    );
+    assert!(arguments.contains("'a b'"), "{arguments}");
+    assert!(arguments.contains("''"), "{arguments}");
+    assert!(arguments.contains("'$HOME;literal'"), "{arguments}");
+    for malformed in [
+        serde_json::json!([]),
+        serde_json::json!(["echo", null]),
+        serde_json::json!(["echo", 42]),
+        serde_json::json!({"cmd":"echo"}),
+        serde_json::json!(["echo", "\u{0}"]),
+    ] {
+        record["payload"]["item"]["command"] = malformed;
+        assert!(
+            crate::agent::codex_records::decode(&record).is_empty(),
+            "{record}"
+        );
+    }
+}
