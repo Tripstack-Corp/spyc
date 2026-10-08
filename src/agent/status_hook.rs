@@ -1,7 +1,12 @@
+mod input;
+
+pub use input::read_payload;
+
 use serde::Serialize;
 use serde_json::Value;
 
 pub const HISTORY_LIMIT: usize = 8;
+/// Cap on normalized metadata, not on raw hook arguments or responses.
 pub const PAYLOAD_LIMIT: usize = 8192;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

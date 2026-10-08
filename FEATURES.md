@@ -246,7 +246,7 @@ spyc's workflow: browse files above, talk to Claude below.
   inert while zoomed (only `^a z` exits), and the prior split is restored on
   un-zoom.
 - **Agent-activity dots** — each **agent** pane tab shows a live activity dot
-  in the divider, from these layered sources (a later one always wins):
+  in the divider, from these layered sources:
   - **Output timing** (no hooks, no screen-scraping): a **spicy heat-pulse `●`**
     — a pepper-red → ember → orange → spark color *breath* (~4 Hz) — while
     output is flowing, fading to a quiet `·` once the agent goes silent. The
@@ -261,21 +261,32 @@ spyc's workflow: browse files above, talk to Claude below.
     or done) — so you can tell "needs me / finished" from "busy" at a glance.
     For Codex and Claude, live reports survive output and footer redraws until
     a newer report or TTL expiry; quiet tool waits do not erase `working`.
-    Agents with scrape rules still yield non-blocked reports to fresh output
-    so an uncovered approval prompt can be detected. **`blocked` is latched**: it stays a steady red
+    Agy yields non-blocked reports to fresh output for uncovered approvals.
+    Codex's complete command, file-edit, MCP-tool and network approval forms
+    temporarily override a non-blocked report while retaining it for recovery. **`blocked` is latched**: it stays a steady red
     square — no TTL, no output or animation revives it — until you actually
     answer the pane by pressing **Enter** in it (or the agent files a newer
-    report). Non-agent tabs (a plain shell) get no dot.
+    report). Identified Codex questions instead wait for their matching tool
+    completion; Enter alone does not clear them. Non-agent tabs (a plain shell)
+    get no dot.
   - **Auto-reporting (claude + codex; agy partial)** — so it works without the
     agent choosing to call the tool, spyc installs lifecycle hooks (prompt-submit
     → working, needs-permission/approval → blocked, turn-end → done) that run
     `spyc --report-status`. The agents share the same event idea, with per-agent
     config: **claude** writes `.claude/settings.json` (JSON, reloaded live);
-    **codex** writes inline `[[hooks.*]]` into the same `.codex/config.toml` that
-    already holds the MCP entry (read once at startup, so for an already-consented
-    repo the hooks are written *before* codex spawns). Codex's `Interrupt` hook
-    reports `idle` after cancellation. Project trust and `/hooks` review are
-    separate from spyc's consent; spyc never auto-approves hooks. **agy** (Antigravity)
+    **codex** writes inline `[[hooks.*]]` into `.codex/config.toml` at its actual
+    hook source. Linked worktrees use the corresponding directory in the root
+    checkout, while their MCP entry stays worktree-local. Hooks are read once at
+    startup, so an already-consented source is written *before* codex spawns.
+    Codex's metadata-bearing `PermissionRequest` is observational: it fires
+    before automatic or human review, so it cannot establish a human wait.
+    Known command, file-edit, MCP-tool and network forms require their default
+    choices and complete footer at the viewport bottom; diagnostics identify
+    this `scrape-fallback`. Missing required text and other forms produce no guess. Codex's `Interrupt` hook
+    reports `idle` after cancellation. Its `request_user_input` hooks report
+    `blocked` on start and recover `working` only for the same pending
+    pane/session/turn/call; other waits stay blocked. Project trust and `/hooks`
+    review are separate from spyc's consent; spyc never auto-approves hooks. **agy** (Antigravity)
     writes a `spyc-status` set into `.agents/hooks.json` and is **partial** — it
     covers `working`, `done`, and `blocked` for agy's own `ask_question` tool
     (a `PreToolUse` hook sees that one exactly when it's called). The *other*
@@ -301,16 +312,17 @@ spyc's workflow: browse files above, talk to Claude below.
     spyc is a throwaway build-dir binary whose path went stale), **`:hooks on!`**
     force-restarts the active claude pane and resumes the conversation so the
     hooks load from launch.
-  - **Scrape fallback** (for a state an agent's hooks can't report) — when an
-    agent has no self-report, spyc reads its **visible screen** for a known
-    prompt and infers status. Today that's `agy`'s tool-approval prompt lighting
-    the red `blocked` square, because agy exposes no approval event to hook.
-    Deliberately last-resort: any live self-report always wins; it waits for the
-    pane to go quiet so a half-drawn prompt can't flip the dot; it requires
-    *several* phrases of a prompt spyc has actually verified, so an agent merely
-    discussing permissions doesn't trip it; and answering with Enter clears it.
-    This is the one place spyc reads the screen, and only as a graceful
-    degradation.
+  - **Scrape fallback** (for a state an agent's hooks can't report) — spyc
+    reads the **visible screen** for verified approval prompts. Agy exposes no
+    approval event. Codex's permission event precedes both automatic and human
+    review, so only a complete default command, file-edit, MCP-tool or network
+    form establishes its user wait. That dialogue temporarily overrides a non-blocked report;
+    semantic question/agent blocks retain precedence. Codex scans within 250 ms
+    of the first pending repaint, so continuous redraws cannot hide a wait;
+    other agents wait for quiet output. Codex requires several prompt phrases
+    and the exact modal footer at the viewport bottom, accepting native word
+    wrapping and excluding old dialogues above the normal composer.
+    Prompt-settling input clears the detected wait.
 
   **`:why-status`** flashes the active tab's state, its source (self-reported /
   scrape-fallback / output-timing), seconds since last output and hook setup
@@ -509,6 +521,11 @@ Multiple tabs, each running an independent pty:
   tab's child is still running, so a stray keystroke can't kill a live agent
   session; an already-exited tab closes silently
 - **^a 1..9** switch to tab N
+- **^a P** pipe selected file contents to the pane. Content over 8 MiB asks
+  for confirmation of its size (`y`/`Y` sends, other keys cancel). A confirmed
+  large pipe needs an empty input queue and stays together as one bracketed
+  paste; later input is refused until that batch finishes writing. Ordinary pastes
+  over 8 MiB are refused with a size-limit error.
 - **^a p / ^a [** prev tab
 - **^a n / ^a ]** next tab
 - **^a ^a** jump to the last-active tab (screen/tmux "last window")

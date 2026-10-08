@@ -61,7 +61,7 @@ fn agent_argv(dir: &std::path::Path, name: &str) -> Vec<String> {
 fn deliver(app: &mut App, effects: Vec<Effect>) {
     let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
     for e in effects {
-        if let Effect::SendToPane { input, .. } = e {
+        if let Effect::SendToPane { mut input, .. } = e {
             input.send_to(tabs.active_mut()).expect("send");
         }
     }
@@ -426,6 +426,8 @@ fn agent_transition_notifies_even_when_activity_preset_by_report() {
     });
 }
 
+mod agent_approval;
+mod agent_hook_sources;
 mod agent_readiness;
 mod agent_spawn;
 mod archive;

@@ -394,6 +394,7 @@ impl AppState {
             | PromptKind::SkillUpdate { .. }
             | PromptKind::ProjectTabsConsent { .. }
             | PromptKind::ClosePane
+            | PromptKind::PipeConfirm { .. }
             | PromptKind::RestartPane
             | PromptKind::LuaRunaway
             | PromptKind::ArchiveMountConfirm { .. }

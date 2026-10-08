@@ -120,9 +120,9 @@ free optimization — a live report outranks the scrape result in
 of *when* the two settles run. Both fire pre-recv in the same iteration:
 `drain_pane_output` stamps `last_output_at` and sets `scrape_dirty`, then
 `settle_scrape_quiet`, then `settle_agent_activity` — which drops that very
-report through `report_superseded_by_output` (for agents with scrape rules,
-output newer than a non-`Blocked` report supersedes it). Agents without scrape
-rules retain semantic reports through output until expiry or a newer report.
+report through `report_superseded_by_output` (for agy, output newer than a
+non-`Blocked` report supersedes it). Codex and Claude retain semantic reports
+through output until expiry or a newer report.
 So consuming the dirty flag on the
 report's behalf discarded the scan for a report that no longer existed by the
 end of the tick.
@@ -137,11 +137,25 @@ single case it exists to serve, and the symptom is a dot that quietly decays
 to Idle instead of going red, which nobody reports as a bug.
 
 `scrape_step` takes `has_rules` rather than a report precisely so the pure
-decision cannot express the skip. Scanning behind a genuinely live report is
-harmless: `settle_agent_activity` clears `scrape_status` while a report is
-still authoritative (so a stale guess can't resurface when the report later
-expires), and a tab with no detection rules — claude, codex, zot, whose hooks
-report every state they have — returns `Skip` before any screen read.
+decision cannot express the skip. Other live reports discard scrape guesses
+so they cannot resurface stale after expiry. A tab without detection rules
+returns `Skip` before any screen read.
+
+Codex's `PermissionRequest` precedes both automatic review and a human
+approval dialogue, and supplies no call id. Its metadata-bearing report is
+observational rather than a semantic user wait. A verified command, file-edit,
+MCP-tool or network approval form at the viewport bottom temporarily overrides
+a non-blocked report. The report remains stored and resumes when the dialogue
+disappears. This
+also requires scanning behind a live report. Native question blocks and
+explicit agent blocks retain semantic precedence. `codex_approval::overrides_report`
+is shared by activity settling and both status diagnostics, so the dot and
+its explanation agree. The rules require known phrases and a complete default
+footer at the viewport bottom, including native word wrapping. Missing required
+text and other approval forms produce no guess. Codex's scan deadline starts
+with the first pending repaint rather than moving with every output event;
+continuous modal redraws therefore cannot postpone the scan indefinitely.
+Other agents retain the trailing quiet-window debounce.
 
 ## Update model: Elm-architecture (MVU)
 
@@ -237,7 +251,7 @@ Nothing on a live, post-startup code path may read the cursor position
 read the same bytes off stdin — either way the read fails and tears the
 whole session down. This bit us through ratatui 0.30's `Terminal::clear()`
 (closing a pager / any `needs_full_repaint` over SSH crashed the session,
-#444); `force_full_repaint` (`src/lib.rs`) is the cursor-read-free
+#444); `force_full_repaint` (`src/terminal.rs`) is the cursor-read-free
 replacement — `Terminal::resize()` to the current size has the same
 clear-and-full-repaint effect but takes the no-cursor-read branch. Any
 detection that *does* need a probe (the graphics-protocol query feeding
@@ -366,6 +380,21 @@ reopens the second commander there.
 - Pane subprocesses run under their own slave PTY (allocated via
   `portable_pty`). The pane is a VT-emulated rectangle inside
   spyc's TUI; the child has a real tty, ours is unaffected.
+- **Child input never waits for the child on the UI thread.** `PtyHost`
+  queues keys, wheel commands and complete pastes to its private input worker.
+  Ordinary input is bounded to 512 waiting batches and 8 MiB including the
+  batch being written. A single larger paste is rejected with a size-limit
+  error; queue pressure has a separate retryable error. File piping (`^a P`)
+  above that limit asks for explicit confirmation of the payload size. A
+  confirmed large pipe requires an empty queue and moves its existing allocation
+  to the worker as one exclusive batch, preserving its bracketed-paste envelope.
+  No other input is accepted until that batch finishes. Acceptance means queued,
+  not consumed by the child; prompt tracking and attention settlement commit
+  only after acceptance. A rejected batch sends no prefix. The worker preserves
+  FIFO order and owns both the OS writer and its destructor (which may write
+  EOF). Host close never joins it. Process-group teardown normally releases the
+  blocked write, but a background job in another group can retain the slave and
+  leave the detached writer blocked until that job closes it.
 - `!` captured commands also use a slave PTY now (since v1.12.0),
   so programs that open `/dev/tty` for prompts (sudo, ssh, gpg)
   flow through the master into the pager instead of bleeding onto
@@ -832,3 +861,16 @@ resolves to a marker here, and every marker has a code referrer. This is
 a sparse discoverability signal for agents and humans — **not** a
 comment-style change; ordinary "why" comments stay inline. See AGENTS.md
 → "Load-bearing trap anchors" for the authoring protocol.
+
+<!-- SPYC-TRAP: pty-input-never-waits -->
+### Child input must not wait on the UI thread
+
+A child that stops reading can fill its PTY. Blocking writes or a writer
+whose destructor sends EOF must belong to the private `pty-input` worker,
+including for captured commands. The UI enqueues complete batches with
+`try_send`, never waits for capacity and never joins the writer on tab close.
+A confirmed large file pipe changes only admission of that one allocation;
+it cannot change the execution thread. A real raw-mode non-reading child
+regression reaches the pane executor and `PtyHost::write_all`, with an owned-child
+watchdog so a regression fails within a deadline. Rejected input must flash its
+cause, preserve attention and leave prompt replay unchanged.

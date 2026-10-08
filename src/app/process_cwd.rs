@@ -64,7 +64,7 @@ mod tests {
     /// the helper.
     #[test]
     fn the_loop_settles_the_process_cwd() {
-        let run = crate::guard_support::production_half(include_str!("run.rs"));
+        let run = crate::guard_support::production_half(include_str!("pre_recv.rs"));
         assert!(
             run.contains("self.settle_process_cwd()"),
             "App::run no longer reconciles the process cwd (#495)"

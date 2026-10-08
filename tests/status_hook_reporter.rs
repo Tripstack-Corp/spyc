@@ -8,6 +8,10 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 fn run_reporter(payload: &str) -> (Value, String) {
+    run_reporter_for("blocked", payload)
+}
+
+fn run_reporter_for(state: &str, payload: &str) -> (Value, String) {
     let temp = tempfile::Builder::new()
         .prefix("spyc-hook-")
         .tempdir_in("/tmp")
@@ -27,6 +31,11 @@ fn run_reporter(payload: &str) -> (Value, String) {
                 Err(error) => panic!("accept reporter: {error}"),
             }
         };
+        // macOS hands the accepted socket the listener's O_NONBLOCK (Linux, and
+        // so CI, doesn't), and a non-blocking socket ignores the read timeout
+        // below: a read that beats the reporter's write fails at once with
+        // WouldBlock, which a loaded machine makes likely.
+        stream.set_nonblocking(false).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();
@@ -50,7 +59,7 @@ fn run_reporter(payload: &str) -> (Value, String) {
         serde_json::from_slice::<Value>(&body).unwrap()
     });
     let mut child = Command::new(env!("CARGO_BIN_EXE_spyc"))
-        .args(["--report-status", "blocked", "--status-trace"])
+        .args(["--report-status", state, "--status-trace"])
         .env("SPYC_MCP_SOCK", &socket)
         .env("SPYC_PANE_ID", "pane-1")
         .env("XDG_STATE_HOME", temp.path().join("state"))
@@ -129,4 +138,76 @@ fn status_hook_reporter_preserves_legacy_remap_and_malformed_payload_fallback() 
         assert!(request["params"]["arguments"]["hook_event"].is_null());
         assert!(!log.contains("private-"), "{log}");
     }
+}
+
+#[test]
+fn question_hook_reporter_preserves_guarded_wire_values_and_correlation() {
+    for (state, event) in [
+        ("codex-question-start", "PreToolUse"),
+        ("codex-question-end", "PostToolUse"),
+    ] {
+        let (request, log) = run_reporter_for(state, &json!({
+            "hook_event_name":event, "tool_name":"request_user_input", "turn_id":"turn-1",
+            "tool_use_id":"call-1", "session_id":"session-1", "tool_input":{"questions":"private-question"},
+            "tool_response":"private-answer"
+        }).to_string());
+        let args = &request["params"]["arguments"];
+        assert_eq!(
+            args["status"], state,
+            "older hosts must reject the guarded status"
+        );
+        assert_eq!(args["hook_event"]["tool_use_id"], "call-1");
+        assert_eq!(args["hook_event"]["turn_id"], "turn-1");
+        assert_eq!(args["session_id"], "session-1");
+        assert!(!request.to_string().contains("private-"));
+        assert!(!log.contains("private-"));
+    }
+}
+
+#[test]
+fn large_hook_arguments_do_not_erase_permission_or_question_metadata() {
+    // Normalized metadata recorded from native CLI runs; oversized body content
+    // is synthetic edge-case data, not a claimed raw native hook capture.
+    let fixtures: Value =
+        serde_json::from_str(include_str!("fixtures/codex-hook-metadata.json")).unwrap();
+    for (state, fixture, body_field) in [
+        ("blocked", "permission", "tool_input"),
+        ("codex-question-start", "question_start", "tool_input"),
+        ("codex-question-end", "question_end", "tool_response"),
+    ] {
+        let metadata = &fixtures[fixture];
+        // Put all correlation fields after a body larger than the old cutoff.
+        let payload = format!(
+            r#"{{"{body_field}":{{"private-content":"{}"}},{}}}"#,
+            "private-content-".repeat(1600),
+            metadata
+                .to_string()
+                .trim_start_matches('{')
+                .trim_end_matches('}')
+        );
+        assert!(payload.len() > 8192);
+        let (request, log) = run_reporter_for(state, &payload);
+        let args = &request["params"]["arguments"];
+        let mut expected = metadata.clone();
+        expected.as_object_mut().unwrap().remove("session_id");
+        assert_eq!(args["hook_event"], expected);
+        assert_eq!(args["session_id"], metadata["session_id"]);
+        assert_eq!(args["status"], state);
+        assert!(!request.to_string().contains("private-content"));
+        assert!(!log.contains("private-content"));
+    }
+}
+
+#[test]
+fn large_hook_body_preserves_legacy_idle_remap_and_camel_case_session() {
+    let payload = format!(
+        r#"{{"tool_response":"{}","hook_event_name":"Notification","notification_type":"idle_prompt","conversationId":"session-agy"}}"#,
+        "private-content-".repeat(1600)
+    );
+    let (request, log) = run_reporter(&payload);
+    let args = &request["params"]["arguments"];
+    assert_eq!(args["status"], "done");
+    assert_eq!(args["session_id"], "session-agy");
+    assert!(!request.to_string().contains("private-content"));
+    assert!(!log.contains("private-content"));
 }

@@ -425,6 +425,35 @@ impl App {
                 } else {
                     format!("piped {count} file(s) to pane")
                 };
+                if payload.len() > crate::pane::pty_host::MAX_INPUT_BYTES {
+                    let Some(info) = self
+                        .runtime
+                        .pane_tabs
+                        .as_ref()
+                        .map(crate::pane::PaneTabs::active_info)
+                    else {
+                        self.state.flash_error("pipe failed: no pane open");
+                        return;
+                    };
+                    if !matches!(self.state.mode, super::Mode::Normal) {
+                        self.state
+                            .flash_error("pipe failed: finish the current prompt, then retry");
+                        return;
+                    }
+                    let prefix = format!(
+                        "Pipe {:.1} MiB from {count} file(s) to pane? [y/N] ",
+                        payload.len() as f64 / 1_048_576.0
+                    );
+                    self.state.mode = super::Mode::Prompting(super::Prompt::simple(
+                        super::PromptKind::PipeConfirm {
+                            payload,
+                            tab_id: info.id.clone(),
+                            on_ok: msg,
+                        },
+                        prefix,
+                    ));
+                    return;
+                }
                 effects.push(Effect::SendToPane {
                     target: PaneTarget::Active,
                     input: PaneInput::Bytes(payload),

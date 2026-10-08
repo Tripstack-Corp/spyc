@@ -104,8 +104,8 @@ Two tracks keep the RC manageable:
   to establish an approval-only recovery transition. Question-tool handling,
   quiet post-approval work and multi-pane live isolation remain unverified.
 
-- A3b2 was accepted for integration on 2026-10-06 on
-  `fix/codex-hook-recovery`, based on merged #543.
+- A3b2 landed through PR #546 (`e1b714a6`) after local-build acceptance
+  on 2026-10-06, based on merged #543.
   Read-only inspection on 2026-10-06 found spyc reporters in both the project's
   `.codex/config.toml` and `.codex/hooks.json` for `UserPromptSubmit`,
   `PermissionRequest` and `Stop`. Codex independently loads both representations;
@@ -126,7 +126,8 @@ Two tracks keep the RC manageable:
   The full `RUST_TEST_THREADS=1 make check` gate passed: 2740 library tests,
   one existing ignored test, integration tests (including the real reporter
   tests) and VT-system tests. The user accepted the supplied local build for
-  integration after the prompt/stop test below; integration is pending.
+  integration after the prompt/stop test below. GitHub lint, tests and packaging
+  passed before the squash merge.
   The user's test instance (PID 62116) was verified running the supplied binary.
   Read-only config inspection found only the worktree guard remaining in the
   legacy JSON file, with spyc's reporters in TOML. The startup dump had a bound
@@ -152,6 +153,393 @@ Two tracks keep the RC manageable:
   [pager request #545](https://github.com/Tripstack-Corp/spyc/issues/545) will
   make `:why-status` easier to inspect. See the
   [official hook contract](https://learn.chatgpt.com/docs/hooks).
+
+- A3b3 landed through PR #548 (`9f24dd4b`) after local-build acceptance
+  on 2026-10-07, based on #546.
+  The source-routing and protocol fixes passed `RUST_TEST_THREADS=1 make check`:
+  2760 library tests, one existing ignored test, all integration tests (including
+  four actual reporter-binary tests) and VT-system tests. Automated local native
+  question and keyboard approval loops passed on the fresh build. The user
+  accepted that result and requested continuing. GitHub lint, tests and
+  packaging passed before the squash merge.
+  The local CLI is `0.160.1`; the local source audit at `f380b487` and the
+  official generic-function hook contract support narrowly scoped
+  `request_user_input` start/completion instrumentation. Real native execution
+  and recovery are verified with already trusted hooks. Fresh trust onboarding
+  remains a separate acceptance case.
+  The test build installs exact-match `PreToolUse`/`PostToolUse` reporters for
+  that tool. Its completion restores `working` only after a matching start in
+  the same pane, session, turn and call; another question or uncorrelated block
+  keeps attention latched. Enter alone cannot clear an identified question.
+  Pending correlation lives in the pure Model, is bounded to eight questions
+  per pane and pruned for replaced/closed panes. No arguments or answers are
+  retained. Distinct wire statuses are rejected by older hosts; a newer host
+  ignores question reports from older reporters without correlation metadata.
+  Diagnostics retain unapplied reports with a reason. Ordinary explicit agent
+  and lifecycle reports retain their existing authority.
+  All five pure correlation regressions failed against the scaffold; three
+  hook/dispatch/input regressions failed against the prior behaviour. Deliberate
+  mutations were detected at dispatch, the input helper and its production call,
+  replaced-pane pruning and the actual reporter binary. Production was restored
+  after every probe. The initial `RUST_TEST_THREADS=1 make check` gate passed:
+  2751 library tests, one existing ignored test, all integration tests (including
+  four actual reporter-binary tests) and VT-system tests. Live acceptance was
+  pending at that point. This does not fix correlated semantic approval recovery:
+  `PermissionRequest` lacks a call id, and successful completion of an unrelated
+  tool cannot establish which permission was answered. Invalid/cancelled
+  question calls may have no post event; `Stop`, `Interrupt` or a newer explicit
+  report retires the wait. The new hooks require restart and `/hooks` review;
+  spyc does not alter trust records. See the
+  [official hook contract](https://learn.chatgpt.com/docs/hooks).
+  The first A3b3 live attempt on 2026-10-06 did not exercise the native question
+  hooks. PID 9553 was verified running the supplied `taa534jt` artifact, whose
+  SHA-256 remained `0a2c9883…`. The 11:27:57, 11:28:23 and 12:03:29 UTC dumps
+  contained only one `UserPromptSubmit` report and a restart-needed marker.
+  The final dump showed that working report expired, with output-timing taking
+  over; this is not evidence of question completion. The captured worktree config
+  contained both exact-match native question hooks; reporter tracing contained
+  no question invocation for the test. Read-only rollout metadata identifies
+  CLI `0.160.1`, Default mode, and a `request_user_input_async` call at
+  11:28:09.237 UTC. Its tool result acknowledged acceptance 43 ms later, followed
+  by repeated sleep calls; no `request_user_input` call occurred. Async tool
+  completion therefore cannot be used as an answer signal. That path remains
+  an A3 coverage gap. The native-hook retest requires a Codex restart, `/hooks`
+  review and entering `/plan` as an actual slash command before the diagnostic.
+  The second attempt (PID 51304, `codex resume --last`) showed a native Plan-mode
+  question open while the dot remained `working`. Dumps at 12:34:12, 12:34:25
+  and 12:34:37 UTC contained no question event, only `UserPromptSubmit` after
+  launch. Read-only rollout metadata confirms a native `request_user_input`
+  call at 12:34:32.540 UTC. This reproduced a real source-routing defect rather
+  than an async-tool mismatch.
+  Local Codex source inspection found root-checkout hook routing for linked
+  worktrees. The installed CLI's read-only `hooks/list` RPC independently
+  confirmed it: with the six-hook worktree config temporarily restored, it
+  loaded the four trusted spyc reporters from main's `.codex/config.toml` and
+  omitted both question hooks. The worktree declarations were ignored. The
+  temporary config was removed only after verifying its bytes were unchanged;
+  no trust records or main-checkout files were manually edited.
+  spyc now resolves Codex's actual hook source for installation, presence,
+  consent, refcounting, re-healing and restart detection. Ordinary MCP config
+  remains worktree-local. Five integration regressions reproduced the wrong
+  source before the fix; they also exposed a trailing-slash consent/ownership
+  key mismatch. Additional tests cover denied/unasked root consent, drift and
+  tracked-source refusal. Deliberate mutations of consent, drift routing and
+  the tracked-file guard each failed their regression; production was restored.
+  That build still required native question and quiet-after-answer acceptance;
+  the automated test below completed those cases after a protocol fix.
+  Approval-only semantic recovery and async-answer coverage remain A3 gaps.
+  The next test instance, PID 78174, was verified running the fresh `sf_du3_d`
+  artifact. Its 13:32:34 UTC dump names the root-checkout hook source and
+  records definition presence at launch. The 13:33:51 UTC dump contains one
+  `UserPromptSubmit` report, with no question event. Read-only rollout metadata
+  identifies Default mode and `request_user_input_async` at 13:33:37.526 UTC;
+  its immediate result arrived 32 ms later. No native `request_user_input`
+  occurred in that observed turn. The installed CLI's read-only `hooks/list`
+  now lists all six spyc reporters at main's source, including both exact-match
+  native question hooks as enabled and trusted. This confirms source discovery
+  and current trust metadata, not native hook execution or answer recovery.
+  A native Plan-mode retest was still required.
+
+  On 2026-10-07, the demo worktree's installed Microsoft `tui-test` harness
+  automated the real CLI in dedicated named sessions. The native Plan-mode
+  question reproduced `working` while its dialogue was open. Reporter tracing
+  showed `PreToolUse` was emitted and sent; MCP protocol validation rejected
+  the private question signal before the App received it. A protocol regression
+  failed on that rejection, then passed after both correlated wire values were
+  admitted. The saved TUI driver also failed against the prior `sf_du3_d` build.
+  The corrected `rmbkuxtj` artifact has SHA-256
+  `9a8103ca58ba22673e172dec26d744363eb702df629e0577ef2a87862975de01`.
+  Its native question loop passed: one `UserPromptSubmit`, one `PreToolUse`
+  reporting `blocked` while awaiting input, one `PostToolUse` restoring
+  authoritative `working` with the same pane/session/turn/call, continued
+  authoritative working during the quiet sleep, and one `Stop` reporting
+  `done`. The first driver attempt at completion raced final text against
+  asynchronous Stop delivery; the corrected driver waits for the actual report.
+  The approval loop separately verified one `PermissionRequest`, `blocked`
+  while the CLI's permission dialogue was open, one-time approval of `sleep 30`,
+  output-timing `working` after Enter and during the sleep, then authoritative
+  `done` from one `Stop`. This validates the existing keyboard recovery path;
+  it does not establish correlated semantic approval completion. The permission
+  event supplied no call id. Neither loop used an agent `report_status` call,
+  hook-trust approval, trust-file editing or an approval bypass.
+  The repeatable driver is `scripts/codex-tui-smoke.py`; its isolated-session
+  recordings, viewport captures, extracted dumps and binary manifests remain
+  local artifacts. Single-delivery counts are asserted per observed test turn.
+
+- A3b4 landed through PR #549 (`eff0bce1`) after local-build acceptance
+  on 2026-10-07, based on #548.
+  The real CLI `0.160.1` mixed approval → native question test failed against
+  the accepted A3b3 binary on 2026-10-07. Its permission and question shared a
+  turn; exactly one native start and matching completion were received. Enter
+  had cleared the visible ordinary permission latch, but its correlation state
+  still retained an uncorrelated blocker. The completion was recorded as
+  unapplied and the dot remained blocked at output age `0.0s`.
+  A permanent harness regression reproduced the same stale state before the
+  fix. Prompt-settling input now retires both representations of that ordinary
+  latch together. It preserves pending identified questions and overflow;
+  typing or pasting does not recover an unanswered permission. The TUI driver
+  includes the mixed sequence and waits for long diagnostic text to render
+  before submission. The full `RUST_TEST_THREADS=1 make check` gate passed:
+  2762 library tests, one existing ignored test, integration and VT-system tests.
+  Deliberate production mutations were caught for model retirement, executor
+  wiring and non-settling input; production was restored before the gate.
+  The fresh `x5d5b_lq` artifact has SHA-256
+  `4f77eb5907fd208a782ace6d6fbee6eb117ad3691393c10cd6db1874137f2da4`.
+  The real-CLI mixed sequence passed: one prompt, one permission request,
+  one question start/completion with matching pane/session/turn/call, and one
+  Stop. Question completion restored authoritative working, retained during
+  the quiet `sleep 30`, followed by authoritative done. The standalone question
+  and approval loops passed against the same artifact. Approval-only working
+  remained output-timing recovery after Enter, rather than a correlated semantic
+  permission completion. No loop called agent `report_status`, approved hook
+  trust or edited trust records. The user launched the supplied new version
+  and requested continuing, accepting the build for integration. GitHub lint,
+  tests and packaging passed before the squash merge. The remaining A3 gaps
+  below are not closed by this slice.
+  A read-only exact-version upstream audit confirms that
+  [`request_user_input_async`](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
+  posts an async message and immediately returns acceptance without awaiting
+  an answer. The
+  [TUI reply parser](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/tui/src/async_question_reply.rs)
+  recognizes answers in a later user message. This rules out using async tool
+  completion as answer recovery, and a blocking start would misrepresent
+  continuing work. The ordinary permission hook still has no call id in the
+  [official contract](https://learn.chatgpt.com/docs/hooks); this slice repairs
+  keyboard recovery state without inventing correlated permission completion.
+  Fresh trust onboarding, async attention and live parallel-pane isolation
+  remain A3 acceptance gaps.
+
+- A3b5 landed through PR #550 (`fb5b60b9`) after local-build acceptance
+  on 2026-10-07, based on #549.
+  The accepted A3b4 artifact passed the real two-pane native-question loop:
+  both questions blocked, answering the second restored only that pane, the
+  first remained blocked until answered, and both independently reached done.
+  The two MCP connections and pane/session/turn/call ids were distinct; each
+  pane received one prompt, one question start/completion and one Stop. Replay
+  mutations detected recovery of the unanswered pane, a changed completion
+  call and cross-bound sessions.
+
+  The user's continuing-work dump then exposed a separate false block:
+  `PermissionRequest` had latched blocked after automatic review of a completed
+  MCP tool, with no human answer required. An exact `0.160.1` source audit of
+  [permission events](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/hooks/src/events/permission_request.rs)
+  and [approval routing](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/approvals.rs)
+  confirms that the hook precedes hook allow/deny decisions, automatic review
+  and user review. It supplies no call id, and `permission_mode` describes
+  approval policy rather than reviewer identity. A real automatic-review
+  `sleep 30` regression failed against the accepted A3b4 artifact with no
+  dialogue open and an authoritative blocked report.
+
+  The worktree records metadata-bearing permission reports as observations,
+  leaving existing working/question reports intact. Owned hook command bytes
+  remain unchanged, preserving trust hashes. A captured complete command
+  approval at the viewport bottom supplies a narrow UI fallback that
+  temporarily overrides non-blocked reports; those reports resume after the
+  dialogue closes. Activity settling and both diagnostics share this policy.
+  Explicit agent blocks and native questions retain semantic precedence.
+  Clipped/customized dialogues, other approval types and async-answer attention
+  remain outside this verified rule. No generic post-tool hook or invented
+  permission correlation is added.
+
+  Five permanent regressions failed before the fix, then passed. The library
+  suite passed 2767 tests with one existing ignored test. The first fixed
+  artifact passed the real automatic-review loop without an approval key or
+  agent `report_status`. Fresh `CODEX_HOME` discovery separately confirmed that
+  an untrusted project's six hook declarations are ignored, with Codex's trust
+  warning and no trust configuration written. This negative probe does not
+  establish execution after trust approval. The scanner call-site guard caught
+  a deliberate production mutation to scrollback and the source was restored.
+  An expanded complete-dialogue fixture also failed with a twelve-line region;
+  the rule now reads the bounded current viewport and still requires the exact
+  modal footer at its bottom, excluding prior dialogue above the composer.
+
+  The final unpiped `RUST_TEST_THREADS=1 make check` gate passed: 2768 library
+  tests, one existing ignored test, all integration tests and six VT-system
+  tests. All five real-CLI loops passed against the exact final artifact:
+  automatic review, human command approval, mixed approval → native question,
+  standalone native question and parallel questions. Automatic review retained
+  authoritative working without an approval key; human approval used the
+  labelled UI fallback, then resumed the retained working report. Questions
+  recovered only their matching pane/session/turn/call. The parallel run had
+  two bound connections and eight reports; the unanswered pane stayed blocked
+  while the other worked and finished. None called agent `report_status`,
+  approved hook trust or edited trust records.
+  The final binary is
+  `/private/tmp/spyc-codex-a3b5-final.5yj63yev/spyc`, SHA-256
+  `a809801d0a13d0dba6783efd0817bc14caf025905764891ae22bf46edef33cc1`.
+  Its `test.sh` launcher selects the worktree and prepends that binary to
+  `PATH`, so both the host and hook reporter use the supplied build. Local
+  artifacts retain manifests, recordings, viewport captures, extracted dumps
+  and step logs. The live host and MCP proxy were verified against the exact
+  artifact hash. The user reported that it was working well and requested
+  continuing, accepting the build for integration. GitHub lint, tests and
+  packaging passed, and the exact PR head was `CLEAN` before squash merge.
+  The clean main checkout was fast-forwarded to that merge. The accepted
+  worktree is retained while the user's running host and panes use it.
+  Full fresh-trust execution, async attention and other approval-dialogue
+  formats remain A3 acceptance gaps; parallel native-question isolation passed.
+
+- A3b6 landed through PR #560 (`fdd3c884`) on 2026-10-08 under the user's
+  authorization to proceed with added automated TUI coverage while deferring
+  manual testing. It was refreshed onto merged PTY input-backpressure PR #551
+  and main's subsequent refactors (`f334affc`); earlier builds remain historical.
+  A real Codex `0.160.1` file-edit approval failed against A3b5: the complete
+  dialogue was open but the dot remained working. Its captured modal became
+  a fixture and the regression failed before the fix. The initial file-edit-only
+  implementation passed 2769 library tests, all integration and VT-system tests,
+  plus five native CLI loops (approve, decline, Esc dismissal, automatic review
+  and mixed command approval → native question) on the earlier artifact.
+  Those historical checks used trusted hooks and do not establish acceptance
+  of the expanded current build.
+
+  Review then identified uncovered MCP and network waits. Native MCP capture
+  showed a single-field Allow/Cancel form, distinct from command approval.
+  Continuous repainting also prevented the trailing-quiet scan from running.
+  A real 40-column command capture showed native wrapping across required
+  phrases and the footer. Permanent regressions reproduced each missed wait
+  against the old code, including the App path with a real PTY and continuing
+  output timestamps. Network and persistent MCP option fixtures come from
+  exact-version upstream UI snapshots; their provenance is separate from the
+  native command, file-edit and MCP captures.
+
+  Rules now cover command, file-edit, single-field MCP-tool and network approval
+  forms with known phrases and the complete footer at the viewport bottom.
+  Native word wrapping is accepted; old quoted modals above the composer,
+  missing required text and prefixed/clipped footers are rejected. Codex scans
+  within 250 ms of the first pending repaint rather than allowing each redraw
+  to postpone detection. The retained report and existing precedence policy
+  are unchanged: semantic question/agent blocks still win, and permission hooks
+  remain observational. Hook commands and correlation are unchanged.
+
+  The ten focused approval regressions pass. Deliberate network-rule, footer
+  boundary and scan-deadline mutations were detected, and production was restored.
+  The initial refreshed full gate passed 2788 library tests, all integration
+  suites and six VT-system tests. Native command approval at 40 columns, MCP
+  approve/cancel at 200 columns and MCP approve at 40 columns passed on the
+  #551-based combined artifact. Each held a blocked scrape for six seconds and
+  recovered after answering; only approved MCP calls wrote their marker once.
+  The refreshed gate on `209b7e4f` passed the same full suite. Five native
+  UI checks then passed against the exact final artifact: 40-column command
+  approval, 200-column MCP approve and cancel, 40-column MCP approve, and a
+  repeated wide MCP approval after correcting the driver's session-name check.
+  That check now compares exact names in structured JSON rather than rejecting
+  a distinct session with the same name prefix. Every held modal used the
+  blocked scrape source, with no semantic reports; each answer cleared it.
+  Approvals wrote exactly one disposable MCP marker and cancellation wrote none.
+  This verifies UI recovery, not retained semantic working or native hook delivery.
+  The current Gemma model chose shell commands rather than `apply_patch` in two
+  file-edit attempts; those runs do not establish a native file-edit dialogue
+  on the new build. The recorded native file-edit fixture regression passes.
+
+  The earlier refreshed binary was `/private/tmp/spyc-codex-a3b6-current.umb6tuwn/spyc`,
+  SHA-256 `fe4628a0416a9d53495bb09093d85d89c470880a5e11e7a679c7a00755067ea5`.
+  Its `test.sh` selects this worktree and places the exact binary/reporter on
+  `PATH`. The manifest records the source head, build-time changed-file hashes,
+  gate log and native UI results. On 2026-10-08, the user explicitly authorized
+  proceeding with added automated TUI coverage while deferring their manual
+  local test. This authorizes integration after checks; it does not establish
+  manual acceptance or fresh hook execution. The UI-only driver can skip
+  startup hook review with Esc, without approving or editing trust records.
+  Read-only `hooks/list` currently labels six root-checkout spyc reporters
+  modified; live semantic-hook recovery requires user review of that trust state.
+  Generic MCP elicitation, extra-permission and stdin-write forms, a live native
+  network approval, async attention and fresh-trust execution remain A3 gaps.
+
+  The final PR head `e6f1cb9a` passed the full gate (2788 library tests, one
+  ignored, all integration and VT-system tests), GitHub lint/tests/packaging and
+  four repeated native UI-only cases: MCP approve/cancel at 200 columns, command
+  approval at 40 columns and MCP approval at 40 columns. `mergeStateStatus` was
+  `CLEAN` immediately before squash. The final artifact is
+  `/private/tmp/spyc-codex-pr560.nc0h2ab1/spyc`, SHA-256
+  `cc99774e5ca81c56c70fedfdaf561652af34ae8ed92eb691d593006c040464d4`.
+  The previous handoff launcher forwards to its `test.sh`, which selects main
+  after the worktree's removal. Manual testing remains deferred.
+
+- A3b7 landed through PR #561 (`5b455a50`) on 2026-10-08, based on merged
+  #560, under the same deferred-manual-test authorization.
+  Real reporter regressions reproduced loss of permission/question correlation
+  and a false blocked idle notification when stdin exceeded 8 KiB. The reader
+  now validates the complete JSON while retaining only bounded root metadata;
+  tool arguments and responses are streamed past rather than stored or traced.
+  Recorded native normalized metadata supplies the regression fixtures, with
+  explicitly synthetic large bodies and provenance separate from raw captures.
+  A controlled PTY/real reporter/host TUI replay failed against #560: the large
+  permission request lost its event and latched blocked during automatic review.
+  The question replay also failed against #560: the start lost its correlation
+  and stayed working while waiting. Both replay cases pass on the fixed debug
+  and release builds. Question coverage includes silence while blocked, Enter
+  without completion, a wrong-call completion, matching recovery, quiet semantic
+  working and Stop/done. The release replays also verify trace/dump privacy.
+  The full `RUST_TEST_THREADS=1 make check` gate passed: 2793 library tests, one
+  ignored, all integration suites (six real reporter tests) and six VT-system
+  tests. Bounds/depth and metadata-capture mutations failed their regressions;
+  production was restored. The final head `d14ac855` passed the full gate,
+  both final-head TUI replays and CI lint/tests/packaging; it was `CLEAN` before
+  squash. The artifact is `/private/tmp/spyc-codex-hook-payload-final.mrewok3m/spyc`,
+  SHA-256 `2fb69aa0065bc924a71fded5cb39eda02f072828a53f11d8b93dddff247497ab`.
+  The prior handoff launcher forwards there after worktree removal. These
+  replays do not establish native CLI hook execution or fresh trust. The generic
+  pre-question agent `blocked` latch was a separate recovery issue, addressed in A3b9.
+
+- A3b8 landed through PR #566 (`f78f06cb`) on 2026-10-08, refreshed onto
+  main through #565 after merged #561.
+  Native Codex `0.160.1` read-only discovery reproduced the review finding:
+  the JSON shared-handler fixture's user key changed from `stop:0:1` to
+  `stop:0:0`; the TOML separate-group fixture changed from `stop:1:0` to
+  `stop:0:0`. The command hash stayed identical in both cases. The temporary
+  fixture permits project loading but leaves every hook untrusted; no turn or
+  hook approval is sent, and real user trust records are untouched.
+  Installation and cleanup now refuse pruning that moves a user handler's
+  group/handler indices, before editing either source. Diagnostics identify the
+  refusal. Safe trailing removals remain allowed. The two refusal regressions
+  failed before the fix; the focused writer suite passes. The full gate passed
+  2796 library tests, one ignored, all integration suites and six VT-system
+  tests. Cleanup-preflight and blanket-refusal mutations were detected and
+  restored. All five TUI/discovery cases pass on the verified release artifact:
+  shared handler and separate group in each source, plus a safe trailing prune.
+  Each preserves the native key/hash/flags through install, explicit removal
+  and teardown. The final head `416c1df0` passed the full gate (2798 library
+  tests, one ignored, all integration/VT suites), all five repeated TUI cases
+  and CI lint/tests/packaging; it was `CLEAN` before squash. The artifact is
+  `/private/tmp/spyc-a3b8-build-7a6ifx49/spyc`, SHA-256
+  `f33ecc608c3ba02cf6cd250764028a788e0bf7455c9e865f18a7271012e92c28`.
+  The prior launcher forwards there; manual testing remains deferred. This protects the
+  lookup of existing trust records without moving those records; it does not
+  establish fresh trusted-hook execution or resolve adoption of reporters after
+  a refused installation.
+
+- A3b9 landed through PR #567 (`6988a9f8`) on 2026-10-08, based on #566.
+  The review's pre-question generic-block sequence failed both a pure recovery
+  regression and the App path: an ordinary agent `blocked`, followed by a valid
+  question start and matching end, stayed blocked because the older report was
+  treated as an independent pending wait. The first valid correlated question
+  start now supersedes that preceding generic status. A generic block arriving
+  while a question is pending remains independent; duplicate/additional starts,
+  incomplete metadata and wrong completions cannot clear it. Added TUI scenarios
+  exercise an actual pane-bound MCP agent block before a reporter question and
+  a later independent block during it. The corrected previous-build TUI replay
+  failed at matching completion; its first driver attempt had accidentally
+  cleared the generic block with Enter before the question start, so it did not
+  exercise the defect. The driver now triggers start without pane input.
+  All four fixed-release replays pass, including both additions and the existing
+  question/permission cases. An indiscriminate-clearing mutation failed both the
+  later-block and incomplete-metadata regressions; production was restored.
+  Focused recovery/App suites pass. The final head `a6e62fb9` passed the full
+  `RUST_TEST_THREADS=1 make check` gate (2801 library tests, one ignored, all
+  integration suites and six VT-system tests), all four repeated release TUI
+  replays and CI lint/tests/packaging. It was `CLEAN` immediately before squash.
+  The exact artifact is `/private/tmp/spyc-a3b9-build-dos2yw78/spyc`, SHA-256
+  `fa9c3e48a8b41d96778a4773d9a2f2a60280d68e0fa2bef7135370baefb12bd0`.
+  Main was fast-forwarded, all eight PR files matched before worktree removal,
+  and the previous handoff launcher forwards to this artifact's `test.sh`.
+  The two new variants use actual pane-bound agent MCP reports; all four use
+  the real reporter and host with a controlled PTY child. They do not establish
+  native CLI hook execution or fresh trust. Manual local testing remains deferred.
+
+  A3 remains open for fresh-trust execution, async question attention and native
+  approval forms outside the verified rules. Refused-install reporter cleanup
+  ownership remains a reviewed follow-up; positional trust preservation and
+  pre-question generic-block recovery have landed.
 
 ### Baseline
 

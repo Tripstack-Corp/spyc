@@ -41,7 +41,7 @@ fn codex_interrupt_hook_reports_idle_without_changing_user_hooks_or_trust() {
     );
 }
 
-fn agent_app(dir: &std::path::Path, name: &str) -> App {
+pub(super) fn agent_app(dir: &std::path::Path, name: &str) -> App {
     let mut app = App::test_app(dir.to_path_buf());
     assert!(app.open_pane_tab_in("cat", dir));
     app.runtime
@@ -67,7 +67,7 @@ fn report(app: &mut App, status: &str) {
     ));
 }
 
-fn dump(app: &mut App) -> String {
+pub(super) fn dump(app: &mut App) -> String {
     app.dispatch_command("activity dump");
     app.view
         .pager
@@ -533,5 +533,294 @@ fn codex_refused_migration_retains_shared_ownership_of_legacy_only_reporters() {
             "a refused migration must retain ownership of legacy-only reporters"
         );
         assert!(legacy.exists());
+    });
+}
+
+fn question_report(app: &mut App, signal: &str, event: &str, call: &str) {
+    let result = app.execute_mcp_command(McpCommand::ReportStatus {
+        pane_id: None, pane: None, status: signal.into(), ttl_ms: Some(120_000),
+        session_id: Some("session-1".into()),
+        hook_event: crate::agent::status_hook::StatusHookEvent::from_value(&serde_json::json!({
+            "hook_event_name":event, "tool_name":"request_user_input", "turn_id":"turn-1", "tool_use_id":call
+        }))
+    });
+    assert!(matches!(result, McpResponse::Ok { .. }), "{result:?}");
+}
+
+#[test]
+fn codex_question_recovery_matches_the_call_and_survives_quiet_after_answer() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "codex");
+        question_report(&mut app, "codex-question-start", "PreToolUse", "call-1");
+        question_report(
+            &mut app,
+            "codex-question-end",
+            "PostToolUse",
+            "unrelated-call",
+        );
+        assert!(dump(&mut app).contains("source: SELF-REPORT status=blocked"));
+        assert!(dump(&mut app).contains("not applied:"));
+        question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
+        let at = app
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info()
+            .reported
+            .unwrap()
+            .at;
+        let mut ctx = RunCtx::for_test();
+        app.settle_agent_activity(at + Duration::from_secs(60), &mut ctx);
+        assert_eq!(
+            app.runtime
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .activity,
+            AgentActivity::Working
+        );
+        report(&mut app, "done");
+        question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
+        assert!(dump(&mut app).contains("source: SELF-REPORT status=done"));
+    });
+}
+
+#[test]
+fn codex_question_recovery_waits_for_completion_instead_of_enter() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "codex");
+        question_report(&mut app, "codex-question-start", "PreToolUse", "call-1");
+        let input = crate::app::effect::PaneInput::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ));
+        let id = app
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info()
+            .id
+            .clone();
+        let recovery = app.state.codex_recovery.get_mut(&id);
+        crate::app::effect::clear_blocked_for_input(
+            app.runtime.pane_tabs.as_mut().unwrap().active_info_mut(),
+            &input,
+            recovery,
+        );
+        assert!(dump(&mut app).contains("source: SELF-REPORT status=blocked"));
+        question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
+        assert!(dump(&mut app).contains("source: SELF-REPORT status=working"));
+    });
+}
+
+#[test]
+fn codex_question_hook_definitions_are_narrow_and_require_a_metadata_capable_host() {
+    let tmp = tempfile::tempdir().unwrap();
+    assert!(crate::mcp::ensure_codex_status_hooks(tmp.path()));
+    let path = tmp.path().join(".codex/config.toml");
+    let value: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    for (event, signal) in [
+        ("PreToolUse", "codex-question-start"),
+        ("PostToolUse", "codex-question-end"),
+    ] {
+        assert_eq!(
+            value["hooks"][event][0]["matcher"].as_str(),
+            Some("^request_user_input$")
+        );
+        assert!(
+            value["hooks"][event][0]["hooks"][0]["command"]
+                .as_str()
+                .unwrap()
+                .contains(signal)
+        );
+    }
+    let before = std::fs::read(&path).unwrap();
+    assert!(crate::mcp::ensure_codex_status_hooks(tmp.path()));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    crate::mcp::cleanup_codex_status_hooks(tmp.path());
+    assert!(!path.exists());
+}
+
+#[test]
+fn codex_question_recovery_ignores_old_reporters_and_other_panes() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "codex");
+        assert!(matches!(
+            app.execute_mcp_command(McpCommand::ReportStatus {
+                pane_id: None,
+                pane: None,
+                status: "codex-question-start".into(),
+                ttl_ms: None,
+                session_id: Some("session-1".into()),
+                hook_event: None,
+            }),
+            McpResponse::Ok { .. }
+        ));
+        assert!(
+            app.runtime
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .reported
+                .is_none()
+        );
+        assert!(dump(&mut app).contains("not applied: question hook requires"));
+        question_report(&mut app, "codex-question-start", "PreToolUse", "call-1");
+        assert!(app.open_pane_tab_in("cat", tmp.path()));
+        app.runtime
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut()
+            .command = "codex".into();
+        question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
+        let tabs = app.runtime.pane_tabs.as_ref().unwrap();
+        assert_eq!(
+            tabs.tabs()[0].info.reported.unwrap().status,
+            AgentActivity::Blocked
+        );
+        assert!(
+            tabs.tabs()[1].info.reported.is_none(),
+            "another pane cannot answer this question"
+        );
+    });
+}
+
+#[test]
+fn codex_question_recovery_prunes_a_replaced_pane_without_carrying_its_wait() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "codex");
+        question_report(&mut app, "codex-question-start", "PreToolUse", "call-1");
+        let old = app
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info()
+            .id
+            .clone();
+        let command = fake_agent(tmp.path(), "codex").display().to_string();
+        assert!(app.spawn_agent_into_tab(0, &command, tmp.path(), None));
+        let new = app
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info()
+            .id
+            .clone();
+        assert_ne!(old, new);
+        app.settle_agent_activity(std::time::Instant::now(), &mut RunCtx::for_test());
+        assert!(!app.state.codex_recovery.contains_key(&old));
+        question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
+        assert!(
+            app.runtime
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .reported
+                .is_none()
+        );
+    });
+}
+
+#[test]
+fn answered_codex_permission_does_not_poison_the_next_question_in_the_same_turn() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "codex");
+        report(&mut app, "blocked");
+        let id = app
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info()
+            .id
+            .clone();
+        let recovery = app.state.codex_recovery.get_mut(&id);
+        crate::app::effect::clear_blocked_for_input(
+            app.runtime.pane_tabs.as_mut().unwrap().active_info_mut(),
+            &crate::app::effect::PaneInput::Key(KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::empty(),
+            )),
+            recovery,
+        );
+        assert!(
+            app.runtime
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .reported
+                .is_none()
+        );
+        question_report(&mut app, "codex-question-start", "PreToolUse", "call-1");
+        question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
+        assert!(dump(&mut app).contains("source: SELF-REPORT status=working"));
+        assert!(!dump(&mut app).contains("not applied:"));
+    });
+}
+
+#[test]
+fn typing_or_pasting_does_not_retire_an_unanswered_codex_permission() {
+    use crate::app::effect::{PaneInput, clear_blocked_for_input};
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "codex");
+        for input in [
+            PaneInput::Key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::empty())),
+            PaneInput::Bytes(b"answer\r".to_vec()),
+        ] {
+            report(&mut app, "blocked");
+            let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+            clear_blocked_for_input(info, &input, app.state.codex_recovery.get_mut(&info.id));
+            assert!(dump(&mut app).contains("source: SELF-REPORT status=blocked"));
+            question_report(&mut app, "codex-question-start", "PreToolUse", "call-1");
+            question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
+            assert!(dump(&mut app).contains("source: SELF-REPORT status=working"));
+            assert!(!dump(&mut app).contains("not applied:"));
+        }
+    });
+}
+
+#[test]
+fn invalid_question_start_cannot_supersede_a_generic_block() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "codex");
+        for event in [
+            None,
+            crate::agent::status_hook::StatusHookEvent::from_value(
+                &serde_json::json!({"hook_event_name":"PreToolUse", "tool_name":"request_user_input", "turn_id":"turn-1"}),
+            ),
+        ] {
+            question_report(&mut app, "codex-question-start", "PreToolUse", "call-1");
+            report(&mut app, "blocked");
+            assert!(matches!(
+                app.execute_mcp_command(McpCommand::ReportStatus {
+                    pane_id: None,
+                    pane: None,
+                    status: "codex-question-start".into(),
+                    ttl_ms: None,
+                    session_id: Some("session-1".into()),
+                    hook_event: event,
+                }),
+                McpResponse::Ok { .. }
+            ));
+            question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
+            assert!(dump(&mut app).contains("source: SELF-REPORT status=blocked"));
+            assert!(dump(&mut app).contains("not applied:"));
+        }
     });
 }

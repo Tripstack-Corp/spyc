@@ -13,8 +13,10 @@
 //! [`detect`] (command → profile, for live panes).
 
 pub mod chrome;
+pub mod codex_approval;
 pub mod codex_command;
 pub mod codex_records;
+pub mod codex_recovery;
 pub mod detect_rules;
 pub mod resume;
 pub mod status_hook;
@@ -126,10 +128,12 @@ pub struct TranscriptImageSpec {
 /// How spyc installs an agent's activity-status lifecycle hooks (the ones that
 /// call `spyc --report-status <state>` so the tab dot tracks the agent's turn).
 /// Returned by [`AgentProfile::status_hooks`] for agents spyc can auto-wire
-/// (claude/codex/agy); `None` for the rest. The two `fn` pointers are the
-/// format-specific writer/cleaner in [`crate::mcp`] — JSON `settings.json` for
+/// (claude/codex/agy); `None` for the rest. Alongside the source resolver, the
+/// `fn` pair supplies the format-specific writer/cleaner in [`crate::mcp`] — JSON `settings.json` for
 /// claude, TOML `config.toml` for codex, JSON `.agents/hooks.json` for agy.
 pub struct StatusHookSupport {
+    /// Resolve the hook directory the agent actually consumes from this cwd.
+    pub config_dir: fn(&Path) -> std::path::PathBuf,
     /// Write/refresh our hooks into the project dir; returns whether our hooks
     /// are present in a file we own (so teardown tracks the dir for cleanup).
     pub ensure: fn(&Path) -> bool,
@@ -157,6 +161,7 @@ impl StatusHookSupport {
     /// for any instance's pane.
     #[must_use]
     pub fn installed(&self, dir: &Path) -> bool {
+        let dir = (self.config_dir)(dir);
         let present = |label| {
             std::fs::read_to_string(dir.join(label))
                 .is_ok_and(|text| text.contains("--report-status"))
@@ -272,9 +277,9 @@ pub trait AgentProfile: Sync {
     }
 
     /// P1-2 scrape fallback: priority-ordered pane-text detection rules for an
-    /// agent that can't (or doesn't yet) self-report — consulted only while no
-    /// live semantic report is authoritative for the tab (`report_status`
-    /// always wins; see `app::agent_status::effective_activity`). Default:
+    /// state the agent cannot self-report. Codex's verified command approval
+    /// temporarily overrides non-blocked reports; semantic blocks retain
+    /// precedence (see `app::agent_status::effective_activity`). Default:
     /// empty — no fallback beyond P0 output timing, which is correct for any
     /// agent whose prompt text isn't verified here (guessing at UI text spyc
     /// hasn't observed would be worse than no fallback).
@@ -485,6 +490,7 @@ impl AgentProfile for ClaudeProfile {
     }
     fn status_hooks(&self) -> Option<StatusHookSupport> {
         Some(StatusHookSupport {
+            config_dir: Path::to_path_buf,
             ensure: crate::mcp::ensure_claude_status_hooks,
             cleanup: crate::mcp::cleanup_claude_status_hooks,
             config_label: ".claude/settings.json",
@@ -514,6 +520,9 @@ pub fn codex_without_daemon(cmd: &str) -> Cow<'_, str> {
 
 pub struct CodexProfile;
 impl AgentProfile for CodexProfile {
+    fn detection_rules(&self) -> &'static [DetectionRule] {
+        codex_approval::RULES
+    }
     fn kind(&self) -> AgentKind {
         AgentKind::Codex
     }
@@ -675,10 +684,10 @@ impl AgentProfile for CodexProfile {
         })
     }
     fn status_hooks(&self) -> Option<StatusHookSupport> {
-        // Codex's event hooks live in `.codex/config.toml` (the same file as the
-        // MCP entry) and are read once at startup → `live_reload: false`, so the
-        // app-layer install runs pre-spawn for an already-consented repo.
+        // Codex loads hooks from the corresponding root-checkout directory;
+        // ordinary config and the MCP entry remain worktree-local.
         Some(StatusHookSupport {
+            config_dir: crate::git::discovery::root_checkout_dir,
             ensure: crate::mcp::ensure_codex_status_hooks,
             cleanup: crate::mcp::cleanup_codex_status_hooks,
             config_label: ".codex/config.toml",
@@ -799,6 +808,7 @@ impl AgentProfile for AgyProfile {
         // agy's built-in termination checks, so the hook was installed and never
         // ran. On an older agy that half degrades to output timing.
         Some(StatusHookSupport {
+            config_dir: Path::to_path_buf,
             ensure: crate::mcp::ensure_agy_status_hooks,
             cleanup: crate::mcp::cleanup_agy_status_hooks,
             config_label: ".agents/hooks.json",

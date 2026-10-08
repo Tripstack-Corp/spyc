@@ -1,3 +1,7 @@
+mod identity;
+
+use identity::{inline_prune_refused, prune_toml_groups};
+
 use std::path::Path;
 
 use super::{
@@ -6,22 +10,26 @@ use super::{
 
 // ── Codex status hooks ────────────────────────────────────────────────
 //
-// Codex's hooks are inline `[[hooks.<Event>]]` tables in the same
-// `.codex/config.toml` as the MCP entry (see [`crate::mcp::config`]).
+// Codex's hooks are inline `[[hooks.<Event>]]` tables in `.codex/config.toml`.
+// The app passes the root-checkout source Codex consumes; this writer operates
+// on that literal directory. Ordinary MCP config can remain worktree-local.
 // Codex also loads `.codex/hooks.json`; spyc migrates its reporters out of it.
-// `UserPromptSubmit` → working, `PermissionRequest` → blocked, `Stop` → done,
-// `Interrupt` → idle. It reads config once at startup
+// `UserPromptSubmit` → working, `Stop` → done, `Interrupt` → idle.
+// `PermissionRequest` retains its wire command for hook-trust stability; a
+// metadata-capable host records it observationally because it precedes both
+// automatic and human review. It reads config once at startup
 // (no live reload), so hooks are written pre-spawn; a first-launch `yes` only
 // takes effect on codex's next launch.
 
-/// Codex's (event, reported-state). No matcher: these events aren't
-/// tool-scoped, and the `--report-status` command string is the "ours" marker
-/// for cleanup (a user isn't expected to author their own).
-const CODEX_STATUS_HOOKS: [(&str, &str); 4] = [
+/// Lifecycle events are unfiltered; tool hooks match only `request_user_input`.
+/// The `--report-status` command string identifies owned handlers for cleanup.
+const CODEX_STATUS_HOOKS: [(&str, &str); 6] = [
     ("UserPromptSubmit", "working"),
     ("PermissionRequest", "blocked"),
     ("Stop", "done"),
     ("Interrupt", "idle"),
+    ("PreToolUse", crate::agent::codex_recovery::QUESTION_START),
+    ("PostToolUse", crate::agent::codex_recovery::QUESTION_END),
 ];
 
 /// TOML counterpart of [`super::group_is_ours`]: a `{ hooks = [{ command = … }] }`
@@ -30,17 +38,11 @@ fn codex_group_is_ours(group: &toml::Value) -> bool {
     group
         .get("hooks")
         .and_then(toml::Value::as_array)
-        .is_some_and(|handlers| {
-            handlers.iter().any(|h| {
-                h.get("command")
-                    .and_then(toml::Value::as_str)
-                    .is_some_and(|c| c.contains("--report-status"))
-            })
-        })
+        .is_some_and(|handlers| handlers.iter().any(identity::toml_owned))
 }
 
 /// Codex counterpart of [`super::ensure_claude_status_hooks`]: merge spyc's status
-/// hooks into `<dir>/.codex/config.toml` (the same file as the MCP entry),
+/// hooks into `<dir>/.codex/config.toml` at the caller's resolved hook source,
 /// preserving everything else. Legacy JSON reporters are removed only after
 /// the canonical file is durable; an unsafe legacy source refuses installation.
 /// Other handlers survive even when they share a matcher group with a reporter.
@@ -104,6 +106,12 @@ pub(super) fn merged_codex_status_hooks_toml(
             toml::Value::String(reporter_command(exe, state, trace)),
         );
         let mut group = toml::Table::new();
+        if matches!(event, "PreToolUse" | "PostToolUse") {
+            group.insert(
+                "matcher".into(),
+                toml::Value::String("^request_user_input$".into()),
+            );
+        }
         group.insert(
             "hooks".into(),
             toml::Value::Array(vec![toml::Value::Table(handler)]),
@@ -115,7 +123,9 @@ pub(super) fn merged_codex_status_hooks_toml(
             continue;
         };
         // Drop stale spyc handlers, preserve user handlers, append ours.
-        prune_toml_groups(list);
+        if !prune_toml_groups(list) {
+            return None;
+        }
         list.push(toml::Value::Table(group));
     }
     toml::to_string_pretty(&root).ok()
@@ -127,7 +137,16 @@ pub(super) fn merged_codex_status_hooks_toml(
 /// cascade as in the claude version; the file (and `.codex/`) is deleted only
 /// when nothing else remains. Refuses a git-tracked file.
 pub fn cleanup_codex_status_hooks(dir: &Path) -> ConfigCleanup {
-    let legacy = match legacy_edit(dir) {
+    // Preflight both sources before removing either: partial cleanup must not
+    // change a user's positional trust key or discard the other reporters.
+    if inline_prune_refused(dir) {
+        return ConfigCleanup::NothingToDo;
+    }
+    let legacy_edit = legacy_edit(dir);
+    if matches!(legacy_edit, Err(LegacyError::TrustPositions)) {
+        return ConfigCleanup::NothingToDo;
+    }
+    let legacy = match legacy_edit {
         Ok(edit) => match apply_legacy_edit(dir, edit) {
             Ok(true) => ConfigCleanup::Cleaned,
             _ => ConfigCleanup::NothingToDo,
@@ -175,8 +194,10 @@ fn cleanup_codex_toml(dir: &Path) -> ConfigCleanup {
     };
     if let Some(hooks_obj) = obj.get_mut("hooks").and_then(toml::Value::as_table_mut) {
         for (event, _) in CODEX_STATUS_HOOKS {
-            if let Some(list) = hooks_obj.get_mut(event).and_then(toml::Value::as_array_mut) {
-                prune_toml_groups(list);
+            if let Some(list) = hooks_obj.get_mut(event).and_then(toml::Value::as_array_mut)
+                && !prune_toml_groups(list)
+            {
+                return ConfigCleanup::NothingToDo;
             }
         }
         // Drop emptied event arrays.
@@ -202,25 +223,6 @@ fn cleanup_codex_toml(dir: &Path) -> ConfigCleanup {
     ConfigCleanup::Cleaned
 }
 
-/// Remove individual reporters so a matcher group shared with user hooks survives.
-fn prune_toml_groups(groups: &mut Vec<toml::Value>) {
-    groups.retain_mut(|group| {
-        if !codex_group_is_ours(group) {
-            return true;
-        }
-        let Some(handlers) = group.get_mut("hooks").and_then(toml::Value::as_array_mut) else {
-            return true;
-        };
-        handlers.retain(|handler| {
-            !handler
-                .get("command")
-                .and_then(toml::Value::as_str)
-                .is_some_and(|command| command.contains("--report-status"))
-        });
-        !handlers.is_empty()
-    });
-}
-
 enum LegacyEdit {
     Keep,
     Write(String),
@@ -231,6 +233,7 @@ enum LegacyError {
     Invalid,
     Unreadable,
     Tracked,
+    TrustPositions,
 }
 
 /// Plan a precise removal from Codex's second, independently loaded hook source.
@@ -260,25 +263,7 @@ fn pruned_legacy_hooks_json(text: &str) -> Result<LegacyEdit, LegacyError> {
     let mut changed = false;
     for groups in hooks.values_mut() {
         let groups = groups.as_array_mut().ok_or(LegacyError::Invalid)?;
-        groups.retain_mut(|group| {
-            if !super::group_is_ours(group) {
-                return true;
-            }
-            let Some(handlers) = group
-                .get_mut("hooks")
-                .and_then(serde_json::Value::as_array_mut)
-            else {
-                return true;
-            };
-            handlers.retain(|handler| {
-                !handler
-                    .get("command")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|command| command.contains("--report-status"))
-            });
-            changed = true;
-            !handlers.is_empty()
-        });
+        changed |= identity::prune_json_groups(groups).map_err(|()| LegacyError::TrustPositions)?;
     }
     if !changed {
         return Ok(LegacyEdit::Keep);
@@ -313,10 +298,18 @@ fn apply_legacy_edit(dir: &Path, edit: LegacyEdit) -> std::io::Result<bool> {
 }
 
 pub fn codex_legacy_hook_diagnostic(dir: &Path) -> Option<&'static str> {
+    if inline_prune_refused(dir) {
+        return Some(
+            "spyc hook edit in .codex/config.toml would move user hook trust identities; hook declarations preserved; preserve positions or review affected user hooks after manual migration",
+        );
+    }
     match legacy_edit(dir) {
         Ok(LegacyEdit::Keep) => None,
         Ok(_) => Some(
             "additional spyc reporters in .codex/hooks.json; run `:hooks on`, then restart Codex",
+        ),
+        Err(LegacyError::TrustPositions) => Some(
+            "spyc reporter removal from .codex/hooks.json would move user hook trust identities; hook declarations preserved; preserve positions or review affected user hooks after manual migration",
         ),
         Err(LegacyError::Tracked) => Some(
             "spyc reporters in git-tracked .codex/hooks.json; remove those reporters by hand, then restart Codex",
@@ -329,6 +322,9 @@ pub fn codex_legacy_hook_diagnostic(dir: &Path) -> Option<&'static str> {
         ),
     }
 }
+
+#[cfg(test)]
+mod identity_tests;
 
 #[cfg(test)]
 mod tests {
@@ -487,7 +483,7 @@ mod tests {
             tmp.path(),
             json!({"extra":"preserve", "hooks":{
                 "UserPromptSubmit":[{"hooks":[own_handler("working")]}],
-                "PermissionRequest":[{"matcher":"Bash", "extra":"group", "hooks":[own_handler("blocked"), user]}],
+                "PermissionRequest":[{"matcher":"Bash", "extra":"group", "hooks":[user, own_handler("blocked")]}],
                 "Stop":[{"hooks":[own_handler("done")]}],
                 "PreToolUse":[{"matcher":"AskUserQuestion|ExitPlanMode", "hooks":[own_handler("blocked")]}],
                 "FutureEvent":[{"hooks":[user]}]
@@ -624,13 +620,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir(tmp.path().join(".codex")).unwrap();
         let path = tmp.path().join(".codex/config.toml");
-        std::fs::write(&path, "[[hooks.Stop]]\nmatcher = 'keep-group'\n[[hooks.Stop.hooks]]\ncommand = 'user-reporter'\n[[hooks.Stop.hooks]]\ncommand = 'spyc --report-status done'\n[hooks.state.user]\ntrusted_hash = 'unchanged'\n").unwrap();
+        std::fs::write(&path, "[[hooks.Stop]]\nmatcher = 'keep-group'\n[[hooks.Stop.hooks]]\ncommand = 'user-reporter'\ntimeout = 7\n[[hooks.Stop.hooks]]\ncommand = 'spyc --report-status done'\n").unwrap();
         assert!(ensure_codex_status_hooks(tmp.path()));
         let installed = read_toml(&path);
         assert_eq!(codex_cmd(&installed, "Stop"), "user-reporter");
         assert_eq!(
-            installed["hooks"]["state"]["user"]["trusted_hash"].as_str(),
-            Some("unchanged")
+            installed["hooks"]["Stop"][0]["hooks"][0]["timeout"].as_integer(),
+            Some(7)
         );
         cleanup_codex_status_hooks(tmp.path());
         let left = read_toml(&path);
@@ -641,8 +637,8 @@ mod tests {
             Some("keep-group")
         );
         assert_eq!(
-            left["hooks"]["state"]["user"]["trusted_hash"].as_str(),
-            Some("unchanged")
+            left["hooks"]["Stop"][0]["hooks"][0]["timeout"].as_integer(),
+            Some(7)
         );
     }
 

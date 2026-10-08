@@ -37,10 +37,10 @@ views), off-thread PagerStream (grep / git-view / agent transcripts on one
 seam), and unified input routing (`route_input`/`InputSink`, `Focus` as the
 routing authority).
 
-The **800-LoC file rule is a convention with an explicit escape hatch**, stated
-in AGENTS.md and enforced nowhere except `mod_rs_stays_decomposed`, which caps
-`src/app/mod.rs` alone. Some files are over it. Re-derive the list from the
-tree rather than from a number written down here.
+The **file-size rule is a ratchet** in `src/size_guard.rs`: at most 1,000 lines
+of non-test code and 3,000 lines in all. Files over a limit when the guard
+landed are pinned there and may only shrink, so its pin lists are the
+decomposition backlog. Read them rather than a number written down here.
 
 The thesis work shipped over 1.x and 2.0: agent-awareness dots and
 notifications, the worktree MCP suite, the merge/scope registry, the in-process

@@ -27,8 +27,8 @@ use crate::pane::{AgentActivity, ReportedStatus};
 /// the P1 semantic hook (`docs/archive/AGENT_AWARENESS_PLAN.md`), not output timing.
 const AGENT_ACTIVE_WINDOW: Duration = Duration::from_secs(2);
 
-/// P1-2 scrape-fallback quiet window: fire a single screen scan after an agent
-/// tab with detection rules stops producing output for this long.
+/// Screen-scan debounce. Codex's complete approval forms are checked this long
+/// after the first pending repaint; other agents require this much silence.
 const SCRAPE_QUIET_WINDOW: Duration = Duration::from_millis(250);
 
 /// What [`App::scrape_step`] decided for one dirty tab: nothing to do, scan its
@@ -67,18 +67,17 @@ const AGENT_ANIM_INTERVAL: Duration = Duration::from_millis(250);
 /// dot off red and back to the working pulse. Blocked is cleared only by its
 /// a newer report or the user settling the prompt — answering it with
 /// Enter or dismissing it with Esc / `^c` (the `SendToPane` handler in
-/// `run_effects` drops it on any of those keystrokes).
-/// Agents without scrape rules retain all semantic reports through output;
-/// redraws do not establish a new turn or completion. Agents with scrape rules
-/// yield to output so an uncovered approval prompt can become authoritative.
+/// `run_effects` drops ordinary blocks on those keystrokes). Identified Codex
+/// questions instead require their matching tool completion or a newer report.
+/// Codex/Claude semantic reports survive output; redraws do not establish a
+/// new turn or completion. Agy yields non-blocked reports to output so its
+/// uncovered approval prompt can become authoritative.
 fn report_superseded_by_output(
     r: ReportedStatus,
     last_output_at: Option<Instant>,
     kind: AgentKind,
 ) -> bool {
-    if r.status == AgentActivity::Blocked
-        || crate::agent::profile_for(kind).detection_rules().is_empty()
-    {
+    if r.status == AgentActivity::Blocked || kind != AgentKind::Agy {
         return false;
     }
     last_output_at.is_some_and(|o| o > r.at)
@@ -410,15 +409,12 @@ impl App {
         }
     }
 
-    /// The authority resolution (P1, testable core): a live semantic
-    /// [`ReportedStatus`] wins over the P1-2 scrape fallback, which wins over
-    /// the output-timing fallback. A report is *live* until it expires or the
-    /// tab with scrape rules produces output **after** it. Agents without those
-    /// rules retain reports through redraws and silent tool waits. `scrape` is
-    /// the tab's scrape-inferred state, written only by the
-    /// debounced [`Self::settle_scrape_quiet`]; it's a fallback for agents with
-    /// no live report, never consulted while one is authoritative (the caller
-    /// clears it the instant a report exists — see `settle_agent_activity`).
+    /// Resolve semantic reports, verified approval dialogues and output timing.
+    /// Agy yields non-blocked reports to newer output. Codex's complete
+    /// approval form temporarily overrides non-blocked reports without discarding
+    /// them; semantic question/agent blocks retain precedence. Other reports
+    /// survive redraws and silent tool waits until expiry. `scrape` comes from
+    /// the debounced visible-screen scan in `settle_scrape_quiet`.
     /// Non-agent tabs are always `Unknown` (a report targeting one is ignored —
     /// dots are agent-only).
     fn effective_activity(
@@ -431,20 +427,23 @@ impl App {
         if kind == AgentKind::Other {
             return AgentActivity::Unknown;
         }
+        if crate::agent::codex_approval::overrides_report(reported, scrape, kind) {
+            return AgentActivity::Blocked;
+        }
         if let Some(r) = reported {
             // `Blocked` is latched: no TTL expiry and output never supersedes it
             // (`report_superseded_by_output` returns false), so it holds until the
             // user answers the pane (Enter, in `run_effects`) or a newer report
-            // lands. Other statuses expire; only scrape-rule agents yield to output.
+            // lands. Other statuses expire; only agy yields reports to output.
             let expired = r.status != AgentActivity::Blocked && now >= r.expiry;
             let superseded = report_superseded_by_output(r, last_output_at, kind);
             if !expired && !superseded {
                 return r.status;
             }
         }
-        // P1-2 scrape fallback: the debounced `settle_scrape_quiet` fires a
-        // single scan after `SCRAPE_QUIET_WINDOW` of silence, so the result
-        // here is already timing-safe — no per-event race with `reported`.
+        // P1-2 scrape fallback: `settle_scrape_quiet` debounces the screen read.
+        // Codex's complete forms have a bounded delay; other agents wait for
+        // silence. Report precedence is resolved here, after that screen read.
         if let Some(s) = scrape {
             return s;
         }
@@ -452,21 +451,17 @@ impl App {
     }
 
     /// P1-2 pure debounce step for one dirty tab: skip it, scan its screen now,
-    /// or wait until its quiet window expires.
-    ///
-    /// A prompt renders over several output events, so scanning mid-draw reads a
-    /// half-written screen. Waiting for `SCRAPE_QUIET_WINDOW` of silence means
-    /// the one scan we do run sees a settled frame. `None` last-output can't
-    /// happen for a dirty tab (the same drain stamps both), but reads as due so
-    /// the function is total.
+    /// or wait until its debounce expires. The caller chooses the first pending
+    /// repaint for Codex and the last output for other agents. A missing start
+    /// reads as due so the function is total.
     ///
     /// Deliberately blind to whether a report is live: a report that is about to
     /// be superseded must not cancel the scan. See [`Self::settle_scrape_quiet`].
-    fn scrape_step(has_rules: bool, last_output_at: Option<Instant>, now: Instant) -> ScrapeStep {
+    fn scrape_step(has_rules: bool, wait_from: Option<Instant>, now: Instant) -> ScrapeStep {
         if !has_rules {
             return ScrapeStep::Skip;
         }
-        let Some(at) = last_output_at else {
+        let Some(at) = wait_from else {
             return ScrapeStep::Scan;
         };
         let fire_at = at + SCRAPE_QUIET_WINDOW;
@@ -477,12 +472,11 @@ impl App {
         }
     }
 
-    /// P1-2 scrape-fallback settle: after `SCRAPE_QUIET_WINDOW` of silence from a
-    /// dirty agent tab with detection rules, fire a single screen scan. Consumes
-    /// the dirty flag.
+    /// Scan dirty agent viewports after their debounce. Codex's complete forms
+    /// use the first pending repaint, so a waiting tool's animation cannot keep
+    /// postponing detection. Other agents use the last output's quiet window.
     ///
-    /// **A live report does not cancel the scan**, even though it outranks the
-    /// scrape result in [`Self::effective_activity`]. Skipping the scan behind one
+    /// **A live report does not cancel the scan**. Skipping the scan behind one
     /// looks like a free optimization and is not: this runs before
     /// `settle_agent_activity`, which in the *same* iteration drops that report
     /// via `report_superseded_by_output`. Consuming the dirty flag on its behalf
@@ -491,8 +485,8 @@ impl App {
     /// whose last output *is* the prompt it's now blocked on never got scanned at
     /// all. That is precisely agy's approval prompt, and the scrape is agy's only
     /// source of `Blocked`, so the tier was dead for the case it exists to serve.
-    /// Scanning behind a live report costs one screen read and cannot change the
-    /// displayed status.
+    /// Codex's visible approval modal instead temporarily overrides a live
+    /// non-blocked report without dropping it.
     ///
     /// `&mut` settle point, PRE-recv. Returns `true` if any tab's status changed.
     pub(crate) fn settle_scrape_quiet(
@@ -508,22 +502,37 @@ impl App {
         let mut earliest_fire: Option<std::time::Instant> = None;
         for entry in tabs.tabs_mut().iter_mut() {
             if !entry.info.scrape_dirty {
+                entry.info.scrape_pending_at = None;
                 continue;
             }
             // SPYC-TRAP(scrape-scan-ignores-live-report): do not skip the scan
-            // because `entry.info.reported.is_some()` — that report is dropped
-            // later in this same iteration.
-            let rules = crate::agent::detect(&entry.info.command).detection_rules();
-            match Self::scrape_step(!rules.is_empty(), entry.info.last_output_at, now) {
-                // No rules — claude/codex/zot, whose hooks report every state
-                // they have. They can never produce a scrape result, so they pay
+            // because `entry.info.reported.is_some()` — agy's report may be
+            // dropped this iteration, and Codex's modal can override one.
+            let profile = crate::agent::detect(&entry.info.command);
+            let rules = profile.detection_rules();
+            let wait_from = if profile.kind() == AgentKind::Codex {
+                Some(
+                    *entry
+                        .info
+                        .scrape_pending_at
+                        .get_or_insert(entry.info.last_output_at.unwrap_or(now)),
+                )
+            } else {
+                entry.info.last_output_at
+            };
+            match Self::scrape_step(!rules.is_empty(), wait_from, now) {
+                // No rules — these agents can never produce a scrape result, so they pay
                 // neither the debounce nor the screen read.
-                ScrapeStep::Skip => entry.info.scrape_dirty = false,
+                ScrapeStep::Skip => {
+                    entry.info.scrape_dirty = false;
+                    entry.info.scrape_pending_at = None;
+                }
                 ScrapeStep::WaitUntil(fire_at) => {
                     earliest_fire = Some(earliest_fire.map_or(fire_at, |m| m.min(fire_at)));
                 }
                 ScrapeStep::Scan => {
                     entry.info.scrape_dirty = false;
+                    entry.info.scrape_pending_at = None;
                     let lines = entry.pane.visible_lines();
                     let scanned = crate::agent::detect_rules::scan(&lines, rules);
                     changed |= entry.info.scrape_status != scanned;
@@ -568,6 +577,7 @@ impl App {
         // during the borrow, fire after it drops (fire needs `&mut self`).
         let track_status = self.lua_wants_agent_status_event();
         let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+            self.state.codex_recovery.clear();
             ctx.scheduler.disarm(Deadline::AgentIdle);
             ctx.scheduler.disarm(Deadline::AgentAnim);
             if track_status {
@@ -576,6 +586,9 @@ impl App {
             }
             return (false, Vec::new());
         };
+        self.state
+            .codex_recovery
+            .retain(|id, _| tabs.tabs().iter().any(|tab| tab.info.id == *id));
         let active_idx = tabs.active_index();
 
         let mut changed = false;
@@ -598,11 +611,16 @@ impl App {
             {
                 entry.info.reported = None;
             }
-            // P1-2: a live report is now (or still) authoritative — drop any
-            // scrape guess so it can't resurface stale if the report later
-            // expires (the tab would then correctly fall through to a FRESH
-            // scan on its next output event, not a carried-over one).
-            if entry.info.reported.is_some() {
+            // Keep Codex's visible approval while preserving its silent-work
+            // report. Other live reports discard guesses so they cannot
+            // resurface stale after expiry.
+            if entry.info.reported.is_some()
+                && !crate::agent::codex_approval::overrides_report(
+                    entry.info.reported,
+                    entry.info.scrape_status.map(|(status, _)| status),
+                    kind,
+                )
+            {
                 entry.info.scrape_status = None;
             }
             let new = Self::effective_activity(

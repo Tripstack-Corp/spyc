@@ -24,21 +24,23 @@ in-memory view coordinates them all.
 ## 1. Activity dots — "which agent needs me?"
 
 Each **agent** pane tab carries a live dot in the divider. Its state comes from
-three tiers; a higher tier always wins:
+three tiers, with a narrow Codex approval exception:
 
 1. **Semantic self-report** (best) — the agent calls the `report_status` MCP tool
    (or its lifecycle hook does): `working` / `blocked` / `done` / `idle`.
 2. **Scrape fallback** — for a state an agent's hooks can't report, spyc reads
-   its *visible screen* for a known prompt (today: agy's tool-approval prompt →
-   `blocked`, since agy has no approval event). Second-class; a live report
-   always overrides it, and it only scans once the pane goes quiet.
+   its *visible screen* for a known prompt: agy's tool approval or Codex's
+   complete command, file-edit, MCP-tool and network approval forms. Codex scans
+   within 250 ms of the first pending repaint; agy waits for quiet.
+   Codex's verified dialogue temporarily overrides a non-blocked report;
+   semantic question/agent blocks retain precedence.
 3. **Output timing** — with neither of the above, output flowing = `working`,
    silence = `idle`.
 
 Codex and Claude retain semantic reports through output and footer redraws.
 Silent tool waits do not erase `working`; the default five-minute TTL remains
-a backstop, and newer reports replace older ones. Agents with scrape rules
-(agy) still yield non-blocked reports to fresh output so their uncovered
+a backstop, and newer reports replace older ones. Agy still yields non-blocked
+reports to fresh output so their uncovered
 approval prompts can be detected. Timing-only `idle` means quiet, not proof
 that a turn stopped or finished.
 
@@ -52,7 +54,7 @@ that a turn stopped or finished.
 | calm **teal** square `■` | **done** — finished a turn |
 | `💤` | `^z`-suspended |
 
-`blocked` is **latched**: it stays red until you settle the prompt in that pane —
+Semantically reported `blocked` is **latched**: it stays red until you settle the prompt in that pane —
 **Enter** to answer it, **Esc** or **`^c`** to dismiss it — or the agent files a
 newer report. No timer or stray output bounces it off. The dismissal keys count
 because no hook reports one: Claude Code ends a declined turn as a user
@@ -111,14 +113,79 @@ The reporter forwards only event/tool names, notification subtype and available
 turn/call ids; it excludes arguments, prompts, response text and tool output.
 Control characters, malformed identifiers and oversized fields are discarded.
 `--status-trace` logs this sanitized metadata instead of the raw stdin payload.
+The reporter streams the complete hook JSON and retains only a fixed set of
+root metadata fields; a large patch, heredoc or answer does not erase later ids.
+The 8 KiB limit applies to normalized metadata, not raw stdin. String capture is
+bounded and nesting is limited to 128 levels; malformed documents produce no
+partial metadata. Arguments and responses are skipped without being retained.
 This is claimed metadata, not authenticated hook provenance. Missing metadata
 can mean an older reporter or an absent/malformed payload, not a missing hook.
 
 The current official hook contract supplies `tool_use_id` for `PreToolUse` and
 `PostToolUse`, but does not list it for `PermissionRequest`. An absent id stays
 absent. A generic tool completion cannot establish which permission/question
-was answered, and metadata alone does not clear `blocked`. Question/plan tool
-coverage still needs real-CLI evidence; no broad tool-completion hook is added.
+was answered. No broad tool-completion hook is added; narrowly correlated
+question recovery is described below.
+
+### Codex question-tool recovery
+
+Codex's `request_user_input` tool has narrowly matched `PreToolUse` and
+`PostToolUse` reporters. A start reports `blocked`; successful completion
+restores `working` only when pane, session, turn and call match a pending
+question. The first valid correlated start supersedes a preceding generic
+agent block, such as the agent's announcement that it is about to ask. A generic
+block received while any question is pending remains independent and retains
+attention after completion; duplicate or additional starts cannot clear it.
+Enter alone does not clear an identified question, and unrelated or late
+completions are recorded as unapplied with a reason in `:activity dump`.
+
+Correlation is bounded to eight pending questions per pane, with overflow
+remaining blocked until a lifecycle or explicit agent report. It is reset for
+replaced panes and never stores question arguments or answers. The hook wire
+values require a capable host and metadata-bearing reporter; older components
+cannot silently apply an uncorrelated completion. Restart Codex and review both
+new hooks in `/hooks`; spyc never approves them or edits trust records.
+
+This instruments the question tool's attempt/completion, not authenticated
+proof that a dialogue opened. Invalid/cancelled calls may have no post event;
+`Stop`, `Interrupt` or an explicit newer report retires the wait. Correlated semantic
+permission completion cannot be correlated because `PermissionRequest` has
+no call id. It runs before hook decisions, automatic review or a human dialogue,
+as shown by the exact-version
+[permission event](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/hooks/src/events/permission_request.rs)
+and [review path](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/approvals.rs).
+Metadata-bearing permission reports are recorded as observational
+(`not applied: PermissionRequest precedes review; human wait unverified`). They
+cannot latch blocked or interfere with a later question. The existing hook
+command remains unchanged, preserving its trust hash; the host and reporter
+on `PATH` must both support lifecycle metadata.
+
+Command, file-edit, MCP-tool and network approvals use a narrow fallback:
+known required phrases and a complete default footer at the current viewport
+bottom temporarily override a non-blocked report. Native word wrapping is
+accepted; missing required text, changed forms and old dialogues above the
+composer are not inferred. Codex scans within 250 ms of the first pending
+repaint, so continuous redraws cannot postpone detection indefinitely.
+`:why-status` and `:activity dump` identify `scrape-fallback` as the source.
+The silent-work report remains stored and resumes after the dialogue closes.
+This is UI detection, not semantic permission completion. Network coverage uses
+an exact-version upstream UI fixture; a live native network approval remains
+an acceptance case. Generic MCP elicitation, extra-permission and stdin-write
+approval forms remain uncovered. Explicit agent blocks retain their ordinary input
+recovery; identified questions require matching completion instead of Enter.
+Real-CLI native question and quiet-after-answer checks passed through the
+automated TUI harness with already trusted hooks. Fresh hook trust onboarding
+remains a separate acceptance case; see `docs/HARNESS.md` for the driver.
+
+`request_user_input_async` is a separate question path. Its immediate completion
+acknowledges posting a question; it does not establish that the user answered.
+These native question hooks do not instrument that path. The
+[`0.160.1` async handler](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
+posts an async message and immediately returns `accepted`; the
+[TUI reply parser](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/tui/src/async_question_reply.rs)
+handles the answer as a later user message. A blocked latch tied to the tool's
+completion would misrepresent an agent that continues working. Async-answer
+lifecycle coverage remains open in A3.
 
 ### Duplicate Codex hook sources
 
@@ -137,6 +204,21 @@ hook definitions, so removing a duplicate file does not establish single
 delivery before restart. A JSON-only change also sets the restart diagnostic.
 Migration does not approve hooks or infer that a pending question or permission
 request was answered.
+
+### Codex linked-worktree hook sources
+
+Codex loads project hooks from the corresponding directory in the root checkout,
+even when launched in a linked worktree. For example, `repo.worktrees/fix/src/`
+uses `repo/src/.codex/config.toml` and `repo/src/.codex/hooks.json`. Ordinary
+project config and spyc's MCP entry remain worktree-local. Worktree-local hook
+declarations are ignored; their reporter marker cannot establish readiness.
+
+spyc resolves that source for installation, consent, diagnostics, re-healing and
+shared ownership. Consent belongs to the actual source's project root; a prior
+worktree-only grant cannot authorize a write in the root checkout. The consent
+popup names the file, and linked-worktree diagnostics show its full path. A
+source change marks all affected Codex tabs as needing restart. Review `/hooks`
+in the fresh CLI; definition presence still does not establish execution/trust.
 
 ### How the hooks get written
 
@@ -285,3 +367,14 @@ map: `src/app/agent_status.rs` (dots + notify + autosave settle),
 `src/mcp/` + `src/mcp_cmd.rs` + `src/app/mcp.rs` (the MCP verbs + wait parking),
 `src/state/scope_registry.rs` (the registry + conflict logic),
 `src/agent/` (per-agent profiles + hooks + scrape rules).
+
+### Preserve Codex user hook positions
+
+Codex's persisted hook key includes the source, event, matcher-group index and
+handler index. Removing a reporter ahead of a user handler changes the trust
+lookup even when that handler's command hash is identical. spyc therefore
+preflights inline TOML and legacy JSON pruning. If a user handler would move,
+installation and cleanup preserve both sources and explain the refusal in
+`:activity dump`. Removing trailing reporters is still allowed. spyc does not
+move or create hook trust records; a manual migration must include reviewing the
+affected user hooks in `/hooks` after restarting Codex.
