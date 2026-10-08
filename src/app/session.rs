@@ -326,6 +326,9 @@ impl App {
             for t in pt.tabs() {
                 t.info.command.hash(&mut h);
                 t.info.cwd.hash(&mut h);
+                // A pin usually lands after the tab's first save, which then
+                // recorded no conversation, or a guessed one (#584).
+                t.info.pinned_session_id().hash(&mut h);
             }
         }
         super::state::restore::hash_deferred_tabs(&self.state.deferred_tabs, &mut h);
@@ -980,7 +983,6 @@ mod tests {
     /// claude hasn't written yet, and the newest transcript in the folder
     /// belongs to a conversation from before this tab existed.
     #[test]
-    #[ignore = "red: an unwritten pin falls back to the newest transcript in the cwd"]
     fn a_pinned_claude_tab_saves_its_own_conversation_before_claude_writes_it() {
         with_claude_home(|project, claude| {
             claude_transcript(claude, project, OTHER, SPAWN - 60);
@@ -995,7 +997,6 @@ mod tests {
     /// identifies it. Its conversation having no transcript yet means there
     /// is nothing to resume, not that the tab is someone else's.
     #[test]
-    #[ignore = "red: the resolver skips the tab's own record until its transcript exists"]
     fn an_unpinned_claude_tab_never_borrows_another_conversation_before_its_own_exists() {
         with_claude_home(|project, claude| {
             claude_transcript(claude, project, OTHER, SPAWN - 60);
@@ -1010,7 +1011,6 @@ mod tests {
     /// writing its conversation now. While this tab's own conversation is
     /// unwritten, the other one is still not this tab's.
     #[test]
-    #[ignore = "red: the resolver takes a running claude's conversation"]
     fn an_unpinned_claude_tab_never_takes_another_running_claudes_conversation() {
         with_claude_home(|project, claude| {
             claude_record(claude, 1111, OTHER, project, SPAWN - 3_600);
@@ -1026,7 +1026,6 @@ mod tests {
     /// it, has already written its conversation. This tab's own record is the
     /// nearer one, and its unwritten conversation still isn't the other's.
     #[test]
-    #[ignore = "red: the resolver skips the tab's own record for a written neighbour"]
     fn an_unpinned_claude_tab_matches_its_own_record_before_a_written_neighbour() {
         with_claude_home(|project, claude| {
             claude_record(claude, 4242, MINE, project, SPAWN + 1);
@@ -1041,7 +1040,6 @@ mod tests {
     /// The same with no record for this tab's own claude: the last-resort guess
     /// can't take a conversation another running claude owns.
     #[test]
-    #[ignore = "red: the last-resort guess takes a running claude's conversation"]
     fn the_last_resort_guess_skips_a_running_claudes_conversation() {
         with_claude_home(|project, claude| {
             claude_record(claude, 1111, OTHER, project, SPAWN - 3_600);
@@ -1055,7 +1053,6 @@ mod tests {
     /// With no process record at all, a transcript last written before the tab
     /// started can't be the tab's conversation.
     #[test]
-    #[ignore = "red: the last-resort guess takes any transcript in the cwd"]
     fn a_transcript_older_than_the_tab_is_not_its_conversation() {
         with_claude_home(|project, claude| {
             claude_transcript(claude, project, OTHER, SPAWN - 60);
@@ -1097,7 +1094,6 @@ mod tests {
     /// keeps whatever the previous save resolved until something unrelated
     /// changes.
     #[test]
-    #[ignore = "red: the fingerprint doesn't cover a tab's pinned conversation"]
     fn a_pin_arriving_moves_the_autosave_fingerprint() {
         with_claude_home(|project, _| {
             let mut app = App::test_app(project.to_path_buf());

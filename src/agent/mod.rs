@@ -420,25 +420,34 @@ impl AgentProfile for ClaudeProfile {
     ) -> (Option<String>, Option<String>) {
         resume::resolve_claude_resume_target(pane, cwd, spawn_epoch_secs, claimed)
     }
-    fn validate_live_session_id(&self, cwd: &Path, id: &str) -> Option<(String, Option<String>)> {
-        if crate::state::sessions::claude_jsonl_exists(cwd, id) {
-            Some((
-                id.to_string(),
-                crate::state::sessions::find_claude_session_name(id),
-            ))
-        } else {
-            None
-        }
+    /// Claude's pin is taken as-is. The hook names the conversation this tab
+    /// runs from claude's startup, but the transcript appears only with the
+    /// first message: requiring it here sent an unwritten pin to the resolver,
+    /// which saved another tab's conversation (#584). Restore checks for the
+    /// transcript instead, before typing `/resume`.
+    fn validate_live_session_id(&self, _cwd: &Path, id: &str) -> Option<(String, Option<String>)> {
+        Some((
+            id.to_string(),
+            crate::state::sessions::find_claude_session_name(id),
+        ))
     }
     fn command_without_resume(&self, cmd: &str) -> String {
         resume::command_without_resume(cmd)
     }
-    fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, _cwd: &Path) -> RestorePlan {
+    fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, cwd: &Path) -> RestorePlan {
         // Claude always spawns fresh; the `/resume <sid>` stdin dance is
         // armed by the event loop when a session id is present.
         RestorePlan {
             command: resume::command_without_resume(cmd),
             resume: match sid {
+                // Saved before its first message, so there is nothing to
+                // resume. A name can't be checked; claude resolves it.
+                Some(s)
+                    if crate::state::sessions::is_uuid(s)
+                        && !crate::state::sessions::claude_jsonl_exists(cwd, s) =>
+                {
+                    ResumeAction::None
+                }
                 Some(s) => ResumeAction::ClaudeStdin {
                     session_id: s.to_string(),
                 },
@@ -645,8 +654,8 @@ impl AgentProfile for CodexProfile {
     /// claim already was the observation. If that file has since gone,
     /// `codex resume <uuid>` fails where the user can see it, which beats
     /// `--last` silently attaching to whichever rollout in the cwd was written
-    /// last (the #230 shape). Claude validates instead, because its id arrives
-    /// from a hook payload that can name a conversation already gone.
+    /// last (the #230 shape). Claude's pin is taken as-is too, and its restore
+    /// skips a conversation with no transcript.
     fn validate_live_session_id(&self, _cwd: &Path, id: &str) -> Option<(String, Option<String>)> {
         Some((id.to_string(), None))
     }
@@ -1222,7 +1231,6 @@ mod tests {
     /// for it gets "No conversation found"; there is nothing to resume, so
     /// claude starts fresh.
     #[test]
-    #[ignore = "red: restore types /resume for a conversation that was never written"]
     fn restoring_a_claude_conversation_that_was_never_written_starts_fresh() {
         const SID: &str = "11111111-1111-4111-8111-111111111111";
         let tmp = tempfile::tempdir().unwrap();

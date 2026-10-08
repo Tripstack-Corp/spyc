@@ -447,6 +447,19 @@ pub fn claude_jsonl_path(cwd: &std::path::Path, session_id: &str) -> Option<Path
 /// Returns the session ID (filename stem). This is the same conversation
 /// the no-arg `claude --resume` picker would surface first for this cwd.
 pub fn most_recent_jsonl_for_cwd(cwd: &std::path::Path) -> Option<String> {
+    newest_jsonl_for_cwd(cwd).map(|(_, id)| id)
+}
+
+/// [`most_recent_jsonl_for_cwd`], if that transcript was last written at or
+/// after `since` (epoch secs).
+pub fn most_recent_jsonl_for_cwd_since(cwd: &std::path::Path, since: u64) -> Option<String> {
+    let since = std::time::UNIX_EPOCH + std::time::Duration::from_secs(since);
+    newest_jsonl_for_cwd(cwd)
+        .filter(|(written, _)| *written >= since)
+        .map(|(_, id)| id)
+}
+
+fn newest_jsonl_for_cwd(cwd: &std::path::Path) -> Option<(std::time::SystemTime, String)> {
     let dir = claude_dir()?.join("projects").join(project_slug(cwd));
     let entries = std::fs::read_dir(&dir).ok()?;
     let mut best: Option<(std::time::SystemTime, String)> = None;
@@ -464,7 +477,7 @@ pub fn most_recent_jsonl_for_cwd(cwd: &std::path::Path) -> Option<String> {
             best = Some((mtime, stem.to_string()));
         }
     }
-    best.map(|(_, id)| id)
+    best
 }
 
 #[derive(Debug, Clone)]
