@@ -2,7 +2,8 @@
 //!
 //! Each session is a JSON snapshot of the workspace layout at quit time.
 //! Stored in `$XDG_STATE_HOME/spyc/sessions/` (or `~/.local/state/spyc/sessions/`),
-//! one file per session, filename is the epoch millis.
+//! one `<id>.json` per session. The id is the session's creation time in epoch
+//! millis, and a restore keeps it, so the name says nothing about recency.
 
 use std::path::PathBuf;
 
@@ -156,14 +157,23 @@ pub fn save_session(session: &Session) -> std::io::Result<()> {
         return Ok(());
     };
     std::fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("{}.json", session.id));
+    let path = dir.join(session_file_name(session.id));
     let json = serde_json::to_string_pretty(session).map_err(std::io::Error::other)?;
     // Atomic write (temp + rename) so a SIGKILL mid-write can't leave a
     // truncated/corrupt `<id>.json` — the crash-sufficiency contract the P3-2
     // debounced autosave relies on (and a free win for the quit-time save).
     crate::fs::write_atomic(&path, json.as_bytes())?;
-    prune_old(&dir);
+    prune_old(&dir, &path);
     Ok(())
+}
+
+fn session_file_name(id: u64) -> String {
+    format!("{id}.json")
+}
+
+/// Whether a restore point is already saved under `id`.
+pub fn session_exists(id: u64) -> bool {
+    sessions_dir().is_some_and(|dir| dir.join(session_file_name(id)).is_file())
 }
 
 pub fn load_sessions() -> Vec<Session> {
@@ -190,24 +200,40 @@ pub fn load_sessions() -> Vec<Session> {
     sessions
 }
 
-fn prune_old(dir: &std::path::Path) {
+fn prune_old(dir: &std::path::Path, just_saved: &std::path::Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
-    let mut files: Vec<PathBuf> = entries
+    let files: Vec<(PathBuf, std::time::SystemTime)> = entries
         .filter_map(Result::ok)
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
-        .map(|e| e.path())
+        .map(|e| {
+            let saved = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            (e.path(), saved)
+        })
         .collect();
-    if files.len() <= MAX_SESSIONS {
-        return;
-    }
-    // Sort ascending by filename (epoch millis) so oldest are first.
-    files.sort();
-    let to_remove = files.len() - MAX_SESSIONS;
-    for path in &files[..to_remove] {
+    for path in prune_victims(files, just_saved, MAX_SESSIONS) {
         let _ = std::fs::remove_file(path);
     }
+}
+
+/// The session files to delete to get back down to `max`: the least recently
+/// written, and never `keep`, the file the current save just wrote.
+///
+/// SPYC-TRAP(session-prune-by-last-save): rank by write time, never by name.
+fn prune_victims(
+    mut files: Vec<(PathBuf, std::time::SystemTime)>,
+    keep: &std::path::Path,
+    max: usize,
+) -> Vec<PathBuf> {
+    let excess = files.len().saturating_sub(max);
+    files.retain(|(path, _)| path != keep);
+    files.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+    files.truncate(excess);
+    files.into_iter().map(|(path, _)| path).collect()
 }
 
 /// Claude session info returned by `find_claude_sessions`.

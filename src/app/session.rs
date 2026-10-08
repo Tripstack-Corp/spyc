@@ -94,6 +94,18 @@ pub(super) fn tab_conversation(
 
 impl App {
     pub fn save_session(&mut self) {
+        // SPYC-TRAP(session-prune-by-last-save): every file holds a picker slot,
+        // so an empty quit writes nothing new. An existing file is still
+        // overwritten, or tabs closed before quitting would come back on `-r`.
+        if !self.has_restorable_state()
+            && !self
+                .state
+                .session_id
+                .is_some_and(crate::state::sessions::session_exists)
+        {
+            self.exit_summary = Some("no session saved — no tabs or split to restore".into());
+            return;
+        }
         let session = self.build_session_snapshot();
         let save_result = crate::state::sessions::save_session(&session);
         // A successful save resets the autosave baseline so a follow-up
@@ -334,6 +346,18 @@ impl App {
         h.finish()
     }
 
+    /// Whether a restore would bring anything back: tabs (open or kept
+    /// unopened), a split, or scope claims. A cwd alone doesn't count.
+    fn has_restorable_state(&self) -> bool {
+        self.runtime
+            .pane_tabs
+            .as_ref()
+            .is_some_and(|pt| !pt.tabs().is_empty())
+            || !self.state.deferred_tabs.is_empty()
+            || self.state.vsplit.is_some()
+            || !self.state.scope_registry.is_empty()
+    }
+
     /// P3-2 crash-sufficient autosave (PRE-recv settle). Debounce: on a
     /// session-relevant change arm `Deadline::Autosave` `AUTOSAVE_DEBOUNCE` out
     /// (re-armed while changes keep landing); when the quiet window elapses,
@@ -342,15 +366,7 @@ impl App {
     pub(crate) fn settle_autosave(&mut self, now: Instant, ctx: &mut RunCtx) {
         // Nothing worth restoring (bare launch: no tabs, no split, no scope
         // claims) ⇒ never write an empty session; stay disarmed.
-        let has_restorable = self
-            .runtime
-            .pane_tabs
-            .as_ref()
-            .is_some_and(|pt| !pt.tabs().is_empty())
-            || !self.state.deferred_tabs.is_empty()
-            || self.state.vsplit.is_some()
-            || !self.state.scope_registry.is_empty();
-        let dirty = has_restorable
+        let dirty = self.has_restorable_state()
             && Some(self.session_fingerprint()) != self.runtime.autosave_last_saved_fp;
         match autosave_action(dirty, self.runtime.autosave_due, now) {
             AutosaveAction::Idle => {
@@ -431,15 +447,20 @@ impl App {
             })
             .collect();
         self.state.pending_sessions = Some(sessions);
-        let mut all_lines = vec!["  [n]  new session".to_string(), String::new()];
+        let mut all_lines = vec!["  [n]  new session".to_string()];
         all_lines.extend(lines);
         let mut view = pager::PagerView::new_plain(
             "sessions — j/k navigate, Enter restore, n new, q close",
             all_lines,
         );
-        view.picker_cursor = Some(2); // Start on first session (after header).
+        // Opens on the newest session.
+        view.picker_cursor = Some(Self::SESSION_PICKER_HEADER_ROWS);
         self.set_pager(view);
     }
+
+    /// Rows above the first session in the `-r` picker: `[n] new session`.
+    /// The cursor can stop on any row, so the picker has no spacer.
+    pub(super) const SESSION_PICKER_HEADER_ROWS: usize = 1;
 
     pub fn show_session_info(&mut self) {
         let mut lines: Vec<String> = Vec::new();
@@ -718,6 +739,163 @@ mod tests {
                 .filter(|t| t.agent_session_id.as_deref() == Some(UUID))
                 .count();
             assert_eq!(claims, 1, "only one tab may claim a conversation");
+        });
+    }
+
+    /// A restore point the picker can restore. Its `cwd` is the crate root,
+    /// where the test process already runs, because restoring `chdir`s the
+    /// whole process (#576).
+    fn restorable(id: u64, epoch_secs: u64, name: &str) -> crate::state::sessions::Session {
+        crate::state::sessions::Session {
+            id,
+            saved_at: String::new(),
+            epoch_secs,
+            cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+            tabs: Vec::new(),
+            active_tab: 0,
+            pane_height_pct: 30,
+            pane_focused: false,
+            name: name.to_string(),
+            project_home: None,
+            vsplit: None,
+            scope_claims: Vec::new(),
+        }
+    }
+
+    fn press(app: &mut App, code: crossterm::event::KeyCode) {
+        app.handle_pager_key(crossterm::event::KeyEvent::new(
+            code,
+            crossterm::event::KeyModifiers::empty(),
+        ));
+    }
+
+    /// The text of the line under the open picker's cursor.
+    fn cursored_line(app: &App) -> String {
+        let view = app.view.pager.as_ref().expect("the picker is open");
+        let cursor = view.picker_cursor.expect("a picker has a cursor");
+        view.lines[cursor].to_string()
+    }
+
+    /// Quitting with nothing to restore — no tabs, no split, no scope claims —
+    /// must not write a restore point. Each one took a `MAX_SESSIONS` slot, so
+    /// opening `spyc -r`, finding the session missing and quitting pushed out
+    /// another real session every time.
+    #[test]
+    fn quitting_with_nothing_to_restore_writes_no_session() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.save_session();
+            assert!(
+                crate::state::sessions::load_sessions().is_empty(),
+                "an empty quit must not take a picker slot"
+            );
+            let summary = app.exit_summary.as_deref().unwrap_or_default();
+            assert!(
+                !summary.contains("spyc -r"),
+                "the exit summary must not offer a restore that isn't there: {summary}"
+            );
+        });
+    }
+
+    /// The other side of the rule above: a restored session whose tabs were all
+    /// closed is still overwritten on quit. Skipping that save would leave the
+    /// old file in place, and `-r` would reopen the tabs the user closed.
+    #[test]
+    fn quitting_an_emptied_restored_session_still_overwrites_it() {
+        const ID: u64 = 4242;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            let mut saved = restorable(ID, 1_700_000_000, "OLD");
+            saved.tabs.push(crate::state::sessions::SavedTab {
+                command: "cat".into(),
+                label: "cat".into(),
+                cwd: tmp.path().to_path_buf(),
+                agent_kind: crate::state::sessions::AgentKind::Other,
+                agent_session_id: None,
+                agent_session_name: None,
+                claim_owner: String::new(),
+            });
+            crate::state::sessions::save_session(&saved).expect("seed the restore point");
+
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.state.session_id = Some(ID);
+            app.save_session();
+
+            let loaded = crate::state::sessions::load_sessions();
+            assert_eq!(loaded.len(), 1);
+            assert_eq!(loaded[0].id, ID);
+            assert!(
+                loaded[0].tabs.is_empty(),
+                "the closed tab must not come back"
+            );
+        });
+    }
+
+    /// Every line the session picker's cursor can stop on is a choice. A blank
+    /// spacer under `[n] new session` was selectable, and `Enter` on it quietly
+    /// started a new session, which looks like a corrupt entry.
+    #[test]
+    fn every_line_the_session_picker_cursor_reaches_is_a_choice() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            for (id, name) in [(1, "FIRST"), (2, "SECOND")] {
+                crate::state::sessions::save_session(&restorable(id, 1_700_000_000 + id, name))
+                    .expect("seed a restore point");
+            }
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.show_session_picker();
+            let reachable = app.view.pager.as_ref().expect("picker").lines.len();
+            for code in [
+                crossterm::event::KeyCode::Up,
+                crossterm::event::KeyCode::Down,
+            ] {
+                for _ in 0..reachable {
+                    let line = cursored_line(&app);
+                    assert!(
+                        !line.trim().is_empty(),
+                        "the cursor stopped on a line that is not a choice"
+                    );
+                    press(&mut app, code);
+                }
+            }
+        });
+    }
+
+    /// The picker opens on the newest session, `Enter` restores the row under
+    /// the cursor, and the row above the list starts a new session.
+    #[test]
+    fn the_session_picker_restores_the_row_under_the_cursor() {
+        use crossterm::event::KeyCode;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            for (id, name) in [(1, "OLDER"), (2, "NEWER")] {
+                crate::state::sessions::save_session(&restorable(id, 1_700_000_000 + id, name))
+                    .expect("seed a restore point");
+            }
+
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.show_session_picker();
+            assert!(cursored_line(&app).contains("NEWER"));
+            press(&mut app, KeyCode::Down);
+            press(&mut app, KeyCode::Enter);
+            assert_eq!(app.state.session_id, Some(1));
+            assert_eq!(app.state.session_name.as_deref(), Some("OLDER"));
+
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.show_session_picker();
+            press(&mut app, KeyCode::Enter);
+            assert_eq!(app.state.session_id, Some(2));
+
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.show_session_picker();
+            for _ in 0..app.view.pager.as_ref().expect("picker").lines.len() {
+                press(&mut app, KeyCode::Up);
+            }
+            assert!(cursored_line(&app).contains("new session"));
+            press(&mut app, KeyCode::Enter);
+            assert_eq!(app.state.session_id, None, "the [n] row restores nothing");
+            assert!(app.view.pager.is_none(), "and closes the picker");
         });
     }
 

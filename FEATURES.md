@@ -1357,14 +1357,16 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   tabs (command, label, cwd), active tab, pane height, focus state,
   the spice-themed session name, `PROJECT_HOME`, and the vertical split
   (its shape plus the second commander's cwd, or the preview file) —
-  restored on `-r`, reopening column `b` where you left it.
+  restored on `-r`, reopening column `b` where you left it. A quit with
+  nothing to restore (no tabs, split or scope claims) saves nothing, so it
+  doesn't take a picker slot; a restored session is still updated.
 - **`spyc --resume`** (or `-r`) — opens a session picker showing
   the session name (primary column), a human-readable timestamp
   ("just now", "2 hours ago", "3 days ago"), and the cwd.
 - **j/k navigation** — browse sessions with highlighted cursor row.
   Enter to restore, n for a new session, 1-9 for direct selection.
-- Sessions are de-duplicated by cwd + tab commands (most recent kept).
-- Capped at 20 most recent sessions.
+- Capped at the 20 most recently saved sessions. A session you restore
+  keeps its place by when it was last saved, not when it was created.
 - **Agent session resume** — for tabs running `claude`, `codex`,
   `agy`, or `zot`, quitting spyc and launching with `spyc -r`
   will restore. Claude tabs spawn a fresh `claude` and type
