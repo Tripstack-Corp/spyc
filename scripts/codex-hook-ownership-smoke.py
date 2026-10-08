@@ -153,6 +153,21 @@ class OwnershipSmoke(module.Smoke):
         if self.snapshot is not None:
             assert self.config.read_bytes() == self.snapshot, "refused configuration changed"
 
+    def dump(self, name):
+        if self.args.scenario not in ("symlink", "dangling_symlink"):
+            return super().dump(name)
+        self.key("Ctrl+a", "k")
+        self.cli("type", ":activity dump")
+        self.key("Enter")
+        self.wait("activity dump", 5000)
+        # Plain pagers wrap by default. The shared numbered-line extractor
+        # omits continuation rows; assert against the actual wrapped screen.
+        self.wait("link and target preserved", 5000)
+        text = self.capture(name)
+        self.key("q")
+        self.key("Ctrl+a", "j")
+        return text
+
     def check_mode(self, name):
         assert self.legacy.is_file() and not self.legacy.is_symlink(), "legacy source disappeared or changed type"
         mode = self.legacy.stat().st_mode & 0o777
@@ -170,7 +185,8 @@ class OwnershipSmoke(module.Smoke):
         if self.args.scenario in ("tracked", "malformed", "claude_only", "mcp_only", "symlink", "dangling_symlink"):
             self.unchanged()
             if self.args.scenario in ("symlink", "dangling_symlink"):
-                assert "legacy .codex/hooks.json is a symlink" in self.dump("symlink-diagnostic")
+                diagnostic = self.dump("symlink-diagnostic")
+                assert "is a symlink" in diagnostic and "link and target preserved" in diagnostic, diagnostic
             self.quit_host(self)
             self.unchanged()
             if kind == "claude":
