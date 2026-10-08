@@ -140,7 +140,7 @@ mod tests {
     fn the_flag_reaches_the_loop() {
         let lib = crate::guard_support::production_half(include_str!("../lib.rs"));
         assert!(lib.contains("app.queue_startup_commands(cli.cmd)"));
-        let run = crate::guard_support::production_half(include_str!("run.rs"));
+        let run = crate::guard_support::production_half(include_str!("pre_recv.rs"));
         assert!(run.contains("self.settle_startup_commands()"));
     }
 

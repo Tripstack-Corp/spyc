@@ -118,6 +118,49 @@ fn gitignored_fs_event_drop_keeps_cwd_level_source_and_preview() {
     });
 }
 
+/// The gitignore drop runs on every loop iteration, and most iterations (a pane
+/// output wake, a key, a timer) carry no FsEvents. An empty batch has nothing to
+/// filter, so it must not build the exclude checker: each build reopens the repo
+/// and SHA-1-verifies the whole index, which a busy agent pane paid per wake.
+/// The non-empty half proves the counter counts, so the zero isn't vacuous.
+#[test]
+fn empty_fs_batch_builds_no_gitignore_checker() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let a = std::fs::canonicalize(tmp.path()).unwrap().join("a");
+        let b = std::fs::canonicalize(tmp.path()).unwrap().join("b");
+        for repo in [&a, &b] {
+            std::fs::create_dir(repo).unwrap();
+            gix::init(repo).unwrap();
+            std::fs::write(repo.join(".gitignore"), "target/\n").unwrap();
+        }
+        let mut app = App::test_app(a.clone());
+        app.state.update_repo_root(state::Side::Left, &a);
+        app.open_second_commander_at(&b);
+        app.state.update_repo_root(state::Side::Right, &b);
+
+        crate::git::excludes::reset_checker_builds();
+        app.drop_gitignored_fs_events(&mut Vec::new());
+        assert_eq!(
+            crate::git::excludes::checker_builds(),
+            0,
+            "no FsEvents pending → no checker built for either column"
+        );
+
+        let ev = |p: std::path::PathBuf| notify::Event::new(notify::EventKind::Any).add_path(p);
+        let src = b.join("src/main.rs");
+        let mut pending = vec![ev(a.join("target/debug/foo.o")), ev(src.clone())];
+        app.drop_gitignored_fs_events(&mut pending);
+        assert_eq!(
+            crate::git::excludes::checker_builds(),
+            2,
+            "a pending batch builds one checker per column in a repo"
+        );
+        let survived: Vec<_> = pending.iter().flat_map(|e| e.paths.clone()).collect();
+        assert_eq!(survived, vec![src], "the batch was still filtered");
+    });
+}
+
 /// Dual fs-watch: with a second commander open, the fs-event path predicates
 /// recognize column `b`'s tree + gitdir too — so `b`'s working-tree edits and
 /// index/HEAD changes drive a refresh, not just the ≤1 s poll PR E left.
