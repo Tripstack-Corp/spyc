@@ -21,7 +21,7 @@ use crate::shell;
 
 use super::route;
 use super::update::UiMsg;
-use super::{App, Effect, Mode, PaneInput, PaneTarget, View, sh_c, strip_ansi_escapes};
+use super::{App, Effect, Mode, PaneInput, PaneTarget, View, sh_c};
 
 /// Wrap `text` in bracketed-paste markers so the receiving child app (claude,
 /// an editor, …) sees it as one paste block rather than line-by-line.
@@ -301,38 +301,8 @@ impl App {
                 // chance to keep a copy of what it just took. Purely additive:
                 // the key still forwards below, unmodified.
                 let capture = self.plan_clipboard_capture(key);
-                // Track what the user types so `yP` can yank the
-                // last prompt.
-                match key.code {
-                    KeyCode::Enter => {
-                        let trimmed = strip_ansi_escapes(&self.state.pane.pane_prompt_buf);
-                        if !trimmed.is_empty() {
-                            self.state.pane.last_pane_prompt = Some(trimmed);
-                        }
-                        self.state.pane.pane_prompt_buf.clear();
-                        // Submitting hands the images to the agent, whose
-                        // transcript becomes the record — so the uncommitted
-                        // ring for this tab is done. Same signal the prompt
-                        // buffer uses, deliberately: one notion of "sent".
-                        self.clear_pending_images_for_active_tab();
-                    }
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.state.pane.pane_prompt_buf.clear();
-                    }
-                    KeyCode::Backspace => {
-                        self.state.pane.pane_prompt_buf.pop();
-                    }
-                    KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.state.pane.pane_prompt_buf.push(c);
-                    }
-                    _ => {}
-                }
-                // Forward the keystroke to the active pane via the sole
-                // executor (no flash — result was always ignored). The
-                // `pane_prompt_buf` tracking above stays as pure
-                // transitions before the emit. Any clipboard capture rides
-                // ALONGSIDE the forward, never instead of it — the agent must
-                // still receive the paste it asked for.
+                // Commit prompt tracking only after the input queue accepts it.
+                // Clipboard capture rides alongside the key forward.
                 let mut effects = vec![Effect::SendToPane {
                     target: PaneTarget::Active,
                     input: PaneInput::Key(key),
@@ -640,7 +610,6 @@ impl App {
                 if !self.state.pane_focused() {
                     self.set_pane_focus(true);
                 }
-                self.state.pane.pane_prompt_buf.push_str(&text);
                 let child_bracketed = self
                     .runtime
                     .pane_tabs
@@ -648,7 +617,10 @@ impl App {
                     .is_some_and(|t| t.active().bracketed_paste_enabled());
                 vec![Effect::SendToPane {
                     target: PaneTarget::Active,
-                    input: PaneInput::Bytes(paste_bytes_for_pane(&text, child_bracketed)),
+                    input: PaneInput::Paste {
+                        bytes: paste_bytes_for_pane(&text, child_bracketed),
+                        text,
+                    },
                     on_ok: None,
                     err_prefix: None,
                 }]
