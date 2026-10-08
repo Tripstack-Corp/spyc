@@ -384,7 +384,7 @@ impl App {
                     return Some(Vec::new());
                 }
                 KeyCode::Char(c @ '1'..='9') => {
-                    // Direct selection — index into sessions (offset by 2 header lines).
+                    // Direct selection by the `[N]` shown on the row.
                     let sessions = self.state.pending_sessions.take().unwrap();
                     let idx = (c as u8 - b'1') as usize;
                     if let Some(session) = sessions.get(idx) {
@@ -403,14 +403,14 @@ impl App {
                         .pending_sessions
                         .take()
                         .expect("guarded by is_some check above");
-                    if cursor < 2 {
+                    if cursor < Self::SESSION_PICKER_HEADER_ROWS {
                         // "New session" header.
                         self.clear_pager();
                         self.view.needs_full_repaint = true;
                         self.state.flash_info("new session");
                         return Some(Vec::new());
                     }
-                    let idx = cursor - 2;
+                    let idx = cursor - Self::SESSION_PICKER_HEADER_ROWS;
                     if let Some(session) = sessions.get(idx) {
                         let session = session.clone();
                         self.clear_pager();

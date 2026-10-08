@@ -94,6 +94,18 @@ pub(super) fn tab_conversation(
 
 impl App {
     pub fn save_session(&mut self) {
+        // SPYC-TRAP(session-prune-by-last-save): every file holds a picker slot,
+        // so an empty quit writes nothing new. An existing file is still
+        // overwritten, or tabs closed before quitting would come back on `-r`.
+        if !self.has_restorable_state()
+            && !self
+                .state
+                .session_id
+                .is_some_and(crate::state::sessions::session_exists)
+        {
+            self.exit_summary = Some("no session saved — no tabs or split to restore".into());
+            return;
+        }
         let session = self.build_session_snapshot();
         let save_result = crate::state::sessions::save_session(&session);
         // A successful save resets the autosave baseline so a follow-up
@@ -334,6 +346,18 @@ impl App {
         h.finish()
     }
 
+    /// Whether a restore would bring anything back: tabs (open or kept
+    /// unopened), a split, or scope claims. A cwd alone doesn't count.
+    fn has_restorable_state(&self) -> bool {
+        self.runtime
+            .pane_tabs
+            .as_ref()
+            .is_some_and(|pt| !pt.tabs().is_empty())
+            || !self.state.deferred_tabs.is_empty()
+            || self.state.vsplit.is_some()
+            || !self.state.scope_registry.is_empty()
+    }
+
     /// P3-2 crash-sufficient autosave (PRE-recv settle). Debounce: on a
     /// session-relevant change arm `Deadline::Autosave` `AUTOSAVE_DEBOUNCE` out
     /// (re-armed while changes keep landing); when the quiet window elapses,
@@ -342,15 +366,7 @@ impl App {
     pub(crate) fn settle_autosave(&mut self, now: Instant, ctx: &mut RunCtx) {
         // Nothing worth restoring (bare launch: no tabs, no split, no scope
         // claims) ⇒ never write an empty session; stay disarmed.
-        let has_restorable = self
-            .runtime
-            .pane_tabs
-            .as_ref()
-            .is_some_and(|pt| !pt.tabs().is_empty())
-            || !self.state.deferred_tabs.is_empty()
-            || self.state.vsplit.is_some()
-            || !self.state.scope_registry.is_empty();
-        let dirty = has_restorable
+        let dirty = self.has_restorable_state()
             && Some(self.session_fingerprint()) != self.runtime.autosave_last_saved_fp;
         match autosave_action(dirty, self.runtime.autosave_due, now) {
             AutosaveAction::Idle => {
@@ -431,15 +447,20 @@ impl App {
             })
             .collect();
         self.state.pending_sessions = Some(sessions);
-        let mut all_lines = vec!["  [n]  new session".to_string(), String::new()];
+        let mut all_lines = vec!["  [n]  new session".to_string()];
         all_lines.extend(lines);
         let mut view = pager::PagerView::new_plain(
             "sessions — j/k navigate, Enter restore, n new, q close",
             all_lines,
         );
-        view.picker_cursor = Some(2); // Start on first session (after header).
+        // Opens on the newest session.
+        view.picker_cursor = Some(Self::SESSION_PICKER_HEADER_ROWS);
         self.set_pager(view);
     }
+
+    /// Rows above the first session in the `-r` picker: `[n] new session`.
+    /// The cursor can stop on any row, so the picker has no spacer.
+    pub(super) const SESSION_PICKER_HEADER_ROWS: usize = 1;
 
     pub fn show_session_info(&mut self) {
         let mut lines: Vec<String> = Vec::new();
@@ -760,7 +781,6 @@ mod tests {
     /// opening `spyc -r`, finding the session missing and quitting pushed out
     /// another real session every time.
     #[test]
-    #[ignore = "red: the quit save writes a session with nothing to restore"]
     fn quitting_with_nothing_to_restore_writes_no_session() {
         let tmp = tempfile::tempdir().expect("tempdir");
         crate::state::with_state_root(tmp.path(), || {
@@ -816,7 +836,6 @@ mod tests {
     /// spacer under `[n] new session` was selectable, and `Enter` on it quietly
     /// started a new session, which looks like a corrupt entry.
     #[test]
-    #[ignore = "red: the picker's blank spacer line is selectable"]
     fn every_line_the_session_picker_cursor_reaches_is_a_choice() {
         let tmp = tempfile::tempdir().expect("tempdir");
         crate::state::with_state_root(tmp.path(), || {

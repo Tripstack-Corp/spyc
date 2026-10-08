@@ -909,6 +909,27 @@ their reasons; none of their commands are executed. A wholly refused tab set
 leaves the current session and its identity intact.
 
 
+<!-- SPYC-TRAP: session-prune-by-last-save -->
+### Session pruning ranks by last save, not by id
+
+Each session lives in `<id>.json`, where the id is the session's creation time
+in epoch millis, and `save_session` prunes the directory back to
+`MAX_SESSIONS`. A restore keeps the id so later saves overwrite one file. The
+filename therefore says nothing about recency: a session restored every day has
+the lowest name in the directory while being the one saved most recently.
+Ranking the prune by name deleted that file in the same call that wrote it,
+whenever the directory already held `MAX_SESSIONS` newer-named files. Nothing
+reported it, and the quit summary still said "session saved". `prune_victims`
+ranks by file write time instead, and never selects the file the current save
+just wrote, whatever its timestamp says.
+
+The quit save skips a session with nothing to restore — no tabs, split or scope
+claims — unless a file already exists under its id. Each file holds one of the
+`MAX_SESSIONS` slots, so an empty quit would push out a real session. An
+existing file is still overwritten, so tabs closed before quitting don't come
+back on `-r`.
+
+
 <!-- SPYC-TRAP: codex-hook-ownership-is-a-command -->
 ### Codex hook pruning requires a reporter invocation
 
