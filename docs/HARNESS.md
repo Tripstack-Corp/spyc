@@ -248,7 +248,10 @@ resume-without-id, because those are opposite tells.
 Codex's `request_user_input` tool has narrowly matched `PreToolUse` and
 `PostToolUse` reporters. A start reports `blocked`; successful completion
 restores `working` only when pane, session, turn and call match a pending
-question. Other questions or uncorrelated blocked reports retain attention.
+question. The first valid correlated start supersedes a preceding generic
+agent block, such as the agent's announcement that it is about to ask. A generic
+block received while any question is pending remains independent and retains
+attention after completion; duplicate or additional starts cannot clear it.
 Enter alone does not clear an identified question, and unrelated or late
 completions are recorded as unapplied with a reason in `:activity dump`.
 
@@ -402,13 +405,22 @@ python3 scripts/codex-hook-payload-smoke.py --binary /tmp/spyc-build/spyc \
   --scenario permission --output /tmp/spyc-hook-permission
 python3 scripts/codex-hook-payload-smoke.py --binary /tmp/spyc-build/spyc \
   --scenario question --output /tmp/spyc-hook-question
+python3 scripts/codex-hook-payload-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario preblocked_question --output /tmp/spyc-hook-preblocked
+python3 scripts/codex-hook-payload-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario blocked_during_question --output /tmp/spyc-hook-independent
 ```
 
 The permission case checks that an observed request during automatic review
 cannot replace the working report without a human dialogue. The question case
 holds blocked through silence, Enter without completion and a wrong-call
 completion; a matching completion restores authoritative working through a
-quiet wait, followed by Stop/done. Content reaches neither reports nor traces.
+quiet wait, followed by Stop/done. Two variants also send ordinary agent reports
+through the actual pane-bound MCP proxy: `preblocked_question` checks recovery
+when the agent reported blocked before asking, with no intervening pane input;
+`blocked_during_question` checks that a later independent block remains red
+through matching completion and silence, then accepts a newer working report.
+Content reaches neither reports nor traces.
 The real reporter integration tests run in `make check`; these TUI replays run
 on demand and retain hashes, recordings, captures and results. Each uses its own
 temporary project with hook installation disabled and closes only its named

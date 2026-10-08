@@ -113,13 +113,13 @@ fn codex_permission_observation_preserves_question_correlation() {
             event("PostToolUse", "call-1"),
         );
         assert!(dump(&mut app).contains("source: SELF-REPORT status=working"));
-        // An explicit agent block still needs its own answer or newer report.
-        report(&mut app, "blocked", None);
+        // An agent block during the question still needs its own answer or newer report.
         report(
             &mut app,
             "codex-question-start",
             event("PreToolUse", "call-2"),
         );
+        report(&mut app, "blocked", None);
         report(
             &mut app,
             "codex-question-end",

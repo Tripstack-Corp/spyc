@@ -75,6 +75,10 @@ class PayloadReplay(module.Smoke):
         self.reported(self.wait_dump("done", "done"), "done")
         reports = [json.loads(line) for line in (self.output / "reports.jsonl").read_text().splitlines()]
         assert any(report["input_bytes"] > 8192 for report in reports)
+        if self.args.scenario in ("preblocked_question", "blocked_during_question"):
+            agent_reports = [report for report in reports if report.get("source") == "agent MCP"]
+            expected = ["blocked", "working"] if self.args.scenario == "blocked_during_question" else ["blocked"]
+            assert [report["status"] for report in agent_reports] == expected, reports
         assert all("private-content" not in json.dumps(report) for report in reports)
         trace = (self.output / "state/spyc/mcp.log").read_text()
         assert "report-status: hook metadata:" in trace, "reporter trace was not captured"
@@ -91,9 +95,21 @@ class PayloadReplay(module.Smoke):
         assert "not applied: PermissionRequest precedes review" in dump, dump
         assert "SCRAPE-FALLBACK" not in dump, dump
 
-    def question(self):
+    def preblocked_question(self):
+        self.question(preblocked=True)
+
+    def blocked_during_question(self):
+        self.question(independent=True)
+
+    def question(self, preblocked=False, independent=False):
         self.reported(self.dump("initial-working"), "working")
         self.key("Enter")
+        if preblocked:
+            self.wait("PAYLOAD_GENERIC_BLOCKED", 10000)
+            self.reported(self.dump("agent-pre-question-block"), "blocked")
+            time.sleep(6)
+            self.reported(self.dump("agent-block-held"), "blocked")
+            (self.output / "start-question").touch()
         self.wait("PAYLOAD_QUESTION_WAITING", 10000)
         start = self.wait_dump("question-blocked", "blocked")
         self.reported(start, "blocked")
@@ -111,19 +127,26 @@ class PayloadReplay(module.Smoke):
         assert "not applied:" in wrong and "call_wrong_completion" in wrong, wrong
         self.key("Enter")
         self.wait("PAYLOAD_MATCHED_COMPLETION", 10000)
-        working = self.wait_dump("matching-completion", "working")
-        self.reported(working, "working")
+        expected = "blocked" if independent else "working"
+        working = self.wait_dump("matching-completion", expected)
+        self.reported(working, expected)
+        if independent:
+            assert "another question or uncorrelated blocked report" in working, working
         completed = self.events(working, "PostToolUse")
         assert len(completed) == 2 and completed[-1][2:] == event[0][2:], working
         time.sleep(8)
-        self.reported(self.dump("quiet-working"), "working")
+        self.reported(self.dump("quiet-after-completion"), expected)
+        if independent:
+            self.key("Enter")
+            self.wait("PAYLOAD_NEWER_WORKING", 10000)
+            self.reported(self.wait_dump("newer-agent-working", "working"), "working")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--scenario", choices=("question", "permission"), default="question")
+    parser.add_argument("--scenario", choices=("question", "permission", "preblocked_question", "blocked_during_question"), default="question")
     parser.add_argument("--session", default="spyc-hook-payload-" + uuid.uuid4().hex[:10])
     args = parser.parse_args()
     smoke = PayloadReplay(args)

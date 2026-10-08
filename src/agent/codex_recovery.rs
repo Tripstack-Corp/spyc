@@ -28,7 +28,7 @@ impl CodexRecovery {
     }
 
     /// Fold bounded lifecycle metadata; argument/response content never enters.
-    /// Explicit ordinary reports remain authoritative and retire these waits.
+    /// Ordinary non-blocked reports retire waits; later generic blocks retain attention.
     pub fn report(
         &mut self,
         signal: &str,
@@ -57,6 +57,12 @@ impl CodexRecovery {
             .filter(|_| status == expected.1)
             .ok_or("question hook requires matching tool/event and session/turn/call metadata")?;
         if signal == QUESTION_START {
+            // The first correlated start supersedes the preceding generic status,
+            // including an agent's announcement that it is about to ask. A block
+            // received during a pending question remains independently latched.
+            if !self.question_waiting() {
+                self.other_blocked = false;
+            }
             if !self.pending.contains(&key) {
                 if self.pending.len() < PENDING_LIMIT {
                     self.pending.push(key);
@@ -155,6 +161,72 @@ mod tests {
             Ok(AgentActivity::Working)
         );
         assert!(!state.question_waiting());
+    }
+
+    #[test]
+    fn first_correlated_question_supersedes_a_preceding_generic_block() {
+        for session in [None, Some("session-1")] {
+            let mut state = CodexRecovery::default();
+            state
+                .report("blocked", AgentActivity::Blocked, session, None)
+                .unwrap();
+            start(&mut state, "turn-1", "call-1");
+            assert!(
+                state
+                    .report(
+                        QUESTION_END,
+                        AgentActivity::Working,
+                        Some("session-1"),
+                        Some(&event("PostToolUse", "turn-1", "wrong-call"))
+                    )
+                    .is_err()
+            );
+            assert!(state.question_waiting());
+            assert_eq!(
+                state.report(
+                    QUESTION_END,
+                    AgentActivity::Working,
+                    Some("session-1"),
+                    Some(&event("PostToolUse", "turn-1", "call-1"))
+                ),
+                Ok(AgentActivity::Working)
+            );
+            assert!(!state.question_waiting());
+        }
+    }
+
+    #[test]
+    fn another_question_start_cannot_retire_a_newer_generic_block() {
+        for call in ["call-1", "call-2"] {
+            let mut state = CodexRecovery::default();
+            start(&mut state, "turn-1", "call-1");
+            state
+                .report("blocked", AgentActivity::Blocked, None, None)
+                .unwrap();
+            start(&mut state, "turn-1", call);
+            assert!(
+                state
+                    .report(
+                        QUESTION_END,
+                        AgentActivity::Working,
+                        Some("session-1"),
+                        Some(&event("PostToolUse", "turn-1", "call-1"))
+                    )
+                    .is_err()
+            );
+            if call == "call-2" {
+                assert!(
+                    state
+                        .report(
+                            QUESTION_END,
+                            AgentActivity::Working,
+                            Some("session-1"),
+                            Some(&event("PostToolUse", "turn-1", call))
+                        )
+                        .is_err()
+                );
+            }
+        }
     }
 
     #[test]
