@@ -479,7 +479,7 @@ Two tracks keep the RC manageable:
   SHA-256 `2fb69aa0065bc924a71fded5cb39eda02f072828a53f11d8b93dddff247497ab`.
   The prior handoff launcher forwards there after worktree removal. These
   replays do not establish native CLI hook execution or fresh trust. The generic
-  pre-question agent `blocked` latch remains a separate recovery issue.
+  pre-question agent `blocked` latch was a separate recovery issue, addressed in A3b9.
 
 - A3b8 landed through PR #566 (`f78f06cb`) on 2026-10-08, refreshed onto
   main through #565 after merged #561.
@@ -508,7 +508,7 @@ Two tracks keep the RC manageable:
   establish fresh trusted-hook execution or resolve adoption of reporters after
   a refused installation.
 
-- A3b9 is in progress on `fix/codex-question-report-recovery`, based on #566.
+- A3b9 landed through PR #567 (`6988a9f8`) on 2026-10-08, based on #566.
   The review's pre-question generic-block sequence failed both a pure recovery
   regression and the App path: an ordinary agent `blocked`, followed by a valid
   question start and matching end, stayed blocked because the older report was
@@ -524,7 +524,22 @@ Two tracks keep the RC manageable:
   All four fixed-release replays pass, including both additions and the existing
   question/permission cases. An indiscriminate-clearing mutation failed both the
   later-block and incomplete-metadata regressions; production was restored.
-  Focused recovery/App suites pass. Final gates and integration are pending.
+  Focused recovery/App suites pass. The final head `a6e62fb9` passed the full
+  `RUST_TEST_THREADS=1 make check` gate (2801 library tests, one ignored, all
+  integration suites and six VT-system tests), all four repeated release TUI
+  replays and CI lint/tests/packaging. It was `CLEAN` immediately before squash.
+  The exact artifact is `/private/tmp/spyc-a3b9-build-dos2yw78/spyc`, SHA-256
+  `fa9c3e48a8b41d96778a4773d9a2f2a60280d68e0fa2bef7135370baefb12bd0`.
+  Main was fast-forwarded, all eight PR files matched before worktree removal,
+  and the previous handoff launcher forwards to this artifact's `test.sh`.
+  The two new variants use actual pane-bound agent MCP reports; all four use
+  the real reporter and host with a controlled PTY child. They do not establish
+  native CLI hook execution or fresh trust. Manual local testing remains deferred.
+
+  A3 remains open for fresh-trust execution, async question attention and native
+  approval forms outside the verified rules. Refused-install reporter cleanup
+  ownership remains a reviewed follow-up; positional trust preservation and
+  pre-question generic-block recovery have landed.
 
 ### Baseline
 
