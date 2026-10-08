@@ -894,3 +894,16 @@ installation also skips writes when a lease cannot be registered. Legacy
 untyped owners conservatively protect every agent's hooks in their directory.
 An explicit `:hooks off` retains the user's authority to remove the active
 project's reporters, subject to tracked-file and positional-trust guards.
+
+
+<!-- SPYC-TRAP: partial-restore-keeps-saved-tabs -->
+### Partial restore must keep unopened tabs in the next save
+
+A session restore refuses unsupported agent commands per tab. The valid tabs
+can resume, but autosave and quit overwrite the same session file. Saving only
+the live panes would silently erase the refused records. The pure Model keeps
+those records verbatim and the shared snapshot builder merges them back into
+the saved list, mapping the selected live tab past inserted records. Spawn
+failures receive the same protection. Session info lists the unopened tabs and
+their reasons; none of their commands are executed. A wholly refused tab set
+leaves the current session and its identity intact.

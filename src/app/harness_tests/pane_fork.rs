@@ -188,10 +188,9 @@ fn codex_refuses_ambiguous_fork_and_restore_without_replacing_live_tabs() {
         let original_name = app.state.session_name.clone();
         let saved: crate::state::sessions::Session = serde_json::from_value(serde_json::json!({
             "id": 999, "name": "REFUSED_SESSION", "saved_at": "", "epoch_secs": 0, "cwd": env!("CARGO_MANIFEST_DIR"),
-            "tabs": [{ "command": "cat", "label": "shell", "cwd": dir },
-                { "command": command, "label": "codex", "cwd": dir,
+            "tabs": [{ "command": command, "label": "codex", "cwd": dir,
                     "agent_kind": "codex", "agent_session_id": PARENT }],
-            "active_tab": 1, "pane_height_pct": 75, "pane_focused": true
+            "active_tab": 0, "pane_height_pct": 75, "pane_focused": true
         }))
         .unwrap();
 
@@ -211,7 +210,7 @@ fn codex_refuses_ambiguous_fork_and_restore_without_replacing_live_tabs() {
         assert!(
             app.flash_text()
                 .unwrap()
-                .contains("session restore refused for tab 2")
+                .contains("session restore refused for all 1 tabs")
         );
         assert!(!dir.join("codex.argv").exists());
     });
