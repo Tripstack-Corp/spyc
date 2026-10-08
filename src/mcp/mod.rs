@@ -27,51 +27,20 @@ const SERVER_NAME: &str = "spyc";
 const SERVER_VERSION: &str = crate::VERSION;
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
-/// Returned in the `initialize` response's `instructions` field — the MCP
-/// spec's slot for "how to use this server". Claude Code folds it into the
-/// system prompt at connect, which is the one ephemeral, no-files-written way
-/// to bias a spyc-launched agent toward spyc's own tools (it otherwise reaches
-/// for `Bash rg` / `git worktree` and never touches them). Kept short on
-/// purpose — clients truncate instructions, so the prioritization comes first.
+/// The MCP handshake's shared bootstrap. Clients may attach it to each tool,
+/// so keep it within the response's tested byte budget. Tool descriptions and
+/// the spyc skill carry argument details and complete workflows.
 const SERVER_INSTRUCTIONS: &str = "\
-You are running inside spyc, a terminal file/worktree manager, with its tools \
-on this server. Prefer them over shell equivalents — even mid-task, not only \
-when answering questions about the user's view:\n\
-- Call `get_spyc_context` first to ground yourself: the user's cwd, cursor \
-file, picks, filter, git branch, and the running spyc's pid + version. Its \
-`pane`, when present, is your own tab: where you run, not what the user views.\n\
-- `search_content` / `search_paths` instead of `Bash rg` / `find`, and \
-`git_status` / `git_log` / `git_diff` instead of shelling out to git — all \
-in-process, gitignore-aware, and structured. `git_diff` has three scopes: \
-default vs HEAD, `cached:true` for staged, and `unstaged:true` for the index \
-vs the working tree (what changed since the last `git add` — use it after a \
-staged checkpoint). They scope to the focused column \
-by default; when you're working in a DIFFERENT worktree, pass its path as the \
-`root` argument so they target it (otherwise shell with explicit paths is the \
-right call).\n\
-- `navigate_to` to move the user's view; `pick_files` / `set_filter` to drive \
-their selection; `get_file_content` to read what they're viewing.\n\
-- `report_status` to keep your pane tab's activity dot accurate: call it \
-`working` when you start a task, `blocked` when you pause to ask the user a \
-question or for permission (so they see at a glance which agent needs them), \
-and `done` when you finish. Cheap and idempotent — call it freely as your turn \
-changes; it overrides spyc's output-timing guess.\n\
-- Worktree lifecycle, all in-process (never `git worktree`): `list_worktrees` \
-lists them (branch, dirty counts, which is current, whether each is merged / \
-ahead-behind the base — the safe-to-remove signal — and whether one is claimed \
-by another session), `create_worktree` adds one (pass `open:true` to also open \
-it in column b and work there right away), `open_worktree` opens an existing one \
-in column b while the user's column stays put, and `remove_worktree` tears one \
-down safely — archiving any untracked + uncommitted changes to spyc's \
-graveyard, then deleting the branch only if it's merged (`clean_worktree` is \
-an alias).\n\
-- Coordinating with another agent on the same repo: `claim_worktree(path, reason)` \
-to lease the worktree you're working in (a cooperative lock — others' \
-remove/clean will refuse it), and `release_worktree(path)` when you're done. \
-Before removing a worktree you didn't create, `list_worktrees` first and skip \
-any that are `locked` by someone else.\n\
-If a tool you expect is missing, the running spyc is older than this repo — \
-tell the user to restart it (compare `version`'s git SHA to the repo HEAD).";
+Prefer spyc's `search_content`/`search_paths` and `git_status`/`git_log`/`git_diff` \
+over shell equivalents. Use its full worktree tools, including `clean_worktree`; \
+never run `git worktree`.\n\
+Call `get_spyc_context` first: `pane` is your tab; other fields describe the user's \
+view. Reads default to the focused column; pass `root` for another worktree.\n\
+Before editing, `claim_worktree` and `register_scope`; release claims when done. \
+Before removing a tree, `list_worktrees` and skip others' claims.\n\
+Use `report_status` on turn changes: `working`, `blocked` when waiting for user \
+input, then `done`.\n\
+See the spyc skill for workflows and tool descriptions for arguments.";
 const CONTEXT_URI: &str = "spyc://context";
 
 /// Socket IO deadline for the stdio proxy. Bounds how long it waits on a

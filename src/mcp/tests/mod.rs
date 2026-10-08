@@ -51,6 +51,12 @@ fn initialize_response() {
     assert_eq!(resp["result"]["serverInfo"]["name"], "spyc");
     // The `instructions` field steers a launched agent toward spyc's tools.
     let instructions = resp["result"]["instructions"].as_str().unwrap();
+    // Clients can repeat this field on every tool; workflows belong in the skill.
+    assert!(
+        instructions.len() <= 800,
+        "shared instructions exceed the 800-byte context budget: {} bytes",
+        instructions.len()
+    );
     assert!(
         instructions.contains("search_content"),
         "names the search tool"

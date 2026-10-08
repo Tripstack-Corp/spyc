@@ -1407,9 +1407,12 @@ Contents:
 | `references/search.md` | which of the four search corpora to use, and `root` scoping |
 | `references/git.md` | the three `git_diff` scopes, and when to shell out anyway |
 
-This is the depth *underneath* the MCP handshake: `initialize`'s
-`SERVER_INSTRUCTIONS` is prepended to every session so it has to stay short and
-can only point at the tools. The skill is loaded on demand instead.
+This is the depth *underneath* the MCP handshake: `initialize`'s shared
+`SERVER_INSTRUCTIONS` stays within an 800-byte budget because clients may repeat
+it across tool descriptions. It retains tool preference, pane/root scoping,
+worktree and file-scope claims, safe cleanup and status reporting. Argument
+details live in each tool's description; full workflows live in the skill,
+which is loaded on demand.
 
 **Staying current.** spyc offers a single `[Y/n]` update on startup when its
 embedded copy differs from what's installed — one prompt covering every host,
