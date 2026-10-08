@@ -424,6 +424,13 @@ and keeps its reporters in TOML. Other handlers, matcher fields and trust record
 are preserved. An emptied legacy file is removed; user-only files are not
 rewritten. `:hooks off` and last-owner cleanup also remove legacy reporters.
 
+Removing a spyc reporter before a user hook can change Codex's positional trust
+key and silently disable that user hook. Installation and cleanup refuse such
+pruning in either source; hook declarations remain in place and `:activity dump` names
+the trust-identity reason. Trailing reporters can still be removed without
+moving user hooks. Manual migration requires restarting Codex and reviewing the
+affected user hooks in `/hooks`; spyc does not rewrite their trust records.
+
 Legacy files containing tracked reporters, or malformed/unreadable files,
 block migration; `:activity dump`
 names the source and repair action. Use `:hooks on` to migrate a valid untracked
@@ -520,3 +527,28 @@ spyc's own activity pager must still open. It also checks capture input, a
 pane producing continuous output, session restore and cancellation/complete
 byte delivery of a confirmed 9 MiB file pipe. A failure can capture a macOS stack sample
 before killing the owned test child. It never drives the user's current pane.
+
+### Test Codex hook identity during installation and cleanup
+
+`scripts/codex-hook-trust-smoke.py` drives a controlled Codex-profile PTY child
+through actual spyc hook installation, `:hooks off` and teardown. It reads native
+Codex `hooks/list` before and after each step, asserting that the fixture user
+hook keeps its key, current hash, enabled flag and untrusted status.
+
+```sh
+python3 scripts/codex-hook-trust-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario json_shared --output /tmp/spyc-hook-json-identity
+python3 scripts/codex-hook-trust-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario toml_groups --output /tmp/spyc-hook-toml-identity
+python3 scripts/codex-hook-trust-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario safe --output /tmp/spyc-hook-safe-identity
+```
+
+The shared-handler and separate-group cases cover both JSON and TOML. The safe
+case allows trailing reporter removal. Each creates a disposable project and
+`CODEX_HOME`; project-load permission is fixture data, while every hook remains
+untrusted. The native CLI only lists hooks: no turn, hook approval or hook
+execution is requested. The real user's trust records are untouched. Stable keys
+and hashes protect the lookup of an existing trust record; this is discovery
+coverage, not live trusted-hook execution. Captures, recordings, discovery JSON,
+binary hashes and results are retained, and only the owned session is closed.
