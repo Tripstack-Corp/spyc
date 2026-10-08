@@ -89,15 +89,22 @@ def host(args):
             if args.scenario == "mixed":
                 assert "legacy-compatible" in shown and "LEGACY_COMMAND_RESULT" in shown, shown
             self.key("t")
-            self.wait("tool calls: hidden", 5000)
-            time.sleep(0.5)
-            hidden = self.capture("commands-hidden")
+            until = time.monotonic() + 8
+            while True:
+                hidden = self.capture("commands-hidden")
+                if "SPYC_TRANSCRIPT_PROSE" in hidden and "codex --version" not in hidden and "WARNING: proceeding" not in hidden:
+                    break
+                assert time.monotonic() < until, "tool lines remained visible: " + hidden
+                time.sleep(0.1)
             assert "SPYC_TRANSCRIPT_PROSE" in hidden, hidden
             assert "codex --version" not in hidden and "WARNING: proceeding" not in hidden, hidden
             assert "legacy-compatible" not in hidden and "SPYC_INVALID_COMMAND_OUTPUT" not in hidden, hidden
             self.key("t")
             self.wait("codex --version", 8000)
+            with rollout.open("a") as stream:
+                stream.write(json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": "SPYC_TRANSCRIPT_RELOADED"}}) + "\n")
             self.key("r")
+            self.wait("SPYC_TRANSCRIPT_RELOADED", 8000)
             self.wait("codex --version", 8000)
             restored = self.capture("commands-restored")
             assert restored.count("codex --version") == 1, restored
