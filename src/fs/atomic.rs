@@ -19,9 +19,31 @@ use std::path::Path;
 /// file inherits `NamedTempFile`'s owner-only (0600) permissions — appropriate
 /// for the per-user config/state files this is used for.
 pub fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    write_atomic_inner(path, contents, None)
+}
+
+/// Replace a file atomically with explicit permission bits. The caller supplies
+/// the existing permissions after checking its own destination policy. Set them
+/// on the temporary file before rename so readers never see an intermediate mode.
+pub fn write_atomic_with_permissions(
+    path: &Path,
+    contents: &[u8],
+    permissions: std::fs::Permissions,
+) -> std::io::Result<()> {
+    write_atomic_inner(path, contents, Some(permissions))
+}
+
+fn write_atomic_inner(
+    path: &Path,
+    contents: &[u8],
+    permissions: Option<std::fs::Permissions>,
+) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
     tmp.write_all(contents)?;
+    if let Some(permissions) = permissions {
+        tmp.as_file().set_permissions(permissions)?;
+    }
     // `persist` does the rename; on failure it hands back the io::Error.
     tmp.persist(path).map_err(|e| e.error)?;
     Ok(())

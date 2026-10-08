@@ -601,7 +601,8 @@ Two tracks keep the RC manageable:
   GitHub checks were green and merge state was `CLEAN`; all seven owned files
   matched integrated `main`.
 
-- The A2 restore-isolation follow-up replaces whole-session refusal for mixed
+- The A2 restore-isolation follow-up landed through PR #573 (`3ecba518`) on
+  2026-10-08. It replaces whole-session refusal for mixed
   tab sets with per-tab refusal. Unopened records stay verbatim in the Model
   and every subsequent autosave/quit snapshot; selection maps from saved to
   successfully spawned indices. Session info lists the saved tab and reason.
@@ -610,7 +611,21 @@ Two tracks keep the RC manageable:
   repeated save/restore, no-live-pane autosave, refusal metadata changes,
   selection fallback, layout/scope recovery and clearing obsolete refusals.
   The TUI driver exercises the actual picker with controlled children, not
-  native Codex execution or trust. Final acceptance evidence goes with the PR.
+  native Codex execution or trust. All four final artifact scenarios passed;
+  all seven hosts exited with code zero and no signal. The full gate passed
+  with 2829 library tests, one ignored test, integration tests and six VT-system
+  tests. Required CI checks were green and merge state was `CLEAN`; all 17
+  owned files matched integrated `main`.
+
+- A3b12 addresses legacy JSON file preservation. A symlink, including a dangling
+  one, refuses migration and teardown before changing either hook source. The
+  apply boundary rechecks the path type. Regular JSON migrations retain the
+  existing permission bits on the temporary file before rename. Three new
+  filesystem regressions failed against the old implementation before passing
+  with the fix. Cleanup mode retention has its own production regression. The
+  ownership TUI driver adds symlink and two file-mode scenarios; final artifact
+  acceptance is recorded with the PR. JSON key order, parent/user-layer reporter
+  duplication and precise command ownership are separate remaining findings.
 
 ### Baseline
 
