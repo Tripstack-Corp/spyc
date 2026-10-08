@@ -396,11 +396,11 @@ fn lnum_width_floors_at_four_and_grows_with_digits() {
         }],
     };
     // Small numbers keep the stable 4-wide gutter…
-    assert_eq!(super::lnum_width(&[hunk(1)]), 4);
-    assert_eq!(super::lnum_width(&[hunk(9999)]), 4);
+    assert_eq!(super::split::lnum_width(&[hunk(1)]), 4);
+    assert_eq!(super::split::lnum_width(&[hunk(9999)]), 4);
     // …5- and 6-digit numbers widen to fit.
-    assert_eq!(super::lnum_width(&[hunk(10_000)]), 5);
-    assert_eq!(super::lnum_width(&[hunk(123_456)]), 6);
+    assert_eq!(super::split::lnum_width(&[hunk(10_000)]), 5);
+    assert_eq!(super::split::lnum_width(&[hunk(123_456)]), 6);
 }
 
 #[test]
@@ -649,7 +649,7 @@ fn wrap_spans_splits_at_width_boundary() {
     use ratatui::text::Span;
     let spans = vec![Span::raw("hello world")];
     // Width 5: "hello" | " worl" | "d"
-    let rows = super::wrap_spans(&spans, 5, 4);
+    let rows = super::split::wrap_spans(&spans, 5, 4);
     assert_eq!(rows.len(), 3, "expected 3 rows, got {rows:?}");
     assert_eq!(rows[0][0].content.as_ref(), "hello");
     assert_eq!(rows[1][0].content.as_ref(), " worl");
