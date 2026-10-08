@@ -71,7 +71,7 @@ const WHOLE_FILE: Rule = Rule {
     list: "WHOLE_FILE",
     unit: "lines",
     limit: 3000,
-    pins: &[("src/app/harness_tests/archive.rs", 3298)],
+    pins: &[],
 };
 
 impl Rule {
