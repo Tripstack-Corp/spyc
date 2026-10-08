@@ -113,6 +113,11 @@ The reporter forwards only event/tool names, notification subtype and available
 turn/call ids; it excludes arguments, prompts, response text and tool output.
 Control characters, malformed identifiers and oversized fields are discarded.
 `--status-trace` logs this sanitized metadata instead of the raw stdin payload.
+The reporter streams the complete hook JSON and retains only a fixed set of
+root metadata fields; a large patch, heredoc or answer does not erase later ids.
+The 8 KiB limit applies to normalized metadata, not raw stdin. String capture is
+bounded and nesting is limited to 128 levels; malformed documents produce no
+partial metadata. Arguments and responses are skipped without being retained.
 This is claimed metadata, not authenticated hook provenance. Missing metadata
 can mean an older reporter or an absent/malformed payload, not a missing hook.
 

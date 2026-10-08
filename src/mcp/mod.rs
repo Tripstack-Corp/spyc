@@ -277,25 +277,17 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
             "set"
         },
     ));
-    // Claude Code pipes the hook event JSON to the hook's stdin (carrying
-    // `hook_event_name`, `notification_type`, `tool_name`, …) then closes it.
-    // Read it ALWAYS (not just when tracing): the *effective* state depends on
-    // it — `effective_report_state` downgrades an `idle_prompt` Notification
-    // from `blocked` to `done`. Guarded on `!is_terminal()` so a manual
-    // `spyc --report-status …` from a shell never blocks on read, and capped so
-    // a pathological payload can't balloon reporter memory.
+    // Hooks close stdin after sending JSON. Read the complete document while
+    // retaining only bounded root metadata; truncating large tool arguments
+    // erases the event/correlation fields and can create false legacy blocks.
+    // A manual terminal invocation must still never wait for hook input.
     let payload = {
-        use std::io::{IsTerminal, Read};
+        use std::io::IsTerminal;
         let stdin = std::io::stdin();
         if stdin.is_terminal() {
             String::new()
         } else {
-            let mut s = String::new();
-            let _ = stdin
-                .lock()
-                .take(crate::agent::status_hook::PAYLOAD_LIMIT as u64)
-                .read_to_string(&mut s);
-            s.trim().to_string()
+            crate::agent::status_hook::read_payload(stdin.lock()).unwrap_or_default()
         }
     };
     let hook_event = crate::agent::status_hook::StatusHookEvent::from_payload(&payload);

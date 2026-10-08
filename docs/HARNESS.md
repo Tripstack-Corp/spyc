@@ -389,6 +389,32 @@ of hook delivery or retained semantic working. Use `codex-tui-smoke.py` with
 user-reviewed hooks for native question and quiet semantic recovery acceptance.
 Fixture provenance is recorded in `tests/fixtures/codex-approvals.md`.
 
+### Replay large hook payloads through the reporter and host
+
+`scripts/codex-hook-payload-smoke.py` uses a controlled Codex-profile PTY child
+and the supplied spyc binary for both the host and one-shot reporter. Native
+normalized event metadata is combined with synthetic 256 KiB content before the
+correlation fields. Fixture provenance is in
+`tests/fixtures/codex-hook-metadata.md`; these are not raw hook captures.
+
+```sh
+python3 scripts/codex-hook-payload-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario permission --output /tmp/spyc-hook-permission
+python3 scripts/codex-hook-payload-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario question --output /tmp/spyc-hook-question
+```
+
+The permission case checks that an observed request during automatic review
+cannot replace the working report without a human dialogue. The question case
+holds blocked through silence, Enter without completion and a wrong-call
+completion; a matching completion restores authoritative working through a
+quiet wait, followed by Stop/done. Content reaches neither reports nor traces.
+The real reporter integration tests run in `make check`; these TUI replays run
+on demand and retain hashes, recordings, captures and results. Each uses its own
+temporary project with hook installation disabled and closes only its named
+session. They require no model call or hook trust, and do not establish native
+CLI execution or fresh onboarding acceptance.
+
 ### Duplicate Codex hook sources
 
 Codex loads `.codex/hooks.json` alongside inline hooks in `.codex/config.toml`.

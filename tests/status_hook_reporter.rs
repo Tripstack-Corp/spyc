@@ -163,3 +163,51 @@ fn question_hook_reporter_preserves_guarded_wire_values_and_correlation() {
         assert!(!log.contains("private-"));
     }
 }
+
+#[test]
+fn large_hook_arguments_do_not_erase_permission_or_question_metadata() {
+    // Normalized metadata recorded from native CLI runs; oversized body content
+    // is synthetic edge-case data, not a claimed raw native hook capture.
+    let fixtures: Value =
+        serde_json::from_str(include_str!("fixtures/codex-hook-metadata.json")).unwrap();
+    for (state, fixture, body_field) in [
+        ("blocked", "permission", "tool_input"),
+        ("codex-question-start", "question_start", "tool_input"),
+        ("codex-question-end", "question_end", "tool_response"),
+    ] {
+        let metadata = &fixtures[fixture];
+        // Put all correlation fields after a body larger than the old cutoff.
+        let payload = format!(
+            r#"{{"{body_field}":{{"private-content":"{}"}},{}}}"#,
+            "private-content-".repeat(1600),
+            metadata
+                .to_string()
+                .trim_start_matches('{')
+                .trim_end_matches('}')
+        );
+        assert!(payload.len() > 8192);
+        let (request, log) = run_reporter_for(state, &payload);
+        let args = &request["params"]["arguments"];
+        let mut expected = metadata.clone();
+        expected.as_object_mut().unwrap().remove("session_id");
+        assert_eq!(args["hook_event"], expected);
+        assert_eq!(args["session_id"], metadata["session_id"]);
+        assert_eq!(args["status"], state);
+        assert!(!request.to_string().contains("private-content"));
+        assert!(!log.contains("private-content"));
+    }
+}
+
+#[test]
+fn large_hook_body_preserves_legacy_idle_remap_and_camel_case_session() {
+    let payload = format!(
+        r#"{{"tool_response":"{}","hook_event_name":"Notification","notification_type":"idle_prompt","conversationId":"session-agy"}}"#,
+        "private-content-".repeat(1600)
+    );
+    let (request, log) = run_reporter(&payload);
+    let args = &request["params"]["arguments"];
+    assert_eq!(args["status"], "done");
+    assert_eq!(args["session_id"], "session-agy");
+    assert!(!request.to_string().contains("private-content"));
+    assert!(!log.contains("private-content"));
+}
