@@ -28,9 +28,21 @@ struct Lease {
 type Leases = HashMap<String, Vec<Lease>>;
 
 struct Registry {
-    lock: File,
+    lock: LeaseLock,
     path: PathBuf,
     leases: Leases,
+}
+
+/// The held registry lock, released explicitly on drop. A `flock` belongs to
+/// the open file, not the handle, and a child spawned on another thread holds a
+/// copy of every open file until it execs, so closing the handle alone can leave
+/// the lock held and the next `Registry::open` refused.
+struct LeaseLock(File);
+
+impl Drop for LeaseLock {
+    fn drop(&mut self) {
+        let _ = rustix::fs::flock(&self.0, rustix::fs::FlockOperation::Unlock);
+    }
 }
 
 fn read<T: serde::de::DeserializeOwned + Default>(path: &Path) -> Option<T> {
@@ -52,6 +64,7 @@ impl Registry {
             .open(root.join("hook_leases.lock"))
             .ok()?;
         rustix::fs::flock(&lock, rustix::fs::FlockOperation::NonBlockingLockExclusive).ok()?;
+        let lock = LeaseLock(lock);
         let path = root.join("hook_leases.json");
         let mut leases: Leases = read(&path)?;
         if leases.values().flatten().any(|owner| {
@@ -96,7 +109,7 @@ pub fn claim(dir: &Path, kind: AgentKind, pid: u32, managed: bool) -> bool {
 
 /// Holds the registry lock through authorized teardown cleanup.
 pub struct CleanupGuard {
-    _lock: File,
+    _lock: LeaseLock,
 }
 
 /// Remove this instance's agent lease. Cleanup requires a recorded successful
@@ -213,6 +226,37 @@ mod tests {
             assert!(start.elapsed() < std::time::Duration::from_secs(1));
             drop(guard);
             assert!(claim(dir, AgentKind::Codex, 1, true));
+        });
+    }
+
+    /// Between fork and exec, a child spawned on another thread holds a copy of
+    /// every open file, the lock file included, and a `flock` belongs to the
+    /// open file rather than the handle. Closing our handle alone leaves the lock
+    /// held while such a copy exists, so the next `Registry::open` sees
+    /// contention that isn't there, which is how the status-hook tests failed
+    /// intermittently wherever other tests were spawning processes. A
+    /// duplicated handle is that copy, held on purpose.
+    #[test]
+    fn dropping_the_lock_releases_it_while_a_copy_is_still_open() {
+        fixture(|dir| {
+            let me = std::process::id();
+            let registry = Registry::open().expect("nothing else holds the lock");
+            let registry_copy = registry.lock.0.try_clone().unwrap();
+            drop(registry);
+            assert!(
+                claim(dir, AgentKind::Codex, me, true),
+                "a dropped registry still held its lock"
+            );
+            let guard = release(&owned(dir, AgentKind::Codex), me).expect("last managed owner");
+            // `_lock` exists only to be held; this test is its one reader.
+            #[allow(clippy::used_underscore_binding)]
+            let guard_copy = guard._lock.0.try_clone().unwrap();
+            drop(guard);
+            assert!(
+                claim(dir, AgentKind::Codex, me, true),
+                "a dropped cleanup guard still held its lock"
+            );
+            drop((registry_copy, guard_copy));
         });
     }
 
