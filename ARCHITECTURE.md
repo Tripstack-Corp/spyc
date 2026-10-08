@@ -246,7 +246,7 @@ Nothing on a live, post-startup code path may read the cursor position
 read the same bytes off stdin — either way the read fails and tears the
 whole session down. This bit us through ratatui 0.30's `Terminal::clear()`
 (closing a pager / any `needs_full_repaint` over SSH crashed the session,
-#444); `force_full_repaint` (`src/lib.rs`) is the cursor-read-free
+#444); `force_full_repaint` (`src/terminal.rs`) is the cursor-read-free
 replacement — `Terminal::resize()` to the current size has the same
 clear-and-full-repaint effect but takes the no-cursor-read branch. Any
 detection that *does* need a probe (the graphics-protocol query feeding

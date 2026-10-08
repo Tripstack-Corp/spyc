@@ -64,7 +64,6 @@ const PRODUCTION: Rule = Rule {
         ("src/app/run.rs", 1102),
         ("src/app/state/mod.rs", 1213),
         ("src/config/mod.rs", 1277),
-        ("src/lib.rs", 1245),
         ("src/mcp/protocol.rs", 1272),
     ],
 };
