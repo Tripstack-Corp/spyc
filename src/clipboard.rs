@@ -959,8 +959,12 @@ mod tests {
         fs::set_permissions(&stub, perms).unwrap();
 
         let big = "x".repeat(512 * 1024); // >> any pipe buffer
-        let err = retry_text_busy(|| with_clipboard_override(&stub, || copy(&big)))
-            .expect_err("a helper that ignores a large stdin should surface a write error");
+        // Await the shell fixture's exit before asserting EPIPE. The production
+        // budget can expire during fixture startup and correctly yield TimedOut.
+        let err = with_reap_budget(DETACH_TEST_BUDGET, || {
+            retry_text_busy(|| with_clipboard_override(&stub, || copy(&big)))
+        })
+        .expect_err("a helper that ignores a large stdin should surface a write error");
         assert_eq!(err.kind(), io::ErrorKind::BrokenPipe, "got {err:?}");
     }
 

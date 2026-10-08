@@ -440,6 +440,13 @@ and keeps its reporters in TOML. Other handlers, matcher fields and trust record
 are preserved. An emptied legacy file is removed; user-only files are not
 rewritten. `:hooks off` and last-owner cleanup also remove legacy reporters.
 
+Codex identifies an owned handler by a direct `spyc` invocation (or the
+currently resolved reporter executable), a known wire status and the generated
+command shape, including its optional trace flag and fail-soft tail. Bare legacy
+invocations are also recognized. Quoted flags, other programs, wrappers, unknown
+statuses and extra shell actions are preserved. A non-command handler is never
+pruned. This check does not change generated hook commands or trust records.
+
 Removing a spyc reporter before a user hook can change Codex's positional trust
 key and silently disable that user hook. Installation and cleanup refuse such
 pruning in either source; hook declarations remain in place and `:activity dump` names
@@ -654,3 +661,9 @@ The ownership TUI driver adds `symlink`, `dangling_symlink`, `mode_640` and
 `mode_644` scenarios. They check installation, diagnostics, file contents and
 permissions after graceful host exit, using controlled children and disposable
 HOME/state without executing native hooks or changing trust.
+
+The ownership smoke driver also accepts `json_mentions`, `toml_mentions` and
+`json_user_only`. These scenarios preserve user hooks that quote the reporter
+flag, call another program, wrap spyc or add shell actions; they check migration,
+installed user-command ordering, graceful teardown and unchanged user-only JSON.
+They use controlled children and do not execute these fixture commands.

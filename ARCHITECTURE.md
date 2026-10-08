@@ -907,3 +907,17 @@ the saved list, mapping the selected live tab past inserted records. Spawn
 failures receive the same protection. Session info lists the unopened tabs and
 their reasons; none of their commands are executed. A wholly refused tab set
 leaves the current session and its identity intact.
+
+
+<!-- SPYC-TRAP: codex-hook-ownership-is-a-command -->
+### Codex hook pruning requires a reporter invocation
+
+A flag mentioned in an unrelated hook grants no permission to remove that
+handler. Codex TOML installation, JSON migration, cleanup and positional-trust
+preflight share a conservative command matcher: a direct `spyc` invocation
+(or the caller's resolved reporter executable), a known wire status, and the
+exact generated or bare legacy command shape. Quoted flags, other programs,
+wrappers, extra shell actions and unknown statuses remain user content. The
+matcher does not execute a command or inspect hook trust. Existing generated
+reporter commands retain their bytes; changing cleanup recognition must not
+force a new native hook trust decision.
