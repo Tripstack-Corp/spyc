@@ -227,10 +227,14 @@ Automatic reconstruction supports a bare or path-qualified `codex` executable
 and recognized interactive options. Shell operators, substitutions, wrappers,
 unknown options, repeated singleton options, initial prompts and initial image
 inputs require a manual reopen rather than a guessed launch or replayed input.
-A refused fork opens nothing. Restore preflights every tab: an unsupported
-Codex command refuses the entire restore before replacing existing tabs or
-session identity, and names the affected tab and reason. The saved command is
-retained verbatim when it cannot be normalized.
+A refused fork opens nothing. Restore preflights every tab and opens supported
+tabs while keeping refused or unspawned entries saved verbatim. The selected
+tab follows its saved identity; if it cannot open, the next supported tab is
+selected, falling back to the previous one. Session info (`Space s` from the
+file list, `^a Space s` from a pane) lists unopened tabs and their reasons.
+Autosave and quit preserve those entries for a later retry, including when all
+live panes have been closed. If every saved tab is refused, the current tabs
+and session identity stay intact.
 
 **A resumed codex session appends to its original rollout file and leaves
 `session_meta` frozen at the original creation time.** So a rollout created a
@@ -628,3 +632,14 @@ python3 scripts/codex-transcript-smoke.py --binary /tmp/spyc-build/spyc \
 Use `--scenario duplicate` or `--scenario mixed` for the other cases. The driver
 preserves recordings, viewport captures, fixture/binary hashes and host exit
 state. Native Codex execution and hook trust are not exercised.
+
+
+`scripts/codex-restore-smoke.py --binary /absolute/path/to/spyc --output /tmp/new-output`
+uses a disposable HOME and saved session with controlled Codex-named children.
+Its four `--scenario` values are `leading_unknown`, `middle_prompt`,
+`trailing_image` and `all_refused`. The first three restore through `spyc -r`,
+check the selected tab, activity dump and session-info reasons, then verify the
+refused record survives autosave and quit and repeat the restore. The last
+checks a wholly refused session executes no child and remains saved unchanged.
+Each host must quit with exit code zero and no signal. This covers spyc's restore
+behaviour without running native Codex or approving hook trust.

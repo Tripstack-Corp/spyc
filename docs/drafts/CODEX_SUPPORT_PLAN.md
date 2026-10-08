@@ -583,7 +583,8 @@ Two tracks keep the RC manageable:
   and merge state was `CLEAN`; the owned files matched integrated `main`.
   Integration used automated acceptance under the user's authorization.
 
-- The A1 review follow-up restores completed shell execution records whose
+- The A1 review follow-up landed through PR #572 (`1a0a8804`) on 2026-10-08.
+  It restores completed shell execution records whose
   `command` is an argv array. A real rollout snapshot contained 1570 such
   records, all arrays, while the reader accepted only strings. A sanitized
   `codex --version` record preserves actual argv and output with identifying
@@ -594,7 +595,22 @@ Two tracks keep the RC manageable:
   rejects malformed arrays without truncating words or panicking. A deliberate
   malformed-word mutation failed; correct code was restored. The new TUI driver
   covers recorded, duplicate and mixed command histories with tool visibility
-  and reload. Final artifact and integration evidence is recorded with the PR.
+  and reload. All three final artifact TUI cases passed, including a newly
+  appended disk record on reload; all three hosts exited normally. The full
+  check gate passed with 2822 library tests and one ignored test. Required
+  GitHub checks were green and merge state was `CLEAN`; all seven owned files
+  matched integrated `main`.
+
+- The A2 restore-isolation follow-up replaces whole-session refusal for mixed
+  tab sets with per-tab refusal. Unopened records stay verbatim in the Model
+  and every subsequent autosave/quit snapshot; selection maps from saved to
+  successfully spawned indices. Session info lists the saved tab and reason.
+  A wholly refused tab set leaves the current session intact. A production
+  App regression failed against the old code before the fix. New tests cover
+  repeated save/restore, no-live-pane autosave, refusal metadata changes,
+  selection fallback, layout/scope recovery and clearing obsolete refusals.
+  The TUI driver exercises the actual picker with controlled children, not
+  native Codex execution or trust. Final acceptance evidence goes with the PR.
 
 ### Baseline
 

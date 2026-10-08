@@ -193,6 +193,7 @@ impl App {
             last_captured_cmd: None,
             pending_worktrees: None,
             pending_sessions: None,
+            deferred_tabs: Vec::new(),
             startup_commands: Vec::new(),
             start_dir: cwd,
             prev_dir: None,
