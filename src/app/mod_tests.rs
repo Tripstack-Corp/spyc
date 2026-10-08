@@ -334,7 +334,7 @@ mod guard_tests {
     #[test]
     fn a_per_file_documented_subdir_is_documented_completely() {
         /// Enumerated file-by-file in the index; every file must be named.
-        const PER_FILE: &[&str] = &["effect", "mouse"];
+        const PER_FILE: &[&str] = &["archive", "effect", "mouse"];
         /// Described as a whole; individual files are deliberately not listed.
         const AS_GROUP: &[&str] = &[
             "render",
