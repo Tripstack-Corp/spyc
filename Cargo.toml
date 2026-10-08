@@ -221,7 +221,10 @@ libproc = "0.14"
 
 [dev-dependencies]
 insta = "1"
+# `span-locations` gives `fn_size_guard` the line numbers syn parses outside a proc macro.
+proc-macro2 = { version = "1", features = ["span-locations"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
+syn = { version = "2", default-features = false, features = ["full", "parsing", "visit"] }
 
 [profile.release]
 opt-level = 3
@@ -307,8 +310,9 @@ must_use_candidate = "allow"
 # readability; this lint wants us to collapse to `match`.
 option_if_let_else = "allow"
 
-# Dispatch functions (handle_prompt_key, App::apply) are naturally long —
-# one match arm per supported action. Splitting them hurts navigation.
+# Off because clippy can only say a function is long, not that a long one grew.
+# `src/fn_size_guard.rs` holds the same 100-line limit, counted the same way, as
+# a ratchet: the functions over it are pinned and may only shrink.
 too_many_lines = "allow"
 
 # "missing backticks in doc" is too eager — it flags things like trailing
