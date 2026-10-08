@@ -17,31 +17,64 @@ fn key(c: char) -> KeyEvent {
 /// with to `dir/<name>.argv`, one per line, and waits. A path-qualified
 /// command is detected by its last component, so the pane treats it as `name`.
 ///
-/// The list is written beside the file and renamed into place. Written in
-/// place, a reader could catch it after its first line, since nothing stops a
-/// shell writing `printf`'s lines one at a time.
+/// `dir/bin/<name>` is a symlink to [`fake_agent_script`], never a new file:
+/// macOS scans an executable the first time it runs, and a copy per test paid
+/// that scan (about a second, longer while parallel tests queue on it) inside
+/// [`agent_argv`]'s wait.
 fn fake_agent(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let exe = bin.join(name);
-    let argv = dir.join(format!("{name}.argv"));
-    std::fs::write(
-        &exe,
-        format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{argv}.tmp'\nmv '{argv}.tmp' '{argv}'\nexec sleep 30\n",
-            argv = argv.display()
-        ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _ = std::fs::remove_file(&exe);
+    std::os::unix::fs::symlink(fake_agent_script(), &exe).unwrap();
     exe
 }
 
+/// The script every [`fake_agent`] runs. It finds the test's dir and its own
+/// name from `$0`, the symlink's path.
+///
+/// The list is written beside the file and renamed into place. Written in
+/// place, a reader could catch it after its first line, since nothing stops a
+/// shell writing `printf`'s lines one at a time.
+///
+/// It sits beside the test binary, named by a hash of its text: written once
+/// per version, and test builds sharing a target dir never run each other's.
+fn fake_agent_script() -> std::path::PathBuf {
+    use std::hash::{Hash, Hasher};
+    use std::os::unix::fs::PermissionsExt;
+    const TEXT: &str = "#!/bin/sh\n\
+        argv=\"$(dirname \"$(dirname \"$0\")\")/$(basename \"$0\").argv\"\n\
+        printf '%s\\n' \"$@\" > \"$argv.tmp\"\n\
+        mv \"$argv.tmp\" \"$argv\"\n\
+        exec sleep 30\n";
+    static SCRIPT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    SCRIPT
+        .get_or_init(|| {
+            let mut hash = std::collections::hash_map::DefaultHasher::new();
+            TEXT.hash(&mut hash);
+            let exe = std::env::current_exe().expect("the test binary has a path");
+            let script = exe
+                .parent()
+                .expect("the test binary is in a directory")
+                .join(format!("spyc-fake-agent-{:016x}", hash.finish()));
+            if !script.exists() {
+                let tmp = script.with_extension(format!("{}.tmp", std::process::id()));
+                std::fs::write(&tmp, TEXT).unwrap();
+                std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).unwrap();
+                std::fs::rename(&tmp, &script).unwrap();
+            }
+            script
+        })
+        .clone()
+}
+
 /// The arguments [`fake_agent`] `name` was started with, once it has started.
+///
+/// The wait only detects an agent that never starts, so it is generous: a
+/// loaded machine can take seconds to start a pty child.
 fn agent_argv(dir: &std::path::Path, name: &str) -> Vec<String> {
     let path = dir.join(format!("{name}.argv"));
-    for _ in 0..300 {
+    for _ in 0..1_000 {
         if let Ok(text) = std::fs::read_to_string(&path)
             && text.ends_with('\n')
         {
