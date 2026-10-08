@@ -32,22 +32,27 @@ const SLACK: usize = 25;
 /// outside the workspace, which nobody maintains.
 const ROOTS: &[&str] = &["src", "crates", "tests", "fuzz/fuzz_targets", "build.rs"];
 
-/// Files neither limit applies to, with the reason.
-const EXEMPT: &[(&str, &str)] = &[(
+/// Files no limit applies to, with the reason. `fn_size_guard` skips them too.
+pub const EXEMPT: &[(&str, &str)] = &[(
     "crates/spyc-vt-sys/src/bindings.rs",
     "bindgen output, checked in so the build needs neither bindgen nor libclang",
 )];
 
-/// One limit and the files pinned over it.
-struct Rule {
+/// One limit and the things pinned over it: files here, functions in
+/// `fn_size_guard`.
+pub struct Rule {
     /// The pin list's name, as error messages tell the reader to edit it.
-    list: &'static str,
+    pub list: &'static str,
     /// What a counted line is, for error messages.
-    unit: &'static str,
-    limit: usize,
-    /// Files over `limit` when the guard landed, sorted by path, each pinned at
+    pub unit: &'static str,
+    pub limit: usize,
+    /// How far a pinned item may sit below its pin before the pin must follow.
+    pub slack: usize,
+    /// What to do instead of raising a pin, for error messages.
+    pub advice: &'static str,
+    /// Items over `limit` when the guard landed, sorted by name, each pinned at
     /// its length. An entry only ever moves down, then out.
-    pins: &'static [(&'static str, usize)],
+    pub pins: &'static [(&'static str, usize)],
 }
 
 /// Non-test code: everything `guard_support::production_half` keeps, and
@@ -56,6 +61,8 @@ const PRODUCTION: Rule = Rule {
     list: "PRODUCTION",
     unit: "non-test lines",
     limit: 1000,
+    slack: SLACK,
+    advice: "Split out a cohesive module",
     pins: &[("src/app/state/mod.rs", 1110)],
 };
 
@@ -64,42 +71,41 @@ const WHOLE_FILE: Rule = Rule {
     list: "WHOLE_FILE",
     unit: "lines",
     limit: 3000,
+    slack: SLACK,
+    advice: "Split out a cohesive module",
     pins: &[],
 };
 
 impl Rule {
-    fn pin(&self, path: &str) -> Option<usize> {
+    fn pin(&self, name: &str) -> Option<usize> {
         self.pins
             .iter()
-            .find(|(pinned, _)| *pinned == path)
+            .find(|(pinned, _)| *pinned == name)
             .map(|&(_, pin)| pin)
     }
 
-    /// What is wrong with `path` at `lines`, or `None` when it satisfies the
+    /// What is wrong with `name` at `lines`, or `None` when it satisfies the
     /// ratchet.
-    fn verdict(&self, path: &str, lines: usize) -> Option<String> {
-        let (list, unit, limit) = (self.list, self.unit, self.limit);
-        let Some(pin) = self.pin(path) else {
+    pub fn verdict(&self, name: &str, lines: usize) -> Option<String> {
+        let (list, unit, limit, advice) = (self.list, self.unit, self.limit, self.advice);
+        let Some(pin) = self.pin(name) else {
             return (lines > limit).then(|| {
-                format!(
-                    "{path}: {lines} {unit}, over the {limit}-line limit. Split out a \
-                     cohesive module."
-                )
+                format!("{name}: {lines} {unit}, over the {limit}-line limit. {advice}.")
             });
         };
         if lines > pin {
             Some(format!(
-                "{path}: grew to {lines} {unit}, past its {list} pin of {pin}. Split out a \
-                 cohesive module; don't raise the pin."
+                "{name}: grew to {lines} {unit}, past its {list} pin of {pin}. {advice}; \
+                 don't raise the pin."
             ))
         } else if lines <= limit {
             Some(format!(
-                "{path}: down to {lines} {unit}, under the {limit}-line limit. Delete its \
+                "{name}: down to {lines} {unit}, under the {limit}-line limit. Delete its \
                  {list} pin."
             ))
-        } else if pin - lines > SLACK {
+        } else if pin - lines > self.slack {
             Some(format!(
-                "{path}: shrank to {lines} {unit}. Lower its {list} pin from {pin} to {lines}."
+                "{name}: shrank to {lines} {unit}. Lower its {list} pin from {pin} to {lines}."
             ))
         } else {
             None
@@ -110,7 +116,7 @@ impl Rule {
 /// A whole-file test module, reached through `#[cfg(test)] mod name;` and so
 /// carrying no in-file marker for `production_half` to find. The repo's naming
 /// convention, as `git::no_subprocess_git_in_production` reads it too.
-fn is_test_module(path: &str) -> bool {
+pub fn is_test_module(path: &str) -> bool {
     let p = Path::new(path);
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
     let under_tests = p.parent().is_some_and(|dir| {
@@ -123,6 +129,22 @@ fn is_test_module(path: &str) -> bool {
 
 /// Every `.rs` file under [`ROOTS`]: `(repo-relative path, lines, non-test lines)`.
 fn rust_files(repo: &Path) -> Vec<(String, usize, usize)> {
+    rust_sources(repo)
+        .into_iter()
+        .map(|(rel, src)| {
+            let production = if is_test_module(&rel) {
+                0
+            } else {
+                crate::guard_support::production_half(&src).lines().count()
+            };
+            let lines = src.lines().count();
+            (rel, lines, production)
+        })
+        .collect()
+}
+
+/// Every `.rs` file under [`ROOTS`]: `(repo-relative path, contents)`.
+pub fn rust_sources(repo: &Path) -> Vec<(String, String)> {
     let mut found = Vec::new();
     for root in ROOTS {
         collect(repo, &repo.join(root), &mut found);
@@ -130,7 +152,7 @@ fn rust_files(repo: &Path) -> Vec<(String, usize, usize)> {
     found
 }
 
-fn collect(repo: &Path, path: &Path, found: &mut Vec<(String, usize, usize)>) {
+fn collect(repo: &Path, path: &Path, found: &mut Vec<(String, String)>) {
     if path.is_dir() {
         let name = path
             .file_name()
@@ -148,13 +170,7 @@ fn collect(repo: &Path, path: &Path, found: &mut Vec<(String, usize, usize)>) {
         let src = std::fs::read_to_string(path)
             .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
         let rel = path.strip_prefix(repo).expect("walked from the repo root");
-        let rel = rel.to_string_lossy().replace('\\', "/");
-        let production = if is_test_module(&rel) {
-            0
-        } else {
-            crate::guard_support::production_half(&src).lines().count()
-        };
-        found.push((rel, src.lines().count(), production));
+        found.push((rel.to_string_lossy().replace('\\', "/"), src));
     }
 }
 
@@ -201,6 +217,8 @@ fn the_ratchet_turns_one_way() {
         list: "TEST",
         unit: "lines",
         limit: 800,
+        slack: SLACK,
+        advice: "Split it",
         pins: &[("pinned.rs", 1000)],
     };
     // Unpinned: the limit itself passes, one line more fails.

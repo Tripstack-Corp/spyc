@@ -124,6 +124,19 @@ core type definitions qualifies; a pile of helpers does not).
 `app/mod.rs` keeps its own tighter ceiling
 (`app::mod_tests::guard_tests::mod_rs_stays_decomposed`).
 
+### Function length
+
+No function over 100 lines of code: the body's lines that hold code,
+so blank lines and comments are free. That is clippy's
+`too_many_lines` count at its default threshold, and test code is
+exempt. When a function grows, extract a cohesive helper; a long
+`match` usually splits into one function per arm group.
+
+`src/fn_size_guard.rs` enforces it the same way `size_guard.rs`
+enforces file size: the functions that were over the limit when it
+landed are pinned by name (`path::Type::fn`) and may only shrink. If
+you rename or move a pinned function, move its pin with it.
+
 ### Error handling
 
 - **Never crash on user actions.** Navigation into an unreadable
