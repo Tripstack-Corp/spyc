@@ -874,3 +874,23 @@ it cannot change the execution thread. A real raw-mode non-reading child
 regression reaches the pane executor and `PtyHost::write_all`, with an owned-child
 watchdog so a regression fails within a deadline. Rejected input must flash its
 cause, preserve attention and leave prompt replay unchanged.
+
+
+<!-- SPYC-TRAP: hook-cleanup-needs-managed-lease -->
+### Hook cleanup requires a managed lease
+
+An existing reporter marker can belong to a legacy import or a file whose
+installation spyc refused. Borrowing that reporter protects a live pane from
+sibling teardown, but grants no permission to remove it on exit. Hook leases
+in `state::dir_owners::hooks` record the resolved directory, agent kind, pid and
+whether installation succeeded. Teardown requires both the local and recorded
+managed lease, with no live same-agent owner. A Claude-only or MCP-only session
+cannot acquire Codex hook cleanup authority.
+
+The separate lease registry uses a nonblocking advisory lock, held through
+cleanup to prevent another instance registering between the owner check and
+file removal. Corrupt/unreadable state or lock contention preserves hooks;
+installation also skips writes when a lease cannot be registered. Legacy
+untyped owners conservatively protect every agent's hooks in their directory.
+An explicit `:hooks off` retains the user's authority to remove the active
+project's reporters, subject to tracked-file and positional-trust guards.

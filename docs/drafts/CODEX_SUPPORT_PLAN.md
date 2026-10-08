@@ -538,8 +538,26 @@ Two tracks keep the RC manageable:
 
   A3 remains open for fresh-trust execution, async question attention and native
   approval forms outside the verified rules. Refused-install reporter cleanup
-  ownership remains a reviewed follow-up; positional trust preservation and
+  ownership is addressed by A3b10 below; positional trust preservation and
   pre-question generic-block recovery have landed.
+
+- A3b10 implements the cleanup-ownership follow-up. Refused installs borrow existing
+  reporters without teardown authority; managed leases and cleanup are scoped
+  to the agent kind and resolved source, independently of MCP directories.
+  The regression suite covers borrowed, missing, same-agent, mixed-agent,
+  legacy-owner, corrupt-state and lock-contention paths. The new
+  `scripts/codex-hook-ownership-smoke.py` exercises seven controlled-PTY cases
+  through real installation and graceful host teardown. Refused re-healing no
+  longer flashes a false restored message. Native hook execution
+  and manual acceptance remain separate; integration uses automated acceptance
+  under the user's 2026-10-08 authorization. Three teardown regressions failed
+  before the fix. Corrected old-binary TUI cases reproduce reporter deletion
+  after graceful exit for tracked, Claude-only and MCP-only fixtures; seven
+  preliminary fixed-binary scenarios pass. Mutation assertions detect broken
+  borrowed authority, same-agent protection and legacy-owner handling; the
+  correct implementation was restored. The false re-heal regression also failed
+  before the result was checked. Final build/acceptance evidence is recorded
+  with the PR and isolated artifact manifest.
 
 ### Baseline
 
@@ -569,6 +587,7 @@ P1 denotes a reproduced user-visible compatibility failure. P2 denotes a parity
 gap or onboarding risk, not necessarily a release blocker. The maintainer should
 choose the RC gate explicitly; this plan recommends gating on the two P1 fixes
 and live restore/fork, transcript and hook smoke tests.
+
 
 ## Track A — compatibility and parity
 

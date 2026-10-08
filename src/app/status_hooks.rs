@@ -93,7 +93,9 @@ impl App {
         let dir = (support.config_dir)(cwd);
         let root = state::find_repo_root(&dir).unwrap_or_else(|| dir.clone());
         match crate::state::hook_consent::consent_for(&root) {
-            Some(true) => self.install_status_hooks(cwd, kind),
+            Some(true) => {
+                self.install_status_hooks(cwd, kind);
+            }
             Some(false) => {}
             None => {
                 self.state.mode = Mode::Prompting(Prompt::simple(
@@ -141,22 +143,16 @@ impl App {
         }
     }
 
-    /// Write `kind`'s status hooks into its resolved source and record that dir
-    /// for teardown (shares `mcp_config_dirs` with the `.mcp.json` cleanup).
-    /// Assumes consent is already granted. A no-op for an agent without a
-    /// status-hook installer; a no-op-returning write (git-tracked config)
-    /// simply isn't tracked.
-    ///
-    /// Also claims the dir in the cross-instance owner registry, so a *sibling*
-    /// spyc quitting can't delete the hooks this session's panes are still
-    /// reporting through (`state::dir_owners`).
+    /// Install `kind`'s reporters and record a per-agent lease. Existing
+    /// reporters on a refused install are borrowed: protected from sibling
+    /// teardown, but never eligible for this instance's exit cleanup.
     pub(super) fn install_status_hooks(
         &mut self,
         cwd: &std::path::Path,
         kind: crate::state::sessions::AgentKind,
-    ) {
+    ) -> bool {
         let Some(support) = crate::agent::profile_for(kind).status_hooks() else {
-            return;
+            return false;
         };
         let dir = (support.config_dir)(cwd);
         let snapshot = || {
@@ -171,7 +167,11 @@ impl App {
         } else {
             Some(snapshot())
         };
-        let installed = (support.ensure)(&dir);
+        let me = std::process::id();
+        let registered = crate::state::dir_owners::hooks::claim(&dir, kind, me, false);
+        let installed = registered && (support.ensure)(&dir);
+        let managed =
+            registered && installed && crate::state::dir_owners::hooks::claim(&dir, kind, me, true);
         if before.is_some_and(|content| content != snapshot())
             && let Some(tabs) = self.runtime.pane_tabs.as_mut()
         {
@@ -183,18 +183,45 @@ impl App {
                 }
             }
         }
-        // A refused migration can leave existing reporters in use by this pane.
-        // Retain their shared ownership so sibling cleanup cannot remove them.
-        if installed || support.installed(cwd) {
-            crate::state::dir_owners::claim(
-                crate::state::dir_owners::Shared::StatusHooks,
-                &dir,
-                std::process::id(),
-            );
-            if !self.runtime.mcp_config_dirs.iter().any(|d| d == &dir) {
-                self.runtime.mcp_config_dirs.push(dir);
+        if let Some(claim) = self
+            .runtime
+            .status_hook_claims
+            .iter_mut()
+            .find(|claim| claim.dir == dir && claim.kind == kind)
+        {
+            claim.managed = managed;
+        } else {
+            self.runtime
+                .status_hook_claims
+                .push(crate::state::dir_owners::hooks::HookClaim { dir, kind, managed });
+        }
+        installed
+    }
+
+    /// Teardown touches only agent kinds installed successfully by this instance.
+    pub(super) fn cleanup_written_status_hooks(&mut self) -> Vec<PathBuf> {
+        let claims = std::mem::take(&mut self.runtime.status_hook_claims);
+        let me = std::process::id();
+        let mut tracked = Vec::new();
+        for claim in &claims {
+            if let Some(_guard) = crate::state::dir_owners::hooks::release(claim, me)
+                && let Some(support) = crate::agent::profile_for(claim.kind).status_hooks()
+                && matches!(
+                    (support.cleanup)(&claim.dir),
+                    crate::mcp::ConfigCleanup::SkippedTracked
+                )
+            {
+                tracked.push(claim.dir.join(support.config_label));
             }
         }
+        for claim in &claims {
+            let _ = crate::state::dir_owners::release(
+                crate::state::dir_owners::Shared::StatusHooks,
+                &claim.dir,
+                me,
+            );
+        }
+        tracked
     }
 
     /// The active agent's hook-source project root, else the focused directory's
@@ -240,14 +267,31 @@ impl App {
                 // with a sibling spyc still claiming the dir: the user is
                 // revoking consent for the project, and consent is what the
                 // sibling's own re-heal consults before re-installing.
-                let _ = crate::state::dir_owners::release(
-                    crate::state::dir_owners::Shared::StatusHooks,
-                    cwd,
-                    std::process::id(),
-                );
-                (support.cleanup)(cwd);
-                // Keep the directory for teardown: its independent MCP entry
-                // can still be owned after hooks are explicitly disabled.
+                let me = std::process::id();
+                if let Some(index) = self
+                    .runtime
+                    .status_hook_claims
+                    .iter()
+                    .position(|claim| claim.dir == *cwd && claim.kind == *kind)
+                {
+                    let claim = self.runtime.status_hook_claims.remove(index);
+                    let _guard = crate::state::dir_owners::hooks::release(&claim, me);
+                    (support.cleanup)(cwd);
+                } else {
+                    (support.cleanup)(cwd);
+                }
+                if !self
+                    .runtime
+                    .status_hook_claims
+                    .iter()
+                    .any(|claim| claim.dir == *cwd)
+                {
+                    let _ = crate::state::dir_owners::release(
+                        crate::state::dir_owners::Shared::StatusHooks,
+                        cwd,
+                        me,
+                    );
+                }
             }
         }
         let proj = crate::paths::display_tilde(&root);
@@ -327,7 +371,9 @@ impl App {
             if crate::state::hook_consent::consent_for(&root) != Some(true) {
                 continue;
             }
-            self.install_status_hooks(&cwd, kind);
+            if !self.install_status_hooks(&cwd, kind) {
+                continue;
+            }
             // Only reachable when they were actually missing, so this flashes
             // once per removal rather than once per interval.
             let note = if support.live_reload {
@@ -480,6 +526,163 @@ mod tests {
             let entry = TabEntry::new(pane, TabInfo::new("cat", dir.clone()));
             app.runtime.pane_tabs = Some(PaneTabs::new(entry));
             assert!(app.hook_supporting_panes().is_empty());
+        });
+    }
+
+    fn legacy_fixture(dir: &Path) -> (std::path::PathBuf, Vec<u8>) {
+        let path = dir.join(".codex/hooks.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let bytes =
+            br#"{"hooks":{"Stop":[{"hooks":[{"command":"spyc --report-status done"}]}]}}"#.to_vec();
+        std::fs::write(&path, &bytes).unwrap();
+        (path, bytes)
+    }
+
+    #[test]
+    fn teardown_preserves_borrowed_legacy_reporters_when_codex_install_is_refused() {
+        for tracked in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            let dir = tmp.path();
+            crate::state::with_state_root(&dir.join("state"), || {
+                let (legacy, before) = legacy_fixture(dir);
+                let config = dir.join(".codex/config.toml");
+                let config_before = if tracked {
+                    "model = 'preserve'\n"
+                } else {
+                    "{broken"
+                };
+                std::fs::write(&config, config_before).unwrap();
+                if tracked {
+                    crate::git::test_support::run_git(dir, &["init", "--quiet"]);
+                    crate::git::test_support::run_git(dir, &["add", ".codex/config.toml"]);
+                }
+                let mut app = App::test_app(dir.to_path_buf());
+                app.install_status_hooks(dir, AgentKind::Codex);
+                app.cleanup_written_mcp_configs();
+                assert_eq!(
+                    std::fs::read(&legacy).ok(),
+                    Some(before),
+                    "borrowed reporters must survive teardown (tracked={tracked})"
+                );
+                assert_eq!(std::fs::read_to_string(&config).unwrap(), config_before);
+            });
+        }
+    }
+
+    #[test]
+    fn teardown_of_claude_only_session_preserves_codex_reporters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        crate::state::with_state_root(&dir.join("state"), || {
+            let (legacy, before) = legacy_fixture(dir);
+            let mut app = App::test_app(dir.to_path_buf());
+            app.view.mcp_running = true;
+            app.ensure_agent_mcp_config("claude", dir);
+            app.install_status_hooks(dir, AgentKind::Claude);
+            let own = dir.join(".claude/settings.json");
+            assert!(own.exists());
+            app.cleanup_written_mcp_configs();
+            assert_eq!(
+                std::fs::read(&legacy).ok(),
+                Some(before),
+                "another agent's reporters must survive"
+            );
+            assert!(
+                !own.exists(),
+                "managed Claude reporters must still be cleaned"
+            );
+        });
+    }
+
+    #[test]
+    fn teardown_of_mcp_only_session_preserves_unclaimed_hooks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        crate::state::with_state_root(&dir.join("state"), || {
+            let (legacy, before) = legacy_fixture(dir);
+            let mut app = App::test_app(dir.to_path_buf());
+            app.view.mcp_running = true;
+            app.ensure_agent_mcp_config("agy", dir);
+            app.cleanup_written_mcp_configs();
+            assert_eq!(
+                std::fs::read(&legacy).ok(),
+                Some(before),
+                "MCP registration grants no hook cleanup authority"
+            );
+        });
+    }
+
+    #[test]
+    fn explicit_disable_retires_borrowed_cleanup_claim() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        crate::state::with_state_root(&dir.join("state"), || {
+            let (legacy, before) = legacy_fixture(dir);
+            std::fs::write(dir.join(".codex/config.toml"), "{broken").unwrap();
+            let mut app = app_with_agent_tabs(dir, 1);
+            app.runtime
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .active_info_mut()
+                .command = "codex".into();
+            app.install_status_hooks(dir, AgentKind::Codex);
+            app.set_status_hooks(false);
+            assert!(
+                !legacy.exists(),
+                "explicit user revocation can remove borrowed reporters"
+            );
+            std::fs::write(&legacy, &before).unwrap();
+            app.cleanup_written_mcp_configs();
+            assert_eq!(
+                std::fs::read(&legacy).unwrap(),
+                before,
+                "disabled claims must not regain teardown authority"
+            );
+        });
+    }
+
+    #[test]
+    fn refused_reheal_does_not_flash_restored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        crate::state::with_state_root(&dir.join("state"), || {
+            let mut app = app_with_agent_tabs(dir, 1);
+            crate::state::hook_consent::set_consent(dir, true);
+            std::fs::create_dir_all(dir.join(".claude")).unwrap();
+            std::fs::write(dir.join(".claude/settings.json"), "{broken").unwrap();
+            assert!(
+                !app.settle_status_hooks(Instant::now()),
+                "a refused write did not restore hooks"
+            );
+            assert!(app.state.flash.is_none(), "no false success message");
+        });
+    }
+
+    #[test]
+    fn installation_skips_writes_when_lease_registry_is_locked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        crate::state::with_state_root(&dir.join("state"), || {
+            let me = std::process::id();
+            assert!(crate::state::dir_owners::hooks::claim(
+                dir,
+                AgentKind::Claude,
+                me,
+                true
+            ));
+            let claim = crate::state::dir_owners::hooks::HookClaim {
+                dir: dir.to_path_buf(),
+                kind: AgentKind::Claude,
+                managed: true,
+            };
+            let _guard = crate::state::dir_owners::hooks::release(&claim, me).unwrap();
+            let mut app = App::test_app(dir.to_path_buf());
+            assert!(!app.install_status_hooks(dir, AgentKind::Claude));
+            assert!(
+                !dir.join(".claude/settings.json").exists(),
+                "no write may race a locked cleanup"
+            );
         });
     }
 }

@@ -103,6 +103,8 @@ pub(super) struct Runtime {
     /// `ensure_agent_mcp_config`; `cleanup_written_mcp_configs` removes our
     /// entry from each on teardown so a dead socket isn't left referenced.
     pub(super) mcp_config_dirs: Vec<PathBuf>,
+    /// Per-agent reporter leases, separate from MCP entry cleanup authority.
+    pub(super) status_hook_claims: Vec<crate::state::dir_owners::hooks::HookClaim>,
     /// Bottom pane tabs (each owns a `PtyHost`).
     pub(super) pane_tabs: Option<PaneTabs>,
     /// Top-area overlay subprocess (`V`/`D`/`;`) — a `PtyHost`. The LEFT

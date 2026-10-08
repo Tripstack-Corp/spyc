@@ -564,3 +564,25 @@ execution is requested. The real user's trust records are untouched. Stable keys
 and hashes protect the lookup of an existing trust record; this is discovery
 coverage, not live trusted-hook execution. Captures, recordings, discovery JSON,
 binary hashes and results are retained, and only the owned session is closed.
+
+
+### Test hook cleanup ownership across hosts
+
+`scripts/codex-hook-ownership-smoke.py` runs controlled PTY children through
+actual spyc installation and graceful `:q` teardown. It uses disposable home,
+project and state directories, disables the unrelated Codex MCP writer and
+never executes native agents, hooks or trust approvals.
+
+```sh
+python3 scripts/codex-hook-ownership-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario tracked --output /tmp/spyc-hook-borrowed
+python3 scripts/codex-hook-ownership-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario mixed --output /tmp/spyc-hook-mixed-hosts
+```
+
+The seven scenarios cover tracked/malformed refused installs, Claude-only and
+MCP-only sessions, two managed Codex hosts, mixed-agent hosts and a borrowed
+last owner. The driver waits for the host process to exit before checking file
+preservation or cleanup. Manifests, recordings, activity dumps, viewport captures
+and results identify the binary and distinguish this coverage from native hook
+execution.

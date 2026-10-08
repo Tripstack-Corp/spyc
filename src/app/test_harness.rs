@@ -46,6 +46,7 @@ impl App {
                 lua_inflight: None,
                 lua_events: super::lua_events::LuaEventState::default(),
                 mcp_config_dirs: Vec::new(),
+                status_hook_claims: Vec::new(),
                 pane_tabs: None,
                 top_overlay: None,
                 top_overlay_right: None,
