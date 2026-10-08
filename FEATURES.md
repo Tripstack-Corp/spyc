@@ -519,6 +519,11 @@ Multiple tabs, each running an independent pty:
   tab's child is still running, so a stray keystroke can't kill a live agent
   session; an already-exited tab closes silently
 - **^a 1..9** switch to tab N
+- **^a P** pipe selected file contents to the pane. Content over 8 MiB asks
+  for confirmation of its size (`y`/`Y` sends, other keys cancel). A confirmed
+  large pipe needs an empty input queue and stays together as one bracketed
+  paste; later input is refused until that batch finishes writing. Ordinary pastes
+  over 8 MiB are refused with a size-limit error.
 - **^a p / ^a [** prev tab
 - **^a n / ^a ]** next tab
 - **^a ^a** jump to the last-active tab (screen/tmux "last window")

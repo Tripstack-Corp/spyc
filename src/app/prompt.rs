@@ -148,6 +148,12 @@ pub enum PromptKind {
     /// anything else keeps it. Always targets the active tab (the modal prompt
     /// blocks tab switching), so it needs no index. An exited tab skips this.
     ClosePane,
+    /// Large file-pipe confirmation: only an unmodified `y`/`Y` queues it.
+    PipeConfirm {
+        payload: Vec<u8>,
+        tab_id: String,
+        on_ok: String,
+    },
     /// `^a R` on a tab whose child is still running — a restart kills it, so it
     /// loses the session exactly as `^a x` does. Same single-key shape as
     /// [`Self::ClosePane`]: `y`/`Y` restarts, anything else keeps the tab. An

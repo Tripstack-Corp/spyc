@@ -416,6 +416,11 @@ impl Pane {
         self.host.write_all(bytes)
     }
 
+    /// Deliver the payload of a confirmed file-pipe prompt through the same worker.
+    pub(crate) fn send_confirmed_pipe(&mut self, bytes: Vec<u8>) -> anyhow::Result<()> {
+        self.host.write_confirmed_pipe(bytes)
+    }
+
     /// The visible-grid text of a selection, for a clipboard copy; see
     /// [`widget::selection_text`].
     pub fn selection_text(&self, start: (u16, u16), end: (u16, u16)) -> String {

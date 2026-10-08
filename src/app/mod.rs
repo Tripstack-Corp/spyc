@@ -144,6 +144,7 @@ mod pager_handler;
 mod pager_history;
 mod pager_stream;
 mod pane_fork;
+mod pane_input;
 mod pane_scroll;
 mod pane_tabs;
 mod pane_wake;
@@ -205,7 +206,7 @@ use tasks::{BackgroundTasks, TASK_BUFFER_CAP, TaskStatus};
 use util::kill_pg;
 use util::{
     buffer_to_lines, eof_marker_line, format_elapsed_hms, format_uptime, path_basename_display,
-    strip_ansi_escapes, user_host_string,
+    user_host_string,
 };
 
 /// Which collection the user is looking at.
