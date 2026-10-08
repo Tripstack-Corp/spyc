@@ -1217,6 +1217,43 @@ mod tests {
         assert!(matches!(fresh.resume, ResumeAction::None));
     }
 
+    /// A saved claude conversation id names a transcript claude may never have
+    /// written: the tab was saved before its first message. Typing `/resume`
+    /// for it gets "No conversation found"; there is nothing to resume, so
+    /// claude starts fresh.
+    #[test]
+    #[ignore = "red: restore types /resume for a conversation that was never written"]
+    fn restoring_a_claude_conversation_that_was_never_written_starts_fresh() {
+        const SID: &str = "11111111-1111-4111-8111-111111111111";
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::sessions::with_claude_dir(tmp.path(), || {
+            let plan = ClaudeProfile.reconstruct_restore("claude", Some(SID), Path::new("/tmp/p"));
+            assert_eq!(plan.command, "claude");
+            assert!(matches!(plan.resume, ResumeAction::None));
+        });
+    }
+
+    /// The other side: a written conversation is resumed.
+    #[test]
+    fn restoring_a_written_claude_conversation_resumes_it() {
+        const SID: &str = "11111111-1111-4111-8111-111111111111";
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = Path::new("/tmp/p");
+        let project = tmp
+            .path()
+            .join("projects")
+            .join(crate::state::sessions::project_slug(cwd));
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join(format!("{SID}.jsonl")), "{}\n").unwrap();
+        crate::state::sessions::with_claude_dir(tmp.path(), || {
+            let plan = ClaudeProfile.reconstruct_restore("claude", Some(SID), cwd);
+            assert!(matches!(
+                plan.resume,
+                ResumeAction::ClaudeStdin { session_id } if session_id == SID
+            ));
+        });
+    }
+
     /// Codex bakes resume into the command: `resume <UUID>` with an id,
     /// `resume --last` without one.
     #[test]
