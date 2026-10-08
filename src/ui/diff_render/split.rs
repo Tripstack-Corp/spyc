@@ -69,6 +69,10 @@ pub(super) fn render_file_split(
     // Size the line-number field to the file's largest number so 5-digit+
     // files don't overflow the gutter and break column alignment.
     let lnum_w = lnum_width(prep.hunks);
+    // Every cell in the file wraps to the same geometry.
+    let cell = |lnum: u32, origin: LineOrigin, content: Vec<Span<'static>>| {
+        split_cell_rows(theme, Some(lnum), origin, content, col_w, lnum_w, tab_width)
+    };
 
     let (mut oi, mut ni) = (0usize, 0usize);
     for h in prep.hunks {
@@ -80,23 +84,15 @@ pub(super) fn render_file_split(
         let mut i = 0;
         while i < lines.len() {
             if lines[i].origin == LineOrigin::Context {
-                let left_rows = split_cell_rows(
-                    theme,
-                    Some(old_no),
+                let left_rows = cell(
+                    old_no,
                     LineOrigin::Context,
                     styled_content(pick(old_ref, oi, &lines[i].text, theme, None), None, None),
-                    col_w,
-                    lnum_w,
-                    tab_width,
                 );
-                let right_rows = split_cell_rows(
-                    theme,
-                    Some(new_no),
+                let right_rows = cell(
+                    new_no,
                     LineOrigin::Context,
                     styled_content(pick(new_ref, ni, &lines[i].text, theme, None), None, None),
-                    col_w,
-                    lnum_w,
-                    tab_width,
                 );
                 push_split_rows(out, left_rows, right_rows, None, None, col_w, theme);
                 old_no += 1;
@@ -133,15 +129,7 @@ pub(super) fn render_file_split(
                         theme.diff_row_bg(false),
                         word,
                     );
-                    let rows = split_cell_rows(
-                        theme,
-                        Some(old_no),
-                        LineOrigin::Remove,
-                        content,
-                        col_w,
-                        lnum_w,
-                        tab_width,
-                    );
+                    let rows = cell(old_no, LineOrigin::Remove, content);
                     old_no += 1;
                     oi += 1;
                     rows
@@ -155,15 +143,7 @@ pub(super) fn render_file_split(
                         theme.diff_row_bg(true),
                         word,
                     );
-                    let rows = split_cell_rows(
-                        theme,
-                        Some(new_no),
-                        LineOrigin::Add,
-                        content,
-                        col_w,
-                        lnum_w,
-                        tab_width,
-                    );
+                    let rows = cell(new_no, LineOrigin::Add, content);
                     new_no += 1;
                     ni += 1;
                     rows

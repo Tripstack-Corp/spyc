@@ -67,6 +67,23 @@ impl StatusBar<'_> {
         self.powerline(area)
     }
 
+    /// The logo. Truecolor terminals get the 🌶️ emoji; degraded ones (GNU screen,
+    /// non-truecolor) mangle the 2-cell astral glyph into junk, so paint a
+    /// spice-red block instead — same 4-col footprint, reads as intentional.
+    fn push_logo(&self, spans: &mut Vec<Span<'static>>, term_bg: Color) {
+        // Pepper emoji gets its own span with terminal-default bg so the
+        // emoji colour rendering isn't clipped by the segment background.
+        let emoji_text = " \u{1f336}\u{fe0f} ";
+        if self.plain_logo {
+            let pepper_red = Color::Rgb(0xE0, 0x32, 0x22); // SPICE_HEAT[0]
+            spans.push(Span::styled(" ", Style::default().bg(term_bg)));
+            spans.push(Span::styled("  ", Style::default().bg(pepper_red)));
+            spans.push(Span::styled(" ", Style::default().bg(term_bg)));
+        } else {
+            spans.push(Span::styled(emoji_text, Style::default().bg(term_bg)));
+        }
+    }
+
     #[allow(clippy::similar_names)]
     fn powerline(&self, area: Rect) -> Line<'static> {
         let avail = area.width as usize;
@@ -95,9 +112,6 @@ impl StatusBar<'_> {
 
         let term_bg = Color::Reset;
 
-        // Pepper emoji gets its own span with terminal-default bg so the
-        // emoji colour rendering isn't clipped by the segment background.
-        let emoji_text = " \u{1f336}\u{fe0f} ";
         let emoji_w = 4; // space + 🌶️ (2 cols) + space
 
         let project_text = self.project_home.map(|p| format!(" {p} "));
@@ -138,18 +152,7 @@ impl StatusBar<'_> {
         };
 
         let mut spans: Vec<Span> = Vec::new();
-
-        // Logo. Truecolor terminals get the 🌶️ emoji; degraded ones (GNU screen,
-        // non-truecolor) mangle the 2-cell astral glyph into junk, so paint a
-        // spice-red block instead — same 4-col footprint, reads as intentional.
-        if self.plain_logo {
-            let pepper_red = Color::Rgb(0xE0, 0x32, 0x22); // SPICE_HEAT[0]
-            spans.push(Span::styled(" ", Style::default().bg(term_bg)));
-            spans.push(Span::styled("  ", Style::default().bg(pepper_red)));
-            spans.push(Span::styled(" ", Style::default().bg(term_bg)));
-        } else {
-            spans.push(Span::styled(emoji_text, Style::default().bg(term_bg)));
-        }
+        self.push_logo(&mut spans, term_bg);
 
         if let Some(ref text) = project_text {
             let next_bg = if session_text.is_some() {
