@@ -48,7 +48,8 @@ thread_local! {
 /// this root.
 ///
 /// Resolution order:
-/// 1. Per-thread test override (see `with_state_root`).
+/// 1. Per-thread test override (see `with_state_root`). A unit-test build
+///    stops here and returns `None` without one.
 /// 2. `$XDG_STATE_HOME/spyc`.
 /// 3. `$HOME/.local/state/spyc`.
 /// 4. `None` on exotic systems with neither.
@@ -60,6 +61,11 @@ thread_local! {
 pub fn state_root() -> Option<PathBuf> {
     if let Some(p) = STATE_ROOT_OVERRIDE.with(|c| c.borrow().clone()) {
         return Some(p);
+    }
+    // A unit test that doesn't pin a root persists nothing, rather than
+    // writing into the developer's real state dir.
+    if cfg!(test) {
+        return None;
     }
     if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
         return Some(PathBuf::from(xdg).join("spyc"));
@@ -498,6 +504,19 @@ mod tests {
         });
         // Override unwound: resolution falls back to env, never our tempdir.
         assert_ne!(super::config_root().as_deref(), Some(tmp.path()));
+    }
+
+    /// A unit test that doesn't pin a state root persists nothing. Falling
+    /// back to `$XDG_STATE_HOME` / `$HOME` here left one `test_history_<pid>`
+    /// file in the developer's real state dir per test run.
+    #[test]
+    fn unit_tests_see_no_state_root_unless_they_pin_one() {
+        assert_eq!(super::state_root(), None);
+        let tmp = tempfile::tempdir().unwrap();
+        super::with_state_root(tmp.path(), || {
+            assert_eq!(super::state_root().as_deref(), Some(tmp.path()));
+        });
+        assert_eq!(super::state_root(), None);
     }
 
     /// `config_root` and `state_root` are independent axes — overriding one

@@ -574,11 +574,17 @@ mod tests {
         cleanup_mcp_json, ensure_agy_mcp_config, sweep_orphan_spyc_configs,
     };
 
+    /// The socket `cleanup_*` treats as this process's own. `socket_path` lives
+    /// under the state root, so call it inside [`with_our_state_root`].
     fn our_sock() -> String {
         crate::mcp::socket_path()
-            .expect("tests run with HOME set")
+            .expect("the test pinned a state root")
             .to_string_lossy()
             .into_owned()
+    }
+
+    fn with_our_state_root(tmp: &tempfile::TempDir, body: impl FnOnce()) {
+        crate::state::with_state_root(&tmp.path().join("state"), body);
     }
 
     /// A `.codex/config.toml` whose spyc entry points at `sock`, written into a
@@ -598,23 +604,25 @@ mod tests {
     #[test]
     fn cleanup_codex_removes_our_entry_and_empty_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let codex = tmp.path().join(".codex");
-        std::fs::create_dir_all(&codex).unwrap();
-        let cfg = codex.join("config.toml");
-        std::fs::write(
-            &cfg,
-            format!(
-                "[mcp_servers.spyc]\ncommand = \"spyc\"\nargs = [\"--mcp\"]\n[mcp_servers.spyc.env]\nSPYC_MCP_SOCK = \"{}\"\n",
-                our_sock()
-            ),
-        )
-        .unwrap();
-        assert!(matches!(
-            cleanup_codex_config(tmp.path()),
-            ConfigCleanup::Cleaned
-        ));
-        assert!(!cfg.exists(), "config.toml should be deleted");
-        assert!(!codex.exists(), "empty .codex dir should be removed");
+        with_our_state_root(&tmp, || {
+            let codex = tmp.path().join(".codex");
+            std::fs::create_dir_all(&codex).unwrap();
+            let cfg = codex.join("config.toml");
+            std::fs::write(
+                &cfg,
+                format!(
+                    "[mcp_servers.spyc]\ncommand = \"spyc\"\nargs = [\"--mcp\"]\n[mcp_servers.spyc.env]\nSPYC_MCP_SOCK = \"{}\"\n",
+                    our_sock()
+                ),
+            )
+            .unwrap();
+            assert!(matches!(
+                cleanup_codex_config(tmp.path()),
+                ConfigCleanup::Cleaned
+            ));
+            assert!(!cfg.exists(), "config.toml should be deleted");
+            assert!(!codex.exists(), "empty .codex dir should be removed");
+        });
     }
 
     #[test]
@@ -687,25 +695,27 @@ mod tests {
     #[test]
     fn cleanup_codex_preserves_other_config_keys() {
         let tmp = tempfile::tempdir().unwrap();
-        let codex = tmp.path().join(".codex");
-        std::fs::create_dir_all(&codex).unwrap();
-        let cfg = codex.join("config.toml");
-        std::fs::write(
-            &cfg,
-            format!(
-                "model = \"gpt-5\"\n[mcp_servers.spyc.env]\nSPYC_MCP_SOCK = \"{}\"\n",
-                our_sock()
-            ),
-        )
-        .unwrap();
-        assert!(matches!(
-            cleanup_codex_config(tmp.path()),
-            ConfigCleanup::Cleaned
-        ));
-        let after = std::fs::read_to_string(&cfg).expect("file kept (other config present)");
-        assert!(after.contains("model"), "user's other config preserved");
-        assert!(!after.contains("spyc"), "our entry removed");
-        assert!(codex.exists(), ".codex dir kept (config.toml still there)");
+        with_our_state_root(&tmp, || {
+            let codex = tmp.path().join(".codex");
+            std::fs::create_dir_all(&codex).unwrap();
+            let cfg = codex.join("config.toml");
+            std::fs::write(
+                &cfg,
+                format!(
+                    "model = \"gpt-5\"\n[mcp_servers.spyc.env]\nSPYC_MCP_SOCK = \"{}\"\n",
+                    our_sock()
+                ),
+            )
+            .unwrap();
+            assert!(matches!(
+                cleanup_codex_config(tmp.path()),
+                ConfigCleanup::Cleaned
+            ));
+            let after = std::fs::read_to_string(&cfg).expect("file kept (other config present)");
+            assert!(after.contains("model"), "user's other config preserved");
+            assert!(!after.contains("spyc"), "our entry removed");
+            assert!(codex.exists(), ".codex dir kept (config.toml still there)");
+        });
     }
 
     // --- agy `.agents/mcp_config.json` (same schema as `.mcp.json`) ---
@@ -766,16 +776,18 @@ mod tests {
     #[test]
     fn cleanup_agy_removes_our_entry_and_the_emptied_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = write_agy_with_sock(tmp.path(), &our_sock());
-        assert!(matches!(
-            cleanup_agy_mcp_config(tmp.path()),
-            ConfigCleanup::Cleaned
-        ));
-        assert!(!path.exists(), "sole-spyc mcp_config.json deleted");
-        assert!(
-            !tmp.path().join(".agents").exists(),
-            "emptied .agents dir removed"
-        );
+        with_our_state_root(&tmp, || {
+            let path = write_agy_with_sock(tmp.path(), &our_sock());
+            assert!(matches!(
+                cleanup_agy_mcp_config(tmp.path()),
+                ConfigCleanup::Cleaned
+            ));
+            assert!(!path.exists(), "sole-spyc mcp_config.json deleted");
+            assert!(
+                !tmp.path().join(".agents").exists(),
+                "emptied .agents dir removed"
+            );
+        });
     }
 
     #[test]
@@ -828,20 +840,22 @@ mod tests {
     #[test]
     fn cleanup_mcp_json_removes_our_entry_when_sole() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join(".mcp.json");
-        std::fs::write(
-            &path,
-            format!(
-                "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}}}}}}",
-                our_sock()
-            ),
-        )
-        .unwrap();
-        assert!(matches!(
-            cleanup_mcp_json(tmp.path()),
-            ConfigCleanup::Cleaned
-        ));
-        assert!(!path.exists(), "sole-spyc .mcp.json should be deleted");
+        with_our_state_root(&tmp, || {
+            let path = tmp.path().join(".mcp.json");
+            std::fs::write(
+                &path,
+                format!(
+                    "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}}}}}}",
+                    our_sock()
+                ),
+            )
+            .unwrap();
+            assert!(matches!(
+                cleanup_mcp_json(tmp.path()),
+                ConfigCleanup::Cleaned
+            ));
+            assert!(!path.exists(), "sole-spyc .mcp.json should be deleted");
+        });
     }
 
     /// A git-TRACKED (committed) `.mcp.json` is left byte-for-byte intact:
@@ -861,47 +875,51 @@ mod tests {
             assert!(ok, "git {args:?} failed");
         };
         let tmp = tempfile::tempdir().unwrap();
-        let repo = tmp.path();
-        run_git(repo, &["init", "-q", "--initial-branch=main"]);
-        let path = repo.join(".mcp.json");
-        let body = format!(
-            "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}}}}}}",
-            our_sock()
-        );
-        std::fs::write(&path, &body).unwrap();
-        run_git(repo, &["add", ".mcp.json"]);
-        run_git(repo, &["commit", "-q", "-m", "add mcp config"]);
+        with_our_state_root(&tmp, || {
+            let repo = tmp.path();
+            run_git(repo, &["init", "-q", "--initial-branch=main"]);
+            let path = repo.join(".mcp.json");
+            let body = format!(
+                "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}}}}}}",
+                our_sock()
+            );
+            std::fs::write(&path, &body).unwrap();
+            run_git(repo, &["add", ".mcp.json"]);
+            run_git(repo, &["commit", "-q", "-m", "add mcp config"]);
 
-        assert!(
-            matches!(cleanup_mcp_json(repo), ConfigCleanup::SkippedTracked),
-            "committed .mcp.json with our entry → SkippedTracked, not Cleaned"
-        );
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            body,
-            "the tracked config is left byte-for-byte intact"
-        );
+            assert!(
+                matches!(cleanup_mcp_json(repo), ConfigCleanup::SkippedTracked),
+                "committed .mcp.json with our entry → SkippedTracked, not Cleaned"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                body,
+                "the tracked config is left byte-for-byte intact"
+            );
+        });
     }
 
     #[test]
     fn cleanup_mcp_json_preserves_other_servers() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join(".mcp.json");
-        std::fs::write(
-            &path,
-            format!(
-                "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}},\"other\":{{\"command\":\"x\"}}}}}}",
-                our_sock()
-            ),
-        )
-        .unwrap();
-        assert!(matches!(
-            cleanup_mcp_json(tmp.path()),
-            ConfigCleanup::Cleaned
-        ));
-        let after = std::fs::read_to_string(&path).expect("file kept (other server present)");
-        assert!(after.contains("other"), "other server preserved");
-        assert!(!after.contains("spyc"), "our entry removed");
+        with_our_state_root(&tmp, || {
+            let path = tmp.path().join(".mcp.json");
+            std::fs::write(
+                &path,
+                format!(
+                    "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}},\"other\":{{\"command\":\"x\"}}}}}}",
+                    our_sock()
+                ),
+            )
+            .unwrap();
+            assert!(matches!(
+                cleanup_mcp_json(tmp.path()),
+                ConfigCleanup::Cleaned
+            ));
+            let after = std::fs::read_to_string(&path).expect("file kept (other server present)");
+            assert!(after.contains("other"), "other server preserved");
+            assert!(!after.contains("spyc"), "our entry removed");
+        });
     }
 
     #[test]

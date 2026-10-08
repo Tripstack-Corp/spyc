@@ -345,9 +345,12 @@ mod tests {
 
     #[test]
     fn project_path_collision_resistant() {
-        let a = Harpoon::disk_path(Path::new("/work/spyc")).unwrap();
-        let b = Harpoon::disk_path(Path::new("/play/spyc")).unwrap();
-        assert_ne!(a, b);
+        let root = fresh_root();
+        crate::state::with_state_root(root.path(), || {
+            let a = Harpoon::disk_path(Path::new("/work/spyc")).unwrap();
+            let b = Harpoon::disk_path(Path::new("/play/spyc")).unwrap();
+            assert_ne!(a, b);
+        });
     }
 
     #[test]
