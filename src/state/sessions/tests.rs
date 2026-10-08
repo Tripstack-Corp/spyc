@@ -619,7 +619,6 @@ fn tabless_session(id: u64, epoch_secs: u64) -> Session {
 /// prune by id deleted that file in the same call that wrote it, and the quit
 /// summary still said "session saved".
 #[test]
-#[ignore = "red: prune ranks by id, so a restored session deletes itself on save"]
 fn pruning_keeps_the_session_just_saved_and_drops_the_least_recently_saved() {
     let tmp = tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -655,6 +654,21 @@ fn pruning_keeps_the_session_just_saved_and_drops_the_least_recently_saved() {
             "the least recently saved restore point is the one pruned"
         );
     });
+}
+
+/// The file a save just wrote survives even when its timestamp is the oldest,
+/// as after the clock steps back.
+#[test]
+fn prune_never_selects_the_file_just_written() {
+    let at = |secs| std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+    let files = vec![
+        (PathBuf::from("1.json"), at(1)),
+        (PathBuf::from("2.json"), at(2)),
+        (PathBuf::from("3.json"), at(3)),
+    ];
+    let keep = std::path::Path::new("1.json");
+    assert!(prune_victims(files.clone(), keep, 3).is_empty());
+    assert_eq!(prune_victims(files, keep, 2), vec![PathBuf::from("2.json")]);
 }
 
 /// Full save→disk→load round-trip: multiple tabs survive in order
