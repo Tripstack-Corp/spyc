@@ -27,8 +27,8 @@ use crate::pane::{AgentActivity, ReportedStatus};
 /// the P1 semantic hook (`docs/archive/AGENT_AWARENESS_PLAN.md`), not output timing.
 const AGENT_ACTIVE_WINDOW: Duration = Duration::from_secs(2);
 
-/// P1-2 scrape-fallback quiet window: fire a single screen scan after an agent
-/// tab with detection rules stops producing output for this long.
+/// Screen-scan debounce. Codex's complete approval forms are checked this long
+/// after the first pending repaint; other agents require this much silence.
 const SCRAPE_QUIET_WINDOW: Duration = Duration::from_millis(250);
 
 /// What [`App::scrape_step`] decided for one dirty tab: nothing to do, scan its
@@ -410,8 +410,8 @@ impl App {
     }
 
     /// Resolve semantic reports, verified approval dialogues and output timing.
-    /// Agy yields non-blocked reports to newer output. Codex's complete command
-    /// approval temporarily overrides non-blocked reports without discarding
+    /// Agy yields non-blocked reports to newer output. Codex's complete
+    /// approval form temporarily overrides non-blocked reports without discarding
     /// them; semantic question/agent blocks retain precedence. Other reports
     /// survive redraws and silent tool waits until expiry. `scrape` comes from
     /// the debounced visible-screen scan in `settle_scrape_quiet`.
@@ -441,9 +441,9 @@ impl App {
                 return r.status;
             }
         }
-        // P1-2 scrape fallback: the debounced `settle_scrape_quiet` fires a
-        // single scan after `SCRAPE_QUIET_WINDOW` of silence, so the result
-        // here is already timing-safe — no per-event race with `reported`.
+        // P1-2 scrape fallback: `settle_scrape_quiet` debounces the screen read.
+        // Codex's complete forms have a bounded delay; other agents wait for
+        // silence. Report precedence is resolved here, after that screen read.
         if let Some(s) = scrape {
             return s;
         }
@@ -451,21 +451,17 @@ impl App {
     }
 
     /// P1-2 pure debounce step for one dirty tab: skip it, scan its screen now,
-    /// or wait until its quiet window expires.
-    ///
-    /// A prompt renders over several output events, so scanning mid-draw reads a
-    /// half-written screen. Waiting for `SCRAPE_QUIET_WINDOW` of silence means
-    /// the one scan we do run sees a settled frame. `None` last-output can't
-    /// happen for a dirty tab (the same drain stamps both), but reads as due so
-    /// the function is total.
+    /// or wait until its debounce expires. The caller chooses the first pending
+    /// repaint for Codex and the last output for other agents. A missing start
+    /// reads as due so the function is total.
     ///
     /// Deliberately blind to whether a report is live: a report that is about to
     /// be superseded must not cancel the scan. See [`Self::settle_scrape_quiet`].
-    fn scrape_step(has_rules: bool, last_output_at: Option<Instant>, now: Instant) -> ScrapeStep {
+    fn scrape_step(has_rules: bool, wait_from: Option<Instant>, now: Instant) -> ScrapeStep {
         if !has_rules {
             return ScrapeStep::Skip;
         }
-        let Some(at) = last_output_at else {
+        let Some(at) = wait_from else {
             return ScrapeStep::Scan;
         };
         let fire_at = at + SCRAPE_QUIET_WINDOW;
@@ -476,9 +472,9 @@ impl App {
         }
     }
 
-    /// P1-2 scrape-fallback settle: after `SCRAPE_QUIET_WINDOW` of silence from a
-    /// dirty agent tab with detection rules, fire a single screen scan. Consumes
-    /// the dirty flag.
+    /// Scan dirty agent viewports after their debounce. Codex's complete forms
+    /// use the first pending repaint, so a waiting tool's animation cannot keep
+    /// postponing detection. Other agents use the last output's quiet window.
     ///
     /// **A live report does not cancel the scan**. Skipping the scan behind one
     /// looks like a free optimization and is not: this runs before
@@ -506,21 +502,37 @@ impl App {
         let mut earliest_fire: Option<std::time::Instant> = None;
         for entry in tabs.tabs_mut().iter_mut() {
             if !entry.info.scrape_dirty {
+                entry.info.scrape_pending_at = None;
                 continue;
             }
             // SPYC-TRAP(scrape-scan-ignores-live-report): do not skip the scan
             // because `entry.info.reported.is_some()` — agy's report may be
             // dropped this iteration, and Codex's modal can override one.
-            let rules = crate::agent::detect(&entry.info.command).detection_rules();
-            match Self::scrape_step(!rules.is_empty(), entry.info.last_output_at, now) {
+            let profile = crate::agent::detect(&entry.info.command);
+            let rules = profile.detection_rules();
+            let wait_from = if profile.kind() == AgentKind::Codex {
+                Some(
+                    *entry
+                        .info
+                        .scrape_pending_at
+                        .get_or_insert(entry.info.last_output_at.unwrap_or(now)),
+                )
+            } else {
+                entry.info.last_output_at
+            };
+            match Self::scrape_step(!rules.is_empty(), wait_from, now) {
                 // No rules — these agents can never produce a scrape result, so they pay
                 // neither the debounce nor the screen read.
-                ScrapeStep::Skip => entry.info.scrape_dirty = false,
+                ScrapeStep::Skip => {
+                    entry.info.scrape_dirty = false;
+                    entry.info.scrape_pending_at = None;
+                }
                 ScrapeStep::WaitUntil(fire_at) => {
                     earliest_fire = Some(earliest_fire.map_or(fire_at, |m| m.min(fire_at)));
                 }
                 ScrapeStep::Scan => {
                     entry.info.scrape_dirty = false;
+                    entry.info.scrape_pending_at = None;
                     let lines = entry.pane.visible_lines();
                     let scanned = crate::agent::detect_rules::scan(&lines, rules);
                     changed |= entry.info.scrape_status != scanned;

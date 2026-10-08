@@ -143,14 +143,19 @@ returns `Skip` before any screen read.
 
 Codex's `PermissionRequest` precedes both automatic review and a human
 approval dialogue, and supplies no call id. Its metadata-bearing report is
-observational rather than a semantic user wait. A verified command-approval
-dialogue at the viewport bottom temporarily overrides a non-blocked report;
-the report remains stored and resumes when the dialogue disappears. This
+observational rather than a semantic user wait. A verified command, file-edit,
+MCP-tool or network approval form at the viewport bottom temporarily overrides
+a non-blocked report. The report remains stored and resumes when the dialogue
+disappears. This
 also requires scanning behind a live report. Native question blocks and
 explicit agent blocks retain semantic precedence. `codex_approval::overrides_report`
 is shared by activity settling and both status diagnostics, so the dot and
-its explanation agree. The rule requires a complete default dialogue;
-clipped or customized screens and other approval types produce no guess.
+its explanation agree. The rules require known phrases and a complete default
+footer at the viewport bottom, including native word wrapping. Missing required
+text and other approval forms produce no guess. Codex's scan deadline starts
+with the first pending repaint rather than moving with every output event;
+continuous modal redraws therefore cannot postpone the scan indefinitely.
+Other agents retain the trailing quiet-window debounce.
 
 ## Update model: Elm-architecture (MVU)
 
