@@ -235,7 +235,8 @@ mirrors the claude pair, and all three share the same three properties:
   invoking spyc's own reporter, so a hand-written hook of the user's survives
   teardown.
 
-They all ride the same `mcp_config_dirs` teardown path. Non-live-reload agents
+Hook cleanup uses separate per-agent leases rather than MCP directory tracking.
+Non-live-reload agents
 (codex, agy) additionally get their hooks written *pre-spawn* for an
 already-consented repo via `maybe_preinstall_startup_hooks`, because they read
 their config once at startup and would otherwise miss them until next launch.
@@ -249,11 +250,15 @@ removing is not. Until this was refcounted, a second spyc quitting deleted the
 hooks out from under the first one's live panes, and every dot there fell back
 to output timing for the rest of that session, silently. Two things close it:
 
-- **`state/hook_owners.rs`** — `{dir: [pid, ...]}` in the state dir, pruned by
-  liveness on each write (a `SIGKILL`ed spyc never releases). Teardown removes
-  the hooks only when `release` reports no live owner left. An explicit
-  `:hooks off` still removes them regardless — that's the user revoking consent
-  for the project, and consent is what every instance's re-heal consults.
+- **`state/dir_owners/hooks.rs`** records managed or borrowed leases per
+  resolved directory, agent and pid. Successful installation grants cleanup
+  authority; refused installation only protects existing reporters. The last
+  managed owner may remove its agent's hooks, while a borrowed last owner
+  preserves them. Other agent kinds and MCP entries have independent cleanup.
+  Dead pids are pruned, and unknown older instances conservatively protect hooks.
+  A nonblocking lock remains held through cleanup; contention or unreadable
+  state preserves reporters. An explicit `:hooks off` still removes the active
+  project's reporters regardless of siblings, subject to the file/trust guards.
 - **`app/status_hooks.rs`** — `settle_status_hooks` re-installs, at loop bottom
   behind a 30s throttle, whenever a consented pane's config has lost the hooks
   by any other route (`git clean -xfd`, a hand edit, an older spyc). It arms no

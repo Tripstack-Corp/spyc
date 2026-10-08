@@ -12,11 +12,15 @@
 //! must not take the MCP entry with it.
 //!
 //! `{dir: [pid, ...]}` per kind in the XDG state dir, pruned of dead pids on
-//! every write. Best-effort like the other state stores: a lost concurrent
+//! every write. Hook cleanup uses the stricter per-agent leases in [`hooks`];
+//! this directory-wide registry also protects reporters from older instances.
+//! The MCP/compatibility counters are best-effort: a lost concurrent
 //! update either strands a pid (the next prune drops it) or loses ours (the
 //! drift re-heal in `app::status_hooks` puts the hooks back, and the next agent
 //! launch rewrites the MCP entry). A recycled pid can keep a dead owner looking
 //! alive, which only leaves a file in place a while longer.
+
+pub mod hooks;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
