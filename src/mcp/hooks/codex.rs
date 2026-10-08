@@ -620,13 +620,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir(tmp.path().join(".codex")).unwrap();
         let path = tmp.path().join(".codex/config.toml");
-        std::fs::write(&path, "[[hooks.Stop]]\nmatcher = 'keep-group'\n[[hooks.Stop.hooks]]\ncommand = 'user-reporter'\n[[hooks.Stop.hooks]]\ncommand = 'spyc --report-status done'\n[hooks.state.user]\ntrusted_hash = 'unchanged'\n").unwrap();
+        std::fs::write(&path, "[[hooks.Stop]]\nmatcher = 'keep-group'\n[[hooks.Stop.hooks]]\ncommand = 'user-reporter'\ntimeout = 7\n[[hooks.Stop.hooks]]\ncommand = 'spyc --report-status done'\n").unwrap();
         assert!(ensure_codex_status_hooks(tmp.path()));
         let installed = read_toml(&path);
         assert_eq!(codex_cmd(&installed, "Stop"), "user-reporter");
         assert_eq!(
-            installed["hooks"]["state"]["user"]["trusted_hash"].as_str(),
-            Some("unchanged")
+            installed["hooks"]["Stop"][0]["hooks"][0]["timeout"].as_integer(),
+            Some(7)
         );
         cleanup_codex_status_hooks(tmp.path());
         let left = read_toml(&path);
@@ -637,8 +637,8 @@ mod tests {
             Some("keep-group")
         );
         assert_eq!(
-            left["hooks"]["state"]["user"]["trusted_hash"].as_str(),
-            Some("unchanged")
+            left["hooks"]["Stop"][0]["hooks"][0]["timeout"].as_integer(),
+            Some(7)
         );
     }
 

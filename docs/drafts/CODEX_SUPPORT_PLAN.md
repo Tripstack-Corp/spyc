@@ -481,7 +481,8 @@ Two tracks keep the RC manageable:
   replays do not establish native CLI hook execution or fresh trust. The generic
   pre-question agent `blocked` latch remains a separate recovery issue.
 
-- A3b8 is in progress on `fix/codex-hook-trust-positions`, based on merged #561.
+- A3b8 is in PR #566 on `fix/codex-hook-trust-positions`, refreshed onto
+  main through #565 after merged #561.
   Native Codex `0.160.1` read-only discovery reproduced the review finding:
   the JSON shared-handler fixture's user key changed from `stop:0:1` to
   `stop:0:0`; the TOML separate-group fixture changed from `stop:1:0` to
