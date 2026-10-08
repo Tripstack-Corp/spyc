@@ -421,33 +421,7 @@ impl App {
             let in_block = view
                 .visual
                 .is_some_and(|v| v.kind == crate::ui::pager::VisualKind::Block);
-            // Toggle / cancel keys: V cancels Line, ^v cancels Block,
-            // and ^v from Line upgrades. Esc cancels either.
-            if matches!(key.code, KeyCode::Esc) {
-                view.cancel_visual();
-                return Some(Vec::new());
-            }
-            if matches!(key.code, KeyCode::Char('V'))
-                && !key.modifiers.contains(KeyModifiers::CONTROL)
-            {
-                if in_block {
-                    // V from block: drop down to Line (vim parity).
-                    if let Some(sel) = view.visual.as_mut() {
-                        sel.kind = crate::ui::pager::VisualKind::Line;
-                    }
-                } else {
-                    view.cancel_visual();
-                }
-                return Some(Vec::new());
-            }
-            if matches!(key.code, KeyCode::Char('v'))
-                && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
-                if in_block {
-                    view.cancel_visual();
-                } else {
-                    view.enter_visual_block();
-                }
+            if visual_mode_switch(view, key, in_block) {
                 return Some(Vec::new());
             }
             match key.code {
@@ -524,6 +498,40 @@ impl App {
 
         None
     }
+}
+
+/// Visual mode's toggle / cancel keys: `V` cancels Line, `^v` cancels Block,
+/// and `^v` from Line upgrades. `Esc` cancels either. `true` when `key` was one
+/// of them, so the caller stops there.
+fn visual_mode_switch(
+    view: &mut crate::ui::pager::PagerView,
+    key: KeyEvent,
+    in_block: bool,
+) -> bool {
+    if matches!(key.code, KeyCode::Esc) {
+        view.cancel_visual();
+        return true;
+    }
+    if matches!(key.code, KeyCode::Char('V')) && !key.modifiers.contains(KeyModifiers::CONTROL) {
+        if in_block {
+            // V from block: drop down to Line (vim parity).
+            if let Some(sel) = view.visual.as_mut() {
+                sel.kind = crate::ui::pager::VisualKind::Line;
+            }
+        } else {
+            view.cancel_visual();
+        }
+        return true;
+    }
+    if matches!(key.code, KeyCode::Char('v')) && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if in_block {
+            view.cancel_visual();
+        } else {
+            view.enter_visual_block();
+        }
+        return true;
+    }
+    false
 }
 
 #[cfg(test)]

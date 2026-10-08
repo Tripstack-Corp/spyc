@@ -51,6 +51,60 @@ impl App {
         }
     }
 
+    /// The harpoon menu's slot list: one row per slot, its number as the jump
+    /// key, the path relative to the project where it can be, the cursor row
+    /// highlighted (and warned when a delete is armed).
+    fn harpoon_menu_lines(
+        &self,
+        h: &crate::state::Harpoon,
+        menu: &crate::app::HarpoonMenu,
+    ) -> Vec<ratatui::text::Line<'static>> {
+        use ratatui::{
+            style::{Color, Modifier, Style},
+            text::{Line, Span},
+        };
+        let mut body_lines: Vec<Line> = Vec::with_capacity(h.slots.len().max(1));
+        if h.slots.is_empty() {
+            body_lines.push(Line::from(Span::styled(
+                "  (empty — Ha to harpoon the cursor file/dir)",
+                Style::default().fg(self.view.theme.status_suffix),
+            )));
+        } else {
+            let cursor_style = Style::default()
+                .fg(Color::Black)
+                .bg(self.view.theme.prompt_prefix)
+                .add_modifier(Modifier::BOLD);
+            let normal_style = Style::default().fg(self.view.theme.status_path);
+            let key_style = Style::default()
+                .fg(self.view.theme.pick)
+                .add_modifier(Modifier::BOLD);
+            for (i, path) in h.slots.iter().enumerate() {
+                let on_cursor = i == menu.cursor;
+                let armed = on_cursor && menu.delete_armed;
+                let prefix = if armed { " ⚠ " } else { "   " };
+                // Display path relative to project_home when possible
+                // (shorter, more readable); otherwise use the absolute.
+                let shown = path
+                    .strip_prefix(&h.project)
+                    .map_or_else(|_| path.display().to_string(), |p| p.display().to_string());
+                let line = Line::from(vec![
+                    Span::styled(prefix, normal_style),
+                    Span::styled(format!("{}  ", i + 1), key_style),
+                    Span::styled(
+                        shown,
+                        if on_cursor {
+                            cursor_style
+                        } else {
+                            normal_style
+                        },
+                    ),
+                ]);
+                body_lines.push(line);
+            }
+        }
+        body_lines
+    }
+
     /// Render the harpoon menu overlay. Centred modal box listing
     /// the active project's slots, with the menu cursor on a
     /// highlighted row. Footer shows the bindings. `h_divider_row` /
@@ -64,8 +118,8 @@ impl App {
     ) {
         use ratatui::{
             layout::Rect,
-            style::{Color, Modifier, Style},
-            text::{Line, Span},
+            style::{Modifier, Style},
+            text::Span,
             widgets::{Block, Borders, Clear, Paragraph},
         };
         let Some(menu) = self.view.harpoon_menu.as_ref() else {
@@ -120,47 +174,7 @@ impl App {
             height: footer_h,
         };
 
-        // Body lines.
-        let mut body_lines: Vec<Line> = Vec::with_capacity(h.slots.len().max(1));
-        if h.slots.is_empty() {
-            body_lines.push(Line::from(Span::styled(
-                "  (empty — Ha to harpoon the cursor file/dir)",
-                Style::default().fg(self.view.theme.status_suffix),
-            )));
-        } else {
-            let cursor_style = Style::default()
-                .fg(Color::Black)
-                .bg(self.view.theme.prompt_prefix)
-                .add_modifier(Modifier::BOLD);
-            let normal_style = Style::default().fg(self.view.theme.status_path);
-            let key_style = Style::default()
-                .fg(self.view.theme.pick)
-                .add_modifier(Modifier::BOLD);
-            for (i, path) in h.slots.iter().enumerate() {
-                let on_cursor = i == menu.cursor;
-                let armed = on_cursor && menu.delete_armed;
-                let prefix = if armed { " ⚠ " } else { "   " };
-                // Display path relative to project_home when possible
-                // (shorter, more readable); otherwise use the absolute.
-                let shown = path
-                    .strip_prefix(&h.project)
-                    .map_or_else(|_| path.display().to_string(), |p| p.display().to_string());
-                let line = Line::from(vec![
-                    Span::styled(prefix, normal_style),
-                    Span::styled(format!("{}  ", i + 1), key_style),
-                    Span::styled(
-                        shown,
-                        if on_cursor {
-                            cursor_style
-                        } else {
-                            normal_style
-                        },
-                    ),
-                ]);
-                body_lines.push(line);
-            }
-        }
-        frame.render_widget(Paragraph::new(body_lines), body_rect);
+        frame.render_widget(Paragraph::new(self.harpoon_menu_lines(h, menu)), body_rect);
 
         let footer_style = Style::default()
             .fg(self.view.theme.status_suffix)
@@ -519,26 +533,9 @@ impl App {
             })
             .collect();
 
-        // Flow cells into columns, balancing by rendered-line count so a tall
-        // menu (or one with wrapped labels) splits into columns rather than
-        // overflowing the screen height. An entry never splits across columns.
         let body_h = (area.height as usize).saturating_sub(2).max(1);
-        let total_lines: usize = cells.iter().map(Vec::len).sum();
         let max_cols = ((area.width as usize).saturating_sub(2) / col_w.max(1)).max(1);
-        let n_cols = total_lines.div_ceil(body_h).clamp(1, max_cols);
-        let target = total_lines.div_ceil(n_cols).max(1);
-
-        let mut columns: Vec<Vec<Line>> = Vec::new();
-        let mut cur: Vec<Line> = Vec::new();
-        for cell in cells {
-            if !cur.is_empty() && cur.len() + cell.len() > target {
-                columns.push(std::mem::take(&mut cur));
-            }
-            cur.extend(cell);
-        }
-        if !cur.is_empty() {
-            columns.push(cur);
-        }
+        let columns = flow_columns(cells, body_h, max_cols);
 
         let n = columns.len().max(1);
         let rows_tall = columns.iter().map(Vec::len).max().unwrap_or(0);
@@ -609,6 +606,32 @@ fn place_clear_of_line(start: u16, size: u16, line: Option<u16>, min: u16, max_e
 /// Greedy word-wrap a popup label to `width` display columns. Returns one
 /// segment per line. A single word longer than `width` lands on its own line
 /// (popup labels never contain such words, so this stays simple).
+/// Flow cells into columns, balancing by rendered-line count so a tall menu (or
+/// one with wrapped labels) splits into columns rather than overflowing the
+/// screen height. An entry never splits across columns.
+fn flow_columns(
+    cells: Vec<Vec<ratatui::text::Line<'_>>>,
+    body_h: usize,
+    max_cols: usize,
+) -> Vec<Vec<ratatui::text::Line<'_>>> {
+    let total_lines: usize = cells.iter().map(Vec::len).sum();
+    let n_cols = total_lines.div_ceil(body_h).clamp(1, max_cols);
+    let target = total_lines.div_ceil(n_cols).max(1);
+
+    let mut columns = Vec::new();
+    let mut cur = Vec::new();
+    for cell in cells {
+        if !cur.is_empty() && cur.len() + cell.len() > target {
+            columns.push(std::mem::take(&mut cur));
+        }
+        cur.extend(cell);
+    }
+    if !cur.is_empty() {
+        columns.push(cur);
+    }
+    columns
+}
+
 fn wrap_label(label: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     if crate::ui::display_width(label) <= width {

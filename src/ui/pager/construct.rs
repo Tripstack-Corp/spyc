@@ -176,6 +176,85 @@ impl PagerView {
     }
 }
 
+/// The pager help screen's keys, by section: `(title, [(keys, description)])`.
+const PAGER_HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "Navigation",
+        &[
+            ("j  ↓", "scroll down one line"),
+            ("k  ↑", "scroll up one line"),
+            ("^D", "half page down"),
+            ("^U", "half page up"),
+            ("^F  Space  PageDn", "page down"),
+            ("^B  b  PageUp", "page up"),
+            ("g  Home", "top of file"),
+            ("G  End", "bottom of file"),
+        ],
+    ),
+    (
+        "Search",
+        &[
+            ("/", "search forward (from current position)"),
+            ("?", "search backward (from current position)"),
+            ("n", "repeat search (same direction)"),
+            ("N", "repeat search (opposite direction)"),
+            (":N", "jump to line N"),
+        ],
+    ),
+    (
+        "Display",
+        &[
+            ("l", "toggle line numbers"),
+            ("|", "toggle diff layout (unified ⇄ side-by-side)"),
+            ("w", "toggle whitespace markers (·, ↲, $)"),
+            ("W", "toggle line wrap (default on for content pagers)"),
+            (
+                "m",
+                "toggle alt view (.md render ↔ source, .json pretty ↔ raw)",
+            ),
+            ("f", "toggle full-width / centered"),
+        ],
+    ),
+    (
+        "Markdown outline",
+        &[
+            ("za", "fold / unfold the section you're reading"),
+            ("zM", "collapse every section"),
+            ("zR", "expand everything"),
+            ("[[  ]]", "previous / next heading"),
+        ],
+    ),
+    (
+        "Actions",
+        &[
+            ("v", "open in $EDITOR"),
+            ("y", "yank source to clipboard"),
+            (
+                "Y",
+                "yank visible to clipboard (rendered markdown / current view)",
+            ),
+            ("V", "enter visual line mode (j/k extend, y yanks range)"),
+            (
+                "^v",
+                "enter visual block mode (j/k/h/l extend, y yanks rect)",
+            ),
+            (
+                "p",
+                "open in $PAGER (less, full-screen takeover — for huge files)",
+            ),
+            ("s", "save to file (command output only)"),
+        ],
+    ),
+    (
+        "Buffer history",
+        &[("[b", "previous buffer"), ("]b", "next buffer")],
+    ),
+    (
+        "Exit",
+        &[("q  Q  Esc", "close pager"), ("H  F1", "this help")],
+    ),
+];
+
 /// Build a pager help overlay showing all pager-specific keybindings.
 pub fn build_pager_help(theme: &Theme) -> PagerView {
     use crate::ui::display_pad_right;
@@ -186,86 +265,8 @@ pub fn build_pager_help(theme: &Theme) -> PagerView {
         .fg(theme.status_user)
         .add_modifier(Modifier::BOLD);
 
-    let sections: &[(&str, &[(&str, &str)])] = &[
-        (
-            "Navigation",
-            &[
-                ("j  ↓", "scroll down one line"),
-                ("k  ↑", "scroll up one line"),
-                ("^D", "half page down"),
-                ("^U", "half page up"),
-                ("^F  Space  PageDn", "page down"),
-                ("^B  b  PageUp", "page up"),
-                ("g  Home", "top of file"),
-                ("G  End", "bottom of file"),
-            ],
-        ),
-        (
-            "Search",
-            &[
-                ("/", "search forward (from current position)"),
-                ("?", "search backward (from current position)"),
-                ("n", "repeat search (same direction)"),
-                ("N", "repeat search (opposite direction)"),
-                (":N", "jump to line N"),
-            ],
-        ),
-        (
-            "Display",
-            &[
-                ("l", "toggle line numbers"),
-                ("|", "toggle diff layout (unified ⇄ side-by-side)"),
-                ("w", "toggle whitespace markers (·, ↲, $)"),
-                ("W", "toggle line wrap (default on for content pagers)"),
-                (
-                    "m",
-                    "toggle alt view (.md render ↔ source, .json pretty ↔ raw)",
-                ),
-                ("f", "toggle full-width / centered"),
-            ],
-        ),
-        (
-            "Markdown outline",
-            &[
-                ("za", "fold / unfold the section you're reading"),
-                ("zM", "collapse every section"),
-                ("zR", "expand everything"),
-                ("[[  ]]", "previous / next heading"),
-            ],
-        ),
-        (
-            "Actions",
-            &[
-                ("v", "open in $EDITOR"),
-                ("y", "yank source to clipboard"),
-                (
-                    "Y",
-                    "yank visible to clipboard (rendered markdown / current view)",
-                ),
-                ("V", "enter visual line mode (j/k extend, y yanks range)"),
-                (
-                    "^v",
-                    "enter visual block mode (j/k/h/l extend, y yanks rect)",
-                ),
-                (
-                    "p",
-                    "open in $PAGER (less, full-screen takeover — for huge files)",
-                ),
-                ("s", "save to file (command output only)"),
-            ],
-        ),
-        (
-            "Buffer history",
-            &[("[b", "previous buffer"), ("]b", "next buffer")],
-        ),
-        (
-            "Exit",
-            &[("q  Q  Esc", "close pager"), ("H  F1", "this help")],
-        ),
-    ];
-
     let mut lines: Vec<Line<'static>> = Vec::new();
-    for (i, (title, rows)) in sections.iter().enumerate() {
+    for (i, (title, rows)) in PAGER_HELP_SECTIONS.iter().enumerate() {
         if i > 0 {
             lines.push(Line::from(""));
         }

@@ -212,18 +212,6 @@ pub(super) fn cmd_why_git(app: &mut App, _args: &str) -> Vec<Effect> {
 /// `refresh_git_state_for`'s short-circuit condition.
 fn why_git_lines(app: &App) -> Vec<String> {
     use super::state::Side;
-    // A `SystemTime` as `secs.mmm` since the epoch — stable + directly
-    // comparable across the poll-cache vs on-disk lines; `—` for `None`.
-    let fmt = |t: Option<std::time::SystemTime>| -> String {
-        match t.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()) {
-            Some(d) => format!("{}.{:03}", d.as_secs(), d.subsec_millis()),
-            None => "—".to_string(),
-        }
-    };
-    let path_or = |p: Option<&std::path::Path>| {
-        p.map_or_else(|| "(none)".to_string(), |p| p.display().to_string())
-    };
-
     let mut out = vec![
         format!(
             "spyc {} (pid {}) — git dump @ {}",
@@ -243,11 +231,11 @@ fn why_git_lines(app: &App) -> Vec<String> {
         out.push(format!("[{label}]  cwd: {}", c.listing.dir.display()));
         out.push(format!(
             "    repo_root: {}",
-            path_or(gc.current_repo_root.as_deref())
+            path_or_none(gc.current_repo_root.as_deref())
         ));
         out.push(format!(
             "    gitdir:    {}",
-            path_or(gc.current_gitdir.as_deref())
+            path_or_none(gc.current_gitdir.as_deref())
         ));
         out.push(format!(
             "    branch:    {}",
@@ -278,21 +266,22 @@ fn why_git_lines(app: &App) -> Vec<String> {
         let (live_idx, live_head) = (live.map(|(i, _)| i), live.map(|(_, h)| h));
         out.push(format!(
             "    poll_cache: index={} head={}",
-            fmt(cache_key.map(|(i, _)| i)),
-            fmt(cache_key.map(|(_, h)| h)),
+            epoch_secs(cache_key.map(|(i, _)| i)),
+            epoch_secs(cache_key.map(|(_, h)| h)),
         ));
         out.push(format!(
             "    on-disk:    index={} head={}  (head = latest of HEAD/ref + config)",
-            fmt(live_idx),
-            fmt(live_head)
+            epoch_secs(live_idx),
+            epoch_secs(live_head)
         ));
         out.push(format!(
             "    config:     {} mtime={}",
-            path_or(gc.current_config_path.as_deref()),
-            fmt(gc
-                .current_config_path
-                .as_deref()
-                .and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())),
+            path_or_none(gc.current_config_path.as_deref()),
+            epoch_secs(
+                gc.current_config_path
+                    .as_deref()
+                    .and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+            ),
         ));
         // Mirrors `refresh_git_state_for`: skip the walk iff a full cached key
         // equals the (both-present) on-disk key and no rewalk is forced.
@@ -311,8 +300,8 @@ fn why_git_lines(app: &App) -> Vec<String> {
                 "    status_cache: {} entr(y/ies) for {} (index={} head={})",
                 sc.entries.len(),
                 sc.repo_root.display(),
-                fmt(Some(sc.index_mtime)),
-                fmt(Some(sc.head_mtime)),
+                epoch_secs(Some(sc.index_mtime)),
+                epoch_secs(Some(sc.head_mtime)),
             )),
             None => out.push("    status_cache: (none)".to_string()),
         }
@@ -323,6 +312,19 @@ fn why_git_lines(app: &App) -> Vec<String> {
         out.push(String::new());
     }
     out
+}
+
+/// A `SystemTime` as `secs.mmm` since the epoch — stable + directly comparable
+/// across the poll-cache vs on-disk lines; `—` for `None`.
+fn epoch_secs(t: Option<std::time::SystemTime>) -> String {
+    match t.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()) {
+        Some(d) => format!("{}.{:03}", d.as_secs(), d.subsec_millis()),
+        None => "—".to_string(),
+    }
+}
+
+fn path_or_none(p: Option<&std::path::Path>) -> String {
+    p.map_or_else(|| "(none)".to_string(), |p| p.display().to_string())
 }
 
 /// `:notify test` — fire every notification channel on demand (bell, the

@@ -36,7 +36,6 @@ const FUNCTION: Rule = Rule {
         ("src/app/archive.rs::App::apply_one_archive_outcome", 134),
         ("src/app/archive_route.rs::classify", 142),
         ("src/app/bootstrap.rs::App::new", 266),
-        ("src/app/commands.rs::why_git_lines", 102),
         ("src/app/effect/executor.rs::App::run_effects", 356),
         ("src/app/file_ops.rs::App::apply_one_file_outcome", 144),
         ("src/app/file_ops.rs::run_file_op", 162),
@@ -52,10 +51,6 @@ const FUNCTION: Rule = Rule {
         ("src/app/mcp.rs::App::execute_mcp_command", 386),
         ("src/app/mouse/mod.rs::App::handle_mouse", 136),
         ("src/app/pager_handler/file_view.rs::build_pager_view", 151),
-        (
-            "src/app/pager_handler/modes.rs::App::handle_pager_visual",
-            101,
-        ),
         (
             "src/app/pager_handler/motion.rs::App::handle_pager_motion",
             329,
@@ -76,8 +71,6 @@ const FUNCTION: Rule = Rule {
         ),
         ("src/app/render/inner.rs::App::render_inner", 141),
         ("src/app/render/mod.rs::App::compute_layout", 183),
-        ("src/app/render/overlays.rs::App::render_chord_hint", 102),
-        ("src/app/render/overlays.rs::App::render_harpoon_menu", 103),
         ("src/app/render/overlays.rs::App::render_image_gallery", 129),
         ("src/app/session_restore.rs::App::restore_session", 126),
         ("src/app/state/apply.rs::AppState::apply", 380),
@@ -95,13 +88,8 @@ const FUNCTION: Rule = Rule {
             "src/pane/engine_ghostty/mod.rs::GhosttyScreen::fill_from_render_state",
             111,
         ),
-        ("src/ui/diff_render/split.rs::render_file_split", 107),
         ("src/ui/line_edit.rs::LineEditor::feed_normal", 122),
-        ("src/ui/list_view.rs::<ListView as Widget>::render", 106),
         ("src/ui/markdown/renderer.rs::Renderer::start_tag", 135),
-        ("src/ui/pager/construct.rs::build_pager_help", 103),
-        ("src/ui/pager/render.rs::apply_row_styling", 110),
-        ("src/ui/status.rs::StatusBar::powerline", 101),
     ],
 };
 

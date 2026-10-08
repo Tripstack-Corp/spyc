@@ -270,6 +270,45 @@ impl ListView<'_> {
             col_widths,
         }
     }
+    /// The bar a row gets: its background and whether it is bold, or `None`
+    /// for a plain row. The cursor row forces the bright bar bg + fg over both
+    /// marker cells and the filename; DIM doesn't apply to it, and
+    /// `cursor_bg_dim` handles the unfocused case.
+    ///
+    /// A row pending delete (active `RemoveConfirm` prompt) overrides the
+    /// cursor bg with the warning colour so the user sees the consequence of
+    /// the next `y` keystroke. The warning wins even when the row is also the
+    /// cursor.
+    const fn row_highlight(
+        &self,
+        pending_delete: bool,
+        selected: bool,
+        highlighted: bool,
+    ) -> (Option<ratatui::style::Color>, Modifier) {
+        if pending_delete {
+            (Some(self.theme.delete_warning), Modifier::BOLD)
+        } else if selected && !highlighted {
+            // A selected row that isn't the cursor. Uses the dim cursor bg so a
+            // selection reads as a contiguous band with the cursor as its bright
+            // end — and so it stays distinct from the delete warning above it in
+            // this ladder, which must keep winning.
+            (Some(self.theme.cursor_bg_dim), Modifier::empty())
+        } else if highlighted {
+            let bg = if self.focused {
+                self.theme.cursor_bg
+            } else {
+                self.theme.cursor_bg_dim
+            };
+            let bold = if self.focused {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            };
+            (Some(bg), bold)
+        } else {
+            (None, Modifier::empty())
+        }
+    }
 }
 
 impl Widget for ListView<'_> {
@@ -339,38 +378,8 @@ impl Widget for ListView<'_> {
                 .selection
                 .is_some_and(|(lo, hi)| abs_idx >= lo && abs_idx <= hi);
 
-            // Cursor row — force the bright bar bg + fg over both
-            // marker cells and the filename. DIM doesn't apply to the
-            // cursor row; the existing `cursor_bg_dim` handles the
-            // unfocused case.
-            //
-            // A row pending delete (active `RemoveConfirm` prompt)
-            // overrides the cursor bg with the warning colour so the
-            // user sees the consequence of the next `y` keystroke.
-            // The warning wins even when the row is also the cursor.
-            let (cursor_bg, cursor_bold) = if row.pending_delete {
-                (Some(self.theme.delete_warning), Modifier::BOLD)
-            } else if selected && !highlighted {
-                // A selected row that isn't the cursor. Uses the dim cursor bg so a
-                // selection reads as a contiguous band with the cursor as its bright
-                // end — and so it stays distinct from the delete warning above it in
-                // this ladder, which must keep winning.
-                (Some(self.theme.cursor_bg_dim), Modifier::empty())
-            } else if highlighted {
-                let bg = if self.focused {
-                    self.theme.cursor_bg
-                } else {
-                    self.theme.cursor_bg_dim
-                };
-                let bold = if self.focused {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                };
-                (Some(bg), bold)
-            } else {
-                (None, Modifier::empty())
-            };
+            let (cursor_bg, cursor_bold) =
+                self.row_highlight(row.pending_delete, selected, highlighted);
 
             let apply_row_style = |s: Style| -> Style {
                 if let Some(bg) = cursor_bg {
