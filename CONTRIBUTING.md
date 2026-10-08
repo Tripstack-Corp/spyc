@@ -110,12 +110,19 @@ invariants + conventions); read it before adding behaviour.
 
 ### File size
 
-No `.rs` file over ~800 lines without a solid reason (a module root
-holding its own core type definitions qualifies; a pile of helpers
-does not). When a file grows, extract a cohesive child/sibling module
-— verbatim relocation, behaviour-identical. `app/mod.rs` has a
-ceiling-guard test (`app::guard_tests::mod_rs_stays_decomposed`):
-if you hit it, extract a module, don't bump the number.
+No `.rs` file over 1,000 lines of non-test code, or 3,000 lines in
+all. When a file grows, extract a cohesive child/sibling module —
+verbatim relocation, behaviour-identical. Tests get the larger
+allowance because they are flat lists of independent cases; past it,
+split them by theme.
+
+`src/size_guard.rs` enforces both limits as a ratchet: a file that was
+over a limit when the guard landed is pinned at its length then and may
+only shrink. If you hit it, extract a module; don't raise the pin. A
+new pin needs a solid reason in the PR (a module root holding its own
+core type definitions qualifies; a pile of helpers does not).
+`app/mod.rs` keeps its own tighter ceiling
+(`app::mod_tests::guard_tests::mod_rs_stays_decomposed`).
 
 ### Error handling
 
