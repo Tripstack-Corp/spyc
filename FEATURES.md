@@ -1373,7 +1373,8 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   `/resume <id>` once it's settled (the CLI flag has a regression),
   then verify the submit landed — re-sending Enter while the command
   is still visibly unsubmitted, since Claude's async startup can eat
-  a lone `\r`.
+  a lone `\r`. A tab saved before its conversation's first message
+  restores as a fresh `claude`, since there is nothing to resume yet.
   Codex tabs spawn `codex resume <UUID>` directly — the UUID being the
   rollout spyc pinned to that tab while it ran, so a tab still working at
   quit resumes exactly rather than guessing. When no UUID was ever pinned,
