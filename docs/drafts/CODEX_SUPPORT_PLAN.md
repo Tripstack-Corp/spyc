@@ -481,7 +481,7 @@ Two tracks keep the RC manageable:
   replays do not establish native CLI hook execution or fresh trust. The generic
   pre-question agent `blocked` latch remains a separate recovery issue.
 
-- A3b8 is in PR #566 on `fix/codex-hook-trust-positions`, refreshed onto
+- A3b8 landed through PR #566 (`f78f06cb`) on 2026-10-08, refreshed onto
   main through #565 after merged #561.
   Native Codex `0.160.1` read-only discovery reproduced the review finding:
   the JSON shared-handler fixture's user key changed from `stop:0:1` to
@@ -498,10 +498,33 @@ Two tracks keep the RC manageable:
   restored. All five TUI/discovery cases pass on the verified release artifact:
   shared handler and separate group in each source, plus a safe trailing prune.
   Each preserves the native key/hash/flags through install, explicit removal
-  and teardown. Integration and CI remain pending. This protects the
+  and teardown. The final head `416c1df0` passed the full gate (2798 library
+  tests, one ignored, all integration/VT suites), all five repeated TUI cases
+  and CI lint/tests/packaging; it was `CLEAN` before squash. The artifact is
+  `/private/tmp/spyc-a3b8-build-7a6ifx49/spyc`, SHA-256
+  `f33ecc608c3ba02cf6cd250764028a788e0bf7455c9e865f18a7271012e92c28`.
+  The prior launcher forwards there; manual testing remains deferred. This protects the
   lookup of existing trust records without moving those records; it does not
   establish fresh trusted-hook execution or resolve adoption of reporters after
   a refused installation.
+
+- A3b9 is in progress on `fix/codex-question-report-recovery`, based on #566.
+  The review's pre-question generic-block sequence failed both a pure recovery
+  regression and the App path: an ordinary agent `blocked`, followed by a valid
+  question start and matching end, stayed blocked because the older report was
+  treated as an independent pending wait. The first valid correlated question
+  start now supersedes that preceding generic status. A generic block arriving
+  while a question is pending remains independent; duplicate/additional starts,
+  incomplete metadata and wrong completions cannot clear it. Added TUI scenarios
+  exercise an actual pane-bound MCP agent block before a reporter question and
+  a later independent block during it. The corrected previous-build TUI replay
+  failed at matching completion; its first driver attempt had accidentally
+  cleared the generic block with Enter before the question start, so it did not
+  exercise the defect. The driver now triggers start without pane input.
+  All four fixed-release replays pass, including both additions and the existing
+  question/permission cases. An indiscriminate-clearing mutation failed both the
+  later-block and incomplete-metadata regressions; production was restored.
+  Focused recovery/App suites pass. Final gates and integration are pending.
 
 ### Baseline
 

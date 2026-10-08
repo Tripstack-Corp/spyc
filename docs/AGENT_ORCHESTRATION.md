@@ -132,7 +132,10 @@ question recovery is described below.
 Codex's `request_user_input` tool has narrowly matched `PreToolUse` and
 `PostToolUse` reporters. A start reports `blocked`; successful completion
 restores `working` only when pane, session, turn and call match a pending
-question. Other questions or uncorrelated blocked reports retain attention.
+question. The first valid correlated start supersedes a preceding generic
+agent block, such as the agent's announcement that it is about to ask. A generic
+block received while any question is pending remains independent and retains
+attention after completion; duplicate or additional starts cannot clear it.
 Enter alone does not clear an identified question, and unrelated or late
 completions are recorded as unapplied with a reason in `:activity dump`.
 

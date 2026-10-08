@@ -788,7 +788,39 @@ fn typing_or_pasting_does_not_retire_an_unanswered_codex_permission() {
             assert!(dump(&mut app).contains("source: SELF-REPORT status=blocked"));
             question_report(&mut app, "codex-question-start", "PreToolUse", "call-1");
             question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
-            assert!(dump(&mut app).contains("another question or uncorrelated blocked report"));
+            assert!(dump(&mut app).contains("source: SELF-REPORT status=working"));
+            assert!(!dump(&mut app).contains("not applied:"));
+        }
+    });
+}
+
+#[test]
+fn invalid_question_start_cannot_supersede_a_generic_block() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "codex");
+        for event in [
+            None,
+            crate::agent::status_hook::StatusHookEvent::from_value(
+                &serde_json::json!({"hook_event_name":"PreToolUse", "tool_name":"request_user_input", "turn_id":"turn-1"}),
+            ),
+        ] {
+            question_report(&mut app, "codex-question-start", "PreToolUse", "call-1");
+            report(&mut app, "blocked");
+            assert!(matches!(
+                app.execute_mcp_command(McpCommand::ReportStatus {
+                    pane_id: None,
+                    pane: None,
+                    status: "codex-question-start".into(),
+                    ttl_ms: None,
+                    session_id: Some("session-1".into()),
+                    hook_event: event,
+                }),
+                McpResponse::Ok { .. }
+            ));
+            question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
+            assert!(dump(&mut app).contains("source: SELF-REPORT status=blocked"));
+            assert!(dump(&mut app).contains("not applied:"));
         }
     });
 }
