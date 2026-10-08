@@ -617,7 +617,7 @@ Two tracks keep the RC manageable:
   tests. Required CI checks were green and merge state was `CLEAN`; all 17
   owned files matched integrated `main`.
 
-- A3b12 addresses legacy JSON file preservation. A symlink, including a dangling
+- A3b12 landed through PR #575 (`3ac0e187`) for legacy JSON file preservation. A symlink, including a dangling
   one, refuses migration and teardown before changing either hook source. The
   apply boundary rechecks the path type. Regular JSON migrations retain the
   existing permission bits on the temporary file before rename. Three new
@@ -626,6 +626,15 @@ Two tracks keep the RC manageable:
   ownership TUI driver adds symlink and two file-mode scenarios; final artifact
   acceptance is recorded with the PR. JSON key order, parent/user-layer reporter
   duplication and precise command ownership are separate remaining findings.
+
+- A3b13 narrows Codex command ownership before installation, JSON migration,
+  positional-trust preflight and cleanup. Only direct spyc invocations with known
+  statuses and generated or bare legacy command shapes are pruned. Commands
+  mentioning the flag, unrelated tools, wrappers, extra actions and non-command
+  handlers remain user content. Generated hook bytes and trust records are
+  unchanged. Three production regressions and three actual TUI scenarios failed
+  against the old implementation; final artifact acceptance is recorded with the
+  PR. Native hook execution remains separate from these file-edit tests.
 
 ### Baseline
 

@@ -5,23 +5,35 @@
 
 use std::path::Path;
 
-use super::{CODEX_STATUS_HOOKS, codex_group_is_ours};
+use super::{CODEX_STATUS_HOOKS, codex_group_is_ours, reporter, reporter_binary};
 
-pub(super) fn toml_owned(handler: &toml::Value) -> bool {
+pub(super) fn toml_owned(handler: &toml::Value, exe: Option<&str>) -> bool {
+    if handler
+        .get("type")
+        .is_some_and(|kind| kind.as_str() != Some("command"))
+    {
+        return false;
+    }
     handler
         .get("command")
         .and_then(toml::Value::as_str)
-        .is_some_and(|command| command.contains("--report-status"))
+        .is_some_and(|command| reporter::is_owned(command, exe))
 }
 
-fn json_owned(handler: &serde_json::Value) -> bool {
+fn json_owned(handler: &serde_json::Value, exe: Option<&str>) -> bool {
+    if handler
+        .get("type")
+        .is_some_and(|kind| kind.as_str() != Some("command"))
+    {
+        return false;
+    }
     handler
         .get("command")
         .and_then(serde_json::Value::as_str)
-        .is_some_and(|command| command.contains("--report-status"))
+        .is_some_and(|command| reporter::is_owned(command, exe))
 }
 
-fn toml_user_positions(groups: &[toml::Value]) -> Vec<(usize, usize)> {
+fn toml_user_positions(groups: &[toml::Value], exe: Option<&str>) -> Vec<(usize, usize)> {
     groups
         .iter()
         .enumerate()
@@ -33,13 +45,13 @@ fn toml_user_positions(groups: &[toml::Value]) -> Vec<(usize, usize)> {
                 .flatten()
                 .enumerate()
                 .filter_map(move |(handler_index, handler)| {
-                    (!toml_owned(handler)).then_some((group_index, handler_index))
+                    (!toml_owned(handler, exe)).then_some((group_index, handler_index))
                 })
         })
         .collect()
 }
 
-fn json_user_positions(groups: &[serde_json::Value]) -> Vec<(usize, usize)> {
+fn json_user_positions(groups: &[serde_json::Value], exe: Option<&str>) -> Vec<(usize, usize)> {
     groups
         .iter()
         .enumerate()
@@ -51,7 +63,7 @@ fn json_user_positions(groups: &[serde_json::Value]) -> Vec<(usize, usize)> {
                 .flatten()
                 .enumerate()
                 .filter_map(move |(handler_index, handler)| {
-                    (!json_owned(handler)).then_some((group_index, handler_index))
+                    (!json_owned(handler, exe)).then_some((group_index, handler_index))
                 })
         })
         .collect()
@@ -59,35 +71,38 @@ fn json_user_positions(groups: &[serde_json::Value]) -> Vec<(usize, usize)> {
 
 /// Apply pruning only when every user handler retains both position indices.
 /// Compare the actual proposed edit, including emptied groups, before applying.
-pub(super) fn prune_toml_groups(groups: &mut Vec<toml::Value>) -> bool {
-    let before = toml_user_positions(groups);
+pub(super) fn prune_toml_groups(groups: &mut Vec<toml::Value>, exe: Option<&str>) -> bool {
+    let before = toml_user_positions(groups, exe);
     let mut pruned = groups.clone();
     pruned.retain_mut(|group| {
-        if !codex_group_is_ours(group) {
+        if !codex_group_is_ours(group, exe) {
             return true;
         }
         let Some(handlers) = group.get_mut("hooks").and_then(toml::Value::as_array_mut) else {
             return true;
         };
-        handlers.retain(|handler| !toml_owned(handler));
+        handlers.retain(|handler| !toml_owned(handler, exe));
         !handlers.is_empty()
     });
-    if toml_user_positions(&pruned) != before {
+    if toml_user_positions(&pruned, exe) != before {
         return false;
     }
     *groups = pruned;
     true
 }
 
-pub(super) fn prune_json_groups(groups: &mut Vec<serde_json::Value>) -> Result<bool, ()> {
-    let before = json_user_positions(groups);
+pub(super) fn prune_json_groups(
+    groups: &mut Vec<serde_json::Value>,
+    exe: Option<&str>,
+) -> Result<bool, ()> {
+    let before = json_user_positions(groups, exe);
     let mut pruned = groups.clone();
     let mut changed = false;
     pruned.retain_mut(|group| {
         if !group
             .get("hooks")
             .and_then(serde_json::Value::as_array)
-            .is_some_and(|handlers| handlers.iter().any(json_owned))
+            .is_some_and(|handlers| handlers.iter().any(|handler| json_owned(handler, exe)))
         {
             return true;
         }
@@ -97,11 +112,11 @@ pub(super) fn prune_json_groups(groups: &mut Vec<serde_json::Value>) -> Result<b
         else {
             return true;
         };
-        handlers.retain(|handler| !json_owned(handler));
+        handlers.retain(|handler| !json_owned(handler, exe));
         changed = true;
         !handlers.is_empty()
     });
-    if json_user_positions(&pruned) != before {
+    if json_user_positions(&pruned, exe) != before {
         return Err(());
     }
     *groups = pruned;
@@ -117,10 +132,11 @@ pub(super) fn inline_prune_refused(dir: &Path) -> bool {
     else {
         return false;
     };
+    let exe = reporter_binary();
     CODEX_STATUS_HOOKS.iter().any(|(event, _)| {
         root.get("hooks")
             .and_then(|hooks| hooks.get(*event))
             .and_then(toml::Value::as_array)
-            .is_some_and(|groups| !prune_toml_groups(&mut groups.clone()))
+            .is_some_and(|groups| !prune_toml_groups(&mut groups.clone(), exe.as_deref()))
     })
 }

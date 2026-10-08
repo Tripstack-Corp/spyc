@@ -196,6 +196,13 @@ and keeps its reporters in TOML. Other handlers, matcher fields and trust record
 are preserved. An emptied legacy file is removed; user-only files are not
 rewritten. `:hooks off` and last-owner cleanup also remove legacy reporters.
 
+Codex identifies an owned handler by a direct `spyc` invocation (or the
+currently resolved reporter executable), a known wire status and the generated
+command shape, including its optional trace flag and fail-soft tail. Bare legacy
+invocations are also recognized. Quoted flags, other programs, wrappers, unknown
+statuses and extra shell actions are preserved. A non-command handler is never
+pruned. This check does not change generated hook commands or trust records.
+
 Legacy files containing tracked reporters, or malformed/unreadable files,
 block migration; `:activity dump`
 names the source and repair action. Use `:hooks on` to migrate a valid untracked
@@ -231,9 +238,9 @@ mirrors the claude pair, and all three share the same three properties:
 - **Git-tracked guard** — spyc refuses to modify a config the repo tracks.
   These files are the user's (`.codex/config.toml` carries their `model` and
   `approval_policy`), and silently rewriting a committed one is data loss.
-- **`--report-status` is the "ours" marker** — cleanup removes only entries
-  invoking spyc's own reporter, so a hand-written hook of the user's survives
-  teardown.
+- **Reporter ownership** — Claude and agy use the `--report-status` marker.
+  Codex additionally requires the direct reporter command shape described above;
+  mentioning the flag in another hook does not permit its removal.
 
 Hook cleanup uses separate per-agent leases rather than MCP directory tracking.
 Non-live-reload agents

@@ -1,4 +1,5 @@
 mod identity;
+mod reporter;
 
 use identity::{inline_prune_refused, prune_toml_groups};
 
@@ -22,7 +23,7 @@ use super::{
 // takes effect on codex's next launch.
 
 /// Lifecycle events are unfiltered; tool hooks match only `request_user_input`.
-/// The `--report-status` command string identifies owned handlers for cleanup.
+/// Generated reporter invocations identify owned handlers for cleanup.
 const CODEX_STATUS_HOOKS: [(&str, &str); 6] = [
     ("UserPromptSubmit", "working"),
     ("PermissionRequest", "blocked"),
@@ -33,12 +34,16 @@ const CODEX_STATUS_HOOKS: [(&str, &str); 6] = [
 ];
 
 /// TOML counterpart of [`super::group_is_ours`]: a `{ hooks = [{ command = … }] }`
-/// group is ours when a handler's `command` runs `--report-status`.
-fn codex_group_is_ours(group: &toml::Value) -> bool {
+/// group contains an owned generated reporter invocation.
+fn codex_group_is_ours(group: &toml::Value, exe: Option<&str>) -> bool {
     group
         .get("hooks")
         .and_then(toml::Value::as_array)
-        .is_some_and(|handlers| handlers.iter().any(identity::toml_owned))
+        .is_some_and(|handlers| {
+            handlers
+                .iter()
+                .any(|handler| identity::toml_owned(handler, exe))
+        })
 }
 
 /// Codex counterpart of [`super::ensure_claude_status_hooks`]: merge spyc's status
@@ -123,7 +128,7 @@ pub(super) fn merged_codex_status_hooks_toml(
             continue;
         };
         // Drop stale spyc handlers, preserve user handlers, append ours.
-        if !prune_toml_groups(list) {
+        if !prune_toml_groups(list, Some(exe)) {
             return None;
         }
         list.push(toml::Value::Table(group));
@@ -176,6 +181,7 @@ fn cleanup_codex_toml(dir: &Path) -> ConfigCleanup {
     let Ok(mut root) = toml::from_str::<toml::Value>(&text) else {
         return ConfigCleanup::NothingToDo;
     };
+    let exe = reporter_binary();
     let has_ours = root
         .get("hooks")
         .and_then(toml::Value::as_table)
@@ -183,7 +189,10 @@ fn cleanup_codex_toml(dir: &Path) -> ConfigCleanup {
             CODEX_STATUS_HOOKS.iter().any(|(event, _)| {
                 h.get(*event)
                     .and_then(toml::Value::as_array)
-                    .is_some_and(|a| a.iter().any(codex_group_is_ours))
+                    .is_some_and(|a| {
+                        a.iter()
+                            .any(|group| codex_group_is_ours(group, exe.as_deref()))
+                    })
             })
         });
     if !has_ours {
@@ -198,7 +207,7 @@ fn cleanup_codex_toml(dir: &Path) -> ConfigCleanup {
     if let Some(hooks_obj) = obj.get_mut("hooks").and_then(toml::Value::as_table_mut) {
         for (event, _) in CODEX_STATUS_HOOKS {
             if let Some(list) = hooks_obj.get_mut(event).and_then(toml::Value::as_array_mut)
-                && !prune_toml_groups(list)
+                && !prune_toml_groups(list, exe.as_deref())
             {
                 return ConfigCleanup::NothingToDo;
             }
@@ -255,14 +264,15 @@ fn legacy_edit(dir: &Path) -> Result<LegacyEdit, LegacyError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(LegacyEdit::Keep),
         Err(_) => return Err(LegacyError::Unreadable),
     };
-    let edit = pruned_legacy_hooks_json(&text)?;
+    let exe = reporter_binary();
+    let edit = pruned_legacy_hooks_json(&text, exe.as_deref())?;
     if !matches!(edit, LegacyEdit::Keep) && crate::git::discovery::is_tracked(&path) {
         return Err(LegacyError::Tracked);
     }
     Ok(edit)
 }
 
-fn pruned_legacy_hooks_json(text: &str) -> Result<LegacyEdit, LegacyError> {
+fn pruned_legacy_hooks_json(text: &str, exe: Option<&str>) -> Result<LegacyEdit, LegacyError> {
     let mut root: serde_json::Value =
         serde_json::from_str(text).map_err(|_| LegacyError::Invalid)?;
     let object = root.as_object_mut().ok_or(LegacyError::Invalid)?;
@@ -273,7 +283,8 @@ fn pruned_legacy_hooks_json(text: &str) -> Result<LegacyEdit, LegacyError> {
     let mut changed = false;
     for groups in hooks.values_mut() {
         let groups = groups.as_array_mut().ok_or(LegacyError::Invalid)?;
-        changed |= identity::prune_json_groups(groups).map_err(|()| LegacyError::TrustPositions)?;
+        changed |=
+            identity::prune_json_groups(groups, exe).map_err(|()| LegacyError::TrustPositions)?;
     }
     if !changed {
         return Ok(LegacyEdit::Keep);

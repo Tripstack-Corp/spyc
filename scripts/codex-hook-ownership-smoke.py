@@ -14,6 +14,7 @@ import shlex
 import subprocess
 import sys
 import time
+import re
 import uuid
 
 spec = importlib.util.spec_from_file_location("codex_smoke", Path(__file__).with_name("codex-tui-smoke.py"))
@@ -68,6 +69,27 @@ class OwnershipSmoke(module.Smoke):
             self.legacy.write_text(json.dumps(existing) + "\n")
             self.expected_mode = int(self.args.scenario.removeprefix("mode_"), 8)
             self.legacy.chmod(self.expected_mode)
+        if self.args.scenario in ("json_mentions", "toml_mentions", "json_user_only"):
+            self.legacy.parent.mkdir()
+            self.user_commands = ["printf '%s' '--report-status'", "echo 'spyc --report-status done'",
+                                  "other-tool --report-status done", "spyc --report-status done; printf user-hook",
+                                  "spyc --report-status done-custom", "env spyc --report-status done",
+                                  "$(echo spyc) --report-status done"]
+            users = [{"type": "command", "command": command, "timeout": 7} for command in self.user_commands]
+            self.user_json = {"user-setting": "keep", "hooks": {"Stop": [{"matcher": "keep-group", "hooks": users}]}}
+            existing = json.loads(json.dumps(self.user_json))
+            if self.args.scenario != "json_user_only":
+                existing["hooks"]["Stop"][0]["hooks"].append({"type": "command", "command": "spyc --report-status done"})
+            if self.args.scenario == "toml_mentions":
+                parts = ["model = 'preserve'", "[[hooks.Stop]]", "matcher = 'keep-group'"]
+                for handler in existing["hooks"]["Stop"][0]["hooks"]:
+                    parts += ["[[hooks.Stop.hooks]]", "type = 'command'", "command = " + json.dumps(handler["command"])]
+                    if "timeout" in handler:
+                        parts += ["timeout = 7"]
+                self.config.write_text("\n".join(parts) + "\n")
+            else:
+                self.legacy.write_text(json.dumps(existing) + "\n")
+                self.before = self.legacy.read_bytes()
         binary = self.args.binary.resolve()
         manifest = {"binary": str(binary), "sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
                     "version": subprocess.check_output([str(binary), "--version"], text=True).strip(),
@@ -176,6 +198,27 @@ class OwnershipSmoke(module.Smoke):
         assert actual == self.user_json, actual
         (self.output / (name + "-legacy.json")).write_text(json.dumps({"mode": mode, "content": actual}, indent=2) + "\n")
 
+    def check_mentions(self, name, cleaned=False):
+        if self.args.scenario == "toml_mentions":
+            text = self.config.read_text()
+            # These fixtures use only basic TOML strings and integer timeouts.
+            # Read the first Stop group independently of the Rust hook matcher.
+            group = text.split("[[hooks.Stop]]", 1)[1]
+            group = re.split(r"(?m)^\[\[hooks\.[^.]+\]\]", group, maxsplit=1)[0]
+            commands = [json.loads(value) for value in re.findall(r"(?m)^command = (.*)$", group)]
+            assert commands == self.user_commands, "inline user commands or their positions changed"
+            assert group.count("timeout = 7") == len(self.user_commands), "user timeouts changed"
+            assert 'matcher = "keep-group"' in group and 'model = "preserve"' in text
+            if cleaned:
+                assert text.count("[[hooks.Stop]]") == 1, "canonical reporters were not cleaned"
+            actual = {"toml": text, "first_stop_commands": commands}
+        else:
+            actual = json.loads(self.legacy.read_text())
+            assert actual == self.user_json, "legacy user hooks or trust positions changed"
+            if self.args.scenario == "json_user_only":
+                assert self.legacy.read_bytes() == self.before, "user-only JSON was unnecessarily rewritten"
+        (self.output / (name + "-user-hooks.json")).write_text(json.dumps(actual, indent=2) + "\n")
+
     def run(self):
         self.setup()
         kind = "claude" if self.args.scenario == "claude_only" else (
@@ -191,6 +234,12 @@ class OwnershipSmoke(module.Smoke):
             self.unchanged()
             if kind == "claude":
                 assert not self.claude.exists(), "managed Claude hooks were stranded"
+        elif self.args.scenario in ("json_mentions", "toml_mentions", "json_user_only"):
+            self.check_mentions("installed")
+            self.quit_host(self)
+            self.check_mentions("exited", cleaned=True)
+            if self.args.scenario != "toml_mentions":
+                assert not self.config.exists(), "managed canonical hooks were stranded"
         elif self.args.scenario in ("mode_640", "mode_644"):
             assert self.config.exists() and b"--report-status" in self.config.read_bytes()
             self.check_mode("installed")
@@ -223,7 +272,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--scenario", choices=("tracked", "malformed", "claude_only", "mcp_only", "shared", "mixed", "borrowed_last", "symlink", "dangling_symlink", "mode_640", "mode_644"), default="tracked")
+    parser.add_argument("--scenario", choices=("tracked", "malformed", "claude_only", "mcp_only", "shared", "mixed", "borrowed_last", "symlink", "dangling_symlink", "mode_640", "mode_644", "json_mentions", "toml_mentions", "json_user_only"), default="tracked")
     parser.add_argument("--session", default="spyc-hook-ownership-" + uuid.uuid4().hex[:10])
     smoke = OwnershipSmoke(parser.parse_args())
     result = {"passed": False}
