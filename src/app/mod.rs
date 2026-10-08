@@ -163,6 +163,7 @@ mod run;
 mod runtime;
 mod scheduler;
 mod session;
+mod session_restore;
 mod skill;
 mod sources;
 mod startup_commands;

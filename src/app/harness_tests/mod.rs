@@ -441,3 +441,5 @@ mod prompt_templates;
 mod second_commander;
 mod send_selection;
 mod vsplit;
+
+mod session_restore;

@@ -1339,6 +1339,12 @@ self-documenting starting point.
 
 ## Session management
 
+When restoring a saved session, an unsupported Codex tab is left unopened while
+supported tabs resume. Its command and conversation metadata stay saved through
+autosave and quit. Session info (`Space s`, or `^a Space s` from a pane) lists the
+unopened tabs and reasons. If every saved tab is refused, the current session
+stays intact.
+
 spyc auto-saves your workspace on quit and can restore it on startup.
 
 - **Crash-sufficient autosave** — beyond the quit-time save, spyc
