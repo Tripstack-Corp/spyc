@@ -455,8 +455,8 @@ Two tracks keep the RC manageable:
   The previous handoff launcher forwards to its `test.sh`, which selects main
   after the worktree's removal. Manual testing remains deferred.
 
-- A3b7 is ready for integration on `fix/codex-hook-payload-metadata`, based on
-  merged #560, under the same deferred-manual-test authorization.
+- A3b7 landed through PR #561 (`5b455a50`) on 2026-10-08, based on merged
+  #560, under the same deferred-manual-test authorization.
   Real reporter regressions reproduced loss of permission/question correlation
   and a false blocked idle notification when stdin exceeded 8 KiB. The reader
   now validates the complete JSON while retaining only bounded root metadata;
@@ -473,9 +473,35 @@ Two tracks keep the RC manageable:
   The full `RUST_TEST_THREADS=1 make check` gate passed: 2793 library tests, one
   ignored, all integration suites (six real reporter tests) and six VT-system
   tests. Bounds/depth and metadata-capture mutations failed their regressions;
-  production was restored. Integration and CI remain pending. These replays do
-  not establish native CLI hook execution or fresh trust. The generic
+  production was restored. The final head `d14ac855` passed the full gate,
+  both final-head TUI replays and CI lint/tests/packaging; it was `CLEAN` before
+  squash. The artifact is `/private/tmp/spyc-codex-hook-payload-final.mrewok3m/spyc`,
+  SHA-256 `2fb69aa0065bc924a71fded5cb39eda02f072828a53f11d8b93dddff247497ab`.
+  The prior handoff launcher forwards there after worktree removal. These
+  replays do not establish native CLI hook execution or fresh trust. The generic
   pre-question agent `blocked` latch remains a separate recovery issue.
+
+- A3b8 is in PR #566 on `fix/codex-hook-trust-positions`, refreshed onto
+  main through #565 after merged #561.
+  Native Codex `0.160.1` read-only discovery reproduced the review finding:
+  the JSON shared-handler fixture's user key changed from `stop:0:1` to
+  `stop:0:0`; the TOML separate-group fixture changed from `stop:1:0` to
+  `stop:0:0`. The command hash stayed identical in both cases. The temporary
+  fixture permits project loading but leaves every hook untrusted; no turn or
+  hook approval is sent, and real user trust records are untouched.
+  Installation and cleanup now refuse pruning that moves a user handler's
+  group/handler indices, before editing either source. Diagnostics identify the
+  refusal. Safe trailing removals remain allowed. The two refusal regressions
+  failed before the fix; the focused writer suite passes. The full gate passed
+  2796 library tests, one ignored, all integration suites and six VT-system
+  tests. Cleanup-preflight and blanket-refusal mutations were detected and
+  restored. All five TUI/discovery cases pass on the verified release artifact:
+  shared handler and separate group in each source, plus a safe trailing prune.
+  Each preserves the native key/hash/flags through install, explicit removal
+  and teardown. Integration and CI remain pending. This protects the
+  lookup of existing trust records without moving those records; it does not
+  establish fresh trusted-hook execution or resolve adoption of reporters after
+  a refused installation.
 
 ### Baseline
 

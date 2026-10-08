@@ -364,3 +364,14 @@ map: `src/app/agent_status.rs` (dots + notify + autosave settle),
 `src/mcp/` + `src/mcp_cmd.rs` + `src/app/mcp.rs` (the MCP verbs + wait parking),
 `src/state/scope_registry.rs` (the registry + conflict logic),
 `src/agent/` (per-agent profiles + hooks + scrape rules).
+
+### Preserve Codex user hook positions
+
+Codex's persisted hook key includes the source, event, matcher-group index and
+handler index. Removing a reporter ahead of a user handler changes the trust
+lookup even when that handler's command hash is identical. spyc therefore
+preflights inline TOML and legacy JSON pruning. If a user handler would move,
+installation and cleanup preserve both sources and explain the refusal in
+`:activity dump`. Removing trailing reporters is still allowed. spyc does not
+move or create hook trust records; a manual migration must include reviewing the
+affected user hooks in `/hooks` after restarting Codex.
