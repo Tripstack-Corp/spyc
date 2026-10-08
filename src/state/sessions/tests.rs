@@ -884,3 +884,15 @@ fn title_from_tail_survives_midcodepoint_seek_boundary() {
         "title must survive a 64KB seek that lands mid-UTF-8-codepoint"
     );
 }
+
+/// No test reads the developer's own `~/.claude`: without a pinned dir there
+/// is none, and claude lookups find nothing.
+#[test]
+fn unit_tests_see_no_claude_dir_unless_they_pin_one() {
+    assert_eq!(claude_dir(), None);
+    let tmp = tempdir().unwrap();
+    with_claude_dir(tmp.path(), || {
+        assert_eq!(claude_dir().as_deref(), Some(tmp.path()));
+    });
+    assert_eq!(claude_dir(), None);
+}

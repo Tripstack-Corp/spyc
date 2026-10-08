@@ -899,6 +899,217 @@ mod tests {
         });
     }
 
+    // ── which conversation a claude tab saves (#584) ─────────────────
+    //
+    // Claude writes a conversation's transcript only once it has a message,
+    // but its per-process record and the hook's pin exist from startup. These
+    // fixtures lay out `~/.claude` in a temp dir to catch the save between the
+    // two, where it used to record another tab's conversation.
+
+    const MINE: &str = "11111111-1111-4111-8111-111111111111";
+    const OTHER: &str = "22222222-2222-4222-8222-222222222222";
+    const SPAWN: u64 = 1_800_000_000;
+
+    /// One claude tab in `cwd`, spawned at [`SPAWN`] and pinned to `pin`.
+    fn claude_tab(app: &mut App, cwd: &std::path::Path, pin: Option<&str>) {
+        app.open_pane_tab("cat");
+        let info = &mut app
+            .runtime
+            .pane_tabs
+            .as_mut()
+            .expect("a tab was opened")
+            .tabs_mut()[0]
+            .info;
+        info.command = "claude".into();
+        info.cwd = cwd.to_path_buf();
+        info.spawn_epoch_secs = SPAWN;
+        info.live_session_id = pin.map(String::from);
+    }
+
+    /// Claude's record for its running process: `sessions/<pid>.json`.
+    fn claude_record(
+        claude: &std::path::Path,
+        pid: u32,
+        sid: &str,
+        cwd: &std::path::Path,
+        started: u64,
+    ) {
+        let dir = claude.join("sessions");
+        std::fs::create_dir_all(&dir).expect("sessions dir");
+        let record = serde_json::json!({
+            "pid": pid, "sessionId": sid, "cwd": cwd, "startedAt": started * 1000
+        });
+        std::fs::write(dir.join(format!("{pid}.json")), record.to_string()).expect("record");
+    }
+
+    /// A transcript for `sid` in `cwd`'s project dir, last written at `written`.
+    fn claude_transcript(claude: &std::path::Path, cwd: &std::path::Path, sid: &str, written: u64) {
+        let dir = claude
+            .join("projects")
+            .join(crate::state::sessions::project_slug(cwd));
+        std::fs::create_dir_all(&dir).expect("project dir");
+        let file = dir.join(format!("{sid}.jsonl"));
+        std::fs::write(&file, "{}\n").expect("transcript");
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .expect("open transcript")
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(written))
+            .expect("set mtime");
+    }
+
+    /// Runs `body` with the state root and `~/.claude` pinned under a temp dir,
+    /// handing it the dir claude would run in and the fake `~/.claude`.
+    fn with_claude_home(body: impl FnOnce(&std::path::Path, &std::path::Path)) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = std::fs::canonicalize(tmp.path()).expect("canonical tempdir");
+        let (project, claude) = (root.join("project"), root.join("claude"));
+        std::fs::create_dir_all(&project).expect("project");
+        crate::state::with_state_root(&root.join("state"), || {
+            crate::state::sessions::with_claude_dir(&claude, || body(&project, &claude));
+        });
+    }
+
+    fn saved_conversation(app: &mut App) -> Option<String> {
+        app.build_session_snapshot().tabs[0]
+            .agent_session_id
+            .clone()
+    }
+
+    /// The observed case: the hook has pinned the tab's own conversation, which
+    /// claude hasn't written yet, and the newest transcript in the folder
+    /// belongs to a conversation from before this tab existed.
+    #[test]
+    #[ignore = "red: an unwritten pin falls back to the newest transcript in the cwd"]
+    fn a_pinned_claude_tab_saves_its_own_conversation_before_claude_writes_it() {
+        with_claude_home(|project, claude| {
+            claude_transcript(claude, project, OTHER, SPAWN - 60);
+            claude_record(claude, 4242, MINE, project, SPAWN + 1);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, Some(MINE));
+            assert_eq!(saved_conversation(&mut app).as_deref(), Some(MINE));
+        });
+    }
+
+    /// Without a pin (no status hooks), the tab's own process record still
+    /// identifies it. Its conversation having no transcript yet means there
+    /// is nothing to resume, not that the tab is someone else's.
+    #[test]
+    #[ignore = "red: the resolver skips the tab's own record until its transcript exists"]
+    fn an_unpinned_claude_tab_never_borrows_another_conversation_before_its_own_exists() {
+        with_claude_home(|project, claude| {
+            claude_transcript(claude, project, OTHER, SPAWN - 60);
+            claude_record(claude, 4242, MINE, project, SPAWN + 1);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app), None);
+        });
+    }
+
+    /// Another claude has been running in the same cwd for an hour and is
+    /// writing its conversation now. While this tab's own conversation is
+    /// unwritten, the other one is still not this tab's.
+    #[test]
+    #[ignore = "red: the resolver takes a running claude's conversation"]
+    fn an_unpinned_claude_tab_never_takes_another_running_claudes_conversation() {
+        with_claude_home(|project, claude| {
+            claude_record(claude, 1111, OTHER, project, SPAWN - 3_600);
+            claude_transcript(claude, project, OTHER, SPAWN + 50);
+            claude_record(claude, 4242, MINE, project, SPAWN + 1);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app), None);
+        });
+    }
+
+    /// A claude started just after this tab's, as by another tab opened beside
+    /// it, has already written its conversation. This tab's own record is the
+    /// nearer one, and its unwritten conversation still isn't the other's.
+    #[test]
+    #[ignore = "red: the resolver skips the tab's own record for a written neighbour"]
+    fn an_unpinned_claude_tab_matches_its_own_record_before_a_written_neighbour() {
+        with_claude_home(|project, claude| {
+            claude_record(claude, 4242, MINE, project, SPAWN + 1);
+            claude_record(claude, 4343, OTHER, project, SPAWN + 3);
+            claude_transcript(claude, project, OTHER, SPAWN + 20);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app), None);
+        });
+    }
+
+    /// The same with no record for this tab's own claude: the last-resort guess
+    /// can't take a conversation another running claude owns.
+    #[test]
+    #[ignore = "red: the last-resort guess takes a running claude's conversation"]
+    fn the_last_resort_guess_skips_a_running_claudes_conversation() {
+        with_claude_home(|project, claude| {
+            claude_record(claude, 1111, OTHER, project, SPAWN - 3_600);
+            claude_transcript(claude, project, OTHER, SPAWN + 50);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app), None);
+        });
+    }
+
+    /// With no process record at all, a transcript last written before the tab
+    /// started can't be the tab's conversation.
+    #[test]
+    #[ignore = "red: the last-resort guess takes any transcript in the cwd"]
+    fn a_transcript_older_than_the_tab_is_not_its_conversation() {
+        with_claude_home(|project, claude| {
+            claude_transcript(claude, project, OTHER, SPAWN - 60);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app), None);
+        });
+    }
+
+    /// The last-resort guess still finds a conversation written since the tab
+    /// started, for a claude that leaves no process record.
+    #[test]
+    fn with_no_record_a_conversation_written_since_the_tab_started_is_saved() {
+        with_claude_home(|project, claude| {
+            claude_transcript(claude, project, MINE, SPAWN + 30);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app).as_deref(), Some(MINE));
+        });
+    }
+
+    /// Spawn-time matching still picks the tab's own conversation over an
+    /// older one in the same cwd once both are written.
+    #[test]
+    fn an_unpinned_claude_tab_saves_its_own_written_conversation() {
+        with_claude_home(|project, claude| {
+            claude_record(claude, 1111, OTHER, project, SPAWN - 3_600);
+            claude_transcript(claude, project, OTHER, SPAWN + 50);
+            claude_record(claude, 4242, MINE, project, SPAWN + 1);
+            claude_transcript(claude, project, MINE, SPAWN + 40);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app).as_deref(), Some(MINE));
+        });
+    }
+
+    /// The autosave writes only when its fingerprint moves, so the moment a
+    /// tab's conversation id becomes known has to move it. Otherwise the file
+    /// keeps whatever the previous save resolved until something unrelated
+    /// changes.
+    #[test]
+    #[ignore = "red: the fingerprint doesn't cover a tab's pinned conversation"]
+    fn a_pin_arriving_moves_the_autosave_fingerprint() {
+        with_claude_home(|project, _| {
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            let before = app.session_fingerprint();
+            app.runtime.pane_tabs.as_mut().expect("the tab").tabs_mut()[0]
+                .info
+                .live_session_id = Some(MINE.into());
+            assert_ne!(app.session_fingerprint(), before);
+        });
+    }
+
     #[test]
     fn autosave_idle_when_not_dirty() {
         let now = Instant::now();
