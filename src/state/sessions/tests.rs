@@ -597,6 +597,66 @@ fn save_load_prune_and_keep_distinct_sessions() {
     });
 }
 
+fn tabless_session(id: u64, epoch_secs: u64) -> Session {
+    Session {
+        id,
+        saved_at: String::new(),
+        epoch_secs,
+        cwd: PathBuf::from("/tmp/proj"),
+        tabs: Vec::new(),
+        active_tab: 0,
+        pane_height_pct: 30,
+        pane_focused: false,
+        name: format!("S{id}"),
+        project_home: None,
+        vsplit: None,
+        scope_claims: Vec::new(),
+    }
+}
+
+/// A restore keeps the session's id, so a session restored day after day has
+/// the LOWEST id on disk while being the one saved most recently. Ranking the
+/// prune by id deleted that file in the same call that wrote it, and the quit
+/// summary still said "session saved".
+#[test]
+#[ignore = "red: prune ranks by id, so a restored session deletes itself on save"]
+fn pruning_keeps_the_session_just_saved_and_drops_the_least_recently_saved() {
+    let tmp = tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("sessions");
+        let full = MAX_SESSIONS as u64;
+        let base = 1_700_000_000_u64;
+        // A full directory of newer-id sessions; the highest id was saved
+        // longest ago. File times agree with `epoch_secs`, so the test holds
+        // whichever of the two a prune reads.
+        for id in 2..=full + 1 {
+            let session = tabless_session(id, base + (full + 2 - id));
+            save_session(&session).unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(dir.join(format!("{id}.json")))
+                .unwrap()
+                .set_modified(
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(session.epoch_secs),
+                )
+                .unwrap();
+        }
+        // The long-lived session: created before all of them, saved after.
+        save_session(&tabless_session(1, base + 1_000)).unwrap();
+
+        let ids: std::collections::HashSet<u64> = load_sessions().iter().map(|s| s.id).collect();
+        assert!(
+            ids.contains(&1),
+            "a save must not delete the file it just wrote"
+        );
+        assert_eq!(ids.len(), MAX_SESSIONS);
+        assert!(
+            !ids.contains(&(full + 1)),
+            "the least recently saved restore point is the one pruned"
+        );
+    });
+}
+
 /// Full save→disk→load round-trip: multiple tabs survive in order
 /// with distinct session ids/kinds, and cwd / labels / commands /
 /// project_home / session name / active tab / pane geometry all
