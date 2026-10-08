@@ -586,3 +586,26 @@ last owner. The driver waits for the host process to exit before checking file
 preservation or cleanup. Manifests, recordings, activity dumps, viewport captures
 and results identify the binary and distinguish this coverage from native hook
 execution.
+
+### Test interruption, exit and report lifetimes
+
+`scripts/agent-interrupt-smoke.py` uses a raw-mode controlled child with an
+agent profile and real pane-bound spyc MCP reports. It verifies ordinary input
+preserves working, Escape/`Ctrl-C` returns to idle through silence, and a newer
+report restores working. Exit cases use a file trigger without pane input,
+then check idle and rejection of a late report. The TTL case requests an
+oversized lifetime and checks the capped diagnostic expiry.
+
+```sh
+python3 scripts/agent-interrupt-smoke.py --binary /tmp/spyc-build/spyc \
+  --agent claude --scenario escape --output /tmp/spyc-interrupt-claude
+python3 scripts/agent-interrupt-smoke.py --binary /tmp/spyc-build/spyc \
+  --agent codex --scenario exit_blocked --output /tmp/spyc-exit-codex
+python3 scripts/agent-interrupt-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario ttl --output /tmp/spyc-report-ttl
+```
+
+The driver records captures, activity dumps, manifest, late-report result and
+host exit state. It quits the test host through the UI and requires exit code
+zero. Controlled child exits use code seven. Native agent/hook execution and
+trust are not part of these replay cases.

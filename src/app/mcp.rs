@@ -16,7 +16,7 @@ use super::App;
 /// gives no `ttl_ms`. Non-blocked reports eventually fall back to output timing
 /// if the agent stops reporting; blocked is latched until answered or superseded
 /// by a newer report. Overridable per-report.
-const DEFAULT_REPORT_TTL_MS: u64 = 300_000;
+const DEFAULT_REPORT_TTL_MS: u64 = crate::mcp_cmd::MAX_REPORT_TTL_MS;
 
 impl App {
     /// Write the MCP client config a *launching* agent needs to discover spyc's
@@ -482,8 +482,17 @@ impl App {
                     Err(message) => return McpResponse::Error { message },
                 };
                 let now = std::time::Instant::now();
-                let ttl = std::time::Duration::from_millis(ttl_ms.unwrap_or(DEFAULT_REPORT_TTL_MS));
+                let ttl = std::time::Duration::from_millis(
+                    ttl_ms
+                        .unwrap_or(DEFAULT_REPORT_TTL_MS)
+                        .min(crate::mcp_cmd::MAX_REPORT_TTL_MS),
+                );
                 let entry = &mut tabs.tabs_mut()[idx];
+                if entry.pane.is_closed() {
+                    return McpResponse::Error {
+                        message: "pane has exited; activity report rejected".into(),
+                    };
+                }
                 let kind = crate::agent::detect(&entry.info.command).kind();
                 let question_signal = matches!(
                     status.as_str(),

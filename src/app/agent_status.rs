@@ -600,6 +600,13 @@ impl App {
         let mut live_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
             let kind = crate::agent::detect(&entry.info.command).kind();
+            let closed = entry.pane.is_closed();
+            if closed {
+                entry.info.reported = None;
+                entry.info.scrape_status = None;
+                entry.info.scrape_dirty = false;
+                self.state.codex_recovery.remove(&entry.info.id);
+            }
             // Drop a report that's no longer authoritative (expired, or the tab
             // emitted output that supersedes it) so diagnostics stay honest. A
             // `Blocked` report is latched — it never expires here and output
@@ -623,13 +630,17 @@ impl App {
             {
                 entry.info.scrape_status = None;
             }
-            let new = Self::effective_activity(
-                entry.info.reported,
-                entry.info.scrape_status.map(|(s, _)| s),
-                kind,
-                entry.info.last_output_at,
-                now,
-            );
+            let new = if closed {
+                Self::activity_for(kind != AgentKind::Other, None, now)
+            } else {
+                Self::effective_activity(
+                    entry.info.reported,
+                    entry.info.scrape_status.map(|(s, _)| s),
+                    kind,
+                    entry.info.last_output_at,
+                    now,
+                )
+            };
             // Wake-arming: re-evaluate at the earliest of a live report's expiry
             // or a timing-Working tab's idle-flip, so the dot can't go stale. A
             // latched `Blocked` report never expires, so don't arm a wake for it

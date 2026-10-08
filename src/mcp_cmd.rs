@@ -7,6 +7,9 @@
 //! Each request bundles a one-shot reply sender so the MCP thread can
 //! block until the main loop processes the command.
 
+/// Maximum non-blocked report lifetime; blocked still requires explicit recovery.
+pub const MAX_REPORT_TTL_MS: u64 = 300_000;
+
 use std::sync::mpsc;
 
 /// A request sent from an MCP server thread to the main event loop.

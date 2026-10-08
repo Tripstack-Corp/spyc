@@ -824,3 +824,160 @@ fn invalid_question_start_cannot_supersede_a_generic_block() {
         }
     });
 }
+
+#[test]
+fn accepted_interrupt_retires_working_reports_without_touching_the_other_tab() {
+    use crate::app::effect::{PaneInput, PaneTarget};
+    for name in ["claude", "codex"] {
+        for key in [
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            crate::state::with_state_root(tmp.path(), || {
+                let mut app = agent_app(tmp.path(), name);
+                report(&mut app, "working");
+                assert!(app.open_pane_tab_in("cat", tmp.path()));
+                app.runtime
+                    .pane_tabs
+                    .as_mut()
+                    .unwrap()
+                    .active_info_mut()
+                    .command = name.into();
+                report(&mut app, "blocked");
+                app.settle_agent_activity(std::time::Instant::now(), &mut RunCtx::for_test());
+                app.runtime.pane_tabs.as_mut().unwrap().switch_to(0);
+                app.execute_pane_input(PaneTarget::Active, PaneInput::Key(key), None, None);
+                let tabs = app.runtime.pane_tabs.as_ref().unwrap();
+                assert!(
+                    tabs.tabs()[0].info.reported.is_none(),
+                    "{name} interrupt left a working report"
+                );
+                assert_eq!(
+                    tabs.tabs()[1].info.reported.unwrap().status,
+                    AgentActivity::Blocked
+                );
+                let (_, effects) = app.settle_agent_activity(
+                    std::time::Instant::now() + Duration::from_secs(121),
+                    &mut RunCtx::for_test(),
+                );
+                assert_eq!(
+                    app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+                        .info
+                        .activity,
+                    AgentActivity::Idle
+                );
+                assert!(
+                    !effects.iter().any(|fx| matches!(fx, Effect::Notify { .. })),
+                    "cancelled work is not a done notification"
+                );
+            });
+        }
+    }
+}
+
+#[test]
+fn ordinary_input_keeps_a_working_report() {
+    use crate::app::effect::{PaneInput, PaneTarget};
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "claude");
+        for input in [
+            PaneInput::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            PaneInput::Bytes(b"\x1b[A".to_vec()),
+            PaneInput::Paste {
+                bytes: b"\x1b\x03".to_vec(),
+                text: "paste".into(),
+            },
+        ] {
+            report(&mut app, "working");
+            app.execute_pane_input(PaneTarget::Active, input, None, None);
+            assert_eq!(
+                app.runtime
+                    .pane_tabs
+                    .as_ref()
+                    .unwrap()
+                    .active_info()
+                    .reported
+                    .unwrap()
+                    .status,
+                AgentActivity::Working
+            );
+        }
+    });
+}
+
+#[test]
+fn report_ttl_is_bounded_at_dispatch_even_for_the_largest_u64() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "claude");
+        for ttl in [300_001, u64::MAX] {
+            let result = app.execute_mcp_command(McpCommand::ReportStatus {
+                pane_id: None,
+                pane: None,
+                status: "working".into(),
+                ttl_ms: Some(ttl),
+                session_id: None,
+                hook_event: None,
+            });
+            assert!(matches!(result, McpResponse::Ok { .. }), "{result:?}");
+            let reported = app
+                .runtime
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .reported
+                .unwrap();
+            assert!(reported.expiry.duration_since(reported.at) <= Duration::from_secs(300));
+        }
+    });
+}
+
+#[test]
+fn a_closed_agent_pane_retires_reports_and_rejects_late_reports() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "claude");
+        report(&mut app, "blocked");
+        let pid = app
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active()
+            .process_id()
+            .unwrap();
+        rustix::process::kill_process(
+            rustix::process::Pid::from_raw(pid as i32).unwrap(),
+            rustix::process::Signal::KILL,
+        )
+        .unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(10);
+        while !app.runtime.pane_tabs.as_ref().unwrap().active().is_closed() {
+            app.drain_pane_output();
+            assert!(std::time::Instant::now() < until, "child failed to exit");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        app.settle_agent_activity(std::time::Instant::now(), &mut RunCtx::for_test());
+        let info = app.runtime.pane_tabs.as_ref().unwrap().active_info();
+        assert!(info.reported.is_none());
+        assert_eq!(info.activity, AgentActivity::Idle);
+        assert!(dump(&mut app).contains("source: process-exit"));
+        app.dispatch_command("why-status");
+        assert!(app.flash_text().unwrap().contains("(process-exit)"));
+        let result = app.execute_mcp_command(McpCommand::ReportStatus {
+            pane_id: None,
+            pane: None,
+            status: "working".into(),
+            ttl_ms: None,
+            session_id: None,
+            hook_event: None,
+        });
+        assert!(
+            matches!(result, McpResponse::Error { .. }),
+            "a late child report resurrected an exited pane: {result:?}"
+        );
+    });
+}

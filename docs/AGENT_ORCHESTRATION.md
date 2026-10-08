@@ -383,3 +383,20 @@ installation and cleanup preserve both sources and explain the refusal in
 `:activity dump`. Removing trailing reporters is still allowed. spyc does not
 move or create hook trust records; a manual migration must include reviewing the
 affected user hooks in `/hooks` after restarting Codex.
+
+### Interruption and process exit
+
+A working report survives redraws and silent tool waits until its backstop.
+Accepted Escape or `Ctrl-C` input retires that report so cancelled work falls
+back to output timing and then idle. Enter, ordinary typing, arrows and pasted
+control bytes preserve working reports. An input rejected by the PTY queue
+cannot change report authority. Identified pending Codex questions retain their
+existing correlated completion/new-report recovery rules.
+
+A closed pane retires live reports, scrape attention and pending question
+recovery, and stops using output timing to drive activity. Diagnostics show
+`process-exit` as the source and retain the final output timestamp. Its last received report remains in diagnostics as no longer
+authoritative, and late reports are rejected rather than reviving the dot.
+Non-blocked report TTLs default to five minutes and are capped at five minutes
+at dispatch, including direct callers outside the MCP schema. Blocked remains
+latched until explicit recovery while the pane is alive.
