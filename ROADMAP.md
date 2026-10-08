@@ -232,6 +232,14 @@ rather than an instance. See "The 3.0 horizon" below.
 `docs/drafts/PROJECTS_PLAN.md` — a 2.2 deliverable — is where the design gets
 argued. Tracked as [#99](https://github.com/Tripstack-Corp/spyc/issues/99).
 
+**Candidate addition, not committed to 2.3:** the
+[Git review workspace proposal](docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md)
+connects Changes, branch Compare, History, and shared agent review context.
+Its scope and sequencing need review; Projects remains the primary objective.
+The proposal retains in-process `gix` for review and records a dated backend
+assessment; complete Git write workflows and any backend exception are
+assessed separately.
+
 ## The 3.0 horizon: Slow Cooker (durable sessions)
 
 The goal is that spyc stops needing tmux underneath it. Detach, close the
@@ -710,6 +718,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/drafts/V2_2_PLAN.md` | The 2.2 scope, sequencing and exit criteria — the plan behind "Road to 2.2". |
 | `docs/drafts/CODEX_SUPPORT_PLAN.md` | Draft Codex parity remediation and opt-in session HUD: reproduced RC regressions, hook/image/navigation gaps, telemetry contracts, sequencing and validation. HUD scope is proposed and unscheduled, not an added RC gate. |
 | `docs/drafts/PROJECTS_PLAN.md` | The 2.3 Projects design, in review ([#492](https://github.com/Tripstack-Corp/spyc/issues/492)): the per-project state inventory, one MCP socket answering per project, the recovery manifest, the `Space` keys, the `projects` segment, attention across projects, and what an attach snapshot carries. #99's code waits on its approval. |
+| [`docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md`](docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md) | Draft candidate for 2.3, unscheduled: connected Git review, project/worktree context, comparison semantics, MCP reads, delivery slices, and references. Git write operations are a separate assessment. |
 | `docs/drafts/pane-identity-transport-proposal.md` | Option B shipped in #507 ([#491](https://github.com/Tripstack-Corp/spyc/issues/491)): the pane id goes in the MCP `initialize` handshake. Per-pane roots are dropped (decisions log, 2026-09-30). It is also the attribution mechanism Projects extends. |
 | `docs/drafts/VT_ENGINE_SPIKE.md` | The engine spike report plus its dated gate addendum: the evidence behind the libghostty-vt entries in the decisions log. Appended to, never rewritten. |
 | `docs/drafts/CLICKABLE_MENUS_PLAN.md` | Proposal, unscheduled and with no issue yet: make the which-key popup clickable instead of adding right-click context menus (#478). |
