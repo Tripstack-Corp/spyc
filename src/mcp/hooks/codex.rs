@@ -44,7 +44,7 @@ fn codex_group_is_ours(group: &toml::Value) -> bool {
 /// Codex counterpart of [`super::ensure_claude_status_hooks`]: merge spyc's status
 /// hooks into `<dir>/.codex/config.toml` at the caller's resolved hook source,
 /// preserving everything else. Legacy JSON reporters are removed only after
-/// the canonical file is durable; an unsafe legacy source refuses installation.
+/// the canonical file is written; an unsafe legacy source refuses installation.
 /// Other handlers survive even when they share a matcher group with a reporter.
 pub fn ensure_codex_status_hooks(dir: &Path) -> bool {
     let path = dir.join(".codex").join("config.toml");
@@ -75,7 +75,7 @@ pub fn ensure_codex_status_hooks(dir: &Path) -> bool {
             return false;
         }
     }
-    // The canonical file is durable before removing a legacy reporter.
+    // The canonical file is written before removing a legacy reporter.
     // Codex executes both representations; unchanged TOML still needs migration.
     apply_legacy_edit(dir, legacy).is_ok()
 }
@@ -143,7 +143,10 @@ pub fn cleanup_codex_status_hooks(dir: &Path) -> ConfigCleanup {
         return ConfigCleanup::NothingToDo;
     }
     let legacy_edit = legacy_edit(dir);
-    if matches!(legacy_edit, Err(LegacyError::TrustPositions)) {
+    if matches!(
+        legacy_edit,
+        Err(LegacyError::TrustPositions | LegacyError::Symlink)
+    ) {
         return ConfigCleanup::NothingToDo;
     }
     let legacy = match legacy_edit {
@@ -234,12 +237,19 @@ enum LegacyError {
     Unreadable,
     Tracked,
     TrustPositions,
+    Symlink,
 }
 
 /// Plan a precise removal from Codex's second, independently loaded hook source.
 /// Invalid and tracked sources are preserved before any canonical-file write.
 fn legacy_edit(dir: &Path) -> Result<LegacyEdit, LegacyError> {
     let path = dir.join(".codex/hooks.json");
+    match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => return Err(LegacyError::Symlink),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(LegacyEdit::Keep),
+        Err(_) => return Err(LegacyError::Unreadable),
+    }
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(LegacyEdit::Keep),
@@ -282,9 +292,28 @@ fn pruned_legacy_hooks_json(text: &str) -> Result<LegacyEdit, LegacyError> {
 
 fn apply_legacy_edit(dir: &Path, edit: LegacyEdit) -> std::io::Result<bool> {
     let path = dir.join(".codex/hooks.json");
+    if matches!(edit, LegacyEdit::Keep) {
+        return Ok(false);
+    }
+    // Recheck at apply time: an unchanged or newly created link is never an
+    // owned destination to replace or unlink, even after a valid preflight.
+    let metadata = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "legacy hook source is not a regular file; preserved",
+        ));
+    }
     match edit {
         LegacyEdit::Keep => Ok(false),
-        LegacyEdit::Write(text) => crate::fs::write_atomic(&path, text.as_bytes()).map(|()| true),
+        LegacyEdit::Write(text) => {
+            crate::fs::write_atomic_with_permissions(&path, text.as_bytes(), metadata.permissions())
+                .map(|()| true)
+        }
         LegacyEdit::Remove => {
             match std::fs::remove_file(path) {
                 Ok(()) => {}
@@ -317,12 +346,17 @@ pub fn codex_legacy_hook_diagnostic(dir: &Path) -> Option<&'static str> {
         Err(LegacyError::Invalid) => Some(
             "legacy .codex/hooks.json is malformed; repair it before `:hooks on` and restarting Codex",
         ),
+        Err(LegacyError::Symlink) => Some(
+            "legacy .codex/hooks.json is a symlink; link and target preserved; migrate its reporters manually before :hooks on and restarting Codex",
+        ),
         Err(LegacyError::Unreadable) => Some(
             "legacy .codex/hooks.json is unreadable; restore access before `:hooks on` and restarting Codex",
         ),
     }
 }
 
+#[cfg(test)]
+mod file_tests;
 #[cfg(test)]
 mod identity_tests;
 

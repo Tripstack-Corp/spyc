@@ -643,3 +643,14 @@ refused record survives autosave and quit and repeat the restore. The last
 checks a wholly refused session executes no child and remains saved unchanged.
 Each host must quit with exit code zero and no signal. This covers spyc's restore
 behaviour without running native Codex or approving hook trust.
+
+
+Codex legacy-hook migration preserves a `.codex/hooks.json` symlink, including
+its target, and refuses installation/teardown rather than replacing or unlinking
+it. Diagnostics explain that the linked reporters need manual migration.
+Regular JSON files keep their existing permission bits when spyc removes its
+reporters; the replacement file receives those bits before atomic rename.
+The ownership TUI driver adds `symlink`, `dangling_symlink`, `mode_640` and
+`mode_644` scenarios. They check installation, diagnostics, file contents and
+permissions after graceful host exit, using controlled children and disposable
+HOME/state without executing native hooks or changing trust.

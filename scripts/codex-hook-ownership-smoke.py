@@ -54,6 +54,20 @@ class OwnershipSmoke(module.Smoke):
         if self.args.scenario == "tracked":
             self.git("add", ".codex/config.toml")
             self.git("commit", "--quiet", "-m", "fixture: tracked config")
+        if self.args.scenario in ("symlink", "dangling_symlink"):
+            self.legacy.parent.mkdir()
+            self.link_target = self.output / "shared-hooks.json"
+            if self.args.scenario == "symlink":
+                self.link_target.write_bytes(self.before)
+            self.legacy.symlink_to(self.link_target)
+        if self.args.scenario in ("mode_640", "mode_644"):
+            self.legacy.parent.mkdir()
+            self.user_json = {"user-setting": "keep", "hooks": {"Stop": [{"hooks": [{"command": "printf user-hook"}]}]}}
+            existing = json.loads(json.dumps(self.user_json))
+            existing["hooks"]["Stop"].append({"hooks": [{"command": "spyc --report-status done"}]})
+            self.legacy.write_text(json.dumps(existing) + "\n")
+            self.expected_mode = int(self.args.scenario.removeprefix("mode_"), 8)
+            self.legacy.chmod(self.expected_mode)
         binary = self.args.binary.resolve()
         manifest = {"binary": str(binary), "sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
                     "version": subprocess.check_output([str(binary), "--version"], text=True).strip(),
@@ -127,9 +141,40 @@ class OwnershipSmoke(module.Smoke):
         host.started = False
 
     def unchanged(self):
+        if self.args.scenario in ("symlink", "dangling_symlink"):
+            assert self.legacy.is_symlink() and self.legacy.readlink() == self.link_target, "legacy symlink was replaced or unlinked"
+            if self.args.scenario == "symlink":
+                assert self.link_target.read_bytes() == self.before, "shared target changed"
+            else:
+                assert not self.link_target.exists(), "dangling target was created"
+            assert not self.config.exists(), "refused legacy migration wrote canonical hooks"
+            return
         assert self.legacy.exists() and self.legacy.read_bytes() == self.before, "teardown deleted or changed borrowed Codex reporters"
         if self.snapshot is not None:
             assert self.config.read_bytes() == self.snapshot, "refused configuration changed"
+
+    def dump(self, name):
+        if self.args.scenario not in ("symlink", "dangling_symlink"):
+            return super().dump(name)
+        self.key("Ctrl+a", "k")
+        self.cli("type", ":activity dump")
+        self.key("Enter")
+        self.wait("activity dump", 5000)
+        # Plain pagers wrap by default. The shared numbered-line extractor
+        # omits continuation rows; assert against the actual wrapped screen.
+        self.wait("link and target preserved", 5000)
+        text = self.capture(name)
+        self.key("q")
+        self.key("Ctrl+a", "j")
+        return text
+
+    def check_mode(self, name):
+        assert self.legacy.is_file() and not self.legacy.is_symlink(), "legacy source disappeared or changed type"
+        mode = self.legacy.stat().st_mode & 0o777
+        assert mode == self.expected_mode, f"legacy mode changed: {mode:o}, expected {self.expected_mode:o}"
+        actual = json.loads(self.legacy.read_text())
+        assert actual == self.user_json, actual
+        (self.output / (name + "-legacy.json")).write_text(json.dumps({"mode": mode, "content": actual}, indent=2) + "\n")
 
     def run(self):
         self.setup()
@@ -137,12 +182,21 @@ class OwnershipSmoke(module.Smoke):
             "agy" if self.args.scenario == "mcp_only" else "codex")
         self.start_host(self, kind, consent=self.args.scenario != "mcp_only")
         print(f"Started {self.args.scenario}: {self.args.session}", flush=True)
-        if self.args.scenario in ("tracked", "malformed", "claude_only", "mcp_only"):
+        if self.args.scenario in ("tracked", "malformed", "claude_only", "mcp_only", "symlink", "dangling_symlink"):
             self.unchanged()
+            if self.args.scenario in ("symlink", "dangling_symlink"):
+                diagnostic = self.dump("symlink-diagnostic")
+                assert "is a symlink" in diagnostic and "link and target preserved" in diagnostic, diagnostic
             self.quit_host(self)
             self.unchanged()
             if kind == "claude":
                 assert not self.claude.exists(), "managed Claude hooks were stranded"
+        elif self.args.scenario in ("mode_640", "mode_644"):
+            assert self.config.exists() and b"--report-status" in self.config.read_bytes()
+            self.check_mode("installed")
+            self.quit_host(self)
+            self.check_mode("exited")
+            assert not self.config.exists(), "managed canonical hooks were stranded"
         else:
             assert self.config.exists() and b"--report-status" in self.config.read_bytes()
             if self.args.scenario == "borrowed_last":
@@ -169,7 +223,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--scenario", choices=("tracked", "malformed", "claude_only", "mcp_only", "shared", "mixed", "borrowed_last"), default="tracked")
+    parser.add_argument("--scenario", choices=("tracked", "malformed", "claude_only", "mcp_only", "shared", "mixed", "borrowed_last", "symlink", "dangling_symlink", "mode_640", "mode_644"), default="tracked")
     parser.add_argument("--session", default="spyc-hook-ownership-" + uuid.uuid4().hex[:10])
     smoke = OwnershipSmoke(parser.parse_args())
     result = {"passed": False}
