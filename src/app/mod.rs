@@ -149,6 +149,7 @@ mod pane_scroll;
 mod pane_tabs;
 mod pane_wake;
 mod paste_capture;
+mod pre_recv;
 mod preview_ops;
 mod proc;
 mod process_cwd;

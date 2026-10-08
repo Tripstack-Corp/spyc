@@ -248,8 +248,8 @@ fn approval_scan_is_wired_to_the_current_viewport_and_loop() {
         !scan.contains("recent_lines("),
         "old approval history cannot establish a current wait"
     );
-    let run = crate::guard_support::production_half(include_str!("../run.rs"));
-    assert!(run.contains("self.settle_scrape_quiet(now_pre, &mut ctx)"));
+    let run = crate::guard_support::production_half(include_str!("../pre_recv.rs"));
+    assert!(run.contains("self.settle_scrape_quiet(now_pre, ctx)"));
 }
 
 #[test]

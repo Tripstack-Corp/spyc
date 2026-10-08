@@ -60,7 +60,6 @@ const PRODUCTION: Rule = Rule {
         ("src/app/archive.rs", 1494),
         ("src/app/commands.rs", 1059),
         ("src/app/pager_handler/mod.rs", 1068),
-        ("src/app/run.rs", 1102),
         ("src/app/state/mod.rs", 1213),
     ],
 };
