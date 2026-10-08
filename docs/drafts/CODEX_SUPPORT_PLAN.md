@@ -309,8 +309,8 @@ Two tracks keep the RC manageable:
   Fresh trust onboarding, async attention and live parallel-pane isolation
   remain A3 acceptance gaps.
 
-- A3b5 was locally accepted on 2026-10-07 on `test/codex-attention-isolation`,
-  based on #549, and is ready for integration.
+- A3b5 landed through PR #550 (`fb5b60b9`) after local-build acceptance
+  on 2026-10-07, based on #549.
   The accepted A3b4 artifact passed the real two-pane native-question loop:
   both questions blocked, answering the second restored only that pane, the
   first remained blocked until answered, and both independently reached done.
@@ -372,9 +372,78 @@ Two tracks keep the RC manageable:
   artifacts retain manifests, recordings, viewport captures, extracted dumps
   and step logs. The live host and MCP proxy were verified against the exact
   artifact hash. The user reported that it was working well and requested
-  continuing, accepting the build for integration.
+  continuing, accepting the build for integration. GitHub lint, tests and
+  packaging passed, and the exact PR head was `CLEAN` before squash merge.
+  The clean main checkout was fast-forwarded to that merge. The accepted
+  worktree is retained while the user's running host and panes use it.
   Full fresh-trust execution, async attention and other approval-dialogue
   formats remain A3 acceptance gaps; parallel native-question isolation passed.
+
+- A3b6 is ready for integration on `fix/codex-edit-approval`, refreshed onto
+  merged PTY input-backpressure PR #551 and main's subsequent refactors
+  (`f334affc`).
+  the earlier #550-based build is superseded for the next handoff.
+  A real Codex `0.160.1` file-edit approval failed against A3b5: the complete
+  dialogue was open but the dot remained working. Its captured modal became
+  a fixture and the regression failed before the fix. The initial file-edit-only
+  implementation passed 2769 library tests, all integration and VT-system tests,
+  plus five native CLI loops (approve, decline, Esc dismissal, automatic review
+  and mixed command approval → native question) on the earlier artifact.
+  Those historical checks used trusted hooks and do not establish acceptance
+  of the expanded current build.
+
+  Review then identified uncovered MCP and network waits. Native MCP capture
+  showed a single-field Allow/Cancel form, distinct from command approval.
+  Continuous repainting also prevented the trailing-quiet scan from running.
+  A real 40-column command capture showed native wrapping across required
+  phrases and the footer. Permanent regressions reproduced each missed wait
+  against the old code, including the App path with a real PTY and continuing
+  output timestamps. Network and persistent MCP option fixtures come from
+  exact-version upstream UI snapshots; their provenance is separate from the
+  native command, file-edit and MCP captures.
+
+  Rules now cover command, file-edit, single-field MCP-tool and network approval
+  forms with known phrases and the complete footer at the viewport bottom.
+  Native word wrapping is accepted; old quoted modals above the composer,
+  missing required text and prefixed/clipped footers are rejected. Codex scans
+  within 250 ms of the first pending repaint rather than allowing each redraw
+  to postpone detection. The retained report and existing precedence policy
+  are unchanged: semantic question/agent blocks still win, and permission hooks
+  remain observational. Hook commands and correlation are unchanged.
+
+  The ten focused approval regressions pass. Deliberate network-rule, footer
+  boundary and scan-deadline mutations were detected, and production was restored.
+  The initial refreshed full gate passed 2788 library tests, all integration
+  suites and six VT-system tests. Native command approval at 40 columns, MCP
+  approve/cancel at 200 columns and MCP approve at 40 columns passed on the
+  #551-based combined artifact. Each held a blocked scrape for six seconds and
+  recovered after answering; only approved MCP calls wrote their marker once.
+  The refreshed gate on `209b7e4f` passed the same full suite. Five native
+  UI checks then passed against the exact final artifact: 40-column command
+  approval, 200-column MCP approve and cancel, 40-column MCP approve, and a
+  repeated wide MCP approval after correcting the driver's session-name check.
+  That check now compares exact names in structured JSON rather than rejecting
+  a distinct session with the same name prefix. Every held modal used the
+  blocked scrape source, with no semantic reports; each answer cleared it.
+  Approvals wrote exactly one disposable MCP marker and cancellation wrote none.
+  This verifies UI recovery, not retained semantic working or native hook delivery.
+  The current Gemma model chose shell commands rather than `apply_patch` in two
+  file-edit attempts; those runs do not establish a native file-edit dialogue
+  on the new build. The recorded native file-edit fixture regression passes.
+
+  The fresh binary is `/private/tmp/spyc-codex-a3b6-current.umb6tuwn/spyc`,
+  SHA-256 `fe4628a0416a9d53495bb09093d85d89c470880a5e11e7a679c7a00755067ea5`.
+  Its `test.sh` selects this worktree and places the exact binary/reporter on
+  `PATH`. The manifest records the source head, build-time changed-file hashes,
+  gate log and native UI results. On 2026-10-08, the user explicitly authorized
+  proceeding with added automated TUI coverage while deferring their manual
+  local test. This authorizes integration after checks; it does not establish
+  manual acceptance or fresh hook execution. The UI-only driver can skip
+  startup hook review with Esc, without approving or editing trust records.
+  Read-only `hooks/list` currently labels six root-checkout spyc reporters
+  modified; live semantic-hook recovery requires user review of that trust state.
+  Generic MCP elicitation, extra-permission and stdin-write forms, a live native
+  network approval, async attention and fresh-trust execution remain A3 gaps.
 
 ### Baseline
 

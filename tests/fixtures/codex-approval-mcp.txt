@@ -1,0 +1,6 @@
+  Field 1/1
+  Allow the attention_probe MCP server to run tool "attention_probe"?
+  › 1. Allow   Run the tool and continue
+    2. Cancel  Cancel this tool call
+
+  enter to submit | esc to cancel
