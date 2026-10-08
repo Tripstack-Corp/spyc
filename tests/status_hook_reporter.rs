@@ -31,6 +31,11 @@ fn run_reporter_for(state: &str, payload: &str) -> (Value, String) {
                 Err(error) => panic!("accept reporter: {error}"),
             }
         };
+        // macOS hands the accepted socket the listener's O_NONBLOCK (Linux, and
+        // so CI, doesn't), and a non-blocking socket ignores the read timeout
+        // below: a read that beats the reporter's write fails at once with
+        // WouldBlock, which a loaded machine makes likely.
+        stream.set_nonblocking(false).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();
