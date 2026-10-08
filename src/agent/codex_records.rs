@@ -69,13 +69,13 @@ fn completed_item(item: &Value) -> Vec<Record> {
             vec![Record { id, kind }]
         }
         Some("CommandExecution") => {
-            let Some(command) = item["command"].as_str() else {
+            let Some(command) = command_text(&item["command"]) else {
                 return Vec::new();
             };
             tool_records(
                 id,
                 "shell".to_owned(),
-                command.to_owned(),
+                command,
                 text_content(&item["aggregated_output"]),
             )
         }
@@ -100,6 +100,24 @@ fn completed_item(item: &Value) -> Vec<Record> {
             )
         }
         _ => Vec::new(),
+    }
+}
+
+/// Recorded argv is quoted for display only; it is never interpreted or run.
+/// Reject a malformed word rather than display a silently shortened command.
+fn command_text(command: &Value) -> Option<String> {
+    match command {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(argv) if !argv.is_empty() => argv
+            .iter()
+            .map(|word| {
+                shlex::try_quote(word.as_str()?)
+                    .ok()
+                    .map(std::borrow::Cow::into_owned)
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(|words| words.join(" ")),
+        _ => None,
     }
 }
 

@@ -609,3 +609,22 @@ The driver records captures, activity dumps, manifest, late-report result and
 host exit state. It quits the test host through the UI and requires exit code
 zero. Controlled child exits use code seven. Native agent/hook execution and
 trust are not part of these replay cases.
+
+
+### Test recorded Codex command scrollback
+
+`scripts/codex-transcript-smoke.py` mounts a sanitized real command-execution
+record in a disposable Codex session directory. A controlled alt-screen child
+allows the actual `Ctrl-A v` transcript path to open; the recorded command is
+never executed. Cases cover a recorded argv command and result, duplicate
+identity, and mixed legacy/malformed records. Each case hides and restores tool
+lines with `t`, reloads, retains prose and quits the host through the UI.
+
+```sh
+python3 scripts/codex-transcript-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario recorded --output /tmp/spyc-transcript-recorded
+```
+
+Use `--scenario duplicate` or `--scenario mixed` for the other cases. The driver
+preserves recordings, viewport captures, fixture/binary hashes and host exit
+state. Native Codex execution and hook trust are not exercised.

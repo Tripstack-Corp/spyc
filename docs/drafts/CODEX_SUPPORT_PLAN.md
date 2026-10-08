@@ -562,7 +562,8 @@ Two tracks keep the RC manageable:
   VT-system tests. Required GitHub checks passed and merge state was `CLEAN`.
   Build/acceptance evidence is recorded with the PR and isolated artifact manifest.
 
-- A3b11 implements the reviewed interruption/exit/lifetime follow-up. Accepted
+- A3b11 landed through PR #571 (`e4e85843`) on 2026-10-08 after automated
+  acceptance of the committed artifact. It implements the reviewed interruption/exit/lifetime follow-up. Accepted
   interrupt input retires a working report while ordinary input, rejected input
   and identified pending-question recovery retain their respective contracts.
   Closed panes retire current authority and reject late reports; non-blocked
@@ -576,7 +577,24 @@ Two tracks keep the RC manageable:
   Call-site mutations detect rejected interrupts clearing authority and late
   reports reviving exited panes. Activity diagnostics are extracted into a
   cohesive module, removing the oversized command module's size exemption.
-  Integration uses automated acceptance under the user's authorization.
+  All 18 final artifact TUI cases passed: nine interruption/exit/TTL cases,
+  two question-recovery sequences and seven ownership scenarios. Nineteen test
+  hosts exited with code zero and no signal. Required GitHub checks were green
+  and merge state was `CLEAN`; the owned files matched integrated `main`.
+  Integration used automated acceptance under the user's authorization.
+
+- The A1 review follow-up restores completed shell execution records whose
+  `command` is an argv array. A real rollout snapshot contained 1570 such
+  records, all arrays, while the reader accepted only strings. A sanitized
+  `codex --version` record preserves actual argv and output with identifying
+  fields replaced. Three new regressions failed against the unchanged public
+  reader. The prior accepted binary also failed the actual `Ctrl-A v` command
+  assertion after successfully displaying the fixture's prose. Safe display
+  quoting preserves argv boundaries, retains legacy string compatibility and
+  rejects malformed arrays without truncating words or panicking. A deliberate
+  malformed-word mutation failed; correct code was restored. The new TUI driver
+  covers recorded, duplicate and mixed command histories with tool visibility
+  and reload. Final artifact and integration evidence is recorded with the PR.
 
 ### Baseline
 
