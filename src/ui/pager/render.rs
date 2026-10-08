@@ -389,6 +389,82 @@ fn pad_row_to_width(line: Line<'static>, width: usize, bg: Color) -> Line<'stati
     Line::from(spans)
 }
 
+/// Visual selection: paint a muted background across the
+/// selected region so the user can see what `y` will yank.
+/// - Line mode (`V`): whole rows in `[lo..=hi]`. Cursor row
+///   gets the brighter cursor_bg, others cursor_bg_dim.
+/// - Block mode (`^v`): only the rectangular slice
+///   `[lo_col..=hi_col]` of each row in `[lo..=hi]` is
+///   highlighted, painted character-by-character. The cursor
+///   *cell* (cursor_line, cursor_col) gets the brighter bg.
+///
+/// Applied before the picker-cursor branch so visual mode wins
+/// when both would coincide.
+fn paint_visual_selection(
+    mut styled: Line<'static>,
+    sel: super::VisualSelection,
+    abs_idx: usize,
+    theme: &Theme,
+) -> Line<'static> {
+    let (lo, hi) = sel.range();
+    if (lo..=hi).contains(&abs_idx) {
+        match sel.kind {
+            VisualKind::Line => {
+                // Only the glyphs the row actually has; `render_single_column`
+                // pads the rest of the width to the same bg.
+                let bg = line_sel_bg(sel.cursor, abs_idx, theme);
+                styled = Line::from(
+                    styled
+                        .spans
+                        .into_iter()
+                        .map(|s| Span::styled(s.content, s.style.bg(bg)))
+                        .collect::<Vec<_>>(),
+                );
+            }
+            VisualKind::Block => {
+                let (lo_col, hi_col) = sel.col_range();
+                let cursor_col = if abs_idx == sel.cursor {
+                    Some(sel.cursor_col)
+                } else {
+                    None
+                };
+                styled = paint_block_selection(
+                    &styled,
+                    lo_col,
+                    hi_col,
+                    cursor_col,
+                    theme.cursor_bg_dim,
+                    theme.cursor_bg,
+                );
+            }
+            // Charwise: same painter as Block, but the column bounds are
+            // per-row rather than a shared rectangle — first row from its
+            // start column to end-of-line, interior rows whole, last row up
+            // to its end column.
+            VisualKind::Char => {
+                let ((s_line, s_col), (e_line, e_col)) = sel.char_endpoints();
+                let eol = line_plain_text(&styled).chars().count().saturating_sub(1);
+                let from = if abs_idx == s_line { s_col } else { 0 };
+                let to = if abs_idx == e_line { e_col } else { eol };
+                let cursor_col = if abs_idx == sel.cursor {
+                    Some(sel.cursor_col)
+                } else {
+                    None
+                };
+                styled = paint_block_selection(
+                    &styled,
+                    from,
+                    to,
+                    cursor_col,
+                    theme.cursor_bg_dim,
+                    theme.cursor_bg,
+                );
+            }
+        }
+    }
+    styled
+}
+
 /// Apply match-highlight + picker-cursor styling to a source line.
 /// Extracted from `render_single_column` so wrap can re-use it
 /// (styling decisions happen before the visual split).
@@ -399,73 +475,8 @@ fn apply_row_styling(
     theme: &Theme,
 ) -> Line<'static> {
     let mut styled = styled_line_for_render(line, view, abs_idx, theme);
-    // Visual selection: paint a muted background across the
-    // selected region so the user can see what `y` will yank.
-    // - Line mode (`V`): whole rows in `[lo..=hi]`. Cursor row
-    //   gets the brighter cursor_bg, others cursor_bg_dim.
-    // - Block mode (`^v`): only the rectangular slice
-    //   `[lo_col..=hi_col]` of each row in `[lo..=hi]` is
-    //   highlighted, painted character-by-character. The cursor
-    //   *cell* (cursor_line, cursor_col) gets the brighter bg.
-    // Applied before the picker-cursor branch so visual mode wins
-    // when both would coincide.
     if let Some(sel) = view.visual {
-        let (lo, hi) = sel.range();
-        if (lo..=hi).contains(&abs_idx) {
-            match sel.kind {
-                VisualKind::Line => {
-                    // Only the glyphs the row actually has; `render_single_column`
-                    // pads the rest of the width to the same bg.
-                    let bg = line_sel_bg(sel.cursor, abs_idx, theme);
-                    styled = Line::from(
-                        styled
-                            .spans
-                            .into_iter()
-                            .map(|s| Span::styled(s.content, s.style.bg(bg)))
-                            .collect::<Vec<_>>(),
-                    );
-                }
-                VisualKind::Block => {
-                    let (lo_col, hi_col) = sel.col_range();
-                    let cursor_col = if abs_idx == sel.cursor {
-                        Some(sel.cursor_col)
-                    } else {
-                        None
-                    };
-                    styled = paint_block_selection(
-                        &styled,
-                        lo_col,
-                        hi_col,
-                        cursor_col,
-                        theme.cursor_bg_dim,
-                        theme.cursor_bg,
-                    );
-                }
-                // Charwise: same painter as Block, but the column bounds are
-                // per-row rather than a shared rectangle — first row from its
-                // start column to end-of-line, interior rows whole, last row up
-                // to its end column.
-                VisualKind::Char => {
-                    let ((s_line, s_col), (e_line, e_col)) = sel.char_endpoints();
-                    let eol = line_plain_text(&styled).chars().count().saturating_sub(1);
-                    let from = if abs_idx == s_line { s_col } else { 0 };
-                    let to = if abs_idx == e_line { e_col } else { eol };
-                    let cursor_col = if abs_idx == sel.cursor {
-                        Some(sel.cursor_col)
-                    } else {
-                        None
-                    };
-                    styled = paint_block_selection(
-                        &styled,
-                        from,
-                        to,
-                        cursor_col,
-                        theme.cursor_bg_dim,
-                        theme.cursor_bg,
-                    );
-                }
-            }
-        }
+        styled = paint_visual_selection(styled, sel, abs_idx, theme);
     }
     // Placement cursor: where the anchor will land when the user
     // commits with `^v` / `V`. Block placement (`^v`) shows a single
