@@ -396,7 +396,7 @@ mod tests {
     #[test]
     fn send_effect_uses_the_tested_input_executor() {
         // Pin the production seam exercised by the real-PTY regression.
-        let source = crate::guard_support::production_half(include_str!("effect.rs"));
+        let source = crate::guard_support::production_half(include_str!("effect/executor.rs"));
         assert!(source.contains("self.execute_pane_input(target, input, on_ok, err_prefix)"));
     }
 }
