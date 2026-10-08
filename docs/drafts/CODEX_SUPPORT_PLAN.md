@@ -541,7 +541,8 @@ Two tracks keep the RC manageable:
   ownership is addressed by A3b10 below; positional trust preservation and
   pre-question generic-block recovery have landed.
 
-- A3b10 implements the cleanup-ownership follow-up. Refused installs borrow existing
+- A3b10 landed through PR #570 (`05d4e55d`) on 2026-10-08 after automated
+  local-build acceptance. It implements the cleanup-ownership follow-up. Refused installs borrow existing
   reporters without teardown authority; managed leases and cleanup are scoped
   to the agent kind and resolved source, independently of MCP directories.
   The regression suite covers borrowed, missing, same-agent, mixed-agent,
@@ -552,12 +553,30 @@ Two tracks keep the RC manageable:
   and manual acceptance remain separate; integration uses automated acceptance
   under the user's 2026-10-08 authorization. Three teardown regressions failed
   before the fix. Corrected old-binary TUI cases reproduce reporter deletion
-  after graceful exit for tracked, Claude-only and MCP-only fixtures; seven
-  preliminary fixed-binary scenarios pass. Mutation assertions detect broken
+  after graceful exit for tracked, Claude-only and MCP-only fixtures; all seven
+  final artifact scenarios pass with zero host exit codes. Mutation assertions detect broken
   borrowed authority, same-agent protection and legacy-owner handling; the
   correct implementation was restored. The false re-heal regression also failed
-  before the result was checked. Final build/acceptance evidence is recorded
-  with the PR and isolated artifact manifest.
+  before the result was checked. The final-head `RUST_TEST_THREADS=1 make check`
+  passed with 2815 library tests, one ignored test, integration tests and six
+  VT-system tests. Required GitHub checks passed and merge state was `CLEAN`.
+  Build/acceptance evidence is recorded with the PR and isolated artifact manifest.
+
+- A3b11 implements the reviewed interruption/exit/lifetime follow-up. Accepted
+  interrupt input retires a working report while ordinary input, rejected input
+  and identified pending-question recovery retain their respective contracts.
+  Closed panes retire current authority and reject late reports; non-blocked
+  TTLs are capped at the existing five-minute default. Three real-input/dispatch
+  regressions failed before the fix, and controlled TUI replays reproduced stale
+  working after Escape, blocked after child exit and an oversized expiry on the
+  prior accepted artifact. `scripts/agent-interrupt-smoke.py` adds repeatable
+  controlled-agent coverage; native hook/trust and manual acceptance remain
+  separate. The full `RUST_TEST_THREADS=1 make check` gate passes with 2819
+  library tests, one ignored test, integration tests and six VT-system tests.
+  Call-site mutations detect rejected interrupts clearing authority and late
+  reports reviving exited panes. Activity diagnostics are extracted into a
+  cohesive module, removing the oversized command module's size exemption.
+  Integration uses automated acceptance under the user's authorization.
 
 ### Baseline
 

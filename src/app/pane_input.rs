@@ -272,6 +272,43 @@ mod tests {
                     expiry: now + Duration::from_secs(60),
                 });
             }
+            app.runtime
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .active_info_mut()
+                .reported
+                .as_mut()
+                .unwrap()
+                .status = crate::pane::AgentActivity::Working;
+            app.execute_pane_input(
+                PaneTarget::Active,
+                PaneInput::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+                None,
+                None,
+            );
+            assert_eq!(
+                app.runtime
+                    .pane_tabs
+                    .as_ref()
+                    .unwrap()
+                    .active_info()
+                    .reported
+                    .unwrap()
+                    .status,
+                crate::pane::AgentActivity::Working,
+                "rejected interrupt input cannot retire a working report"
+            );
+            assert!(app.flash_text().unwrap().contains("queue full"));
+            app.runtime
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .active_info_mut()
+                .reported
+                .as_mut()
+                .unwrap()
+                .status = crate::pane::AgentActivity::Blocked;
             app.state.pane.pane_prompt_buf = "accepted".into();
             app.set_pane_focus(true);
             let paste = app.handle_paste("rejected paste".into());

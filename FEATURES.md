@@ -1489,7 +1489,11 @@ Claude can query and control the workspace through these tools:
 - **`report_status(status, [pane], [ttl_ms])`** -- self-report activity for
   your pane's dot: `working` / `blocked` (the "needs me" hot-red dot) / `done` /
   `idle`. Overrides spyc's output-timing guess; targets the caller's own tab
-  by default (the focused tab for a connection that named none).
+  by default (the focused tab for a connection that named none). Non-blocked
+  reports default to five minutes and larger `ttl_ms` values are clamped to
+  that maximum; blocked reports stay latched until settled or replaced.
+  Accepted Escape/`Ctrl-C` retires a working report; Enter, arrows and pasted
+  control bytes preserve it. Closed panes cannot retain or receive activity reports.
 - **`register_scope(paths, intent, [pr], [note])`** / **`list_scopes`** /
   **`release_scope(id)`** / **`wait_for_scope_clear(paths, [timeout_ms])`** --
   merge-coordination registry (P2). Declare the files/globs you're touching and

@@ -99,6 +99,7 @@ pub enum PostAction {
 mod about;
 mod actions;
 mod activity;
+mod activity_diagnostics;
 mod agent_status;
 mod archive;
 mod archive_ops;

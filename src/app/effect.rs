@@ -321,7 +321,7 @@ pub enum PaneTarget {
     Overlay,
 }
 
-/// Apply prompt-settling input to semantic and scrape-derived attention.
+/// Apply accepted prompt/interrupt input to semantic and scrape-derived activity.
 pub(super) fn clear_blocked_for_input(
     info: &mut crate::pane::tabs::TabInfo,
     input: &PaneInput,
@@ -333,6 +333,14 @@ pub(super) fn clear_blocked_for_input(
     let question_waiting = recovery
         .as_ref()
         .is_some_and(|state| state.question_waiting());
+    if !question_waiting
+        && input.interrupts_agent()
+        && info
+            .reported
+            .is_some_and(|report| report.status == crate::pane::AgentActivity::Working)
+    {
+        info.reported = None;
+    }
     let blocked = |status| status == crate::pane::AgentActivity::Blocked;
     if !question_waiting && info.reported.is_some_and(|report| blocked(report.status)) {
         info.reported = None;
@@ -403,6 +411,26 @@ impl PaneInput {
                 );
                 pane.send_bytes(&bytes)
             }
+        }
+    }
+
+    /// An explicit interrupt key, excluding arrows and pasted control bytes.
+    fn interrupts_agent(&self) -> bool {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        match self {
+            Self::Key(key) => match key.code {
+                KeyCode::Esc => key.modifiers.is_empty(),
+                KeyCode::Char('c' | 'C') => {
+                    key.modifiers.contains(KeyModifiers::CONTROL)
+                        && key
+                            .modifiers
+                            .difference(KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+                            .is_empty()
+                }
+                _ => false,
+            },
+            Self::Bytes(bytes) => matches!(bytes.as_slice(), b"\x1b" | b"\x03"),
+            _ => false,
         }
     }
 

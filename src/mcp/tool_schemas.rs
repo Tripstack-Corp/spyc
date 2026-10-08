@@ -38,7 +38,8 @@ pub fn tools() -> Value {
                         },
                         "ttl_ms": {
                             "type": "integer",
-                            "description": "Optional backstop in ms after which the report expires and the dot falls back to output timing. Defaults to a few minutes; rarely needed."
+                            "maximum": crate::mcp_cmd::MAX_REPORT_TTL_MS,
+                            "description": "Optional non-blocked report backstop in ms; default and maximum 300000 (five minutes). Larger values are clamped. Blocked stays latched until settled or replaced."
                         }
                     },
                     "required": ["status"]

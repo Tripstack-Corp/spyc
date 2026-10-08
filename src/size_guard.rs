@@ -56,11 +56,7 @@ const PRODUCTION: Rule = Rule {
     list: "PRODUCTION",
     unit: "non-test lines",
     limit: 1000,
-    pins: &[
-        ("src/app/archive.rs", 1494),
-        ("src/app/commands.rs", 1059),
-        ("src/app/state/mod.rs", 1213),
-    ],
+    pins: &[("src/app/archive.rs", 1494), ("src/app/state/mod.rs", 1213)],
 };
 
 /// Every line of the file.

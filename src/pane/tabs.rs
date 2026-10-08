@@ -91,7 +91,8 @@ pub struct ReportedStatus {
     pub status: AgentActivity,
     /// When the report was received (monotonic).
     pub at: std::time::Instant,
-    /// Non-blocked backstop expiry; blocked remains latched until settled.
+    /// Non-blocked backstop expiry (at most five minutes); blocked remains
+    /// latched until settled while the pane is alive.
     pub expiry: std::time::Instant,
 }
 
