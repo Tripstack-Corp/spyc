@@ -163,6 +163,7 @@ mod protocol;
 /// gated by `mcp` being private.
 pub mod readers;
 mod server;
+mod tool_schemas;
 
 pub use config::{
     ConfigCleanup, McpConfigStatus, cleanup_agy_mcp_config, cleanup_codex_config, cleanup_mcp_json,
