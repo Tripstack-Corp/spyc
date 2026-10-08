@@ -1560,6 +1560,9 @@ mod mouse_reporting_tests {
 }
 
 #[cfg(test)]
+mod size_guard;
+
+#[cfg(test)]
 mod style_guard;
 
 #[cfg(test)]
