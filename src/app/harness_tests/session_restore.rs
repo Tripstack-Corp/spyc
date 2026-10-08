@@ -2,13 +2,18 @@
 
 use super::*;
 
+/// The session's own `cwd` is the crate root, where the test process already
+/// runs: restoring it `chdir`s the whole process, and a temp dir there would
+/// leave every parallel test without a working directory once it is deleted.
+/// The tabs keep `dir`, which only their spawned children use.
 fn saved_session(
     dir: &std::path::Path,
     commands: &[String],
     active_tab: usize,
 ) -> crate::state::sessions::Session {
     serde_json::from_value(serde_json::json!({
-        "id": 991, "name": "RESTORE_ISOLATION", "saved_at": "", "epoch_secs": 0, "cwd": dir,
+        "id": 991, "name": "RESTORE_ISOLATION", "saved_at": "", "epoch_secs": 0,
+        "cwd": env!("CARGO_MANIFEST_DIR"),
         "tabs": commands.iter().enumerate().map(|(index, command)| serde_json::json!({
             "command": command, "label": format!("saved-{index}"), "cwd": dir,
             "agent_kind": "codex", "agent_session_id": "019e8b21-9e7c-7553-a118-d1cdada725fd",
