@@ -687,9 +687,12 @@ fn pid_from_sock_path_parses() {
 
 #[test]
 fn socket_path_contains_pid() {
-    let path = socket_path().expect("tests run with HOME set");
-    let pid = std::process::id();
-    assert!(path.to_string_lossy().contains(&format!("mcp-{pid}.sock")));
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let path = socket_path().expect("override is Some");
+        let pid = std::process::id();
+        assert!(path.to_string_lossy().contains(&format!("mcp-{pid}.sock")));
+    });
 }
 
 #[test]
