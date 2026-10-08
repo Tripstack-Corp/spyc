@@ -30,7 +30,8 @@ three tiers, with a narrow Codex approval exception:
    (or its lifecycle hook does): `working` / `blocked` / `done` / `idle`.
 2. **Scrape fallback** — for a state an agent's hooks can't report, spyc reads
    its *visible screen* for a known prompt: agy's tool approval or Codex's
-   complete command-approval dialogue. It scans once the pane goes quiet.
+   complete command, file-edit, MCP-tool and network approval forms. Codex scans
+   within 250 ms of the first pending repaint; agy waits for quiet.
    Codex's verified dialogue temporarily overrides a non-blocked report;
    semantic question/agent blocks retain precedence.
 3. **Output timing** — with neither of the above, output flowing = `working`,
@@ -112,6 +113,11 @@ The reporter forwards only event/tool names, notification subtype and available
 turn/call ids; it excludes arguments, prompts, response text and tool output.
 Control characters, malformed identifiers and oversized fields are discarded.
 `--status-trace` logs this sanitized metadata instead of the raw stdin payload.
+The reporter streams the complete hook JSON and retains only a fixed set of
+root metadata fields; a large patch, heredoc or answer does not erase later ids.
+The 8 KiB limit applies to normalized metadata, not raw stdin. String capture is
+bounded and nesting is limited to 128 levels; malformed documents produce no
+partial metadata. Arguments and responses are skipped without being retained.
 This is claimed metadata, not authenticated hook provenance. Missing metadata
 can mean an older reporter or an absent/malformed payload, not a missing hook.
 
@@ -151,13 +157,18 @@ cannot latch blocked or interfere with a later question. The existing hook
 command remains unchanged, preserving its trust hash; the host and reporter
 on `PATH` must both support lifecycle metadata.
 
-Command approvals use a narrow fallback: a complete default approval dialogue
-at the bottom of the current viewport, after 250 ms of quiet, temporarily
-overrides a non-blocked report. `:why-status` and `:activity dump` identify
-`scrape-fallback` as the source. The silent-work report remains stored and
-resumes after the dialogue closes. Clipped/customized dialogues and other
-approval types are not inferred. This is verified UI detection, not semantic
-permission completion. Explicit agent blocks retain their ordinary input
+Command, file-edit, MCP-tool and network approvals use a narrow fallback:
+known required phrases and a complete default footer at the current viewport
+bottom temporarily override a non-blocked report. Native word wrapping is
+accepted; missing required text, changed forms and old dialogues above the
+composer are not inferred. Codex scans within 250 ms of the first pending
+repaint, so continuous redraws cannot postpone detection indefinitely.
+`:why-status` and `:activity dump` identify `scrape-fallback` as the source.
+The silent-work report remains stored and resumes after the dialogue closes.
+This is UI detection, not semantic permission completion. Network coverage uses
+an exact-version upstream UI fixture; a live native network approval remains
+an acceptance case. Generic MCP elicitation, extra-permission and stdin-write
+approval forms remain uncovered. Explicit agent blocks retain their ordinary input
 recovery; identified questions require matching completion instead of Enter.
 Real-CLI native question and quiet-after-answer checks passed through the
 automated TUI harness with already trusted hooks. Fresh hook trust onboarding

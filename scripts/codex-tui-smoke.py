@@ -23,8 +23,9 @@ class Smoke:
         self.started = False
 
     def cli(self, *args, check=True):
+        requested_timeout = int(args[args.index("--timeout") + 1]) / 1000 if "--timeout" in args else 0
         result = subprocess.run(self.base + list(args), capture_output=True, text=True,
-                                timeout=65)
+                                timeout=max(65, requested_timeout + 5))
         with self.log.open("a") as out:
             out.write(json.dumps({"time": time.time(), "args": args,
                                   "exit": result.returncode, "stderr": result.stderr}) + "\n")
@@ -158,6 +159,80 @@ class Smoke:
         self.status(done, "done")
         assert len(self.events(done, "Stop")) == 1, done
 
+    def edit(self):
+        self.file_edit("approve")
+
+    def edit_decline(self):
+        self.file_edit("decline")
+
+    def edit_dismiss(self):
+        self.file_edit("dismiss")
+
+    def file_edit(self, decision):
+        destination = self.output / "approved.txt"
+        after = ("After approval, run sleep 30 with exec_command, then reply exactly "
+                 "SPYC_EDIT_APPROVAL_COMPLETE.") if decision == "approve" else (
+                 "If refused or dismissed, never retry; acknowledge and finish if the turn continues.")
+        self.prompt("Diagnostic: do not call spyc report_status. With apply_patch, add only "
+                    + str(destination) + " containing SPYC_EDIT_APPROVAL plus a newline. "
+                    "Use no other tool for this edit; request no persistent approval. " + after)
+        self.wait("Would you like to make the following edits?", 60000)
+        self.wait("Press enter to confirm or esc to cancel", 5000)
+        self.capture("edit-open")
+        blocked = self.wait_dump("edit-blocked", "blocked")
+        self.status(blocked, "blocked", semantic=False)
+        assert "source: SCRAPE-FALLBACK status=blocked (awaiting file-edit approval)" in blocked, blocked
+        permission = self.events(blocked, "PermissionRequest")
+        assert len(permission) == 1 and permission[0][:2] == ("blocked", "apply_patch"), blocked
+        assert "not applied: PermissionRequest precedes review" in blocked, blocked
+        assert not destination.exists(), "file changed before approval"
+        time.sleep(6)
+        self.status(self.dump("edit-still-blocked"), "blocked", semantic=False)
+        assert not destination.exists(), "file changed while waiting for approval"
+        if decision == "decline":
+            self.key("Down")
+            self.wait("› 2. Yes, and don't ask again for these files", 5000)
+            self.key("Down")
+            self.wait("› 3. No, and tell Codex what to do differently", 5000)
+            self.capture("edit-decline-selected")
+            assert not destination.exists(), "file changed before declining"
+            self.key("Enter")
+        elif decision == "dismiss":
+            self.key("Esc")
+        else:
+            self.key("Enter")
+        answered_at = time.monotonic()
+        if decision == "approve":
+            working = self.wait_dump("edit-after-answer", "working")
+            self.status(working, "working", semantic=False)
+            assert "source: SELF-REPORT status=working" in working, working
+            assert re.findall(r"pane_id: (\S+)", blocked) == re.findall(r"pane_id: (\S+)", working)
+            assert re.findall(r"codex_session_id: (\S+)", blocked) == re.findall(r"codex_session_id: (\S+)", working)
+            time.sleep(8)
+            quiet = self.dump("edit-quiet-working")
+            self.status(quiet, "working", semantic=False)
+            assert "source: SELF-REPORT status=working" in quiet, quiet
+            assert destination.read_text() == "SPYC_EDIT_APPROVAL\n"
+            self.wait("• SPYC_EDIT_APPROVAL_COMPLETE", 45000)
+            assert "• Ran sleep 30" in self.capture("edit-finished")
+            assert time.monotonic() - answered_at >= 29, "quiet sleep did not last 30 seconds"
+            done = self.wait_dump("edit-done", "done")
+            self.status(done, "done", semantic=False)
+            assert len(self.events(done, "Stop")) == 1, done
+        else:
+            deadline = time.monotonic() + 30
+            while True:
+                finished = self.dump("edit-cancelled")
+                if self.events(finished, "Stop") or self.events(finished, "Interrupt"):
+                    break
+                assert time.monotonic() < deadline, "declined edit did not finish or interrupt"
+                time.sleep(0.5)
+            assert 'dot=blocked  agent=true' not in finished, finished
+            assert "source: SCRAPE-FALLBACK" not in finished, finished
+            assert "source: SELF-REPORT status=done" in finished or "source: SELF-REPORT status=idle" in finished, finished
+            assert not destination.exists(), "declined/dismissed edit wrote its file"
+        self.capture("edit-recovered")
+
     def auto(self):
         self.prompt("For this diagnostic, do not call spyc report_status or edit files. "
                     "Use exec_command with sandbox_permissions=require_escalated and justification "
@@ -179,7 +254,7 @@ class Smoke:
         self.status(quiet, "working", semantic=False)
         assert "source: SELF-REPORT status=working" in quiet, quiet
         assert "not applied: PermissionRequest precedes review" in quiet, quiet
-        self.wait("• SPYC_AUTO_REVIEW_COMPLETE", 45000)
+        self.wait("• SPYC_AUTO_REVIEW_COMPLETE", 180000)
         assert "• Ran sleep 30" in self.capture("auto-finished")
         done = self.wait_dump("auto-done", "done")
         self.status(done, "done")
@@ -317,7 +392,7 @@ class Smoke:
         # This script stays alive while the daemon runs; tool runners can reap
         # detached descendants when the launching command ends.
         sessions = subprocess.check_output(["tui-test", "--json", "sessions"], text=True)
-        assert self.args.session not in sessions, "refusing to reuse an existing session"
+        assert self.args.session not in json.loads(sessions)["sessions"], "refusing to reuse an existing session"
         command = "codex" if self.args.scenario in ("question", "parallel") else (
             'codex -a on-request -c approvals_reviewer="user" -s read-only')
         if self.args.scenario == "auto":
@@ -330,6 +405,8 @@ class Smoke:
                  "--env", "SPYC_PANE_ID=", str(binary), "--status-trace", "--no-lua")
         self.started = True
         self.cli("record", "start", str(self.output / "session.cast"), "--format", "cast")
+        # The first painted status bar establishes that spyc is reading input.
+        self.wait("🌶️", 15000)
         self.open_pane()
         self.capture("ready")
         print(f"Started {self.args.scenario}: {self.args.session}", flush=True)
@@ -341,7 +418,7 @@ def main():
     parser.add_argument("--binary", required=True, type=Path)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--scenario", choices=("question", "approval", "mixed", "parallel", "auto"), default="question")
+    parser.add_argument("--scenario", choices=("question", "approval", "mixed", "parallel", "auto", "edit", "edit_decline", "edit_dismiss"), default="question")
     parser.add_argument("--session", default="spyc-codex-" + uuid.uuid4().hex[:10])
     args = parser.parse_args()
     smoke = Smoke(args)

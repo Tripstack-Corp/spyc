@@ -827,7 +827,7 @@ impl App {
                 ctx.draw.mark(3);
             }
 
-            // P1-2 scrape fallback: single visible-screen scan after 250 ms of quiet.
+            // P1-2 viewport scan: bounded Codex delay; other agents wait for quiet.
             // Runs BEFORE settle_agent_activity so scrape_status is fresh.
             // Armed only while a dirty tab exists ⇒ idle stays 0 dps.
             if self.settle_scrape_quiet(now_pre, &mut ctx) {

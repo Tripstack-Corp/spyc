@@ -1,0 +1,22 @@
+{
+  "question_start": {
+    "tool_name": "request_user_input",
+    "turn_id": "01a115f2-ea62-7042-90bf-f90f85ba6963",
+    "tool_use_id": "call_jCrAizHbeUo4MfkZPPXlMO40",
+    "hook_event_name": "PreToolUse",
+    "session_id": "01a115f2-d9b2-7641-9fee-ef15d5588cc2"
+  },
+  "question_end": {
+    "tool_name": "request_user_input",
+    "turn_id": "01a115f2-ea62-7042-90bf-f90f85ba6963",
+    "tool_use_id": "call_jCrAizHbeUo4MfkZPPXlMO40",
+    "hook_event_name": "PostToolUse",
+    "session_id": "01a115f2-d9b2-7641-9fee-ef15d5588cc2"
+  },
+  "permission": {
+    "tool_name": "Bash",
+    "turn_id": "01a115f1-c28f-7462-8fec-b42619f843e3",
+    "hook_event_name": "PermissionRequest",
+    "session_id": "01a115f1-ab76-7d83-9af6-be37249422db"
+  }
+}

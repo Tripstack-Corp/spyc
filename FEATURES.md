@@ -262,8 +262,8 @@ spyc's workflow: browse files above, talk to Claude below.
     For Codex and Claude, live reports survive output and footer redraws until
     a newer report or TTL expiry; quiet tool waits do not erase `working`.
     Agy yields non-blocked reports to fresh output for uncovered approvals.
-    Codex's complete command-approval dialogue temporarily overrides a
-    non-blocked report while retaining it for recovery. **`blocked` is latched**: it stays a steady red
+    Codex's complete command, file-edit, MCP-tool and network approval forms
+    temporarily override a non-blocked report while retaining it for recovery. **`blocked` is latched**: it stays a steady red
     square — no TTL, no output or animation revives it — until you actually
     answer the pane by pressing **Enter** in it (or the agent files a newer
     report). Identified Codex questions instead wait for their matching tool
@@ -280,9 +280,9 @@ spyc's workflow: browse files above, talk to Claude below.
     startup, so an already-consented source is written *before* codex spawns.
     Codex's metadata-bearing `PermissionRequest` is observational: it fires
     before automatic or human review, so it cannot establish a human wait.
-    Command approvals use a complete default dialogue at the viewport bottom;
-    diagnostics identify this `scrape-fallback`. Clipped/customized dialogues
-    and other approval types produce no guess. Codex's `Interrupt` hook
+    Known command, file-edit, MCP-tool and network forms require their default
+    choices and complete footer at the viewport bottom; diagnostics identify
+    this `scrape-fallback`. Missing required text and other forms produce no guess. Codex's `Interrupt` hook
     reports `idle` after cancellation. Its `request_user_input` hooks report
     `blocked` on start and recover `working` only for the same pending
     pane/session/turn/call; other waits stay blocked. Project trust and `/hooks`
@@ -315,12 +315,14 @@ spyc's workflow: browse files above, talk to Claude below.
   - **Scrape fallback** (for a state an agent's hooks can't report) — spyc
     reads the **visible screen** for verified approval prompts. Agy exposes no
     approval event. Codex's permission event precedes both automatic and human
-    review, so only a complete default command-approval dialogue establishes
-    its user wait. That dialogue temporarily overrides a non-blocked report;
-    semantic question/agent blocks retain precedence. The scan waits for quiet
-    output and requires several prompt phrases. Codex also requires the exact
-    modal footer at the viewport bottom, excluding old dialogues above the
-    normal composer. Prompt-settling input clears the detected wait.
+    review, so only a complete default command, file-edit, MCP-tool or network
+    form establishes its user wait. That dialogue temporarily overrides a non-blocked report;
+    semantic question/agent blocks retain precedence. Codex scans within 250 ms
+    of the first pending repaint, so continuous redraws cannot hide a wait;
+    other agents wait for quiet output. Codex requires several prompt phrases
+    and the exact modal footer at the viewport bottom, accepting native word
+    wrapping and excluding old dialogues above the normal composer.
+    Prompt-settling input clears the detected wait.
 
   **`:why-status`** flashes the active tab's state, its source (self-reported /
   scrape-fallback / output-timing), seconds since last output and hook setup

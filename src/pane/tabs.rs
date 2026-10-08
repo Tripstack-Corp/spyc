@@ -211,11 +211,11 @@ pub struct TabInfo {
     /// retaining it for recovery; other live reports discard stale guesses.
     /// Also cleared by prompt-settling input.
     pub scrape_status: Option<(AgentActivity, Option<&'static str>)>,
-    /// P1-2 scrape-fallback dirty flag: set `true` on output for agent tabs
-    /// with detection rules. Consumed by `settle_scrape_quiet` after
-    /// `SCRAPE_QUIET_WINDOW` of silence, so the one scan it runs reads a
-    /// settled screen rather than a half-drawn prompt.
+    /// Output from an agent with detection rules needs another viewport scan.
     pub scrape_dirty: bool,
+    /// First pending Codex scan. Repaints cannot postpone its deadline; other
+    /// agents retain the quiet-window debounce from their last output.
+    pub scrape_pending_at: Option<std::time::Instant>,
     /// P2 scope-coordination owner key: a uuid assigned once, here, and —
     /// unlike [`Self::id`] (the ephemeral `SPYC_PANE_ID`, fresh every spawn) —
     /// **carried across `-r` restore** (`restore_session` copies the saved
@@ -263,6 +263,7 @@ impl TabInfo {
             live_session_id: None,
             scrape_status: None,
             scrape_dirty: false,
+            scrape_pending_at: None,
             // A separate uuid from `id`: this one is restore-stable (see the
             // field doc), so it must not alias the ephemeral pane-wake id.
             claim_owner: uuid::Uuid::now_v7().to_string(),

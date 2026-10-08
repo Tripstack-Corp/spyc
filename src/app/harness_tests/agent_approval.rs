@@ -251,3 +251,205 @@ fn approval_scan_is_wired_to_the_current_viewport_and_loop() {
     let run = crate::guard_support::production_half(include_str!("../run.rs"));
     assert!(run.contains("self.settle_scrape_quiet(now_pre, &mut ctx)"));
 }
+
+#[test]
+fn codex_file_edit_approval_requires_a_complete_current_dialogue() {
+    let rules = crate::agent::profile_for(AgentKind::Codex).detection_rules();
+    let text = include_str!("../../../tests/fixtures/codex-approval-edit.txt");
+    let scan = |text: &str| {
+        crate::agent::detect_rules::scan(&text.lines().map(String::from).collect::<Vec<_>>(), rules)
+    };
+    let expected = Some((AgentActivity::Blocked, Some("awaiting file-edit approval")));
+    assert_eq!(scan(text), expected);
+    for phrase in [
+        "Would you like to make the following edits?",
+        "Yes, proceed",
+        "Yes, and don't ask again for these files",
+        "No, and tell Codex what to do differently",
+        "Press enter to confirm or esc to cancel",
+    ] {
+        assert_eq!(scan(&text.replace(phrase, "")), None, "missing {phrase}");
+    }
+    assert_eq!(
+        scan(&format!(
+            "{text}\n› Ask Codex to do anything\nGPT | Vim: Insert"
+        )),
+        None,
+        "an old dialogue above the composer is not a current wait"
+    );
+    assert_eq!(
+        scan(&text.replace("› 1.", "  1.").replace("  3.", "› 3.")),
+        expected,
+        "choosing decline still needs the user until submitted"
+    );
+    let details = (0..20)
+        .map(|index| format!("  edit detail line {index}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        scan(&text.replace("  Description: Apply proposed file edits", &details)),
+        expected,
+        "a complete long dialogue still needs the user"
+    );
+}
+
+#[test]
+fn codex_mcp_and_network_waits_use_recorded_native_dialogues() {
+    let rules = crate::agent::profile_for(AgentKind::Codex).detection_rules();
+    for (text, reason, phrases, footer) in [
+        (
+            include_str!("../../../tests/fixtures/codex-approval-mcp.txt"),
+            "awaiting MCP tool approval",
+            &[
+                "Field 1/1",
+                "Run the tool and continue",
+                "Cancel this tool call",
+            ][..],
+            "enter to submit | esc to cancel",
+        ),
+        (
+            include_str!("../../../tests/fixtures/codex-approval-mcp-narrow.txt"),
+            "awaiting MCP tool approval",
+            &[
+                "Field 1/1",
+                "Run the tool and continue",
+                "Cancel this tool call",
+            ][..],
+            "enter to submit | esc to cancel",
+        ),
+        (
+            include_str!("../../../tests/fixtures/codex-approval-mcp-session.txt"),
+            "awaiting MCP tool approval",
+            &[
+                "Field 1/1",
+                "Run the tool and continue",
+                "Cancel this tool call",
+            ][..],
+            "enter to submit | esc to cancel",
+        ),
+        (
+            include_str!("../../../tests/fixtures/codex-approval-network.txt"),
+            "awaiting network approval",
+            &[
+                "Do you want to approve network access to",
+                "Yes, just this once",
+                "No, and tell Codex what to do differently",
+            ][..],
+            "Press enter to confirm or esc to cancel",
+        ),
+    ] {
+        let scan = |text: &str| {
+            crate::agent::detect_rules::scan(
+                &text.lines().map(String::from).collect::<Vec<_>>(),
+                rules,
+            )
+        };
+        let expected = Some((AgentActivity::Blocked, Some(reason)));
+        assert_eq!(scan(text), expected, "{text}");
+        for phrase in phrases.iter().copied().chain(std::iter::once(footer)) {
+            assert_eq!(scan(&text.replace(phrase, "")), None, "missing {phrase}");
+        }
+        assert_eq!(
+            scan(&format!(
+                "{text}\n› Ask Codex to do anything\nGPT | Vim: Insert"
+            )),
+            None,
+            "quoted modal above the composer"
+        );
+    }
+}
+
+#[test]
+fn codex_approval_scan_has_a_deadline_despite_continuous_redraws() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        assert!(app.open_pane_tab_in("sh -c 'stty raw -echo; printf READY; exec cat'", tmp.path()));
+        let wait_screen = |app: &mut App, expected: &str| {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                let pane = &mut app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0].pane;
+                pane.drain_output();
+                let visible = pane.visible_lines().join("\n");
+                if visible.contains(expected) {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "screen did not contain {expected}: {visible}"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        wait_screen(&mut app, "READY");
+        let fixture = include_str!("../../../tests/fixtures/codex-approval-exec.txt");
+        {
+            let entry = &mut app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0];
+            entry.info.command = "codex".into();
+            entry.pane.resize(30, 100).unwrap();
+            entry
+                .pane
+                .send_bytes(format!("\x1b[2J\x1b[H{}", fixture.replace('\n', "\r\n")).as_bytes())
+                .unwrap();
+        }
+        wait_screen(&mut app, "Press enter to confirm or esc to cancel");
+        report(&mut app, "working", None);
+        let base = Instant::now();
+        let mut ctx = RunCtx::for_test();
+        for elapsed in [0, 100, 200, 300] {
+            let now = base + Duration::from_millis(elapsed);
+            {
+                let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+                info.last_output_at = Some(now);
+                info.scrape_dirty = true;
+            }
+            app.settle_scrape_quiet(now, &mut ctx);
+            app.settle_agent_activity(now, &mut ctx);
+        }
+        let info = app.runtime.pane_tabs.as_ref().unwrap().active_info();
+        assert_eq!(
+            info.activity,
+            AgentActivity::Blocked,
+            "a repaint cannot postpone every approval scan"
+        );
+        assert_eq!(
+            info.reported.unwrap().status,
+            AgentActivity::Working,
+            "retain working for answer recovery"
+        );
+        assert!(!info.scrape_dirty, "the deadline consumes the pending scan");
+        assert!(
+            dump(&mut app)
+                .contains("source: SCRAPE-FALLBACK status=blocked (awaiting command approval)")
+        );
+    });
+}
+
+#[test]
+fn codex_command_approval_handles_recorded_native_wrapping() {
+    let rules = crate::agent::profile_for(AgentKind::Codex).detection_rules();
+    let text = include_str!("../../../tests/fixtures/codex-approval-exec-narrow.txt");
+    let scan = |text: &str| {
+        crate::agent::detect_rules::scan(&text.lines().map(String::from).collect::<Vec<_>>(), rules)
+    };
+    let expected = Some((AgentActivity::Blocked, Some("awaiting command approval")));
+    assert_eq!(scan(text), expected);
+    for required in [
+        "Would you like",
+        "Yes, proceed",
+        "No, and tell",
+        "Press enter",
+        "  cancel",
+    ] {
+        assert_eq!(
+            scan(&text.replace(required, "")),
+            None,
+            "missing {required}"
+        );
+    }
+    assert_eq!(scan(&format!("{text}\n› Ask Codex to do anything")), None);
+    assert_eq!(
+        scan(&text.replace("Press enter", "Quoted footer: Press enter")),
+        None
+    );
+}
