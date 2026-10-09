@@ -516,12 +516,49 @@ risk is imaginary.
 Set via `OPT_MODE_DEFAULT`, not `OPT_MODE`: it sets the current value *and* the
 one RIS restores, so a child running `reset` keeps clustering.
 
-Two limits. No `write_pty` callback is installed, so a child's `CSI ? 2027 $ p`
-goes unanswered ([#486](https://github.com/Tripstack-Corp/spyc/issues/486)); the
-common producers emit and assume, which is what made the bug visible. And vt100
-cannot satisfy this (flag as two narrow cells, ZWJ family across six columns,
-VS16 heart in one), so the contract test is scoped to the ghostty engine rather
-than the `E: Engine` conformance suite.
+A child that asks with `CSI ? 2027 $ p` is told the mode is set (see "Answering
+the child's queries" below), though the common producers emit and assume rather
+than ask, which is what made the bug visible. vt100 cannot satisfy this (flag as
+two narrow cells, ZWJ family across six columns, VS16 heart in one), so the
+contract test is scoped to the ghostty engine rather than the `E: Engine`
+conformance suite.
+
+## Answering the child's queries
+
+The pane answers a child's terminal queries, but only with answers that are true
+of spyc's pane ([#486](https://github.com/Tripstack-Corp/spyc/issues/486)).
+libghostty-vt answers once a `write_pty` callback is installed. spyc installs
+one in `pane::engine_ghostty::replies` and passes what the engine produces
+through an allowlist:
+
+| Answered | Why it's true |
+|---|---|
+| DECRQM mode reports | the engine's own modes, so 2026 and 2027 report what spyc does |
+| DSR operating status, cursor position | engine state |
+| DA1 `?62;22c`, DA2 `>1;10;0c` | Ghostty's own answers less clipboard access (52) |
+| XTVERSION `spyc <version>` | not `ghostty` or `kitty`, the names children key image support on |
+| DECRQSS | engine state |
+
+Left unanswered: the kitty keyboard flags (spyc's key encoder is legacy-only,
+so claiming the protocol would switch a child to an encoding spyc never sends),
+XTGETTCAP (answered from Ghostty's terminfo, which advertises OSC 52 clipboard
+spyc lacks), colour reports (Ghostty's palette, not the host's), size reports
+(the engine's cell pixel size is a placeholder), the title report (an injection
+path), and DA3, which Ghostty doesn't answer either. Kitty graphics and the
+glyph protocol are switched off in the engine, so it doesn't answer their queries
+at all. Left on, the engine replies `OK` to a graphics query, and image tools
+then send pictures spyc never draws.
+
+An allowlist rather than a denylist, so an answer a pin bump teaches the engine
+stays unsent until someone judges it.
+
+The callback fires inside `ghostty_terminal_vt_write`, on the parser worker,
+with the engine lock held, so it only buffers (64 KiB at most). The worker takes
+the buffer, releases the lock, and queues it on the pty's input writer as a
+second producer beside the keyboard. That queue never blocks and shares input's
+8 MiB limit, so a child that never reads its input can't stall the worker.
+Replies go out even while a synchronized update holds the output: a child may
+wait on one before it closes the update.
 
 ## Git: 100% in-process gix
 

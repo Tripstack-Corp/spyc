@@ -210,6 +210,15 @@ The bottom half of the terminal hosts a fully independent pty — by
 default, it runs `claude` (the Claude Code CLI). This is the core of
 spyc's workflow: browse files above, talk to Claude below.
 
+The pane is a terminal in its own right, not a pass-through to the host. A
+program that redraws inside a synchronized update (DEC mode 2026) is shown only
+once the update is finished, so brew's download list doesn't flicker. A program
+that asks before choosing what to emit gets answers about the pane rather than
+the host: device attributes, mode reports, cursor position, and an XTVERSION
+naming `spyc`. That is how claude learns it can use synchronized output in any
+host terminal. The pane answers nothing it can't back: no kitty keyboard
+protocol, no image protocols, no OSC 52 clipboard.
+
 - **^\\ / F10** toggle the pane open/closed
 - **F9** open pane with `claude --resume`
 - **^a j / ^a k** switch focus between the file list and the pane

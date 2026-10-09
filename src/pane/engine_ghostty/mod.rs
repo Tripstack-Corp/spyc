@@ -47,6 +47,8 @@ use spyc_vt_sys::{ffi, scrollback};
 
 use super::engine::{CellStyle, Color, Engine, MouseEncoding, MouseMode, TerminalScreen, Wide};
 
+mod replies;
+
 /// DEC mode 2027 — grapheme clustering. See `GhosttyEngine::new` for why spyc
 /// turns it on, and ARCHITECTURE.md → "Grapheme clustering (DEC mode 2027)".
 const MODE_GRAPHEME_CLUSTER: u16 = 2027;
@@ -117,6 +119,10 @@ pub struct GhosttyScreen {
     /// The child's DEC 2026 state, read once per `process` rather than per
     /// cell read.
     synchronized: bool,
+    /// Replies to the child's queries, written by the terminal's `write_pty`.
+    /// A raw heap pointer, so moving the engine never moves what the callback's
+    /// userdata points at.
+    replies: *mut replies::Sink,
 }
 
 pub struct GhosttyEngine {
@@ -146,6 +152,10 @@ impl Drop for GhosttyEngine {
             }
             if !s.t.is_null() {
                 ffi::ghostty_terminal_free(s.t);
+            }
+            // After the terminal, whose callback points at it.
+            if !s.replies.is_null() {
+                drop(Box::from_raw(s.replies));
             }
         }
     }
@@ -768,6 +778,8 @@ impl Engine for GhosttyEngine {
                 (&raw const lines).cast(),
             );
         }
+        let replies = Box::into_raw(Box::default());
+        replies::install(t, replies);
         let mut rs: ffi::GhosttyRenderState = std::ptr::null_mut();
         let mut it: ffi::GhosttyRenderStateRowIterator = std::ptr::null_mut();
         let mut rc: ffi::GhosttyRenderStateRowCells = std::ptr::null_mut();
@@ -790,6 +802,7 @@ impl Engine for GhosttyEngine {
                 frame_valid: Cell::new(false),
                 frame_live: Cell::new(false),
                 synchronized: false,
+                replies,
             },
         }
     }
@@ -821,7 +834,9 @@ impl Engine for GhosttyEngine {
     }
 
     fn take_replies(&mut self) -> Vec<u8> {
-        Vec::new()
+        // SAFETY: the sink lives as long as the engine, and the terminal writes
+        // to it only inside `process`, which `&mut self` excludes.
+        unsafe { (*self.inner.replies).take() }
     }
 
     fn screen(&self) -> &Self::Screen {
