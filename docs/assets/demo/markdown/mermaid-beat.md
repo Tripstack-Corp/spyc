@@ -1,7 +1,8 @@
 # The mermaid beat — must be a REAL screen capture
 
-No scripted recorder can capture it (both vhs and tui-test rasterize text cells
-only; spyc emits the bitmap and the recorder drops it). Do this take live.
+Neither text recorder can capture it (both vhs and tui-test rasterize text cells
+only; spyc emits the bitmap and the recorder drops it). The AppleScript films it
+as its fifth beat; this is the by-hand take for splicing into the `tui-test` clips.
 
 1. Stage the fixture (the AppleScript harness does this for you; by hand it is
    a copy), open a REAL Ghostty window, size it ~200x50, and enter the tree:
@@ -19,7 +20,7 @@ only; spyc emits the bitmap and the recorder drops it). Do this take live.
    Privacy & Security. QuickTime "New Screen Recording" works just as well.)
 
 3. Keystrokes, slowly:
-       /HAND  <Enter>  <Esc>      select HANDBOOK.md   (or RELEASE-NOTES.md)
+       /RELEASE  <Enter>  <Esc>   select RELEASE-NOTES.md, the only file with a fence
        <Enter>                    open the in-app pager
        /mermaid <Enter>           jump to the fence
        i                          render the diagram inline, full screen

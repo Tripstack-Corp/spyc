@@ -46,10 +46,12 @@ interrupted run. Establish that first, from an untouched window.
   it reproduces only on a machine that has never consented for that path.
 - **`^a c` prefills the command box** with the default (`claude`). Typing on top
   of it yields `claudeclaude` and a pane that exits 127. `^u` clears the buffer.
-- **Only `working` is unstable.** `blocked` latches until settled, `done` and
-  `idle` persist, `💤` is a sticky toggle — but `●` lasts only while a turn is
-  running, so tab 1 needs a long read-only task and the take has to be shot while
-  it is still going. Read is not gated by default, which is what keeps that pane
+- **Only `blocked` and `💤` hold indefinitely.** `blocked` latches until
+  settled and `💤` is a sticky toggle. A `done` report lives five minutes, the
+  cap on any non-blocked report, then falls back to output timing and reads
+  idle, so the take has to end within five minutes of tab 3 finishing. `●`
+  lasts only while a turn is running, so tab 1 needs a long read-only task and
+  the take has to be shot while it is still going. Read is not gated by default, which is what keeps that pane
   `working` rather than stopping on a prompt like tab 2 deliberately does.
 - **Never assert on agent prose.** Real agents are non-deterministic; spyc's own
   state is not. The beats wait on the dots, the `💤`, and the file list moving

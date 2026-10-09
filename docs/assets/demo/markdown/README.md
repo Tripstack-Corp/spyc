@@ -20,10 +20,10 @@ are sure of. Takes are written to `/private/tmp/spyc-demo/out/`.
 
 | Path | What it is |
 | --- | --- |
-| `spyc-quicktime-demo.applescript` | The real driver. Films a live iTerm2 window with QuickTime. Five beats, each asserted. |
+| `spyc-quicktime-demo.applescript` | The real driver. Films a live iTerm2 window with `screencapture` (the name predates the switch from QuickTime). Five beats, each asserted. |
 | `demo.sh` | Earlier pipeline: `tui-test` drives spyc, `agg` renders the cast. Preview + live-reload clip. |
 | `fold.sh` | Same pipeline, outline-folding clip. |
-| `mermaid-beat.md` | Hand-recording recipe for the one beat no scripted recorder can capture. |
+| `mermaid-beat.md` | Recording the mermaid beat by hand, for splicing into the `tui-test` clips. The AppleScript films that beat itself. |
 | `aurora-docs/` | The fixture doc tree the demo browses. Multiple top-level headings, on purpose — see below. |
 
 The fixture is inside spyc's repo, so `prose_is_canadian_english` scans it like
@@ -91,6 +91,10 @@ Recording:
   not report a generic recording error. `screencapture -v -R` needs none of this,
   running under the terminal's own grant
   (`kTCCServiceScreenCapture | com.googlecode.iterm2`).
+- **Address iTerm2 by bundle id, `application id "com.googlecode.iterm2"`.**
+  The bundle on disk is `iTerm.app`, so `application "iTerm2"` resolves only
+  while iTerm2 is running. Otherwise the script fails to compile, with
+  `Expected end of line but found identifier` on the first iTerm-only command.
 - **`get text of sess` returns the WHOLE SCROLLBACK** (617 lines for a 50-row
   window), and `contents` is identical. Assertions silently match stale output
   from earlier beats. Slice the last `rowCount` paragraphs.

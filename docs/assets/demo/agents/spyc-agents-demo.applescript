@@ -24,10 +24,11 @@
 --  arrangement is verified through `:activity dump`, which names each pane's
 --  state in words. Asserting on the glyph would repeat the mermaid-beat bug.
 --
---  TRAP 2 -- only `working` is unstable. `blocked` is latched until you settle
---  it, `done` and `idle` persist, `💤` is a sticky toggle -- but `●` lasts only
---  while a turn is actually running. Tab 1 therefore gets a long read-only task
---  kicked off during setup, and the clip has to be shot while it is still going.
+--  TRAP 2 -- only `blocked` and `💤` hold indefinitely. `blocked` is latched
+--  until you settle it and `💤` is a sticky toggle; `done` lives five minutes
+--  (the cap on a non-blocked report), then reads idle. `●` lasts only while a
+--  turn is actually running. Tab 1 therefore gets a long read-only task kicked
+--  off during setup, and the clip has to be shot while it is still going.
 -- ===========================================================================
 
 property stageDir    : "/private/tmp/spyc-demo"
@@ -96,7 +97,7 @@ end stateFile
 
 -- one key, no newline: a KEYPRESS, not a command
 on emit(s)
-	tell application "iTerm2" to tell sess to write text s newline no
+	tell application id "com.googlecode.iterm2" to tell sess to write text s newline no
 end emit
 
 on typeSlow(s)
@@ -138,7 +139,7 @@ end chordZ
 -- tallying folds from three beats ago. The visible screen is the LAST rowCount
 -- lines, so slice it.
 on screenText()
-	tell application "iTerm2" to set t to (get text of sess)
+	tell application id "com.googlecode.iterm2" to set t to (get text of sess)
 	set ps to paragraphs of t
 	set n to count of ps
 	set i0 to n - rowCount + 1
@@ -227,13 +228,13 @@ on acquireWindow()
 	-- 1. the window we used last time
 	try
 		set wid to (my sh("cat " & quoted form of (my stateFile()))) as integer
-		tell application "iTerm2" to set w to (first window whose id is wid)
+		tell application id "com.googlecode.iterm2" to set w to (first window whose id is wid)
 		my trace("reusing window " & wid)
 	end try
 
 	-- 2. any window still carrying our tag
 	if w is missing value then
-		tell application "iTerm2"
+		tell application id "com.googlecode.iterm2"
 			repeat with ww in windows
 				try
 					if (name of current session of ww) contains tagName then
@@ -248,7 +249,7 @@ on acquireWindow()
 
 	-- 3. make one
 	if w is missing value then
-		tell application "iTerm2" to set w to (create window with default profile)
+		tell application id "com.googlecode.iterm2" to set w to (create window with default profile)
 		my trace("created a new window")
 	end if
 
@@ -257,7 +258,7 @@ on acquireWindow()
 	-- ^d is unreliable (it needs ^d^d, and a half-quit instance then eats the
 	-- launch command as keystrokes); a new tab is unconditional. New tab first,
 	-- so the window is never left with zero tabs and cannot disappear.
-	tell application "iTerm2"
+	tell application id "com.googlecode.iterm2"
 		set nOld to count of tabs of w
 		tell w to create tab with default profile
 		delay 1
@@ -306,7 +307,7 @@ on screenPoints()
 	-- `zoomed` maximizes to the visible frame, so reading the bounds back gives
 	-- the screen size IN POINTS with no extra dependency. A scaled display is
 	-- NOT 2x -- this machine is 3456px over 2056pt = 1.68 -- so this matters.
-	tell application "iTerm2"
+	tell application id "com.googlecode.iterm2"
 		set old to bounds of win
 		set zoomed of win to true
 		delay 0.6
@@ -341,7 +342,7 @@ on startRec(path_, rect_)
 			start document 1
 		end tell
 		delay 3
-		tell application "iTerm2" to activate
+		tell application id "com.googlecode.iterm2" to activate
 		delay 1
 	else
 		my sh("nohup screencapture -v -R " & rect_ & " " & quoted form of path_ & " >/dev/null 2>&1 &")
@@ -476,7 +477,7 @@ on run argv
 	my acquireWindow()
 
 	my trace("launching spyc at " & colCount & "x" & rowCount)
-	tell application "iTerm2" to tell sess to ¬
+	tell application id "com.googlecode.iterm2" to tell sess to ¬
 		write text "cd " & quoted form of demoDir & " && clear && spyc"
 	my waitFor("CONTRIBUTING.md", 25)
 	delay 2
@@ -516,7 +517,7 @@ on run argv
 	end if
 
 	set pts to my screenPoints()
-	tell application "iTerm2" to set wb to bounds of win
+	tell application id "com.googlecode.iterm2" to set wb to bounds of win
 	set rectStr to "" & (item 1 of wb) & "," & (item 2 of wb) & "," & ¬
 		((item 3 of wb) - (item 1 of wb)) & "," & ((item 4 of wb) - (item 2 of wb))
 	my trace("recording (" & recorder & ") rect " & rectStr)
