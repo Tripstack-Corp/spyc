@@ -688,7 +688,7 @@ fn parser_worker(
     parser_gen: Arc<AtomicU64>,
     debug_dump: bool,
     wake: Wake,
-    _sync_timeout: std::time::Duration,
+    sync_timeout: std::time::Duration,
 ) {
     // `guard` owns the byte receiver and ships it back to the pane on EVERY
     // exit from this function — normal return AND panic-unwind. A worker
@@ -708,6 +708,28 @@ fn parser_worker(
             (wake.fire)();
         }
     };
+    let publish = || {
+        // Publish the grid (UNCHANGED Release edge; pairs with
+        // `drain_output`'s Acquire gen load). MUST stay BEFORE the
+        // wake so a woken loop that Acquire-loads the gen always
+        // sees these bytes.
+        parser_gen.fetch_add(1, Ordering::Release);
+        // MVU Phase 3b: wake the loop only on the 0→1 edge, so a
+        // byte storm collapses to one channel message. The loop
+        // clears the flag (clear-before-read) before its gen load,
+        // so a chunk racing the clear re-arms and re-sends.
+        if wake
+            .pending
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+        {
+            (wake.fire)();
+        }
+    };
+    // When the child's open synchronized update was first seen. Nothing is
+    // published until it closes: the screen would only present the frame
+    // before it anyway.
+    let mut sync_opened: Option<std::time::Instant> = None;
     loop {
         if stop.load(Ordering::Acquire) {
             return;
@@ -727,8 +749,9 @@ fn parser_worker(
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     engine::Engine::process(&mut *p, &bytes);
+                    engine::Engine::synchronized_update(&*p)
                 }));
-                if result.is_err() {
+                let open = result.unwrap_or_else(|_| {
                     crate::spyc_debug!(
                         "vt100 parser panicked on {} bytes; replacing parser to recover",
                         bytes.len()
@@ -746,22 +769,13 @@ fn parser_worker(
                         rebuild_parser_preserving_size(&mut p);
                     }
                     parser.clear_poison();
-                }
-                // Publish the grid (UNCHANGED Release edge; pairs with
-                // `drain_output`'s Acquire gen load). MUST stay BEFORE the
-                // wake so a woken loop that Acquire-loads the gen always
-                // sees these bytes.
-                parser_gen.fetch_add(1, Ordering::Release);
-                // MVU Phase 3b: wake the loop only on the 0→1 edge, so a
-                // byte storm collapses to one channel message. The loop
-                // clears the flag (clear-before-read) before its gen load,
-                // so a chunk racing the clear re-arms and re-sends.
-                if wake
-                    .pending
-                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
-                    .is_ok()
-                {
-                    (wake.fire)();
+                    false
+                });
+                if open {
+                    sync_opened.get_or_insert_with(std::time::Instant::now);
+                } else {
+                    sync_opened = None;
+                    publish();
                 }
             }
             Ok(PtyEvent::Closed) => {
@@ -777,6 +791,15 @@ fn parser_worker(
                 wake_on_close();
                 return;
             }
+        }
+        if sync_opened.is_some_and(|t| t.elapsed() >= sync_timeout) {
+            let mut p = parser
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            engine::Engine::end_synchronized_update(&mut *p);
+            drop(p);
+            sync_opened = None;
+            publish();
         }
     }
 }

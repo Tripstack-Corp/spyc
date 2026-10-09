@@ -456,7 +456,6 @@ mod synchronized_output {
     /// line it landed on, so mid-update the NEXT line is blank until it is
     /// rewritten. A terminal that paints that state flickers on every redraw.
     #[test]
-    #[ignore = "red: the half-drawn update is presented, with its blanked row"]
     fn an_open_update_presents_the_last_finished_frame() {
         let mut e = engine(4, 20);
         e.process(FRAME);
@@ -474,7 +473,6 @@ mod synchronized_output {
     }
 
     #[test]
-    #[ignore = "red: the cursor moves with the half-drawn update"]
     fn the_cursor_holds_with_the_frame() {
         let mut e = engine(4, 20);
         e.process(b"ready\x1b[1;3H");
@@ -500,7 +498,6 @@ mod synchronized_output {
 
     /// The pane's timeout for a child that never closes its update.
     #[test]
-    #[ignore = "red: an open update is presented before it is ended"]
     fn ending_an_open_update_presents_what_was_written() {
         let mut e = engine(4, 20);
         e.process(FRAME);

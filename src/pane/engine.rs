@@ -174,23 +174,9 @@ pub trait Engine: Send {
     fn process(&mut self, bytes: &[u8]);
     /// The child has a synchronized update open (DEC mode 2026): it is partway
     /// through a redraw it asked to have shown whole.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "red tests only; the parser worker calls it with the fix"
-        )
-    )]
     fn synchronized_update(&self) -> bool;
     /// Close the child's open synchronized update, for a child that never
     /// closes its own.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "red tests only; the parser worker calls it with the fix"
-        )
-    )]
     fn end_synchronized_update(&mut self);
     fn screen(&self) -> &Self::Screen;
     fn screen_mut(&mut self) -> &mut Self::Screen;

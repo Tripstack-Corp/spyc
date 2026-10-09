@@ -226,7 +226,6 @@ mod wake_tests {
     /// `Closed` is the barrier — the worker has handled every chunk once it
     /// returns.
     #[test]
-    #[ignore = "red: the worker publishes every chunk of an open update"]
     fn an_open_update_publishes_only_when_it_closes() {
         let (tx, gen_ctr, _parser, handle) = spawn_sync_worker(Duration::from_secs(60));
         tx.send(PtyEvent::Bytes(b"\x1b[?2026ha 2\r\n\x1b[K".to_vec()))
@@ -241,7 +240,6 @@ mod wake_tests {
     /// A child that never closes its update is shown anyway once the timeout
     /// passes, and the update is ended so the next frame isn't held either.
     #[test]
-    #[ignore = "red: the worker never ends an update left open"]
     fn an_update_left_open_is_ended_after_the_timeout() {
         let (tx, gen_ctr, parser, handle) = spawn_sync_worker(Duration::from_millis(20));
         tx.send(PtyEvent::Bytes(b"\x1b[?2026hstuck".to_vec()))
