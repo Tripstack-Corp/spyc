@@ -52,8 +52,18 @@ fn split_command(raw: &str) -> Vec<String> {
 /// SPYC-TRAP(pane-shell-rc-double-source): an `exec_replace` pane whose
 /// command is itself an rc-sourcing shell must NOT get the wrapper's `-i`.
 pub fn pane_invocation(command: &str, exec_replace: bool) -> (String, Vec<String>) {
-    let shell = crate::envset::var("SHELL");
-    pane_invocation_for(shell.as_deref(), command, exec_replace)
+    pane_invocation_for(pane_shell().as_deref(), command, exec_replace)
+}
+
+/// `$SHELL`, except under unit tests, which get `/bin/sh` so no rc runs: a
+/// developer's rc is outside the test's control, and one that starts
+/// background helpers (powerlevel10k's gitstatus) orphans them when a pane
+/// execs or is killed mid-startup.
+fn pane_shell() -> Option<String> {
+    if cfg!(test) {
+        return Some("/bin/sh".to_string());
+    }
+    crate::envset::var("SHELL")
 }
 
 /// Pure half of `pane_invocation`, taking the SHELL value as an argument.
@@ -157,6 +167,16 @@ pub fn looks_like_text(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pane a unit test spawns must not run the developer's interactive
+    /// shell. Its rc is outside the test's control, and powerlevel10k's
+    /// gitstatus left an orphaned helper behind for many of the spawns.
+    #[test]
+    fn a_test_pane_runs_sh_without_an_rc() {
+        let (sh, args) = pane_invocation("cat", true);
+        assert_eq!(sh, "/bin/sh");
+        assert_eq!(args, vec!["-c", "exec cat"]);
+    }
 
     #[test]
     fn user_shell_zsh_gets_interactive_flag() {
