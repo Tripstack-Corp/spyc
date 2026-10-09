@@ -396,11 +396,19 @@ mod tests {
                 .unwrap();
             execute(&mut app, effects);
             assert_eq!(app.flash_text(), Some("piped 1 file(s) to pane"));
-            let deadline = Instant::now() + Duration::from_secs(10);
-            while std::fs::metadata(&received).map_or(0, |m| m.len()) < expected.len() as u64 {
+            // A pty moves the payload about a kilobyte per handoff, so its rate
+            // is whatever CPU contention allows: guard on progress, not total
+            // time. Delivery that stops is the failure.
+            let (mut got, mut progressed) = (0, Instant::now());
+            while got < expected.len() as u64 {
+                let now = std::fs::metadata(&received).map_or(0, |m| m.len());
+                if now > got {
+                    (got, progressed) = (now, Instant::now());
+                }
                 assert!(
-                    Instant::now() < deadline,
-                    "large pipe did not arrive completely"
+                    progressed.elapsed() < Duration::from_secs(10),
+                    "large pipe stalled at {got} of {} bytes",
+                    expected.len()
                 );
                 std::thread::sleep(Duration::from_millis(10));
             }
