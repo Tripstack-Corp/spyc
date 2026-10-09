@@ -11,7 +11,28 @@ fn run_reporter(payload: &str) -> (Value, String) {
     run_reporter_for("blocked", payload)
 }
 
+/// How long to wait on the reporter before failing instead of hanging. A bound
+/// for a broken reporter, not a measure of a working one: starting a process on
+/// a loaded machine has no useful upper limit.
+const HANG_GUARD: Duration = Duration::from_secs(30);
+
+/// The reporter is the freshly built `spyc`. macOS scans an executable on its
+/// first run, which takes seconds for a debug build this size, and every rebuild
+/// (any worktree sharing the target dir) makes it new again. Run it once,
+/// untimed, so the waits below are spent on the reporter rather than the scan.
+fn warm_binary() {
+    static WARM: std::sync::Once = std::sync::Once::new();
+    WARM.call_once(|| {
+        let _ = Command::new(env!("CARGO_BIN_EXE_spyc"))
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    });
+}
+
 fn run_reporter_for(state: &str, payload: &str) -> (Value, String) {
+    warm_binary();
     let temp = tempfile::Builder::new()
         .prefix("spyc-hook-")
         .tempdir_in("/tmp")
@@ -20,7 +41,7 @@ fn run_reporter_for(state: &str, payload: &str) -> (Value, String) {
     let listener = UnixListener::bind(&socket).unwrap();
     listener.set_nonblocking(true).unwrap();
     let server = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + HANG_GUARD;
         let stream = loop {
             match listener.accept() {
                 Ok((stream, _)) => break stream,
@@ -76,7 +97,7 @@ fn run_reporter_for(state: &str, payload: &str) -> (Value, String) {
         .unwrap()
         .write_all(payload.as_bytes())
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(8);
+    let deadline = Instant::now() + HANG_GUARD;
     while child.try_wait().unwrap().is_none() {
         if Instant::now() >= deadline {
             child.kill().unwrap();
