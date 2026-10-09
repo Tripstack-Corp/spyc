@@ -145,6 +145,13 @@ impl Engine for vt100::Parser {
         Self::process(self, bytes);
     }
 
+    // vt100 does not implement mode 2026, so it never holds a frame.
+    fn synchronized_update(&self) -> bool {
+        false
+    }
+
+    fn end_synchronized_update(&mut self) {}
+
     fn screen(&self) -> &Self::Screen {
         Self::screen(self)
     }

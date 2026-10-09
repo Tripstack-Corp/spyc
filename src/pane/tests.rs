@@ -97,7 +97,7 @@ mod worker_tests {
 #[cfg(test)]
 mod wake_tests {
     //! MVU Phase 3b: the parser worker's lost-wakeup-safe wake protocol.
-    use super::super::{PtyEvent, RxReturn, Wake, parser_worker};
+    use super::super::{PtyEvent, RxReturn, SYNC_TIMEOUT, Wake, parser_worker};
     #[allow(unused_imports)]
     use crate::pane::PaneEngine;
     #[allow(unused_imports)]
@@ -152,7 +152,7 @@ mod wake_tests {
             home: rx_home_tx,
         };
         let handle = std::thread::spawn(move || {
-            parser_worker(guard, stop_cl, parser, gen_cl, false, wake);
+            parser_worker(guard, stop_cl, parser, gen_cl, false, wake, SYNC_TIMEOUT);
         });
         (tx, gen_ctr, pending, count, handle)
     }
@@ -189,6 +189,75 @@ mod wake_tests {
         stop.store(true, Ordering::Release);
         drop(tx);
         let _ = handle.join();
+    }
+
+    /// Spawn a worker with an explicit sync timeout, handing back its parser.
+    #[allow(clippy::type_complexity)]
+    fn spawn_sync_worker(
+        sync_timeout: Duration,
+    ) -> (
+        std::sync::mpsc::Sender<PtyEvent>,
+        Arc<AtomicU64>,
+        Arc<Mutex<PaneEngine>>,
+        std::thread::JoinHandle<()>,
+    ) {
+        let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
+        let parser = Arc::new(Mutex::new(<PaneEngine as EngineT>::new(24, 80, 100)));
+        let gen_ctr = Arc::new(AtomicU64::new(0));
+        let wake = Wake {
+            pending: Arc::new(AtomicBool::new(false)),
+            fire: Arc::new(|| {}),
+        };
+        let (rx_home_tx, _rx_home_rx) = std::sync::mpsc::channel();
+        let guard = RxReturn {
+            rx: Some(rx),
+            home: rx_home_tx,
+        };
+        let (parser_cl, gen_cl) = (Arc::clone(&parser), Arc::clone(&gen_ctr));
+        let handle = std::thread::spawn(move || {
+            let stop = Arc::new(AtomicBool::new(false));
+            parser_worker(guard, stop, parser_cl, gen_cl, false, wake, sync_timeout);
+        });
+        (tx, gen_ctr, parser, handle)
+    }
+
+    /// A child's synchronized update publishes once, when it closes: a
+    /// generation per chunk would have the loop paint the half-drawn screen.
+    /// `Closed` is the barrier — the worker has handled every chunk once it
+    /// returns.
+    #[test]
+    #[ignore = "red: the worker publishes every chunk of an open update"]
+    fn an_open_update_publishes_only_when_it_closes() {
+        let (tx, gen_ctr, _parser, handle) = spawn_sync_worker(Duration::from_secs(60));
+        tx.send(PtyEvent::Bytes(b"\x1b[?2026ha 2\r\n\x1b[K".to_vec()))
+            .unwrap();
+        tx.send(PtyEvent::Bytes(b"b 2\x1b[K\x1b[?2026l".to_vec()))
+            .unwrap();
+        tx.send(PtyEvent::Closed).unwrap();
+        handle.join().unwrap();
+        assert_eq!(gen_ctr.load(Ordering::Acquire), 1);
+    }
+
+    /// A child that never closes its update is shown anyway once the timeout
+    /// passes, and the update is ended so the next frame isn't held either.
+    #[test]
+    #[ignore = "red: the worker never ends an update left open"]
+    fn an_update_left_open_is_ended_after_the_timeout() {
+        let (tx, gen_ctr, parser, handle) = spawn_sync_worker(Duration::from_millis(20));
+        tx.send(PtyEvent::Bytes(b"\x1b[?2026hstuck".to_vec()))
+            .unwrap();
+        wait_until("the stuck update is published", || {
+            gen_ctr.load(Ordering::Acquire) == 1
+        });
+        assert!(
+            !parser
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .synchronized_update(),
+            "the worker ended the update"
+        );
+        tx.send(PtyEvent::Closed).unwrap();
+        handle.join().unwrap();
     }
 
     /// A natural EOF (stop unset) fires exactly one final wake, so the loop
@@ -247,7 +316,7 @@ mod wake_tests {
             home: home_tx,
         };
         let handle = std::thread::spawn(move || {
-            parser_worker(guard, stop, parser, gen_ctr, false, wake);
+            parser_worker(guard, stop, parser, gen_ctr, false, wake, SYNC_TIMEOUT);
         });
         // First Bytes chunk parses, then fires the 0→1 wake edge → panic.
         tx.send(PtyEvent::Bytes(b"x".to_vec())).unwrap();
@@ -271,7 +340,7 @@ mod app_cursor_tests {
     //! through `Pane::application_cursor` — the same `screen()` accessor asserted
     //! here (a pty spawn in a unit test is what `pty_host`'s own tests document as
     //! flaky, so the worker is the deepest deterministic seam).
-    use super::super::{PtyEvent, RxReturn, Wake, parser_worker};
+    use super::super::{PtyEvent, RxReturn, SYNC_TIMEOUT, Wake, parser_worker};
     #[allow(unused_imports)]
     use crate::pane::PaneEngine;
     #[allow(unused_imports)]
@@ -307,6 +376,7 @@ mod app_cursor_tests {
                     Arc::new(AtomicU64::new(0)),
                     false,
                     wake,
+                    SYNC_TIMEOUT,
                 );
             })
         };

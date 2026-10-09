@@ -429,3 +429,131 @@ mod grapheme_cluster_width {
         assert_eq!(columns_used(FLAG), 2, "and layout still clusters after RIS");
     }
 }
+
+/// DEC mode 2026: while a child has an update open, the screen presents the
+/// last frame it finished. A frame is presented when something reads it, as
+/// the render does.
+#[cfg(test)]
+mod synchronized_output {
+    use super::super::*;
+
+    fn engine(rows: u16, cols: u16) -> GhosttyEngine {
+        <GhosttyEngine as Engine>::new(rows, cols, 100)
+    }
+
+    fn rows(e: &GhosttyEngine) -> Vec<String> {
+        e.screen()
+            .contents()
+            .split('\n')
+            .map(String::from)
+            .collect()
+    }
+
+    /// The previous redraw, finished, with the cursor parked on its first row.
+    const FRAME: &[u8] = b"a 1\r\nb 1\r\nc 1\x1b[2F";
+
+    /// brew's download list ends each line with a newline and then erases the
+    /// line it landed on, so mid-update the NEXT line is blank until it is
+    /// rewritten. A terminal that paints that state flickers on every redraw.
+    #[test]
+    #[ignore = "red: the half-drawn update is presented, with its blanked row"]
+    fn an_open_update_presents_the_last_finished_frame() {
+        let mut e = engine(4, 20);
+        e.process(FRAME);
+        assert_eq!(rows(&e)[..3], ["a 1", "b 1", "c 1"]);
+
+        e.process(b"\x1b[?2026ha 2\r\n\x1b[K");
+        assert_eq!(
+            rows(&e)[..3],
+            ["a 1", "b 1", "c 1"],
+            "a half-drawn update must not be presented"
+        );
+
+        e.process(b"b 2\r\n\x1b[Kc 2\x1b[K\x1b[2F\x1b[?2026l");
+        assert_eq!(rows(&e)[..3], ["a 2", "b 2", "c 2"], "closing presents it");
+    }
+
+    #[test]
+    #[ignore = "red: the cursor moves with the half-drawn update"]
+    fn the_cursor_holds_with_the_frame() {
+        let mut e = engine(4, 20);
+        e.process(b"ready\x1b[1;3H");
+        let _ = rows(&e);
+        e.process(b"\x1b[?2026h\x1b[?25l\x1b[3;5H");
+        assert_eq!(e.screen().cursor_position(), (0, 2), "position holds");
+        assert!(!e.screen().hide_cursor(), "visibility holds");
+
+        e.process(b"\x1b[?2026l");
+        assert_eq!(e.screen().cursor_position(), (2, 4));
+        assert!(e.screen().hide_cursor());
+    }
+
+    #[test]
+    fn the_open_update_reaches_the_seam() {
+        let mut e = engine(4, 20);
+        assert!(!e.synchronized_update());
+        e.process(b"\x1b[?2026h");
+        assert!(e.synchronized_update());
+        e.process(b"\x1b[?2026l");
+        assert!(!e.synchronized_update());
+    }
+
+    /// The pane's timeout for a child that never closes its update.
+    #[test]
+    #[ignore = "red: an open update is presented before it is ended"]
+    fn ending_an_open_update_presents_what_was_written() {
+        let mut e = engine(4, 20);
+        e.process(FRAME);
+        let _ = rows(&e);
+        e.process(b"\x1b[?2026ha 2\r\n\x1b[K");
+        assert_eq!(rows(&e)[..3], ["a 1", "b 1", "c 1"], "held");
+
+        e.end_synchronized_update();
+        assert!(!e.synchronized_update());
+        assert_eq!(rows(&e)[..3], ["a 2", "", "c 1"]);
+    }
+
+    /// ghostty clears the mode on resize so the new size shows at once; the
+    /// hold must not outlive it.
+    #[test]
+    fn a_resize_ends_the_update() {
+        let mut e = engine(4, 20);
+        e.process(FRAME);
+        let _ = rows(&e);
+        e.process(b"\x1b[?2026ha 2\r\n\x1b[K");
+        e.screen_mut().set_size(5, 20);
+        assert!(!e.synchronized_update());
+        assert_eq!(rows(&e)[..3], ["a 2", "", "c 1"]);
+    }
+
+    /// An update reopened before anything is presented at the new size must
+    /// not hold the old size's frame.
+    #[test]
+    fn a_frame_from_before_a_resize_is_not_held() {
+        let mut e = engine(4, 20);
+        e.process(FRAME);
+        let _ = rows(&e);
+        e.screen_mut().set_size(5, 20);
+        e.process(b"\x1b[?2026h");
+        assert_eq!(rows(&e).len(), 5);
+    }
+
+    /// Nothing finished to hold, so what is there is presented: a task's
+    /// captured output can end mid-update.
+    #[test]
+    fn with_no_frame_presented_an_open_update_shows() {
+        let mut e = engine(4, 20);
+        e.process(b"\x1b[?2026hpartial");
+        assert_eq!(rows(&e)[0], "partial");
+    }
+
+    #[test]
+    fn scrolling_back_is_not_held() {
+        let mut e = engine(2, 20);
+        e.process(b"old\r\nb 1\r\nc 1");
+        let _ = rows(&e);
+        e.process(b"\x1b[?2026h\x1b[Hb 2");
+        e.screen_mut().set_scrollback(1);
+        assert_eq!(rows(&e), ["old", "b 2"]);
+    }
+}
