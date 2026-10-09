@@ -212,6 +212,12 @@ Goal: 0 draws-per-second at idle. Implementation:
 - Per-frame: DEC 2026 synchronized output (`\x1b[?2026h…l`) wraps
   every render so terminals that support it (iTerm2, kitty, WezTerm,
   Alacritty current) draw atomically — no flicker.
+- Inbound, the pane honours a child's own DEC 2026: while its update is
+  open the engine presents the last frame it finished and the parser
+  worker publishes nothing, so a redraw that erases a line before
+  rewriting it (brew's download list) never paints half-done. An update
+  left open past a second is ended, Ghostty's own bound. Detail in the
+  `pane::engine_ghostty` module doc.
 - Per-frame: colour-depth downgrade. The theme is 24-bit `Color::Rgb`;
   terminals that can't parse `\x1b[38;2…m` (old GNU screen) drop all
   colour. `ui::color_depth::downgrade_buffer` rewrites the finished

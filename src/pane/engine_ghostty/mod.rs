@@ -22,6 +22,15 @@
 //! them against each other: an instrument that shares the subject's model
 //! inherits its blind spots, and two fills that disagree would do exactly that.
 //!
+//! ## Synchronized output (DEC mode 2026)
+//!
+//! While a child has an update open, reads answer from the frame last
+//! materialized, cursor included, which is what Ghostty's renderer does by
+//! skipping frames until the mode resets. Programs that redraw several lines in
+//! place (brew's download list) rely on it: mid-update a line can be erased
+//! before it is rewritten. The pane worker publishes no output while an update is
+//! open, and ends one left open past its timeout.
+//!
 //! ## Threading
 //!
 //! See the `ghostty-terminal-send` trap anchor below.
@@ -58,6 +67,9 @@ struct Frame {
     spans: Vec<(u32, u32)>,
     /// Per row: does it continue into the next one (a soft wrap)?
     wrapped: Vec<bool>,
+    /// The cursor when the frame was filled, which a held frame presents.
+    cursor: (u16, u16),
+    cursor_hidden: bool,
 }
 
 impl Frame {
@@ -99,6 +111,12 @@ pub struct GhosttyScreen {
     budget: usize,
     frame: RefCell<Frame>,
     frame_valid: Cell<bool>,
+    /// The frame shows the live viewport at the current size, so it can be
+    /// held through a synchronized update.
+    frame_live: Cell<bool>,
+    /// The child's DEC 2026 state, read once per `process` rather than per
+    /// cell read.
+    synchronized: bool,
 }
 
 pub struct GhosttyEngine {
@@ -520,7 +538,7 @@ impl GhosttyScreen {
 
     /// Materialize the frame if a `process` / resize / scroll invalidated it.
     fn ensure_frame(&self) {
-        if self.frame_valid.get() {
+        if self.frame_valid.get() || self.holding() {
             return;
         }
         let mut frame = self.frame.borrow_mut();
@@ -529,7 +547,32 @@ impl GhosttyScreen {
         if self.view != 0 || !self.fill_from_render_state(&mut frame) {
             self.fill_from_grid_ref(&mut frame);
         }
+        frame.cursor = self.live_cursor_position();
+        frame.cursor_hidden = self.live_hide_cursor();
+        self.frame_live.set(self.view == 0);
         self.frame_valid.set(true);
+    }
+
+    /// The child is partway through a synchronized update: keep presenting the
+    /// last frame, as a terminal pauses rendering until the update closes. A
+    /// scrolled-back view is not held, since the user moved it.
+    const fn holding(&self) -> bool {
+        self.synchronized && self.view == 0 && self.frame_live.get()
+    }
+
+    fn live_cursor_position(&self) -> (u16, u16) {
+        (
+            self.get_u16(Data::GHOSTTY_TERMINAL_DATA_CURSOR_Y)
+                .unwrap_or(0),
+            self.get_u16(Data::GHOSTTY_TERMINAL_DATA_CURSOR_X)
+                .unwrap_or(0),
+        )
+    }
+
+    fn live_hide_cursor(&self) -> bool {
+        !self
+            .get_bool(Data::GHOSTTY_TERMINAL_DATA_CURSOR_VISIBLE)
+            .unwrap_or(true)
     }
 
     fn with_frame<R>(&self, f: impl FnOnce(&Frame) -> R) -> R {
@@ -544,18 +587,17 @@ impl TerminalScreen for GhosttyScreen {
     }
 
     fn cursor_position(&self) -> (u16, u16) {
-        (
-            self.get_u16(Data::GHOSTTY_TERMINAL_DATA_CURSOR_Y)
-                .unwrap_or(0),
-            self.get_u16(Data::GHOSTTY_TERMINAL_DATA_CURSOR_X)
-                .unwrap_or(0),
-        )
+        if self.holding() {
+            return self.frame.borrow().cursor;
+        }
+        self.live_cursor_position()
     }
 
     fn hide_cursor(&self) -> bool {
-        !self
-            .get_bool(Data::GHOSTTY_TERMINAL_DATA_CURSOR_VISIBLE)
-            .unwrap_or(true)
+        if self.holding() {
+            return self.frame.borrow().cursor_hidden;
+        }
+        self.live_hide_cursor()
     }
 
     fn alternate_screen(&self) -> bool {
@@ -746,17 +788,20 @@ impl Engine for GhosttyEngine {
                 budget: scrollback_rows,
                 frame: RefCell::new(Frame::default()),
                 frame_valid: Cell::new(false),
+                frame_live: Cell::new(false),
+                synchronized: false,
             },
         }
     }
 
     fn process(&mut self, bytes: &[u8]) {
         unsafe { ffi::ghostty_terminal_vt_write(self.inner.t, bytes.as_ptr(), bytes.len()) };
+        self.inner.synchronized = self.inner.mode(MODE_SYNCHRONIZED_OUTPUT);
         self.inner.invalidate();
     }
 
     fn synchronized_update(&self) -> bool {
-        self.inner.mode(MODE_SYNCHRONIZED_OUTPUT)
+        self.inner.synchronized
     }
 
     fn end_synchronized_update(&mut self) {
@@ -771,6 +816,7 @@ impl Engine for GhosttyEngine {
                 (&raw const off).cast(),
             );
         }
+        self.inner.synchronized = false;
         self.inner.invalidate();
     }
 
@@ -791,6 +837,10 @@ impl GhosttyScreen {
         self.rows = rows;
         self.cols = cols;
         self.view = 0;
+        // ghostty ends an open update on resize, and the old frame is the
+        // wrong shape to hold through the next one.
+        self.synchronized = self.mode(MODE_SYNCHRONIZED_OUTPUT);
+        self.frame_live.set(false);
         self.invalidate();
     }
 }
