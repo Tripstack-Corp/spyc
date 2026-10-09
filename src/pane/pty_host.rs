@@ -25,6 +25,7 @@ use super::PaneWake;
 mod input_writer;
 use input_writer::InputWriter;
 pub use input_writer::MAX_BYTES as MAX_INPUT_BYTES;
+pub use input_writer::ReplyWriter;
 
 /// How long [`PtyHost::reap_exit`] polls for a cleanly-exiting child after
 /// EOF before it concludes the child is the EOF-but-alive case and SIGKILLs
@@ -424,6 +425,11 @@ impl PtyHost {
             pixel_height: 0,
         })?;
         Ok(())
+    }
+
+    /// A handle for the terminal's replies to the child's queries.
+    pub(crate) fn reply_writer(&self) -> ReplyWriter {
+        self.input.reply_writer()
     }
 
     /// Queue a complete input batch without waiting for the child to read.

@@ -94,10 +94,21 @@ mod worker_tests {
     }
 }
 
+/// Worker options with no debug dump and no reply sink.
+#[cfg(test)]
+fn quiet(sync_timeout: std::time::Duration) -> super::WorkerOpts {
+    super::WorkerOpts {
+        debug_dump: false,
+        sync_timeout,
+        replies: None,
+    }
+}
+
 #[cfg(test)]
 mod wake_tests {
     //! MVU Phase 3b: the parser worker's lost-wakeup-safe wake protocol.
     use super::super::{PtyEvent, RxReturn, SYNC_TIMEOUT, Wake, parser_worker};
+    use super::quiet;
     #[allow(unused_imports)]
     use crate::pane::PaneEngine;
     #[allow(unused_imports)]
@@ -152,7 +163,7 @@ mod wake_tests {
             home: rx_home_tx,
         };
         let handle = std::thread::spawn(move || {
-            parser_worker(guard, stop_cl, parser, gen_cl, false, wake, SYNC_TIMEOUT);
+            parser_worker(guard, stop_cl, parser, gen_cl, wake, quiet(SYNC_TIMEOUT));
         });
         (tx, gen_ctr, pending, count, handle)
     }
@@ -216,7 +227,7 @@ mod wake_tests {
         let (parser_cl, gen_cl) = (Arc::clone(&parser), Arc::clone(&gen_ctr));
         let handle = std::thread::spawn(move || {
             let stop = Arc::new(AtomicBool::new(false));
-            parser_worker(guard, stop, parser_cl, gen_cl, false, wake, sync_timeout);
+            parser_worker(guard, stop, parser_cl, gen_cl, wake, quiet(sync_timeout));
         });
         (tx, gen_ctr, parser, handle)
     }
@@ -256,6 +267,71 @@ mod wake_tests {
         );
         tx.send(PtyEvent::Closed).unwrap();
         handle.join().unwrap();
+    }
+
+    /// Spawn a worker that sends the terminal's replies to a capture.
+    #[allow(clippy::type_complexity)]
+    fn spawn_reply_worker() -> (
+        std::sync::mpsc::Sender<PtyEvent>,
+        Arc<AtomicU64>,
+        std::sync::mpsc::Receiver<Vec<u8>>,
+        std::thread::JoinHandle<()>,
+    ) {
+        let (tx, rx) = std::sync::mpsc::channel::<PtyEvent>();
+        let parser = Arc::new(Mutex::new(<PaneEngine as EngineT>::new(24, 80, 100)));
+        let gen_ctr = Arc::new(AtomicU64::new(0));
+        let wake = Wake {
+            pending: Arc::new(AtomicBool::new(false)),
+            fire: Arc::new(|| {}),
+        };
+        let (rx_home_tx, _rx_home_rx) = std::sync::mpsc::channel();
+        let guard = RxReturn {
+            rx: Some(rx),
+            home: rx_home_tx,
+        };
+        let (replies, written) = crate::pane::pty_host::ReplyWriter::capture();
+        let opts = crate::pane::WorkerOpts {
+            replies: Some(replies),
+            ..quiet(Duration::from_secs(60))
+        };
+        let gen_cl = Arc::clone(&gen_ctr);
+        let handle = std::thread::spawn(move || {
+            let stop = Arc::new(AtomicBool::new(false));
+            parser_worker(guard, stop, parser, gen_cl, wake, opts);
+        });
+        (tx, gen_ctr, written, handle)
+    }
+
+    /// #486: a child's query is answered through the pty writer.
+    #[test]
+    #[ignore = "red: the worker sends no reply"]
+    fn a_query_is_answered_through_the_pty_writer() {
+        let (tx, _gen, written, handle) = spawn_reply_worker();
+        tx.send(PtyEvent::Bytes(b"\x1b[?2027$p".to_vec())).unwrap();
+        assert_eq!(
+            written.recv_timeout(Duration::from_secs(2)).ok(),
+            Some(b"\x1b[?2027;1$y".to_vec())
+        );
+        tx.send(PtyEvent::Closed).unwrap();
+        handle.join().unwrap();
+    }
+
+    /// A query inside a held synchronized update is answered at once: a child
+    /// waiting on the reply before it closes the update would otherwise stall
+    /// until the timeout.
+    #[test]
+    #[ignore = "red: the worker sends no reply"]
+    fn a_query_inside_an_open_update_is_answered_while_output_is_held() {
+        let (tx, gen_ctr, written, handle) = spawn_reply_worker();
+        tx.send(PtyEvent::Bytes(b"\x1b[?2026h\x1b[6n".to_vec()))
+            .unwrap();
+        assert_eq!(
+            written.recv_timeout(Duration::from_secs(2)).ok(),
+            Some(b"\x1b[1;1R".to_vec())
+        );
+        tx.send(PtyEvent::Closed).unwrap();
+        handle.join().unwrap();
+        assert_eq!(gen_ctr.load(Ordering::Acquire), 0, "output stayed held");
     }
 
     /// A natural EOF (stop unset) fires exactly one final wake, so the loop
@@ -314,7 +390,7 @@ mod wake_tests {
             home: home_tx,
         };
         let handle = std::thread::spawn(move || {
-            parser_worker(guard, stop, parser, gen_ctr, false, wake, SYNC_TIMEOUT);
+            parser_worker(guard, stop, parser, gen_ctr, wake, quiet(SYNC_TIMEOUT));
         });
         // First Bytes chunk parses, then fires the 0→1 wake edge → panic.
         tx.send(PtyEvent::Bytes(b"x".to_vec())).unwrap();
@@ -339,6 +415,7 @@ mod app_cursor_tests {
     //! here (a pty spawn in a unit test is what `pty_host`'s own tests document as
     //! flaky, so the worker is the deepest deterministic seam).
     use super::super::{PtyEvent, RxReturn, SYNC_TIMEOUT, Wake, parser_worker};
+    use super::quiet;
     #[allow(unused_imports)]
     use crate::pane::PaneEngine;
     #[allow(unused_imports)]
@@ -372,9 +449,8 @@ mod app_cursor_tests {
                     stop,
                     parser,
                     Arc::new(AtomicU64::new(0)),
-                    false,
                     wake,
-                    SYNC_TIMEOUT,
+                    quiet(SYNC_TIMEOUT),
                 );
             })
         };

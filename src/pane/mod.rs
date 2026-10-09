@@ -184,7 +184,11 @@ impl Pane {
         let event_rx = host
             .take_event_rx()
             .expect("PtyHost::take_event_rx returned None — already taken");
-        let debug_dump = host.debug_dump;
+        let opts = WorkerOpts {
+            debug_dump: host.debug_dump,
+            sync_timeout: SYNC_TIMEOUT,
+            replies: Some(host.reply_writer()),
+        };
         let parser_clone = Arc::clone(&parser);
         let gen_clone = Arc::clone(&parser_gen);
         let stop_clone = Arc::clone(&stop);
@@ -204,15 +208,7 @@ impl Pane {
             home: rx_home_tx,
         };
         let handle = thread::spawn(move || {
-            parser_worker(
-                rx_guard,
-                stop_clone,
-                parser_clone,
-                gen_clone,
-                debug_dump,
-                wake,
-                SYNC_TIMEOUT,
-            );
+            parser_worker(rx_guard, stop_clone, parser_clone, gen_clone, wake, opts);
         });
         Self {
             host,
@@ -681,14 +677,25 @@ fn rebuild_parser_preserving_size(p: &mut PaneEngine) {
 /// it anyway. Ghostty's own bound (`sync_reset_ms`).
 const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// A parser worker's settings, and where the terminal's replies to the
+/// child's queries go (`None` drops them).
+struct WorkerOpts {
+    debug_dump: bool,
+    sync_timeout: std::time::Duration,
+    #[expect(
+        dead_code,
+        reason = "red tests only; the worker sends replies with the fix"
+    )]
+    replies: Option<pty_host::ReplyWriter>,
+}
+
 fn parser_worker(
     guard: RxReturn,
     stop: Arc<AtomicBool>,
     parser: Arc<Mutex<PaneEngine>>,
     parser_gen: Arc<AtomicU64>,
-    debug_dump: bool,
     wake: Wake,
-    sync_timeout: std::time::Duration,
+    opts: WorkerOpts,
 ) {
     // `guard` owns the byte receiver and ships it back to the pane on EVERY
     // exit from this function — normal return AND panic-unwind. A worker
@@ -741,7 +748,7 @@ fn parser_worker(
             .recv_timeout(std::time::Duration::from_millis(50))
         {
             Ok(PtyEvent::Bytes(bytes)) => {
-                if debug_dump {
+                if opts.debug_dump {
                     append_pty_debug(&bytes);
                 }
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -792,7 +799,7 @@ fn parser_worker(
                 return;
             }
         }
-        if sync_opened.is_some_and(|t| t.elapsed() >= sync_timeout) {
+        if sync_opened.is_some_and(|t| t.elapsed() >= opts.sync_timeout) {
             let mut p = parser
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);

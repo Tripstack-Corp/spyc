@@ -152,6 +152,11 @@ impl Engine for vt100::Parser {
 
     fn end_synchronized_update(&mut self) {}
 
+    // vt100 answers no queries.
+    fn take_replies(&mut self) -> Vec<u8> {
+        Vec::new()
+    }
+
     fn screen(&self) -> &Self::Screen {
         Self::screen(self)
     }

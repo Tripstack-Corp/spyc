@@ -178,6 +178,16 @@ pub trait Engine: Send {
     /// Close the child's open synchronized update, for a child that never
     /// closes its own.
     fn end_synchronized_update(&mut self);
+    /// Take the replies to the child's queries that `process` produced, for the
+    /// caller to write to the child once it no longer holds the engine.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "red tests only; the parser worker calls it with the fix"
+        )
+    )]
+    fn take_replies(&mut self) -> Vec<u8>;
     fn screen(&self) -> &Self::Screen;
     fn screen_mut(&mut self) -> &mut Self::Screen;
 }

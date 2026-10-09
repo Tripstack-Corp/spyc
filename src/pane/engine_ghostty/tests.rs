@@ -554,3 +554,120 @@ mod synchronized_output {
         assert_eq!(rows(&e), ["old", "b 2"]);
     }
 }
+
+/// The child's queries (#486): what the pane answers, and what it leaves
+/// unanswered because the answer would not be true of spyc.
+#[cfg(test)]
+mod child_queries {
+    use super::super::*;
+
+    fn replies_to(query: &[u8]) -> Vec<u8> {
+        let mut e = <GhosttyEngine as Engine>::new(24, 80, 100);
+        e.process(query);
+        e.take_replies()
+    }
+
+    #[test]
+    #[ignore = "red: the pane answers no query"]
+    fn decrqm_reports_clustering_set() {
+        assert_eq!(replies_to(b"\x1b[?2027$p"), b"\x1b[?2027;1$y");
+    }
+
+    /// Recognized and currently reset: how claude learns spyc holds frames.
+    #[test]
+    #[ignore = "red: the pane answers no query"]
+    fn decrqm_reports_synchronized_output_supported() {
+        assert_eq!(replies_to(b"\x1b[?2026$p"), b"\x1b[?2026;2$y");
+    }
+
+    /// A name that doesn't start with `ghostty` or `kitty`: those would invite
+    /// image escapes spyc never draws.
+    #[test]
+    #[ignore = "red: the pane answers no query"]
+    fn xtversion_names_spyc() {
+        let want = concat!("\x1bP>|spyc ", env!("CARGO_PKG_VERSION"), "\x1b\\");
+        assert_eq!(replies_to(b"\x1b[>0q"), want.as_bytes());
+    }
+
+    /// Ghostty's own answers, less clipboard access (52), which spyc lacks.
+    #[test]
+    #[ignore = "red: the pane answers no query"]
+    fn device_attributes_quack_as_a_colour_vt220() {
+        assert_eq!(replies_to(b"\x1b[c"), b"\x1b[?62;22c");
+        assert_eq!(replies_to(b"\x1b[>c"), b"\x1b[>1;10;0c");
+    }
+
+    #[test]
+    #[ignore = "red: the pane answers no query"]
+    fn status_and_cursor_position_are_reported() {
+        assert_eq!(replies_to(b"\x1b[5n"), b"\x1b[0n");
+        assert_eq!(replies_to(b"\x1b[3;5H\x1b[6n"), b"\x1b[3;5R");
+    }
+
+    #[test]
+    #[ignore = "red: the pane answers no query"]
+    fn decrqss_reports_the_scroll_region() {
+        assert_eq!(
+            replies_to(b"\x1b[2;10r\x1bP$qr\x1b\\"),
+            b"\x1bP1$r2;10r\x1b\\"
+        );
+    }
+
+    #[test]
+    #[ignore = "red: the pane answers no query"]
+    fn replies_are_taken_once() {
+        let mut e = <GhosttyEngine as Engine>::new(24, 80, 100);
+        e.process(b"\x1b[5n");
+        assert_eq!(e.take_replies(), b"\x1b[0n");
+        assert!(e.take_replies().is_empty());
+    }
+
+    /// Each of these has an answer libghostty-vt could give that would be
+    /// false of spyc's pane, or that a child could use against itself.
+    #[test]
+    fn untrue_or_unsafe_answers_stay_unsent() {
+        let silent: &[(&str, &[u8])] = &[
+            ("kitty keyboard: spyc encodes legacy keys only", b"\x1b[?u"),
+            (
+                "XTGETTCAP Ms: Ghostty's terminfo, not spyc's",
+                b"\x1bP+q4d73\x1b\\",
+            ),
+            ("XTGETTCAP RGB", b"\x1bP+q524742\x1b\\"),
+            (
+                "OSC 4: Ghostty's palette, not the host's",
+                b"\x1b]4;1;?\x1b\\",
+            ),
+            ("OSC 11: no background is known", b"\x1b]11;?\x1b\\"),
+            ("title report: an injection path", b"\x1b]2;x\x07\x1b[21t"),
+            (
+                "kitty graphics: spyc draws no images",
+                b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\",
+            ),
+            ("glyph protocol: Ghostty-only", b"\x1b_25a1;s\x1b\\"),
+            ("DA3: Ghostty doesn't answer it either", b"\x1b[=c"),
+            ("ENQ answerback", b"\x05"),
+            ("size in cells", b"\x1b[18t"),
+            (
+                "size in pixels: spyc's cell size is a placeholder",
+                b"\x1b[14t",
+            ),
+            ("colour scheme", b"\x1b[?996n"),
+        ];
+        let answered: Vec<&str> = silent
+            .iter()
+            .filter(|(_, query)| !replies_to(query).is_empty())
+            .map(|(why, _)| *why)
+            .collect();
+        assert!(answered.is_empty(), "answered: {answered:#?}");
+    }
+
+    /// A child flooding queries cannot grow the pending replies without limit.
+    #[test]
+    #[ignore = "red: the pane answers no query"]
+    fn pending_replies_are_bounded() {
+        let mut e = <GhosttyEngine as Engine>::new(24, 80, 100);
+        e.process(&b"\x1b[6n".repeat(100_000));
+        let n = e.take_replies().len();
+        assert!(n > 0 && n <= 64 * 1024, "{n} bytes pending");
+    }
+}

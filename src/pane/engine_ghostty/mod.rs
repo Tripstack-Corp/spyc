@@ -820,6 +820,10 @@ impl Engine for GhosttyEngine {
         self.inner.invalidate();
     }
 
+    fn take_replies(&mut self) -> Vec<u8> {
+        Vec::new()
+    }
+
     fn screen(&self) -> &Self::Screen {
         &self.inner
     }
