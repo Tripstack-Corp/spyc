@@ -1,0 +1,3 @@
+ingest:
+  codec: zstd
+  level: 9
