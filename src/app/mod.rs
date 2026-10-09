@@ -99,6 +99,7 @@ pub enum PostAction {
 mod about;
 mod actions;
 mod activity;
+mod activity_diagnostics;
 mod agent_status;
 mod archive;
 mod archive_ops;
@@ -125,6 +126,7 @@ mod harpoon;
 mod image_gallery;
 pub mod image_ops;
 mod inventory_ops;
+mod jump_default;
 mod key_dispatch;
 mod loop_steps;
 mod lua;
@@ -142,13 +144,18 @@ mod navigate;
 mod pager_handler;
 mod pager_history;
 mod pager_stream;
+mod pane_fork;
+mod pane_input;
 mod pane_scroll;
 mod pane_tabs;
 mod pane_wake;
 mod paste_capture;
+mod pre_recv;
 mod preview_ops;
 mod proc;
+mod process_cwd;
 mod prompt;
+mod prompt_templates;
 mod quick_select;
 mod render;
 mod route;
@@ -156,8 +163,11 @@ mod run;
 mod runtime;
 mod scheduler;
 mod session;
+mod session_restore;
 mod skill;
 mod sources;
+mod startup_commands;
+mod startup_tabs;
 pub mod state;
 mod status_hooks;
 mod streaming;
@@ -199,7 +209,7 @@ use tasks::{BackgroundTasks, TASK_BUFFER_CAP, TaskStatus};
 use util::kill_pg;
 use util::{
     buffer_to_lines, eof_marker_line, format_elapsed_hms, format_uptime, path_basename_display,
-    strip_ansi_escapes, user_host_string,
+    user_host_string,
 };
 
 /// Which collection the user is looking at.

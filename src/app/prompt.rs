@@ -26,6 +26,10 @@ pub struct Prompt {
     pub buffer: String,
     /// When set, this prompt uses the vi line editor with history.
     pub editor: Option<LineEditor>,
+    /// What an empty buffer submits, drawn dimmed in its place (`J` offers
+    /// the last path the pane printed). Typing hides it; `→`/`End` on the
+    /// empty buffer loads it for editing. Honoured by the vi-editor prompts.
+    pub suggestion: Option<String>,
 }
 
 impl Prompt {
@@ -36,6 +40,7 @@ impl Prompt {
             prefix: prefix.into(),
             buffer: String::new(),
             editor: None,
+            suggestion: None,
         }
     }
 
@@ -46,6 +51,23 @@ impl Prompt {
             prefix: prefix.into(),
             buffer: String::new(),
             editor: Some(LineEditor::new()),
+            suggestion: None,
+        }
+    }
+
+    /// The renderer's view of this prompt. One constructor for the draw and
+    /// for the layout's height reservation, so the two can't wrap differently.
+    pub fn line<'a>(
+        &'a self,
+        theme: &'a crate::ui::theme::Theme,
+    ) -> crate::ui::prompt::PromptLine<'a> {
+        crate::ui::prompt::PromptLine {
+            prefix: &self.prefix,
+            buffer: &self.buffer,
+            theme,
+            cursor_pos: self.editor.as_ref().map(|e| e.cursor),
+            vi_mode: self.editor.as_ref().map(|e| e.mode),
+            suggestion: self.suggestion.as_deref(),
         }
     }
 }
@@ -88,23 +110,28 @@ pub enum PromptKind {
     Limit,
     /// `:` — vim-style command line.
     Command,
-    /// Auto-fired when a restored `claude --resume` tab looks broken;
-    /// y/Enter respawns into the same slot. Cwd and fallback command
-    /// live on the tab's `TabInfo` and are read at confirm time.
-    ClaudeCrashRecover {
-        tab_idx: usize,
-    },
     /// First-launch consent (per project, saved) before spyc writes an agent's
     /// status hooks into `root`'s config (claude `.claude/settings.json` /
     /// codex `.codex/config.toml`). `y`/`Y` → remember-allow + install hooks for
-    /// `cwd`; `n`/`N` → remember-deny. Any other key (including Esc) keeps the
-    /// prompt open — y/n is required. `root` keys the persisted consent
-    /// (`state::hook_consent`); `cwd` is the launching pane's dir (where the
-    /// hooks are written); `agent` picks the installer (which config + format).
+    /// `cwd`; `n`/`N` → remember-deny. Any other key (including Esc) defers the
+    /// prompt without recording consent. `root` keys the persisted consent (`state::hook_consent`);
+    /// `cwd` is the launching pane's dir, resolved to the actual hook source by
+    /// `agent`'s support profile (including Codex's root-checkout routing).
     HookConsent {
         root: std::path::PathBuf,
         cwd: std::path::PathBuf,
         agent: crate::state::sessions::AgentKind,
+    },
+    /// A project-local `.spycrc.toml` declares startup tabs this user hasn't
+    /// answered for in this exact form (`state::tab_consent`). A centred
+    /// pop-up listing every command. `y` approves this list and opens it, `n`
+    /// declines it (remembered for this list), `Esc` skips it this launch;
+    /// both of those open the user's own tabs instead. Anything else re-raises
+    /// it, because a stray key must not answer a question about running
+    /// commands.
+    ProjectTabsConsent {
+        source: std::path::PathBuf,
+        tabs: Vec<crate::config::PaneTabConfig>,
     },
     /// Startup offer to install/update the Claude skill in `~/.claude/skills/`,
     /// raised only when the embedded copy differs from what's installed. Same
@@ -121,6 +148,12 @@ pub enum PromptKind {
     /// anything else keeps it. Always targets the active tab (the modal prompt
     /// blocks tab switching), so it needs no index. An exited tab skips this.
     ClosePane,
+    /// Large file-pipe confirmation: only an unmodified `y`/`Y` queues it.
+    PipeConfirm {
+        payload: Vec<u8>,
+        tab_id: String,
+        on_ok: String,
+    },
     /// `^a R` on a tab whose child is still running — a restart kills it, so it
     /// loses the session exactly as `^a x` does. Same single-key shape as
     /// [`Self::ClosePane`]: `y`/`Y` restarts, anything else keeps the tab. An
@@ -699,9 +732,17 @@ impl App {
                 }
                 let dir = self.state.cur().listing.dir.clone();
                 match crate::git::worktree::remove(&dir) {
-                    Ok(()) => {
-                        self.state
-                            .flash_info(format!("removed worktree: {}", dir.display()));
+                    Ok(removal) => {
+                        if removal.leftovers.is_empty() {
+                            self.state
+                                .flash_info(format!("removed worktree: {}", dir.display()));
+                        } else {
+                            self.state.flash_info(format!(
+                                "removed worktree: {} (a process was still writing, so {} is left to delete)",
+                                dir.display(),
+                                crate::git::worktree::show_paths(&removal.leftovers)
+                            ));
+                        }
                         // chdir the focused column to the parent (the deleted
                         // dir is gone). PROJECT_HOME is left untouched — it's the
                         // overall project anchor, not tied to a worktree.
@@ -829,7 +870,6 @@ mod tests {
             ("WorktreeNewBranch", K::WorktreeNewBranch),
             ("WorktreeDeleteConfirm", K::WorktreeDeleteConfirm),
             ("Limit", K::Limit),
-            ("ClaudeCrashRecover", K::ClaudeCrashRecover { tab_idx: 0 }),
             (
                 "HookConsent",
                 K::HookConsent {

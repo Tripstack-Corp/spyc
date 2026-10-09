@@ -15,7 +15,7 @@ use super::readers::{
 };
 use super::{
     CONTEXT_URI, PROTOCOL_VERSION, PROXY_IO_TIMEOUT, SERVER_INSTRUCTIONS, SERVER_NAME,
-    SERVER_VERSION,
+    SERVER_VERSION, mcp_log,
 };
 
 /// Per-call ceiling for the read tools that walk the filesystem / git (search,
@@ -75,14 +75,101 @@ where
         .map_err(|_| "timed out".to_string())
 }
 
-/// Dispatch a JSON-RPC request and write the response to `w`.
-/// `cmd_tx` is `Some` when running as the socket server
-/// (writable actions available), `None` for read-only fallback.
+/// The `initialize` `_meta` key the `spyc --mcp` proxy puts its
+/// `$SPYC_PANE_ID` under.
+pub(super) const PANE_ID_META: &str = "spyc/paneId";
+
+/// Who is on the other end of one connection: the pane its `initialize`
+/// named, once the main loop has confirmed that tab is live. Bound once, for
+/// the connection's lifetime, and never taken from a tool call. `None` is an
+/// unattributed caller (an older proxy, the status hook, the read-only
+/// fallback), which behaves as every caller did before attribution existed.
+#[derive(Debug, Default)]
+pub(super) struct Caller {
+    /// This socket connection's number; `None` in the read-only fallback.
+    conn: Option<u64>,
+    pane_id: Option<String>,
+    /// Whether it has sent `initialize`, which is what makes it an agent's
+    /// session rather than the status hook's one-shot call.
+    initialized: bool,
+}
+
+impl Caller {
+    pub(super) fn connection(conn: u64) -> Self {
+        Self {
+            conn: Some(conn),
+            ..Self::default()
+        }
+    }
+
+    /// Tell the loop this connection is gone, if it was ever an agent's.
+    pub(super) fn close(&self, cmd_tx: &std::sync::mpsc::Sender<McpRequest>) {
+        if let (true, Some(conn)) = (self.initialized, self.conn) {
+            tell(cmd_tx, McpCommand::ConnectionClosed { conn });
+        }
+    }
+}
+
+/// Send the loop a command whose reply nobody reads.
+fn tell(tx: &std::sync::mpsc::Sender<McpRequest>, command: McpCommand) {
+    let (reply_tx, _) = std::sync::mpsc::channel();
+    let _ = tx.send(McpRequest {
+        command,
+        reply: reply_tx,
+    });
+}
+
+/// The live tab `pane_id` names, as the main loop describes it; `None` once
+/// that tab is gone (or the loop doesn't answer).
+fn pane_context(tx: &std::sync::mpsc::Sender<McpRequest>, pane_id: &str) -> Option<Value> {
+    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+    tx.send(McpRequest {
+        command: McpCommand::PaneContext {
+            pane_id: pane_id.to_string(),
+        },
+        reply: reply_tx,
+    })
+    .ok()?;
+    match reply_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .ok()?
+    {
+        McpResponse::Ok { message } => serde_json::from_str(&message).ok(),
+        McpResponse::Error { .. } => None,
+    }
+}
+
+/// The tab a targeting call (`report_status`, the scope tools) means by
+/// `pane_id`: the one it names, else this connection's own unless it named a
+/// `pane` index instead. `None` leaves the loop's fallback, the focused tab.
+fn target_pane_id(args: &Value, caller: &Caller) -> Option<String> {
+    match args["pane_id"].as_str() {
+        Some(p) => Some(p.to_string()),
+        None if args["pane"].is_null() => caller.pane_id.clone(),
+        None => None,
+    }
+}
+
+/// [`dispatch_for`] an unattributed caller.
 pub(super) fn dispatch(
     w: &mut impl Write,
     msg: &str,
     ctx_path: &Path,
     cmd_tx: Option<&std::sync::mpsc::Sender<McpRequest>>,
+) -> io::Result<()> {
+    dispatch_for(w, msg, ctx_path, cmd_tx, &mut Caller::default())
+}
+
+/// Dispatch a JSON-RPC request and write the response to `w`.
+/// `cmd_tx` is `Some` when running as the socket server
+/// (writable actions available), `None` for read-only fallback. `caller` is
+/// this connection's attribution, bound by its `initialize`.
+pub(super) fn dispatch_for(
+    w: &mut impl Write,
+    msg: &str,
+    ctx_path: &Path,
+    cmd_tx: Option<&std::sync::mpsc::Sender<McpRequest>>,
+    caller: &mut Caller,
 ) -> io::Result<()> {
     let parsed: Value = match serde_json::from_str(msg) {
         Ok(v) => v,
@@ -109,11 +196,11 @@ pub(super) fn dispatch(
     let method = parsed["method"].as_str().unwrap_or("");
 
     match method {
-        "initialize" => handle_initialize(w, &id, &parsed["params"]),
+        "initialize" => handle_initialize(w, &id, &parsed["params"], cmd_tx, caller),
         "resources/list" => handle_resources_list(w, &id),
         "resources/read" => handle_resources_read(w, &id, &parsed["params"], ctx_path),
         "tools/list" => handle_tools_list(w, &id),
-        "tools/call" => handle_tools_call(w, &id, &parsed["params"], ctx_path, cmd_tx),
+        "tools/call" => handle_tools_call(w, &id, &parsed["params"], ctx_path, cmd_tx, caller),
         "ping" => send_result(w, &id, json!({})),
         _ => send_error(w, id, -32601, &format!("Method not found: {method}")),
     }
@@ -121,7 +208,38 @@ pub(super) fn dispatch(
 
 // ── Protocol handlers ────────────────────────────────────────────
 
-fn handle_initialize(w: &mut impl Write, id: &Value, _params: &Value) -> io::Result<()> {
+fn handle_initialize(
+    w: &mut impl Write,
+    id: &Value,
+    params: &Value,
+    cmd_tx: Option<&std::sync::mpsc::Sender<McpRequest>>,
+    caller: &mut Caller,
+) -> io::Result<()> {
+    if caller.pane_id.is_none()
+        && let Some(tx) = cmd_tx
+        && let Some(pane_id) = params["_meta"][PANE_ID_META]
+            .as_str()
+            .filter(|p| !p.is_empty())
+    {
+        if pane_context(tx, pane_id).is_some() {
+            mcp_log(&format!("initialize: connection bound to pane {pane_id}"));
+            caller.pane_id = Some(pane_id.to_string());
+        } else {
+            mcp_log(&format!("initialize: no live pane {pane_id}; unattributed"));
+        }
+    }
+    if !caller.initialized
+        && let (Some(tx), Some(conn)) = (cmd_tx, caller.conn)
+    {
+        caller.initialized = true;
+        tell(
+            tx,
+            McpCommand::ConnectionInitialized {
+                conn,
+                pane_id: caller.pane_id.clone(),
+            },
+        );
+    }
     send_result(
         w,
         id,
@@ -185,394 +303,7 @@ fn handle_resources_read(
 }
 
 fn handle_tools_list(w: &mut impl Write, id: &Value) -> io::Result<()> {
-    send_result(
-        w,
-        id,
-        json!({
-            "tools": [
-                {
-                    "name": "get_spyc_context",
-                    "description": "Get the current spyc file manager state: working directory, cursor position, picked files, inventory, active filter, git branch, project_home (sticky project root), session_name, plus the running spyc's pid and version ('<x.y.z> (<git-sha>)'). Use this to understand what the user is looking at — and to detect a stale server: if a tool you expect is missing, compare version's git SHA against the repo HEAD and ask the user to restart spyc (pid identifies the process).",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {},
-                        "required": []
-                    }
-                },
-                {
-                    "name": "report_status",
-                    "description": "Report YOUR current activity so spyc shows it as a live dot on your pane tab — the 'which agent needs me' signal. Call it as your turn changes: 'working' when you start a non-trivial task, 'blocked' when you stop to ask the user a question or for permission (this is the one that earns attention), 'done' when you finish, 'idle' when waiting with nothing pending. Overrides spyc's output-timing guess and keeps your dot accurate through silent thinking. Targets your own (focused) tab by default; pass `pane` for a specific tab. Cheap and idempotent — call it freely.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "status": {
-                                "type": "string",
-                                "enum": ["working", "blocked", "idle", "done"],
-                                "description": "working = actively doing a task; blocked = waiting on the user (needs attention); done = finished a turn; idle = nothing pending."
-                            },
-                            "pane_id": {
-                                "type": "string",
-                                "description": "Optional stable pane id (the `SPYC_PANE_ID` env var spyc set for your pane). The auto-hook passes this; you normally don't need it."
-                            },
-                            "pane": {
-                                "type": "integer",
-                                "description": "Optional 1-based tab number (the `[N]` in the divider) to report for. Defaults to the focused tab — normally omit it."
-                            },
-                            "ttl_ms": {
-                                "type": "integer",
-                                "description": "Optional backstop in ms after which the report expires and the dot falls back to output timing. Defaults to a few minutes; rarely needed."
-                            }
-                        },
-                        "required": ["status"]
-                    }
-                },
-                {
-                    "name": "register_scope",
-                    "description": "Declare the files/globs YOU are about to touch and whether you're `editing` or about to be `merging` — the merge-coordination registry. Another agent can `list_scopes` to see your claim and `wait_for_scope_clear` before merging overlapping files, so concurrent agents queue instead of colliding. Call it before a merge with intent='merging' and your PR's file set; `release_scope` when done. Returns {claim_id, conflicting_merges:[...]} — a non-empty conflicting_merges means someone else is mid-merge on your files. Advisory: spyc never blocks a merge.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "paths": {"type": "array", "items": {"type": "string"}, "description": "File paths or globs (glob::Pattern syntax, e.g. 'src/app/*.rs') you're touching."},
-                            "intent": {"type": "string", "enum": ["editing", "merging"], "description": "editing = informational; merging = blocks another agent's wait_for_scope_clear on overlapping paths."},
-                            "pr": {"type": "string", "description": "Optional PR identifier this claim is for (e.g. '#661')."},
-                            "note": {"type": "string", "description": "Optional free-text note shown in list_scopes / the orchestration screen."},
-                            "pane_id": {"type": "string", "description": "Optional stable pane id (SPYC_PANE_ID); defaults to your focused tab."},
-                            "pane": {"type": "integer", "description": "Optional 1-based tab number; defaults to the focused tab."}
-                        },
-                        "required": ["paths", "intent"]
-                    }
-                },
-                {
-                    "name": "list_scopes",
-                    "description": "List all active scope claims in this spyc — each {id, owner_label, paths, intent, pr, note, claimed_at_secs}. Check it before you merge to see who else is touching your files and whether anyone is mid-merge (intent='merging'). Also what the orchestration screen renders.",
-                    "inputSchema": {"type": "object", "properties": {}, "required": []}
-                },
-                {
-                    "name": "release_scope",
-                    "description": "Release a scope claim by its `id` (from register_scope / list_scopes) once you're done with those files. No-op if the id doesn't match a live claim. No ownership check — a lead agent or the user may clear a stale claim on someone's behalf.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {"id": {"type": "integer", "description": "The claim id to release."}},
-                        "required": ["id"]
-                    }
-                },
-                {
-                    "name": "wait_for_scope_clear",
-                    "description": "Block until no OTHER agent's `merging` scope claim overlaps `paths` (or `timeout_ms` elapses) — the coordination verb for the merge train. Register your merge (register_scope intent='merging'), then wait_for_scope_clear on the same paths: you resume once whoever's mid-merge on overlapping files releases, so concurrent agents serialize instead of colliding + rebasing. Returns {outcome: 'cleared'|'timed_out', conflicts:[...]}. Your OWN claims never block you. Always bounded by a timeout (default 5m, hard cap 10m).",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "paths": {"type": "array", "items": {"type": "string"}, "description": "File paths/globs to wait on (usually the same set you register_scope'd)."},
-                            "timeout_ms": {"type": "integer", "description": "Max wait in ms (default 300000, capped 600000). Returns outcome='timed_out' if it elapses."},
-                            "pane_id": {"type": "string", "description": "Optional stable pane id (SPYC_PANE_ID); defaults to your focused tab."},
-                            "pane": {"type": "integer", "description": "Optional 1-based tab number; defaults to the focused tab."}
-                        },
-                        "required": ["paths"]
-                    }
-                },
-                {
-                    "name": "navigate_to",
-                    "description": "Navigate spyc to a directory or file. If the path is a directory, changes to it. If a file, navigates to its parent directory and places the cursor on it.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Absolute or relative path. Relative paths resolved against spyc's cwd. Supports ~ and $VAR expansion."
-                            }
-                        },
-                        "required": ["path"]
-                    }
-                },
-                {
-                    "name": "set_filter",
-                    "description": "Set or clear the file listing filter. When set, only files matching the glob pattern are shown. Pass null or empty string to clear.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "pattern": {
-                                "type": ["string", "null"],
-                                "description": "Glob pattern (e.g. '*.rs', 'test_*'), or null/empty to clear the filter."
-                            }
-                        }
-                    }
-                },
-                {
-                    "name": "pick_files",
-                    "description": "Select (pick) files in the current directory matching glob patterns. Picks are additive. Use clear_picks first for a clean selection.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "patterns": {
-                                "type": "array",
-                                "items": { "type": "string" },
-                                "description": "Glob patterns to match against filenames (e.g. ['*.rs', 'Cargo.*'])."
-                            }
-                        },
-                        "required": ["patterns"]
-                    }
-                },
-                {
-                    "name": "clear_picks",
-                    "description": "Clear all picked (selected) files in spyc.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {}
-                    }
-                },
-                {
-                    "name": "create_worktree",
-                    "description": "Create a git worktree for the given branch (existing branch reused, else a NEW branch created off the repo's default/integration branch — pass `base` to override that start point). It lands in a sibling `<repo>.worktrees/<branch>/` dir, anchored on the MAIN repo even when called from inside a linked worktree. Returns {branch, path}. Pass `open:true` to also open it in column b and work there right away (otherwise navigate_to / open_worktree later). Errors if not in a repo or the branch is already checked out elsewhere.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "branch": {
-                                "type": "string",
-                                "description": "Branch to check out in the new worktree. Existing branch is reused; otherwise created off `base` (or the repo's default branch)."
-                            },
-                            "base": {
-                                "type": "string",
-                                "description": "Start point (branch/rev) for a NEW branch. Optional — defaults to the repo's default branch. Ignored when `branch` already exists."
-                            },
-                            "open": {
-                                "type": "boolean",
-                                "description": "If true, also open the new worktree in column b (and focus it) so you can work in it immediately. Default false."
-                            }
-                        },
-                        "required": ["branch"]
-                    }
-                },
-                {
-                    "name": "remove_worktree",
-                    "description": "Safely tear down a git worktree by path (the path create_worktree returned). Safe by default: archives any untracked + uncommitted changes to spyc's graveyard first (recoverable), removes the worktree, then deletes its branch ONLY if it is merged into the integration base — an unmerged branch's ref is kept (it's the commit backup). Refuses a worktree CLAIMED by another session (claim_worktree) — release it first. A spyc column sitting inside is reset to PROJECT_HOME, not refused. The teardown half of the worktree flow.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Path of the worktree to remove (as returned by create_worktree)."
-                            }
-                        },
-                        "required": ["path"]
-                    }
-                },
-                {
-                    "name": "clean_worktree",
-                    "description": "Alias of remove_worktree (kept for familiarity) — identical safe-by-default teardown: archives untracked + uncommitted changes to the graveyard under '<worktree>-<timestamp>', removes the worktree, and deletes the branch iff merged. Prefer remove_worktree.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Path of the worktree to clean out and remove (as returned by create_worktree)."
-                            }
-                        },
-                        "required": ["path"]
-                    }
-                },
-                {
-                    "name": "open_worktree",
-                    "description": "Open the second spyc column (column 'b') at the given worktree path (as returned by create_worktree) — so you can work in the worktree while the main column stays where the user left it. Re-targets column b if it's already open. After this, navigate_to / search / pick_files act on column b.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Path of the worktree (or any directory) to open in column b."
-                            }
-                        },
-                        "required": ["path"]
-                    }
-                },
-                {
-                    "name": "get_file_content",
-                    "description": "Read the text contents of a file (up to 100KB). Binary files are rejected. Relative paths resolved against the project root (the focused commander's worktree root, else PROJECT_HOME, else cwd) — the same scope as search_paths/search_content, so their results can be read back. Pass `root` to resolve against a different worktree you're working in.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "path": {
-                                "type": "string",
-                                "description": "Absolute or relative path to the file."
-                            },
-                            "root": {
-                                "type": "string",
-                                "description": "Optional absolute path to resolve relative paths against instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root. Must be inside one of this spyc session's roots — anything else is rejected, and the error names the allowed set."
-                            }
-                        },
-                        "required": ["path"]
-                    }
-                },
-                {
-                    "name": "search_paths",
-                    "description": "Project-wide fuzzy filename search. Walks the focused commander's worktree root (its repo root, else PROJECT_HOME, else cwd) honoring .gitignore, scores candidates against the query with fzf-style ranking (basename hits beat parent-dir hits). Returns a JSON array of repo-relative paths, best match first. Empty query returns paths in walk order, truncated. Pass `root` to walk a different worktree you're working in.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "Fuzzy-match query. Empty string returns natural walk order."
-                            },
-                            "limit": {
-                                "type": "integer",
-                                "description": "Maximum results to return. Default 100, max 1000.",
-                                "minimum": 1
-                            },
-                            "root": {
-                                "type": "string",
-                                "description": "Optional absolute path to walk instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root. Must be inside one of this spyc session's roots — anything else is rejected, and the error names the allowed set."
-                            }
-                        },
-                        "required": ["query"]
-                    }
-                },
-                {
-                    "name": "search_content",
-                    "description": "Project-wide content search using ripgrep's matcher (gitignore-aware, smart-case, binary files skipped). Walks the focused commander's worktree root (its repo root, else PROJECT_HOME, else cwd). Returns a JSON array of {path, line, col, text} match objects. Pass `root` to search a different worktree you're working in.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "pattern": {
-                                "type": "string",
-                                "description": "Regex pattern. Smart-case: lowercase pattern matches case-insensitively, mixed-case is sensitive."
-                            },
-                            "limit": {
-                                "type": "integer",
-                                "description": "Maximum matches to return. Default 200, max 5000.",
-                                "minimum": 1
-                            },
-                            "root": {
-                                "type": "string",
-                                "description": "Optional absolute path to search instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root. Must be inside one of this spyc session's roots — anything else is rejected, and the error names the allowed set."
-                            }
-                        },
-                        "required": ["pattern"]
-                    }
-                },
-                {
-                    "name": "search_picks",
-                    "description": "Search content within ONLY the user's currently-picked files (multi-select state). Picks are spyc UI state Claude can't see directly, so this is the only way to grep the user's intended subset. Returns a JSON array of {path, line, col, text} match objects.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "pattern": {
-                                "type": "string",
-                                "description": "Regex pattern. Smart-case applied."
-                            },
-                            "limit": {
-                                "type": "integer",
-                                "description": "Maximum matches. Default 200, max 5000.",
-                                "minimum": 1
-                            }
-                        },
-                        "required": ["pattern"]
-                    }
-                },
-                {
-                    "name": "search_inventory",
-                    "description": "Search content within the user's persistent inventory cache (yanked-into-cache files that survive across sessions). Like search_picks but spans sessions, so it's the way to grep accumulated 'interesting files'. Returns a JSON array of {path, line, col, text} match objects.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "pattern": {
-                                "type": "string",
-                                "description": "Regex pattern. Smart-case applied."
-                            },
-                            "limit": {
-                                "type": "integer",
-                                "description": "Maximum matches. Default 200, max 5000.",
-                                "minimum": 1
-                            }
-                        },
-                        "required": ["pattern"]
-                    }
-                },
-                {
-                    "name": "list_worktrees",
-                    "description": "List the git worktrees of the focused column's repo — the orient/inspect entry point for worktree cleanup. Returns a JSON array, one object per worktree: {path, branch, head, is_current, dirty:{staged,unstaged,untracked}, ahead, behind, merged, locked, lock_reason}. ahead/behind/merged are relative to the repo's integration base (null when unresolvable) — `merged:true` means removing that worktree/branch loses no unmerged commits. `locked:true` (with `lock_reason`) means another session has claimed it via claim_worktree and remove/clean will refuse. Consult it before remove_worktree (which tree is dirty, which is merged and safe to drop, which is claimed by someone else, which is the current one).",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {}
-                    }
-                },
-                {
-                    "name": "claim_worktree",
-                    "description": "Claim a worktree for your exclusive use — a cooperative lease so another spyc session (e.g. a second agent) won't tear it down underneath you. Sets git's native worktree lock with your `reason`, so remove_worktree/clean_worktree (here and via plain git) refuse it until released. Claim the worktree you're working in before you start editing; release_worktree when done. Locking the MAIN worktree is not possible (mirrors git).",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "path": { "type": "string", "description": "Path of the worktree to claim (as returned by create_worktree); relative paths resolve against the focused column's cwd." },
-                            "reason": { "type": "string", "description": "Human-readable owner/reason recorded on the lease and shown to other sessions (e.g. 'agent A: refactoring auth'). Optional." }
-                        },
-                        "required": ["path"]
-                    }
-                },
-                {
-                    "name": "release_worktree",
-                    "description": "Release a claim_worktree lease (clear the lock), so the worktree can be removed/cleaned again. Call it when you're done working in a worktree you claimed. No-op if it wasn't locked.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "path": { "type": "string", "description": "Path of the worktree to release; relative paths resolve against the focused column's cwd." }
-                        },
-                        "required": ["path"]
-                    }
-                },
-                {
-                    "name": "git_status",
-                    "description": "Working-tree status of the focused column's worktree, gitignore-aware and in-process (don't shell out to `git status`). Returns a JSON array, one object per changed path: {path, staged, unstaged, untracked} — `staged`/`unstaged` are the change kind ('modified'|'added'|'deleted'|'renamed'|'conflicted') or null. Empty array when the tree is clean. Pass `root` to inspect a different worktree you're working in.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "root": {
-                                "type": "string",
-                                "description": "Optional absolute path of the worktree to inspect instead of the user's focused column — e.g. a sibling worktree you're working in (a path from create_worktree/list_worktrees). Defaults to the focused column's worktree root. Must be inside one of this spyc session's roots — anything else is rejected, and the error names the allowed set."
-                            }
-                        }
-                    }
-                },
-                {
-                    "name": "git_log",
-                    "description": "Recent commit history of the focused column's worktree (HEAD, newest first), in-process. Returns a JSON array: {short_id, author, time, subject} per commit. Use it to orient on what's landed without shelling out to `git log`. Pass `root` for a different worktree you're working in.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "limit": { "type": "integer", "description": "Max commits to return (default 20, capped at 500)." },
-                            "root": {
-                                "type": "string",
-                                "description": "Optional absolute path of the worktree whose history to read instead of the user's focused column — e.g. a sibling worktree you're working in. Defaults to the focused column's worktree root. Must be inside one of this spyc session's roots — anything else is rejected, and the error names the allowed set."
-                            }
-                        }
-                    }
-                },
-                {
-                    "name": "git_diff",
-                    "description": "Unified diff of the focused column's worktree, in-process (don't shell out to `git diff` — and the production guard forbids it). Three scopes: default = the working tree (staged + unstaged + untracked) vs HEAD; `cached:true` = staged vs HEAD (what would commit); `unstaged:true` = the index vs the working tree (plain `git diff` — only what changed SINCE you staged). The last is the read you want when someone stages a checkpoint and then keeps editing. Returns `git diff`-style unified text (empty string when there's nothing to show). Pass `root` for a different worktree, and `paths` to restrict to specific files/subtrees.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "cached": {
-                                "type": "boolean",
-                                "description": "If true, diff the staged changes (index vs HEAD). Default false = working tree (staged + unstaged + untracked) vs HEAD."
-                            },
-                            "unstaged": {
-                                "type": "boolean",
-                                "description": "If true, diff the index vs the working tree (plain `git diff` — only the unstaged changes, i.e. what changed since you last staged). Takes precedence over `cached`."
-                            },
-                            "paths": {
-                                "type": "array",
-                                "items": { "type": "string" },
-                                "description": "Optional repo-relative paths (forward-slash) to restrict the diff to. Empty/omitted = the whole worktree."
-                            },
-                            "root": {
-                                "type": "string",
-                                "description": "Optional absolute path of the worktree to diff instead of the user's focused column — e.g. a sibling worktree you're working in. Defaults to the focused column's worktree root. Must be inside one of this spyc session's roots — anything else is rejected, and the error names the allowed set."
-                            }
-                        }
-                    }
-                }
-            ]
-        }),
-    )
+    send_result(w, id, super::tool_schemas::tools())
 }
 
 fn handle_tools_call(
@@ -581,6 +312,7 @@ fn handle_tools_call(
     params: &Value,
     ctx_path: &Path,
     cmd_tx: Option<&std::sync::mpsc::Sender<McpRequest>>,
+    caller: &Caller,
 ) -> io::Result<()> {
     let name = params["name"].as_str().unwrap_or("");
     let args = &params["arguments"];
@@ -597,6 +329,7 @@ fn handle_tools_call(
         let _ = tx.send(McpRequest {
             command: McpCommand::ToolCalled {
                 name: name.to_string(),
+                conn: caller.conn,
             },
             reply: reply_tx,
         });
@@ -605,6 +338,11 @@ fn handle_tools_call(
     match name {
         "get_spyc_context" => {
             let text = read_context_or_empty(ctx_path);
+            let own = caller.pane_id.as_deref().zip(cmd_tx);
+            let text = match own.and_then(|(pane_id, tx)| pane_context(tx, pane_id)) {
+                Some(pane) => with_pane(text, pane),
+                None => text,
+            };
             send_tool_result(w, id, &text)
         }
         "get_file_content" => {
@@ -839,25 +577,36 @@ fn handle_tools_call(
             let command = match name {
                 "report_status" => {
                     let status = args["status"].as_str().unwrap_or("").to_string();
-                    if !matches!(status.as_str(), "working" | "blocked" | "idle" | "done") {
+                    if !matches!(
+                        status.as_str(),
+                        "working"
+                            | "blocked"
+                            | "idle"
+                            | "done"
+                            | crate::agent::codex_recovery::QUESTION_START
+                            | crate::agent::codex_recovery::QUESTION_END
+                    ) {
                         return send_tool_error(
                             w,
                             id,
                             "status must be one of: working, blocked, idle, done",
                         );
                     }
-                    let pane_id = args["pane_id"].as_str().map(String::from);
+                    let pane_id = target_pane_id(args, caller);
                     let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
                     let ttl_ms = args["ttl_ms"].as_u64();
                     // Piggybacked by the status-hook reporter (Claude's hook
                     // stdin carries `session_id`); absent on a direct agent call.
                     let session_id = args["session_id"].as_str().map(String::from);
+                    let hook_event =
+                        crate::agent::status_hook::StatusHookEvent::from_value(&args["hook_event"]);
                     McpCommand::ReportStatus {
                         pane_id,
                         pane,
                         status,
                         ttl_ms,
                         session_id,
+                        hook_event,
                     }
                 }
                 "navigate_to" => {
@@ -935,7 +684,7 @@ fn handle_tools_call(
                     if !matches!(intent.as_str(), "editing" | "merging") {
                         return send_tool_error(w, id, "intent must be 'editing' or 'merging'");
                     }
-                    let pane_id = args["pane_id"].as_str().map(String::from);
+                    let pane_id = target_pane_id(args, caller);
                     let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
                     let pr = args["pr"].as_str().map(String::from);
                     let note = args["note"].as_str().map(String::from);
@@ -967,7 +716,7 @@ fn handle_tools_call(
                     if paths.is_empty() {
                         return send_tool_error(w, id, "missing required parameter: paths");
                     }
-                    let pane_id = args["pane_id"].as_str().map(String::from);
+                    let pane_id = target_pane_id(args, caller);
                     let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
                     let timeout_ms = args["timeout_ms"]
                         .as_u64()
@@ -1027,6 +776,18 @@ fn handle_tools_call(
             }
         }
         _ => send_tool_error(w, id, &format!("unknown tool: {name}")),
+    }
+}
+
+/// The context file's JSON with the caller's own tab under `pane`, beside the
+/// fields that describe what the user is looking at.
+fn with_pane(context: String, pane: Value) -> String {
+    match serde_json::from_str::<Value>(&context) {
+        Ok(Value::Object(mut map)) => {
+            map.insert("pane".into(), pane);
+            Value::Object(map).to_string()
+        }
+        _ => context,
     }
 }
 

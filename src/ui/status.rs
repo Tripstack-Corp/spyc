@@ -12,8 +12,11 @@ pub struct StatusBar<'a> {
     /// Session display name (e.g. `SAFFRON_CUMIN`). Hidden when `None`.
     pub session_name: Option<&'a str>,
     pub path: &'a str,
-    /// Optional trailing state, e.g. `[picks:2 inv:5 m1:on m2:on]`.
+    /// Optional trailing state, e.g. `[picks:2 hidden:3]`.
     pub suffix: &'a str,
+    /// A shorter `suffix` (`[p:2 h:3]`), drawn instead when the full one would
+    /// cut the path. `None` keeps `suffix` whatever the width.
+    pub suffix_short: Option<&'a str>,
     /// Git branch + dirty flag, e.g. `"main*"` or `None` if not in a repo.
     pub git_info: Option<&'a str>,
     /// Active pane's agent identity (e.g. `"claude:76422c62"` /
@@ -43,6 +46,16 @@ fn push_segment(spans: &mut Vec<Span>, text: &str, fg: Color, bg: Color, next_bg
 }
 
 impl StatusBar<'_> {
+    /// The suffix to draw in `room` columns, given what a suffix costs there
+    /// and what the uncut path needs: the full one, unless it would cut the path
+    /// and a short form exists.
+    fn fitting_suffix(&self, room: usize, cost: impl Fn(&str) -> usize, path_need: usize) -> &str {
+        match self.suffix_short {
+            Some(short) if room.saturating_sub(cost(self.suffix)) < path_need => short,
+            _ => self.suffix,
+        }
+    }
+
     /// The bar as a styled [`Line`], exactly as it will be drawn — including the
     /// width-driven truncation. Split out so the app layer can record what was
     /// actually rendered: a mouse selection maps screen COLUMNS back to characters,
@@ -52,6 +65,23 @@ impl StatusBar<'_> {
             return self.plain_line(area);
         }
         self.powerline(area)
+    }
+
+    /// The logo. Truecolor terminals get the 🌶️ emoji; degraded ones (GNU screen,
+    /// non-truecolor) mangle the 2-cell astral glyph into junk, so paint a
+    /// spice-red block instead — same 4-col footprint, reads as intentional.
+    fn push_logo(&self, spans: &mut Vec<Span<'static>>, term_bg: Color) {
+        // Pepper emoji gets its own span with terminal-default bg so the
+        // emoji colour rendering isn't clipped by the segment background.
+        let emoji_text = " \u{1f336}\u{fe0f} ";
+        if self.plain_logo {
+            let pepper_red = Color::Rgb(0xE0, 0x32, 0x22); // SPICE_HEAT[0]
+            spans.push(Span::styled(" ", Style::default().bg(term_bg)));
+            spans.push(Span::styled("  ", Style::default().bg(pepper_red)));
+            spans.push(Span::styled(" ", Style::default().bg(term_bg)));
+        } else {
+            spans.push(Span::styled(emoji_text, Style::default().bg(term_bg)));
+        }
     }
 
     #[allow(clippy::similar_names)]
@@ -82,22 +112,25 @@ impl StatusBar<'_> {
 
         let term_bg = Color::Reset;
 
-        // Pepper emoji gets its own span with terminal-default bg so the
-        // emoji colour rendering isn't clipped by the segment background.
-        let emoji_text = " \u{1f336}\u{fe0f} ";
         let emoji_w = 4; // space + 🌶️ (2 cols) + space
 
         let project_text = self.project_home.map(|p| format!(" {p} "));
         let session_text = self.session_name.map(|n| format!(" {n} "));
         let git_text = self.git_info.map(|g| format!(" \u{e0a0} {g} "));
         let agent_text = self.agent_info.map(|a| format!(" \u{f120} {a} ")); // 󰰠 terminal-shell-like glyph
-        let suffix_text = (!self.suffix.is_empty()).then(|| format!(" {} ", self.suffix));
 
         let width_of = |t: &Option<String>| t.as_deref().map_or(0, |s| dw(s) + 1);
         let project_w = width_of(&project_text);
         let session_w = width_of(&session_text);
         let git_w = width_of(&git_text);
         let agent_w = width_of(&agent_text);
+        // A suffix segment is ` text ` plus its separator; the path's is ` path `.
+        let suffix = self.fitting_suffix(
+            avail.saturating_sub(emoji_w + project_w + session_w + git_w + agent_w + 1),
+            |s| if s.is_empty() { 0 } else { dw(s) + 3 },
+            dw(self.path) + 2,
+        );
+        let suffix_text = (!suffix.is_empty()).then(|| format!(" {suffix} "));
         let suffix_w = width_of(&suffix_text);
 
         // path_budget = avail − (emoji + optional segments + path-sep).
@@ -119,18 +152,7 @@ impl StatusBar<'_> {
         };
 
         let mut spans: Vec<Span> = Vec::new();
-
-        // Logo. Truecolor terminals get the 🌶️ emoji; degraded ones (GNU screen,
-        // non-truecolor) mangle the 2-cell astral glyph into junk, so paint a
-        // spice-red block instead — same 4-col footprint, reads as intentional.
-        if self.plain_logo {
-            let pepper_red = Color::Rgb(0xE0, 0x32, 0x22); // SPICE_HEAT[0]
-            spans.push(Span::styled(" ", Style::default().bg(term_bg)));
-            spans.push(Span::styled("  ", Style::default().bg(pepper_red)));
-            spans.push(Span::styled(" ", Style::default().bg(term_bg)));
-        } else {
-            spans.push(Span::styled(emoji_text, Style::default().bg(term_bg)));
-        }
+        self.push_logo(&mut spans, term_bg);
 
         if let Some(ref text) = project_text {
             let next_bg = if session_text.is_some() {
@@ -199,18 +221,13 @@ impl StatusBar<'_> {
             format!("{}: ", parts.join(" "))
         };
         let pre_w = dw(&prefix);
-        let suffix_w = if self.suffix.is_empty() {
-            0
-        } else {
-            2 + dw(self.suffix)
-        };
+        let cost = |s: &str| if s.is_empty() { 0 } else { 2 + dw(s) };
+        let suffix = self.fitting_suffix(avail.saturating_sub(pre_w), cost, dw(self.path));
+        let suffix_w = cost(suffix);
 
         let path_budget = avail.saturating_sub(pre_w + suffix_w);
         let (path_disp, suffix_disp) = if path_budget >= 8 {
-            (
-                truncate_middle(self.path, path_budget),
-                self.suffix.to_string(),
-            )
+            (truncate_middle(self.path, path_budget), suffix.to_string())
         } else {
             let budget = avail.saturating_sub(pre_w);
             (truncate_middle(self.path, budget), String::new())
@@ -350,6 +367,7 @@ mod tests {
                     session_name,
                     path,
                     suffix,
+                    suffix_short: None,
                     git_info,
                     agent_info,
                     theme: &theme,
@@ -364,6 +382,76 @@ mod tests {
             out.push_str(buf.cell((x, 0)).map_or(" ", |c| c.symbol()));
         }
         out.trim_end().to_string()
+    }
+
+    /// The bar's text at `width`, with a short suffix to fall back on.
+    fn bar_text(path: &str, mono: bool, width: u16) -> String {
+        let theme = Theme {
+            mono,
+            ..Theme::default()
+        };
+        let bar = StatusBar {
+            project_home: Some("spyc"),
+            session_name: None,
+            path,
+            suffix: "[picks:3 hidden:12 sort:mtime]",
+            suffix_short: Some("[p:3 h:12 s:t]"),
+            git_info: None,
+            agent_info: None,
+            theme: &theme,
+            plain_logo: true,
+        };
+        bar.build_line(Rect::new(0, 0, width, 1))
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect()
+    }
+
+    const PATH: &str = "~/src/spyc/src/app/render";
+
+    #[test]
+    fn the_full_suffix_is_drawn_while_the_path_fits() {
+        for mono in [false, true] {
+            let text = bar_text(PATH, mono, 120);
+            assert!(text.contains("[picks:3 hidden:12 sort:mtime]"), "{text}");
+            assert!(text.contains(PATH), "{text}");
+        }
+    }
+
+    /// The width where the full words would cut the path but the short forms
+    /// don't: the path is what the user navigates by, so it wins the room.
+    #[test]
+    fn the_short_suffix_is_drawn_when_the_full_one_would_cut_the_path() {
+        for mono in [false, true] {
+            let text = bar_text(PATH, mono, 58);
+            assert!(text.contains("[p:3 h:12 s:t]"), "mono={mono}: {text}");
+            assert!(text.contains(PATH), "mono={mono}: {text}");
+        }
+    }
+
+    #[test]
+    fn with_no_short_form_the_path_truncates_as_before() {
+        let theme = Theme::default();
+        let bar = StatusBar {
+            project_home: Some("spyc"),
+            session_name: None,
+            path: PATH,
+            suffix: "[picks:3 hidden:12 sort:mtime]",
+            suffix_short: None,
+            git_info: None,
+            agent_info: None,
+            theme: &theme,
+            plain_logo: true,
+        };
+        let text: String = bar
+            .build_line(Rect::new(0, 0, 58, 1))
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert!(text.contains("[picks:3 hidden:12 sort:mtime]"), "{text}");
+        assert!(text.contains(ELLIPSIS), "{text}");
     }
 
     #[test]

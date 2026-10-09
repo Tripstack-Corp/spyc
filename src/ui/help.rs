@@ -78,7 +78,10 @@ const SECTIONS: &[Section] = &[
             ("D", "open in pager (top pane, bottom pane stays visible)"),
             ("u  -", "climb to parent"),
             ("~  Home", "go to home directory ($HOME)"),
-            ("J", "jump to a path (~, $VAR expanded; ? for history)"),
+            (
+                "J",
+                "jump to a path (~, $VAR; ? history; offers the pane's last path)",
+            ),
             (
                 "F",
                 "find file (project-wide fuzzy: gitignore-aware walk, type to filter)",
@@ -221,7 +224,7 @@ const SECTIONS: &[Section] = &[
             ),
             (
                 ":activity",
-                "toggle activity monitor; :activity dump → per-pane dot-status (why-status) report in a pager",
+                "toggle activity monitor; :activity transparent|solid → overlay style; :activity dump → per-pane dot-status (why-status) report + MCP connections in a pager",
             ),
             (":setenv NAME=VALUE", "set an environment variable"),
         ],
@@ -269,12 +272,20 @@ const SECTIONS: &[Section] = &[
                 "restart active tab command in place (confirms if its child is still running)",
             ),
             (
+                "^a F",
+                "fork active tab: claude/codex branch its conversation into a new tab; a shell tab copies",
+            ),
+            (
                 "●  ■  ·",
                 "agent tab dot: pulse ● working, red square ■ blocked, teal square ■ done, dim · idle (:why-status)",
             ),
             (
                 ":hooks on|on!|off",
                 "claude/codex/agy auto-status hooks (asked once on launch); on! restarts+resumes a claude pane",
+            ),
+            (
+                ":startup-tabs [forget]",
+                "where launch's pane tabs come from; forget re-asks about a project .spycrc.toml's list",
             ),
             (
                 ":mouse on|off|auto",
@@ -315,7 +326,10 @@ const SECTIONS: &[Section] = &[
                 "^a g",
                 "image gallery popup: received + unsent pastes (Enter view, q close)",
             ),
-            ("^a s", "send selection paths to pane stdin"),
+            (
+                "^a s",
+                "send selection paths to pane stdin (relative to the pane's cwd)",
+            ),
             (
                 "^a ↓",
                 "send a literal ^a to the pane (e.g. so Claude receives it)",
@@ -358,6 +372,10 @@ const SECTIONS: &[Section] = &[
             (
                 ":lua",
                 "status|on|off|reload — engine control (init.lua: spyc.map/spyc.command/spyc.on events)",
+            ),
+            (
+                ":prompt",
+                "<name> — type a [prompts] template into the pane (bare: list them)",
             ),
         ],
     },

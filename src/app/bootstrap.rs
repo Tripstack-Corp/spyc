@@ -24,11 +24,7 @@ impl App {
         self.runtime.picker = picker;
     }
 
-    pub fn new(
-        resume: bool,
-        mcp_takeover_allowed: bool,
-        cli_color: crate::config::ColorMode,
-    ) -> Self {
+    pub fn new(resume: bool, cli_color: crate::config::ColorMode) -> Self {
         let (cwd, start_error) = if let Ok(d) = std::env::current_dir() {
             (d, None)
         } else {
@@ -176,6 +172,7 @@ impl App {
             config,
             // No runtime `:mouse` toggle yet — follow the config.
             mouse_capture_override: None,
+            status_flags_override: None,
             mode: Mode::Normal,
             project_home,
             session_name,
@@ -191,10 +188,13 @@ impl App {
             pending_delete_preview: None,
             graveyard: Vec::new(),
             scope_registry: Vec::new(),
+            codex_recovery: std::collections::HashMap::new(),
             pending_new_tab_cmd: None,
             last_captured_cmd: None,
             pending_worktrees: None,
             pending_sessions: None,
+            deferred_tabs: Vec::new(),
+            startup_commands: Vec::new(),
             start_dir: cwd,
             prev_dir: None,
             last_search: None,
@@ -211,7 +211,7 @@ impl App {
             user_host: user_host_string(),
             should_quit: false,
         };
-        let context_path = crate::context::context_path(&app_state.start_dir);
+        let context_path = crate::context::process_context_path(&app_state.start_dir);
         // Reap orphaned artifacts left by instances that exited WITHOUT running
         // teardown (SIGKILL / crash / `kill -9`): stale `.spyc-context-<pid>.json`
         // files and dead-PID `spyc` MCP entries in `.mcp.json` / `.codex/config.toml`.
@@ -220,8 +220,15 @@ impl App {
         // config), so this is safe to run before we write our own. Clean exits
         // still self-clean via `run_teardown`; this just stops orphans piling up.
         let our_pid = std::process::id();
+        // The launch dir is swept for the in-tree markers spyc wrote before
+        // #523 moved the context into the state dir.
+        let state_swept = crate::state::state_root().map_or(0, |dir| {
+            crate::context::sweep_orphan_context_files(&dir, our_pid)
+                + crate::mcp::sweep_orphan_root_markers(&dir, our_pid)
+        });
         let swept = crate::context::sweep_orphan_context_files(&app_state.start_dir, our_pid)
-            + crate::mcp::sweep_orphan_spyc_configs(&app_state.start_dir, our_pid);
+            + crate::mcp::sweep_orphan_spyc_configs(&app_state.start_dir, our_pid)
+            + state_swept;
         if swept > 0 {
             spyc_debug!("startup: reaped {swept} orphaned spyc artifact(s)");
         }
@@ -229,14 +236,15 @@ impl App {
         let (mcp_cmd_tx, mcp_cmd_rx) = std::sync::mpsc::channel();
         // Start the MCP Unix socket server so `spyc --mcp` (spawned by
         // Claude Code) can proxy to us for full read/write MCP access.
-        let mcp_running = crate::mcp::start_socket_server(context_path.clone(), mcp_cmd_tx)
-            .map_or_else(
-                |e| {
-                    spyc_debug!("MCP socket server failed to start: {e}");
-                    false
-                },
-                |()| true,
-            );
+        let mcp_running =
+            crate::mcp::start_socket_server(context_path.clone(), &app_state.start_dir, mcp_cmd_tx)
+                .map_or_else(
+                    |e| {
+                        spyc_debug!("MCP socket server failed to start: {e}");
+                        false
+                    },
+                    |()| true,
+                );
         // Background git-status worker. Owns the in-process gix
         // status read (status::repo_status) on cache miss so the chdir
         // UI returns immediately. Lives for the lifetime of the
@@ -274,7 +282,10 @@ impl App {
         let mut app_state = app_state;
         // Per-column flag — only `left` exists at bootstrap. A second commander
         // copies this from `left` when it opens (`open_second_commander_at`).
-        app_state.left.git_cache.git_worker_available = true;
+        app_state
+            .col_mut(state::Side::Left)
+            .git_cache
+            .git_worker_available = true;
         let mut app = Self {
             state: app_state,
             // Write context once on startup so claude sees initial state
@@ -297,6 +308,7 @@ impl App {
                 lua_inflight: None,
                 lua_events: super::lua_events::LuaEventState::default(),
                 mcp_config_dirs: Vec::new(),
+                status_hook_claims: Vec::new(),
                 pane_tabs: None,
                 top_overlay: None,
                 top_overlay_right: None,
@@ -324,6 +336,8 @@ impl App {
                 archive_mount_then: None,
                 file_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 clipboard_paste_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                jump_default_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                jump_default_seq: 0,
                 clipboard_copy_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 listing_refresh_inflight: false,
                 listing_refresh_dirty: false,
@@ -339,7 +353,7 @@ impl App {
         app.state.rebuild_rows();
         // Resolve + cache the repo root at startup so the first git read
         // (and the FSEvent exclude filter) have it before the user navigates.
-        let initial_cwd = app.state.left.listing.dir.clone();
+        let initial_cwd = app.state.col(state::Side::Left).listing.dir.clone();
         app.state.update_repo_root(state::Side::Left, &initial_cwd);
         // Re-key the seeded harpoon to the resolved worktree root (the seed
         // above used PROJECT_HOME, which differs when launched in a subdir of
@@ -350,7 +364,8 @@ impl App {
         // string is computed sync via gix (compute_git_info_fast ->
         // discovery::head_branch) so it's available on the first paint;
         // only the per-file markers and dirty flag wait for the worker.
-        app.state.left.git.info = app.state.compute_git_info_fast(state::Side::Left);
+        app.state.col_mut(state::Side::Left).git.info =
+            app.state.compute_git_info_fast(state::Side::Left);
         let _ = app
             .state
             .git_file_statuses_cached(state::Side::Left, &initial_cwd, false);
@@ -378,6 +393,12 @@ impl App {
         // `Effect::Graveyard` kicked from `App::run`, so its disk IO stays off
         // the startup path. See that call site.
 
+        // Startup pane tabs (`[pane] tabs` / `[[pane.tab]]`): the declared
+        // fleet at launch, or the consent prompt a project-local list needs
+        // first (`startup_tabs`). Precedence: restore > an approved project
+        // list > the user's list > single-tab-on-demand.
+        app.start_startup_tabs(resume);
+
         if resume {
             app.show_session_picker();
         }
@@ -388,13 +409,11 @@ impl App {
         if !resume {
             app.maybe_offer_skill_update();
         }
-        // The MCP client config (`.mcp.json` / `.codex/config.toml`) is no
-        // longer written here; it's written lazily when an agent pane launches
-        // (`open_pane_tab_in` → `ensure_agent_mcp_config`), so we don't create a
-        // config dir in directories where no agent is ever run. Stash the
-        // takeover decision for that later write. (Restored agent panes go
+        // The MCP client config (`.mcp.json` / `.codex/config.toml`) is
+        // written lazily when an agent pane launches (`open_pane_tab_in` →
+        // `ensure_agent_mcp_config`), so we don't create a config dir in
+        // directories where no agent is ever run. (Restored agent panes go
         // through the same launch path, so they pick up their config too.)
-        app.view.mcp_takeover_allowed = mcp_takeover_allowed;
         app
     }
 }

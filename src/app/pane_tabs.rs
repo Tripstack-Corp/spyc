@@ -6,8 +6,6 @@
 //! `pager_handler`, `loop_steps`, `session`), so they're `pub` (or
 //! `pub(super)` for the one that only a sibling needs).
 
-use std::time::Duration;
-
 use super::{
     App, Effect, Mode, Pane, PaneTabs, Prompt, PromptKind, RESTORE_RESUME_ENTER_DELAY,
     RESTORE_RESUME_VERIFY_DELAY, RESTORE_RESUME_VERIFY_RETRIES, RESTORE_RESUME_VERIFY_TAIL,
@@ -168,6 +166,9 @@ impl App {
         // pane knows its session id immediately — pin it now so `^a v` is exact
         // from the first keypress (the spawn-time scan handles fresh codex panes).
         let mut info = TabInfo::new(cmd, cwd);
+        info.status_hooks_at_spawn = crate::agent::detect(cmd)
+            .status_hooks()
+            .is_some_and(|support| support.installed(cwd));
         let is_agent = crate::agent::detect(cmd).kind() != crate::state::sessions::AgentKind::Other;
         if crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex {
             info.codex_session_id = crate::state::codex_transcript::resume_uuid_from_command(cmd);
@@ -187,7 +188,7 @@ impl App {
             (false, _) => Vec::new(),
         };
         match Pane::spawn_with_env(
-            cmd,
+            &self.spawn_command(cmd),
             rows,
             cols,
             cwd,
@@ -219,164 +220,15 @@ impl App {
         }
     }
 
-    /// After launching an agent pane that supports status hooks (claude/codex):
-    /// install them if this project has already consented, do nothing if it
-    /// declined, else raise the first-launch consent popup (`HookConsent`).
-    /// Consent is keyed by the **project root** (`find_repo_root`, else the cwd)
-    /// and saved, so a given repo is asked exactly once. Gated on MCP running
-    /// (the hooks report over the socket) and the agent having a status-hook
-    /// installer. For codex the already-consented case is also written
-    /// pre-spawn ([`maybe_preinstall_startup_hooks`](Self::maybe_preinstall_startup_hooks))
-    /// so the hooks are live this session; here it's a harmless idempotent re-run.
-    fn maybe_offer_status_hooks(&mut self, cmd: &str, cwd: &std::path::Path) {
-        if !self.view.mcp_running {
-            return;
-        }
-        let profile = crate::agent::detect(cmd);
-        let Some(support) = profile.status_hooks() else {
-            return;
-        };
-        let kind = profile.kind();
-        let root = state::find_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
-        match crate::state::hook_consent::consent_for(&root) {
-            Some(true) => self.install_status_hooks(cwd, kind),
-            Some(false) => {}
-            None => {
-                self.state.mode = Mode::Prompting(Prompt::simple(
-                    PromptKind::HookConsent {
-                        root,
-                        cwd: cwd.to_path_buf(),
-                        agent: kind,
-                    },
-                    format!(
-                        "Show this agent's live status on its tab? spyc will write status hooks to {} (removed when the pane exits).",
-                        support.config_label
-                    ),
-                ));
-            }
-        }
-    }
-
-    /// Pre-spawn install for agents that read their hook config only at startup
-    /// (codex): when this project has already consented, write the status hooks
-    /// BEFORE the pty spawns so they're live for THIS session — a post-spawn
-    /// install would be missed until the agent's next launch. Live-reload agents
-    /// (claude) skip this; their post-spawn `maybe_offer_status_hooks` install
-    /// is picked up on the next turn. First-launch consent is still handled
-    /// post-spawn (it can't pre-empt the interactive popup).
-    pub(super) fn maybe_preinstall_startup_hooks(&mut self, cmd: &str, cwd: &std::path::Path) {
-        if !self.view.mcp_running {
-            return;
-        }
-        let profile = crate::agent::detect(cmd);
-        let Some(support) = profile.status_hooks() else {
-            return;
-        };
-        if support.live_reload {
-            return;
-        }
-        let root = state::find_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
-        if crate::state::hook_consent::consent_for(&root) == Some(true) {
-            self.install_status_hooks(cwd, profile.kind());
-        }
-    }
-
-    /// Write `kind`'s status hooks into `cwd` and record the dir so teardown
-    /// cleans them (shares `mcp_config_dirs` with the `.mcp.json` cleanup).
-    /// Assumes consent is already granted. A no-op for an agent without a
-    /// status-hook installer; a no-op-returning write (git-tracked config)
-    /// simply isn't tracked.
-    ///
-    /// Also claims the dir in the cross-instance owner registry, so a *sibling*
-    /// spyc quitting can't delete the hooks this session's panes are still
-    /// reporting through (`state::hook_owners`).
-    pub(super) fn install_status_hooks(
-        &mut self,
-        cwd: &std::path::Path,
-        kind: crate::state::sessions::AgentKind,
-    ) {
-        let Some(support) = crate::agent::profile_for(kind).status_hooks() else {
-            return;
-        };
-        if (support.ensure)(cwd) {
-            crate::state::hook_owners::claim(cwd, std::process::id());
-            if !self.runtime.mcp_config_dirs.iter().any(|d| d == cwd) {
-                self.runtime.mcp_config_dirs.push(cwd.to_path_buf());
-            }
-        }
-    }
-
-    /// The project root `:hooks` acts on: the active pane's cwd's repo root
-    /// (the agent the user means), else the focused commander's. Falls back to
-    /// the dir itself when it isn't in a repo. Consent is keyed by this root.
-    pub(super) fn status_hooks_target_root(&self) -> std::path::PathBuf {
-        let dir = self.runtime.pane_tabs.as_ref().map_or_else(
-            || self.state.cur().listing.dir.clone(),
-            |t| t.active_info().cwd.clone(),
-        );
-        state::find_repo_root(&dir).unwrap_or(dir)
-    }
-
-    /// `:hooks on|off` — grant/revoke per-project consent for agent status hooks
-    /// and (un)install them for every open hook-supporting pane (claude/codex)
-    /// in that project, so a *running* agent gains/loses the hooks, not just
-    /// future launches. Claude reloads `.claude/settings.json` live (effect on
-    /// its next message); codex reads its config at startup, so an `on` for a
-    /// running codex pane writes the hooks but they only apply on codex's next
-    /// launch. This is the escape hatch from an accidental `no` at launch.
-    pub(super) fn set_status_hooks(&mut self, enable: bool) {
-        let root = self.status_hooks_target_root();
-        crate::state::hook_consent::set_consent(&root, enable);
-        // Hook-supporting panes whose project root matches — collect (cwd, kind)
-        // first (immutable borrow) so the install/cleanup mutations don't alias.
-        let panes: Vec<(std::path::PathBuf, crate::state::sessions::AgentKind)> = self
-            .hook_supporting_panes()
-            .into_iter()
-            .filter(|(cwd, _)| state::find_repo_root(cwd).as_deref().unwrap_or(cwd) == root)
-            .collect();
-        for (cwd, kind) in &panes {
-            if enable {
-                self.install_status_hooks(cwd, *kind);
-            } else if let Some(support) = crate::agent::profile_for(*kind).status_hooks() {
-                // Unlike teardown, an explicit `:hooks off` removes them even
-                // with a sibling spyc still claiming the dir: the user is
-                // revoking consent for the project, and consent is what the
-                // sibling's own re-heal consults before re-installing.
-                let _ = crate::state::hook_owners::release(cwd, std::process::id());
-                (support.cleanup)(cwd);
-                self.runtime.mcp_config_dirs.retain(|d| d != cwd);
-            }
-        }
-        let proj = crate::paths::display_tilde(&root);
-        if enable {
-            let note = Self::ephemeral_hook_binary_note();
-            self.state.flash_info(format!(
-                "status hooks ON for {proj} ({} pane(s)) — claude live next message, codex on next launch (`:hooks on!` force-restarts claude){note}",
-                panes.len()
-            ));
+    /// What a pane actually runs for `cmd`: a codex pane gets `--no-daemon`
+    /// (`agent::codex_without_daemon`) unless `[pane] codex_daemon` lets it
+    /// join codex's shared server. The tab keeps `cmd` itself.
+    fn spawn_command<'a>(&self, cmd: &'a str) -> std::borrow::Cow<'a, str> {
+        let codex = crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex;
+        if codex && !self.state.config.pane.codex_daemon {
+            crate::agent::codex_without_daemon(cmd)
         } else {
-            self.state
-                .flash_info(format!("status hooks OFF for {proj}"));
-        }
-    }
-
-    /// A trailing flash note (or empty) warning that the running binary lives
-    /// in a `target/{debug,release}` build dir — its absolute path is baked
-    /// into the hook command (`current_exe()`), so it goes stale if that tree
-    /// (e.g. a throwaway worktree) is cleaned. `make install` + running from a
-    /// stable path avoids it. Cheap; computed only on user-initiated enable.
-    fn ephemeral_hook_binary_note() -> String {
-        let in_build_dir = std::env::current_exe().is_ok_and(|exe| {
-            let has = |name: &str| {
-                exe.components()
-                    .any(|c| c.as_os_str().to_str() == Some(name))
-            };
-            has("target") && (has("debug") || has("release"))
-        });
-        if in_build_dir {
-            " — note: build-dir binary, `make install` for a stable hook path".to_string()
-        } else {
-            String::new()
+            std::borrow::Cow::Borrowed(cmd)
         }
     }
 
@@ -416,7 +268,7 @@ impl App {
             extra_env.push(("SPYC_MCP_SOCK", sock));
         }
         match Pane::spawn_with_env(
-            cmd,
+            &self.spawn_command(cmd),
             rows,
             cols,
             cwd,
@@ -613,41 +465,6 @@ impl App {
                 }
             }
         }
-    }
-
-    /// Locate a `claude --resume` tab from session restore that looks
-    /// broken (non-zero exit, or alive-but-printed-a-crash-dump within
-    /// the 30s window). Disarms the marker on tabs whose window has
-    /// passed without trouble, so a real user-driven exit later isn't
-    /// mistaken for a restore failure. Returns the index of the first
-    /// crashed tab found, if any.
-    pub fn find_crashed_restore_tab(&mut self, now: std::time::Instant) -> Option<usize> {
-        let tabs = self.runtime.pane_tabs.as_mut()?;
-        let window = Duration::from_secs(30);
-        let dump_grace = Duration::from_secs(3);
-        for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
-            if entry.info.restore_fallback.is_none() {
-                continue;
-            }
-            let age = now.duration_since(entry.info.spawn_at);
-            if age > window {
-                entry.info.restore_fallback = None;
-                continue;
-            }
-            let bad_exit = entry.pane.is_closed()
-                && entry.pane.exit_status().is_some_and(|s| s.exit_code() != 0);
-            // Always re-scan once dump_grace has elapsed: claude often
-            // prints the entire crash dump in <1s then sits quiescent,
-            // and `output_dirty` gets cleared on every render — gating
-            // on it would silently swallow the prompt.
-            let dump_signature = !entry.pane.is_closed()
-                && age >= dump_grace
-                && pane_has_crash_marker(&entry.pane.recent_lines(200));
-            if bad_exit || dump_signature {
-                return Some(i);
-            }
-        }
-        None
     }
 
     pub fn start_new_tab_prompt(&mut self) {
@@ -1083,22 +900,6 @@ impl App {
         let top = usable.saturating_sub(bottom);
         (top.max(1), cols.max(1))
     }
-}
-
-/// True when scrollback contains a known Claude/bun crash signature.
-/// These markers don't appear in healthy Claude startup output.
-fn pane_has_crash_marker(lines: &[String]) -> bool {
-    const MARKERS: &[&str] = &[
-        // bun's single-file runtime path; appears in unhandled-exception dumps.
-        "/$bunfs/root/",
-        // e.g. `g9H is not a function` on the resume path regression.
-        "is not a function",
-        // sandbox helper failed and `failIfUnavailable` is set.
-        "Error: sandbox required but unavailable",
-    ];
-    lines
-        .iter()
-        .any(|line| MARKERS.iter().any(|m| line.contains(m)))
 }
 
 #[cfg(test)]

@@ -190,6 +190,11 @@ impl App {
             })
             .collect();
         for (root, listing_dir) in cols {
+            // Runs every loop iteration, and building a checker reopens the repo
+            // and SHA-1s the whole index: skip it when nothing is left to judge.
+            if fs_pending.is_empty() {
+                return;
+            }
             crate::git::excludes::with_checker(&root, |is_excluded| {
                 fs_pending.retain_mut(|ev| {
                     ev.paths.retain(|p| {
@@ -539,6 +544,7 @@ mod tests {
             Message::Wake(Wake::Lua),
             Message::Wake(Wake::ClipboardPaste),
             Message::Wake(Wake::ClipboardCopy),
+            Message::Wake(Wake::JumpDefault),
         ];
         for done in wakes {
             let (_tx, rx) = mpsc::channel::<Message>();

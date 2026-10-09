@@ -28,10 +28,15 @@ restart** (`:lua reload` or `^R` re-runs `init.lua`). Project settings layer on
 top of user settings per-field, so a bare `[notify]` in a project file doesn't
 clobber your user defaults.
 
-**Security:** the *executing* keymap verbs (`unix`, `command`, `lua`, `jump`)
-only take effect from **`~/.spycrc.toml`** — a project-local `.spycrc.toml` in an
-untrusted clone can't bind a key to run code. Lua scripts load only from
-`~/.config/spyc/`.
+**Security:** the *executing* keymap verbs (`unix`, `command`, `lua`, `jump`,
+`prompt`), and the four [actions](#action-names) that type at the pane, only take
+effect from **`~/.spycrc.toml`** — a project-local `.spycrc.toml` in an untrusted
+clone can't bind a key to run code, and its
+[`[prompts]`](#prompt-templates--prompts) are ignored, so a repo can't choose
+what gets typed at your agent. A project file's
+[startup tabs](#startup-tabs--pane-tabs) run their commands at launch with no
+keypress at all, so they open only after you approve that exact list, and an
+edited list asks again. Lua scripts load only from `~/.config/spyc/`.
 
 ---
 
@@ -43,14 +48,17 @@ status_position = "top"        # or "bottom" (vim/tmux convention; prompt sits a
 chord_hint_delay_ms = 300      # ms holding a chord (g, ^a, H) before the which-key popup; 0 disables
 color_depth = "auto"           # "auto" (truecolor if $COLORTERM says so, else 256), "truecolor", or "256"
 vsplit_mode = "full_height"    # shape `^s |` opens a vertical split in; or "top_only" (pane stays full-width below)
+status_flags = "auto"          # status-bar state: only what differs, short when tight; or "short", "full"
 
 [pane]
 default_command = "claude"     # pre-filled into the `^a c` new-tab prompt
+tabs = ["claude", "zsh"]       # open these tabs at launch (~/.spycrc.toml only; see below)
 new_tab_cwd = "worktree_root"  # focused column's worktree root (gw's target); or "project_home" (PROJECT_HOME), "browse_dir" (the focused column's dir)
 claude_transcript_scrollback = false  # `^a v` reads Claude's JSONL transcript instead of terminal scrollback
                                       # (only decides which comes up FIRST — `T` swaps in the view, and the
                                       #  transcript is used regardless when there's no terminal capture)
 codex_mcp = true               # register spyc's MCP server for codex panes
+codex_daemon = false           # false: codex panes run `--no-daemon`, so their hooks + MCP reach the spyc that launched them
 preview_pasted_images = true   # keep a copy of images you paste into an agent pane, for `^a g`
 
 [yank]
@@ -115,6 +123,82 @@ Aliases: `full` for the first, `half` / `half_height` / `top` for the second.
 second commander (`^s n`) ignores the setting and always opens `top_only` — two
 peer browsers normally want one full-width pane beneath them — and `^s f` is how
 you make that one full-height too.
+
+### Status-bar state — `[layout] status_flags`
+
+The status bar ends with the focused column's state, and lists only what
+differs from rest:
+
+| full | short | shown when |
+|---|---|---|
+| `picks:3` | `p:3` | anything is picked |
+| `inv:2` | `i:2` | the inventory has items |
+| `m1:off` / `m2:on` | the same | a mask differs from its configured default |
+| `limit:*.rs` | `l:*.rs` | a `=` / `:limit` filter is active (`limit:picks` for `=!`) |
+| `hidden:14` | `h:14` | the masks or the filter hide entries |
+| `sort:mtime↑` | `s:t↑` | the sort isn't by name, ascending (`n` name, `s` size, `t` time, `e` ext) |
+
+An archive mount's badge, background tasks (when there's no pane divider to
+show them) and `[ZOOM]` appear as before.
+
+| value | behaviour |
+|-------|----------|
+| `auto` (default) | the full words, or the short forms when the words would cut the path |
+| `short` | always the short forms |
+| `full` | every field on every frame, `[picks:0 inv:0 m1:on m2:on hidden:14 sort:name]` — the bar before this setting |
+
+`:set flags=auto|short|full` changes it for the rest of the run; a config
+reload doesn't undo it.
+
+### Startup tabs — `[pane] tabs`
+
+Opens the bottom pane with tabs already in place at launch, the config-driven
+version of pressing `^a c` once per tab. The compact form lists commands:
+
+```toml
+[pane]
+tabs = ["claude", "zsh"]
+```
+
+The table form adds a working directory and a display label per tab:
+
+```toml
+[[pane.tab]]
+command = "claude"
+cwd = "~/Work/my-project"   # ~, absolute, or relative to the launch directory
+label = "coordinator"       # defaults from the command
+```
+
+- **A project's own tabs need your approval first.** Yours, in
+  `~/.spycrc.toml`, open unasked. A project-local `.spycrc.toml` can declare a
+  list too, a repo's own claude + dev-server set for instance. Those commands
+  aren't yours, so at launch spyc lists every one in a pop-up:
+  - **`y`** approves that list: it opens now and on later launches, in place of
+    yours.
+  - **`n`** declines it, and your own tabs open, now and on later launches.
+  - **`Esc`** skips it this once and asks next time.
+  - Any other key keeps the pop-up up, so a reflexive `Enter` can't approve a
+    command.
+
+  The answer binds to the **exact list**: every command and `cwd`, in order.
+  If a later `git pull` changes the list, spyc asks again. A changed `label`
+  doesn't count, since labels don't change what runs. The prompt escapes
+  control characters and caps very long commands at a visible count, so what
+  you read is what would run. `:startup-tabs` shows the current answer, and
+  `:startup-tabs forget` drops it so the next launch asks again.
+- Use one form per file. Setting both is an error at load, and so is more than
+  9 tabs (the `^a 1..9` reach) or an empty `command`. In a project file each of
+  those is a warning instead, and the project's list is ignored, so a broken
+  repo can't stop your own config loading.
+- A `cwd` that doesn't exist falls back to `[pane] new_tab_cwd`.
+- `spyc -r` wins: resuming a session restores its saved tabs and skips these.
+  Unset, nothing opens until the first `^a c`.
+- Startup doesn't take the keyboard. The first tab is active, focus stays on
+  the file list, and one flash summarizes the spawn, including any cwd
+  fallbacks or failed spawns.
+- When labels don't fit the divider, each tab is cropped so every tab stays
+  visible and clickable. A per-tab `label` is the way to keep tabs with a
+  shared prefix apart.
 
 ---
 
@@ -467,6 +551,57 @@ A pattern with an un-compilable regex is skipped with a warning, not a crash.
 
 ---
 
+## Prompt templates — `[prompts]`
+
+A prompt template is a message you send an agent over and over. One key types
+it into the active pane tab, with the selection filled in:
+
+```toml
+keymap = [
+  "map <F6> prompt review",
+  "map <F7> prompt explain",
+]
+
+[prompts]
+review  = "Review % for bugs. Don't change anything yet."
+explain = "Explain what %d does, starting from its entry point."
+tests   = """
+Write tests for %.
+Cover the error paths first."""
+```
+
+(`keymap` goes above `[prompts]`: in TOML, a key after a table header belongs to
+that table.)
+
+| Token | Becomes |
+|---|---|
+| `%` | the picks, else the cursor row — what `^a s` sends |
+| `%i` | the inventory's picked items, else all of them |
+| `%d` | the focused column's directory |
+| `%%` | a literal `%`, so "50%" in a template is written `50%%` |
+
+Paths are written the way `^a s` writes them: relative to the receiving pane's
+own cwd when they're under it (`.` for the cwd itself), absolute otherwise, and
+quoted when they hold a space.
+
+**The prompt is typed, not sent.** The pane gets the keyboard and **Enter**
+sends it, so you can read what was filled in, or finish the sentence, first. An
+agent that asked for bracketed paste (claude and codex both do) gets the
+template as one paste, so a multi-line template arrives whole rather than
+submitting at its first newline.
+
+A token with nothing behind it (`%` in an empty directory, `%i` with an empty
+inventory) is refused rather than typing a prompt about nothing, and so is a
+path that isn't valid UTF-8, since it can't be typed as itself.
+
+`:prompt <name>` types one without a key, and a bare `:prompt` lists them.
+
+**`[prompts]` loads only from `~/.spycrc.toml`.** A template is text typed at
+your agent, so a project-local file that defines one is ignored with a warning,
+and `prompt` is one of the executing verbs.
+
+---
+
 ## Keymap — the `keymap` DSL
 
 One string per binding in a `keymap = [ ... ]` array. Forms:
@@ -476,11 +611,19 @@ One string per binding in a `keymap = [ ... ]` array. Forms:
 | `map <KEY> unix <command...>` | run a shell command (`%` = current selection) |
 | `map <KEY> command <:cmd...>` | run a `:` command (e.g. `graveyard`, `activity`) |
 | `map <KEY> lua <name>` | run `~/.config/spyc/lua/<name>.lua` |
-| `map <KEY> patternpick <glob>` | multi-select files matching a glob |
-| `map <KEY> jump <path>` | jump the file list to a directory |
+| `map <KEY> prompt <name>` | type the [`[prompts]`](#prompt-templates--prompts) template `<name>` into the active pane tab |
+| `map <KEY> patternpick =<glob>` | multi-select files matching a glob |
+| `map <KEY> jump =<path>` | jump the file list to a directory |
+| `map <KEY> <action>` | any built-in action by [name](#action-names) |
+| `map <KEY> <action> =<value>` | an action with a parameter (`harpoon_jump =3`, `set_mark =a`) |
+| `unmap <KEY>` | the key does nothing; the same as `map <KEY> noop` |
 
 `<KEY>` is a single char (`f`), a Ctrl-combo (`^P`), or a named key (`<F2>`). The
 DSL binds single keys — for multi-key chords, use `init.lua`'s `spyc.map`.
+Later lines win, so a `map` after an `unmap` of the same key binds it again.
+`unmap` of a chord prefix (`g`, `y`, `H`) silences the whole chord, but a
+binding for any other key leaves the chords that end in it alone:
+`map f unix file %` doesn't change `gf`.
 
 > **`^a` and `^w` are reserved.** spyc intercepts both as chord prefixes, so a
 > shell (or tmux) running inside the pane never sees readline's
@@ -495,15 +638,146 @@ the keymap stays uncluttered — bind the ones you use:
 keymap = [
   "map f unix file %",             # `file` on the cursor/selection
   "map ^P unix ps aux",
-  "map H patternpick *.hpp",
+  "map H patternpick =*.hpp",
   "map A command activity",        # toggle the activity monitor
   "map ^Y command graveyard",      # recover soft-deleted files
   "map z lua mymacro",             # ~/.config/spyc/lua/mymacro.lua
+  "map <F7> git_blame",            # any action by name
+  "map <F8> harpoon_jump =2",      # one with a parameter
+  "unmap q",                       # silence the reserved macro key
 ]
 ```
 
-> Reminder: `unix` / `command` / `lua` / `jump` only bind from `~/.spycrc.toml`,
-> not a project file.
+> Reminder: `unix` / `command` / `lua` / `jump` / `prompt`, and the actions
+> marked below, only bind from `~/.spycrc.toml`, not a project file.
+
+### Action names
+
+`map <KEY> <name>` binds any built-in action; these are also the names
+[`spyc.action`](#the-spyc-api) takes, bar `set_mark` and `jump_mark`. The curated
+verbs above (`down`, `pick`,
+`search`, …) keep working beside them. An action shown with `=N`, `=LETTER` or
+`=MODE` needs that parameter (`map <F8> harpoon_jump =2`); the rest take none.
+
+| Name | Does |
+|------|------|
+| `up` | move up |
+| `down` | move down |
+| `left` | move left |
+| `right` | move right |
+| `page_up` | page up |
+| `page_down` | page down |
+| `goto_first` | top of column |
+| `goto_last` | bottom of column |
+| `jump_next_git_change` | jump to next git-changed entry |
+| `jump_prev_git_change` | jump to prev git-changed entry |
+| `enter_or_display` | enter dir / pager on text file |
+| `enter_or_edit` | enter dir / editor on file (suspends TUI) |
+| `climb` | climb to parent |
+| `home` | home directory |
+| `toggle_pick` | toggle pick |
+| `pick_pattern_prompt` | pick by pattern (prompt) |
+| `pick_toggle_all` | pick all / clear |
+| `take` | take into inventory |
+| `untake` | remove from inventory |
+| `drop` | drop from inventory |
+| `toggle_inventory_view` | toggle inventory view |
+| `empty_inventory` | empty inventory |
+| `yank_prompt` | yank visible pane output to clipboard |
+| `yank_last_prompt` | yank last typed prompt to clipboard |
+| `yank_scrollback` | yank full pane scrollback to clipboard |
+| `yank_paths` | yank cursor file path (or picks) to clipboard |
+| `toggle_mask =N` | toggle ignore mask `N` (1 or 2) |
+| `limit_prompt` | filter file list (glob, ! for picks, empty clears) |
+| `command_prompt` | command line (:limit, :!, :!!, :;, etc.) |
+| `shell_captured_prompt` | shell command (captured, pager) |
+| `shell_foreground_prompt` | shell command (foreground) |
+| `start_shell` | start shell |
+| `chmod_add =MODE` | add permission bits to the selection: `MODE` is `w` or `x` |
+| `search_prompt` | search |
+| `search_next` | search next |
+| `search_prev` | search previous |
+| `jump_prompt` | jump to path (prompt) |
+| `copy_prompt` | copy (prompt) |
+| `move_prompt` | move (prompt) |
+| `remove_prompt` | remove (confirm) |
+| `make_dir_prompt` | make directory (prompt) |
+| `new_file_prompt` | new file in editor (prompt) |
+| `long_list` | long listing |
+| `file_type` | file type |
+| `sort_cycle` | cycle sort (name/size/mtime/ext) |
+| `set_mark =LETTER` | set mark `LETTER` (a to z) |
+| `jump_mark =LETTER` | jump to mark `LETTER` |
+| `jump_prev_dir` | jump to previous directory |
+| `jump_start_dir` | jump to starting directory |
+| `jump_project_home` | jump to PROJECT_HOME |
+| `jump_worktree_root` | jump the focused column to its worktree/repo root |
+| `set_project_home_here` | set PROJECT_HOME to current dir |
+| `set_start_dir_here` | set the start dir (what `jump_start_dir` returns to) to the current dir |
+| `edit_in_pane` | open editor in top pane (bottom pane stays visible) |
+| `display_in_pane` | open `$PAGER` in the top pane (the bottom pane stays visible) |
+| `date` | show date |
+| `version` | show version |
+| `show_memory` | session info |
+| `color_toggle` | toggle colour (mono) |
+| `set_env_prompt` | set env var |
+| `toggle_activity` | toggle activity monitor |
+| `help` | help |
+| `about` | about spyc |
+| `reload_config` | reload config |
+| `toggle_pane` | toggle split pane |
+| `resume_pane` | open pane with claude --resume |
+| `pane_focus_down` | focus pane (down) |
+| `pane_focus_up` | focus list (up) |
+| `pane_send_selection` | send selection to pane (`~/.spycrc.toml` only) |
+| `pane_send_prefix` | send literal ^a to pane (`~/.spycrc.toml` only) |
+| `pane_grow` | grow pane |
+| `pane_shrink` | shrink pane |
+| `toggle_pane_zoom` | zoom pane (toggle fullscreen) |
+| `pane_scroll_enter` | scroll pane history |
+| `pane_scroll_save` | save pane scrollback |
+| `pane_new_tab` | new pane tab |
+| `pane_close_tab` | close pane tab |
+| `pane_tab_by_index =N` | switch to pane tab `N` (1 to 9) |
+| `pane_next_tab` | next pane tab |
+| `pane_prev_tab` | prev pane tab |
+| `pane_last_tab` | last pane tab |
+| `pane_rename_tab` | rename pane tab |
+| `pane_restart_tab` | restart pane tab command |
+| `pane_fork_tab` | fork pane tab's conversation |
+| `pane_pipe_content` | pipe file contents to pane (`~/.spycrc.toml` only) |
+| `pane_pipe_inventory` | pipe inventory contents to pane (`~/.spycrc.toml` only) |
+| `vsplit_toggle` | vertical split: open / close |
+| `vsplit_toggle_height` | vertical split: full-height / top-only |
+| `vsplit_focus_left` | focus left pane (a) |
+| `vsplit_focus_right` | focus right pane (b) |
+| `toggle_dim` | toggle dimming of the inactive pane |
+| `open_second_commander` | open a second file-commander (right column) |
+| `close_second_commander` | close the second file-commander |
+| `open_graveyard_view` | open graveyard viewer (recover deleted) |
+| `quick_select_open` | quick select — pick URL/path/SHA/IP from pane |
+| `open_image_gallery` | gallery of images the agent received |
+| `harpoon_jump =N` | jump to harpoon slot `N` (1 to 9) |
+| `harpoon_append` | harpoon — append cursor file |
+| `harpoon_remove` | harpoon — remove cursor file |
+| `harpoon_open_menu` | harpoon — open menu |
+| `worktree_list` | list git worktrees |
+| `worktree_new` | new git worktree |
+| `worktree_delete` | delete git worktree |
+| `git_diff` | git diff HEAD (staged + unstaged + new) |
+| `git_diff_cached` | git diff --cached (staged) |
+| `git_diff_unstaged` | git diff (unstaged — since you staged) |
+| `git_blame` | git blame (cursor file) |
+| `git_restore` | restore deleted file (struck-through row) from git |
+| `goto_file` | jump to path in pane output |
+| `goto_file_line` | jump to path:line in pane output |
+| `redraw` | redraw |
+| `quit` | quit |
+| `macro_record_reserved` | reserved for macro recording (flashes a hint) |
+| `open_task_viewer` | open task viewer (most-recent bg task) |
+| `reopen_last_buffer` | reopen the most-recent closed pager buffer |
+| `find_file` | find file (project-wide fuzzy) |
+| `noop` | nothing: what `unmap` binds |
 
 ---
 

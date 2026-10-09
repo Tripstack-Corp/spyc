@@ -28,12 +28,16 @@ impl App {
                 // Reset to built-in mask defaults first, then apply config
                 // overrides — so removing `[[ignore_masks]]` entries from
                 // the rc file reverts the group to defaults on reload.
-                self.state.left.masks = IgnoreMasks::default();
-                self.state.left.masks.apply_config(&new_config.ignore_masks);
+                let mut masks = IgnoreMasks::default();
+                masks.apply_config(&new_config.ignore_masks);
                 let count = new_config.sources.len();
                 let warnings = new_config.warnings.clone();
                 self.state.config = new_config;
-                self.state.rebuild_rows();
+                let sides: Vec<_> = self.state.active_sides().collect();
+                for side in sides {
+                    self.state.col_mut(side).masks = masks.clone();
+                    self.state.rebuild_rows_for(side);
+                }
                 // Non-fatal problems (bad scan-pattern regex, etc.) win over
                 // the success note so a typo is visible the moment the rc is
                 // saved, not only under --debug.

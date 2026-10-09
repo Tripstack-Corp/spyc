@@ -364,6 +364,7 @@ impl App {
                     status,
                     ttl_ms: None,
                     session_id: None,
+                    hook_event: None,
                 });
                 Vec::new()
             }

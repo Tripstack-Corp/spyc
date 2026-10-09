@@ -22,6 +22,15 @@
 //! them against each other: an instrument that shares the subject's model
 //! inherits its blind spots, and two fills that disagree would do exactly that.
 //!
+//! ## Synchronized output (DEC mode 2026)
+//!
+//! While a child has an update open, reads answer from the frame last
+//! materialized, cursor included, which is what Ghostty's renderer does by
+//! skipping frames until the mode resets. Programs that redraw several lines in
+//! place (brew's download list) rely on it: mid-update a line can be erased
+//! before it is rewritten. The pane worker publishes no output while an update is
+//! open, and ends one left open past its timeout.
+//!
 //! ## Threading
 //!
 //! See the `ghostty-terminal-send` trap anchor below.
@@ -38,6 +47,15 @@ use spyc_vt_sys::{ffi, scrollback};
 
 use super::engine::{CellStyle, Color, Engine, MouseEncoding, MouseMode, TerminalScreen, Wide};
 
+mod replies;
+
+/// DEC mode 2027 — grapheme clustering. See `GhosttyEngine::new` for why spyc
+/// turns it on, and ARCHITECTURE.md → "Grapheme clustering (DEC mode 2027)".
+const MODE_GRAPHEME_CLUSTER: u16 = 2027;
+
+/// DEC mode 2026 — synchronized output.
+const MODE_SYNCHRONIZED_OUTPUT: u16 = 2026;
+
 /// One materialized frame: what every read answers from.
 ///
 /// Text is a flat `String` with a span per cell rather than a `String` per
@@ -51,6 +69,9 @@ struct Frame {
     spans: Vec<(u32, u32)>,
     /// Per row: does it continue into the next one (a soft wrap)?
     wrapped: Vec<bool>,
+    /// The cursor when the frame was filled, which a held frame presents.
+    cursor: (u16, u16),
+    cursor_hidden: bool,
 }
 
 impl Frame {
@@ -92,6 +113,16 @@ pub struct GhosttyScreen {
     budget: usize,
     frame: RefCell<Frame>,
     frame_valid: Cell<bool>,
+    /// The frame shows the live viewport at the current size, so it can be
+    /// held through a synchronized update.
+    frame_live: Cell<bool>,
+    /// The child's DEC 2026 state, read once per `process` rather than per
+    /// cell read.
+    synchronized: bool,
+    /// Replies to the child's queries, written by the terminal's `write_pty`.
+    /// A raw heap pointer, so moving the engine never moves what the callback's
+    /// userdata points at.
+    replies: *mut replies::Sink,
 }
 
 pub struct GhosttyEngine {
@@ -121,6 +152,10 @@ impl Drop for GhosttyEngine {
             }
             if !s.t.is_null() {
                 ffi::ghostty_terminal_free(s.t);
+            }
+            // After the terminal, whose callback points at it.
+            if !s.replies.is_null() {
+                drop(Box::from_raw(s.replies));
             }
         }
     }
@@ -513,7 +548,7 @@ impl GhosttyScreen {
 
     /// Materialize the frame if a `process` / resize / scroll invalidated it.
     fn ensure_frame(&self) {
-        if self.frame_valid.get() {
+        if self.frame_valid.get() || self.holding() {
             return;
         }
         let mut frame = self.frame.borrow_mut();
@@ -522,7 +557,32 @@ impl GhosttyScreen {
         if self.view != 0 || !self.fill_from_render_state(&mut frame) {
             self.fill_from_grid_ref(&mut frame);
         }
+        frame.cursor = self.live_cursor_position();
+        frame.cursor_hidden = self.live_hide_cursor();
+        self.frame_live.set(self.view == 0);
         self.frame_valid.set(true);
+    }
+
+    /// The child is partway through a synchronized update: keep presenting the
+    /// last frame, as a terminal pauses rendering until the update closes. A
+    /// scrolled-back view is not held, since the user moved it.
+    const fn holding(&self) -> bool {
+        self.synchronized && self.view == 0 && self.frame_live.get()
+    }
+
+    fn live_cursor_position(&self) -> (u16, u16) {
+        (
+            self.get_u16(Data::GHOSTTY_TERMINAL_DATA_CURSOR_Y)
+                .unwrap_or(0),
+            self.get_u16(Data::GHOSTTY_TERMINAL_DATA_CURSOR_X)
+                .unwrap_or(0),
+        )
+    }
+
+    fn live_hide_cursor(&self) -> bool {
+        !self
+            .get_bool(Data::GHOSTTY_TERMINAL_DATA_CURSOR_VISIBLE)
+            .unwrap_or(true)
     }
 
     fn with_frame<R>(&self, f: impl FnOnce(&Frame) -> R) -> R {
@@ -537,18 +597,17 @@ impl TerminalScreen for GhosttyScreen {
     }
 
     fn cursor_position(&self) -> (u16, u16) {
-        (
-            self.get_u16(Data::GHOSTTY_TERMINAL_DATA_CURSOR_Y)
-                .unwrap_or(0),
-            self.get_u16(Data::GHOSTTY_TERMINAL_DATA_CURSOR_X)
-                .unwrap_or(0),
-        )
+        if self.holding() {
+            return self.frame.borrow().cursor;
+        }
+        self.live_cursor_position()
     }
 
     fn hide_cursor(&self) -> bool {
-        !self
-            .get_bool(Data::GHOSTTY_TERMINAL_DATA_CURSOR_VISIBLE)
-            .unwrap_or(true)
+        if self.holding() {
+            return self.frame.borrow().cursor_hidden;
+        }
+        self.live_hide_cursor()
     }
 
     fn alternate_screen(&self) -> bool {
@@ -684,6 +743,25 @@ impl Engine for GhosttyEngine {
             spyc_vt_sys::SUCCESS,
             "ghostty_terminal_new"
         );
+        // Grapheme clustering (DEC mode 2027), which libghostty leaves off by
+        // default. spyc's host-facing half already models it enabled —
+        // `ui::display_width` and ratatui both measure a cluster as one unit —
+        // so an engine laying `\u{1f1e8}\u{1f1e6}` across four columns
+        // disagrees with every other component and with the producers filling
+        // the pane. `OPT_MODE_DEFAULT` rather than `OPT_MODE`: it sets the
+        // current value AND the one RIS restores, so a child running `reset`
+        // doesn't silently drop back to per-codepoint layout.
+        let cluster = GhosttyTerminalModeConfig {
+            mode: MODE_GRAPHEME_CLUSTER,
+            value: true,
+        };
+        unsafe {
+            ffi::ghostty_terminal_set(
+                t,
+                Opt::GHOSTTY_TERMINAL_OPT_MODE_DEFAULT,
+                (&raw const cluster).cast(),
+            );
+        }
         // Both limits, always: rows are the UX contract, bytes the safety
         // valve, and leaving either at its default truncates history.
         let limits = scrollback::limits_for_row_budget(scrollback_rows.max(1));
@@ -700,6 +778,8 @@ impl Engine for GhosttyEngine {
                 (&raw const lines).cast(),
             );
         }
+        let replies = Box::into_raw(Box::default());
+        replies::install(t, replies);
         let mut rs: ffi::GhosttyRenderState = std::ptr::null_mut();
         let mut it: ffi::GhosttyRenderStateRowIterator = std::ptr::null_mut();
         let mut rc: ffi::GhosttyRenderStateRowCells = std::ptr::null_mut();
@@ -720,13 +800,43 @@ impl Engine for GhosttyEngine {
                 budget: scrollback_rows,
                 frame: RefCell::new(Frame::default()),
                 frame_valid: Cell::new(false),
+                frame_live: Cell::new(false),
+                synchronized: false,
+                replies,
             },
         }
     }
 
     fn process(&mut self, bytes: &[u8]) {
         unsafe { ffi::ghostty_terminal_vt_write(self.inner.t, bytes.as_ptr(), bytes.len()) };
+        self.inner.synchronized = self.inner.mode(MODE_SYNCHRONIZED_OUTPUT);
         self.inner.invalidate();
+    }
+
+    fn synchronized_update(&self) -> bool {
+        self.inner.synchronized
+    }
+
+    fn end_synchronized_update(&mut self) {
+        let off = GhosttyTerminalModeConfig {
+            mode: MODE_SYNCHRONIZED_OUTPUT,
+            value: false,
+        };
+        unsafe {
+            ffi::ghostty_terminal_set(
+                self.inner.t,
+                Opt::GHOSTTY_TERMINAL_OPT_MODE,
+                (&raw const off).cast(),
+            );
+        }
+        self.inner.synchronized = false;
+        self.inner.invalidate();
+    }
+
+    fn take_replies(&mut self) -> Vec<u8> {
+        // SAFETY: the sink lives as long as the engine, and the terminal writes
+        // to it only inside `process`, which `&mut self` excludes.
+        unsafe { (*self.inner.replies).take() }
     }
 
     fn screen(&self) -> &Self::Screen {
@@ -746,309 +856,13 @@ impl GhosttyScreen {
         self.rows = rows;
         self.cols = cols;
         self.view = 0;
+        // ghostty ends an open update on resize, and the old frame is the
+        // wrong shape to hold through the next one.
+        self.synchronized = self.mode(MODE_SYNCHRONIZED_OUTPUT);
+        self.frame_live.set(false);
         self.invalidate();
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::pane::engine::conformance;
-
-    fn fed(rows: u16, cols: u16, bytes: &[u8]) -> GhosttyEngine {
-        let mut e = <GhosttyEngine as Engine>::new(rows, cols, 10_000);
-        e.process(bytes);
-        e
-    }
-
-    // The seam's contract suite, against the shipped engine. The same five
-    // run against vt100 in `engine_vt100`; one contract, both impls.
-    #[test]
-    fn reports_what_the_engine_holds() {
-        conformance::reports_what_the_engine_holds::<GhosttyEngine>();
-    }
-
-    #[test]
-    fn past_the_edge_is_absence_not_blankness() {
-        conformance::past_the_edge_is_absence_not_blankness::<GhosttyEngine>();
-    }
-
-    #[test]
-    fn mouse_protocol_maps_through_the_model_enums() {
-        conformance::mouse_protocol_maps_through_the_model_enums::<GhosttyEngine>();
-    }
-
-    #[test]
-    fn set_scrollback_clamps_to_the_real_length() {
-        conformance::set_scrollback_clamps_to_the_real_length::<GhosttyEngine>();
-    }
-
-    #[test]
-    fn reports_the_modes_the_pane_branches_on() {
-        conformance::reports_the_modes_the_pane_branches_on::<GhosttyEngine>();
-    }
-
-    /// A frame filled by the render state and one filled by coordinate must be
-    /// the same frame.
-    ///
-    /// Two fill paths exist because the render state only ever presents the
-    /// live viewport, so history reads cannot use it. Two paths that drift
-    /// would give the pane one grid and the scrollback pager another, and
-    /// nothing else in the tree would notice — the render is snapshot-tested
-    /// against ITSELF. This is the check that does not share their model.
-    #[test]
-    fn both_fills_agree_on_the_live_viewport() {
-        let e = fed(
-            6,
-            24,
-            // The last line is a background-colour ERASE: a row painted to the
-            // edge by `ESC[K` under SGR, which stores its colour in the cell's
-            // content tag rather than a style. Added after that shape shipped
-            // a bug this corpus was too narrow to see.
-            "\x1b[31mred\x1b[0m \x1b[1;4mbold-u\x1b[0m\r\n\
-             wide \u{3042}\u{3044}\u{3046} tail\r\n\
-             \x1b[2mdim\x1b[0m \x1b[7mrev\x1b[0m\r\n\
-             \x1b[30;42mHDR\x1b[K\x1b[0m\r\n\
-             plain\r\n"
-                .as_bytes(),
-        );
-        let s = e.screen();
-
-        let mut via_rs = Frame::default();
-        assert!(
-            s.fill_from_render_state(&mut via_rs),
-            "the render state fill must succeed on a live viewport"
-        );
-        let mut via_grid = Frame::default();
-        s.fill_from_grid_ref(&mut via_grid);
-
-        assert_eq!(
-            (via_rs.rows, via_rs.cols),
-            (via_grid.rows, via_grid.cols),
-            "geometry"
-        );
-        assert_eq!(via_rs.styles, via_grid.styles, "cell styles");
-        assert_eq!(via_rs.wrapped, via_grid.wrapped, "row wrap flags");
-        let text_of = |f: &Frame| {
-            (0..f.rows)
-                .map(|r| row_string(f, r))
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        assert_eq!(text_of(&via_rs), text_of(&via_grid), "cell text");
-    }
-
-    /// A scrolled-back view reads history, and the offset clamps to what
-    /// exists — `ui::scrollback` discovers the length by asking for
-    /// `usize::MAX` and reading back.
-    #[test]
-    fn the_view_offset_walks_history_and_clamps() {
-        let mut e = <GhosttyEngine as Engine>::new(3, 12, 10_000);
-        for i in 0..20 {
-            e.process(format!("L{i:02}\r\n").as_bytes());
-        }
-        let s = e.screen_mut();
-        assert_eq!(s.scrollback(), 0, "starts at the live edge");
-        s.set_scrollback(usize::MAX);
-        let len = s.scrollback();
-        assert!(len > 0 && len <= 20, "clamped to real history, got {len}");
-        s.set_scrollback(2);
-        assert_eq!(s.scrollback(), 2);
-        let text = s.contents();
-        assert!(
-            text.contains("L16") || text.contains("L15"),
-            "a 2-row scrollback shows older rows, got {text:?}"
-        );
-        s.set_scrollback(0);
-        assert!(s.contents().contains("L19"), "back at the live edge");
-    }
-}
-
-/// The four engine-side defects [#34](https://github.com/Tripstack-Corp/spyc/issues/34)
-/// turned out to be, each pinned against the shipped engine.
-///
-/// The spike found these by differential against the incumbent and named them
-/// in `docs/drafts/VT_ENGINE_SPIKE.md`; the bytes here are its fixtures. They
-/// are asserted in-crate rather than in `spikes/vt-engine/`, which is excluded
-/// from the workspace and so runs only when someone remembers — a defect that
-/// took an engine swap to fix deserves a test that runs on every push.
-#[cfg(test)]
-mod issue_34_engine_defects {
-    use super::*;
-
-    fn screen_of(rows: u16, cols: u16, bytes: &[u8]) -> GhosttyEngine {
-        let mut e = <GhosttyEngine as Engine>::new(rows, cols, 10_000);
-        e.process(bytes);
-        e
-    }
-
-    /// `ESC ( 0` selects DEC special graphics, so `lqqqk` is a box, not
-    /// letters. vt100 does not implement SCS at all and renders the literal
-    /// text — garbage in any pane whose child draws boxes.
-    #[test]
-    fn scs_box_drawing_draws_boxes() {
-        let e = screen_of(5, 20, b"\x1b(0lqqqk\r\nx  x\r\nmqqqj\x1b(B\r\n");
-        let text = e.screen().contents();
-        let row0 = text.lines().next().unwrap_or_default();
-        assert_eq!(row0, "┌───┐", "SCS box drawing, got {row0:?}");
-        assert!(
-            text.lines().nth(2).unwrap_or_default().starts_with('└'),
-            "the bottom edge too, got {text:?}"
-        );
-    }
-
-    /// A row written before a DECSTBM scroll region is set must survive it.
-    /// vt100 loses it.
-    #[test]
-    fn a_row_written_before_decstbm_survives() {
-        let e = screen_of(
-            8,
-            20,
-            b"\x1b[2J\x1b[H\x1b[3;6rheader\r\n\x1b[3Hone\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\nseven\r\neight\r\n",
-        );
-        let text = e.screen().contents();
-        assert!(
-            text.contains("header"),
-            "the pre-region row must survive, got {text:?}"
-        );
-    }
-
-    /// Content scrolled out of a TOP-ANCHORED DECSTBM region reaches history.
-    /// vt100 retains zero rows, which is why a codex pane's scrollback was
-    /// always empty — codex confines its transcript to a scroll region.
-    ///
-    /// Top-anchored is the whole point, and the first version of this test got
-    /// it wrong by reusing the spike's `3;6` fixture. A region that does not
-    /// start at row 1 scrolls its lines within the screen, so none of them
-    /// leave it and history correctly stays empty — measured at `2;6` and
-    /// `3;6`, both 0 rows, against 15 at `1;6`. The engine was right and the
-    /// test was wrong.
-    #[test]
-    fn a_top_anchored_scroll_region_accumulates_scrollback() {
-        let mut e = <GhosttyEngine as Engine>::new(8, 20, 10_000);
-        e.process(b"\x1b[2J\x1b[H\x1b[1;6r");
-        for i in 0..20 {
-            e.process(format!("line {i:02}\r\n").as_bytes());
-        }
-        let s = e.screen_mut();
-        s.set_scrollback(usize::MAX);
-        assert!(
-            s.scrollback() > 0,
-            "a scroll-region child must accumulate scrollback, got {}",
-            s.scrollback()
-        );
-    }
-
-    /// A tag-sequence grapheme survives past 18 bytes. vt100's `Cell` has
-    /// `CONTENT_BYTES = 22` and drops silently at 18; the Scotland flag needs
-    /// 28, so it lost two of its six tag characters.
-    #[test]
-    fn a_tag_sequence_grapheme_survives_past_eighteen_bytes() {
-        let flag = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}";
-        assert!(flag.len() > 18, "the fixture must exceed the old limit");
-        let e = screen_of(3, 20, format!("{flag}|end\r\n").as_bytes());
-        let mut got = String::new();
-        e.screen().cell_text(0, 0, &mut got);
-        assert_eq!(
-            got.chars().count(),
-            flag.chars().count(),
-            "every codepoint of the cluster survives: {got:?}"
-        );
-        assert_eq!(got, flag);
-    }
-}
-
-/// The shipped engine against the reference engine, over a real captured
-/// terminal stream, through the same widget.
-///
-/// This is the only place spyc compares the two engines' *rendering* rather
-/// than their seam answers, and it is what caught the background-colour-erase
-/// bug that `both_fills_agree_on_the_live_viewport` could not: both fills were
-/// wrong the same way, so they agreed. An instrument that shares the subject's
-/// model inherits its blind spots — the reference engine does not share it.
-///
-/// It dies with `engine_vt100.rs` after 2.2 tags ([#453](https://github.com/Tripstack-Corp/spyc/issues/453)).
-/// Until then it is the strongest thing the fallback buys.
-#[cfg(test)]
-mod against_the_reference_engine {
-    use ratatui::buffer::Buffer;
-    use ratatui::layout::Rect;
-    use ratatui::widgets::Widget as _;
-
-    use crate::pane::PaneWidget;
-    use crate::pane::engine::Engine as EngineT;
-
-    fn render<E: EngineT>(bytes: &[u8], rows: u16, cols: u16) -> Buffer {
-        let mut e = E::new(rows, cols, 10_000);
-        e.process(bytes);
-        let area = Rect::new(0, 0, cols, rows);
-        let mut buf = Buffer::empty(area);
-        PaneWidget {
-            screen: e.screen(),
-            focused: true,
-            selection: None,
-        }
-        .render(area, &mut buf);
-        buf
-    }
-
-    /// htop is the case that exercises meters, a full-width header bar, a
-    /// selected row and the function-key footer — every one of which is a
-    /// coloured run that ends in erased cells.
-    #[test]
-    fn htop_renders_identically_through_both_engines() {
-        // Absolute, via the manifest dir: tests share a process, so a
-        // relative path breaks the moment another test changes the cwd.
-        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("spikes/vt-engine/fixtures/htop.bin");
-        let bytes = std::fs::read(&fixture)
-            .unwrap_or_else(|e| panic!("the spike's htop capture at {}: {e}", fixture.display()));
-        let (rows, cols) = (24u16, 80);
-        let a = render::<vt100::Parser>(&bytes, rows, cols);
-        let b = render::<super::GhosttyEngine>(&bytes, rows, cols);
-
-        let mut wrong = Vec::new();
-        for r in 0..rows {
-            for c in 0..cols {
-                let (Some(x), Some(y)) = (a.cell((c, r)), b.cell((c, r))) else {
-                    continue;
-                };
-                if x.symbol() != y.symbol() {
-                    wrong.push(format!(
-                        "({r},{c}) symbol {:?} vs {:?}",
-                        x.symbol(),
-                        y.symbol()
-                    ));
-                    continue;
-                }
-                let (sx, sy) = (x.style(), y.style());
-                if sx.bg != sy.bg {
-                    wrong.push(format!("({r},{c}) bg {:?} vs {:?}", sx.bg, sy.bg));
-                }
-                if sx.add_modifier != sy.add_modifier {
-                    wrong.push(format!(
-                        "({r},{c}) modifiers {:?} vs {:?}",
-                        sx.add_modifier, sy.add_modifier
-                    ));
-                }
-                // Foreground is compared only where there is a glyph to
-                // colour. A cell erased under SGR keeps the foreground of the
-                // moment in vt100 and carries none in ghostty, which stores
-                // such a cell as a background-only content tag — invisible
-                // either way, since a blank has nothing to paint.
-                if x.symbol().trim().is_empty() {
-                    continue;
-                }
-                if sx.fg != sy.fg {
-                    wrong.push(format!("({r},{c}) fg {:?} vs {:?}", sx.fg, sy.fg));
-                }
-            }
-        }
-        assert!(
-            wrong.is_empty(),
-            "{} cells differ between the engines:\n  {}",
-            wrong.len(),
-            wrong[..wrong.len().min(12)].join("\n  ")
-        );
-    }
-}
+mod tests;

@@ -7,6 +7,9 @@
 //! Each request bundles a one-shot reply sender so the MCP thread can
 //! block until the main loop processes the command.
 
+/// Maximum non-blocked report lifetime; blocked still requires explicit recovery.
+pub const MAX_REPORT_TTL_MS: u64 = 300_000;
+
 use std::sync::mpsc;
 
 /// A request sent from an MCP server thread to the main event loop.
@@ -50,10 +53,12 @@ pub enum McpCommand {
     /// Re-targets `b` if it's already open. The "work in it in b" step.
     OpenWorktree { path: String },
     /// Agent self-reports its activity for the per-tab dot (P1 semantic
-    /// channel). `status` is `working`/`blocked`/`idle`/`done`. Targeting, in
+    /// channel). `status` is an activity name or a correlated Codex question signal. Targeting, in
     /// priority order: `pane_id` (the stable `SPYC_PANE_ID` uuid — what the
-    /// auto-hook sends), else `pane` (a 1-based divider `[N]`), else the focused
-    /// tab. `ttl_ms` overrides the backstop expiry. Overrides output timing.
+    /// auto-hook sends, and what the socket thread fills in from an attributed
+    /// connection when the call names no target), else `pane` (a 1-based
+    /// divider `[N]`), else the focused tab. `ttl_ms` overrides the backstop
+    /// expiry. Overrides output timing.
     ReportStatus {
         pane_id: Option<String>,
         pane: Option<usize>,
@@ -65,6 +70,7 @@ pub enum McpCommand {
         /// the Lua binding) omits it. Lets `save_session` prefer the *live*
         /// conversation over the spawn-proximity resolver (P1-3).
         session_id: Option<String>,
+        hook_event: Option<crate::agent::status_hook::StatusHookEvent>,
     },
     /// P2 merge/scope coordination (`docs/archive/AGENT_AWARENESS_PLAN.md`): declare
     /// the scope this agent is about to touch. Same targeting priority as
@@ -99,15 +105,34 @@ pub enum McpCommand {
         paths: Vec<String>,
         timeout_ms: u64,
     },
-    /// Another spyc instance has taken over the MCP socket for this
-    /// directory. The TUI should warn the user.
+    /// The tab whose `SPYC_PANE_ID` is `pane_id`, as JSON: its id, 1-based
+    /// index, label, live cwd, worktree root and branch. `Error` when no live
+    /// tab has that id. A connection asks once when its `initialize` names a
+    /// pane (binding the id only if this succeeds), then again for each
+    /// `get_spyc_context`, since the tab can close or move under it.
+    PaneContext { pane_id: String },
+    /// An older spyc, one that still pins its own socket in the agents' MCP
+    /// entry, rewrote this directory's entry and said so (`spyc/disconnected`).
+    /// Nothing this version sends; the TUI tells the user who owns the entry.
     Disconnected { new_pid: u32 },
     /// Fire-and-forget telemetry: an agent invoked the named MCP tool. Sent by
     /// the socket dispatch for EVERY `tools/call` (read tools included, which
     /// are otherwise served on the socket thread and never reach the main
     /// loop), so the `A` overlay can show cumulative per-tool call counts. The
     /// reply is ignored.
-    ToolCalled { name: String },
+    ToolCalled {
+        name: String,
+        /// The socket connection it came over (`None` in the read-only stdio
+        /// fallback), so `:activity dump` can count calls per connection.
+        conn: Option<u64>,
+    },
+    /// A socket connection sent its first `initialize`: an agent's MCP session
+    /// began. `pane_id` is the tab it bound to, `None` when unattributed. The
+    /// status hook's one-shot `report_status` calls never initialize, so they
+    /// never appear here. The reply is ignored.
+    ConnectionInitialized { conn: u64, pane_id: Option<String> },
+    /// An initialized connection closed. The reply is ignored.
+    ConnectionClosed { conn: u64 },
     /// The socket server received a message it couldn't frame/parse and dropped
     /// it. Surfaced as a status-line warning so a silent drop can't hide a
     /// client/framing bug (a bare-newline `--report-status` reporter went

@@ -9,12 +9,10 @@
 //! parser for `Pane`, flat byte buffer + lifecycle metadata for
 //! `BackgroundTask`).
 //!
-//! Strict rule for Phase 6a: this module changes no observable
-//! behaviour. The reader-thread protocol, debug-byte-dump,
-//! exit-status harvesting, and shutdown semantics all match the
-//! pre-refactor `Pane`/`BackgroundTask` paths exactly.
+//! Input delivery runs on a bounded worker queue: a stopped or non-reading
+//! child may stall its writer, never the application event loop.
 
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -23,6 +21,11 @@ use std::thread;
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 use super::PaneWake;
+
+mod input_writer;
+use input_writer::InputWriter;
+pub use input_writer::MAX_BYTES as MAX_INPUT_BYTES;
+pub use input_writer::ReplyWriter;
 
 /// How long [`PtyHost::reap_exit`] polls for a cleanly-exiting child after
 /// EOF before it concludes the child is the EOF-but-alive case and SIGKILLs
@@ -114,7 +117,7 @@ pub struct PtySpec<'a> {
 /// differs.
 pub struct PtyHost {
     pub master: Box<dyn MasterPty + Send>,
-    pub writer: Box<dyn Write + Send>,
+    input: InputWriter,
     pub child: Box<dyn portable_pty::Child + Send + Sync>,
     /// Receiver for the reader thread's byte chunks. `None` after
     /// `take_event_rx()` — consumers (e.g. `Pane` with the v1.50.84
@@ -217,13 +220,14 @@ impl PtyHost {
             cmd.env(k, v);
         }
 
+        // Start the writer before spawning the child, so a failed worker spawn
+        // cannot strand a running child. No child input exists at this point.
+        let reader = pair.master.try_clone_reader()?;
+        let input = InputWriter::new(pair.master.take_writer()?)?;
         let child = pair.slave.spawn_command(cmd)?;
         // We don't need our own handle on the slave — once the child
         // exits, the master read side will see EOF.
         drop(pair.slave);
-
-        let reader = pair.master.try_clone_reader()?;
-        let writer = pair.master.take_writer()?;
 
         // Background thread pumps reader → channel. The render loop
         // drains the channel without blocking on child output. The channel is
@@ -253,7 +257,7 @@ impl PtyHost {
         Ok(Self {
             wake,
             master: pair.master,
-            writer,
+            input,
             child,
             event_rx: Some(event_rx),
             closed_atomic,
@@ -423,10 +427,21 @@ impl PtyHost {
         Ok(())
     }
 
-    /// Forward arbitrary bytes to the child. Used for paste, send-
-    /// selection, and the per-keystroke `send_key` path on `Pane`.
+    /// A handle for the terminal's replies to the child's queries.
+    pub(crate) fn reply_writer(&self) -> ReplyWriter {
+        self.input.reply_writer()
+    }
+
+    /// Queue a complete input batch without waiting for the child to read.
+    /// Accepted batches retain their order; a full queue rejects the whole batch.
     pub fn write_all(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
-        self.writer.write_all(bytes)?;
+        self.input.enqueue(bytes)?;
+        Ok(())
+    }
+
+    /// Queue an explicitly confirmed large file pipe without copying it.
+    pub(crate) fn write_confirmed_pipe(&mut self, bytes: Vec<u8>) -> anyhow::Result<()> {
+        self.input.enqueue_confirmed_pipe(bytes)?;
         Ok(())
     }
 

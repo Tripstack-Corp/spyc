@@ -47,12 +47,8 @@ impl App {
     /// focus switch needs no reload — each column's list is already loaded for
     /// its own worktree, so `cur().harpoon` just resolves to the right one.
     pub fn reconcile_harpoon(&mut self) {
-        // Explicit Left + conditional Right (not `active_sides()`) so the
-        // immutable iterator borrow doesn't collide with the `&mut self` loop
-        // body — same shape as `refresh_git_state`.
-        self.reconcile_harpoon_for(state::Side::Left);
-        if self.state.right.is_some() {
-            self.reconcile_harpoon_for(state::Side::Right);
+        for side in self.state.active_sides() {
+            self.reconcile_harpoon_for(side);
         }
     }
 
@@ -337,6 +333,7 @@ impl App {
             | Action::PaneLastTab
             | Action::PaneRenameTab
             | Action::PaneRestartTab
+            | Action::PaneForkTab
             | Action::HarpoonJump(_)
             | Action::HarpoonAppend
             | Action::HarpoonRemove
@@ -475,6 +472,7 @@ impl App {
             }
 
             Action::PaneRestartTab => self.restart_active_tab(),
+            Action::PaneForkTab => self.fork_active_tab(),
 
             Action::PanePipeContent => effects = self.pipe_content_to_pane(false),
             Action::PanePipeInventory => effects = self.pipe_content_to_pane(true),

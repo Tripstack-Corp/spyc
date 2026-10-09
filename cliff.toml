@@ -45,7 +45,11 @@ filter_unconventional = true
 filter_commits = true
 split_commits = false
 protect_breaking_commits = false
-tag_pattern = "v[0-9]*"
+# Stable tags only: a prerelease tag (`v2.2.0-rc.1`) is not a release boundary.
+# Were it one, the final release's section would hold only the commits made
+# after its last rc. release.yml writes a prerelease's notes with
+# `--unreleased --tag`: everything since the last stable release.
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
 sort_commits = "oldest"
 topo_order = false
 

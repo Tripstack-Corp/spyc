@@ -1,22 +1,22 @@
 //! P1-2 scrape fallback (`docs/archive/AGENT_AWARENESS_PLAN.md`): a declarative,
-//! data-driven detection ruleset for agents that don't self-report over the
+//! data-driven detection ruleset for states agents cannot self-report over the
 //! MCP/hook channel — the tunable fallback spyc's P1-1 self-report path was
 //! always meant to have, never the primary path (that's herdr's fragility
 //! class; see the plan's "Explicitly OUT of scope").
 //!
-//! Kept deliberately small: one [`Region`] (the bottom of the pane's recent
+//! Kept deliberately small: one [`Region`] (the bottom of the pane's visible
 //! text, where an interactive prompt renders) and one [`Matcher`] (a conjunction
 //! of substrings). Extend with `Regex` / more regions only when a real rule
 //! needs one — no speculative surface.
 
 use crate::pane::AgentActivity;
 
-/// Which slice of a pane's recent text a [`DetectionRule`] inspects. Derived
-/// from the same vt100 screen text `gf`/quick-select already read
-/// (`Pane::recent_lines`) — no new OSC-sequence tracking.
+/// Which slice of a pane's visible text a [`DetectionRule`] inspects. Derived
+/// from the same terminal screen text `gf`/quick-select already read
+/// (`Pane::visible_lines`) — no new OSC-sequence tracking.
 #[derive(Debug, Clone, Copy)]
 pub enum Region {
-    /// The last `n` non-empty lines of the pane's recent output, newest first
+    /// The last `n` non-empty lines of the pane's visible output, newest first
     /// collapsed into one block — where a confirmation prompt almost always
     /// renders.
     BottomNonEmptyLines(usize),
@@ -36,14 +36,54 @@ pub enum Matcher {
     /// discussing permissions, and a false red "needs me" square is worse than
     /// no detection at all.
     All(&'static [&'static str]),
+    /// Require the full conjunction and an exact footer at the viewport bottom.
+    /// Native word wrapping may split phrases or the footer across rows. A
+    /// quoted dialogue above the normal composer is not an open modal.
+    AllAtBottom {
+        needles: &'static [&'static str],
+        last_line: &'static str,
+    },
 }
 
 impl Matcher {
     fn matches(self, haystack: &str) -> bool {
         match self {
             Self::All(needles) => needles.iter().all(|n| haystack.contains(n)),
+            Self::AllAtBottom { needles, last_line } => {
+                if !footer_matches(haystack, last_line) {
+                    return false;
+                }
+                let text = normalize(haystack);
+                needles.iter().all(|n| text.contains(n))
+            }
         }
     }
+}
+
+/// Collapse native row breaks and alignment spaces without joining split words.
+fn normalize(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The complete footer must start at a row boundary and end the viewport.
+/// Prefix text on the same row, a clipped footer, and a later composer fail.
+fn footer_matches(text: &str, footer: &str) -> bool {
+    let mut suffix = String::new();
+    for row in text.lines().rev().filter(|row| !row.trim().is_empty()) {
+        let row = normalize(row);
+        suffix = if suffix.is_empty() {
+            row
+        } else {
+            format!("{row} {suffix}")
+        };
+        if suffix == footer {
+            return true;
+        }
+        if !footer.ends_with(&suffix) {
+            return false;
+        }
+    }
+    false
 }
 
 /// One priority-ordered rule in an [`crate::agent::AgentProfile::detection_rules`]
@@ -74,11 +114,11 @@ fn region_text(lines: &[String], region: Region) -> String {
     }
 }
 
-/// Scan `lines` (a pane's recent text) against `rules` in priority order,
+/// Scan `lines` (a pane's visible text) against `rules` in priority order,
 /// returning the first match's `(state, visible_blocker)`. Pure — no I/O and no
 /// clock: WHEN to scan is the caller's problem, and
-/// [`crate::app::agent_status`] only calls this once a tab's output has gone
-/// quiet, so a half-drawn prompt can't flip a dot.
+/// [`crate::app::agent_status`] debounces screen reads. Codex's complete-form
+/// rules run with a bounded delay even while output continues.
 pub fn scan(
     lines: &[String],
     rules: &[DetectionRule],

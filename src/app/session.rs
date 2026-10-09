@@ -12,7 +12,6 @@
 //! Worktree helpers moved to `git_state.rs` and pane-sizing helpers to
 //! `pane_tabs.rs`.
 
-use crate::app::Effect;
 use crate::pane::PaneTabs;
 use crate::state::sessions::AgentKind;
 use crate::ui::line_edit::LineEditor;
@@ -20,8 +19,8 @@ use crate::ui::pager::{self, PagerView};
 
 use std::time::{Duration, Instant};
 
-use super::state::{Focus, Side, VSplit, VsplitMode};
-use super::{App, Deadline, RESTORE_BANNER_SETTLE, RunCtx};
+use super::state::{Side, VsplitMode};
+use super::{App, Deadline, RunCtx};
 
 /// P3-2 debounce window: persist this long after the last session-relevant
 /// change. Bounds SIGKILL data loss to ~this window while coalescing bursts of
@@ -59,8 +58,54 @@ fn autosave_action(dirty: bool, due: Option<Instant>, now: Instant) -> AutosaveA
     }
 }
 
+/// The conversation a tab is running, and its name, as a save persists it.
+///
+/// Prefers the tab's PINNED session id — claude's `live_session_id` (set at
+/// restore from the exact `/resume <sid>`) or codex's `codex_session_id` (the
+/// rollout `codex_pin` claimed for it). That's the conversation this pane is
+/// definitively running, so it bypasses the spawn-proximity resolver that
+/// crosses panes restored together. Otherwise falls back to the profile
+/// resolver, whose exit-banner read finds nothing on a *live* tab, since both
+/// agents print their id only on the way out.
+///
+/// Never returns an id in `claimed`. Two tabs pinned to one conversation would
+/// otherwise both save it and both restore into it, which is the collapse this
+/// exists to prevent; `^a F` passes the other tabs' ids for the same reason.
+pub(super) fn tab_conversation(
+    tab: &crate::pane::tabs::TabEntry,
+    claimed: &std::collections::HashSet<String>,
+) -> (Option<String>, Option<String>) {
+    let profile = crate::agent::detect(&tab.info.command);
+    match tab
+        .info
+        .pinned_session_id()
+        .filter(|id| !claimed.contains(*id))
+        .and_then(|id| profile.validate_live_session_id(&tab.info.cwd, id))
+    {
+        Some((id, name)) => (Some(id), name),
+        None => profile.resolve_resume_target(
+            &tab.pane,
+            &tab.info.cwd,
+            tab.info.spawn_epoch_secs,
+            claimed,
+        ),
+    }
+}
+
 impl App {
     pub fn save_session(&mut self) {
+        // SPYC-TRAP(session-prune-by-last-save): every file holds a picker slot,
+        // so an empty quit writes nothing new. An existing file is still
+        // overwritten, or tabs closed before quitting would come back on `-r`.
+        if !self.has_restorable_state()
+            && !self
+                .state
+                .session_id
+                .is_some_and(crate::state::sessions::session_exists)
+        {
+            self.exit_summary = Some("no session saved — no tabs or split to restore".into());
+            return;
+        }
         let session = self.build_session_snapshot();
         let save_result = crate::state::sessions::save_session(&session);
         // A successful save resets the autosave baseline so a follow-up
@@ -110,36 +155,7 @@ impl App {
                     .map(|t| {
                         let profile = crate::agent::detect(&t.info.command);
                         let kind = profile.kind();
-                        // Resolve the (session_id, session_name) to persist.
-                        // Prefer this tab's PINNED session id — claude's
-                        // `live_session_id` (set at restore from the exact
-                        // `/resume <sid>`) or codex's `codex_session_id` (the
-                        // rollout `codex_pin` claimed for it). That's the
-                        // conversation this pane is definitively running, so it
-                        // bypasses the spawn-proximity resolver that crosses panes
-                        // restored together. Otherwise fall back to the profile
-                        // resolver, which honours `claimed` internally so multi-pane
-                        // saves don't collapse onto one conversation — and which
-                        // for a *live* tab has nothing to read, since both agents
-                        // only print their id on the way out.
-                        let (agent_session_id, agent_session_name) = match t
-                            .info
-                            .pinned_session_id()
-                            // The pinned path honours `claimed` too: two tabs
-                            // pinned to one conversation would otherwise both
-                            // save it and both restore into it, which is the
-                            // collapse this whole block exists to prevent.
-                            .filter(|id| !claimed.contains(*id))
-                            .and_then(|id| profile.validate_live_session_id(&t.info.cwd, id))
-                        {
-                            Some((id, name)) => (Some(id), name),
-                            None => profile.resolve_resume_target(
-                                &t.pane,
-                                &t.info.cwd,
-                                t.info.spawn_epoch_secs,
-                                &claimed,
-                            ),
-                        };
+                        let (agent_session_id, agent_session_name) = tab_conversation(t, &claimed);
                         if let Some(ref id) = agent_session_id {
                             claimed.insert(id.clone());
                         }
@@ -168,6 +184,16 @@ impl App {
             })
             .unwrap_or_default();
 
+        // SPYC-TRAP(partial-restore-keeps-saved-tabs): autosave overwrites the
+        // original session, so unopened entries must survive every snapshot.
+        let live_active = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .map_or(0, PaneTabs::active_index);
+        let (tabs, active_tab) =
+            super::state::restore::merge_saved_tabs(tabs, live_active, &self.state.deferred_tabs);
+
         // Anchor the session on `project_home` (explicit) → `start_dir`
         // (where spyc was launched) → `listing.dir` (last resort).
         // `load_sessions` dedups on cwd + tab commands, so saving from
@@ -192,11 +218,7 @@ impl App {
             epoch_secs,
             cwd: session_cwd,
             tabs,
-            active_tab: self
-                .runtime
-                .pane_tabs
-                .as_ref()
-                .map_or(0, PaneTabs::active_index),
+            active_tab,
             pane_height_pct: self.state.pane.pane_height_pct,
             pane_focused: self.state.pane_focused(),
             name: self.state.session_name.clone().unwrap_or_default(),
@@ -217,7 +239,10 @@ impl App {
                         .right_pager
                         .as_ref()
                         .and_then(|p| p.source_path.clone()),
-                    right_cwd: self.state.right.as_ref().map(|c| c.listing.dir.clone()),
+                    right_cwd: self
+                        .state
+                        .get_col(Side::Right)
+                        .map(|c| c.listing.dir.clone()),
                 }),
             scope_claims: self.state.scope_registry.clone(),
         }
@@ -301,8 +326,12 @@ impl App {
             for t in pt.tabs() {
                 t.info.command.hash(&mut h);
                 t.info.cwd.hash(&mut h);
+                // A pin usually lands after the tab's first save, which then
+                // recorded no conversation, or a guessed one (#584).
+                t.info.pinned_session_id().hash(&mut h);
             }
         }
+        super::state::restore::hash_deferred_tabs(&self.state.deferred_tabs, &mut h);
         self.state.project_home.hash(&mut h);
         self.state.pane.pane_height_pct.hash(&mut h);
         self.state.pane_focused().hash(&mut h);
@@ -311,13 +340,25 @@ impl App {
             matches!(v.mode, VsplitMode::FullHeight).hash(&mut h);
             matches!(v.focus, Side::Right).hash(&mut h);
         }
-        if let Some(c) = self.state.right.as_ref() {
+        if let Some(c) = self.state.get_col(Side::Right) {
             c.listing.dir.hash(&mut h);
         }
         // P2: a scope-registry mutation (register/release) is session-relevant
         // — it's exactly what must survive a crash mid-merge-train.
         self.state.scope_registry.hash(&mut h);
         h.finish()
+    }
+
+    /// Whether a restore would bring anything back: tabs (open or kept
+    /// unopened), a split, or scope claims. A cwd alone doesn't count.
+    fn has_restorable_state(&self) -> bool {
+        self.runtime
+            .pane_tabs
+            .as_ref()
+            .is_some_and(|pt| !pt.tabs().is_empty())
+            || !self.state.deferred_tabs.is_empty()
+            || self.state.vsplit.is_some()
+            || !self.state.scope_registry.is_empty()
     }
 
     /// P3-2 crash-sufficient autosave (PRE-recv settle). Debounce: on a
@@ -328,14 +369,7 @@ impl App {
     pub(crate) fn settle_autosave(&mut self, now: Instant, ctx: &mut RunCtx) {
         // Nothing worth restoring (bare launch: no tabs, no split, no scope
         // claims) ⇒ never write an empty session; stay disarmed.
-        let has_restorable = self
-            .runtime
-            .pane_tabs
-            .as_ref()
-            .is_some_and(|pt| !pt.tabs().is_empty())
-            || self.state.vsplit.is_some()
-            || !self.state.scope_registry.is_empty();
-        let dirty = has_restorable
+        let dirty = self.has_restorable_state()
             && Some(self.session_fingerprint()) != self.runtime.autosave_last_saved_fp;
         match autosave_action(dirty, self.runtime.autosave_due, now) {
             AutosaveAction::Idle => {
@@ -416,240 +450,20 @@ impl App {
             })
             .collect();
         self.state.pending_sessions = Some(sessions);
-        let mut all_lines = vec!["  [n]  new session".to_string(), String::new()];
+        let mut all_lines = vec!["  [n]  new session".to_string()];
         all_lines.extend(lines);
         let mut view = pager::PagerView::new_plain(
             "sessions — j/k navigate, Enter restore, n new, q close",
             all_lines,
         );
-        view.picker_cursor = Some(2); // Start on first session (after header).
+        // Opens on the newest session.
+        view.picker_cursor = Some(Self::SESSION_PICKER_HEADER_ROWS);
         self.set_pager(view);
     }
 
-    pub fn restore_session(&mut self, session: &crate::state::sessions::Session) -> Vec<Effect> {
-        // Restore working directory and update start_dir so backtick (`)
-        // jumps to the session's home, not where spyc was launched from.
-        let mut effects = Vec::new();
-        if session.cwd.is_dir() {
-            if let Err(e) = self.state.chdir(&session.cwd) {
-                self.state.flash_error(format!("session chdir: {e:#}"));
-                return effects;
-            }
-            self.state.start_dir.clone_from(&session.cwd);
-        } else if super::archive::archive_ancestor_of(&session.cwd).is_some() {
-            // The user quit while browsing an archive. It isn't a directory and
-            // never was — the effect screen mounts it and lands the column back
-            // where they left off. The rest of the restore carries on meanwhile.
-            self.state.start_dir.clone_from(&session.cwd);
-            effects.push(Effect::ChangeDir {
-                path: session.cwd.clone(),
-                focus: None,
-                on_ok: None,
-                err_prefix: "session chdir failed",
-            });
-        } else {
-            self.state
-                .flash_error(format!("session dir gone: {}", session.cwd.display()));
-            return effects;
-        }
-        // Keep the startup-generated name when an older session file
-        // has no name field; otherwise take the saved one.
-        if !session.name.is_empty() {
-            self.state.session_name = Some(session.name.clone());
-        }
-        // Continue overwriting the restored session's own `<id>.json` on
-        // subsequent saves/autosaves (P3-2), rather than forking a new file.
-        self.state.session_id = Some(session.id);
-        self.state.project_home = session.project_home.clone().filter(|p| p.is_dir());
-        // Restore pane layout.
-        self.state.pane.pane_height_pct = session.pane_height_pct;
-        if !session.tabs.is_empty() {
-            self.runtime.pane_tabs = None;
-            for tab in &session.tabs {
-                let cwd = if tab.cwd.is_dir() {
-                    &tab.cwd
-                } else {
-                    &session.cwd
-                };
-                let kind = tab.effective_kind();
-                // Codex restores by spawning `codex resume <UUID>`
-                // directly — the CLI flag works, no `/resume` stdin
-                // dance needed. Claude has a regression on the CLI
-                // flag (crashes at mount with non-empty initialMessages),
-                // so we always spawn fresh and type `/resume <sid>`
-                // once it has settled.
-                // Reconstruct the spawn command via the agent profile.
-                // Codex/agy bake the resume into the command;
-                // claude spawns fresh and arms the `/resume <sid>` stdin
-                // send below (its `--resume` CLI flag crashes at mount
-                // with non-empty initialMessages).
-                let plan = crate::agent::profile_for(kind).reconstruct_restore(
-                    &tab.command,
-                    tab.agent_session_id.as_deref(),
-                    cwd,
-                );
-                // Only arm the `/resume` injection when the spawn actually
-                // added a tab — `last_mut()` is "the tab we just pushed". If
-                // the spawn failed, the last tab is a *different*, already-
-                // restored pane, and we'd type `/resume <sid>` into the wrong
-                // agent.
-                let spawned = self.open_pane_tab_in(&plan.command, cwd);
-                if spawned
-                    && let Some(tabs) = self.runtime.pane_tabs.as_mut()
-                    && let Some(entry) = tabs.tabs_mut().last_mut()
-                {
-                    // Label the tab we just pushed from ITS saved entry.
-                    // Setting labels inline (rather than zipping tabs ↔
-                    // session.tabs after the loop) keeps them aligned even
-                    // when an earlier tab's spawn failed and the two vectors
-                    // diverge. Defensive `strip_exit_suffix` heals older
-                    // session files saved before the save-side strip landed.
-                    entry.info.label = crate::pane::tabs::strip_exit_suffix(&tab.label);
-                    // P2: re-bind this respawned tab to its pre-restore scope-
-                    // claim owner key (empty on an older save, or a tab that
-                    // never had one) — leave the fresh one `TabInfo::new` just
-                    // assigned rather than overwrite with an empty string.
-                    if !tab.claim_owner.is_empty() {
-                        entry.info.claim_owner.clone_from(&tab.claim_owner);
-                    }
-                    if let crate::agent::ResumeAction::ClaudeStdin { session_id } = plan.resume {
-                        // Pin the exact session this pane is resuming so the next
-                        // save persists it directly, never re-deriving it from the
-                        // spawn-proximity heuristic that crosses panes restored
-                        // together (they all spawn within the same second).
-                        entry.info.live_session_id = Some(session_id.clone());
-                        entry.info.pending_resume_send =
-                            Some(crate::pane::tabs::PendingResumeSend::Text {
-                                sid: session_id,
-                                after: std::time::Instant::now() + RESTORE_BANNER_SETTLE,
-                            });
-                    }
-                }
-            }
-            // Restore the active tab. (On a partial-spawn-failure restore the
-            // saved index may not line up 1:1; switch_to clamps.)
-            if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
-                tabs.switch_to(session.active_tab);
-            }
-            self.state.focus = if session.pane_focused {
-                Focus::Pane
-            } else {
-                Focus::FileList
-            };
-        }
-        // Restore the vertical split (shape + previewed file). Independent of
-        // the pane block above — a split can exist without a bottom pane.
-        if let Some(sv) = &session.vsplit {
-            self.restore_vsplit(sv, session.pane_focused);
-        }
-        // P2: restore the scope-coordination registry verbatim — independent
-        // of tab-restore success, like the vsplit above. A claim whose owning
-        // tab failed to respawn (or whose save predates `claim_owner`) just
-        // shows up "orphaned" on the registry / orchestration screen, still
-        // informative and releasable rather than silently lost.
-        self.state.scope_registry.clone_from(&session.scope_claims);
-        self.state.flash_info("session restored");
-        effects
-    }
-
-    /// Restore a saved vertical split: reopen the second commander at its saved
-    /// cwd (PR G) or re-load the Stage-1 preview file, then apply the saved
-    /// shape. Split out of `restore_session` so it's unit-testable WITHOUT the
-    /// session-cwd `chdir` (which `set_current_dir`s and would race the parallel
-    /// test runner) — `open_second_commander_at` / `load_right_preview` don't
-    /// touch the process cwd.
-    pub(super) fn restore_vsplit(
-        &mut self,
-        sv: &crate::state::sessions::SavedVsplit,
-        pane_focused: bool,
-    ) {
-        let mode = if sv.full_height {
-            VsplitMode::FullHeight
-        } else {
-            VsplitMode::TopOnly
-        };
-        let focus = if sv.focus_right {
-            Side::Right
-        } else {
-            Side::Left
-        };
-        let width_pct = sv.width_pct.clamp(20, 80); // clamp a hand-edited / older width
-        // A column browsing a container has a cwd that is not a directory and
-        // never was, so it fails the filter below, falls through to the preview
-        // branch with no `preview_path`, and the blank-split guard drops the
-        // whole split — silently. Land it on the directory the container is in,
-        // cursor on the container itself: one `Enter` from where they were, and
-        // a split they still have. (The left column remounts instead, but it can
-        // afford to: `Effect::ChangeDir` acts on the focused column, so aiming
-        // one at `b` would need the effect to be able to name a column.)
-        let container = sv
-            .right_cwd
-            .as_ref()
-            .filter(|p| !p.is_dir())
-            .and_then(|p| super::archive::archive_ancestor_of(p))
-            .map(|(archive, _)| archive);
-        if let Some(archive) = container {
-            let Some(parent) = archive.parent() else {
-                return;
-            };
-            self.open_second_commander_at(parent);
-            if let Some(v) = self.state.vsplit.as_mut() {
-                v.width_pct = width_pct;
-                v.mode = mode;
-                v.focus = focus;
-            }
-            self.state.focus_on_path(&archive);
-            self.state.focus = if pane_focused {
-                Focus::Pane
-            } else {
-                Focus::FileList
-            };
-            self.state.flash_info(format!(
-                "b was inside {} — reopened beside it",
-                archive
-                    .file_name()
-                    .unwrap_or(archive.as_os_str())
-                    .to_string_lossy()
-            ));
-            return;
-        }
-        if let Some(right_cwd) = sv.right_cwd.as_ref().filter(|p| p.is_dir()) {
-            // PR G: reopen the second commander at its saved cwd (this sets
-            // `state.right` + `vsplit` + git/harpoon + rows), then override the
-            // split shape with the saved one (open_* uses defaults).
-            self.open_second_commander_at(right_cwd);
-            if let Some(v) = self.state.vsplit.as_mut() {
-                v.width_pct = width_pct;
-                v.mode = mode;
-                v.focus = focus;
-            }
-            // `open_second_commander_at` forces `state.focus = FileList`;
-            // re-apply the saved region focus (the pane block may have wanted
-            // `Pane`).
-            self.state.focus = if pane_focused {
-                Focus::Pane
-            } else {
-                Focus::FileList
-            };
-        } else {
-            self.state.vsplit = Some(VSplit {
-                width_pct,
-                mode,
-                focus,
-            });
-            // Re-load the previewed file if it still exists (wraps to the
-            // restored column width).
-            if let Some(path) = sv.preview_path.as_ref().filter(|p| p.exists()) {
-                self.load_right_preview(path);
-            }
-            // Don't restore a blank split: if the preview file is gone or
-            // failed to load, there'd be a carved, empty right column with no
-            // content. Match `cycle_vsplit`'s open-branch guard.
-            if self.view.right_pager.is_none() {
-                self.state.vsplit = None;
-            }
-        }
-    }
+    /// Rows above the first session in the `-r` picker: `[n] new session`.
+    /// The cursor can stop on any row, so the picker has no spacer.
+    pub(super) const SESSION_PICKER_HEADER_ROWS: usize = 1;
 
     pub fn show_session_info(&mut self) {
         let mut lines: Vec<String> = Vec::new();
@@ -666,16 +480,27 @@ impl App {
             "cwd      : {}",
             crate::paths::display_tilde(&self.state.cur().listing.dir)
         ));
-        lines.push(format!(
-            "entries  : {}",
-            self.state.left.listing.entries.len()
-        ));
-        lines.push(format!("visible  : {}", self.state.left.rows.len()));
-        lines.push(format!("picks    : {}", self.state.left.picks.len()));
+        let col = self.state.cur();
+        lines.push(format!("entries  : {}", col.listing.entries.len()));
+        lines.push(format!("visible  : {}", col.rows.len()));
+        lines.push(format!("picks    : {}", col.picks.len()));
         lines.push(format!("inventory: {}", self.state.inventory.len()));
         lines.push(format!("marks    : {}", self.state.marks.entries.len()));
         lines.push(format!("rss      : {}", crate::sysinfo::format_rss()));
         lines.push(format!("time     : {}", crate::sysinfo::format_now()));
+        if !self.state.deferred_tabs.is_empty() {
+            lines.push(String::new());
+            lines.push("unopened tabs (kept saved):".into());
+            for deferred in &self.state.deferred_tabs {
+                lines.push(format!(
+                    "  saved tab {} ({}) — {}",
+                    deferred.saved_index + 1,
+                    deferred.tab.label,
+                    deferred.reason
+                ));
+                lines.push(format!("    {}", deferred.tab.command));
+            }
+        }
         if !self.state.config.sources.is_empty() {
             lines.push(String::new());
             lines.push("config sources:".into());
@@ -862,13 +687,14 @@ mod tests {
                     .expect("a tab was opened")
                     .tabs_mut()[0]
                     .info;
-                info.command = "codex".to_string();
+                info.command = "codex resume OLD --model test --sandbox read-only".to_string();
                 info.codex_session_id = Some(UUID.to_string());
             }
 
             let snapshot = app.build_session_snapshot();
             let saved = &snapshot.tabs[0];
             assert_eq!(saved.agent_session_id.as_deref(), Some(UUID));
+            assert_eq!(saved.command, "codex --model test --sandbox read-only");
             // And the id has to survive into the spawn, or saving it changed
             // nothing the user can see.
             assert_eq!(
@@ -879,7 +705,7 @@ mod tests {
                         tmp.path()
                     )
                     .command,
-                format!("codex resume {UUID}"),
+                format!("codex --model test --sandbox read-only resume {UUID}"),
                 "a restored tab must resume that exact rollout, not --last"
             );
         });
@@ -916,6 +742,367 @@ mod tests {
                 .filter(|t| t.agent_session_id.as_deref() == Some(UUID))
                 .count();
             assert_eq!(claims, 1, "only one tab may claim a conversation");
+        });
+    }
+
+    /// A restore point the picker can restore. Its `cwd` is the crate root,
+    /// where the test process already runs, because restoring `chdir`s the
+    /// whole process (#576).
+    fn restorable(id: u64, epoch_secs: u64, name: &str) -> crate::state::sessions::Session {
+        crate::state::sessions::Session {
+            id,
+            saved_at: String::new(),
+            epoch_secs,
+            cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+            tabs: Vec::new(),
+            active_tab: 0,
+            pane_height_pct: 30,
+            pane_focused: false,
+            name: name.to_string(),
+            project_home: None,
+            vsplit: None,
+            scope_claims: Vec::new(),
+        }
+    }
+
+    fn press(app: &mut App, code: crossterm::event::KeyCode) {
+        app.handle_pager_key(crossterm::event::KeyEvent::new(
+            code,
+            crossterm::event::KeyModifiers::empty(),
+        ));
+    }
+
+    /// The text of the line under the open picker's cursor.
+    fn cursored_line(app: &App) -> String {
+        let view = app.view.pager.as_ref().expect("the picker is open");
+        let cursor = view.picker_cursor.expect("a picker has a cursor");
+        view.lines[cursor].to_string()
+    }
+
+    /// Quitting with nothing to restore — no tabs, no split, no scope claims —
+    /// must not write a restore point. Each one took a `MAX_SESSIONS` slot, so
+    /// opening `spyc -r`, finding the session missing and quitting pushed out
+    /// another real session every time.
+    #[test]
+    fn quitting_with_nothing_to_restore_writes_no_session() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.save_session();
+            assert!(
+                crate::state::sessions::load_sessions().is_empty(),
+                "an empty quit must not take a picker slot"
+            );
+            let summary = app.exit_summary.as_deref().unwrap_or_default();
+            assert!(
+                !summary.contains("spyc -r"),
+                "the exit summary must not offer a restore that isn't there: {summary}"
+            );
+        });
+    }
+
+    /// The other side of the rule above: a restored session whose tabs were all
+    /// closed is still overwritten on quit. Skipping that save would leave the
+    /// old file in place, and `-r` would reopen the tabs the user closed.
+    #[test]
+    fn quitting_an_emptied_restored_session_still_overwrites_it() {
+        const ID: u64 = 4242;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            let mut saved = restorable(ID, 1_700_000_000, "OLD");
+            saved.tabs.push(crate::state::sessions::SavedTab {
+                command: "cat".into(),
+                label: "cat".into(),
+                cwd: tmp.path().to_path_buf(),
+                agent_kind: crate::state::sessions::AgentKind::Other,
+                agent_session_id: None,
+                agent_session_name: None,
+                claim_owner: String::new(),
+            });
+            crate::state::sessions::save_session(&saved).expect("seed the restore point");
+
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.state.session_id = Some(ID);
+            app.save_session();
+
+            let loaded = crate::state::sessions::load_sessions();
+            assert_eq!(loaded.len(), 1);
+            assert_eq!(loaded[0].id, ID);
+            assert!(
+                loaded[0].tabs.is_empty(),
+                "the closed tab must not come back"
+            );
+        });
+    }
+
+    /// Every line the session picker's cursor can stop on is a choice. A blank
+    /// spacer under `[n] new session` was selectable, and `Enter` on it quietly
+    /// started a new session, which looks like a corrupt entry.
+    #[test]
+    fn every_line_the_session_picker_cursor_reaches_is_a_choice() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            for (id, name) in [(1, "FIRST"), (2, "SECOND")] {
+                crate::state::sessions::save_session(&restorable(id, 1_700_000_000 + id, name))
+                    .expect("seed a restore point");
+            }
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.show_session_picker();
+            let reachable = app.view.pager.as_ref().expect("picker").lines.len();
+            for code in [
+                crossterm::event::KeyCode::Up,
+                crossterm::event::KeyCode::Down,
+            ] {
+                for _ in 0..reachable {
+                    let line = cursored_line(&app);
+                    assert!(
+                        !line.trim().is_empty(),
+                        "the cursor stopped on a line that is not a choice"
+                    );
+                    press(&mut app, code);
+                }
+            }
+        });
+    }
+
+    /// The picker opens on the newest session, `Enter` restores the row under
+    /// the cursor, and the row above the list starts a new session.
+    #[test]
+    fn the_session_picker_restores_the_row_under_the_cursor() {
+        use crossterm::event::KeyCode;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            for (id, name) in [(1, "OLDER"), (2, "NEWER")] {
+                crate::state::sessions::save_session(&restorable(id, 1_700_000_000 + id, name))
+                    .expect("seed a restore point");
+            }
+
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.show_session_picker();
+            assert!(cursored_line(&app).contains("NEWER"));
+            press(&mut app, KeyCode::Down);
+            press(&mut app, KeyCode::Enter);
+            assert_eq!(app.state.session_id, Some(1));
+            assert_eq!(app.state.session_name.as_deref(), Some("OLDER"));
+
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.show_session_picker();
+            press(&mut app, KeyCode::Enter);
+            assert_eq!(app.state.session_id, Some(2));
+
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.show_session_picker();
+            for _ in 0..app.view.pager.as_ref().expect("picker").lines.len() {
+                press(&mut app, KeyCode::Up);
+            }
+            assert!(cursored_line(&app).contains("new session"));
+            press(&mut app, KeyCode::Enter);
+            assert_eq!(app.state.session_id, None, "the [n] row restores nothing");
+            assert!(app.view.pager.is_none(), "and closes the picker");
+        });
+    }
+
+    // ── which conversation a claude tab saves (#584) ─────────────────
+    //
+    // Claude writes a conversation's transcript only once it has a message,
+    // but its per-process record and the hook's pin exist from startup. These
+    // fixtures lay out `~/.claude` in a temp dir to catch the save between the
+    // two, where it used to record another tab's conversation.
+
+    const MINE: &str = "11111111-1111-4111-8111-111111111111";
+    const OTHER: &str = "22222222-2222-4222-8222-222222222222";
+    const SPAWN: u64 = 1_800_000_000;
+
+    /// One claude tab in `cwd`, spawned at [`SPAWN`] and pinned to `pin`.
+    fn claude_tab(app: &mut App, cwd: &std::path::Path, pin: Option<&str>) {
+        app.open_pane_tab("cat");
+        let info = &mut app
+            .runtime
+            .pane_tabs
+            .as_mut()
+            .expect("a tab was opened")
+            .tabs_mut()[0]
+            .info;
+        info.command = "claude".into();
+        info.cwd = cwd.to_path_buf();
+        info.spawn_epoch_secs = SPAWN;
+        info.live_session_id = pin.map(String::from);
+    }
+
+    /// Claude's record for its running process: `sessions/<pid>.json`.
+    fn claude_record(
+        claude: &std::path::Path,
+        pid: u32,
+        sid: &str,
+        cwd: &std::path::Path,
+        started: u64,
+    ) {
+        let dir = claude.join("sessions");
+        std::fs::create_dir_all(&dir).expect("sessions dir");
+        let record = serde_json::json!({
+            "pid": pid, "sessionId": sid, "cwd": cwd, "startedAt": started * 1000
+        });
+        std::fs::write(dir.join(format!("{pid}.json")), record.to_string()).expect("record");
+    }
+
+    /// A transcript for `sid` in `cwd`'s project dir, last written at `written`.
+    fn claude_transcript(claude: &std::path::Path, cwd: &std::path::Path, sid: &str, written: u64) {
+        let dir = claude
+            .join("projects")
+            .join(crate::state::sessions::project_slug(cwd));
+        std::fs::create_dir_all(&dir).expect("project dir");
+        let file = dir.join(format!("{sid}.jsonl"));
+        std::fs::write(&file, "{}\n").expect("transcript");
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .expect("open transcript")
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(written))
+            .expect("set mtime");
+    }
+
+    /// Runs `body` with the state root and `~/.claude` pinned under a temp dir,
+    /// handing it the dir claude would run in and the fake `~/.claude`.
+    fn with_claude_home(body: impl FnOnce(&std::path::Path, &std::path::Path)) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = std::fs::canonicalize(tmp.path()).expect("canonical tempdir");
+        let (project, claude) = (root.join("project"), root.join("claude"));
+        std::fs::create_dir_all(&project).expect("project");
+        crate::state::with_state_root(&root.join("state"), || {
+            crate::state::sessions::with_claude_dir(&claude, || body(&project, &claude));
+        });
+    }
+
+    fn saved_conversation(app: &mut App) -> Option<String> {
+        app.build_session_snapshot().tabs[0]
+            .agent_session_id
+            .clone()
+    }
+
+    /// The observed case: the hook has pinned the tab's own conversation, which
+    /// claude hasn't written yet, and the newest transcript in the folder
+    /// belongs to a conversation from before this tab existed.
+    #[test]
+    fn a_pinned_claude_tab_saves_its_own_conversation_before_claude_writes_it() {
+        with_claude_home(|project, claude| {
+            claude_transcript(claude, project, OTHER, SPAWN - 60);
+            claude_record(claude, 4242, MINE, project, SPAWN + 1);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, Some(MINE));
+            assert_eq!(saved_conversation(&mut app).as_deref(), Some(MINE));
+        });
+    }
+
+    /// Without a pin (no status hooks), the tab's own process record still
+    /// identifies it. Its conversation having no transcript yet means there
+    /// is nothing to resume, not that the tab is someone else's.
+    #[test]
+    fn an_unpinned_claude_tab_never_borrows_another_conversation_before_its_own_exists() {
+        with_claude_home(|project, claude| {
+            claude_transcript(claude, project, OTHER, SPAWN - 60);
+            claude_record(claude, 4242, MINE, project, SPAWN + 1);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app), None);
+        });
+    }
+
+    /// Another claude has been running in the same cwd for an hour and is
+    /// writing its conversation now. While this tab's own conversation is
+    /// unwritten, the other one is still not this tab's.
+    #[test]
+    fn an_unpinned_claude_tab_never_takes_another_running_claudes_conversation() {
+        with_claude_home(|project, claude| {
+            claude_record(claude, 1111, OTHER, project, SPAWN - 3_600);
+            claude_transcript(claude, project, OTHER, SPAWN + 50);
+            claude_record(claude, 4242, MINE, project, SPAWN + 1);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app), None);
+        });
+    }
+
+    /// A claude started just after this tab's, as by another tab opened beside
+    /// it, has already written its conversation. This tab's own record is the
+    /// nearer one, and its unwritten conversation still isn't the other's.
+    #[test]
+    fn an_unpinned_claude_tab_matches_its_own_record_before_a_written_neighbour() {
+        with_claude_home(|project, claude| {
+            claude_record(claude, 4242, MINE, project, SPAWN + 1);
+            claude_record(claude, 4343, OTHER, project, SPAWN + 3);
+            claude_transcript(claude, project, OTHER, SPAWN + 20);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app), None);
+        });
+    }
+
+    /// The same with no record for this tab's own claude: the last-resort guess
+    /// can't take a conversation another running claude owns.
+    #[test]
+    fn the_last_resort_guess_skips_a_running_claudes_conversation() {
+        with_claude_home(|project, claude| {
+            claude_record(claude, 1111, OTHER, project, SPAWN - 3_600);
+            claude_transcript(claude, project, OTHER, SPAWN + 50);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app), None);
+        });
+    }
+
+    /// With no process record at all, a transcript last written before the tab
+    /// started can't be the tab's conversation.
+    #[test]
+    fn a_transcript_older_than_the_tab_is_not_its_conversation() {
+        with_claude_home(|project, claude| {
+            claude_transcript(claude, project, OTHER, SPAWN - 60);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app), None);
+        });
+    }
+
+    /// The last-resort guess still finds a conversation written since the tab
+    /// started, for a claude that leaves no process record.
+    #[test]
+    fn with_no_record_a_conversation_written_since_the_tab_started_is_saved() {
+        with_claude_home(|project, claude| {
+            claude_transcript(claude, project, MINE, SPAWN + 30);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app).as_deref(), Some(MINE));
+        });
+    }
+
+    /// Spawn-time matching still picks the tab's own conversation over an
+    /// older one in the same cwd once both are written.
+    #[test]
+    fn an_unpinned_claude_tab_saves_its_own_written_conversation() {
+        with_claude_home(|project, claude| {
+            claude_record(claude, 1111, OTHER, project, SPAWN - 3_600);
+            claude_transcript(claude, project, OTHER, SPAWN + 50);
+            claude_record(claude, 4242, MINE, project, SPAWN + 1);
+            claude_transcript(claude, project, MINE, SPAWN + 40);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app).as_deref(), Some(MINE));
+        });
+    }
+
+    /// The autosave writes only when its fingerprint moves, so the moment a
+    /// tab's conversation id becomes known has to move it. Otherwise the file
+    /// keeps whatever the previous save resolved until something unrelated
+    /// changes.
+    #[test]
+    fn a_pin_arriving_moves_the_autosave_fingerprint() {
+        with_claude_home(|project, _| {
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            let before = app.session_fingerprint();
+            app.runtime.pane_tabs.as_mut().expect("the tab").tabs_mut()[0]
+                .info
+                .live_session_id = Some(MINE.into());
+            assert_ne!(app.session_fingerprint(), before);
         });
     }
 

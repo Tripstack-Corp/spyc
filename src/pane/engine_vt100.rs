@@ -145,6 +145,18 @@ impl Engine for vt100::Parser {
         Self::process(self, bytes);
     }
 
+    // vt100 does not implement mode 2026, so it never holds a frame.
+    fn synchronized_update(&self) -> bool {
+        false
+    }
+
+    fn end_synchronized_update(&mut self) {}
+
+    // vt100 answers no queries.
+    fn take_replies(&mut self) -> Vec<u8> {
+        Vec::new()
+    }
+
     fn screen(&self) -> &Self::Screen {
         Self::screen(self)
     }
@@ -184,5 +196,10 @@ mod tests {
     #[test]
     fn reports_the_modes_the_pane_branches_on() {
         conformance::reports_the_modes_the_pane_branches_on::<vt100::Parser>();
+    }
+
+    #[test]
+    fn contents_between_stops_before_its_end_column() {
+        conformance::contents_between_stops_before_its_end_column::<vt100::Parser>();
     }
 }

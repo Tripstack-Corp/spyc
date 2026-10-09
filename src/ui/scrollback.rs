@@ -52,6 +52,16 @@ use crate::pane::engine::{TerminalScreen, Wide};
 /// restored before returning. Callers can keep their own scroll
 /// state across the call.
 pub fn lines_from_scrollback<S: TerminalScreen>(screen: &mut S) -> Vec<Line<'static>> {
+    tail_lines_from_scrollback(screen, usize::MAX)
+}
+
+/// The newest `max` lines of [`lines_from_scrollback`], reading only the
+/// scrollback pages that hold them: `gf` and `J` want the last couple of
+/// hundred rows of a 10,000-row history, not all of it rendered and dropped.
+pub fn tail_lines_from_scrollback<S: TerminalScreen>(
+    screen: &mut S,
+    max: usize,
+) -> Vec<Line<'static>> {
     let saved_offset = screen.scrollback();
     let (rows_u16, cols_u16) = screen.size();
     let rows_len = rows_u16 as usize;
@@ -69,13 +79,14 @@ pub fn lines_from_scrollback<S: TerminalScreen>(screen: &mut S) -> Vec<Line<'sta
     screen.set_scrollback(usize::MAX);
     let scrollback_len = screen.scrollback();
 
-    let mut out = Vec::with_capacity(scrollback_len + rows_len);
+    let history = max.saturating_sub(rows_len).min(scrollback_len);
+    let mut out = Vec::with_capacity(history + rows_len);
 
-    // Walk scrollback in `rows_len`-sized pages from oldest to
-    // newest. Each iteration reads exactly `chunk` rows of pure
-    // scrollback content, where `chunk` is `rows_len` for full
-    // pages and the remainder on the partial last page.
-    let mut remaining = scrollback_len;
+    // Walk the newest `history` rows of scrollback in `rows_len`-sized
+    // pages from oldest to newest. Each iteration reads exactly `chunk`
+    // rows of pure scrollback content, where `chunk` is `rows_len` for
+    // full pages and the remainder on the partial last page.
+    let mut remaining = history;
     while remaining > 0 {
         let chunk = remaining.min(rows_len);
         screen.set_scrollback(remaining);
@@ -103,6 +114,9 @@ pub fn lines_from_scrollback<S: TerminalScreen>(screen: &mut S) -> Vec<Line<'sta
     // positioning of text jumps when entering ^a-v". Mirroring
     // the screen geometry verbatim makes ^a-v feel like a frozen
     // copy of the live pty.
+    if out.len() > max {
+        out.drain(..out.len() - max);
+    }
     out
 }
 
@@ -366,6 +380,25 @@ mod tests {
         assert_eq!(plain, expected);
     }
 
+    /// Every tail length, including ones that end mid-page and ones shorter
+    /// than the live screen, is exactly the end of the full walk.
+    #[test]
+    fn tail_walk_is_the_end_of_the_full_walk() {
+        let payload: String = (1..=20).fold(String::new(), |mut acc, i| {
+            use std::fmt::Write as _;
+            let _ = write!(acc, "line{i:02}\r\n");
+            acc
+        });
+        let mut p = parser_with(3, 20, 100, payload.as_bytes());
+        p.screen_mut().set_scrollback(4);
+        let full = plain_lines(&lines_from_scrollback(p.screen_mut()));
+        for max in 0..=full.len() + 2 {
+            let tail = plain_lines(&tail_lines_from_scrollback(p.screen_mut(), max));
+            assert_eq!(tail, full[full.len().saturating_sub(max)..], "max = {max}");
+            assert_eq!(p.screen().scrollback(), 4, "offset restored, max = {max}");
+        }
+    }
+
     #[test]
     fn styled_text_preserves_colors() {
         // Red "hi" — verify the result has a red span. No trailing
@@ -492,5 +525,64 @@ mod tests {
             "expected the blue bar kept and trailing default pad dropped: {:?}",
             lines[0].spans
         );
+    }
+}
+
+/// The live pane and the scrollback pager are two different walks over the
+/// same grid — `PaneWidget` writes cell by cell, `line_from_visible_row` skips
+/// continuations and concatenates heads into a `Line`. They must land the same
+/// glyphs in the same columns, or `^a v` shows something the pane never did.
+#[cfg(test)]
+mod live_and_scrollback_agree {
+    use crate::pane::PaneEngine;
+    use crate::pane::PaneWidget;
+    use crate::pane::engine::Engine as EngineT;
+    use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget as _};
+
+    /// Every cluster shape on one row: flag, ZWJ family, skin tone, two VS16
+    /// sequences, a bare-wide emoji and CJK.
+    const ROW: &str = "\u{1F1E8}\u{1F1E6}\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{1F44D}\u{1F3FD}\u{2764}\u{FE0F}\u{1F336}\u{FE0F}\u{2705}\u{3042}";
+
+    fn row_text(buf: &Buffer, y: u16, cols: u16) -> String {
+        (0..cols)
+            .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
+
+    /// Both sides are normalized through the same `row_text` — an instrument
+    /// that shares the subject's model inherits its blind spots, so the
+    /// comparison is over rendered buffers, not over either walk's own idea of
+    /// what it produced.
+    #[test]
+    fn a_cluster_row_renders_identically_in_both_walks() {
+        let cols = 40u16;
+        let mut e = <PaneEngine as EngineT>::new(3, cols, 1000);
+        e.process(format!("{ROW}\r\n{ROW}\r\n").as_bytes());
+
+        let area = Rect::new(0, 0, cols, 3);
+        let mut live = Buffer::empty(area);
+        PaneWidget {
+            screen: e.screen(),
+            focused: true,
+            selection: None,
+        }
+        .render(area, &mut live);
+
+        let lines = super::lines_from_scrollback(e.screen_mut());
+        let mut back = Buffer::empty(area);
+        for (i, l) in lines.iter().take(3).enumerate() {
+            #[allow(clippy::cast_possible_truncation)]
+            back.set_line(0, i as u16, l, cols);
+        }
+
+        for y in 0..2u16 {
+            assert_eq!(
+                row_text(&live, y, cols),
+                row_text(&back, y, cols),
+                "row {y}: the pane and its scrollback drew different glyphs"
+            );
+        }
     }
 }

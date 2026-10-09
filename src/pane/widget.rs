@@ -157,6 +157,30 @@ const fn selected(sel: Option<((u16, u16), (u16, u16))>, row: u16, col: u16) -> 
     after_start && before_end
 }
 
+/// The text of a selection from `start` to `end`, for a clipboard copy. Both
+/// ends are included, as [`selected`] highlights them; `contents_between` stops
+/// before its end column, so the end is widened by one.
+///
+/// Built on the seam's `contents_between` rather than a cell walk: it reads the
+/// rows the widget drew (the pane's current scroll position), and it breaks a
+/// line only at a hard line end — a cell walk puts a `\n` in the middle of
+/// every soft-wrapped line.
+///
+/// Trailing whitespace is trimmed per line: the grid is space-padded to its full
+/// width, so an untrimmed copy pastes a ragged block of spaces.
+pub(super) fn selection_text<S: TerminalScreen>(
+    screen: &S,
+    start: (u16, u16),
+    end: (u16, u16),
+) -> String {
+    screen
+        .contents_between(start.0, start.1, end.0, end.1.saturating_add(1))
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[cfg(test)]
 mod attribute_tests {
     #[allow(unused_imports)]
@@ -245,11 +269,81 @@ mod attribute_tests {
 
 #[cfg(test)]
 mod selection_tests {
-    use super::selected;
-    #[allow(unused_imports)]
+    use proptest::prelude::*;
+
+    use super::{selected, selection_text};
     use crate::pane::PaneEngine;
-    #[allow(unused_imports)]
-    use crate::pane::engine::{Engine as EngineT, TerminalScreen as _};
+    use crate::pane::engine::{Engine as EngineT, TerminalScreen, Wide};
+
+    const ROWS: u16 = 5;
+    const COLS: u16 = 40;
+    /// Prose ending in punctuation, a blank line and a wide glyph, none of
+    /// which wraps.
+    const LINES: [&str; 4] = [
+        "  The issue lays out the removal check:",
+        "",
+        "a \u{3042} b",
+        "tail",
+    ];
+
+    fn screen() -> PaneEngine {
+        let mut e = <PaneEngine as EngineT>::new(ROWS, COLS, 0);
+        e.process(LINES.join("\r\n").as_bytes());
+        e
+    }
+
+    /// What the highlight shows: the text of every cell `selected` paints,
+    /// read cell by cell, one line per row, trimmed as a copy is.
+    fn highlighted<S: TerminalScreen>(screen: &S, sel: ((u16, u16), (u16, u16))) -> String {
+        let ((sr, _), (er, _)) = sel;
+        let mut text = String::new();
+        (sr..=er)
+            .map(|row| {
+                let mut line = String::new();
+                for col in 0..COLS {
+                    let tail = screen
+                        .cell_style(row, col)
+                        .is_some_and(|s| s.wide == Wide::Tail);
+                    if tail || !selected(Some(sel), row, col) {
+                        continue;
+                    }
+                    text.clear();
+                    screen.cell_text(row, col, &mut text);
+                    line.push_str(if text.is_empty() { " " } else { &text });
+                }
+                line.trim_end().to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The report: a drag across a line to its closing colon highlighted the
+    /// colon and copied everything before it.
+    #[test]
+    fn a_copy_includes_the_cell_the_drag_ended_on() {
+        let e = screen();
+        assert_eq!(
+            selection_text(e.screen(), (0, 2), (0, 38)),
+            "The issue lays out the removal check:"
+        );
+    }
+
+    proptest! {
+        /// A copy is exactly what the highlight covers, for any selection,
+        /// ordered as `finish_pane_selection` orders one.
+        #[test]
+        fn a_copy_is_what_the_highlight_shows(
+            a in (0..ROWS, 0..COLS),
+            b in (0..ROWS, 0..COLS),
+        ) {
+            let (start, end) = if a <= b { (a, b) } else { (b, a) };
+            let e = screen();
+            prop_assert_eq!(
+                selection_text(e.screen(), start, end),
+                highlighted(e.screen(), (start, end))
+            );
+        }
+    }
 
     /// A multi-row selection takes the tail of the first row, all of the middle, and
     /// the head of the last — not a rectangle.
@@ -283,5 +377,84 @@ mod selection_tests {
     #[test]
     fn no_selection_selects_nothing() {
         assert!(!selected(None, 0, 0));
+    }
+}
+
+/// The observed symptom of #484, at the level it was seen: a pane drawn
+/// through this widget.
+///
+/// The engine-side contract lives in `engine_ghostty::grapheme_cluster_width`.
+/// These cover what that contract is *for* — that a producer budgeting columns
+/// the way `ui::display_width` counts them gets the pane it drew.
+#[cfg(test)]
+mod cluster_alignment_tests {
+    #[allow(unused_imports)]
+    use crate::pane::PaneEngine;
+    #[allow(unused_imports)]
+    use crate::pane::engine::{Engine as EngineT, TerminalScreen as _};
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::widgets::Widget as _;
+
+    use super::PaneWidget;
+
+    fn rendered(bytes: &[u8], rows: u16, cols: u16) -> Buffer {
+        let mut parser = <PaneEngine as EngineT>::new(rows, cols, 0);
+        parser.process(bytes);
+        let area = Rect::new(0, 0, cols, rows);
+        let mut buf = Buffer::empty(area);
+        PaneWidget {
+            screen: parser.screen(),
+            focused: true,
+            selection: None,
+        }
+        .render(area, &mut buf);
+        buf
+    }
+
+    fn columns_of(buf: &Buffer, row: u16, cols: u16, symbol: &str) -> Vec<u16> {
+        (0..cols)
+            .filter(|&x| buf.cell((x, row)).is_some_and(|c| c.symbol() == symbol))
+            .collect()
+    }
+
+    /// Two table rows the producer budgeted identically — one whose cell holds
+    /// a regional-indicator flag, one holding two ASCII characters — must land
+    /// their borders in the same columns.
+    ///
+    /// This is the reported symptom: rendering a markdown table, the only row
+    /// containing a real emoji cluster was the only row whose borders were off.
+    #[test]
+    fn a_cluster_does_not_shift_what_follows_it_on_the_line() {
+        let buf = rendered("|\u{1f1e8}\u{1f1e6}|\r\n|ab|".as_bytes(), 2, 12);
+        let emoji_row = columns_of(&buf, 0, 12, "|");
+        let ascii_row = columns_of(&buf, 1, 12, "|");
+        assert_eq!(
+            emoji_row, ascii_row,
+            "the flag row's borders drifted from the ASCII row's"
+        );
+        assert_eq!(
+            emoji_row,
+            vec![0, 3],
+            "and both sit where 2 columns puts them"
+        );
+    }
+
+    /// A producer that redraws a line in place — carriage return, same budgeted
+    /// width, no erase — must fully cover what it drew before. When the engine
+    /// spent more columns on the cluster than the producer budgeted, the
+    /// overspill survived the redraw as stray characters stranded to the right.
+    #[test]
+    fn redrawing_a_line_over_a_cluster_leaves_no_orphaned_cells() {
+        // Four columns by the producer's count: the flag, then `XY`.
+        let buf = rendered("\u{1f1e8}\u{1f1e6}XY\rabcd".as_bytes(), 1, 12);
+        let row: String = (0..12)
+            .filter_map(|x| buf.cell((x, 0)).map(|c| c.symbol().to_string()))
+            .collect();
+        assert_eq!(
+            row.trim_end(),
+            "abcd",
+            "the redraw must cover the whole first write; got {row:?}"
+        );
     }
 }

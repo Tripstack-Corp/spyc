@@ -131,7 +131,8 @@ pub trait TerminalScreen {
 
     /// Visible screen as plain text, one line per row.
     fn contents(&self) -> String;
-    /// Plain text between two positions.
+    /// Plain text from `(start_row, start_col)` up to, not including,
+    /// `(end_row, end_col)`: the end column is exclusive, as vt100 defined it.
     ///
     /// Honouring soft wraps is the implementation's job, not the caller's:
     /// `Pane::selection_text` needs a newline at a hard line end and none at a
@@ -171,6 +172,15 @@ pub trait Engine: Send {
         Self: Sized;
     /// Feed bytes from the child.
     fn process(&mut self, bytes: &[u8]);
+    /// The child has a synchronized update open (DEC mode 2026): it is partway
+    /// through a redraw it asked to have shown whole.
+    fn synchronized_update(&self) -> bool;
+    /// Close the child's open synchronized update, for a child that never
+    /// closes its own.
+    fn end_synchronized_update(&mut self);
+    /// Take the replies to the child's queries that `process` produced, for the
+    /// caller to write to the child once it no longer holds the engine.
+    fn take_replies(&mut self) -> Vec<u8>;
     fn screen(&self) -> &Self::Screen;
     fn screen_mut(&mut self) -> &mut Self::Screen;
 }
@@ -275,6 +285,24 @@ pub mod conformance {
         s.set_scrollback(usize::MAX);
         let len = s.scrollback();
         assert!(len > 0 && len < usize::MAX, "clamped to {len}");
+    }
+
+    /// `contents_between` stops before its end column. A copy widens a
+    /// selection's inclusive end by one for that, so an engine that included
+    /// the column would copy one cell too many.
+    pub fn contents_between_stops_before_its_end_column<E: Engine>() {
+        let mut e = E::new(2, 8, 0);
+        e.process(b"abcdef\r\nghij");
+        let s = e.screen();
+        assert_eq!(s.contents_between(0, 0, 0, 3), "abc", "within a row");
+        // Engines differ on trailing blanks, which a copy trims anyway.
+        let across: Vec<_> = s
+            .contents_between(0, 4, 1, 2)
+            .lines()
+            .map(str::trim_end)
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(across, ["ef", "gh"], "across a hard line end");
     }
 
     /// The modes the pane branches on before forwarding anything.

@@ -1059,6 +1059,189 @@ fn pane_focus_switch_still_works_while_v_editor_is_open() {
     });
 }
 
+/// One rendered frame, row by row.
+fn screen_rows(app: &mut App, w: u16, h: u16) -> Vec<String> {
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let buf = terminal.backend().buffer();
+    (0..h)
+        .map(|y| {
+            (0..w)
+                .map(|x| buf.cell((x, y)).map_or(" ", |c| c.symbol()))
+                .collect()
+        })
+        .collect()
+}
+
+/// A full-screen `V` editor (no split): a live top-overlay pty with the
+/// keyboard. `apply_inner`'s gate reads only `state.focus`.
+fn open_v_editor(app: &mut App, dir: &std::path::Path) {
+    let wake = app.make_pane_wake();
+    let overlay = crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.context_path, wake)
+        .expect("spawn overlay");
+    app.runtime.top_overlay = Some(overlay);
+    app.state.focus = state::Focus::Overlay;
+    assert!(app.state.vsplit.is_none(), "the editor is full-screen");
+}
+
+/// #33: a full-screen `V` paints over the prompt row, so what spyc puts there
+/// must still reach the screen. From the editor, `^a c` is paused with a hint
+/// nobody saw; from the pane (`^a j`), `^a c` opened its prompt behind the
+/// editor, where it took every key unseen, and `^a x` on a live tab asked
+/// `[y/N]` there, so a `y` typed for the agent closed the tab.
+#[test]
+fn the_prompt_row_shows_over_a_full_screen_v_editor() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        app.open_pane_tab("cat");
+        open_v_editor(&mut app, &dir);
+        let screen = |app: &mut App| screen_rows(app, 80, 24).join("\n");
+
+        app.apply(&Action::PaneNewTab).unwrap();
+        assert!(
+            screen(&mut app).contains("pane commands paused"),
+            "the paused hint is drawn"
+        );
+
+        app.apply(&Action::PaneFocusDown).unwrap();
+        app.apply(&Action::PaneNewTab).unwrap();
+        assert!(matches!(app.state.mode, Mode::Prompting(_)));
+        assert!(
+            screen(&mut app).contains("pane command:"),
+            "the new-tab prompt is drawn"
+        );
+
+        app.cancel_prompt();
+        app.apply(&Action::PaneCloseTab).unwrap();
+        assert!(matches!(app.state.mode, Mode::Prompting(_)));
+        assert!(
+            screen(&mut app).contains("close running tab"),
+            "the close confirm is drawn"
+        );
+    });
+}
+
+/// The row it takes is the pane's tab bar, not the editor's text, and only
+/// while there is something to show. A click on a flash shown there selects
+/// it rather than switching to the tab its label covers.
+#[test]
+fn the_prompt_row_borrows_the_tab_bar_and_gives_it_back() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        app.view.term_size = (80, 24);
+        app.open_pane_tab("cat");
+        app.open_pane_tab("cat");
+        open_v_editor(&mut app, &dir);
+        let layout = app.frame_layout(ratatui::layout::Rect::new(0, 0, 80, 24));
+        let divider = layout.divider.expect("a pane is open");
+        // Opening a tab flashes its hint; the test starts from an idle row.
+        app.state.flash = None;
+        let bar = |app: &mut App| screen_rows(app, 80, 24)[usize::from(divider.y)].clone();
+        let is_tab_bar = |row: &str| row.contains("[1]  cat") && row.contains("[2]  cat");
+        let tabs = bar(&mut app);
+        assert!(
+            is_tab_bar(&tabs),
+            "idle, the divider is the tab bar: {tabs:?}"
+        );
+        assert_eq!(app.displaced_prompt_row(&layout), None);
+
+        app.apply(&Action::PaneNewTab).unwrap();
+        assert_eq!(app.displaced_prompt_row(&layout), Some(divider));
+        let shown = bar(&mut app);
+        assert!(shown.starts_with("pane commands paused"), "{shown:?}");
+        assert!(
+            !shown.contains("cat"),
+            "no tab label survives under it: {shown:?}"
+        );
+
+        // From the pane, where a tab click would act (the editor's pause
+        // would swallow it), a flash shown on the bar is text to select.
+        app.apply(&Action::PaneFocusDown).unwrap();
+        app.state.flash_info("from the pane");
+        assert!(bar(&mut app).starts_with("from the pane"));
+        let active = |app: &App| app.runtime.pane_tabs.as_ref().expect("tabs").active_index();
+        let before = active(&app);
+        crate::set_mouse_capture_for_test(true);
+        for column in 0..divider.width {
+            for kind in [
+                crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+            ] {
+                app.handle_mouse(crossterm::event::MouseEvent {
+                    kind,
+                    column,
+                    row: divider.y,
+                    modifiers: KeyModifiers::NONE,
+                });
+            }
+            // Per click: a sweep crosses every label, so a switch to one tab
+            // and back to this one would cancel out by the end.
+            let now = active(&app);
+            if now != before {
+                crate::set_mouse_capture_for_test(false);
+                panic!("a click at column {column} on the flash switched to tab {now}");
+            }
+        }
+        crate::set_mouse_capture_for_test(false);
+
+        app.state.flash = None;
+        assert_eq!(app.displaced_prompt_row(&layout), None);
+        let back = bar(&mut app);
+        assert!(is_tab_bar(&back), "the tab bar comes back: {back:?}");
+    });
+}
+
+/// A `D` pager covers the prompt row the same way, and nothing pauses `^a c`
+/// under it.
+#[test]
+fn the_prompt_row_shows_over_a_full_screen_d_pager() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat");
+        let mut pv = crate::ui::pager::PagerView::new_plain("t", vec!["a".to_string()]);
+        pv.mount = crate::ui::pager::Mount::TopPane;
+        app.install_top_pager(pv);
+
+        app.apply(&Action::PaneFocusDown).unwrap();
+        app.apply(&Action::PaneNewTab).unwrap();
+        assert!(matches!(app.state.mode, Mode::Prompting(_)));
+        assert!(
+            screen_rows(&mut app, 80, 24)
+                .join("\n")
+                .contains("pane command:"),
+            "the new-tab prompt is drawn"
+        );
+    });
+}
+
+/// With no pane open there is no tab bar, so the editor's last row carries it.
+#[test]
+fn with_no_pane_the_prompt_row_takes_the_editors_last_row() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        open_v_editor(&mut app, &dir);
+        assert!(app.runtime.pane_tabs.is_none());
+
+        app.apply(&Action::PaneNewTab).unwrap();
+        let rows = screen_rows(&mut app, 80, 24);
+        let last = rows.last().expect("rows");
+        assert!(last.starts_with("pane commands paused"), "{last:?}");
+    });
+}
+
 /// Companion of the above for the vertical split: `^a h` / `^a l` (column
 /// focus) are pure focus nav too, so they're also exempt from the V-editor
 /// pause — you can switch columns while an editor is open in one of them (the
@@ -1226,16 +1409,9 @@ fn typing_into_a_fresh_agent_pane_is_not_eaten_by_the_consent_prompt() {
                 KeyModifiers::empty(),
             );
             for e in app.handle_key(key).unwrap() {
-                if let Effect::SendToPane { input, .. } = e {
+                if let Effect::SendToPane { mut input, .. } = e {
                     let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
-                    match input {
-                        crate::app::effect::PaneInput::Bytes(b) => {
-                            tabs.active_mut().send_bytes(&b).unwrap();
-                        }
-                        crate::app::effect::PaneInput::Key(k) => {
-                            tabs.active_mut().send_key(k).unwrap();
-                        }
-                    }
+                    input.send_to(tabs.active_mut()).unwrap();
                 }
             }
         }

@@ -13,19 +13,26 @@
 use std::path::{Path, PathBuf};
 
 use crate::config::Config;
+#[cfg(test)]
 use crate::fs::Listing;
 use crate::keymap::{Resolver, UserKeymap};
-use crate::state::{Cursor, Frecency, History, IgnoreMasks, Inventory, Marks, Picks};
+#[cfg(test)]
+use crate::state::{Cursor, IgnoreMasks, Picks};
+use crate::state::{Frecency, History, Inventory, Marks};
+#[cfg(test)]
 use crate::ui::list_view::GridDims;
 
 use super::{Effect, FlashKind, FlashMessage, Mode, RowData, View};
 
 mod apply;
 pub mod archive;
+mod commander;
+pub use commander::Commander;
 mod dispatch;
 mod git;
 mod listing;
 mod navigation;
+pub mod restore;
 mod selection;
 
 /// Result of `AppState::dispatch_command` — tells the `App` caller what to do.
@@ -431,6 +438,16 @@ pub enum Side {
     Right,
 }
 
+impl Side {
+    /// The column across the split.
+    pub const fn other(self) -> Self {
+        match self {
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+        }
+    }
+}
+
 /// How a vertical split is laid out. `TopOnly` splits just the file-list
 /// region (the PTY/agent pane stays full-width below both columns);
 /// `FullHeight` runs the divider the whole frame height (the PTY pane shrinks
@@ -536,116 +553,6 @@ pub struct PaneLayout {
     pub vsplit_left_was_pane: bool,
 }
 
-/// One file-commander's worth of pure Model state — the per-browser fields a
-/// vertical-split column owns: the directory it shows, the cursor in it, its
-/// picks/masks/filter/sort, and its display rows + grid geometry.
-///
-/// Extracted in PR A of the vsplit Stage 2 plan as a behaviour-preserving move.
-/// `left` is always present; `right` is `None` until a second column is opened
-/// (Stage 2 PR C, the feature). The pure-Model **update** path
-/// (`AppState::apply` / `dispatch_*` / cursor / selection / listing) reaches the
-/// **focused** column through [`AppState::cur`] / [`AppState::cur_mut`] — while
-/// `right` is `None` that always resolves to `left`, so the accessor is
-/// behaviour-preserving. Render addresses `left` / `right` explicitly (it draws
-/// both columns). (`git`/`git_cache` are per-column fields below — moved off
-/// `AppState` for dual git, so `b` in a different repo renders its own markers.)
-pub struct Commander {
-    /// The directory this browser is showing + its entries.
-    pub listing: Listing,
-    /// Multi-select set (keyed by path) scoped to this browser's listing.
-    pub picks: Picks,
-    /// File-ignore toggles (`.`/`~`), applied during `rebuild_rows`.
-    pub masks: IgnoreMasks,
-    /// The `:limit` / `=` filter pattern narrowing this browser's rows.
-    pub temp_filter: Option<String>,
-    pub sort_order: crate::fs::listing::SortMode,
-    /// When true, invert the per-mode natural direction (Name/Ext
-    /// ascending → descending, Size/Mtime descending → ascending).
-    /// Toggled by `gs` and `:sort reverse`. Dirs-first grouping is
-    /// always preserved regardless.
-    pub sort_reversed: bool,
-    /// Which content this browser shows: `Dir` / `Inventory` / `Graveyard`.
-    pub view: View,
-    /// Cursor index + viewport scroll (`view_top`) within this browser.
-    pub cursor: Cursor,
-    /// The rendered display rows (derived from `listing` + filter + sort).
-    pub rows: Vec<RowData>,
-    /// The geometry slice of this browser's last rendered grid (cols ×
-    /// rows-per-col), written by render and read by cursor/page-math.
-    pub grid_dims: GridDims,
-    /// Monotonic counter bumped whenever this browser's display row list
-    /// changes. Used by App to skip redundant `build_rows()` calls.
-    pub list_generation: u64,
-    /// Per-column git display pair (branch + per-file markers) for THIS
-    /// browser's repo/worktree. Per-column so `b` in a different worktree
-    /// shows its own markers, not `a`'s. (Moved off `AppState` for dual git.)
-    pub git: GitState,
-    /// Per-column git cache + worker plumbing (repo root/gitdir, status cache,
-    /// the per-column generation gate, the worker outbox). Per-column so two
-    /// columns in different repos can't collide on a single generation.
-    pub git_cache: GitCache,
-    /// This column's harpoon list — pinned per-**worktree** file pointers
-    /// (`None` outside a repo with no `PROJECT_HOME`). Per-column so `b` in a
-    /// separate worktree gets its own bookmarks: harpoon stores absolute paths,
-    /// so a shared list would jump `b` into `a`'s copy (wrong worktree/branch).
-    /// Keyed by [`AppState::harpoon_root`]; `App::reconcile_harpoon` swaps it
-    /// when that root shifts.
-    pub harpoon: Option<crate::state::Harpoon>,
-    /// Snapshot of [`Self::harpoon`]'s ancestor-set (slot paths plus every
-    /// parent directory of every slot). Refreshed whenever the list mutates so
-    /// `apply_temp_filter` (`=h`) stays pure-domain. Empty when `harpoon` is
-    /// `None`.
-    pub harpoon_filter_set: std::collections::HashSet<PathBuf>,
-    /// Bare basenames the user just removed (`R`) that aren't git-untracked,
-    /// held as optimistic struck-through ghosts until the authoritative
-    /// off-thread `git status` lands. Without this the row vanishes on the sync
-    /// post-unlink `refresh_listing` (git markers are async, so no `is_deleted()`
-    /// ghost yet) and only reappears as a ghost when the worker result arrives —
-    /// a visible list "bounce". `build_dir_rows` unions these into its ghost set;
-    /// `apply_git_worker_result` clears them once git is authoritative (a tracked
-    /// deletion is then a real ghost, an untracked/ignored one simply gone).
-    /// Dir-scoped — cleared on chdir.
-    pub pending_ghosts: std::collections::HashSet<String>,
-}
-
-impl Commander {
-    /// Build a fresh commander rooted at `dir`: read + sort the listing and
-    /// seed masks from `config`, with empty picks/filter and the cursor at the
-    /// top. `rows` is left empty — the caller runs `rebuild_rows()` once this
-    /// is the focused commander (it builds rows through `cur()`). Used to open
-    /// the second (right) column; mirrors the `left` init in `bootstrap`.
-    pub fn for_dir(dir: &Path, config: &Config) -> anyhow::Result<Self> {
-        let sort_order = crate::fs::listing::SortMode::Name;
-        let mut listing = Listing::read(dir)?;
-        listing.sort(sort_order, false);
-        let mut masks = IgnoreMasks::default();
-        masks.apply_config(&config.ignore_masks);
-        Ok(Self {
-            listing,
-            picks: Picks::new(),
-            masks,
-            temp_filter: None,
-            sort_order,
-            sort_reversed: false,
-            view: View::Dir,
-            cursor: Cursor::new(),
-            rows: Vec::new(),
-            grid_dims: GridDims {
-                cols: 1,
-                rows_per_col: 1,
-            },
-            list_generation: 0,
-            git: GitState::default(),
-            git_cache: GitCache::default(),
-            // Populated by `App::reconcile_harpoon` once this column's repo
-            // root / PROJECT_HOME is known (a fresh commander has no root yet).
-            harpoon: None,
-            harpoon_filter_set: std::collections::HashSet::new(),
-            pending_ghosts: std::collections::HashSet::new(),
-        })
-    }
-}
-
 pub struct AppState {
     pub inventory: Inventory,
     pub marks: Marks,
@@ -663,6 +570,9 @@ pub struct AppState {
     /// save of a watched config file — including the automatic fs-watch reload.
     /// `:mouse auto` clears it and hands control back to the config.
     pub mouse_capture_override: Option<bool>,
+    /// `:set flags=` for the rest of the run. Outside `Config` for the same
+    /// reason as `mouse_capture_override`: a config reload would revert it.
+    pub status_flags_override: Option<crate::ui::status_flags::FlagsMode>,
     pub mode: Mode,
     pub start_dir: PathBuf,
     pub project_home: Option<PathBuf>,
@@ -718,10 +628,18 @@ pub struct AppState {
     /// `spyc -r`), never file-backed — every agent pane in one spyc shares this
     /// one registry. Advisory only: nothing here blocks a merge.
     pub scope_registry: Vec<crate::state::scope_registry::ScopeClaim>,
+    /// Pure question correlation keyed by ephemeral pane id; never persisted.
+    pub codex_recovery:
+        std::collections::HashMap<String, crate::agent::codex_recovery::CodexRecovery>,
     pub user_host: String,
     pub pending_new_tab_cmd: Option<String>,
     pub pending_worktrees: Option<Vec<PathBuf>>,
     pub pending_sessions: Option<Vec<crate::state::sessions::Session>>,
+    /// Refused or unspawned tabs from a partial restore, kept verbatim on save.
+    pub deferred_tabs: Vec<restore::DeferredTab>,
+    /// `spyc -c` commands not yet run: they wait for startup to settle
+    /// (`App::settle_startup_commands`).
+    pub startup_commands: Vec<String>,
     pub frecency: Frecency,
     /// Which surface owns the keyboard. Replaces the old `pane_focused:
     /// bool`; read the derived bool via `self.pane_focused()`.
@@ -780,6 +698,14 @@ impl AppState {
         }
     }
 
+    /// Every live column's listing dir — `left`, plus `right` when the split is
+    /// open. Deliberately both columns, not the focused one: callers ask "is any
+    /// column standing here?", which is what makes evicting or unmounting an
+    /// archive safe.
+    pub fn column_dirs(&self) -> Vec<std::path::PathBuf> {
+        self.columns().map(|c| c.listing.dir.clone()).collect()
+    }
+
     /// The working directory a freshly-spawned pane tab opens in, honouring
     /// `[pane] new_tab_cwd`. `WorktreeRoot` (the default) anchors the pane to
     /// the focused column's worktree/repo root (`gw`'s target); `ProjectHome`
@@ -788,19 +714,14 @@ impl AppState {
     /// back to the browse dir when their target is unresolved. Goes through
     /// `cur()` so a focused second commander is honoured — and so a pane
     /// launched from the pane view follows the last-focused column, the one
-    /// Every live column's listing dir — `left`, plus `right` when the split is
-    /// open. Deliberately both columns, not the focused one: callers ask "is any
-    /// column standing here?", which is what makes evicting or unmounting an
-    /// archive safe.
-    pub fn column_dirs(&self) -> Vec<std::path::PathBuf> {
-        let mut out = vec![self.left.listing.dir.clone()];
-        if let Some(right) = self.right.as_ref() {
-            out.push(right.listing.dir.clone());
-        }
-        out
+    /// `^a k` returns to (`columns_are_addressed_through_handles`).
+    /// How the status bar writes its state suffix: `:set flags=`, else
+    /// `[layout] status_flags`.
+    pub fn status_flags(&self) -> crate::ui::status_flags::FlagsMode {
+        self.status_flags_override
+            .unwrap_or(self.config.layout.status_flags)
     }
 
-    /// `^a k` returns to (`state_left_listing_dir_uses_are_allowlisted`).
     pub fn default_pane_cwd(&self) -> std::path::PathBuf {
         match self.config.pane.new_tab_cwd {
             crate::config::NewTabCwd::WorktreeRoot => self
@@ -834,6 +755,43 @@ impl AppState {
         }
     }
 
+    /// The commander on `side` if that column is open. Unlike [`Self::col`],
+    /// `Right` with no second commander is `None`, not `left`.
+    pub const fn get_col(&self, side: Side) -> Option<&Commander> {
+        match side {
+            Side::Left => Some(&self.left),
+            Side::Right => self.right.as_ref(),
+        }
+    }
+
+    /// Whether the column on `side` is open. `Left` always is.
+    pub const fn has_col(&self, side: Side) -> bool {
+        match side {
+            Side::Left => true,
+            Side::Right => self.right.is_some(),
+        }
+    }
+
+    /// Every open commander, `left` first.
+    pub fn columns(&self) -> impl Iterator<Item = &Commander> {
+        std::iter::once(&self.left).chain(self.right.as_ref())
+    }
+
+    /// Mutable [`Self::columns`].
+    pub fn columns_mut(&mut self) -> impl Iterator<Item = &mut Commander> {
+        std::iter::once(&mut self.left).chain(self.right.as_mut())
+    }
+
+    /// Open `commander` as the second column, replacing one already open.
+    pub fn open_second(&mut self, commander: Commander) {
+        self.right = Some(commander);
+    }
+
+    /// Close the second column. `false` when none was open.
+    pub fn close_second(&mut self) -> bool {
+        self.right.take().is_some()
+    }
+
     /// The `Side` `cur()` resolves to — `Right` iff a second commander is open
     /// AND focused, else `Left`. The side whose git a focus-scoped op targets.
     pub fn focused_side(&self) -> Side {
@@ -844,8 +802,9 @@ impl AppState {
     }
 
     /// The sides with a live commander: always `Left`, plus `Right` when a
-    /// second commander is open. Drives per-column git refresh (poll + chdir).
-    pub fn active_sides(&self) -> impl Iterator<Item = Side> {
+    /// second commander is open. Holds no borrow of `self` (`use<>`), so a
+    /// loop over it may mutate the columns it names.
+    pub fn active_sides(&self) -> impl Iterator<Item = Side> + use<> {
         std::iter::once(Side::Left).chain(self.right.is_some().then_some(Side::Right))
     }
 
@@ -1115,6 +1074,7 @@ impl AppState {
             user_keymap: UserKeymap::default(),
             config: Config::default(),
             mouse_capture_override: None,
+            status_flags_override: None,
             mode: Mode::Normal,
             start_dir: cwd,
             project_home: None,
@@ -1134,10 +1094,13 @@ impl AppState {
             pending_delete_preview: None,
             graveyard: Vec::new(),
             scope_registry: Vec::new(),
+            codex_recovery: std::collections::HashMap::new(),
             user_host: "test@host".to_string(),
             pending_new_tab_cmd: None,
             pending_worktrees: None,
             pending_sessions: None,
+            deferred_tabs: Vec::new(),
+            startup_commands: Vec::new(),
             frecency: Frecency::default(),
             focus: Focus::FileList,
             pane: PaneLayout {

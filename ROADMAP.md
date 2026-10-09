@@ -37,10 +37,10 @@ views), off-thread PagerStream (grep / git-view / agent transcripts on one
 seam), and unified input routing (`route_input`/`InputSink`, `Focus` as the
 routing authority).
 
-The **800-LoC file rule is a convention with an explicit escape hatch**, stated
-in AGENTS.md and enforced nowhere except `mod_rs_stays_decomposed`, which caps
-`src/app/mod.rs` alone. Some files are over it. Re-derive the list from the
-tree rather than from a number written down here.
+The **file-size rule is a ratchet** in `src/size_guard.rs`: at most 1,000 lines
+of non-test code and 3,000 lines in all. Files over a limit when the guard
+landed are pinned there and may only shrink, so its pin lists are the
+decomposition backlog. Read them rather than a number written down here.
 
 The thesis work shipped over 1.x and 2.0: agent-awareness dots and
 notifications, the worktree MCP suite, the merge/scope registry, the in-process
@@ -87,6 +87,14 @@ done-criteria confirmed and the parts that never shipped named. 2.1 shipped:
 v2.1.1 adds one packaging fix: `docs/ABOUT.md` is compiled into the binary via
 `include_str!` and was missing from the published crate (#426).
 
+Since the tag, `main` (`2.2.0-CURRENT`) has picked up the 2.2 items marked as
+shipped under "Road to 2.2" below, plus work the plan never scoped. That
+includes the pager's markdown outline folding and heading motions (#439) and the
+renderer fixes that came before it (#436), the apt repo deployed as a Pages
+artifact instead of a `gh-pages` branch (#441, #443), and the Canadian-English
+prose guard (#449). All of it ships in 2.2. `make changelog` previews the
+section.
+
 ## Working tracks
 
 Work proceeds along three parallel tracks. They're not strictly sequential;
@@ -105,41 +113,90 @@ foundations work continues throughout.
 
 2.2 lands the prerequisites Projects needs and closes the bugs a daily driver
 hits weekly. Every item is one or the other. Scope and sequencing:
-[`docs/drafts/V2_2_PLAN.md`](docs/drafts/V2_2_PLAN.md).
+[`docs/drafts/V2_2_PLAN.md`](docs/drafts/V2_2_PLAN.md). **2.2 tags once the
+whole list is done, and not before.** For `PROJECTS_PLAN.md`, done means
+authored: its approval gates 2.3, not the tag (decisions log, 2026-10-02).
+Everything else already merged to `main` ships with it (decisions log,
+2026-09-29).
 
-- **Pane-identity transport** — option B of
-  [`docs/drafts/pane-identity-transport-proposal.md`](docs/drafts/pane-identity-transport-proposal.md):
-  the `spyc --mcp` proxy sends its `$SPYC_PANE_ID` in the `initialize`
-  handshake and the server binds it to that connection. Closes the target
-  design the F1 decisions-log entry names, and lets `get_spyc_context` answer
-  for the calling pane rather than for whichever column the user is browsing.
-  Attribution, not authorization — SECURITY.md says which.
-- **[#40](https://github.com/Tripstack-Corp/spyc/issues/40) — one spyc per
-  agent.** Abstract the hardcoded `left`/`right` column references so what a
-  column holds can change. Projects prep, with standalone cleanup value.
-- **[#58](https://github.com/Tripstack-Corp/spyc/issues/58) — configurable
-  startup pane tabs**, per
-  [`docs/drafts/PANE_STARTUP_TABS_PLAN.md`](docs/drafts/PANE_STARTUP_TABS_PLAN.md).
-  A declarative tab set is the config half of a 2.3 project definition.
-- **[#8](https://github.com/Tripstack-Corp/spyc/issues/8) — session forking
-  (`^a f`)**, so an agent conversation can branch without losing the prior line
-  of inquiry.
-- **[#71](https://github.com/Tripstack-Corp/spyc/issues/71) — prompt templates
-  in `.spycrc.toml`**, with picks and inventory substituted.
-- **The daily-driver bug set** —
-  [#326](https://github.com/Tripstack-Corp/spyc/issues/326) (the first
-  keystrokes into a fresh pane are dropped),
-  [#327](https://github.com/Tripstack-Corp/spyc/issues/327) (a partially-failed
-  `remove_worktree` strands the worktree),
-  [#9](https://github.com/Tripstack-Corp/spyc/issues/9) (`^a s` anchors paths
-  on PROJECT_HOME, so an agent in a worktree can't resolve them),
-  [#34](https://github.com/Tripstack-Corp/spyc/issues/34) (Claude PTY
-  scrollback artifacts),
-  [#22](https://github.com/Tripstack-Corp/spyc/issues/22) +
-  [#11](https://github.com/Tripstack-Corp/spyc/issues/11) (the MCP takeover
-  prompt, and an integration test for multi-instance coexistence).
-- **`docs/drafts/PROJECTS_PLAN.md`** — authored in 2.2, design only. 2.3's
-  scope depends on it being written and approved before code lands.
+**Shipped on `main`:**
+
+- **The VT engine: libghostty-vt replaces vt100** (#459, #461, #462, #465,
+  #466). This item joined the scope after the spike reported. The soak has
+  produced two fixes so far: an erased cell keeps its background under SGR
+  (#470), and DEC mode 2027 is enabled, so an emoji cluster takes the width
+  `ui::display_width` budgets for it (#485). Evidence and the gate addendum are
+  in [`docs/drafts/VT_ENGINE_SPIKE.md`](docs/drafts/VT_ENGINE_SPIKE.md).
+- **[#58](https://github.com/Tripstack-Corp/spyc/issues/58): configurable
+  startup pane tabs** (#482), per the now-archived
+  [`docs/archive/PANE_STARTUP_TABS_PLAN.md`](docs/archive/PANE_STARTUP_TABS_PLAN.md).
+  The same PR fits every tab into the bar. Keeping shared-prefix labels
+  distinct when they crop is
+  [#483](https://github.com/Tripstack-Corp/spyc/issues/483).
+- **The daily-driver bug set.** The first keystrokes into a fresh pane
+  now reach the child (#464, closing
+  [#326](https://github.com/Tripstack-Corp/spyc/issues/326)).
+  [#34](https://github.com/Tripstack-Corp/spyc/issues/34) closed on both
+  halves: SGR 2 (#457, closing
+  [#452](https://github.com/Tripstack-Corp/spyc/issues/452)) and the four
+  engine defects the swap fixes (#465). And a `remove_worktree` that fails
+  partway no longer strands the worktree, while one an older spyc left
+  half-removed is finished on retry (#500, closing
+  [#327](https://github.com/Tripstack-Corp/spyc/issues/327)). `^a s` anchors
+  paths on the receiving pane's own cwd, read at delivery, instead of on
+  PROJECT_HOME (closing [#9](https://github.com/Tripstack-Corp/spyc/issues/9)),
+  so [#71](https://github.com/Tripstack-Corp/spyc/issues/71)'s templates
+  inherit a settled anchor. Two spycs in one directory each keep their own
+  agents, with nothing to take over (#509, closing
+  [#22](https://github.com/Tripstack-Corp/spyc/issues/22) and
+  [#11](https://github.com/Tripstack-Corp/spyc/issues/11)). And a `spyc -r`
+  that restores a project elsewhere anchors its agents' MCP on that project,
+  not the launch directory, with the context file out of the working tree
+  (#525, closing [#523](https://github.com/Tripstack-Corp/spyc/issues/523)).
+- **[#40](https://github.com/Tripstack-Corp/spyc/issues/40): columns are
+  addressed by handle** (#504), the projects prep. Only render and fs-watch
+  name `state.left` / `state.right`; everything else goes through `cur()`,
+  `col(side)` or `active_sides()`, and a guard holds it there. Widening that
+  guard first found nine places that acted on column a from column b, fixed
+  in #502: among them, a graveyard purge in b trashed the entry under a's
+  cursor.
+- **[#491](https://github.com/Tripstack-Corp/spyc/issues/491): pane-identity
+  transport** (#507), option B of
+  [`docs/drafts/pane-identity-transport-proposal.md`](docs/drafts/pane-identity-transport-proposal.md).
+  The `spyc --mcp` proxy sends its `$SPYC_PANE_ID` in `initialize` and the
+  server binds that connection to the tab. `get_spyc_context` adds the caller's
+  own tab as `pane`, and `report_status` and the scope tools default to it.
+  Narrowing a `root` override to the calling pane is dropped (decisions log,
+  2026-09-30). Attribution, not authorization — SECURITY.md says which.
+- **[#490](https://github.com/Tripstack-Corp/spyc/issues/490): crates.io
+  publishing.** The release job publishes `spyc-vt-sys` before spyc (#499),
+  0.1.0 is on crates.io, and CI packages both crates on every PR. The release
+  matrix hasn't run since the vendored archives landed, so `v2.2.0-rc.1` still
+  goes out before `v2.2.0`.
+- **[#8](https://github.com/Tripstack-Corp/spyc/issues/8): session forking
+  (`^a F`)** (#516). The active tab's conversation carries on in a new tab as a
+  branch, and the original stays put: claude via `--resume <id>
+  --fork-session`, codex via `codex fork <id>`, and a tab with no conversation
+  as a copy of itself. agy and zot can't branch, and `^a F` says so rather
+  than opening one conversation twice. It took `F` because `^a f` already
+  flips the split's height from the pane.
+- **[#71](https://github.com/Tripstack-Corp/spyc/issues/71): prompt
+  templates** (#517). `[prompts]` in `~/.spycrc.toml` names the messages you send an
+  agent over and over, and `map KEY prompt <name>` or `:prompt <name>` types
+  one into the active pane tab with the picks (`%`), the inventory (`%i`) or
+  the directory (`%d`) filled in, anchored the way `^a s` anchors paths. It is
+  typed, not sent, and a project file can neither bind one nor define one.
+- **The status bar shows only what differs from rest** (#521). The suffix
+  listed every field on every frame, as wide as a path; now
+  `[picks:0 inv:0 m1:on m2:on hidden:1 sort:name]` is `[hidden:1]`, short
+  forms (`[h:1]`) take over when the words would cut the path, and
+  `[layout] status_flags = "full"` keeps the old bar.
+
+**Open:**
+
+- **[#492](https://github.com/Tripstack-Corp/spyc/issues/492):
+  `docs/drafts/PROJECTS_PLAN.md`**, authored in 2.2, design only. 2.3's scope
+  depends on it being written and approved before code lands.
 
 ## The 2.3 horizon: Projects
 
@@ -166,14 +223,22 @@ per-process, so aggregating attention across projects costs little. And the
 pane-identity transport (2.2) gives every MCP connection an identity that
 extends to project attribution.
 
-Out of scope permanently: frame mirroring, input forwarding, cross-process
-discovery, and any CounterTop revival. Headless needs the finer distinction.
-Headless *peers* are dead with the rest of that list — a second spyc that
-another spyc discovers, mirrors or forwards to. The daemonized *monolith*
-returns in 3.0, and it is not a peer: one process, nothing mirrored, and the
-client is a renderer rather than an instance. See "The 3.0 horizon" below.
+Deferred, and not part of Projects v1: frame mirroring, input forwarding,
+cross-process discovery, headless *peers* (a second spyc that another spyc
+discovers, mirrors or forwards to) and CounterTop. They may be revisited later.
+The daemonized *monolith* is a different thing: it returns in 3.0, and it is not
+a peer. It is one process with nothing mirrored, and its client is a renderer
+rather than an instance. See "The 3.0 horizon" below.
 `docs/drafts/PROJECTS_PLAN.md` — a 2.2 deliverable — is where the design gets
 argued. Tracked as [#99](https://github.com/Tripstack-Corp/spyc/issues/99).
+
+**Candidate addition, not committed to 2.3:** the
+[Git review workspace proposal](docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md)
+connects Changes, branch Compare, History, and shared agent review context.
+Its scope and sequencing need review; Projects remains the primary objective.
+The proposal retains in-process `gix` for review and records a dated backend
+assessment; complete Git write workflows and any backend exception are
+assessed separately.
 
 ## The 3.0 horizon: Slow Cooker (durable sessions)
 
@@ -201,8 +266,9 @@ agent-conversation term — session forking, `/resume`, session pinning — and 
 durable thing gets no noun of its own: it is just spyc, still running.
 
 The VT-engine spike has reported (`docs/drafts/VT_ENGINE_SPIKE.md`), and its
-recommendation moved forward rather than back: **the engine lands in 2.2**, so
-it gets a full release of daily dogfood soak before a reattach depends on it.
+recommendation moved forward rather than back: **the engine landed for 2.2**
+(#465), so it gets a full release of daily dogfood soak before a reattach
+depends on it.
 That closes the engine question this horizon was waiting on — screen
 reconstruction fidelity is load-bearing the moment a client reattaches, and the
 incumbent reconstructs 0% of scrollback. It does **not** commit 3.0's own scope:
@@ -287,6 +353,11 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 - **Task-viewer shape**: exited tasks auto-promote to buffer history
   on view-close instead of an explicit dismiss step.
 - **No persistent search index** — see Non-goals.
+- **Pane terminals run DEC mode 2027 (grapheme clustering) enabled**
+  (#484). Forced rather than preferred: ratatui is spyc's only
+  writer to the host and already measures clusters that way, as does
+  `ui::display_width`, so the engine was the sole component modelling
+  the mode disabled. See ARCHITECTURE.md → "Grapheme clustering".
 - **Claude restore types `/resume <sid>`** into a fresh spawn (the
   `--resume` CLI flag has a mount-crash regression) with
   verify-and-retry on the Enter; codex restores via
@@ -349,7 +420,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   guard-enforced, so lifting App state is a bounded question. Vsplit
   Stage 2 already runs a second full `Commander` in-process.
   Agent-status dots and notifications are already per-process. And #40
-  exists as the prep refactor. Depends on the pane-identity transport
+  landed as the prep refactor. Depends on the pane-identity transport
   (2.2) for project attribution; `docs/drafts/PROJECTS_PLAN.md`, a 2.2
   deliverable, is where it gets argued.
 - **The 3.0 horizon opens on durable sessions, via the daemonized
@@ -537,6 +608,96 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   A pin *revert* remains the cheaper escape from a bad pin bump either way, and
   that one survives the removal.
 
+- **2.2 ships its full scope rather than an early engine release**
+  (2026-09-29). The alternative was considered at a point when the engine and
+  three other items were on `main` but none of the projects-prep had started:
+  tag 2.2 on what had merged and move the rest to 2.3. It was declined. The
+  plan exists so that 2.3 "starts on an approved design rather than a
+  refactor", and an engine-only 2.2 would ship neither the prerequisites nor
+  `PROJECTS_PLAN.md`. That hands 2.3 the refactor-plus-design load the plan was
+  written to avoid. Everything already merged ships with 2.2, including work
+  the plan never scoped such as the pager's outline folding (#439), so nothing
+  is held back or reverted to keep the release on-theme. Two costs are accepted
+  knowingly. Users stay on 2.1.1 until the tag, so until then the engine soaks
+  only through dogfooding on `main`, not in a release. And #453's vt100
+  deletion waits for the same tag, so seam changes keep paying for two engines
+  until 2.2 ships.
+
+- **A project's startup tabs run only after a consent bound to the exact
+  list** (2026-09-29). #482 honoured `[pane] tabs` from the untrusted
+  project-local `.spycrc.toml`, which ran a cloned repo's commands at launch
+  with no keypress. #494 closed that by ignoring a project's tabs, and this
+  replaces that stopgap with the answer a repo-defined tab set needs. At launch
+  spyc lists every command in a pop-up. `y` approves, `n` declines, and `Esc`
+  skips for now; no other key answers, so a reflexive `Enter` can't approve a
+  command. An approved list replaces the user's own. Three choices were made
+  deliberately:
+  1. **The answer binds to content, not to the project.** It records each
+     command and cwd in order, and a changed list asks again. A per-project
+     yes would let a `git pull` swap the commands under an old approval,
+     which is the hole in a different form. This is `direnv`'s rule, and a
+     `SPYC-TRAP` guards it.
+  2. **There is no default answer.** The hook-consent popup's `[Y/n]` shape
+     fits writing a config file. It is the wrong one for running a command.
+  3. **Display is sanitized.** Control and invisible characters are escaped,
+     whitespace padding collapses, and very long commands show a count of
+     what's hidden, so what the user reads is what would run.
+
+  `PROJECTS_PLAN.md` (#492) still decides what a project definition holds.
+  This settles only how a repo-declared command earns the right to run.
+
+- **Pane attribution ships; per-pane root narrowing is dropped**
+  (2026-09-30). #507 built the transport the third F1 constraint above was
+  waiting on: the `spyc --mcp` proxy names its `SPYC_PANE_ID` in `initialize`,
+  and the connection binds to that tab if a live one has the id. It is used for
+  what attribution is good at. `get_spyc_context` adds the caller's own tab as
+  `pane`, and `report_status` and the scope tools default to that tab. It is
+  not used for the narrowing F1 called the target design, for two reasons,
+  either of which is enough:
+  1. **It restricts nothing.** The id comes from an environment the agent
+     controls, so narrowing stops an accident and never an attempt, as
+     SECURITY.md says. And F1's first constraint names what an over-tight set
+     buys: the rejected call goes to an unscoped `Bash rg`.
+  2. **It breaks the ordinary workflow.** An agent in the main checkout works
+     in worktrees it created, passing each as `root`. Its pane's worktree is
+     the main checkout, so narrowing rejects exactly those calls unless spyc
+     also tracks which worktrees each agent made, which is machinery with no
+     security return.
+
+  The durable-session horizon doesn't change this. A daemon keeps one uid on
+  one machine, so the id stays forgeable. Agents working unattended while no
+  client is attached make containment more tempting, and the answer is still
+  OS-level isolation: a separate uid, a container. Remote support, when it
+  comes, rides SSH rather than a custom protocol, so SSH authenticates the
+  client and the host is still one uid. The boundary worth designing then is
+  who may attach, and pane attribution isn't that either.
+
+- **The agents' MCP entry names no spyc, so there is nothing to take over**
+  (2026-09-30). #22 asked for the second spyc in a directory to prompt before
+  taking MCP from the first. The takeover existed only because the one entry
+  in a directory's agent config pinned whichever spyc wrote it last, and that
+  pin outranked the socket each agent's pane already carried. So the last
+  writer received every new agent there, the other spyc's included. The entry
+  now pins nothing and the pane's own env decides, so each spyc keeps its own
+  agents and the prompt has nothing to ask. Codex strips the environment it
+  gives an MCP server, so its entry lists the two names to pass through
+  (`env_vars`). This was probed against codex, agy and Claude before the change
+  rather than assumed. An org-deployed `managed-mcp.json` already had this
+  shape, which is why the bug never appeared under one. Removing the entry is
+  now refcounted like the status hooks, so only the last spyc out removes it.
+  The alternative, a prompt at agent launch, would have kept one owner per
+  directory and still sent the losing spyc's new agents to the winner.
+- **`PROJECTS_PLAN.md` gates 2.3, not the 2.2 tag** (2026-10-02). The
+  2026-09-29 entry declined an engine-only 2.2 because it would ship neither
+  the prerequisites nor `PROJECTS_PLAN.md`; the bar it set was shipping the
+  doc. The plan's own exit criterion puts approval "before 2.3 opens", but its
+  progress note said the tag waited for all of it, so the two disagreed about
+  which gate it was. The weaker one wins. Every line of 2.2 code is on `main`,
+  and the engine's case for landing in 2.2 is soak, which is worth more with
+  crates.io users on it than with one daily driver. Holding the tag on a
+  design review adds nothing to the code under it. The doc ships authored and
+  in review, and 2.3 opens only once it is approved.
+
 ## Doc map
 
 | Doc | Role |
@@ -555,12 +716,17 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/BRAND.md` | Brand & identity — the name story, palette, voice. |
 | `docs/AGENT_ORCHESTRATION.md` | How the agent activity-dots / notifications / session-resume / scope registry fit together (living reference). |
 | `docs/drafts/V2_2_PLAN.md` | The 2.2 scope, sequencing and exit criteria — the plan behind "Road to 2.2". |
-| `docs/drafts/pane-identity-transport-proposal.md` | Accepted for 2.2 — pane id in the MCP `initialize` handshake (option B). Also the attribution mechanism Projects extends. |
-| `docs/drafts/PANE_STARTUP_TABS_PLAN.md` | Pending design, 2.2 scope ([#58](https://github.com/Tripstack-Corp/spyc/issues/58)). |
+| `docs/drafts/CODEX_SUPPORT_PLAN.md` | Draft Codex parity remediation and opt-in session HUD: reproduced RC regressions, hook/image/navigation gaps, telemetry contracts, sequencing and validation. HUD scope is proposed and unscheduled, not an added RC gate. |
+| `docs/drafts/PROJECTS_PLAN.md` | The 2.3 Projects design, in review ([#492](https://github.com/Tripstack-Corp/spyc/issues/492)): the per-project state inventory, one MCP socket answering per project, the recovery manifest, the `Space` keys, the `projects` segment, attention across projects, and what an attach snapshot carries. #99's code waits on its approval. |
+| [`docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md`](docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md) | Draft candidate for 2.3, unscheduled: connected Git review, project/worktree context, comparison semantics, MCP reads, delivery slices, and references. Git write operations are a separate assessment. |
+| `docs/drafts/pane-identity-transport-proposal.md` | Option B shipped in #507 ([#491](https://github.com/Tripstack-Corp/spyc/issues/491)): the pane id goes in the MCP `initialize` handshake. Per-pane roots are dropped (decisions log, 2026-09-30). It is also the attribution mechanism Projects extends. |
+| `docs/drafts/VT_ENGINE_SPIKE.md` | The engine spike report plus its dated gate addendum: the evidence behind the libghostty-vt entries in the decisions log. Appended to, never rewritten. |
+| `docs/drafts/CLICKABLE_MENUS_PLAN.md` | Proposal, unscheduled and with no issue yet: make the which-key popup clickable instead of adding right-click context menus (#478). |
 | `docs/drafts/AUTO_APPROVAL_PLAN.md` | Pending design, unscheduled ([#57](https://github.com/Tripstack-Corp/spyc/issues/57)). |
-| `docs/drafts/PATH_HANDOFF_PLAN.md` | Split — Option A is 2.2 scope ([#9](https://github.com/Tripstack-Corp/spyc/issues/9)); the rest stays exploration ([#59](https://github.com/Tripstack-Corp/spyc/issues/59)). |
+| `docs/drafts/PATH_HANDOFF_PLAN.md` | Split — Option A shipped for 2.2 ([#9](https://github.com/Tripstack-Corp/spyc/issues/9)); the rest stays exploration ([#59](https://github.com/Tripstack-Corp/spyc/issues/59)). |
 | `docs/drafts/multi-question-bug-investigation.md` | Open bug, parked without a repro — an agent pane going deaf to input. Not in the tracker; this is the record. |
 | `docs/archive/LAUNCH_PLAN_2_0.md` | Archived — the 2.0 distribution/launch plan, every gate closed, plus what never shipped. |
+| `docs/archive/PANE_STARTUP_TABS_PLAN.md` | Archived design: startup pane tabs, shipped on `main` for 2.2 (#482, closing [#58](https://github.com/Tripstack-Corp/spyc/issues/58)). Its deferred half, true multi-split, stays deferred. |
 | `docs/archive/ARCHIVE_BROWSING_PLAN.md` | Archived design — navigate into zip/tarballs with full editing; shipped v2.1.0, [#149](https://github.com/Tripstack-Corp/spyc/issues/149) closed. |
 | `docs/archive/native_scroll_plan.md` · `docs/archive/mouse_selection_plan.md` | Archived designs — the mouse suite, shipped v2.1.0. Neither was amended as it was built; the banners name what diverged. |
 | `docs/archive/pasted-image-preview-plan.md` | Archived design — paste capture, image preview, the `^a g` gallery; shipped v2.1.0. |
@@ -572,8 +738,8 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/COMPETITIVE_REVIEW.md` | Consolidated competitive review + GTM: the AI coding-agent-manager category (§1–§1c: herdr, psmux, claude-code-ide.el), the TUI file-manager lane (§1d: Yazi, folded 2026-07-02; §1e: lf), and the session layer beneath both (§1f: Superlogical, zmx). Refresh on a competitor's next major. (Standalone Yazi original archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md`.) |
 | `docs/archive/` | Shipped plans, kept as historical record. |
 
-> **Note on pending plans:** `AUTO_APPROVAL_PLAN`, `PANE_STARTUP_TABS_PLAN`
-> and `PATH_HANDOFF_PLAN` predate the MVU decomposition — their designs hold,
+> **Note on pending plans:** `AUTO_APPROVAL_PLAN` and `PATH_HANDOFF_PLAN`
+> predate the MVU decomposition — their designs hold,
 > but `src/app/mod.rs:NNNN`-style file pointers resolve nowhere; re-resolve
 > against the current module layout when picking one up, and each carries that
 > warning in its own header. `V2_2_PLAN` and

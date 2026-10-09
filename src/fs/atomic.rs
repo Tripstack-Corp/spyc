@@ -19,17 +19,71 @@ use std::path::Path;
 /// file inherits `NamedTempFile`'s owner-only (0600) permissions — appropriate
 /// for the per-user config/state files this is used for.
 pub fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    write_atomic_inner(path, contents, None)
+}
+
+/// Replace a file atomically with explicit permission bits. The caller supplies
+/// the existing permissions after checking its own destination policy. Set them
+/// on the temporary file before rename so readers never see an intermediate mode.
+pub fn write_atomic_with_permissions(
+    path: &Path,
+    contents: &[u8],
+    permissions: std::fs::Permissions,
+) -> std::io::Result<()> {
+    write_atomic_inner(path, contents, Some(permissions))
+}
+
+fn write_atomic_inner(
+    path: &Path,
+    contents: &[u8],
+    permissions: Option<std::fs::Permissions>,
+) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
     tmp.write_all(contents)?;
+    if let Some(permissions) = permissions {
+        tmp.as_file().set_permissions(permissions)?;
+    }
     // `persist` does the rename; on failure it hands back the io::Error.
     tmp.persist(path).map_err(|e| e.error)?;
     Ok(())
 }
 
+/// Atomically replace `dst` with a copy of `src`, permission bits included.
+///
+/// The rename is also what lets a read-only `dst` be replaced: writing into it
+/// would have to open it for writing, which its own mode refuses.
+pub fn copy_atomic(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let dir = dst.parent().unwrap_or_else(|| Path::new("."));
+    let tmp = tempfile::NamedTempFile::new_in(dir)?;
+    std::fs::copy(src, tmp.path())?;
+    tmp.persist(dst).map_err(|e| e.error)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::write_atomic;
+    use super::{copy_atomic, write_atomic};
+
+    #[test]
+    fn a_copy_replaces_a_read_only_destination_and_keeps_the_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (src, dst) = (dir.path().join("src"), dir.path().join("dst"));
+        std::fs::write(&src, "first").unwrap();
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o444)).unwrap();
+        copy_atomic(&src, &dst).unwrap();
+
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::write(&src, "second").unwrap();
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o444)).unwrap();
+        copy_atomic(&src, &dst).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&dst).unwrap(), "second");
+        let mode = std::fs::metadata(&dst).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o444);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
 
     #[test]
     fn writes_and_replaces_contents() {

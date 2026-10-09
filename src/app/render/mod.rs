@@ -27,10 +27,11 @@ use ratatui::Frame;
 
 use crate::config::StatusPosition;
 use crate::spyc_debug;
-use crate::ui::list_view::ListView;
+use crate::ui::list_view::{ListView, Row};
 
 use super::{App, FrameLayout, View, state};
 
+mod activity_hud;
 mod chrome;
 mod inner;
 mod overlays;
@@ -439,8 +440,8 @@ impl App {
         self.render_visual_bell(frame, frame_area);
         // First-launch status-hooks consent — a centred modal pop-up drawn over
         // everything (chrome + HUD), so an auto-fired ask can't be mistaken for a
-        // frozen pane while the user's eyes are on the agent. No-op unless the
-        // `HookConsent` prompt is active.
+        // frozen pane while the user's eyes are on the agent. Also draws a
+        // project's startup-tab consent. No-op unless one of them is active.
         self.render_hook_consent_popup(frame, h_divider_row, v_divider_col);
         // Full-screen mermaid image overlay (the `i` key) — drawn last so it
         // sits on top of everything, including the HUD.
@@ -521,13 +522,7 @@ impl App {
         if layout.prompt.width == 0 || layout.prompt.height == 0 {
             return;
         }
-        let pl = crate::ui::prompt::PromptLine {
-            prefix: &p.prefix,
-            buffer: &p.buffer,
-            theme: &self.view.theme,
-            cursor_pos: p.editor.as_ref().map(|e| e.cursor),
-            vi_mode: p.editor.as_ref().map(|e| e.mode),
-        };
+        let pl = p.line(&self.view.theme);
         let cap = (area.height / 2).max(1);
         let lines = pl.line_count(layout.prompt.width).min(cap);
         if lines <= layout.prompt.height {
@@ -652,6 +647,11 @@ impl App {
             view.scroll_to_bottom(rect.height);
             view.pending_scroll_to_bottom.set(false);
         }
+    }
+
+    /// Column `a`'s display rows: the ones `view.cached_rows` holds.
+    fn build_rows(&self) -> Vec<Row> {
+        self.build_rows_for(&self.state.left)
     }
 
     /// Rebuild the list-rows cache and run the `view_top`↔grid stabilization.
@@ -881,6 +881,39 @@ mod render_tests {
         insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
     }
 
+    /// The bar reports only what differs from rest, and `:set flags=` changes
+    /// how it's written.
+    #[test]
+    fn the_status_bar_reports_what_differs_and_follows_set_flags() {
+        let mut app = demo_app(&files());
+        app.state
+            .left
+            .picks
+            .insert(&PathBuf::from("/projects/demo/README.md"));
+        let bar = |app: &mut App| {
+            render_to_string(app, 80, 24)
+                .lines()
+                .next()
+                .unwrap()
+                .to_string()
+        };
+        assert!(bar(&mut app).contains("[picks:1]"), "{}", bar(&mut app));
+        // Too narrow for the words beside the uncut path, wide enough for the
+        // short forms: auto keeps the path whole.
+        let narrow = render_to_string(&mut app, 31, 24);
+        let narrow = narrow.lines().next().unwrap();
+        assert!(narrow.contains("[p:1]"), "{narrow}");
+        assert!(narrow.contains("/projects/demo"), "{narrow}");
+        app.state.dispatch_command("set flags=short");
+        assert!(bar(&mut app).contains("[p:1]"), "{}", bar(&mut app));
+        app.state.dispatch_command("set flags=full");
+        assert!(
+            bar(&mut app).contains("[picks:1 inv:0 m1:on m2:on hidden:0 sort:name]"),
+            "{}",
+            bar(&mut app)
+        );
+    }
+
     #[test]
     fn snapshot_frame_status_bottom() {
         let mut app = demo_app(&files());
@@ -1039,6 +1072,50 @@ mod render_tests {
             flip(&mut app, crate::app::state::Side::Left);
             let (path, _) = app.header_parts();
             assert!(path.contains("demo"), "a focused: {path}");
+        });
+    }
+
+    /// The `A` overlay's `list:` counts the focused column's entries, like the
+    /// status bar beside it. It counted column `a`'s.
+    #[test]
+    fn the_activity_hud_counts_the_focused_columns_listing() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let a = std::fs::canonicalize(tmp.path()).unwrap();
+            let b = a.join("b");
+            std::fs::create_dir(&b).unwrap();
+            for name in ["one", "two", "three"] {
+                std::fs::write(b.join(name), name).unwrap();
+            }
+            let mut app = App::test_app(a);
+            app.state.refresh_listing(); // a holds just `b`
+            app.open_second_commander_at(&b);
+            app.view.show_activity = true;
+
+            let out = render_to_string(&mut app, 140, 24);
+            assert!(out.contains("list:3 "), "{out}");
+        });
+    }
+
+    /// The HUD's `mcp` row leads with the live connection count and how many
+    /// are bound to a tab, before any tool has been called.
+    #[test]
+    fn the_activity_hud_counts_mcp_connections() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.execute_mcp_command(crate::mcp_cmd::McpCommand::ConnectionInitialized {
+                conn: 1,
+                pane_id: Some("p".into()),
+            });
+            app.execute_mcp_command(crate::mcp_cmd::McpCommand::ConnectionInitialized {
+                conn: 2,
+                pane_id: None,
+            });
+            app.view.show_activity = true;
+
+            let out = render_to_string(&mut app, 140, 24);
+            assert!(out.contains("mcp conn:2 bound:1"), "{out}");
         });
     }
 
@@ -1209,7 +1286,8 @@ mod purity_guard {
     //! `mod_rs_stays_decomposed` / the `COMMAND_TABLE` build-error guard turn
     //! prose rules into failures.
     //!
-    //! Scope: the PURE DRAW modules only — `inner` / `chrome` / `overlays`.
+    //! Scope: the PURE DRAW modules only — `inner` / `chrome` / `overlays` /
+    //! `activity_hud`.
     //! `render/mod.rs` is deliberately NOT covered: it holds the `&mut`
     //! settle (`prepare_frame` / `prepare_panes`), which is exactly where the
     //! OS kicks legitimately live. As further off-thread fixes land (e.g. the
@@ -1225,6 +1303,7 @@ mod purity_guard {
         ("render/inner.rs", include_str!("inner.rs")),
         ("render/chrome.rs", include_str!("chrome.rs")),
         ("render/overlays.rs", include_str!("overlays.rs")),
+        ("render/activity_hud.rs", include_str!("activity_hud.rs")),
     ];
 
     /// High-signal tokens for blocking IO / OS access / thread spawning that

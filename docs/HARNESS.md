@@ -54,6 +54,7 @@ sudo -v && python3 -c "import json;print(json.load(open('/Library/Application Su
 | `[mouse] capture` | `true` (default) | The wheel scrolls whatever the pointer is over, including panes whose child ignores mouse reports. Costs your terminal's native click-drag select — hold **Shift** (most terminals) or **Option/Fn** (iTerm2), or `:mouse off` for the session. |
 | status hooks | on | Per-agent hooks let the agent *report* `working`/`blocked`/`done`, which is what makes the tab dots trustworthy instead of guesses from output timing. `:hooks` shows state. |
 | `[notify]` | `desktop = true` | The "which agent needs me" ping. `Blocked` fires every enabled channel; the routine `Done` only fires channels that opt in via `*_done`. Details in [`AGENT_ORCHESTRATION.md`](AGENT_ORCHESTRATION.md). |
+| `[pane] codex_daemon` | `false` (default) | spyc starts codex panes with `--no-daemon`. See "codex's shared daemon" below. |
 | `[clipboard] command` | set it on WSL | No X display by default under WSL2 — point it at `clip.exe`. Alternatively `[clipboard] via = "osc52"`. |
 
 ---
@@ -146,6 +147,22 @@ Inside either view:
 Transcript sources per agent live under `src/state/` (`claude_transcript.rs`,
 `codex_transcript.rs`, `agy_transcript.rs`). zot has none yet.
 
+Codex scrollback accepts both legacy message/function-call events and current
+`item_completed` user/agent, command and MCP items, plus custom-tool calls.
+Structured content contributes text only; wire user-message instructions and
+reasoning records are not conversation prose. Records with the same item/call
+identity and kind appear once within a session; identical text with different
+identities still appears each time. Calls and results remain separate entries,
+and `t` hides both. Distinct wrapper and nested-tool identities are not guessed
+to be duplicates.
+
+**A forked codex thread's rollout holds only its own turns.** Its
+`session_meta.history_base` names the parent thread and the byte offset in the
+parent's rollout where the fork branched, instead of copying what came before.
+So `^a v` on a fork reads the parent's rollout up to that offset first, and
+further back for a fork of a fork (`src/state/codex_history.rs`). Without that
+walk a branch would show none of the history it was forked to keep.
+
 ---
 
 ## 4. Session recovery, per agent
@@ -160,7 +177,64 @@ resumes differs, and the differences leak:
 | **agy** | baked into the spawn command — `--conversation <uuid>` when spyc has a pinned session id for the tab, falling back to `--continue` (the most recent for this cwd) when it does not. |
 | **zot** | `--continue`. spyc doesn't capture a specific session path yet, so restore always continues the most recent. |
 
+### Forking a tab (`^a F`)
+
+| agent | fork |
+|---|---|
+| **claude** | a new tab running `claude --resume <id> --fork-session`. That's the `--resume` flag restore avoids, because the typed `/resume` has no fork form; on claude 2.1.284 it mounts cleanly with a long conversation behind it. The branch writes nothing to disk until its first prompt, and its first hook report carries the branch's own session id, not the parent's. |
+| **codex** | a new tab running `codex fork <uuid>`. The branch writes its rollout straight away, with a new id and a start time at the fork, so spyc pins it like any fresh codex tab. |
+| **agy**, **zot** | none. Each can resume a conversation but not branch it, and two tabs on one conversation would be two clients of one session, not a fork. `^a F` says so and opens nothing. |
+
+A branch starts in the directory its parent was started in, where each agent
+looks its session up, whatever directory the pane has wandered to since. A
+tab running anything else has no conversation, so its fork is a copy of its
+command, opened at the tab's live cwd.
+
 ### The codex quirk that confuses everyone
+
+**Activity diagnostics distinguish setup from execution.** `:activity dump`
+shows the last received semantic report, hook-file marker presence, whether
+hooks existed at launch, and known config changes that require a restart.
+An MCP connection or hook file alone does not prove hooks ran. After first
+consenting to spyc's hooks, restart Codex and review `/hooks` and project trust.
+New/changed hooks need review; spyc does not authorize them for you. Codex and
+Claude reports survive redraws and quiet tool waits until TTL expiry or a newer
+report; Codex cancellation reports `idle` through `Interrupt`. Without a live
+report, timing-only `idle` means silence, not confirmed completion.
+
+The dump includes up to eight reported hook-event summaries per pane. Event,
+tool and available turn/call ids help diagnose permission transitions without
+copying command arguments or conversation content. Metadata is unverified and
+does not change the configured status. Older reporter binaries still report
+status but omit event metadata: for a local test build, put its directory first
+on `PATH` before launching spyc so hooks invoking `spyc` use that build too.
+The pane's interactive shell can reorder `PATH` during startup. If reports
+arrive without metadata, check which `spyc` that shell resolves; launching the
+test with `SHELL=/bin/sh` can preserve the test directory's precedence without
+editing shell configuration. This temporarily changes the pane launch shell,
+not the user's permanent shell settings.
+`--status-trace` records sanitized summaries, not raw hook payloads.
+
+**Restore and fork retain Codex's launch settings**, including model, profile,
+sandbox, approval policy, working directory, repeated config overrides and
+extra writable directories. General options on either side of `resume` or
+`fork` are preserved, with their quoting and shell expansions intact. Only the
+old subcommand, selector and picker switches are removed; the captured session
+id supplies the new selector. An option value such as `resume` is not mistaken
+for a subcommand, and a fork's parent id is never pinned as its own conversation.
+
+Automatic reconstruction supports a bare or path-qualified `codex` executable
+and recognized interactive options. Shell operators, substitutions, wrappers,
+unknown options, repeated singleton options, initial prompts and initial image
+inputs require a manual reopen rather than a guessed launch or replayed input.
+A refused fork opens nothing. Restore preflights every tab and opens supported
+tabs while keeping refused or unspawned entries saved verbatim. The selected
+tab follows its saved identity; if it cannot open, the next supported tab is
+selected, falling back to the previous one. Session info (`Space s` from the
+file list, `^a Space s` from a pane) lists unopened tabs and their reasons.
+Autosave and quit preserve those entries for a later retry, including when all
+live panes have been closed. If every saved tab is refused, the current tabs
+and session identity stay intact.
 
 **A resumed codex session appends to its original rollout file and leaves
 `session_meta` frozen at the original creation time.** So a rollout created a
@@ -172,6 +246,249 @@ and why two codex panes in the same directory is the case that breaks it. See
 **#230**; the fix ranks a *fresh* pane by start-time proximity (its rollout
 necessarily starts when the pane does) while keeping mtime primary for a
 resume-without-id, because those are opposite tells.
+
+### Codex question-tool recovery
+
+Codex's `request_user_input` tool has narrowly matched `PreToolUse` and
+`PostToolUse` reporters. A start reports `blocked`; successful completion
+restores `working` only when pane, session, turn and call match a pending
+question. The first valid correlated start supersedes a preceding generic
+agent block, such as the agent's announcement that it is about to ask. A generic
+block received while any question is pending remains independent and retains
+attention after completion; duplicate or additional starts cannot clear it.
+Enter alone does not clear an identified question, and unrelated or late
+completions are recorded as unapplied with a reason in `:activity dump`.
+
+Correlation is bounded to eight pending questions per pane, with overflow
+remaining blocked until a lifecycle or explicit agent report. It is reset for
+replaced panes and never stores question arguments or answers. The hook wire
+values require a capable host and metadata-bearing reporter; older components
+cannot silently apply an uncorrelated completion. Restart Codex and review both
+new hooks in `/hooks`; spyc never approves them or edits trust records.
+
+This instruments the question tool's attempt/completion, not authenticated
+proof that a dialogue opened. Invalid/cancelled calls may have no post event;
+`Stop`, `Interrupt` or an explicit newer report retires the wait. Correlated semantic
+permission completion cannot be correlated because `PermissionRequest` has
+no call id. It runs before hook decisions, automatic review or a human dialogue,
+as shown by the exact-version
+[permission event](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/hooks/src/events/permission_request.rs)
+and [review path](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/approvals.rs).
+Metadata-bearing permission reports are recorded as observational
+(`not applied: PermissionRequest precedes review; human wait unverified`). They
+cannot latch blocked or interfere with a later question. The existing hook
+command remains unchanged, preserving its trust hash; the host and reporter
+on `PATH` must both support lifecycle metadata.
+
+Command, file-edit, MCP-tool and network approvals use a narrow fallback:
+known required phrases and a complete default footer at the current viewport
+bottom temporarily override a non-blocked report. Native word wrapping is
+accepted; missing required text, changed forms and old dialogues above the
+composer are not inferred. Codex scans within 250 ms of the first pending
+repaint, so continuous redraws cannot postpone detection indefinitely.
+`:why-status` and `:activity dump` identify `scrape-fallback` as the source.
+The silent-work report remains stored and resumes after the dialogue closes.
+This is UI detection, not semantic permission completion. Network coverage uses
+an exact-version upstream UI fixture; a live native network approval remains
+an acceptance case. Generic MCP elicitation, extra-permission and stdin-write
+approval forms remain uncovered. Explicit agent blocks retain their ordinary input
+recovery; identified questions require matching completion instead of Enter.
+Real-CLI native question and quiet-after-answer checks passed through the
+automated TUI harness with already trusted hooks. Fresh hook trust onboarding
+remains a separate acceptance case.
+
+`request_user_input_async` is a separate question path. Its immediate completion
+acknowledges posting a question; it does not establish that the user answered.
+These native question hooks do not instrument that path. The
+[`0.160.1` async handler](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
+posts an async message and immediately returns `accepted`; the
+[TUI reply parser](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/tui/src/async_question_reply.rs)
+handles the answer as a later user message. A blocked latch tied to the tool's
+completion would misrepresent an agent that continues working. Async-answer
+lifecycle coverage remains open in A3.
+
+For a native-hook test, restart Codex after any restart-needed diagnostic and
+review the new hooks in `/hooks`. Enter `/plan` as an actual CLI slash command
+before asking for the diagnostic question. Confirm that `:activity dump` records
+`PreToolUse` for `request_user_input` while waiting, then a matching `PostToolUse`
+after answering. An async question call does not exercise this transition.
+
+### Automate Codex attention smoke tests
+
+`scripts/codex-tui-smoke.py` drives the installed Microsoft `tui-test` CLI with
+its Ghostty backend. It creates a dedicated named session, launches the supplied
+spyc binary, opens a real Codex pane and captures the UI and `:activity dump`.
+The driver stays alive while its daemon runs because tool runners can reap
+detached descendants when their launching command exits. It closes only its
+own session. The output directory must be new for each run.
+
+```sh
+python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-question-run
+python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-approval-run --scenario approval
+python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-mixed-run --scenario mixed
+python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-auto-run --scenario auto
+python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-parallel-run --scenario parallel
+python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-edit-run --scenario edit
+python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-edit-decline-run --scenario edit_decline
+python3 scripts/codex-tui-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-codex-edit-dismiss-run --scenario edit_dismiss
+```
+
+The question scenario selects Plan mode and asserts blocked while the native
+question is open, a single matching start/completion pair, authoritative working
+after the answer and during `sleep 30`, then a single Stop reporting done.
+Final text and the Stop reporter are asynchronous, so it waits for both. Checks
+read the current viewport rather than stale scrollback. The binary hash, step
+log, captures, extracted dumps, recording and result are saved beside each run.
+
+The approval scenario uses a test-only CLI invocation with user-reviewed
+approvals and a read-only sandbox. It approves only the displayed `sleep 30`
+command once, verifies the visible-dialogue fallback and retained working
+report after Enter, then done. This does not claim correlated semantic
+permission completion. The mixed scenario
+first approves the displayed `sleep 1` once, then answers a native question in
+the same turn. It checks matching completion, authoritative working during
+`sleep 30` and done. It catches stale approval state poisoning question recovery.
+The driver waits for diagnostic text to render before submitting it, preventing
+Codex's paste-burst handling from leaving a long prompt in the composer.
+The auto scenario requests the same harmless sleep under automatic review,
+presses no approval key, and checks that the permission observation cannot
+latch blocked. The parallel scenario opens two Codex panes in one worktree,
+holds both native questions open, answers the second first, then the first.
+It checks distinct pane/session/turn/call identities, matching completions,
+quiet working and done without recovering the unanswered pane.
+The edit scenarios request one marker file inside their own output directory.
+They verify blocked before any write, then approve once, choose decline, or
+dismiss with Esc. Approval checks retained working during a quiet sleep and
+done; decline/dismissal checks a lifecycle end and that no file was written.
+No persistent approval is selected.
+None of the scenarios approves hook trust or changes trust records. Hooks
+must already be trusted; fresh onboarding is a separate manual acceptance case. These real-model smoke
+tests run on demand rather than in CI.
+
+`scripts/codex-hook-readiness-smoke.py --output /tmp/spyc-codex-fresh-run`
+creates a temporary project and empty `CODEX_HOME`, then reads `hooks/list`
+without starting a turn or approving trust. It verifies that project hook
+declarations remain unavailable and Codex explains the untrusted-project
+gate. This negative discovery case does not establish trusted hook execution;
+the full onboarding flow remains a separate acceptance case.
+
+### Codex approval UI checks without hook trust changes
+
+`scripts/codex-approval-ui-smoke.py` exercises native command, file-edit and
+single-field MCP tool approval forms. It skips update notices and hook-review
+prompts with Esc, then waits for a stable composer. It never approves hook trust.
+Its `command` case uses a harmless sleep; `edit` requests an exact patch;
+`mcp` approves once and `mcp_decline` selects Cancel. A model choosing a shell
+command instead of `apply_patch` does not exercise the file-edit case. The disposable MCP server writes one marker inside the new
+output directory only after approval. No persistent approval is selected.
+
+```sh
+python3 scripts/codex-approval-ui-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario command --cols 40 --output /tmp/spyc-command-ui
+python3 scripts/codex-approval-ui-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario mcp --output /tmp/spyc-mcp-ui
+```
+
+Each case holds the modal for six seconds, checks the blocked scrape source,
+answers, and checks that the scrape clears. Width, exact binary hash, CLI version,
+recordings, captures and results are retained. These are UI checks, not evidence
+of hook delivery or retained semantic working. Use `codex-tui-smoke.py` with
+user-reviewed hooks for native question and quiet semantic recovery acceptance.
+Fixture provenance is recorded in `tests/fixtures/codex-approvals.md`.
+
+### Replay large hook payloads through the reporter and host
+
+`scripts/codex-hook-payload-smoke.py` uses a controlled Codex-profile PTY child
+and the supplied spyc binary for both the host and one-shot reporter. Native
+normalized event metadata is combined with synthetic 256 KiB content before the
+correlation fields. Fixture provenance is in
+`tests/fixtures/codex-hook-metadata.md`; these are not raw hook captures.
+
+```sh
+python3 scripts/codex-hook-payload-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario permission --output /tmp/spyc-hook-permission
+python3 scripts/codex-hook-payload-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario question --output /tmp/spyc-hook-question
+python3 scripts/codex-hook-payload-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario preblocked_question --output /tmp/spyc-hook-preblocked
+python3 scripts/codex-hook-payload-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario blocked_during_question --output /tmp/spyc-hook-independent
+```
+
+The permission case checks that an observed request during automatic review
+cannot replace the working report without a human dialogue. The question case
+holds blocked through silence, Enter without completion and a wrong-call
+completion; a matching completion restores authoritative working through a
+quiet wait, followed by Stop/done. Two variants also send ordinary agent reports
+through the actual pane-bound MCP proxy: `preblocked_question` checks recovery
+when the agent reported blocked before asking, with no intervening pane input;
+`blocked_during_question` checks that a later independent block remains red
+through matching completion and silence, then accepts a newer working report.
+Content reaches neither reports nor traces.
+The real reporter integration tests run in `make check`; these TUI replays run
+on demand and retain hashes, recordings, captures and results. Each uses its own
+temporary project with hook installation disabled and closes only its named
+session. They require no model call or hook trust, and do not establish native
+CLI execution or fresh onboarding acceptance.
+
+### Duplicate Codex hook sources
+
+Codex loads `.codex/hooks.json` alongside inline hooks in `.codex/config.toml`.
+If both contain spyc reporters, each matching event can report twice. At
+installation, spyc migrates its `--report-status` handlers out of the JSON file
+and keeps its reporters in TOML. Other handlers, matcher fields and trust records
+are preserved. An emptied legacy file is removed; user-only files are not
+rewritten. `:hooks off` and last-owner cleanup also remove legacy reporters.
+
+Codex identifies an owned handler by a direct `spyc` invocation (or the
+currently resolved reporter executable), a known wire status and the generated
+command shape, including its optional trace flag and fail-soft tail. Bare legacy
+invocations are also recognized. Quoted flags, other programs, wrappers, unknown
+statuses and extra shell actions are preserved. A non-command handler is never
+pruned. This check does not change generated hook commands or trust records.
+
+Removing a spyc reporter before a user hook can change Codex's positional trust
+key and silently disable that user hook. Installation and cleanup refuse such
+pruning in either source; hook declarations remain in place and `:activity dump` names
+the trust-identity reason. Trailing reporters can still be removed without
+moving user hooks. Manual migration requires restarting Codex and reviewing the
+affected user hooks in `/hooks`; spyc does not rewrite their trust records.
+
+Legacy files containing tracked reporters, or malformed/unreadable files,
+block migration; `:activity dump`
+names the source and repair action. Use `:hooks on` to migrate a valid untracked
+file, then restart Codex and review `/hooks`. A running CLI may retain its old
+hook definitions, so removing a duplicate file does not establish single
+delivery before restart. A JSON-only change also sets the restart diagnostic.
+Migration does not approve hooks or infer that a pending question or permission
+request was answered.
+
+### Codex hooks in linked worktrees
+
+Codex takes project hook definitions from the corresponding root-checkout
+directory, while ordinary config and the MCP entry stay worktree-local. spyc
+therefore installs and refcounts those hooks at the root-checkout source, using
+that project's saved consent. `:activity dump` names the actual source for a
+linked worktree; a reporter marker in the worktree's ignored file is insufficient.
+After a hook change, restart Codex and review `/hooks` from the new session.
+Native `request_user_input` has exact start/completion hooks; the async question
+tool's immediate acknowledgement is not an answer signal.
+
+### codex's shared daemon
+
+**Recent codex (seen on 0.158.0) runs sessions on one shared background server,
+`codex app-server --managed-daemon`, started by the first codex you launch.**
+That server spawns every session's MCP servers and hooks, and gives them its
+own environment, not the environment of the codex in the tab. spyc's status
+hooks and MCP proxy find their spyc and their tab through `SPYC_MCP_SOCK` and
+`SPYC_PANE_ID` in the pane's env, so on the shared server they all get the
+values of whichever pane happened to start it. Reports go to a spyc that has
+since exited, or light the wrong tab's dot.
+
+So spyc starts codex panes with `--no-daemon` (added after the program, the
+tab keeps what you typed). `[pane] codex_daemon = true` turns that off, at the
+cost of the dots and MCP attribution. A codex started outside spyc is
+unaffected either way.
 
 ### The autosave window
 
@@ -186,8 +503,8 @@ idle spyc still does no work.
 ## 5. Multiple spyc instances
 
 Instances coexist — the MCP server uses a **PID-scoped** Unix socket
-(`~/.local/state/spyc/mcp-<pid>.sock`), and if another instance already owns an
-agent's config entry you get a takeover prompt rather than a silent fight.
+(`~/.local/state/spyc/mcp-<pid>.sock`), and an agent's config entry names no
+instance, so every agent reaches the spyc that launched it.
 
 The thing that genuinely breaks is **concurrent agents of the same kind in the
 same directory**, because that's what makes session resolution ambiguous — same
@@ -207,3 +524,146 @@ sharp edge, and prefer distinct worktrees.
 | Reclaim native text selection | hold Shift (or Option/Fn on iTerm2), or `:mouse off` |
 | Check which build you're on | `:about`, `:version`, or `gV` |
 | See who's editing what, across agents | `:agent list` / `:agent registry` |
+
+## Child input backpressure
+
+A stopped or non-reading child must leave spyc navigation, tab controls and
+pagers responsive. Child input is queued in order off the UI thread. The input
+queue normally holds at most 512 waiting batches and 8 MiB including the
+in-flight write. If it fills, spyc reports that the new input was not sent;
+retry after the child resumes reading. A single paste over 8 MiB gets a separate
+size-limit error; retrying that paste cannot help.
+
+File piping (`^a P`) above 8 MiB shows the size and asks `y/N` before sending.
+Only an unmodified `y`/`Y` proceeds; Enter, Esc and other keys cancel without
+sending content. Confirmation permits one large payload only when the queue is
+empty. It keeps the original bracketed paste together on the worker and accepts
+no further input until that batch finishes. It does not wait on the UI thread.
+Accepted input can remain queued while the child is stopped. Closing its tab
+retains process-group shutdown; an independently grouped background job can keep
+a detached writer alive if it retains the slave PTY.
+
+
+`scripts/pane-input-smoke.py` uses a dedicated `tui-test` session and a disposable
+raw-mode child that does not read stdin. A synthetic paste fills the PTY while
+spyc's own activity pager must still open. It also checks capture input, a
+pane producing continuous output, session restore and cancellation/complete
+byte delivery of a confirmed 9 MiB file pipe. A failure can capture a macOS stack sample
+before killing the owned test child. It never drives the user's current pane.
+
+### Test Codex hook identity during installation and cleanup
+
+`scripts/codex-hook-trust-smoke.py` drives a controlled Codex-profile PTY child
+through actual spyc hook installation, `:hooks off` and teardown. It reads native
+Codex `hooks/list` before and after each step, asserting that the fixture user
+hook keeps its key, current hash, enabled flag and untrusted status.
+
+```sh
+python3 scripts/codex-hook-trust-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario json_shared --output /tmp/spyc-hook-json-identity
+python3 scripts/codex-hook-trust-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario toml_groups --output /tmp/spyc-hook-toml-identity
+python3 scripts/codex-hook-trust-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario safe --output /tmp/spyc-hook-safe-identity
+```
+
+The shared-handler and separate-group cases cover both JSON and TOML. The safe
+case allows trailing reporter removal. Each creates a disposable project and
+`CODEX_HOME`; project-load permission is fixture data, while every hook remains
+untrusted. The native CLI only lists hooks: no turn, hook approval or hook
+execution is requested. The real user's trust records are untouched. Stable keys
+and hashes protect the lookup of an existing trust record; this is discovery
+coverage, not live trusted-hook execution. Captures, recordings, discovery JSON,
+binary hashes and results are retained, and only the owned session is closed.
+
+
+### Test hook cleanup ownership across hosts
+
+`scripts/codex-hook-ownership-smoke.py` runs controlled PTY children through
+actual spyc installation and graceful `:q` teardown. It uses disposable home,
+project and state directories, disables the unrelated Codex MCP writer and
+never executes native agents, hooks or trust approvals.
+
+```sh
+python3 scripts/codex-hook-ownership-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario tracked --output /tmp/spyc-hook-borrowed
+python3 scripts/codex-hook-ownership-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario mixed --output /tmp/spyc-hook-mixed-hosts
+```
+
+The seven scenarios cover tracked/malformed refused installs, Claude-only and
+MCP-only sessions, two managed Codex hosts, mixed-agent hosts and a borrowed
+last owner. The driver waits for the host process to exit before checking file
+preservation or cleanup. Manifests, recordings, activity dumps, viewport captures
+and results identify the binary and distinguish this coverage from native hook
+execution.
+
+### Test interruption, exit and report lifetimes
+
+`scripts/agent-interrupt-smoke.py` uses a raw-mode controlled child with an
+agent profile and real pane-bound spyc MCP reports. It verifies ordinary input
+preserves working, Escape/`Ctrl-C` returns to idle through silence, and a newer
+report restores working. Exit cases use a file trigger without pane input,
+then check idle and rejection of a late report. The TTL case requests an
+oversized lifetime and checks the capped diagnostic expiry.
+
+```sh
+python3 scripts/agent-interrupt-smoke.py --binary /tmp/spyc-build/spyc \
+  --agent claude --scenario escape --output /tmp/spyc-interrupt-claude
+python3 scripts/agent-interrupt-smoke.py --binary /tmp/spyc-build/spyc \
+  --agent codex --scenario exit_blocked --output /tmp/spyc-exit-codex
+python3 scripts/agent-interrupt-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario ttl --output /tmp/spyc-report-ttl
+```
+
+The driver records captures, activity dumps, manifest, late-report result and
+host exit state. It quits the test host through the UI and requires exit code
+zero. Controlled child exits use code seven. Native agent/hook execution and
+trust are not part of these replay cases.
+
+
+### Test recorded Codex command scrollback
+
+`scripts/codex-transcript-smoke.py` mounts a sanitized real command-execution
+record in a disposable Codex session directory. A controlled alt-screen child
+allows the actual `Ctrl-A v` transcript path to open; the recorded command is
+never executed. Cases cover a recorded argv command and result, duplicate
+identity, and mixed legacy/malformed records. Each case hides and restores tool
+lines with `t`, reloads, retains prose and quits the host through the UI.
+
+```sh
+python3 scripts/codex-transcript-smoke.py --binary /tmp/spyc-build/spyc \
+  --scenario recorded --output /tmp/spyc-transcript-recorded
+```
+
+Use `--scenario duplicate` or `--scenario mixed` for the other cases. The driver
+preserves recordings, viewport captures, fixture/binary hashes and host exit
+state. Native Codex execution and hook trust are not exercised.
+
+
+`scripts/codex-restore-smoke.py --binary /absolute/path/to/spyc --output /tmp/new-output`
+uses a disposable HOME and saved session with controlled Codex-named children.
+Its four `--scenario` values are `leading_unknown`, `middle_prompt`,
+`trailing_image` and `all_refused`. The first three restore through `spyc -r`,
+check the selected tab, activity dump and session-info reasons, then verify the
+refused record survives autosave and quit and repeat the restore. The last
+checks a wholly refused session executes no child and remains saved unchanged.
+Each host must quit with exit code zero and no signal. This covers spyc's restore
+behaviour without running native Codex or approving hook trust.
+
+
+Codex legacy-hook migration preserves a `.codex/hooks.json` symlink, including
+its target, and refuses installation/teardown rather than replacing or unlinking
+it. Diagnostics explain that the linked reporters need manual migration.
+Regular JSON files keep their existing permission bits when spyc removes its
+reporters; the replacement file receives those bits before atomic rename.
+The ownership TUI driver adds `symlink`, `dangling_symlink`, `mode_640` and
+`mode_644` scenarios. They check installation, diagnostics, file contents and
+permissions after graceful host exit, using controlled children and disposable
+HOME/state without executing native hooks or changing trust.
+
+The ownership smoke driver also accepts `json_mentions`, `toml_mentions` and
+`json_user_only`. These scenarios preserve user hooks that quote the reporter
+flag, call another program, wrap spyc or add shell actions; they check migration,
+installed user-command ordering, graceful teardown and unchanged user-only JSON.
+They use controlled children and do not execute these fixture commands.

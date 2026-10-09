@@ -2,7 +2,8 @@
 //!
 //! Each session is a JSON snapshot of the workspace layout at quit time.
 //! Stored in `$XDG_STATE_HOME/spyc/sessions/` (or `~/.local/state/spyc/sessions/`),
-//! one file per session, filename is the epoch millis.
+//! one `<id>.json` per session. The id is the session's creation time in epoch
+//! millis, and a restore keeps it, so the name says nothing about recency.
 
 use std::path::PathBuf;
 
@@ -147,6 +148,40 @@ pub struct SavedVsplit {
     pub right_cwd: Option<PathBuf>,
 }
 
+thread_local! {
+    static CLAUDE_DIR_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// `~/.claude`, where claude keeps its per-process session records and its
+/// conversation transcripts. Every read of either goes through here. A unit
+/// test sees none unless it pins one with [`with_claude_dir`], so no test
+/// depends on the developer's own conversations.
+fn claude_dir() -> Option<PathBuf> {
+    if let Some(dir) = CLAUDE_DIR_OVERRIDE.with(|c| c.borrow().clone()) {
+        return Some(dir);
+    }
+    if cfg!(test) {
+        return None;
+    }
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude"))
+}
+
+/// Test-only: run `body` with [`claude_dir`] pinned to `dir`, unwound when
+/// `body` returns or panics.
+#[cfg(test)]
+pub fn with_claude_dir<R>(dir: &std::path::Path, body: impl FnOnce() -> R) -> R {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            CLAUDE_DIR_OVERRIDE.with(|c| *c.borrow_mut() = None);
+        }
+    }
+    CLAUDE_DIR_OVERRIDE.with(|c| *c.borrow_mut() = Some(dir.to_path_buf()));
+    let _guard = Guard;
+    body()
+}
+
 fn sessions_dir() -> Option<PathBuf> {
     crate::state::state_root().map(|r| r.join("sessions"))
 }
@@ -156,14 +191,23 @@ pub fn save_session(session: &Session) -> std::io::Result<()> {
         return Ok(());
     };
     std::fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("{}.json", session.id));
+    let path = dir.join(session_file_name(session.id));
     let json = serde_json::to_string_pretty(session).map_err(std::io::Error::other)?;
     // Atomic write (temp + rename) so a SIGKILL mid-write can't leave a
     // truncated/corrupt `<id>.json` — the crash-sufficiency contract the P3-2
     // debounced autosave relies on (and a free win for the quit-time save).
     crate::fs::write_atomic(&path, json.as_bytes())?;
-    prune_old(&dir);
+    prune_old(&dir, &path);
     Ok(())
+}
+
+fn session_file_name(id: u64) -> String {
+    format!("{id}.json")
+}
+
+/// Whether a restore point is already saved under `id`.
+pub fn session_exists(id: u64) -> bool {
+    sessions_dir().is_some_and(|dir| dir.join(session_file_name(id)).is_file())
 }
 
 pub fn load_sessions() -> Vec<Session> {
@@ -190,24 +234,40 @@ pub fn load_sessions() -> Vec<Session> {
     sessions
 }
 
-fn prune_old(dir: &std::path::Path) {
+fn prune_old(dir: &std::path::Path, just_saved: &std::path::Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
-    let mut files: Vec<PathBuf> = entries
+    let files: Vec<(PathBuf, std::time::SystemTime)> = entries
         .filter_map(Result::ok)
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
-        .map(|e| e.path())
+        .map(|e| {
+            let saved = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            (e.path(), saved)
+        })
         .collect();
-    if files.len() <= MAX_SESSIONS {
-        return;
-    }
-    // Sort ascending by filename (epoch millis) so oldest are first.
-    files.sort();
-    let to_remove = files.len() - MAX_SESSIONS;
-    for path in &files[..to_remove] {
+    for path in prune_victims(files, just_saved, MAX_SESSIONS) {
         let _ = std::fs::remove_file(path);
     }
+}
+
+/// The session files to delete to get back down to `max`: the least recently
+/// written, and never `keep`, the file the current save just wrote.
+///
+/// SPYC-TRAP(session-prune-by-last-save): rank by write time, never by name.
+fn prune_victims(
+    mut files: Vec<(PathBuf, std::time::SystemTime)>,
+    keep: &std::path::Path,
+    max: usize,
+) -> Vec<PathBuf> {
+    let excess = files.len().saturating_sub(max);
+    files.retain(|(path, _)| path != keep);
+    files.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+    files.truncate(excess);
+    files.into_iter().map(|(path, _)| path).collect()
 }
 
 /// Claude session info returned by `find_claude_sessions`.
@@ -226,10 +286,9 @@ pub struct ClaudeSessionInfo {
 /// be matched 1:1 against their session records by spawn time —
 /// otherwise they all collapse onto the most-recent record.
 pub fn find_claude_sessions(cwd: &std::path::Path) -> Vec<ClaudeSessionInfo> {
-    let Some(home) = std::env::var_os("HOME") else {
+    let Some(dir) = claude_dir().map(|d| d.join("sessions")) else {
         return Vec::new();
     };
-    let dir = PathBuf::from(home).join(".claude/sessions");
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
@@ -327,7 +386,7 @@ pub fn pick_closest_unclaimed_session<T: SessionCandidate>(
 /// in the on-disk path. We mirror that exactly — anything else
 /// produces a slug that doesn't match Claude's directory and the
 /// resume resolver returns None, leaving a session unresumable.
-fn project_slug(cwd: &std::path::Path) -> String {
+pub fn project_slug(cwd: &std::path::Path) -> String {
     cwd.to_string_lossy()
         .chars()
         .map(|c| {
@@ -347,10 +406,9 @@ fn project_slug(cwd: &std::path::Path) -> String {
 /// macOS's `/var` → `/private/var` symlink means `getcwd()` inside Claude
 /// may produce a different slug than what spyc passes in.
 pub fn claude_jsonl_exists(cwd: &std::path::Path, session_id: &str) -> bool {
-    let Some(home) = std::env::var_os("HOME") else {
+    let Some(projects) = claude_dir().map(|d| d.join("projects")) else {
         return false;
     };
-    let projects = PathBuf::from(&home).join(".claude/projects");
     let file = format!("{session_id}.jsonl");
     if projects.join(project_slug(cwd)).join(&file).exists() {
         return true;
@@ -370,8 +428,7 @@ pub fn claude_jsonl_exists(cwd: &std::path::Path, session_id: &str) -> bool {
 /// and its canonical form for the macOS symlink-slug mismatch. Returns
 /// the first existing path, or `None`.
 pub fn claude_jsonl_path(cwd: &std::path::Path, session_id: &str) -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let projects = PathBuf::from(&home).join(".claude/projects");
+    let projects = claude_dir()?.join("projects");
     let file = format!("{session_id}.jsonl");
     let direct = projects.join(project_slug(cwd)).join(&file);
     if direct.exists() {
@@ -390,10 +447,20 @@ pub fn claude_jsonl_path(cwd: &std::path::Path, session_id: &str) -> Option<Path
 /// Returns the session ID (filename stem). This is the same conversation
 /// the no-arg `claude --resume` picker would surface first for this cwd.
 pub fn most_recent_jsonl_for_cwd(cwd: &std::path::Path) -> Option<String> {
-    let home = std::env::var_os("HOME")?;
-    let dir = PathBuf::from(home)
-        .join(".claude/projects")
-        .join(project_slug(cwd));
+    newest_jsonl_for_cwd(cwd).map(|(_, id)| id)
+}
+
+/// [`most_recent_jsonl_for_cwd`], if that transcript was last written at or
+/// after `since` (epoch secs).
+pub fn most_recent_jsonl_for_cwd_since(cwd: &std::path::Path, since: u64) -> Option<String> {
+    let since = std::time::UNIX_EPOCH + std::time::Duration::from_secs(since);
+    newest_jsonl_for_cwd(cwd)
+        .filter(|(written, _)| *written >= since)
+        .map(|(_, id)| id)
+}
+
+fn newest_jsonl_for_cwd(cwd: &std::path::Path) -> Option<(std::time::SystemTime, String)> {
+    let dir = claude_dir()?.join("projects").join(project_slug(cwd));
     let entries = std::fs::read_dir(&dir).ok()?;
     let mut best: Option<(std::time::SystemTime, String)> = None;
     for entry in entries.filter_map(Result::ok) {
@@ -410,7 +477,7 @@ pub fn most_recent_jsonl_for_cwd(cwd: &std::path::Path) -> Option<String> {
             best = Some((mtime, stem.to_string()));
         }
     }
-    best.map(|(_, id)| id)
+    best
 }
 
 #[derive(Debug, Clone)]
@@ -584,8 +651,7 @@ pub fn parse_iso8601_to_epoch_secs(s: &str) -> Option<u64> {
 /// (`pub`, not `pub(crate)`: the enclosing `sessions` module is private, so
 /// clippy's `redundant_pub_crate` rejects `pub(crate)` here.)
 pub fn find_claude_session_name(session_id: &str) -> Option<String> {
-    let home = std::env::var_os("HOME")?;
-    let projects_dir = PathBuf::from(home).join(".claude/projects");
+    let projects_dir = claude_dir()?.join("projects");
     let entries = std::fs::read_dir(&projects_dir).ok()?;
 
     for project in entries.filter_map(Result::ok) {

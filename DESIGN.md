@@ -27,7 +27,7 @@ ships a default; `.spycrc.toml`'s `[colors]` table overrides them.
 | `take` | lavender (alt) | inventory rows (taken into the cache) |
 | `status_user` | lavender | session-name segment background |
 | `status_path` | pale lavender | path segment foreground |
-| `status_suffix` | indigo grey | suffix segment (`[picks:0 …]`) |
+| `status_suffix` | indigo grey | suffix segment (`[picks:3 …]`) |
 | `prompt_prefix` | amber | the leading `:`, `!`, `;`, `/`, etc. |
 
 **Mono mode** (`C` toggle) drops to default terminal colours with
@@ -43,9 +43,10 @@ These are the names. Use them in code and when writing.
 - **Status bar** — single row, powerline segments. Top by default,
   bottom via `[layout] status_position = "bottom"`. Segments, in
   order: pepper logo `🌶️` · `PROJECT_HOME` (basename) · session name
-  (`SAFFRON_CUMIN` style) · path · git branch + dirty flag · suffix
-  (`[picks:0 inv:0 m1:on m2:on hidden:14]`). Segments collapse left
-  to right when the terminal is narrow.
+  (`SAFFRON_CUMIN` style) · path · git branch + dirty flag · agent ·
+  suffix (`[picks:3 hidden:14]`). When the terminal is narrow, the
+  suffix switches to its short forms (`[p:3 h:14]`) before the path
+  is cut, and then the path is shortened in the middle.
 - **List** — the file area. Vi-navigated. Each row: cursor bar,
   pick check, take check, name, git marker, size/age (depending on
   mode). The "central widget" — most operations resolve against the
@@ -54,7 +55,10 @@ These are the names. Use them in code and when writing.
   prefix character indicates mode: `:` command line, `!` captured
   shell, `;` interactive shell, `$` interactive shell handoff, `/`
   search, `=` limit filter, `J` jump, `T` glob pick, `c`/`M` copy/
-  move target, `+` mkdir, `O` new file, etc.
+  move target, `+` mkdir, `O` new file, etc. A prompt can carry a
+  *suggestion*, drawn dimmed where the typing goes: it's what `Enter`
+  submits while nothing is typed (`J` offers the last path the pane
+  printed). Typing replaces it; `→`/`End` loads it for editing.
 - **Divider** — pane separator. Rule with tab indicators (`─[1*] claude
   ─[2+] bash`) and the active tab's *live* cwd (`── ↪ /tmp` if
   drifted from spawn). `[SCROLL]` tag right-aligned when in pane
@@ -91,9 +95,17 @@ rather than create a new modal type.
   prompt (`y`/`n`). Used by destructive operations (`R` remove,
   worktree delete) and interrupt-on-quit. Do not introduce a
   separate dialog box — extend confirm.
+- **The prompt row is never hidden.** A full-screen `V` editor or `D`
+  pager paints over it, so while it has something to show (a prompt, a
+  flash, an armed chord) it borrows the pane's tab bar, spyc's own
+  chrome, as the status bar gives way for a zoomed pane; with no pane
+  open, the surface's last row. The editor's text is never what gets
+  covered.
 - **Activity HUD** — tiny right-anchored debug overlay (`A`
-  toggle). Reports dps, bytes/sec, poll period. Engineering tool;
-  features should not depend on it.
+  toggle). Reports dps, bytes/sec, poll period. Transparent by
+  default — coloured text only, so what's beneath shows through the
+  ragged left edge; `:activity solid` restores the opaque colour
+  bands. Engineering tool; features should not depend on it.
 
 ## Icons & glyphs
 
@@ -209,13 +221,19 @@ indicator with a >50ms threshold so the common case never sees it.
 
 ## Status segments: grammar
 
-The suffix `[picks:0 inv:0 m1:on m2:on hidden:14]` is a
-key-value sequence in fixed order. New segments added there must:
+The suffix `[picks:3 hidden:14 sort:mtime]` is a key-value sequence
+in fixed order, listing only the column state that differs from rest
+(`src/ui/status_flags.rs`). New segments added there must:
 
-- Be one short word, no spaces (`m1`, `inv`, `hidden`).
-- Show only when non-default or relevant (the `limit:`, `hidden:`
-  segments only appear when active).
+- Be one short word, no spaces (`picks`, `inv`, `hidden`), with a
+  short form (`p`, `i`, `h`) for when the words would cut the path.
+- Show only when they differ from their resting value: no picks, an
+  empty inventory, a mask at its configured default and sort by name
+  are all silent.
 - Stay inside one row even at narrow terminals.
+
+`[layout] status_flags = "full"` restores the every-field bar for
+anyone who prefers it.
 
 Don't introduce a third status row. If you need more, the answer is
 the `I` info overlay or a flash.

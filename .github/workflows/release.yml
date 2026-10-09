@@ -69,7 +69,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.14.0
-      - uses: taiki-e/install-action@v2.87.0
+      - uses: taiki-e/install-action@v2.87.22
         with:
           tool: cargo-zigbuild
       - name: Toolchain (auto from rust-toolchain.toml)
@@ -162,10 +162,21 @@ jobs:
           cd dist
           cosign sign-blob --yes SHA256SUMS --bundle SHA256SUMS.cosign.bundle
       - name: Generate release notes (git-cliff, this tag's section)
-        uses: taiki-e/install-action@v2.87.0
+        uses: taiki-e/install-action@v2.87.22
         with:
           tool: git-cliff
-      - run: git cliff --config cliff.toml --latest --strip header > RELEASE_NOTES.md
+      - name: Write this tag's notes
+        # cliff.toml's `tag_pattern` matches stable tags only, so `--latest`
+        # gives a stable tag its whole cycle, and a prerelease tag is no
+        # boundary at all: its notes are every commit since the last stable
+        # release, titled with this tag.
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            *-alpha*|*-beta*|*-rc*)
+              git cliff --config cliff.toml --unreleased --tag "${GITHUB_REF_NAME}" --strip header > RELEASE_NOTES.md ;;
+            *)
+              git cliff --config cliff.toml --latest --strip header > RELEASE_NOTES.md ;;
+          esac
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -225,10 +236,15 @@ jobs:
     # exchanges this job's GitHub-issued OIDC token (`id-token: write`, below)
     # for a crates.io token scoped to THIS repo + workflow file, valid only for
     # the step's lifetime — auto-revoked in the action's `post` step. Requires
-    # a trusted-publisher entry on the crate's crates.io settings page
-    # (repository + workflow filename) and, per crates.io, an existing crate
-    # (spyc's first publish already happened via a token, so this is live from
-    # the next release on).
+    # a trusted-publisher entry on EACH crate's crates.io settings page
+    # (repository + workflow filename) and, per crates.io, an existing crate.
+    # So a new crate's first publish is by hand, with a token; spyc's was, and
+    # spyc-vt-sys's is too (RELEASE_ENGINEERING.md §5a).
+    #
+    # Two crates, in dependency order: spyc's packaged manifest resolves
+    # spyc-vt-sys from crates.io, so the FFI crate goes first. Each version is
+    # checked before publishing, which keeps a re-run a no-op and lets a
+    # release that didn't move spyc-vt-sys skip it.
     permissions:
       id-token: write # OIDC for crates.io Trusted Publishing
     steps:
@@ -247,10 +263,19 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
-          ver="${GITHUB_REF_NAME#v}"
-          if curl -sf -H "User-Agent: spyc-release" \
-               "https://crates.io/api/v1/crates/spyc/${ver}" >/dev/null; then
-            echo "spyc ${ver} is already on crates.io — nothing to do."
-            exit 0
-          fi
-          cargo publish --locked
+          set -euo pipefail
+          publish() {
+            local crate="$1" ver="$2"
+            if curl -sf -H "User-Agent: spyc-release" \
+                 "https://crates.io/api/v1/crates/${crate}/${ver}" >/dev/null; then
+              echo "${crate} ${ver} is already on crates.io — skipping."
+              return 0
+            fi
+            # cargo waits for the new version to reach the index before
+            # returning, so the spyc publish below can resolve it.
+            cargo publish --locked -p "${crate}"
+          }
+          vt_ver="$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "spyc-vt-sys") | .version')"
+          publish spyc-vt-sys "${vt_ver}"
+          publish spyc "${GITHUB_REF_NAME#v}"

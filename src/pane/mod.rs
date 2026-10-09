@@ -107,10 +107,10 @@ impl Pane {
     /// the working directory. `context_path` points at *App's* live
     /// context file (the one the main loop writes to) so the child's
     /// `SPYC_CONTEXT` always resolves to a real file regardless of
-    /// where the pane itself spawns — App writes one canonical
-    /// `<start_dir>/.spyc-context-<pid>.json`, but a pane can spawn
-    /// in any subdir, and recomputing from `cwd` would point at a
-    /// path nobody writes.
+    /// where the pane itself spawns — App writes one canonical file
+    /// (`context::process_context_path`), but a pane can spawn in any
+    /// subdir, and recomputing from `cwd` would point at a path nobody
+    /// writes.
     pub fn spawn(
         command: &str,
         rows: u16,
@@ -184,7 +184,11 @@ impl Pane {
         let event_rx = host
             .take_event_rx()
             .expect("PtyHost::take_event_rx returned None — already taken");
-        let debug_dump = host.debug_dump;
+        let opts = WorkerOpts {
+            debug_dump: host.debug_dump,
+            sync_timeout: SYNC_TIMEOUT,
+            replies: Some(host.reply_writer()),
+        };
         let parser_clone = Arc::clone(&parser);
         let gen_clone = Arc::clone(&parser_gen);
         let stop_clone = Arc::clone(&stop);
@@ -204,14 +208,7 @@ impl Pane {
             home: rx_home_tx,
         };
         let handle = thread::spawn(move || {
-            parser_worker(
-                rx_guard,
-                stop_clone,
-                parser_clone,
-                gen_clone,
-                debug_dump,
-                wake,
-            );
+            parser_worker(rx_guard, stop_clone, parser_clone, gen_clone, wake, opts);
         });
         Self {
             host,
@@ -416,35 +413,21 @@ impl Pane {
         self.host.write_all(bytes)
     }
 
-    /// Run `f` with a shared reference to the vt100 screen. The
-    /// parser is mutex-protected (the worker thread owns the write
-    /// path); this acquires the lock for the duration of `f`, so
-    /// keep the closure body short. Returns whatever `f` returns.
-    /// The visible-grid text between two screen positions, for a clipboard copy.
-    ///
-    /// Delegates to the seam's `contents_between`, which is purpose-built for
-    /// this ("useful for things like determining the contents of a clipboard
-    /// selection"). Two properties make it the right primitive rather than merely a
-    /// convenient one, and are why this isn't a hand-rolled cell walk:
-    ///
-    /// - it reads `grid().visible_rows()`, so it follows the pane's CURRENT scroll
-    ///   position — the same rows the widget drew, with no coordinate translation;
-    /// - it honours `row.wrapped()`, emitting a newline only at a HARD line end. A
-    ///   cell walk inserts a spurious `\n` in the middle of every soft-wrapped
-    ///   line, which is the most irritating bug a terminal selection can have.
-    ///
-    /// Trailing whitespace is trimmed per line: the grid is space-padded to its full
-    /// width, so an untrimmed copy pastes a ragged block of spaces.
-    pub fn selection_text(&self, start: (u16, u16), end: (u16, u16)) -> String {
-        let raw = self.with_screen(|s| {
-            engine::TerminalScreen::contents_between(s, start.0, start.1, end.0, end.1)
-        });
-        raw.lines()
-            .map(str::trim_end)
-            .collect::<Vec<_>>()
-            .join("\n")
+    /// Deliver the payload of a confirmed file-pipe prompt through the same worker.
+    pub(crate) fn send_confirmed_pipe(&mut self, bytes: Vec<u8>) -> anyhow::Result<()> {
+        self.host.write_confirmed_pipe(bytes)
     }
 
+    /// The visible-grid text of a selection, for a clipboard copy; see
+    /// [`widget::selection_text`].
+    pub fn selection_text(&self, start: (u16, u16), end: (u16, u16)) -> String {
+        self.with_screen(|s| widget::selection_text(s, start, end))
+    }
+
+    /// Run `f` with a shared reference to the screen. The parser is
+    /// mutex-protected (the worker thread owns the write path); this acquires
+    /// the lock for the duration of `f`, so keep the closure body short.
+    /// Returns whatever `f` returns.
     pub fn with_screen<R, F: FnOnce(&PaneScreen) -> R>(&self, f: F) -> R {
         let guard = self.lock_parser();
         f(engine::Engine::screen(&*guard))
@@ -546,10 +529,11 @@ impl Pane {
     /// the viewport are still found.
     pub fn recent_lines(&self, max_lines: usize) -> Vec<String> {
         // The seam's `contents()` is viewport-only — it returns at most
-        // terminal_height rows at the current scrollback offset. Walking the
-        // full scrollback requires the page-walk in `lines_from_scrollback`.
-        let all: Vec<String> = self.with_screen_mut(|s| {
-            crate::ui::scrollback::lines_from_scrollback(s)
+        // terminal_height rows at the current scrollback offset. Reaching
+        // into the scrollback requires the page-walk in
+        // `tail_lines_from_scrollback`.
+        self.with_screen_mut(|s| {
+            crate::ui::scrollback::tail_lines_from_scrollback(s, max_lines)
                 .into_iter()
                 .map(|l| {
                     l.spans
@@ -558,12 +542,7 @@ impl Pane {
                         .collect::<String>()
                 })
                 .collect()
-        });
-        if all.len() > max_lines {
-            all[all.len() - max_lines..].to_vec()
-        } else {
-            all
-        }
+        })
     }
 
     // ---- Scroll mode ------------------------------------------------
@@ -694,13 +673,25 @@ fn rebuild_parser_preserving_size(p: &mut PaneEngine) {
     *p = <PaneEngine as engine::Engine>::new(rows, cols, 10_000);
 }
 
+/// How long a child's synchronized update may stay open before the pane shows
+/// it anyway. Ghostty's own bound (`sync_reset_ms`).
+const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// A parser worker's settings, and where the terminal's replies to the
+/// child's queries go (`None` drops them).
+struct WorkerOpts {
+    debug_dump: bool,
+    sync_timeout: std::time::Duration,
+    replies: Option<pty_host::ReplyWriter>,
+}
+
 fn parser_worker(
     guard: RxReturn,
     stop: Arc<AtomicBool>,
     parser: Arc<Mutex<PaneEngine>>,
     parser_gen: Arc<AtomicU64>,
-    debug_dump: bool,
     wake: Wake,
+    opts: WorkerOpts,
 ) {
     // `guard` owns the byte receiver and ships it back to the pane on EVERY
     // exit from this function — normal return AND panic-unwind. A worker
@@ -720,6 +711,28 @@ fn parser_worker(
             (wake.fire)();
         }
     };
+    let publish = || {
+        // Publish the grid (UNCHANGED Release edge; pairs with
+        // `drain_output`'s Acquire gen load). MUST stay BEFORE the
+        // wake so a woken loop that Acquire-loads the gen always
+        // sees these bytes.
+        parser_gen.fetch_add(1, Ordering::Release);
+        // MVU Phase 3b: wake the loop only on the 0→1 edge, so a
+        // byte storm collapses to one channel message. The loop
+        // clears the flag (clear-before-read) before its gen load,
+        // so a chunk racing the clear re-arms and re-sends.
+        if wake
+            .pending
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+        {
+            (wake.fire)();
+        }
+    };
+    // When the child's open synchronized update was first seen. Nothing is
+    // published until it closes: the screen would only present the frame
+    // before it anyway.
+    let mut sync_opened: Option<std::time::Instant> = None;
     loop {
         if stop.load(Ordering::Acquire) {
             return;
@@ -731,7 +744,7 @@ fn parser_worker(
             .recv_timeout(std::time::Duration::from_millis(50))
         {
             Ok(PtyEvent::Bytes(bytes)) => {
-                if debug_dump {
+                if opts.debug_dump {
                     append_pty_debug(&bytes);
                 }
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -739,8 +752,12 @@ fn parser_worker(
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     engine::Engine::process(&mut *p, &bytes);
+                    (
+                        engine::Engine::synchronized_update(&*p),
+                        engine::Engine::take_replies(&mut *p),
+                    )
                 }));
-                if result.is_err() {
+                let (open, replies) = result.unwrap_or_else(|_| {
                     crate::spyc_debug!(
                         "vt100 parser panicked on {} bytes; replacing parser to recover",
                         bytes.len()
@@ -758,22 +775,20 @@ fn parser_worker(
                         rebuild_parser_preserving_size(&mut p);
                     }
                     parser.clear_poison();
-                }
-                // Publish the grid (UNCHANGED Release edge; pairs with
-                // `drain_output`'s Acquire gen load). MUST stay BEFORE the
-                // wake so a woken loop that Acquire-loads the gen always
-                // sees these bytes.
-                parser_gen.fetch_add(1, Ordering::Release);
-                // MVU Phase 3b: wake the loop only on the 0→1 edge, so a
-                // byte storm collapses to one channel message. The loop
-                // clears the flag (clear-before-read) before its gen load,
-                // so a chunk racing the clear re-arms and re-sends.
-                if wake
-                    .pending
-                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
-                    .is_ok()
+                    (false, Vec::new())
+                });
+                // Sent with the lock released, and even while output is held:
+                // a child may wait on the reply before it closes its update.
+                if let (false, Some(writer)) = (replies.is_empty(), &opts.replies)
+                    && let Err(e) = writer.send(replies)
                 {
-                    (wake.fire)();
+                    crate::spyc_debug!("reply to a pane query dropped: {e:#}");
+                }
+                if open {
+                    sync_opened.get_or_insert_with(std::time::Instant::now);
+                } else {
+                    sync_opened = None;
+                    publish();
                 }
             }
             Ok(PtyEvent::Closed) => {
@@ -789,6 +804,15 @@ fn parser_worker(
                 wake_on_close();
                 return;
             }
+        }
+        if sync_opened.is_some_and(|t| t.elapsed() >= opts.sync_timeout) {
+            let mut p = parser
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            engine::Engine::end_synchronized_update(&mut *p);
+            drop(p);
+            sync_opened = None;
+            publish();
         }
     }
 }

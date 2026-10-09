@@ -110,12 +110,32 @@ invariants + conventions); read it before adding behaviour.
 
 ### File size
 
-No `.rs` file over ~800 lines without a solid reason (a module root
-holding its own core type definitions qualifies; a pile of helpers
-does not). When a file grows, extract a cohesive child/sibling module
-— verbatim relocation, behaviour-identical. `app/mod.rs` has a
-ceiling-guard test (`app::guard_tests::mod_rs_stays_decomposed`):
-if you hit it, extract a module, don't bump the number.
+No `.rs` file over 1,000 lines of non-test code, or 3,000 lines in
+all. When a file grows, extract a cohesive child/sibling module —
+verbatim relocation, behaviour-identical. Tests get the larger
+allowance because they are flat lists of independent cases; past it,
+split them by theme.
+
+`src/size_guard.rs` enforces both limits as a ratchet: a file that was
+over a limit when the guard landed is pinned at its length then and may
+only shrink. If you hit it, extract a module; don't raise the pin. A
+new pin needs a solid reason in the PR (a module root holding its own
+core type definitions qualifies; a pile of helpers does not).
+`app/mod.rs` keeps its own tighter ceiling
+(`app::mod_tests::guard_tests::mod_rs_stays_decomposed`).
+
+### Function length
+
+No function over 100 lines of code: the body's lines that hold code,
+so blank lines and comments are free. That is clippy's
+`too_many_lines` count at its default threshold, and test code is
+exempt. When a function grows, extract a cohesive helper; a long
+`match` usually splits into one function per arm group.
+
+`src/fn_size_guard.rs` enforces it the same way `size_guard.rs`
+enforces file size: the functions that were over the limit when it
+landed are pinned by name (`path::Type::fn`) and may only shrink. If
+you rename or move a pinned function, move its pin with it.
 
 ### Error handling
 
@@ -178,7 +198,9 @@ We use [SemVer](https://semver.org/). The version lives in
 (FreeBSD's `-CURRENT`; see `docs/RELEASE_ENGINEERING.md`) and carries the
 *next* minor with a `-CURRENT` suffix — e.g. `2.1.0-CURRENT` while 2.1 is
 in development. It stays there for the whole cycle: the release PR is
-what strips the suffix down to `2.1.0`.
+what strips the suffix down to `2.1.0`. The one exception is a release
+candidate's soak, when `main` carries the rc's version (`2.1.0-rc.1`), set
+by the rc's own release PR.
 
 So a feature PR touches no version line at all. Two things follow:
 

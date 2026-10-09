@@ -5,8 +5,10 @@ use std::path::PathBuf;
 
 pub mod agy_transcript;
 pub mod claude_transcript;
+pub mod codex_history;
 pub mod codex_transcript;
 pub mod cursor;
+pub mod dir_owners;
 pub mod frecency;
 pub mod graveyard;
 pub mod harpoon;
@@ -14,7 +16,6 @@ pub mod health;
 #[allow(dead_code, clippy::question_mark)]
 pub mod history;
 pub mod hook_consent;
-pub mod hook_owners;
 pub mod ignore;
 pub mod inventory;
 pub mod marks;
@@ -24,6 +25,7 @@ pub mod scope_registry;
 pub mod session_names;
 pub mod sessions;
 pub mod skill_prompt;
+pub mod tab_consent;
 pub mod transcript_images;
 
 pub use cursor::Cursor;
@@ -46,7 +48,8 @@ thread_local! {
 /// this root.
 ///
 /// Resolution order:
-/// 1. Per-thread test override (see `with_state_root`).
+/// 1. Per-thread test override (see `with_state_root`). A unit-test build
+///    stops here and returns `None` without one.
 /// 2. `$XDG_STATE_HOME/spyc`.
 /// 3. `$HOME/.local/state/spyc`.
 /// 4. `None` on exotic systems with neither.
@@ -58,6 +61,11 @@ thread_local! {
 pub fn state_root() -> Option<PathBuf> {
     if let Some(p) = STATE_ROOT_OVERRIDE.with(|c| c.borrow().clone()) {
         return Some(p);
+    }
+    // A unit test that doesn't pin a root persists nothing, rather than
+    // writing into the developer's real state dir.
+    if cfg!(test) {
+        return None;
     }
     if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
         return Some(PathBuf::from(xdg).join("spyc"));
@@ -167,14 +175,24 @@ pub const MAX_TRANSCRIPT_TAIL_BYTES: u64 = 4 * 1024 * 1024;
 /// callers always parse whole lines. Returns an io error only on
 /// open/metadata/seek/read failure.
 pub fn read_tail_lossy(path: &std::path::Path, max_bytes: u64) -> std::io::Result<String> {
+    read_prefix_tail_lossy(path, u64::MAX, max_bytes)
+}
+
+/// [`read_tail_lossy`] of the file's first `end` bytes: the tail of that prefix,
+/// not of the file.
+pub fn read_prefix_tail_lossy(
+    path: &std::path::Path,
+    end: u64,
+    max_bytes: u64,
+) -> std::io::Result<String> {
     use std::io::{Read, Seek, SeekFrom};
     let mut f = std::fs::File::open(path)?;
-    let len = f.metadata()?.len();
-    let start = len.saturating_sub(max_bytes);
+    let end = f.metadata()?.len().min(end);
+    let start = end.saturating_sub(max_bytes);
     if start == 0 {
-        // Whole file fits in the budget — return it verbatim.
+        // Whole prefix fits in the budget — return it verbatim.
         let mut buf = Vec::new();
-        f.read_to_end(&mut buf)?;
+        f.take(end).read_to_end(&mut buf)?;
         return Ok(String::from_utf8_lossy(&buf).into_owned());
     }
     // Seek to one byte *before* the window so we can tell whether the window
@@ -186,7 +204,7 @@ pub fn read_tail_lossy(path: &std::path::Path, max_bytes: u64) -> std::io::Resul
     // byte, so `nl + 1` is always a char boundary.)
     f.seek(SeekFrom::Start(start - 1))?;
     let mut buf = Vec::new();
-    f.read_to_end(&mut buf)?;
+    f.take(end - (start - 1)).read_to_end(&mut buf)?;
     let text = String::from_utf8_lossy(&buf).into_owned();
     Ok(match text.find('\n') {
         Some(nl) => text[nl + 1..].to_string(),
@@ -486,6 +504,19 @@ mod tests {
         });
         // Override unwound: resolution falls back to env, never our tempdir.
         assert_ne!(super::config_root().as_deref(), Some(tmp.path()));
+    }
+
+    /// A unit test that doesn't pin a state root persists nothing. Falling
+    /// back to `$XDG_STATE_HOME` / `$HOME` here left one `test_history_<pid>`
+    /// file in the developer's real state dir per test run.
+    #[test]
+    fn unit_tests_see_no_state_root_unless_they_pin_one() {
+        assert_eq!(super::state_root(), None);
+        let tmp = tempfile::tempdir().unwrap();
+        super::with_state_root(tmp.path(), || {
+            assert_eq!(super::state_root().as_deref(), Some(tmp.path()));
+        });
+        assert_eq!(super::state_root(), None);
     }
 
     /// `config_root` and `state_root` are independent axes — overriding one

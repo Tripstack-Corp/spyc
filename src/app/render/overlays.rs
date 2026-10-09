@@ -1,11 +1,12 @@
 //! Modal/overlay draw helpers: the centred harpoon menu
-//! (`render_harpoon_menu`) and the top-right activity (`A`) monitor
-//! (`render_activity_hud`). Split from `app/render.rs` verbatim; an `impl App`
-//! child module reading App's private state via the descendant-module rule.
+//! (`render_harpoon_menu`), the image gallery, the hook-consent pop-up, the
+//! chord-hint popup and the visual bell. Split from `app/render.rs` verbatim;
+//! an `impl App` child module reading App's private state via the
+//! descendant-module rule.
 
 use ratatui::Frame;
 
-use crate::app::{App, Mode, PromptKind, format_uptime};
+use crate::app::{App, Mode, PromptKind};
 
 impl App {
     /// P3-1 visual bell: paint spyc's spice-heat gradient border pulse over the
@@ -50,6 +51,60 @@ impl App {
         }
     }
 
+    /// The harpoon menu's slot list: one row per slot, its number as the jump
+    /// key, the path relative to the project where it can be, the cursor row
+    /// highlighted (and warned when a delete is armed).
+    fn harpoon_menu_lines(
+        &self,
+        h: &crate::state::Harpoon,
+        menu: &crate::app::HarpoonMenu,
+    ) -> Vec<ratatui::text::Line<'static>> {
+        use ratatui::{
+            style::{Color, Modifier, Style},
+            text::{Line, Span},
+        };
+        let mut body_lines: Vec<Line> = Vec::with_capacity(h.slots.len().max(1));
+        if h.slots.is_empty() {
+            body_lines.push(Line::from(Span::styled(
+                "  (empty — Ha to harpoon the cursor file/dir)",
+                Style::default().fg(self.view.theme.status_suffix),
+            )));
+        } else {
+            let cursor_style = Style::default()
+                .fg(Color::Black)
+                .bg(self.view.theme.prompt_prefix)
+                .add_modifier(Modifier::BOLD);
+            let normal_style = Style::default().fg(self.view.theme.status_path);
+            let key_style = Style::default()
+                .fg(self.view.theme.pick)
+                .add_modifier(Modifier::BOLD);
+            for (i, path) in h.slots.iter().enumerate() {
+                let on_cursor = i == menu.cursor;
+                let armed = on_cursor && menu.delete_armed;
+                let prefix = if armed { " ⚠ " } else { "   " };
+                // Display path relative to project_home when possible
+                // (shorter, more readable); otherwise use the absolute.
+                let shown = path
+                    .strip_prefix(&h.project)
+                    .map_or_else(|_| path.display().to_string(), |p| p.display().to_string());
+                let line = Line::from(vec![
+                    Span::styled(prefix, normal_style),
+                    Span::styled(format!("{}  ", i + 1), key_style),
+                    Span::styled(
+                        shown,
+                        if on_cursor {
+                            cursor_style
+                        } else {
+                            normal_style
+                        },
+                    ),
+                ]);
+                body_lines.push(line);
+            }
+        }
+        body_lines
+    }
+
     /// Render the harpoon menu overlay. Centred modal box listing
     /// the active project's slots, with the menu cursor on a
     /// highlighted row. Footer shows the bindings. `h_divider_row` /
@@ -63,8 +118,8 @@ impl App {
     ) {
         use ratatui::{
             layout::Rect,
-            style::{Color, Modifier, Style},
-            text::{Line, Span},
+            style::{Modifier, Style},
+            text::Span,
             widgets::{Block, Borders, Clear, Paragraph},
         };
         let Some(menu) = self.view.harpoon_menu.as_ref() else {
@@ -119,47 +174,7 @@ impl App {
             height: footer_h,
         };
 
-        // Body lines.
-        let mut body_lines: Vec<Line> = Vec::with_capacity(h.slots.len().max(1));
-        if h.slots.is_empty() {
-            body_lines.push(Line::from(Span::styled(
-                "  (empty — Ha to harpoon the cursor file/dir)",
-                Style::default().fg(self.view.theme.status_suffix),
-            )));
-        } else {
-            let cursor_style = Style::default()
-                .fg(Color::Black)
-                .bg(self.view.theme.prompt_prefix)
-                .add_modifier(Modifier::BOLD);
-            let normal_style = Style::default().fg(self.view.theme.status_path);
-            let key_style = Style::default()
-                .fg(self.view.theme.pick)
-                .add_modifier(Modifier::BOLD);
-            for (i, path) in h.slots.iter().enumerate() {
-                let on_cursor = i == menu.cursor;
-                let armed = on_cursor && menu.delete_armed;
-                let prefix = if armed { " ⚠ " } else { "   " };
-                // Display path relative to project_home when possible
-                // (shorter, more readable); otherwise use the absolute.
-                let shown = path
-                    .strip_prefix(&h.project)
-                    .map_or_else(|_| path.display().to_string(), |p| p.display().to_string());
-                let line = Line::from(vec![
-                    Span::styled(prefix, normal_style),
-                    Span::styled(format!("{}  ", i + 1), key_style),
-                    Span::styled(
-                        shown,
-                        if on_cursor {
-                            cursor_style
-                        } else {
-                            normal_style
-                        },
-                    ),
-                ]);
-                body_lines.push(line);
-            }
-        }
-        frame.render_widget(Paragraph::new(body_lines), body_rect);
+        frame.render_widget(Paragraph::new(self.harpoon_menu_lines(h, menu)), body_rect);
 
         let footer_style = Style::default()
             .fg(self.view.theme.status_suffix)
@@ -334,7 +349,9 @@ impl App {
     /// prompt bar read as "spyc isn't taking my input". A bordered box in the
     /// middle of the screen with a prominent `y`/`n` footer makes the ask
     /// unmissable. Only `y`/`n` dismiss it (the confirm handler enforces that);
-    /// drawn on top of everything from `render`. `h_divider_row`/`v_divider_col`
+    /// drawn on top of everything from `render`. A project's startup-tab
+    /// consent (`PromptKind::ProjectTabsConsent`) uses the same box, wider, with
+    /// one row per command. `h_divider_row`/`v_divider_col`
     /// nudge the border off a structural divider (see [`Self::render_harpoon_menu`]).
     pub(super) fn render_hook_consent_popup(
         &self,
@@ -351,16 +368,47 @@ impl App {
         let Mode::Prompting(prompt) = &self.state.mode else {
             return;
         };
-        if !matches!(prompt.kind, PromptKind::HookConsent { .. }) {
-            return;
-        }
+        // A project's startup-tab list shares the pop-up: it asks at launch,
+        // and every command it would run needs a row the user can read.
+        let (title, max_w, answers): (&str, u16, &[(&str, &str)]) = match &prompt.kind {
+            PromptKind::HookConsent { .. } => (
+                " spyc — agent status ",
+                68,
+                &[("[y] ", "yes     "), ("[n] ", "no")],
+            ),
+            PromptKind::ProjectTabsConsent { .. } => (
+                " spyc — project startup tabs ",
+                100,
+                &[
+                    ("[y] ", "run them     "),
+                    ("[n] ", "no     "),
+                    ("[Esc] ", "not now"),
+                ],
+            ),
+            _ => return,
+        };
 
         let area = frame.area();
-        let width = area.width.clamp(40, 68);
+        let width = area.width.clamp(40, max_w);
         // Body wraps to the inner width (box minus two border columns + a
         // one-column pad each side).
         let text_w = usize::from(width).saturating_sub(4).max(1);
-        let body = wrap_label(&prompt.prefix, text_w);
+        let mut body = match &prompt.kind {
+            PromptKind::ProjectTabsConsent { tabs, .. } => {
+                crate::app::startup_tabs::consent_lines(&prompt.prefix, tabs, text_w)
+            }
+            _ => wrap_label(&prompt.prefix, text_w),
+        };
+        // Never cut the list silently: past the screen, the last row says how
+        // many rows it hides.
+        let max_body = usize::from(area.height.saturating_sub(4)).max(1);
+        if body.len() > max_body {
+            let hidden = body.len() + 1 - max_body;
+            body.truncate(max_body - 1);
+            body.push(format!(
+                "… {hidden} more row(s) hidden — read the file first"
+            ));
+        }
         // 2 borders + body rows + 1 blank spacer + 1 footer.
         let height = (2 + body.len() as u16 + 2).min(area.height);
         let cx = area.x + (area.width.saturating_sub(width)) / 2;
@@ -377,7 +425,7 @@ impl App {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(" spyc — agent status ")
+            .title(title)
             .border_style(
                 Style::default()
                     .fg(self.view.theme.popup_border)
@@ -396,203 +444,13 @@ impl App {
             .fg(self.view.theme.prompt_prefix)
             .add_modifier(Modifier::BOLD);
         let word = Style::default().fg(self.view.theme.status_suffix);
-        lines.push(Line::from(vec![
-            Span::styled(" [y] ", key),
-            Span::styled("yes     ", word),
-            Span::styled("[n] ", key),
-            Span::styled("no", word),
-        ]));
+        let mut footer = vec![Span::raw(" ")];
+        for (k, w) in answers {
+            footer.push(Span::styled(*k, key));
+            footer.push(Span::styled(*w, word));
+        }
+        lines.push(Line::from(footer));
         frame.render_widget(Paragraph::new(lines), inner);
-    }
-
-    /// Render the activity (`A`) monitor overlay (top-right corner). Called
-    /// LAST from `render` so it sits over every render path — including the
-    /// `$EDITOR` / `;cmd` overlay and top-pager paths that return early from
-    /// `render_inner` (the "omnipresent" ask). Rows are padded to one common
-    /// display width so the block is a clean flush-right rectangle with
-    /// content right-justified, instead of the old ragged per-line staircase:
-    /// throughput + frame timing (yellow), internals (teal), process stats
-    /// (lavender), and a build + terminal-caps footer (blue). No-op unless the
-    /// monitor is toggled on.
-    pub(super) fn render_activity_hud(&self, frame: &mut Frame, frame_area: ratatui::layout::Rect) {
-        if !self.view.show_activity {
-            return;
-        }
-        use ratatui::style::{Color, Style};
-        use ratatui::text::{Line as HudLine, Span};
-
-        // Line 1 — throughput + frame timing. `pk` is the whole terminal.draw
-        // (build + diff + tty emission); `r` is just the render closure (CPU).
-        // pk-r ≈ diff+emission; pk near the inter-keystroke interval ⇒ render-bound.
-        //
-        // The whole HUD renders in one foreground colour (solid black on each
-        // band) — no per-segment dimming. An earlier `Modifier::DIM` on the
-        // `N dps` headline made that count a washed-out grey against the rest,
-        // which read as an inconsistent font colour (same problem as the dropped
-        // transcript-preview DIM). Fixed-width count/timing fields so the line —
-        // and thus the whole block, since line 1 is the longest — keeps a
-        // constant width instead of bouncing as throughput and latency move.
-        let l1_head = format!(" {:>4} dps", self.view.activity.snap.draws);
-        let l1_tail = format!(
-            " [p:{:>3} e:{:>3} o:{:>3}]  {:>6} cells/s  pk {:>5.1}ms r{:>5.1}ms echo {:>5.1}ms ",
-            self.view.activity.snap.reason_pane,
-            self.view.activity.snap.reason_event,
-            self.view.activity.snap.reason_other,
-            self.view.activity.snap.bytes,
-            self.view.activity.peaks_snap.frame_us as f64 / 1000.0,
-            self.view.activity.peaks_snap.render_us as f64 / 1000.0,
-            // Peak keystroke→echo round-trip (forward → agent echo → render).
-            // `echo - r` ≈ the agent/pty round-trip (Claude re-rendering its
-            // input box) we don't control; a small `echo` ⇒ spyc isn't the lag.
-            self.view.activity.peaks_snap.echo_us as f64 / 1000.0,
-        );
-        let l1 = format!("{l1_head}{l1_tail}");
-
-        // Line 2 — internals digest.
-        let bg_running = self.runtime.background_tasks.running_count();
-        let bg_done = self.runtime.background_tasks.done_count();
-        let bg_paused = self
-            .runtime
-            .background_tasks
-            .tasks
-            .iter()
-            .filter(|t| t.paused)
-            .count();
-        let pager_state = match self.view.pager.as_ref() {
-            None => "none",
-            Some(v) => match v.mount {
-                crate::ui::pager::Mount::Overlay => "overlay",
-                crate::ui::pager::Mount::TopPane => "top",
-                crate::ui::pager::Mount::LowerPane => "lower",
-                crate::ui::pager::Mount::RightPane => "right",
-            },
-        };
-        let git_last = if self.view.activity.git_last_ms == 0 {
-            "—".to_string()
-        } else {
-            format!("{}ms", self.view.activity.git_last_ms)
-        };
-        let l2 = format!(
-            " bg:{bg_running}\u{25cf}{bg_done}\u{2713}{}  git:{}/s last:{}  fs:{}/s  mcp:{}/s  list:{}  pager:{} ",
-            if bg_paused > 0 {
-                format!(" {bg_paused}\u{23f8}")
-            } else {
-                String::new()
-            },
-            self.view.activity.snap.git_results,
-            git_last,
-            self.view.activity.snap.watcher_events,
-            self.view.activity.snap.mcp_reqs,
-            self.state.left.listing.entries.len(),
-            pager_state,
-        );
-
-        // Line 3 — process stats (PID for `sample`/lldb, RSS, threads). The
-        // pid is snapshotted in ViewState at startup — render reads no OS here.
-        let pid = self.view.hud_pid;
-        let uptime_str = format_uptime(self.view.started_at.elapsed().as_secs());
-        let pane_count = self
-            .runtime
-            .pane_tabs
-            .as_ref()
-            .map_or(0, |t| t.tabs().len());
-        let rss_mb = self.view.activity.proc_rss_kb / 1024;
-        let l3 = format!(
-            " pid:{pid}  up:{uptime_str}  rss:{rss_mb}m  thr:{}  panes:{pane_count} ",
-            self.view.activity.proc_threads,
-        );
-
-        // Line 4 — build identity + terminal capabilities. `$TERM` + truecolor
-        // are snapshotted in ViewState at startup — render reads no env here.
-        let term = &self.view.hud_term;
-        let truecolor = self.view.hud_truecolor;
-        let l4 = format!(
-            " spyc v{}  {term}{}  {}\u{00d7}{} ",
-            crate::VERSION,
-            if truecolor { " truecolor" } else { "" },
-            frame_area.width,
-            frame_area.height,
-        );
-
-        // The four base rows. Line 1 is fixed-width and the longest, so the
-        // block width it sets is constant — the HUD no longer bounces.
-        let mut rows: Vec<(String, Color)> = vec![
-            (l1, Color::Yellow),
-            (l2, self.view.theme.take),
-            (l3, self.view.theme.status_user),
-            (l4, self.view.theme.dir),
-        ];
-        let maxw = rows
-            .iter()
-            .map(|(s, _)| crate::ui::display_width(s))
-            .max()
-            .unwrap_or(0);
-
-        // Extended section: cumulative per-tool MCP call counts (every agent
-        // tools/call, read tools included). Greedy-wrapped to the base block
-        // width so it never widens the HUD; stable name-sorted order.
-        let calls = &self.view.activity.mcp_tool_calls;
-        let entries: Vec<String> = calls
-            .iter()
-            .filter(|(_, c)| **c > 0)
-            .map(|(name, c)| format!("{name}:{c}"))
-            .collect();
-        let mcp_color = self.view.theme.take;
-        if entries.is_empty() {
-            rows.push((" mcp  (no tool calls yet) ".to_string(), mcp_color));
-        } else {
-            let total: u64 = calls.values().sum();
-            let cont_prefix = "        "; // continuation lines indent under the tokens
-            let avail = maxw.saturating_sub(2); // keep a trailing space inside the block
-            let mut cur = format!(" mcp \u{2211}{total} ");
-            let mut prefix_w = crate::ui::display_width(&cur); // this line's indent width
-            let mut cur_w = prefix_w;
-            for tok in &entries {
-                let tok_w = tok.len() + 1; // a leading space + the "name:count" (ASCII)
-                // Wrap when this line already holds a token and the next won't fit.
-                if cur_w > prefix_w && cur_w + tok_w > avail {
-                    rows.push((format!("{cur} "), mcp_color));
-                    cur = cont_prefix.to_string();
-                    prefix_w = crate::ui::display_width(cont_prefix);
-                    cur_w = prefix_w;
-                }
-                cur.push(' ');
-                cur.push_str(tok);
-                cur_w += tok_w;
-            }
-            rows.push((format!("{cur} "), mcp_color));
-        }
-
-        let block_w = u16::try_from(maxw).unwrap_or(u16::MAX);
-        // Need the block plus a 1-col right margin.
-        if block_w == 0 || frame_area.width <= block_w + 1 {
-            return;
-        }
-        let x = frame_area.width - block_w - 1;
-        for (row, (text, bg)) in rows.iter().enumerate() {
-            let Ok(y) = u16::try_from(row) else { break };
-            if y >= frame_area.height {
-                break;
-            }
-            let pad = " ".repeat(maxw.saturating_sub(crate::ui::display_width(text)));
-            let rect = ratatui::layout::Rect {
-                x,
-                y,
-                width: block_w,
-                height: 1,
-            };
-            // Every row renders in one uniform style (solid black on its band)
-            // so the HUD font colour stays consistent — including row 0, whose
-            // `N dps` headline used to be dimmed.
-            let normal = Style::default().fg(Color::Black).bg(*bg);
-            let line = HudLine::from(Span::styled(format!("{pad}{text}"), normal));
-            // Through the chrome funnel, not a bare `render_widget`: that
-            // records the row so the pointer can hit-test it and a drag can
-            // copy it. The HUD's whole purpose is reporting numbers a human
-            // then quotes — pids, timings, `:why-status` counts — so it being
-            // unselectable meant retyping them from a screenshot.
-            self.draw_chrome_line(frame, rect, line);
-        }
     }
 
     /// Render the which-key chord-hint popup: a centred box listing the armed
@@ -675,26 +533,9 @@ impl App {
             })
             .collect();
 
-        // Flow cells into columns, balancing by rendered-line count so a tall
-        // menu (or one with wrapped labels) splits into columns rather than
-        // overflowing the screen height. An entry never splits across columns.
         let body_h = (area.height as usize).saturating_sub(2).max(1);
-        let total_lines: usize = cells.iter().map(Vec::len).sum();
         let max_cols = ((area.width as usize).saturating_sub(2) / col_w.max(1)).max(1);
-        let n_cols = total_lines.div_ceil(body_h).clamp(1, max_cols);
-        let target = total_lines.div_ceil(n_cols).max(1);
-
-        let mut columns: Vec<Vec<Line>> = Vec::new();
-        let mut cur: Vec<Line> = Vec::new();
-        for cell in cells {
-            if !cur.is_empty() && cur.len() + cell.len() > target {
-                columns.push(std::mem::take(&mut cur));
-            }
-            cur.extend(cell);
-        }
-        if !cur.is_empty() {
-            columns.push(cur);
-        }
+        let columns = flow_columns(cells, body_h, max_cols);
 
         let n = columns.len().max(1);
         let rows_tall = columns.iter().map(Vec::len).max().unwrap_or(0);
@@ -765,6 +606,32 @@ fn place_clear_of_line(start: u16, size: u16, line: Option<u16>, min: u16, max_e
 /// Greedy word-wrap a popup label to `width` display columns. Returns one
 /// segment per line. A single word longer than `width` lands on its own line
 /// (popup labels never contain such words, so this stays simple).
+/// Flow cells into columns, balancing by rendered-line count so a tall menu (or
+/// one with wrapped labels) splits into columns rather than overflowing the
+/// screen height. An entry never splits across columns.
+fn flow_columns(
+    cells: Vec<Vec<ratatui::text::Line<'_>>>,
+    body_h: usize,
+    max_cols: usize,
+) -> Vec<Vec<ratatui::text::Line<'_>>> {
+    let total_lines: usize = cells.iter().map(Vec::len).sum();
+    let n_cols = total_lines.div_ceil(body_h).clamp(1, max_cols);
+    let target = total_lines.div_ceil(n_cols).max(1);
+
+    let mut columns = Vec::new();
+    let mut cur = Vec::new();
+    for cell in cells {
+        if !cur.is_empty() && cur.len() + cell.len() > target {
+            columns.push(std::mem::take(&mut cur));
+        }
+        cur.extend(cell);
+    }
+    if !cur.is_empty() {
+        columns.push(cur);
+    }
+    columns
+}
+
 fn wrap_label(label: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     if crate::ui::display_width(label) <= width {

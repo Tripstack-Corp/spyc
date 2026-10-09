@@ -12,10 +12,12 @@
 /// any other flags the user had on their original `claude` invocation but drop
 /// the resume itself so the fallback doesn't fail for the same reason.
 ///
-/// Handles all of claude's forms: `--resume`/`-r` (optional `[sessionId]`) and
-/// `--continue`/`-c` (no argument). For `--resume`/`-r` the following token is
-/// dropped **only** when it's an id, not another flag — `claude --resume
-/// --verbose` must keep `--verbose` rather than eating it.
+/// Handles all of claude's forms: `--resume`/`-r` (optional `[sessionId]`),
+/// `--continue`/`-c` (no argument), and the `--fork-session` that turns either
+/// into a branch — a saved fork resumes its own conversation. For
+/// `--resume`/`-r` the following token is dropped **only** when it's an id, not
+/// another flag — `claude --resume --verbose` must keep `--verbose` rather than
+/// eating it.
 pub fn command_without_resume(cmd: &str) -> String {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     let mut out: Vec<&str> = Vec::with_capacity(parts.len());
@@ -29,7 +31,7 @@ pub fn command_without_resume(cmd: &str) -> String {
                     i += 1;
                 }
             }
-            "--continue" | "-c" => {} // no argument to drop
+            "--continue" | "-c" | "--fork-session" => {} // no argument to drop
             other => out.push(other),
         }
         i += 1;
@@ -42,35 +44,25 @@ pub fn command_without_resume(cmd: &str) -> String {
     }
 }
 
-/// Strip codex's `resume [...args]` subcommand and any of its flags
-/// from a command line, leaving the bare `codex` invocation. Used at
-/// session-save time so a saved tab restores cleanly even if the
-/// user had explicitly typed `codex resume <UUID>`. Mirrors
-/// `command_without_resume` for claude. The id we'll resume to is
-/// stored separately in `agent_session_id`.
+/// Strip Codex's old conversation selector, preserving general options and
+/// quoting. Unsupported commands remain verbatim for restore diagnostics.
 pub fn command_without_codex_resume(cmd: &str) -> String {
-    let parts: Vec<&str> = cmd.split_whitespace().collect();
-    let mut out: Vec<&str> = Vec::with_capacity(parts.len());
-    let mut hit_resume = false;
-    for p in parts {
-        if !hit_resume && p == "resume" {
-            // Drop "resume" and everything after it — typically a UUID
-            // and/or `--last`/`--all`/`--include-non-interactive` flags
-            // that only make sense with `resume`.
-            hit_resume = true;
-            continue;
-        }
-        if hit_resume {
-            continue;
-        }
-        out.push(p);
-    }
-    let stripped = out.join(" ");
-    if stripped.is_empty() {
-        "codex".to_string()
-    } else {
-        stripped
-    }
+    super::codex_command::baseline(cmd).unwrap_or_else(|_| cmd.to_string())
+}
+
+/// `^a F` for claude: a new session that starts from `sid`'s history. Goes
+/// through the CLI flag, unlike restore's typed `/resume`, because the slash
+/// command has no fork form.
+pub fn claude_fork_command(cmd: &str, sid: &str) -> String {
+    format!(
+        "{} --resume {sid} --fork-session",
+        command_without_resume(cmd)
+    )
+}
+
+/// `^a F` for codex: `codex fork <uuid>` starts a new thread from `sid`'s.
+pub fn codex_fork_command(cmd: &str, sid: &str) -> anyhow::Result<String> {
+    super::codex_command::fork(cmd, sid)
 }
 
 /// Strip Antigravity's `--conversation <UUID>`, `-c <UUID>`, and `--continue` flags from a command line.
@@ -112,6 +104,20 @@ pub fn command_without_agy_resume(cmd: &str) -> String {
 // session dirs, or shell out, all via args. They lived as associated fns on
 // `App` purely by inertia; they belong with the profiles that call them.
 
+/// Slack for the second-granularity clocks a pane's spawn time and claude's
+/// own timestamps are compared on.
+const PANE_CLOCK_SKEW_SECS: u64 = 5;
+
+/// How long after its pane spawns claude can still be starting: the shell's
+/// rc and claude's own startup, on a loaded machine.
+const CLAUDE_STARTUP_SECS: u64 = 60;
+
+/// Whether a claude process that started at `started` (epoch secs) can be the
+/// one a pane spawned at `spawn` is running.
+const fn started_with_pane(started: u64, spawn: u64) -> bool {
+    started + PANE_CLOCK_SKEW_SECS >= spawn && started <= spawn + CLAUDE_STARTUP_SECS
+}
+
 /// Resolve the `claude --resume <token>` target to use on session save.
 ///
 /// Multi-pane safety: when several Claude tabs share a cwd, we
@@ -129,12 +135,17 @@ pub fn command_without_agy_resume(cmd: &str) -> String {
 ///    `/clear`'d or `/resume`'d before exit), so an unconditional
 ///    trust leads to "No conversation found …" on restore. The
 ///    banner is unambiguously this pane, so it bypasses `claimed`.
-/// 2. Walk `~/.claude/sessions/` records matching the cwd, skip
-///    any already in `claimed`, pick the one whose `startedAt` is
-///    closest to this pane's spawn time, verify JSONL on disk.
-/// 3. Last-ditch: most-recently-modified JSONL in the project
-///    slug, but only if it isn't already in `claimed`. Without
-///    the claimed-check this is what was producing the bug.
+/// 2. Walk `~/.claude/sessions/` records matching the cwd and started
+///    around this pane's spawn, skip any already in `claimed`, and take
+///    the one whose `startedAt` is closest: this pane's own claude. Its
+///    conversation is the answer, or none if claude hasn't written it yet.
+/// 3. Last-ditch, when no record matched: the most-recently-modified JSONL
+///    in the project slug, if it was written since this pane started, isn't
+///    already in `claimed`, and isn't a running claude's conversation.
+///
+/// Steps 2 and 3 used to consider only conversations already on disk, and
+/// any age of one. Claude writes a conversation only with its first
+/// message, so a pane saved before that took another pane's (#584).
 pub fn resolve_claude_resume_target(
     pane: &crate::pane::Pane,
     cwd: &std::path::Path,
@@ -163,24 +174,31 @@ pub fn resolve_claude_resume_target(
             }
         }
 
-        // Step 2: pick the per-pane match by spawn-time proximity.
-        // Filter to JSONL-on-disk first so the picker only sees
-        // resumable candidates.
-        let candidates: Vec<_> = s::find_claude_sessions(cwd)
+        // Step 2: this pane's own claude process, by spawn-time proximity.
+        let records = s::find_claude_sessions(cwd);
+        let running: std::collections::HashSet<String> =
+            records.iter().map(|c| c.session_id.clone()).collect();
+        let candidates: Vec<_> = records
             .into_iter()
-            .filter(|c| s::claude_jsonl_exists(cwd, &c.session_id))
+            .filter(|c| started_with_pane(c.started_at_secs, pane_spawn_epoch_secs))
             .collect();
-        if let Some(c) =
+        if let Some(own) =
             s::pick_closest_unclaimed_session(candidates, pane_spawn_epoch_secs, claimed)
         {
-            return (Some(c.session_id), c.name);
+            return if s::claude_jsonl_exists(cwd, &own.session_id) {
+                (Some(own.session_id), own.name)
+            } else {
+                (None, None)
+            };
         }
 
-        // Step 3: final fallback. Most-recent JSONL — but only if
-        // unclaimed; otherwise leave this pane unresumable rather
-        // than collapse it onto another pane's conversation.
-        if let Some(id) = s::most_recent_jsonl_for_cwd(cwd)
+        // Step 3: final fallback. Unclaimed, so this pane never collapses
+        // onto another pane's conversation; written since it started; and not
+        // a running claude's, which step 2 would have matched were it ours.
+        let since = pane_spawn_epoch_secs.saturating_sub(PANE_CLOCK_SKEW_SECS);
+        if let Some(id) = s::most_recent_jsonl_for_cwd_since(cwd, since)
             && !claimed.contains(&id)
+            && !running.contains(&id)
         {
             let name = s::find_claude_session_name(&id);
             return (Some(id), name);

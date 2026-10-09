@@ -15,7 +15,7 @@ exclude = ["fuzz", "spikes/vt-engine", "spikes/vt-engine/sizeprobe"]
 
 [package]
 name = "spyc"
-version = "2.2.0-CURRENT"
+version = "2.2.0-rc.1"
 edition = "2024"
 description = "A Rust TUI file commander where the AI agent in the side pane can query the file commander itself"
 license = "BSD-3-Clause"
@@ -113,7 +113,9 @@ serde_json = "1"
 toml = { version = "1", default-features = false, features = ["parse", "display", "serde"] }
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 portable-pty = "0.9"
-spyc-vt-sys = { path = "crates/spyc-vt-sys" }
+# The version is what crates.io resolves; `path` is dropped from the packaged
+# manifest. Bump it with the crate's own version (RELEASE_ENGINEERING.md §5a).
+spyc-vt-sys = { version = "0.1.0", path = "crates/spyc-vt-sys" }
 vt100 = "0.16"
 ansi-to-tui = "8"
 pretty-hex = "0.4"
@@ -168,7 +170,7 @@ uzers = "0.12"
 strip-ansi-escapes = "0.2"
 pulldown-cmark = { version = "0.13", default-features = false }
 tar = "0.4"
-zstd = "0.13"
+zstd = "0.14"
 # Archive browsing (docs/archive/ARCHIVE_BROWSING_PLAN.md): read the zip central
 # directory to index a mount without decompressing, and `raw_copy_file` untouched
 # entries on repack. `default-features = false` is required, not tidiness — the
@@ -219,7 +221,10 @@ libproc = "0.14"
 
 [dev-dependencies]
 insta = "1"
+# `span-locations` gives `fn_size_guard` the line numbers syn parses outside a proc macro.
+proc-macro2 = { version = "1", features = ["span-locations"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
+syn = { version = "2", default-features = false, features = ["full", "parsing", "visit"] }
 
 [profile.release]
 opt-level = 3
@@ -305,8 +310,9 @@ must_use_candidate = "allow"
 # readability; this lint wants us to collapse to `match`.
 option_if_let_else = "allow"
 
-# Dispatch functions (handle_prompt_key, App::apply) are naturally long —
-# one match arm per supported action. Splitting them hurts navigation.
+# Off because clippy can only say a function is long, not that a long one grew.
+# `src/fn_size_guard.rs` holds the same 100-line limit, counted the same way, as
+# a ratchet: the functions over it are pinned and may only shrink.
 too_many_lines = "allow"
 
 # "missing backticks in doc" is too eager — it flags things like trailing

@@ -82,16 +82,17 @@ pub enum AgentActivity {
 ///
 /// Authority model (`App::effective_activity`): a report wins over the timing
 /// fallback until it expires (`expiry`, a backstop against a crashed agent's
-/// stale report) or the tab produces fresh output after it (`at` — new output
-/// means the agent resumed, so timing takes over). `at` also lets a newer
-/// report supersede an older.
+/// stale report). Agy yields non-blocked reports to fresh output. Codex's
+/// visible approval modal temporarily overrides a non-blocked report without
+/// discarding it. Other reports survive redraws and silent tool waits.
 #[derive(Clone, Copy, Debug)]
 pub struct ReportedStatus {
     /// The reported state (`Working` / `Blocked` / `Idle` / `Done`).
     pub status: AgentActivity,
-    /// When the report was received (monotonic) — beaten by newer output.
+    /// When the report was received (monotonic).
     pub at: std::time::Instant,
-    /// Backstop expiry; after this the dot falls back to output timing.
+    /// Non-blocked backstop expiry (at most five minutes); blocked remains
+    /// latched until settled while the pane is alive.
     pub expiry: std::time::Instant,
 }
 
@@ -141,11 +142,23 @@ pub struct TabInfo {
     /// or `None`. Overrides output timing per the [`ReportedStatus`] authority
     /// model; settle clears it once expired / superseded by fresh output.
     pub reported: Option<ReportedStatus>,
-    /// Set when the tab was spawned by session restore as a `claude
-    /// --resume`. On a non-zero exit shortly after spawn we treat the
-    /// resume as failed and replace the tab with a fresh spawn of this
-    /// fallback command.
-    pub restore_fallback: Option<String>,
+    /// Most recent received semantic report, retained for diagnostics after
+    /// expiry or dismissal. It is not evidence of hook execution or trust.
+    pub last_reported: Option<ReportedStatus>,
+    /// Why the most recent received hook report was not applied, if any.
+    pub last_report_ignored: Option<&'static str>,
+    /// Bounded reported lifecycle metadata, oldest first. No arguments or
+    /// conversation content; reset on spawn, not persisted or proof of trust.
+    pub recent_hook_events: std::collections::VecDeque<(
+        crate::agent::status_hook::StatusHookEvent,
+        AgentActivity,
+        std::time::Instant,
+    )>,
+    /// Whether status-hook definitions were found before this process spawned.
+    /// Presence does not establish that the agent loaded or trusted them.
+    pub status_hooks_at_spawn: bool,
+    /// A startup-only hook config changed after this process spawned.
+    pub status_hooks_restart_needed: bool,
     /// Set on session restore when we want claude to resume a specific
     /// conversation: spawn a *fresh* `claude` (the `--resume` CLI flag
     /// trips a known regression that crashes at mount), then once
@@ -194,18 +207,16 @@ pub struct TabInfo {
     /// reported id); [`Self::pinned_session_id`] reads whichever is set.
     pub live_session_id: Option<String>,
     /// P1-2 scrape-inferred status (state + `:why-status` hint) from the last
-    /// settled screen scan. Third-tier input to `effective_activity`
-    /// (self-report > this > output timing). Cleared the instant a live
-    /// `report_status` self-report exists for this tab — a report always wins,
-    /// and scrape must not hold a stale guess behind one that could resurface if
-    /// the report later expires. Also cleared when the user answers the pane
-    /// with Enter, same as a latched `Blocked` report.
+    /// settled screen scan. Normally below a live report and above output
+    /// timing. Codex's visible approval overrides a non-blocked report while
+    /// retaining it for recovery; other live reports discard stale guesses.
+    /// Also cleared by prompt-settling input.
     pub scrape_status: Option<(AgentActivity, Option<&'static str>)>,
-    /// P1-2 scrape-fallback dirty flag: set `true` on output for agent tabs
-    /// with detection rules. Consumed by `settle_scrape_quiet` after
-    /// `SCRAPE_QUIET_WINDOW` of silence, so the one scan it runs reads a
-    /// settled screen rather than a half-drawn prompt.
+    /// Output from an agent with detection rules needs another viewport scan.
     pub scrape_dirty: bool,
+    /// First pending Codex scan. Repaints cannot postpone its deadline; other
+    /// agents retain the quiet-window debounce from their last output.
+    pub scrape_pending_at: Option<std::time::Instant>,
     /// P2 scope-coordination owner key: a uuid assigned once, here, and —
     /// unlike [`Self::id`] (the ephemeral `SPYC_PANE_ID`, fresh every spawn) —
     /// **carried across `-r` restore** (`restore_session` copies the saved
@@ -240,7 +251,11 @@ impl TabInfo {
             notified: AgentActivity::Unknown,
             suspended: false,
             reported: None,
-            restore_fallback: None,
+            last_reported: None,
+            last_report_ignored: None,
+            recent_hook_events: std::collections::VecDeque::new(),
+            status_hooks_at_spawn: false,
+            status_hooks_restart_needed: false,
             pending_resume_send: None,
             anim_phase_offset,
             spawn_at: std::time::Instant::now(),
@@ -249,6 +264,7 @@ impl TabInfo {
             live_session_id: None,
             scrape_status: None,
             scrape_dirty: false,
+            scrape_pending_at: None,
             // A separate uuid from `id`: this one is restore-stable (see the
             // field doc), so it must not alias the ephemeral pane-wake id.
             claim_owner: uuid::Uuid::now_v7().to_string(),
@@ -359,6 +375,12 @@ impl TabEntry {
         self.live_cwd_cache
             .clone()
             .unwrap_or_else(|| self.info.cwd.clone())
+    }
+
+    /// Record that the child has moved to `cwd`, as a landed refresh would.
+    #[cfg(test)]
+    pub fn set_live_cwd(&mut self, cwd: PathBuf) {
+        self.live_cwd_cache = Some(cwd);
     }
 
     /// `&mut` settle step (called from `prepare_panes`, NOT the draw): pick up

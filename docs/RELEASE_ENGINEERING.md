@@ -97,8 +97,18 @@ SemVer, with FreeBSD's patch-level mapping made explicit:
     the real `2.1.0` — the same ordering rule the `2.0.0~rc.N` debs rely on.
   - After a minor ships, a follow-up PR opens the next cycle by setting `main`
     to the following `-CURRENT`.
+  - **During a release candidate's soak, `main` carries that rc's version**
+    (`2.2.0-rc.1`). The rc's release PR sets it, a fix merged during the soak
+    builds as `2.2.0-rc.1 (<sha>)`, and the next rc or the release itself is
+    another release PR. Returning to `-CURRENT` between rcs would cost a second
+    PR per rc and buy nothing the SHA doesn't already give.
 - **Prereleases:** `vN.M.0-beta.1`, `vN.M.0-rc.1` — published as GitHub
-  *pre-releases* (the "Latest" badge stays on the last stable).
+  *pre-releases* (the "Latest" badge stays on the last stable), and cut with the
+  same two `make` steps as a release (§5). A prerelease gets no `CHANGELOG.md`
+  section: `cliff.toml`'s `tag_pattern` matches stable tags only, so the final
+  release's section covers the whole cycle instead of only the commits after
+  its last rc. Its GitHub release notes are every commit since the last stable
+  release.
 - **Breaking changes** bump MAJOR and (Stage 2) start a new `stable/N`.
 - **Reproducibility:** the pinned `rust-toolchain.toml` + `--locked` mean a tag
   rebuilds bit-stable across runners.
@@ -144,9 +154,15 @@ tag RELEASEs directly off `main` until a second major needs `stable/`.
 
 1. Development accrues on `main`, which sits at `N.M.0-CURRENT` (§3); CI green
    on every PR.
-2. **Cut RC:** tag `vN.M.0-rc.1` on `main`. `release.yml` builds + publishes a
-   GitHub *pre-release* with full artifacts. Soak (e.g., 3–7 days / dogfood).
-3. Fix blockers on `main`; re-tag `-rc.2` as needed.
+2. **Cut RC:** the two steps in 4, with `VERSION=N.M.0-rc.1`. The tag has to
+   sit on a commit whose `Cargo.toml` says `N.M.0-rc.1`: the crates job
+   publishes whatever version the manifest carries, and the binaries report it.
+   The release PR sets it, and `make release-tag` checks it. `release.yml` then
+   builds + publishes a GitHub *pre-release* with full artifacts, and the
+   Homebrew tap, apt and crates.io all take it. Soak (e.g., 3–7 days /
+   dogfood).
+3. Fix blockers on `main`, which stays at `N.M.0-rc.1` (§3); cut `-rc.2` the
+   same way as needed.
 4. **Release — two steps, because `main` only takes PRs.** A single
    bump-commit-and-tag would put the tag on a release-branch commit that the
    squash-merge then orphans, leaving it outside `main`'s history:
@@ -205,16 +221,46 @@ Inspect the policy against a directory of debs without publishing:
 
 ### 5a. Two crates now publish, in order
 
-`spyc-vt-sys` must reach crates.io **before** spyc. This is not a preference:
-`cargo package` refuses a dependency without a registry version — *"all
-dependencies must have a version requirement specified when packaging"* — so
-spyc cannot be published while its FFI crate is unpublished. Verified by
-attempting it.
+`spyc-vt-sys` must reach crates.io **before** spyc. Packaging drops a
+dependency's `path`, so spyc's published manifest resolves the FFI crate from
+the registry by its `version`. That gives two requirements, and the first
+release carrying the crate needed both fixed (#490):
+
+- **The dependency carries a version.** `spyc-vt-sys = { version = "0.1.0",
+  path = "crates/spyc-vt-sys" }`. Without it `cargo package` refuses outright
+  (*"all dependencies must have a version requirement specified when
+  packaging"*). Bump the requirement whenever the crate's own version moves;
+  cargo rejects a path crate whose version no longer satisfies it, so a missed
+  bump fails the build rather than shipping.
+- **The crate is published first.** The `crates` job in `release.yml`
+  publishes `spyc-vt-sys`, then spyc. Each step checks crates.io for that
+  version first and skips it if it's there, so a re-run is a no-op and a
+  release that didn't move the FFI crate republishes nothing.
+
+By hand, the same order:
 
 ```
 cargo publish -p spyc-vt-sys     # first
 cargo publish -p spyc            # then, once the registry has it
 ```
+
+**A new crate's first publish is manual.** Trusted Publishing mints a token
+only for a crate that already exists and names this repo and `release.yml` as
+its trusted publisher. So, once per new crate:
+
+1. `cargo publish -p spyc-vt-sys` with a personal crates.io token
+   (`cargo login`, or `CARGO_REGISTRY_TOKEN` for the one command).
+2. On the crate's crates.io settings page, add a trusted publisher: repository
+   `Tripstack-Corp/spyc`, workflow `release.yml`.
+
+From then on the release job publishes it like spyc.
+
+**CI checks this on every PR.** `make package-check` (the `package` job) runs
+`cargo package --workspace`. That packages both crates and builds each from
+its own tarball, spyc against `spyc-vt-sys`'s through cargo's temporary local
+registry, which is exactly what `cargo publish` will do at the tag. A file the
+build needs but the package leaves out (#426) fails there, and so does a
+dependency the registry can't resolve.
 
 The two package separately, which is what makes the vendored archives
 affordable: `spyc-vt-sys` measures **3.91 MiB** as a `.crate` (five archives)
@@ -314,7 +360,10 @@ are the source of truth — Actions *call them* so local and CI never drift.
   secret).
 - **Notes:** `make changelog` (git-cliff) for the generated section + a hand-
   written highlights block (the 1Password/Slack "changelog for humans" style the
-  backlog calls for).
+  backlog calls for). As built: a stable tag's notes are `git cliff --latest`,
+  its whole cycle. A prerelease tag isn't a git-cliff boundary (§3), so its
+  notes are `git cliff --unreleased --tag <tag>`, every commit since the last
+  stable release.
 - **Publish:** create the GitHub Release, attach `spyc-vN.M.P-<target>.tar.gz` ×4,
   `SHA256SUMS`, signatures. Then **dispatch** `homebrew.yml` + `apt.yml`: a
   GITHUB_TOKEN-created release does NOT fire their `on: release` triggers (GitHub

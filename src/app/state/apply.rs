@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::keymap::Action;
 
 use crate::app::file_ops::FileOp;
-use crate::app::{Effect, Mode, PostAction, Prompt, PromptKind, View};
+use crate::app::{Effect, Mode, PaneTextKind, PaneTextSink, PostAction, Prompt, PromptKind, View};
 
 use super::{AppState, ApplyResult};
 
@@ -235,6 +235,12 @@ impl AppState {
                 // it before submitting -- e.g. recall ~/src/spyc
                 // and append `/src` before pressing Enter.
                 self.mode = Mode::Prompting(Prompt::shell(PromptKind::Jump, "jump to: "));
+                // The default it offers is read from the pane, which the
+                // Model can't see.
+                return ApplyResult::Post(vec![Effect::ReadPaneText {
+                    kind: PaneTextKind::Pickable(200),
+                    then: PaneTextSink::JumpDefault,
+                }]);
             }
 
             // -- File operation prompts --
@@ -469,11 +475,9 @@ impl AppState {
                 // needs guarding. Mirrors the MCP `resolve_worktree_arg` check
                 // so the in-app key is no less safe than `remove_worktree`.
                 let target = self.cur().listing.dir.clone();
-                let other_inside = match self.focused_side() {
-                    super::Side::Left => self.right.as_ref(),
-                    super::Side::Right => Some(&self.left),
-                }
-                .is_some_and(|c| c.listing.dir.starts_with(&target));
+                let other_inside = self
+                    .get_col(self.focused_side().other())
+                    .is_some_and(|c| c.listing.dir.starts_with(&target));
                 if self.cur().git.info.is_none() {
                     self.flash_error("not in a git repository");
                 } else if other_inside {

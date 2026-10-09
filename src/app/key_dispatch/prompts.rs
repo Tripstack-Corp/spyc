@@ -27,12 +27,6 @@ impl App {
         }
         if matches!(
             &self.state.mode,
-            Mode::Prompting(p) if matches!(p.kind, PromptKind::ClaudeCrashRecover { .. })
-        ) {
-            return self.handle_claude_crash_recover_key(key);
-        }
-        if matches!(
-            &self.state.mode,
             Mode::Prompting(p) if matches!(p.kind, PromptKind::HookConsent { .. })
         ) {
             return self.handle_hook_consent_key(key);
@@ -42,6 +36,12 @@ impl App {
             Mode::Prompting(p) if matches!(p.kind, PromptKind::SkillUpdate { .. })
         ) {
             return self.handle_skill_update_key(key);
+        }
+        if matches!(
+            &self.state.mode,
+            Mode::Prompting(p) if matches!(p.kind, PromptKind::ProjectTabsConsent { .. })
+        ) {
+            return self.handle_project_tabs_consent_key(key);
         }
         if matches!(
             &self.state.mode,
@@ -72,6 +72,10 @@ impl App {
             Mode::Prompting(p) if matches!(p.kind, PromptKind::LuaRunaway)
         ) {
             return self.handle_lua_runaway_confirm_key(key);
+        }
+        if matches!(&self.state.mode, Mode::Prompting(p) if matches!(p.kind, PromptKind::PipeConfirm { .. }))
+        {
+            return self.handle_pipe_confirm_key(key);
         }
         // Shell prompts (`!` / `;`) use the vi line editor + history.
         let has_editor = matches!(
@@ -121,7 +125,7 @@ impl App {
             );
             if is_search {
                 if !buffer.is_empty() {
-                    self.state.left.temp_filter = Some(format!("{buffer}*"));
+                    self.state.cur_mut().temp_filter = Some(format!("{buffer}*"));
                     self.state.rebuild_rows();
                 }
             } else if matches!(
@@ -335,6 +339,21 @@ impl App {
             }
         }
 
+        // `→`/`End` on an empty buffer load the suggestion for editing: the
+        // keys a shell autosuggestion is taken with, and no-ops otherwise when
+        // nothing is typed.
+        if matches!(key.code, KeyCode::Right | KeyCode::End)
+            && let Mode::Prompting(p) = &mut self.state.mode
+            && p.buffer.is_empty()
+            && let Some(suggestion) = p.suggestion.clone()
+        {
+            if let Some(editor) = p.editor.as_mut() {
+                editor.set_content_keep_mode(&suggestion);
+            }
+            p.buffer = suggestion;
+            return Vec::new();
+        }
+
         // Feed key to the editor.
         let result = {
             let Mode::Prompting(prompt) = &mut self.state.mode else {
@@ -349,10 +368,17 @@ impl App {
 
         match result {
             EditResult::Submit => {
-                let Mode::Prompting(p) = std::mem::replace(&mut self.state.mode, Mode::Normal)
+                let Mode::Prompting(mut p) = std::mem::replace(&mut self.state.mode, Mode::Normal)
                 else {
                     return Vec::new();
                 };
+                // An empty buffer is showing the suggestion, so that's what it
+                // submits — and what history records.
+                if p.buffer.is_empty()
+                    && let Some(suggestion) = p.suggestion.take()
+                {
+                    p.buffer = suggestion;
+                }
                 // Push to the appropriate history before dispatching.
                 // Buckets stay isolated -- shell, pane command, pane
                 // cwd, jump destinations, and `:` commands don't

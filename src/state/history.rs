@@ -156,15 +156,14 @@ fn disk_path(filename: &str) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
-    /// Build an in-memory History. `push` will attempt best-effort saves
-    /// to disk (harmless test artifact); the test assertions are purely
-    /// in-memory.
+    /// Build an in-memory History. A unit test has no state root unless it
+    /// pins one, so `push`'s best-effort save writes nothing.
     fn empty_history() -> History {
         History {
             entries: Vec::new(),
             nav: None,
             stashed: String::new(),
-            filename: format!("test_history_{}", std::process::id()),
+            filename: "history".to_string(),
         }
     }
 

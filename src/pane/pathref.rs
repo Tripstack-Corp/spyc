@@ -11,6 +11,8 @@
 //!   - `./relative/path`
 //!   - Paths inside backticks, quotes, or after common prefixes
 //!     (Reading, Editing, Created, →, etc.)
+//!   - A path wrapped onto the next row(s), by the terminal or by the
+//!     agent's own line wrapping
 
 use std::path::{Path, PathBuf};
 
@@ -21,18 +23,61 @@ pub struct PathRef {
     pub line: Option<usize>,
 }
 
+/// [`extract_path_ref_under`] with one base. Test-only: production always
+/// has several.
+#[cfg(test)]
+pub fn extract_path_ref(lines: &[String], resolve_base: &Path) -> Option<PathRef> {
+    extract_path_ref_under(lines, &[resolve_base])
+}
+
 /// Scan recent terminal lines for the most relevant path reference.
 ///
 /// `lines` should be the visible screen lines (and optionally a few
 /// scrollback lines), ordered top-to-bottom. We scan **bottom-up** so
-/// the most recent output wins. `resolve_base` is the directory to
-/// resolve relative paths against (typically the pane tab's cwd or the
-/// project root).
-pub fn extract_path_ref(lines: &[String], resolve_base: &Path) -> Option<PathRef> {
+/// the most recent output wins. `bases` are the directories to resolve
+/// relative paths against, best first. The newest row that resolves under
+/// any of them wins, so an older path under an earlier base can't beat a
+/// newer one; within a row, a path wrapped onto it is tried under every base
+/// before the row's own tokens, since a wrapped path's tail alone can name
+/// some other file under an earlier base.
+pub fn extract_path_ref_under<P: AsRef<Path>>(lines: &[String], bases: &[P]) -> Option<PathRef> {
     // Scan bottom-to-top: most recent output is most relevant.
-    for line in lines.iter().rev() {
-        if let Some(pr) = extract_from_line(line, resolve_base) {
+    (0..lines.len()).rev().find_map(|i| {
+        bases
+            .iter()
+            .find_map(|base| wrapped_ref(&lines[..=i], base.as_ref()))
+            .or_else(|| {
+                bases
+                    .iter()
+                    .find_map(|base| extract_from_line(&lines[i], base.as_ref()))
+            })
+    })
+}
+
+/// Rows one wrapped path may span: a 130-column task-output path in a
+/// 45-column pane.
+const MAX_WRAPPED_ROWS: usize = 4;
+
+/// A path wrapped onto more than one row, found at the row it ends on — the
+/// last of `rows` — because that's the one a bottom-up scan reaches first,
+/// and its tail alone can resolve to some other file (`src/main.rs` under
+/// the pane's cwd). The tail is this row's first token, prefixed by the last
+/// token of each row above for as long as that row held nothing else.
+fn wrapped_ref(rows: &[String], resolve_base: &Path) -> Option<PathRef> {
+    let (last, above) = rows.split_last()?;
+    let mut joined = strip_ansi(last).split_whitespace().next()?.to_string();
+    for row in above.iter().rev().take(MAX_WRAPPED_ROWS - 1) {
+        let row = strip_ansi(row);
+        let mut tokens = row.split_whitespace();
+        let Some(head) = tokens.next_back() else {
+            break;
+        };
+        joined.insert_str(0, head);
+        if let Some(pr) = resolve_candidate(strip_decorations(&joined), resolve_base) {
             return Some(pr);
+        }
+        if tokens.next().is_some() {
+            break;
         }
     }
     None
@@ -43,20 +88,22 @@ pub fn extract_path_ref(lines: &[String], resolve_base: &Path) -> Option<PathRef
 /// Tries each candidate token on the line and returns the first one
 /// that resolves to an existing file or directory.
 pub fn extract_from_line(line: &str, resolve_base: &Path) -> Option<PathRef> {
-    for candidate in candidates(line) {
-        let (raw_path, line_num) = split_path_line(&candidate);
-        if raw_path.is_empty() || !looks_like_path(raw_path) {
-            continue;
-        }
-        let resolved = resolve_path(raw_path, resolve_base);
-        if resolved.exists() {
-            return Some(PathRef {
-                path: resolved,
-                line: line_num,
-            });
-        }
+    candidates(line)
+        .iter()
+        .find_map(|candidate| resolve_candidate(candidate, resolve_base))
+}
+
+/// `candidate` as a reference, if it looks like a path and one exists there.
+fn resolve_candidate(candidate: &str, resolve_base: &Path) -> Option<PathRef> {
+    let (raw_path, line_num) = split_path_line(candidate);
+    if raw_path.is_empty() || !looks_like_path(raw_path) {
+        return None;
     }
-    None
+    let resolved = resolve_path(raw_path, resolve_base);
+    resolved.exists().then_some(PathRef {
+        path: resolved,
+        line: line_num,
+    })
 }
 
 /// Split `path:line` or `path:line:col` into (path, Option<line>).
@@ -252,6 +299,34 @@ mod tests {
         fs::write(tmp.path().join("Cargo.toml"), "[package]").unwrap();
         fs::write(tmp.path().join("README.md"), "# readme").unwrap();
         tmp
+    }
+
+    // ── several bases ─────────────────────────────────────────────
+
+    /// A path wrapped across rows resolves under a later base before its own
+    /// tail is taken under an earlier one: the tail alone names some other
+    /// file.
+    #[test]
+    fn a_wrapped_path_under_a_later_base_beats_its_tail_under_an_earlier_one() {
+        let near = setup_tree();
+        let far = tempdir().unwrap();
+        fs::create_dir_all(far.path().join("deep/src")).unwrap();
+        fs::write(far.path().join("deep/src/main.rs"), "").unwrap();
+        let lines = vec!["see deep/".to_string(), "src/main.rs".to_string()];
+        let found = extract_path_ref_under(&lines, &[near.path(), far.path()]);
+        assert_eq!(
+            found.map(|r| r.path),
+            Some(far.path().join("deep/src/main.rs"))
+        );
+    }
+
+    #[test]
+    fn within_a_row_the_earlier_base_wins() {
+        let near = setup_tree();
+        let far = setup_tree();
+        let lines = vec!["src/main.rs".to_string()];
+        let found = extract_path_ref_under(&lines, &[near.path(), far.path()]);
+        assert_eq!(found.map(|r| r.path), Some(near.path().join("src/main.rs")));
     }
 
     // ── split_path_line ───────────────────────────────────────────
@@ -475,6 +550,77 @@ mod tests {
         let pr = extract_from_line("src/main.rs:3:7: error: expected ';'", tmp.path()).unwrap();
         assert_eq!(pr.path, tmp.path().join("src/main.rs"));
         assert_eq!(pr.line, Some(3));
+    }
+
+    // ── wrapped paths ─────────────────────────────────────────────
+
+    fn rows(s: &[&str]) -> Vec<String> {
+        s.iter().copied().map(String::from).collect()
+    }
+
+    /// `prefix` + `path` + `suffix`, with a row break after each of `widths`
+    /// characters of the path and the continuation rows indented, the way an
+    /// agent's own wrapping lays it out.
+    fn wrapped(prefix: &str, path: &str, widths: &[usize], suffix: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut rest = path;
+        for (i, &w) in widths.iter().enumerate() {
+            let (piece, tail) = rest.split_at(w);
+            out.push(if i == 0 {
+                format!("{prefix}{piece}")
+            } else {
+                format!("     {piece}")
+            });
+            rest = tail;
+        }
+        out.push(format!("     {rest}{suffix}"));
+        out
+    }
+
+    #[test]
+    fn a_path_wrapped_onto_the_next_row_resolves() {
+        let tmp = setup_tree();
+        let path = tmp.path().join("src/app/state.rs").display().to_string();
+        let lines = wrapped("  Output: ", &path, &[path.len() - 6], ". Done.");
+        assert_eq!(lines.len(), 2);
+        let pr = extract_path_ref(&lines, tmp.path()).unwrap();
+        assert_eq!(pr.path, tmp.path().join("src/app/state.rs"));
+    }
+
+    #[test]
+    fn a_path_wrapped_over_three_rows_resolves() {
+        let tmp = setup_tree();
+        let path = tmp.path().join("src/app/state.rs").display().to_string();
+        let third = path.len() / 3;
+        let lines = wrapped("Read ", &path, &[third, third], "");
+        assert_eq!(lines.len(), 3);
+        let pr = extract_path_ref(&lines, tmp.path()).unwrap();
+        assert_eq!(pr.path, tmp.path().join("src/app/state.rs"));
+    }
+
+    /// The tail on its own row names a real file under the cwd; the whole
+    /// path names a different one, and that's the one printed.
+    #[test]
+    fn a_wrapped_path_beats_its_tail_resolving_on_its_own() {
+        let tmp = setup_tree();
+        fs::create_dir_all(tmp.path().join("nested/src")).unwrap();
+        fs::write(tmp.path().join("nested/src/main.rs"), "").unwrap();
+        let head = format!("{}/nested/", tmp.path().display());
+        let lines = rows(&[&format!("wrote {head}"), "src/main.rs"]);
+        let pr = extract_path_ref(&lines, tmp.path()).unwrap();
+        assert_eq!(pr.path, tmp.path().join("nested/src/main.rs"));
+    }
+
+    /// A row ending in a whole path isn't glued to the next row's first word.
+    #[test]
+    fn a_complete_path_at_a_row_end_stays_whole() {
+        let tmp = setup_tree();
+        let lines = rows(&["Read src/main.rs", "Cargo.toml updated"]);
+        let pr = extract_path_ref(&lines, tmp.path()).unwrap();
+        assert_eq!(pr.path, tmp.path().join("Cargo.toml"));
+        let lines = rows(&["Read src/main.rs", "and nothing else"]);
+        let pr = extract_path_ref(&lines, tmp.path()).unwrap();
+        assert_eq!(pr.path, tmp.path().join("src/main.rs"));
     }
 
     // ── Claude CLI output patterns ────────────────────────────────

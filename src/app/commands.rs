@@ -13,6 +13,8 @@ use crate::keymap::Action;
 use crate::pane::{Pane, PaneTabs};
 use crate::ui::pager::PagerView;
 
+use super::activity_diagnostics::activity_dump_lines;
+pub(super) use super::activity_diagnostics::cmd_why_status;
 use super::command_table::{self, CmdHandler};
 use super::state::Focus;
 use super::{App, Effect};
@@ -189,65 +191,6 @@ pub(super) fn cmd_about(app: &mut App, _args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
-/// `:why-status` — explain the active tab's agent-activity classification
-/// (debug aid, `docs/archive/AGENT_AWARENESS_PLAN.md`): the current state, its **source**
-/// (a semantic `report_status` self-report vs the output-timing fallback), and
-/// how long since its last pane output. App-layer (reads the live pane tabs +
-/// clock).
-pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
-    use crate::pane::AgentActivity;
-    use crate::state::sessions::AgentKind;
-    let Some(tabs) = app.runtime.pane_tabs.as_ref() else {
-        app.state.flash_info("why-status: no pane open");
-        return Vec::new();
-    };
-    let info = tabs.active_info();
-    let is_agent = crate::agent::detect(&info.command).kind() != AgentKind::Other;
-    let age = match info.last_output_at {
-        Some(at) => format!("{:.1}s since last output", at.elapsed().as_secs_f32()),
-        None => "no output yet".to_string(),
-    };
-    let msg = if is_agent {
-        let state = match info.activity {
-            AgentActivity::Working => "working",
-            AgentActivity::Idle => "idle",
-            AgentActivity::Blocked => "blocked",
-            AgentActivity::Done => "done",
-            AgentActivity::Unknown => "unknown",
-        };
-        // Priority: a live self-report wins, then the P1-2 scrape fallback,
-        // then output timing (`effective_activity`'s exact order).
-        let source = if info.reported.is_some() {
-            "self-reported".to_string()
-        } else if let Some((_, hint)) = info.scrape_status {
-            match hint {
-                Some(h) => format!("scrape-fallback: {h}"),
-                None => "scrape-fallback".to_string(),
-            }
-        } else {
-            "output-timing".to_string()
-        };
-        // Name a missing hook install outright. Without it the fallback reads
-        // as the answer ("idle (output-timing)") when the real story is that
-        // nothing can report — the exact ambiguity that turned one removal into
-        // a forensics session.
-        let hooks = match crate::agent::detect(&info.command).status_hooks() {
-            Some(s) if !s.installed(&info.cwd) => {
-                format!(" — NO status hooks in {} (`:hooks on`)", s.config_label)
-            }
-            _ => String::new(),
-        };
-        format!(
-            "why-status [{}]: {state} ({source}) — {age}{hooks}",
-            info.label
-        )
-    } else {
-        format!("why-status: '{}' is not a known agent — no dot", info.label)
-    };
-    app.state.flash_info(msg);
-    Vec::new()
-}
-
 /// `:why-git` — dump per-column git-marker refresh state to a saveable pager:
 /// each column's repo root + resolved gitdir, the cached poll key vs the LIVE
 /// on-disk one (`git::status::poll_key`, so you can see whether the 1 Hz poll will
@@ -269,18 +212,6 @@ pub(super) fn cmd_why_git(app: &mut App, _args: &str) -> Vec<Effect> {
 /// `refresh_git_state_for`'s short-circuit condition.
 fn why_git_lines(app: &App) -> Vec<String> {
     use super::state::Side;
-    // A `SystemTime` as `secs.mmm` since the epoch — stable + directly
-    // comparable across the poll-cache vs on-disk lines; `—` for `None`.
-    let fmt = |t: Option<std::time::SystemTime>| -> String {
-        match t.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()) {
-            Some(d) => format!("{}.{:03}", d.as_secs(), d.subsec_millis()),
-            None => "—".to_string(),
-        }
-    };
-    let path_or = |p: Option<&std::path::Path>| {
-        p.map_or_else(|| "(none)".to_string(), |p| p.display().to_string())
-    };
-
     let mut out = vec![
         format!(
             "spyc {} (pid {}) — git dump @ {}",
@@ -300,11 +231,11 @@ fn why_git_lines(app: &App) -> Vec<String> {
         out.push(format!("[{label}]  cwd: {}", c.listing.dir.display()));
         out.push(format!(
             "    repo_root: {}",
-            path_or(gc.current_repo_root.as_deref())
+            path_or_none(gc.current_repo_root.as_deref())
         ));
         out.push(format!(
             "    gitdir:    {}",
-            path_or(gc.current_gitdir.as_deref())
+            path_or_none(gc.current_gitdir.as_deref())
         ));
         out.push(format!(
             "    branch:    {}",
@@ -335,21 +266,22 @@ fn why_git_lines(app: &App) -> Vec<String> {
         let (live_idx, live_head) = (live.map(|(i, _)| i), live.map(|(_, h)| h));
         out.push(format!(
             "    poll_cache: index={} head={}",
-            fmt(cache_key.map(|(i, _)| i)),
-            fmt(cache_key.map(|(_, h)| h)),
+            epoch_secs(cache_key.map(|(i, _)| i)),
+            epoch_secs(cache_key.map(|(_, h)| h)),
         ));
         out.push(format!(
             "    on-disk:    index={} head={}  (head = latest of HEAD/ref + config)",
-            fmt(live_idx),
-            fmt(live_head)
+            epoch_secs(live_idx),
+            epoch_secs(live_head)
         ));
         out.push(format!(
             "    config:     {} mtime={}",
-            path_or(gc.current_config_path.as_deref()),
-            fmt(gc
-                .current_config_path
-                .as_deref()
-                .and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())),
+            path_or_none(gc.current_config_path.as_deref()),
+            epoch_secs(
+                gc.current_config_path
+                    .as_deref()
+                    .and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+            ),
         ));
         // Mirrors `refresh_git_state_for`: skip the walk iff a full cached key
         // equals the (both-present) on-disk key and no rewalk is forced.
@@ -368,8 +300,8 @@ fn why_git_lines(app: &App) -> Vec<String> {
                 "    status_cache: {} entr(y/ies) for {} (index={} head={})",
                 sc.entries.len(),
                 sc.repo_root.display(),
-                fmt(Some(sc.index_mtime)),
-                fmt(Some(sc.head_mtime)),
+                epoch_secs(Some(sc.index_mtime)),
+                epoch_secs(Some(sc.head_mtime)),
             )),
             None => out.push("    status_cache: (none)".to_string()),
         }
@@ -380,6 +312,19 @@ fn why_git_lines(app: &App) -> Vec<String> {
         out.push(String::new());
     }
     out
+}
+
+/// A `SystemTime` as `secs.mmm` since the epoch — stable + directly comparable
+/// across the poll-cache vs on-disk lines; `—` for `None`.
+fn epoch_secs(t: Option<std::time::SystemTime>) -> String {
+    match t.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()) {
+        Some(d) => format!("{}.{:03}", d.as_secs(), d.subsec_millis()),
+        None => "—".to_string(),
+    }
+}
+
+fn path_or_none(p: Option<&std::path::Path>) -> String {
+    p.map_or_else(|| "(none)".to_string(), |p| p.display().to_string())
 }
 
 /// `:notify test` — fire every notification channel on demand (bell, the
@@ -533,126 +478,30 @@ pub fn cmd_archive(app: &mut App, arg: &str) -> Vec<Effect> {
 /// tab's dot is derived (the `:why-status` reasoning for ALL panes at once) —
 /// the `source` line is the crux: a live `report_status` self-report vs the
 /// output-timing fallback. Easy to yank/save and paste when debugging the dots.
+/// `:activity transparent|solid` picks how the overlay paints, and shows it.
 pub(super) fn cmd_activity(app: &mut App, args: &str) -> Vec<Effect> {
-    if args.trim() == "dump" {
-        let mut view = PagerView::new_plain("activity dump", activity_dump_lines(app));
-        view.saveable = true;
-        app.set_pager(view);
-        return Vec::new();
-    }
-    app.apply(&Action::ToggleActivity).unwrap_or_default()
-}
-
-/// Build the `:activity dump` report (see [`cmd_activity`]). Reads the live
-/// tabs + activity tallies, plus each agent dir's hook config (the one I/O — a
-/// dot that can't report is the first thing to rule out) → plain lines.
-fn activity_dump_lines(app: &App) -> Vec<String> {
-    use crate::pane::AgentActivity;
-    use crate::state::sessions::AgentKind;
-
-    let state_str = |a: AgentActivity| match a {
-        AgentActivity::Working => "working",
-        AgentActivity::Idle => "idle",
-        AgentActivity::Blocked => "blocked",
-        AgentActivity::Done => "done",
-        AgentActivity::Unknown => "unknown",
-    };
-
-    let now = std::time::Instant::now();
-    let mut out = vec![format!(
-        "spyc {} (pid {}) — activity dump @ {}",
-        crate::VERSION,
-        std::process::id(),
-        crate::sysinfo::format_now(),
-    )];
-    // `report_status:N` here is the key signal: how many status reports
-    // (hook-driven OR agent-driven) actually reached spyc this session.
-    let calls = &app.view.activity.mcp_tool_calls;
-    let tally: Vec<String> = calls
-        .iter()
-        .filter(|(_, c)| **c > 0)
-        .map(|(n, c)| format!("{n}:{c}"))
-        .collect();
-    out.push(format!(
-        "mcp tool calls: {}",
-        if tally.is_empty() {
-            "(none yet)".to_string()
-        } else {
-            tally.join("  ")
+    use super::activity::HudStyle;
+    let (style, name) = match args.trim() {
+        "" => return app.apply(&Action::ToggleActivity).unwrap_or_default(),
+        "dump" => {
+            let mut view = PagerView::new_plain("activity dump", activity_dump_lines(app));
+            view.saveable = true;
+            app.set_pager(view);
+            return Vec::new();
         }
-    ));
-    out.push(String::new());
-
-    let Some(tabs) = app.runtime.pane_tabs.as_ref() else {
-        out.push("(no panes open)".to_string());
-        return out;
-    };
-    let active = tabs.active_index();
-    for (i, e) in tabs.tabs().iter().enumerate() {
-        let info = &e.info;
-        let is_agent = crate::agent::detect(&info.command).kind() != AgentKind::Other;
-        let marker = if i == active { '*' } else { ' ' };
-        out.push(format!(
-            "{marker}[{}] \"{}\"  dot={}  agent={is_agent}  suspended={}",
-            i + 1,
-            info.label,
-            state_str(info.activity),
-            info.suspended,
-        ));
-        out.push(format!("    command: {}", info.command));
-        out.push(format!("    cwd: {}", info.cwd.display()));
-        if let Some(support) = crate::agent::detect(&info.command).status_hooks() {
-            out.push(format!(
-                "    hooks: {} in {}",
-                if support.installed(&info.cwd) {
-                    "installed"
-                } else {
-                    "MISSING (`:hooks on`)"
-                },
-                support.config_label,
+        "transparent" => (HudStyle::Transparent, "transparent"),
+        "solid" => (HudStyle::Solid, "solid"),
+        other => {
+            app.state.flash_error(format!(
+                "usage: :activity [dump|transparent|solid]  (got `{other}`)"
             ));
+            return Vec::new();
         }
-        // The crux: live self-report > P1-2 scrape fallback > output timing.
-        match (info.reported, info.scrape_status) {
-            (Some(r), _) => out.push(format!(
-                "    source: SELF-REPORT status={} set {:.1}s ago, expires in {:.0}s",
-                state_str(r.status),
-                r.at.elapsed().as_secs_f32(),
-                r.expiry.saturating_duration_since(now).as_secs_f32(),
-            )),
-            (None, Some((s, hint))) => out.push(format!(
-                "    source: SCRAPE-FALLBACK status={}{}",
-                state_str(s),
-                match hint {
-                    Some(h) => format!(" ({h})"),
-                    None => String::new(),
-                },
-            )),
-            (None, None) => {
-                out.push("    source: output-timing (no live report)".to_string());
-            }
-        }
-        match info.last_output_at {
-            Some(at) => out.push(format!(
-                "    last_output: {:.1}s ago",
-                at.elapsed().as_secs_f32()
-            )),
-            None => out.push("    last_output: none".to_string()),
-        }
-        out.push(format!(
-            "    spawn: {:.0}s ago",
-            info.spawn_at.elapsed().as_secs_f32()
-        ));
-        out.push(format!("    pane_id: {}", info.id));
-        if let Some(s) = &info.live_session_id {
-            out.push(format!("    live_session_id: {s}"));
-        }
-        if let Some(s) = &info.codex_session_id {
-            out.push(format!("    codex_session_id: {s}"));
-        }
-        out.push(String::new());
-    }
-    out
+    };
+    app.view.activity_style = style;
+    app.view.show_activity = true;
+    app.state.flash_info(format!("activity monitor: {name}"));
+    Vec::new()
 }
 
 /// `:agent list` / `:agent registry` — dump the P2 agent-coordination state to
@@ -986,6 +835,33 @@ mod tests {
         let mut app = App::test_app(std::env::temp_dir());
         app.view.pager = Some(PagerView::new_plain("t", vec!["line".to_string()]));
         app
+    }
+
+    /// Picking a style shows the monitor in it; a bad argument changes nothing
+    /// instead of toggling the overlay as a bare `:activity` would.
+    #[test]
+    fn activity_style_argument_sets_the_style_and_shows_the_monitor() {
+        use crate::app::activity::HudStyle;
+        let mut app = App::test_app(std::env::temp_dir());
+        assert_eq!(app.view.activity_style, HudStyle::Transparent, "default");
+
+        app.dispatch_command("activity solid");
+        assert!(app.view.show_activity);
+        assert_eq!(app.view.activity_style, HudStyle::Solid);
+
+        app.dispatch_command("activity transparent");
+        assert!(app.view.show_activity, "a style never hides the monitor");
+        assert_eq!(app.view.activity_style, HudStyle::Transparent);
+
+        app.view.show_activity = false;
+        app.dispatch_command("activity bogus");
+        assert!(!app.view.show_activity, "a bad argument must not toggle");
+        assert_eq!(app.view.activity_style, HudStyle::Transparent);
+        let flash = app.state.flash.as_ref().map(|f| f.text.as_str());
+        assert!(
+            flash.is_some_and(|t| t.contains("usage: :activity")),
+            "{flash:?}"
+        );
     }
 
     /// #166: with a pager on screen the status bar is occluded by it, so the

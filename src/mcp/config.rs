@@ -1,29 +1,18 @@
-//! Managing the client-side MCP config (.mcp.json / codex config.toml) and
-//! detecting/handing off existing spyc instances. Split out of mcp.rs verbatim.
+//! Managing the agents' MCP `spyc` entry (`.mcp.json`, codex `config.toml`,
+//! agy `mcp_config.json`): writing it, and removing it once no spyc needs it.
 use std::io::{self};
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use super::server::{notify_disconnect, pid_from_sock_path};
+use super::server::pid_from_sock_path;
 use super::{mcp_log, socket_path};
-
-/// Why an agent config wasn't written. With neither `$XDG_STATE_HOME` nor
-/// `$HOME` set there is no socket path, so registering one would point the
-/// agent at an address nothing listens on — worse than no registration.
-const NO_STATE_DIR: &str = "no state directory ($XDG_STATE_HOME / $HOME unset) — MCP disabled";
 
 /// Status of MCP configuration for this directory.
 #[derive(Debug)]
 pub enum McpConfigStatus {
-    /// .mcp.json written/updated to point at our socket.
+    /// The `spyc` entry is written.
     Configured,
-    /// Took over from another instance (notified it). PID of old instance.
-    TookOver { old_pid: u32 },
-    /// Detected another live instance and the caller asked us not to
-    /// take over — `.mcp.json` left pointing at the old PID.
-    SkippedTakeover { old_pid: u32 },
     /// Enterprise managed-settings.json blocks spyc.
     BlockedByEnterprise,
     /// Enterprise managed-mcp.json already defines spyc — Claude
@@ -47,80 +36,9 @@ fn refuse(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg.to_string())
 }
 
-/// Given the `SPYC_MCP_SOCK` value parsed out of an existing client config,
-/// return the live owner's PID — or `None` if it points at our own socket,
-/// isn't reachable (stale registration), or has no parseable PID. The shared
-/// tail of both `detect_existing_spyc*` functions; only the per-format
-/// parsing of `old_sock_str` differs between them.
-fn live_owner_pid(old_sock_str: &str, our_sock: &Path) -> Option<u32> {
-    let old_sock = PathBuf::from(old_sock_str);
-    if old_sock == *our_sock {
-        return None;
-    }
-    UnixStream::connect(&old_sock).ok()?;
-    pid_from_sock_path(old_sock_str)
-}
-
-/// Outcome of the takeover check shared by `ensure_mcp_json` and
-/// `ensure_codex_config_toml`.
-enum TakeoverDecision {
-    /// No live conflicting instance (it's us, stale, or unreachable) —
-    /// write our entry normally.
-    Proceed,
-    /// A live instance was found and we took it over (already notified).
-    TookOver(u32),
-    /// A live instance was found but takeover wasn't allowed — caller bails,
-    /// leaving the old registration in place.
-    Skipped(u32),
-}
-
-/// Decide whether to take over from the instance an existing config points
-/// at. `old_sock_str` is the `SPYC_MCP_SOCK` already parsed out of the config
-/// (JSON or TOML — the parsing differs per format, this decision does not).
-/// On a live takeover this sends the disconnect notification as a side effect;
-/// `log_prefix` (`""` / `"codex: "`) distinguishes the two in the debug log.
-fn decide_takeover(
-    old_sock_str: &str,
-    our_sock: &Path,
-    our_pid: u32,
-    takeover_allowed: bool,
-    log_prefix: &str,
-) -> TakeoverDecision {
-    let old_sock = PathBuf::from(old_sock_str);
-    if old_sock == *our_sock || UnixStream::connect(&old_sock).is_err() {
-        // Our own socket, or a dead one (stale registration) — no conflict.
-        return TakeoverDecision::Proceed;
-    }
-    let old_pid = pid_from_sock_path(old_sock_str).unwrap_or(0);
-    if !takeover_allowed {
-        mcp_log(&format!(
-            "{log_prefix}skipped takeover from PID {old_pid} ({})",
-            old_sock.display()
-        ));
-        return TakeoverDecision::Skipped(old_pid);
-    }
-    notify_disconnect(&old_sock, our_pid);
-    mcp_log(&format!(
-        "{log_prefix}taking over from PID {old_pid} ({})",
-        old_sock.display()
-    ));
-    TakeoverDecision::TookOver(old_pid)
-}
-
-/// Detect a live spyc instance currently owning MCP for `dir` without
-/// modifying `.mcp.json`. Returns the old instance's PID if its socket
-/// is reachable, else None. Used by the startup takeover prompt so we
-/// can ask the user before clobbering another instance's registration.
-pub fn detect_existing_spyc(dir: &Path) -> Option<u32> {
-    let our_sock = socket_path()?;
-    let path = dir.join(".mcp.json");
-    let text = std::fs::read_to_string(&path).ok()?;
-    let parsed: Value = serde_json::from_str(&text).ok()?;
-    let old_sock_str = parsed
-        .pointer("/mcpServers/spyc/env/SPYC_MCP_SOCK")
-        .and_then(|v| v.as_str())?;
-    live_owner_pid(old_sock_str, &our_sock)
-}
+/// The variables an agent pane's env carries (`open_pane_tab_into`) that its
+/// `spyc --mcp` proxy needs: which spyc launched it, and which tab it is.
+const PANE_ENV: [&str; 2] = ["SPYC_MCP_SOCK", "SPYC_PANE_ID"];
 
 /// Well-known paths for Claude Code enterprise managed settings.
 const MANAGED_SETTINGS_PATHS: &[&str] = &[
@@ -180,7 +98,7 @@ fn enterprise_allows_spyc() -> Option<bool> {
 /// reach us and we should not also write per-project `.mcp.json`
 /// files (a name collision results in Claude picking the org
 /// definition, with the per-project entry only adding noise).
-pub fn enterprise_defines_spyc() -> bool {
+fn enterprise_defines_spyc() -> bool {
     for path in MANAGED_MCP_PATHS {
         let Ok(text) = std::fs::read_to_string(path) else {
             continue;
@@ -198,7 +116,7 @@ pub fn enterprise_defines_spyc() -> bool {
 /// Ensure `.mcp.json` has the spyc entry using stdio transport.
 /// Checks enterprise policy first. If another spyc instance owns
 /// the entry, sends it a disconnect notification and takes over.
-pub fn ensure_mcp_json(dir: &Path, takeover_allowed: bool) -> Result<McpConfigStatus, io::Error> {
+pub fn ensure_mcp_json(dir: &Path) -> Result<McpConfigStatus, io::Error> {
     if enterprise_allows_spyc() == Some(false) {
         return Ok(McpConfigStatus::BlockedByEnterprise);
     }
@@ -213,50 +131,24 @@ pub fn ensure_mcp_json(dir: &Path, takeover_allowed: bool) -> Result<McpConfigSt
         return Ok(McpConfigStatus::ManagedByEnterprise);
     }
 
-    ensure_spyc_in_mcp_json(&dir.join(".mcp.json"), takeover_allowed)
+    ensure_spyc_in_mcp_json(&dir.join(".mcp.json"))
 }
 
 /// Write spyc's stdio MCP entry into an `mcpServers`-shaped JSON file at `path`,
-/// preserving any other servers already declared there and taking over from a
-/// stale/other instance per `takeover_allowed`.
+/// preserving any other servers already declared there.
 ///
 /// Shared by claude's `<dir>/.mcp.json` and agy's `<dir>/.agents/mcp_config.json`
 /// — the two formats are byte-identical, so the only difference is the path (and
 /// the enterprise-policy gate, which is claude-specific and stays in
 /// [`ensure_mcp_json`]).
-fn ensure_spyc_in_mcp_json(
-    path: &Path,
-    takeover_allowed: bool,
-) -> Result<McpConfigStatus, io::Error> {
-    let Some(our_sock) = socket_path() else {
-        return Err(io::Error::other(NO_STATE_DIR));
-    };
-    let our_pid = std::process::id();
+pub(super) fn ensure_spyc_in_mcp_json(path: &Path) -> Result<McpConfigStatus, io::Error> {
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
 
-    // Check for an existing live spyc instance registered in this file.
-    let mut took_over: Option<u32> = None;
-    if let Ok(text) = std::fs::read_to_string(path)
-        && let Ok(parsed) = serde_json::from_str::<Value>(&text)
-        && let Some(old_sock_str) = parsed
-            .pointer("/mcpServers/spyc/env/SPYC_MCP_SOCK")
-            .and_then(|v| v.as_str())
-    {
-        match decide_takeover(old_sock_str, &our_sock, our_pid, takeover_allowed, "") {
-            TakeoverDecision::Proceed => {}
-            TakeoverDecision::TookOver(old_pid) => took_over = Some(old_pid),
-            TakeoverDecision::Skipped(old_pid) => {
-                return Ok(McpConfigStatus::SkippedTakeover { old_pid });
-            }
-        }
-    }
-
+    // SPYC-TRAP(mcp-entry-names-no-socket): no `env`. Claude and agy start the
+    // proxy with the agent's own env, where the pane put its spyc's socket.
     let spyc_entry = json!({
         "command": exe.to_string_lossy(),
         "args": ["--mcp"],
-        "env": {
-            "SPYC_MCP_SOCK": our_sock.to_string_lossy()
-        }
     });
 
     // Default content, for an absent or blank file only — there's nothing to
@@ -314,17 +206,8 @@ fn ensure_spyc_in_mcp_json(
         std::fs::create_dir_all(parent)?;
     }
     crate::fs::write_atomic(path, (content + "\n").as_bytes())?;
-    mcp_log(&format!(
-        "wrote {} (sock={}, exe={})",
-        path.display(),
-        our_sock.display(),
-        exe.display()
-    ));
-
-    match took_over {
-        Some(old_pid) => Ok(McpConfigStatus::TookOver { old_pid }),
-        None => Ok(McpConfigStatus::Configured),
-    }
+    mcp_log(&format!("wrote {} (exe={})", path.display(), exe.display()));
+    Ok(McpConfigStatus::Configured)
 }
 
 /// Codex's equivalent of `ensure_mcp_json`. Writes a stdio MCP entry
@@ -335,71 +218,28 @@ fn ensure_spyc_in_mcp_json(
 /// project file to mirror claude's project-scoped behaviour and avoid
 /// touching the user's main config.
 ///
-/// Codex's TOML schema is `[mcp_servers.<name>]` with `command`,
-/// `args`, and `env` keys for stdio servers (parallel to
-/// claude's `.mcp.json` shape):
+/// Codex's TOML schema is `[mcp_servers.<name>]` with `command` and `args`
+/// for a stdio server. Codex starts it with a cleared environment plus the
+/// names `env_vars` lists, so that list is how the pane's socket and id reach
+/// the proxy:
 ///
 /// ```toml
 /// [mcp_servers.spyc]
 /// command = "spyc"
 /// args = ["--mcp"]
-///
-/// [mcp_servers.spyc.env]
-/// SPYC_MCP_SOCK = "/Users/x/.local/state/spyc/mcp-12345.sock"
+/// env_vars = ["SPYC_MCP_SOCK", "SPYC_PANE_ID"]
 /// ```
 ///
-/// Takeover semantics match `ensure_mcp_json`: an existing live spyc
-/// socket in another PID gets a `spyc/disconnected` notification and
-/// we replace the entry. Enterprise policies are claude-specific and
-/// don't apply here.
-pub fn ensure_codex_config_toml(
-    dir: &Path,
-    takeover_allowed: bool,
-) -> Result<McpConfigStatus, io::Error> {
-    let Some(our_sock) = socket_path() else {
-        return Err(io::Error::other(NO_STATE_DIR));
-    };
-    let our_pid = std::process::id();
+/// Enterprise policies are claude-specific and don't apply here.
+pub fn ensure_codex_config_toml(dir: &Path) -> Result<McpConfigStatus, io::Error> {
     let path = dir.join(".codex").join("config.toml");
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
-
-    // Takeover detection: existing entry pointing at a different
-    // live socket means another spyc instance owns this directory.
-    let mut took_over: Option<u32> = None;
-    if let Ok(text) = std::fs::read_to_string(&path)
-        && let Ok(parsed) = toml::from_str::<toml::Value>(&text)
-        && let Some(old_sock_str) = parsed
-            .get("mcp_servers")
-            .and_then(|m| m.get("spyc"))
-            .and_then(|s| s.get("env"))
-            .and_then(|e| e.get("SPYC_MCP_SOCK"))
-            .and_then(toml::Value::as_str)
-    {
-        match decide_takeover(
-            old_sock_str,
-            &our_sock,
-            our_pid,
-            takeover_allowed,
-            "codex: ",
-        ) {
-            TakeoverDecision::Proceed => {}
-            TakeoverDecision::TookOver(old_pid) => took_over = Some(old_pid),
-            TakeoverDecision::Skipped(old_pid) => {
-                return Ok(McpConfigStatus::SkippedTakeover { old_pid });
-            }
-        }
-    }
 
     // Build a fresh `[mcp_servers.spyc]` table — used both as the
     // splice target and as the whole-file fallback when the existing
     // file is malformed or has the wrong shape (top-level not a
     // table, mcp_servers not a table, etc.).
     let build_entry = || {
-        let mut env_table = toml::Table::new();
-        env_table.insert(
-            "SPYC_MCP_SOCK".into(),
-            toml::Value::String(our_sock.to_string_lossy().into_owned()),
-        );
         let mut entry = toml::Table::new();
         entry.insert(
             "command".into(),
@@ -409,7 +249,12 @@ pub fn ensure_codex_config_toml(
             "args".into(),
             toml::Value::Array(vec![toml::Value::String("--mcp".into())]),
         );
-        entry.insert("env".into(), toml::Value::Table(env_table));
+        // SPYC-TRAP(mcp-entry-names-no-socket): pass the pane's own socket
+        // through; never pin one in `env`.
+        entry.insert(
+            "env_vars".into(),
+            toml::Value::Array(PANE_ENV.map(|v| toml::Value::String(v.into())).to_vec()),
+        );
         entry
     };
     let fresh = || {
@@ -478,34 +323,8 @@ pub fn ensure_codex_config_toml(
         std::fs::create_dir_all(parent)?;
     }
     crate::fs::write_atomic(&path, content.as_bytes())?;
-    mcp_log(&format!(
-        "wrote .codex/config.toml (sock={}, exe={})",
-        our_sock.display(),
-        exe.display()
-    ));
-
-    match took_over {
-        Some(old_pid) => Ok(McpConfigStatus::TookOver { old_pid }),
-        None => Ok(McpConfigStatus::Configured),
-    }
-}
-
-/// Detect a live spyc instance currently owning codex MCP for `dir`
-/// without modifying `.codex/config.toml`. Mirrors
-/// `detect_existing_spyc` for the codex side; used by startup so a
-/// single takeover prompt covers both claude and codex.
-pub fn detect_existing_spyc_codex(dir: &Path) -> Option<u32> {
-    let our_sock = socket_path()?;
-    let path = dir.join(".codex").join("config.toml");
-    let text = std::fs::read_to_string(&path).ok()?;
-    let parsed: toml::Value = toml::from_str(&text).ok()?;
-    let old_sock_str = parsed
-        .get("mcp_servers")?
-        .get("spyc")?
-        .get("env")?
-        .get("SPYC_MCP_SOCK")?
-        .as_str()?;
-    live_owner_pid(old_sock_str, &our_sock)
+    mcp_log(&format!("wrote .codex/config.toml (exe={})", exe.display()));
+    Ok(McpConfigStatus::Configured)
 }
 
 /// Remove just the "spyc" entry from `<dir>/.mcp.json`. Enterprise path:
@@ -526,12 +345,21 @@ pub enum ConfigCleanup {
     SkippedTracked,
 }
 
-/// True when `sock_str` is *our* PID-scoped MCP socket — i.e. this entry was
-/// written by this running spyc, not a different (possibly successor) instance.
-/// Our socket path embeds our pid, so this is a sound "did we write it" proxy.
+/// True when `sock_str` is *our* PID-scoped MCP socket. Our socket path embeds
+/// our pid, so this is a sound "we wrote it" proxy for an entry pinned to it.
 fn sock_is_ours(sock_str: &str) -> bool {
-    // No state dir → we never wrote a socket, so no entry can be ours.
+    // No state dir → we never had a socket, so no entry can be pinned to it.
     socket_path().is_some_and(|p| p.to_string_lossy() == sock_str)
+}
+
+/// Whether a `spyc` entry is free to remove once no live spyc claims the dir
+/// (`state::dir_owners`). `sock` is the socket the entry pins, `None` for the
+/// entry spyc writes now, which pins nothing. One pinned to another live spyc
+/// was written by an older version still running there, which removes its own.
+fn entry_is_unowned(sock: Option<&str>) -> bool {
+    sock.is_none_or(|s| {
+        sock_is_ours(s) || pid_from_sock_path(s).is_some_and(|pid| !crate::sysinfo::pid_alive(pid))
+    })
 }
 
 /// Shared core for `.mcp.json` spyc-entry removal. `should_remove` is given the
@@ -591,25 +419,21 @@ fn remove_spyc_from_mcp_json(
     ConfigCleanup::Cleaned
 }
 
-/// Teardown counterpart to [`ensure_mcp_json`]: remove the spyc entry *we*
-/// wrote from `<dir>/.mcp.json`, deleting the file if it's left empty. Leaves a
-/// successor instance's entry and any git-tracked file untouched.
+/// Teardown counterpart to [`ensure_mcp_json`], for the last spyc out of `dir`:
+/// remove the spyc entry from `<dir>/.mcp.json`, deleting the file if it's left
+/// empty. Leaves an entry an older live spyc pinned and any git-tracked file.
 pub fn cleanup_mcp_json(dir: &Path) -> ConfigCleanup {
-    remove_spyc_from_mcp_json(
-        &dir.join(".mcp.json"),
-        |sock| sock.is_some_and(sock_is_ours),
-        true,
-    )
+    remove_spyc_from_mcp_json(&dir.join(".mcp.json"), entry_is_unowned, true)
 }
 
-/// Teardown counterpart to [`ensure_codex_config_toml`]: remove the spyc entry
-/// *we* wrote from `<dir>/.codex/config.toml`, preserving any other codex
-/// config the user has. If that empties the file, delete it and then the
-/// `.codex/` directory too (only when it's now empty — `remove_dir` is a no-op
-/// otherwise, so a `.codex/` holding other files is left alone). Leaves a
-/// successor's entry and any git-tracked file untouched.
+/// Teardown counterpart to [`ensure_codex_config_toml`], for the last spyc out
+/// of `dir`: remove the spyc entry from `<dir>/.codex/config.toml`, preserving
+/// any other codex config the user has. If that empties the file, delete it and
+/// then the `.codex/` directory too (only when it's now empty — `remove_dir` is
+/// a no-op otherwise, so a `.codex/` holding other files is left alone). Leaves
+/// an entry an older live spyc pinned and any git-tracked file.
 pub fn cleanup_codex_config(dir: &Path) -> ConfigCleanup {
-    remove_spyc_from_codex_config(dir, |sock| sock.is_some_and(sock_is_ours), true)
+    remove_spyc_from_codex_config(dir, entry_is_unowned, true)
 }
 
 /// Shared core for `.codex/config.toml` spyc-entry removal — the codex
@@ -676,20 +500,19 @@ fn remove_spyc_from_codex_config(
     ConfigCleanup::Cleaned
 }
 
-/// Startup orphan sweep: reap dead-PID spyc MCP entries that instances killed
-/// without running teardown left behind in `dir`. Removes the `spyc` entry from
-/// `.mcp.json`, `.codex/config.toml` and `.agents/mcp_config.json` ONLY when its
-/// socket PID is dead and isn't `our_pid` — never a live owner's entry — reusing
-/// the conservative removal (preserve any other config/servers, delete an
-/// emptied file / `.codex` / `.agents` dir, skip a git-tracked file). Returns how
-/// many entries it cleaned.
+/// Startup orphan sweep: reap the spyc MCP entries that instances killed
+/// without running teardown left behind in `dir`. Does nothing while another
+/// live spyc claims the dir (`state::dir_owners`); otherwise removes the `spyc`
+/// entry from `.mcp.json`, `.codex/config.toml` and `.agents/mcp_config.json`
+/// when [`entry_is_unowned`], reusing the conservative removal (preserve any
+/// other config/servers, delete an emptied file / `.codex` / `.agents` dir, skip
+/// a git-tracked file). Returns how many entries it cleaned.
 pub fn sweep_orphan_spyc_configs(dir: &Path, our_pid: u32) -> usize {
-    // `move` captures `our_pid` (Copy) by value → the closure is itself `Copy`,
-    // so it can be handed to both removers by value (no borrow).
-    let is_dead_orphan = move |sock: Option<&str>| {
-        sock.and_then(pid_from_sock_path)
-            .is_some_and(|pid| pid != our_pid && !crate::sysinfo::pid_alive(pid))
-    };
+    use crate::state::dir_owners::{Shared, claimed_by_another};
+    if claimed_by_another(Shared::McpEntry, dir, our_pid) {
+        return 0;
+    }
+    let is_dead_orphan = entry_is_unowned;
     let mut cleaned = 0;
     if matches!(
         remove_spyc_from_mcp_json(&dir.join(".mcp.json"), is_dead_orphan, true),
@@ -723,33 +546,18 @@ fn agy_mcp_config_path(dir: &Path) -> PathBuf {
     dir.join(".agents/mcp_config.json")
 }
 
-/// Agy's counterpart to [`detect_existing_spyc`]: the live PID that owns the
-/// spyc entry in `<dir>/.agents/mcp_config.json`, or `None` when the entry is
-/// absent, ours, or stale.
-pub fn detect_existing_spyc_agy(dir: &Path) -> Option<u32> {
-    let text = std::fs::read_to_string(agy_mcp_config_path(dir)).ok()?;
-    let parsed: Value = serde_json::from_str(&text).ok()?;
-    let old_sock_str = parsed
-        .pointer("/mcpServers/spyc/env/SPYC_MCP_SOCK")
-        .and_then(|v| v.as_str())?;
-    live_owner_pid(old_sock_str, &socket_path()?)
-}
-
 /// Agy's counterpart to [`ensure_mcp_json`]. No enterprise-policy gate: that's a
 /// claude managed-settings mechanism with no agy equivalent.
-pub fn ensure_agy_mcp_config(
-    dir: &Path,
-    takeover_allowed: bool,
-) -> Result<McpConfigStatus, io::Error> {
-    ensure_spyc_in_mcp_json(&agy_mcp_config_path(dir), takeover_allowed)
+pub fn ensure_agy_mcp_config(dir: &Path) -> Result<McpConfigStatus, io::Error> {
+    ensure_spyc_in_mcp_json(&agy_mcp_config_path(dir))
 }
 
-/// Teardown counterpart to [`ensure_agy_mcp_config`]: drop the entry this
-/// instance wrote, then the `.agents/` dir if we left it empty. Leaves a
-/// successor's entry and any git-tracked file untouched.
+/// Teardown counterpart to [`ensure_agy_mcp_config`], for the last spyc out of
+/// `dir`: drop the entry, then the `.agents/` dir if that left it empty. Leaves
+/// an entry an older live spyc pinned and any git-tracked file.
 pub fn cleanup_agy_mcp_config(dir: &Path) -> ConfigCleanup {
     let path = agy_mcp_config_path(dir);
-    let result = remove_spyc_from_mcp_json(&path, |sock| sock.is_some_and(sock_is_ours), true);
+    let result = remove_spyc_from_mcp_json(&path, entry_is_unowned, true);
     if matches!(result, ConfigCleanup::Cleaned) && !path.exists() {
         // Only succeeds while empty — a user's own hooks.json / skills/ keeps it.
         let _ = std::fs::remove_dir(dir.join(".agents"));
@@ -758,43 +566,7 @@ pub fn cleanup_agy_mcp_config(dir: &Path) -> ConfigCleanup {
 }
 #[cfg(test)]
 mod tests {
-    use super::{TakeoverDecision, decide_takeover, live_owner_pid};
     use std::path::Path;
-
-    // The takeover/detection helpers' deterministic branches (no live
-    // socket): an entry pointing at our own socket, or at a dead one, must
-    // never trigger a takeover. The live-socket TookOver/Skipped branches
-    // share the same `UnixStream::connect` call and are exercised by the
-    // end-to-end takeover behaviour.
-
-    #[test]
-    fn decide_takeover_proceeds_on_own_socket() {
-        let sock = Path::new("/run/spyc/mcp-1.sock");
-        // old == our socket → no conflict, even with takeover disallowed.
-        assert!(matches!(
-            decide_takeover(&sock.to_string_lossy(), sock, 1, false, ""),
-            TakeoverDecision::Proceed
-        ));
-    }
-
-    #[test]
-    fn decide_takeover_proceeds_on_dead_socket() {
-        // A path that can't be connected to (no listener) is a stale
-        // registration → proceed, don't try to take it over.
-        let dead = "/nonexistent/spyc-mcp-does-not-exist.sock";
-        let our = Path::new("/run/spyc/mcp-2.sock");
-        assert!(matches!(
-            decide_takeover(dead, our, 2, true, ""),
-            TakeoverDecision::Proceed
-        ));
-    }
-
-    #[test]
-    fn live_owner_pid_none_for_own_or_dead_socket() {
-        let our = Path::new("/run/spyc/mcp-3.sock");
-        assert_eq!(live_owner_pid(&our.to_string_lossy(), our), None);
-        assert_eq!(live_owner_pid("/nonexistent/spyc-mcp-nope.sock", our), None);
-    }
 
     // --- teardown cleanup ---
     use super::{
@@ -802,11 +574,17 @@ mod tests {
         cleanup_mcp_json, ensure_agy_mcp_config, sweep_orphan_spyc_configs,
     };
 
+    /// The socket `cleanup_*` treats as this process's own. `socket_path` lives
+    /// under the state root, so call it inside [`with_our_state_root`].
     fn our_sock() -> String {
         crate::mcp::socket_path()
-            .expect("tests run with HOME set")
+            .expect("the test pinned a state root")
             .to_string_lossy()
             .into_owned()
+    }
+
+    fn with_our_state_root(tmp: &tempfile::TempDir, body: impl FnOnce()) {
+        crate::state::with_state_root(&tmp.path().join("state"), body);
     }
 
     /// A `.codex/config.toml` whose spyc entry points at `sock`, written into a
@@ -826,23 +604,25 @@ mod tests {
     #[test]
     fn cleanup_codex_removes_our_entry_and_empty_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let codex = tmp.path().join(".codex");
-        std::fs::create_dir_all(&codex).unwrap();
-        let cfg = codex.join("config.toml");
-        std::fs::write(
-            &cfg,
-            format!(
-                "[mcp_servers.spyc]\ncommand = \"spyc\"\nargs = [\"--mcp\"]\n[mcp_servers.spyc.env]\nSPYC_MCP_SOCK = \"{}\"\n",
-                our_sock()
-            ),
-        )
-        .unwrap();
-        assert!(matches!(
-            cleanup_codex_config(tmp.path()),
-            ConfigCleanup::Cleaned
-        ));
-        assert!(!cfg.exists(), "config.toml should be deleted");
-        assert!(!codex.exists(), "empty .codex dir should be removed");
+        with_our_state_root(&tmp, || {
+            let codex = tmp.path().join(".codex");
+            std::fs::create_dir_all(&codex).unwrap();
+            let cfg = codex.join("config.toml");
+            std::fs::write(
+                &cfg,
+                format!(
+                    "[mcp_servers.spyc]\ncommand = \"spyc\"\nargs = [\"--mcp\"]\n[mcp_servers.spyc.env]\nSPYC_MCP_SOCK = \"{}\"\n",
+                    our_sock()
+                ),
+            )
+            .unwrap();
+            assert!(matches!(
+                cleanup_codex_config(tmp.path()),
+                ConfigCleanup::Cleaned
+            ));
+            assert!(!cfg.exists(), "config.toml should be deleted");
+            assert!(!codex.exists(), "empty .codex dir should be removed");
+        });
     }
 
     #[test]
@@ -851,10 +631,11 @@ mod tests {
         let codex = tmp.path().join(".codex");
         std::fs::create_dir_all(&codex).unwrap();
         let cfg = codex.join("config.toml");
-        // Points at a *different* socket → not ours, leave it alone.
+        // Pinned to another live spyc (pid 1 always runs): an older version
+        // still running there, which removes its own.
         std::fs::write(
             &cfg,
-            "[mcp_servers.spyc.env]\nSPYC_MCP_SOCK = \"/run/other/mcp-999.sock\"\n",
+            "[mcp_servers.spyc.env]\nSPYC_MCP_SOCK = \"/run/other/mcp-1.sock\"\n",
         )
         .unwrap();
         assert!(matches!(
@@ -914,25 +695,27 @@ mod tests {
     #[test]
     fn cleanup_codex_preserves_other_config_keys() {
         let tmp = tempfile::tempdir().unwrap();
-        let codex = tmp.path().join(".codex");
-        std::fs::create_dir_all(&codex).unwrap();
-        let cfg = codex.join("config.toml");
-        std::fs::write(
-            &cfg,
-            format!(
-                "model = \"gpt-5\"\n[mcp_servers.spyc.env]\nSPYC_MCP_SOCK = \"{}\"\n",
-                our_sock()
-            ),
-        )
-        .unwrap();
-        assert!(matches!(
-            cleanup_codex_config(tmp.path()),
-            ConfigCleanup::Cleaned
-        ));
-        let after = std::fs::read_to_string(&cfg).expect("file kept (other config present)");
-        assert!(after.contains("model"), "user's other config preserved");
-        assert!(!after.contains("spyc"), "our entry removed");
-        assert!(codex.exists(), ".codex dir kept (config.toml still there)");
+        with_our_state_root(&tmp, || {
+            let codex = tmp.path().join(".codex");
+            std::fs::create_dir_all(&codex).unwrap();
+            let cfg = codex.join("config.toml");
+            std::fs::write(
+                &cfg,
+                format!(
+                    "model = \"gpt-5\"\n[mcp_servers.spyc.env]\nSPYC_MCP_SOCK = \"{}\"\n",
+                    our_sock()
+                ),
+            )
+            .unwrap();
+            assert!(matches!(
+                cleanup_codex_config(tmp.path()),
+                ConfigCleanup::Cleaned
+            ));
+            let after = std::fs::read_to_string(&cfg).expect("file kept (other config present)");
+            assert!(after.contains("model"), "user's other config preserved");
+            assert!(!after.contains("spyc"), "our entry removed");
+            assert!(codex.exists(), ".codex dir kept (config.toml still there)");
+        });
     }
 
     // --- agy `.agents/mcp_config.json` (same schema as `.mcp.json`) ---
@@ -953,7 +736,7 @@ mod tests {
     fn ensure_agy_writes_the_stdio_entry_and_creates_the_dir() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(matches!(
-            ensure_agy_mcp_config(tmp.path(), false),
+            ensure_agy_mcp_config(tmp.path()),
             Ok(McpConfigStatus::Configured)
         ));
         let path = tmp.path().join(".agents/mcp_config.json");
@@ -964,8 +747,8 @@ mod tests {
             "spyc registers itself as a stdio proxy"
         );
         assert!(
-            v.pointer("/mcpServers/spyc/env/SPYC_MCP_SOCK").is_some(),
-            "the socket env var is what pins the entry to THIS instance"
+            v.pointer("/mcpServers/spyc/env").is_none(),
+            "no socket pinned: the proxy uses the one its pane names"
         );
     }
 
@@ -977,12 +760,12 @@ mod tests {
         let path = agents.join("mcp_config.json");
         std::fs::write(&path, "{\"mcpServers\":{\"other\":{\"command\":\"x\"}}}").unwrap();
 
-        ensure_agy_mcp_config(tmp.path(), false).unwrap();
+        ensure_agy_mcp_config(tmp.path()).unwrap();
         let once = std::fs::read_to_string(&path).unwrap();
         assert!(once.contains("\"other\""), "a user's own server survives");
         assert!(once.contains("\"spyc\""));
 
-        ensure_agy_mcp_config(tmp.path(), false).unwrap();
+        ensure_agy_mcp_config(tmp.path()).unwrap();
         assert_eq!(
             once,
             std::fs::read_to_string(&path).unwrap(),
@@ -993,22 +776,24 @@ mod tests {
     #[test]
     fn cleanup_agy_removes_our_entry_and_the_emptied_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = write_agy_with_sock(tmp.path(), &our_sock());
-        assert!(matches!(
-            cleanup_agy_mcp_config(tmp.path()),
-            ConfigCleanup::Cleaned
-        ));
-        assert!(!path.exists(), "sole-spyc mcp_config.json deleted");
-        assert!(
-            !tmp.path().join(".agents").exists(),
-            "emptied .agents dir removed"
-        );
+        with_our_state_root(&tmp, || {
+            let path = write_agy_with_sock(tmp.path(), &our_sock());
+            assert!(matches!(
+                cleanup_agy_mcp_config(tmp.path()),
+                ConfigCleanup::Cleaned
+            ));
+            assert!(!path.exists(), "sole-spyc mcp_config.json deleted");
+            assert!(
+                !tmp.path().join(".agents").exists(),
+                "emptied .agents dir removed"
+            );
+        });
     }
 
     #[test]
     fn cleanup_agy_leaves_a_foreign_socket_and_keeps_a_shared_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = write_agy_with_sock(tmp.path(), "/run/other/mcp-999.sock");
+        let path = write_agy_with_sock(tmp.path(), "/run/other/mcp-1.sock");
         // A sibling customization file the user owns — teardown must not take
         // `.agents/` down with it.
         std::fs::write(tmp.path().join(".agents/hooks.json"), "{}").unwrap();
@@ -1055,20 +840,22 @@ mod tests {
     #[test]
     fn cleanup_mcp_json_removes_our_entry_when_sole() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join(".mcp.json");
-        std::fs::write(
-            &path,
-            format!(
-                "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}}}}}}",
-                our_sock()
-            ),
-        )
-        .unwrap();
-        assert!(matches!(
-            cleanup_mcp_json(tmp.path()),
-            ConfigCleanup::Cleaned
-        ));
-        assert!(!path.exists(), "sole-spyc .mcp.json should be deleted");
+        with_our_state_root(&tmp, || {
+            let path = tmp.path().join(".mcp.json");
+            std::fs::write(
+                &path,
+                format!(
+                    "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}}}}}}",
+                    our_sock()
+                ),
+            )
+            .unwrap();
+            assert!(matches!(
+                cleanup_mcp_json(tmp.path()),
+                ConfigCleanup::Cleaned
+            ));
+            assert!(!path.exists(), "sole-spyc .mcp.json should be deleted");
+        });
     }
 
     /// A git-TRACKED (committed) `.mcp.json` is left byte-for-byte intact:
@@ -1088,47 +875,51 @@ mod tests {
             assert!(ok, "git {args:?} failed");
         };
         let tmp = tempfile::tempdir().unwrap();
-        let repo = tmp.path();
-        run_git(repo, &["init", "-q", "--initial-branch=main"]);
-        let path = repo.join(".mcp.json");
-        let body = format!(
-            "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}}}}}}",
-            our_sock()
-        );
-        std::fs::write(&path, &body).unwrap();
-        run_git(repo, &["add", ".mcp.json"]);
-        run_git(repo, &["commit", "-q", "-m", "add mcp config"]);
+        with_our_state_root(&tmp, || {
+            let repo = tmp.path();
+            run_git(repo, &["init", "-q", "--initial-branch=main"]);
+            let path = repo.join(".mcp.json");
+            let body = format!(
+                "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}}}}}}",
+                our_sock()
+            );
+            std::fs::write(&path, &body).unwrap();
+            run_git(repo, &["add", ".mcp.json"]);
+            run_git(repo, &["commit", "-q", "-m", "add mcp config"]);
 
-        assert!(
-            matches!(cleanup_mcp_json(repo), ConfigCleanup::SkippedTracked),
-            "committed .mcp.json with our entry → SkippedTracked, not Cleaned"
-        );
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            body,
-            "the tracked config is left byte-for-byte intact"
-        );
+            assert!(
+                matches!(cleanup_mcp_json(repo), ConfigCleanup::SkippedTracked),
+                "committed .mcp.json with our entry → SkippedTracked, not Cleaned"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                body,
+                "the tracked config is left byte-for-byte intact"
+            );
+        });
     }
 
     #[test]
     fn cleanup_mcp_json_preserves_other_servers() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join(".mcp.json");
-        std::fs::write(
-            &path,
-            format!(
-                "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}},\"other\":{{\"command\":\"x\"}}}}}}",
-                our_sock()
-            ),
-        )
-        .unwrap();
-        assert!(matches!(
-            cleanup_mcp_json(tmp.path()),
-            ConfigCleanup::Cleaned
-        ));
-        let after = std::fs::read_to_string(&path).expect("file kept (other server present)");
-        assert!(after.contains("other"), "other server preserved");
-        assert!(!after.contains("spyc"), "our entry removed");
+        with_our_state_root(&tmp, || {
+            let path = tmp.path().join(".mcp.json");
+            std::fs::write(
+                &path,
+                format!(
+                    "{{\"mcpServers\":{{\"spyc\":{{\"env\":{{\"SPYC_MCP_SOCK\":\"{}\"}}}},\"other\":{{\"command\":\"x\"}}}}}}",
+                    our_sock()
+                ),
+            )
+            .unwrap();
+            assert!(matches!(
+                cleanup_mcp_json(tmp.path()),
+                ConfigCleanup::Cleaned
+            ));
+            let after = std::fs::read_to_string(&path).expect("file kept (other server present)");
+            assert!(after.contains("other"), "other server preserved");
+            assert!(!after.contains("spyc"), "our entry removed");
+        });
     }
 
     #[test]
@@ -1158,5 +949,45 @@ mod tests {
             cleanup_codex_config(tmp.path()),
             ConfigCleanup::NothingToDo
         ));
+    }
+
+    /// The entry spyc writes now pins nothing, and the last spyc out removes it.
+    #[test]
+    fn cleanup_removes_an_entry_that_pins_no_socket() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(".mcp.json");
+        std::fs::write(
+            &path,
+            "{\"mcpServers\":{\"spyc\":{\"command\":\"spyc\",\"args\":[\"--mcp\"]}}}",
+        )
+        .unwrap();
+        assert!(matches!(
+            cleanup_mcp_json(tmp.path()),
+            ConfigCleanup::Cleaned
+        ));
+        assert!(!path.exists());
+    }
+
+    /// A killed spyc's socket-free entry is reaped at the next launch there,
+    /// unless another live spyc still claims the dir.
+    #[test]
+    fn orphan_sweep_reaps_an_unclaimed_entry_and_spares_a_claimed_one() {
+        use crate::state::dir_owners::{Shared, claim};
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(&tmp.path().join("state"), || {
+            let dir = tmp.path().join("proj");
+            std::fs::create_dir(&dir).unwrap();
+            let path = dir.join(".mcp.json");
+            let entry = "{\"mcpServers\":{\"spyc\":{\"command\":\"spyc\",\"args\":[\"--mcp\"]}}}";
+
+            std::fs::write(&path, entry).unwrap();
+            claim(Shared::McpEntry, &dir, 1);
+            assert_eq!(sweep_orphan_spyc_configs(&dir, std::process::id()), 0);
+            assert!(path.exists(), "a live spyc (pid 1) still relies on it");
+
+            let _ = crate::state::dir_owners::release(Shared::McpEntry, &dir, 1);
+            assert_eq!(sweep_orphan_spyc_configs(&dir, std::process::id()), 1);
+            assert!(!path.exists());
+        });
     }
 }

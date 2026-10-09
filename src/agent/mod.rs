@@ -12,9 +12,16 @@
 //! meet at [`profile_for`] (kind → profile, for restored tabs) and
 //! [`detect`] (command → profile, for live panes).
 
+pub mod chrome;
+pub mod codex_approval;
+pub mod codex_command;
+pub mod codex_records;
+pub mod codex_recovery;
 pub mod detect_rules;
 pub mod resume;
+pub mod status_hook;
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -34,12 +41,26 @@ pub enum ResumeAction {
     /// the banner settles (the `--resume` CLI flag has a mount-crash
     /// regression). The event loop arms `pending_resume_send`.
     ClaudeStdin { session_id: String },
+    /// Refuse an ambiguous reconstruction without launching a different command.
+    Refuse { reason: String },
 }
 
 /// Reconstructed restore command for a saved tab.
 pub struct RestorePlan {
     pub command: String,
     pub resume: ResumeAction,
+}
+
+/// What `^a F` makes of a tab running this agent.
+pub enum ForkMode {
+    /// Branch the tab's conversation: `(tab command, session id)` → the command
+    /// that opens a new conversation starting from that one's history.
+    Branch(fn(&str, &str) -> anyhow::Result<String>),
+    /// Nothing to branch, so a fork is the same command again.
+    Duplicate,
+    /// The agent can resume a conversation but not branch it. Opening it twice
+    /// would be two clients of one session, which is not a fork.
+    Unsupported,
 }
 
 /// How an agent contributes to the on-quit exit-summary line.
@@ -107,10 +128,12 @@ pub struct TranscriptImageSpec {
 /// How spyc installs an agent's activity-status lifecycle hooks (the ones that
 /// call `spyc --report-status <state>` so the tab dot tracks the agent's turn).
 /// Returned by [`AgentProfile::status_hooks`] for agents spyc can auto-wire
-/// (claude/codex/agy); `None` for the rest. The two `fn` pointers are the
-/// format-specific writer/cleaner in [`crate::mcp`] — JSON `settings.json` for
+/// (claude/codex/agy); `None` for the rest. Alongside the source resolver, the
+/// `fn` pair supplies the format-specific writer/cleaner in [`crate::mcp`] — JSON `settings.json` for
 /// claude, TOML `config.toml` for codex, JSON `.agents/hooks.json` for agy.
 pub struct StatusHookSupport {
+    /// Resolve the hook directory the agent actually consumes from this cwd.
+    pub config_dir: fn(&Path) -> std::path::PathBuf,
     /// Write/refresh our hooks into the project dir; returns whether our hooks
     /// are present in a file we own (so teardown tracks the dir for cleanup).
     pub ensure: fn(&Path) -> bool,
@@ -129,17 +152,21 @@ pub struct StatusHookSupport {
 impl StatusHookSupport {
     /// Are spyc's status hooks currently present in `dir`'s agent config?
     ///
-    /// Keys on the same `--report-status` marker `cleanup` uses to identify its
-    /// own entries, so "installed" and "removable" can never disagree. Format-
-    /// agnostic on purpose: every agent's hooks embed that token, so one
-    /// substring check covers claude's JSON, codex's TOML and agy's named set
-    /// without three parsers. Deliberately blind to *which* spyc wrote them —
-    /// the reporter targets the pane's own socket, so any instance's hooks work
+    /// Marker presence does not confer cleanup authority or establish trust.
+    /// Format-agnostic on purpose: every agent's hooks embed that token, so one
+    /// substring check covers claude's JSON, codex's TOML/legacy JSON and
+    /// agy's named set without separate parsers. Deliberately blind to *which*
+    /// spyc wrote them — the reporter targets the pane's own socket, so any instance's hooks work
     /// for any instance's pane.
     #[must_use]
     pub fn installed(&self, dir: &Path) -> bool {
-        std::fs::read_to_string(dir.join(self.config_label))
-            .is_ok_and(|text| text.contains("--report-status"))
+        let dir = (self.config_dir)(dir);
+        let present = |label| {
+            std::fs::read_to_string(dir.join(label))
+                .is_ok_and(|text| text.contains("--report-status"))
+        };
+        present(self.config_label)
+            || (self.config_label == ".codex/config.toml" && present(".codex/hooks.json"))
     }
 }
 
@@ -195,6 +222,11 @@ pub trait AgentProfile: Sync {
         }
     }
 
+    /// FORK: how `^a F` branches this agent's conversation. Default: it can't.
+    fn fork_mode(&self) -> ForkMode {
+        ForkMode::Unsupported
+    }
+
     /// Status-bar short id for the active pane. Default: none.
     fn resolve_short_id(&self, _cwd: &Path, _spawn_epoch_secs: u64) -> Option<String> {
         None
@@ -244,14 +276,23 @@ pub trait AgentProfile: Sync {
     }
 
     /// P1-2 scrape fallback: priority-ordered pane-text detection rules for an
-    /// agent that can't (or doesn't yet) self-report — consulted only while no
-    /// live semantic report is authoritative for the tab (`report_status`
-    /// always wins; see `app::agent_status::effective_activity`). Default:
+    /// state the agent cannot self-report. Codex's verified command approval
+    /// temporarily overrides non-blocked reports; semantic blocks retain
+    /// precedence (see `app::agent_status::effective_activity`). Default:
     /// empty — no fallback beyond P0 output timing, which is correct for any
     /// agent whose prompt text isn't verified here (guessing at UI text spyc
     /// hasn't observed would be worse than no fallback).
     fn detection_rules(&self) -> &'static [DetectionRule] {
         &[]
+    }
+
+    /// How many of `lines` (a pane's recent text, oldest first) are what the
+    /// agent printed, the rest being its own chrome pinned below them: input
+    /// box, status line. `gf` and `J` scan only the printed part, or claude's
+    /// status line (`1 CLAUDE.md | 1 MCPs`) outranks every path above it.
+    /// Default: all of them.
+    fn output_len(&self, lines: &[String]) -> usize {
+        lines.len()
     }
 
     /// Which keypresses scroll this agent's own view, for an agent that does
@@ -379,31 +420,43 @@ impl AgentProfile for ClaudeProfile {
     ) -> (Option<String>, Option<String>) {
         resume::resolve_claude_resume_target(pane, cwd, spawn_epoch_secs, claimed)
     }
-    fn validate_live_session_id(&self, cwd: &Path, id: &str) -> Option<(String, Option<String>)> {
-        if crate::state::sessions::claude_jsonl_exists(cwd, id) {
-            Some((
-                id.to_string(),
-                crate::state::sessions::find_claude_session_name(id),
-            ))
-        } else {
-            None
-        }
+    /// Claude's pin is taken as-is. The hook names the conversation this tab
+    /// runs from claude's startup, but the transcript appears only with the
+    /// first message: requiring it here sent an unwritten pin to the resolver,
+    /// which saved another tab's conversation (#584). Restore checks for the
+    /// transcript instead, before typing `/resume`.
+    fn validate_live_session_id(&self, _cwd: &Path, id: &str) -> Option<(String, Option<String>)> {
+        Some((
+            id.to_string(),
+            crate::state::sessions::find_claude_session_name(id),
+        ))
     }
     fn command_without_resume(&self, cmd: &str) -> String {
         resume::command_without_resume(cmd)
     }
-    fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, _cwd: &Path) -> RestorePlan {
+    fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, cwd: &Path) -> RestorePlan {
         // Claude always spawns fresh; the `/resume <sid>` stdin dance is
         // armed by the event loop when a session id is present.
         RestorePlan {
             command: resume::command_without_resume(cmd),
             resume: match sid {
+                // Saved before its first message, so there is nothing to
+                // resume. A name can't be checked; claude resolves it.
+                Some(s)
+                    if crate::state::sessions::is_uuid(s)
+                        && !crate::state::sessions::claude_jsonl_exists(cwd, s) =>
+                {
+                    ResumeAction::None
+                }
                 Some(s) => ResumeAction::ClaudeStdin {
                     session_id: s.to_string(),
                 },
                 None => ResumeAction::None,
             },
         }
+    }
+    fn fork_mode(&self) -> ForkMode {
+        ForkMode::Branch(|cmd, sid| Ok(resume::claude_fork_command(cmd, sid)))
     }
     fn resolve_short_id(&self, cwd: &Path, spawn_epoch_secs: u64) -> Option<String> {
         closest_short_id(
@@ -445,16 +498,39 @@ impl AgentProfile for ClaudeProfile {
     }
     fn status_hooks(&self) -> Option<StatusHookSupport> {
         Some(StatusHookSupport {
+            config_dir: Path::to_path_buf,
             ensure: crate::mcp::ensure_claude_status_hooks,
             cleanup: crate::mcp::cleanup_claude_status_hooks,
             config_label: ".claude/settings.json",
             live_reload: true,
         })
     }
+    fn output_len(&self, lines: &[String]) -> usize {
+        chrome::claude_output_len(lines)
+    }
+}
+
+/// `cmd` with `--no-daemon` after its program, so codex runs this session
+/// itself instead of on its shared background server. That server spawns every
+/// session's hooks and MCP servers with the environment of whichever codex
+/// started it, which never has this pane's `SPYC_MCP_SOCK` or `SPYC_PANE_ID`.
+/// Unchanged when it already says so.
+pub fn codex_without_daemon(cmd: &str) -> Cow<'_, str> {
+    if cmd.split_whitespace().any(|t| t == "--no-daemon") {
+        return Cow::Borrowed(cmd);
+    }
+    let start = cmd.len() - cmd.trim_start().len();
+    let end = cmd[start..]
+        .find(char::is_whitespace)
+        .map_or(cmd.len(), |i| start + i);
+    Cow::Owned(format!("{} --no-daemon{}", &cmd[..end], &cmd[end..]))
 }
 
 pub struct CodexProfile;
 impl AgentProfile for CodexProfile {
+    fn detection_rules(&self) -> &'static [DetectionRule] {
+        codex_approval::RULES
+    }
     fn kind(&self) -> AgentKind {
         AgentKind::Codex
     }
@@ -578,8 +654,8 @@ impl AgentProfile for CodexProfile {
     /// claim already was the observation. If that file has since gone,
     /// `codex resume <uuid>` fails where the user can see it, which beats
     /// `--last` silently attaching to whichever rollout in the cwd was written
-    /// last (the #230 shape). Claude validates instead, because its id arrives
-    /// from a hook payload that can name a conversation already gone.
+    /// last (the #230 shape). Claude's pin is taken as-is too, and its restore
+    /// skips a conversation with no transcript.
     fn validate_live_session_id(&self, _cwd: &Path, id: &str) -> Option<(String, Option<String>)> {
         Some((id.to_string(), None))
     }
@@ -587,15 +663,21 @@ impl AgentProfile for CodexProfile {
         resume::command_without_codex_resume(cmd)
     }
     fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, _cwd: &Path) -> RestorePlan {
-        let base = resume::command_without_codex_resume(cmd);
-        let command = match sid {
-            Some(s) => format!("{base} resume {s}"),
-            None => format!("{base} resume --last"),
-        };
-        RestorePlan {
-            command,
-            resume: ResumeAction::None,
+        match codex_command::restore(cmd, sid) {
+            Ok(command) => RestorePlan {
+                command,
+                resume: ResumeAction::None,
+            },
+            Err(error) => RestorePlan {
+                command: cmd.to_string(),
+                resume: ResumeAction::Refuse {
+                    reason: format!("{error:#}"),
+                },
+            },
         }
+    }
+    fn fork_mode(&self) -> ForkMode {
+        ForkMode::Branch(resume::codex_fork_command)
     }
     fn exit_summary_mode(&self) -> ExitSummaryMode {
         ExitSummaryMode::Count
@@ -610,10 +692,10 @@ impl AgentProfile for CodexProfile {
         })
     }
     fn status_hooks(&self) -> Option<StatusHookSupport> {
-        // Codex's event hooks live in `.codex/config.toml` (the same file as the
-        // MCP entry) and are read once at startup → `live_reload: false`, so the
-        // app-layer install runs pre-spawn for an already-consented repo.
+        // Codex loads hooks from the corresponding root-checkout directory;
+        // ordinary config and the MCP entry remain worktree-local.
         Some(StatusHookSupport {
+            config_dir: crate::git::discovery::root_checkout_dir,
             ensure: crate::mcp::ensure_codex_status_hooks,
             cleanup: crate::mcp::cleanup_codex_status_hooks,
             config_label: ".codex/config.toml",
@@ -734,6 +816,7 @@ impl AgentProfile for AgyProfile {
         // agy's built-in termination checks, so the hook was installed and never
         // ran. On an older agy that half degrades to output timing.
         Some(StatusHookSupport {
+            config_dir: Path::to_path_buf,
             ensure: crate::mcp::ensure_agy_status_hooks,
             cleanup: crate::mcp::cleanup_agy_status_hooks,
             config_label: ".agents/hooks.json",
@@ -835,6 +918,9 @@ impl AgentProfile for OtherProfile {
     fn matches_command(&self, _cmd: &str) -> bool {
         false
     }
+    fn fork_mode(&self) -> ForkMode {
+        ForkMode::Duplicate
+    }
 }
 
 // ── Registry ──────────────────────────────────────────────────────────
@@ -872,6 +958,25 @@ pub fn detect(cmd: &str) -> &'static dyn AgentProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The flag goes straight after the program, which codex parses before a
+    /// subcommand as readily as after it, and the rest is kept verbatim.
+    #[test]
+    fn codex_without_daemon_inserts_after_the_program() {
+        assert_eq!(codex_without_daemon("codex"), "codex --no-daemon");
+        assert_eq!(
+            codex_without_daemon("/opt/bin/codex resume  abc"),
+            "/opt/bin/codex --no-daemon resume  abc"
+        );
+        assert_eq!(
+            codex_without_daemon("  codex -m o3"),
+            "  codex --no-daemon -m o3"
+        );
+        assert_eq!(
+            codex_without_daemon("codex --no-daemon x"),
+            "codex --no-daemon x"
+        );
+    }
 
     /// agy's tool-permission prompt must scrape as `Blocked` — the one way agy
     /// waits on the user that fires no hook.
@@ -1121,6 +1226,42 @@ mod tests {
         assert!(matches!(fresh.resume, ResumeAction::None));
     }
 
+    /// A saved claude conversation id names a transcript claude may never have
+    /// written: the tab was saved before its first message. Typing `/resume`
+    /// for it gets "No conversation found"; there is nothing to resume, so
+    /// claude starts fresh.
+    #[test]
+    fn restoring_a_claude_conversation_that_was_never_written_starts_fresh() {
+        const SID: &str = "11111111-1111-4111-8111-111111111111";
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::sessions::with_claude_dir(tmp.path(), || {
+            let plan = ClaudeProfile.reconstruct_restore("claude", Some(SID), Path::new("/tmp/p"));
+            assert_eq!(plan.command, "claude");
+            assert!(matches!(plan.resume, ResumeAction::None));
+        });
+    }
+
+    /// The other side: a written conversation is resumed.
+    #[test]
+    fn restoring_a_written_claude_conversation_resumes_it() {
+        const SID: &str = "11111111-1111-4111-8111-111111111111";
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = Path::new("/tmp/p");
+        let project = tmp
+            .path()
+            .join("projects")
+            .join(crate::state::sessions::project_slug(cwd));
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join(format!("{SID}.jsonl")), "{}\n").unwrap();
+        crate::state::sessions::with_claude_dir(tmp.path(), || {
+            let plan = ClaudeProfile.reconstruct_restore("claude", Some(SID), cwd);
+            assert!(matches!(
+                plan.resume,
+                ResumeAction::ClaudeStdin { session_id } if session_id == SID
+            ));
+        });
+    }
+
     /// Codex bakes resume into the command: `resume <UUID>` with an id,
     /// `resume --last` without one.
     #[test]
@@ -1133,6 +1274,16 @@ mod tests {
         // A stale baked `resume <old>` is stripped before re-baking.
         let none = CodexProfile.reconstruct_restore("codex resume old-uuid", None, cwd);
         assert_eq!(none.command, "codex resume --last");
+    }
+
+    #[test]
+    fn codex_restore_preserves_options_after_the_old_selector() {
+        let command = r#"codex -m old resume OLD --profile team --sandbox read-only -a never -c 'model="new model"' --add-dir "$HOME/shared dir""#;
+        let saved = CodexProfile.command_without_resume(command);
+        let expected = r#"codex -m old --profile team --sandbox read-only -a never -c 'model="new model"' --add-dir "$HOME/shared dir""#;
+        assert_eq!(saved, expected);
+        let restored = CodexProfile.reconstruct_restore(&saved, Some("CURRENT"), Path::new("/tmp"));
+        assert_eq!(restored.command, format!("{expected} resume CURRENT"));
     }
 
     /// Agy: `--conversation <sid>` with an id, `--continue` without.
@@ -1159,6 +1310,88 @@ mod tests {
         let plan = OtherProfile.reconstruct_restore("bash -lc 'make'", Some("ignored"), cwd);
         assert_eq!(plan.command, "bash -lc 'make'");
         assert!(matches!(plan.resume, ResumeAction::None));
+    }
+
+    // ── fork_mode per agent (`^a F`) ───────────────────────────────────
+
+    fn branch(profile: &dyn AgentProfile, cmd: &str, sid: &str) -> Option<String> {
+        match profile.fork_mode() {
+            ForkMode::Branch(fork) => fork(cmd, sid).ok(),
+            ForkMode::Duplicate | ForkMode::Unsupported => None,
+        }
+    }
+
+    /// Claude and codex each branch into a NEW session id that starts from the
+    /// old one's history, so a fork never leaves two tabs on one conversation.
+    #[test]
+    fn claude_and_codex_fork_into_a_new_conversation() {
+        assert_eq!(
+            branch(&ClaudeProfile, "claude --model opus", "SID").as_deref(),
+            Some("claude --model opus --resume SID --fork-session")
+        );
+        // A tab that was itself resumed or forked branches from the id it is
+        // running now, not the one on its command line.
+        assert_eq!(
+            branch(&ClaudeProfile, "claude --resume OLD --fork-session", "SID").as_deref(),
+            Some("claude --resume SID --fork-session")
+        );
+        assert_eq!(
+            branch(&CodexProfile, "codex --model o3", "SID").as_deref(),
+            Some("codex --model o3 fork SID")
+        );
+        assert_eq!(
+            branch(&CodexProfile, "codex resume OLD", "SID").as_deref(),
+            Some("codex fork SID")
+        );
+        assert_eq!(
+            branch(&CodexProfile, "codex fork OLD", "SID").as_deref(),
+            Some("codex fork SID")
+        );
+    }
+
+    /// agy and zot can resume a conversation but not branch one, and opening it
+    /// twice would be two clients of one session, not a fork. A non-agent tab
+    /// has no conversation, so its fork is a copy.
+    #[test]
+    fn agents_without_a_branch_refuse_and_other_tabs_duplicate() {
+        assert!(matches!(AgyProfile.fork_mode(), ForkMode::Unsupported));
+        assert!(matches!(ZotProfile.fork_mode(), ForkMode::Unsupported));
+        assert!(matches!(OtherProfile.fork_mode(), ForkMode::Duplicate));
+    }
+
+    /// A forked tab saves as its own conversation: the fork flags are stripped,
+    /// so restore resumes the fork's id instead of branching from the parent
+    /// again.
+    #[test]
+    fn a_forked_tab_restores_its_own_conversation() {
+        let cwd = Path::new("/tmp");
+        assert_eq!(
+            ClaudeProfile
+                .command_without_resume("claude --model opus --resume PARENT --fork-session"),
+            "claude --model opus"
+        );
+        let saved = CodexProfile.command_without_resume("codex --model o3 fork PARENT");
+        assert_eq!(saved, "codex --model o3");
+        assert_eq!(
+            CodexProfile
+                .reconstruct_restore(&saved, Some("FORK"), cwd)
+                .command,
+            "codex --model o3 resume FORK"
+        );
+    }
+
+    /// A codex fork's command names its PARENT's uuid. Launch pinning must not
+    /// take it for the tab's own session, or `^a v` and the next save would both
+    /// point the fork at the conversation it branched from.
+    #[test]
+    fn a_codex_fork_is_not_pinned_to_its_parent() {
+        let parent = "019e8b21-9e7c-7553-a118-d1cdada725fd";
+        let cmd = branch(&CodexProfile, "codex", parent).expect("codex branches");
+        assert_eq!(
+            crate::state::codex_transcript::resume_uuid_from_command(&cmd),
+            None
+        );
+        assert!(!crate::state::codex_transcript::is_resume_without_id(&cmd));
     }
 
     // ── kind → profile dispatch (restore-time) ────────────────────────

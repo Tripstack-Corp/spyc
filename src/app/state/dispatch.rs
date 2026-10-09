@@ -272,6 +272,15 @@ impl AppState {
                         }
                         None => self.flash_error(format!("invalid sort mode: {value}")),
                     },
+                    "flags" => match crate::ui::status_flags::FlagsMode::parse(value) {
+                        Some(mode) => {
+                            self.status_flags_override = Some(mode);
+                            self.flash_info(format!("flags={mode}"));
+                        }
+                        None => self.flash_error(format!(
+                            "invalid flags mode: {value} (auto, short or full)"
+                        )),
+                    },
                     _ => self.flash_error(format!("unknown setting: {key}")),
                 }
             } else {
@@ -381,10 +390,11 @@ impl AppState {
                 PromptResult::Handled
             }
             PromptKind::RemoveConfirm
-            | PromptKind::ClaudeCrashRecover { .. }
             | PromptKind::HookConsent { .. }
             | PromptKind::SkillUpdate { .. }
+            | PromptKind::ProjectTabsConsent { .. }
             | PromptKind::ClosePane
+            | PromptKind::PipeConfirm { .. }
             | PromptKind::RestartPane
             | PromptKind::LuaRunaway
             | PromptKind::ArchiveMountConfirm { .. }

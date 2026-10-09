@@ -27,7 +27,7 @@ bound too, and on by default — see [Mouse](#mouse).
 | `u` / `-` | Climb to parent |
 | `/` | Search current listing (incremental; glob-aware, `^`/`$` anchors) |
 | `~` / `Home` | Jump to home (`H` is the harpoon prefix) |
-| `J` | Jump to any path |
+| `J` | Jump to any path; with nothing typed, `Enter` takes the newest path the pane printed |
 | `F` | Project-wide fuzzy filename finder (gitignore-aware) |
 | `:grep <pat>` | Project-wide content search (embedded ripgrep matcher) |
 
@@ -126,8 +126,9 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a ^a` | Jump to last-active tab |
 | `^a r` | Rename tab |
 | `^a R` | Restart tab in place, keeping its number (confirms first while its child is still running) |
+| `^a F` | Fork the tab: claude and codex branch its conversation into a new tab, and a shell tab opens a copy at its cwd (agy and zot can't branch) |
 | `^z` | Suspend / resume the pane's child (💤); a shell tab's `^z` forwards as usual |
-| `^a s` | Send selection paths to pane |
+| `^a s` | Send selection paths to pane (relative to the pane's own cwd, else absolute) |
 | `^a P` | Pipe file contents to pane |
 | `^a i` | Pipe inventory file contents to pane |
 | `^a z` | Zoom the active region — list or bottom pane (fullscreen toggle) |
@@ -316,11 +317,13 @@ to open them in the current listing dir.
 | `^L` | Redraw |
 | `^R` | Reload config (also auto-reloads on save) |
 | `Esc` (×2) | Cancel a prompt (`Esc`→Normal→`Esc`→cancel) |
-| `:activity` | Toggle the activity monitor; `:activity dump` → per-pane why-status report |
+| `:activity` | Toggle the activity monitor; `:activity transparent\|solid` → overlay style (transparent by default); `:activity dump` → per-pane why-status report, plus each MCP connection and the tab it's bound to |
 | `:archive` | Mounted archives: `info` / `list` / `write` / `discard` / `unmount` / `cancel` (mounting is `Enter` on the archive) |
 | `:hooks` | Agent status-hook consent (`on` / `on!` / `off`) |
+| `:startup-tabs` | Where launch's pane tabs come from; `forget` re-asks about a project `.spycrc.toml`'s list |
 | `:skill` | Agent skill: `status` / `update` / `remove` / `ask` |
 | `:lua` | Lua engine: `status` / `on` / `off` / `reload` |
+| `:prompt` | Type a `[prompts]` template into the active pane tab (`:prompt <name>`); bare `:prompt` lists them |
 | `:notify test` | Fire every notification channel to verify setup |
 | `:date` | Show date/time (UTC) |
 

@@ -2,7 +2,7 @@
 source: src/app/render/mod.rs
 expression: "render_to_string(&mut app, 80, 24)"
 ---
- 🌶️     [picks:0 inv:0 m1:on m2:on hidd│┌  preview.md   (30 lines)  ───────────┐
+ 🌶️   /projects/demo                   │┌  preview.md   (30 lines)  ───────────┐
   README.md                            ││ 1 preview line 0                     │
   Cargo.toml                           ││ 2 preview line 1                     │
   src                                  ││ 3 preview line 2                     │

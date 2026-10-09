@@ -259,27 +259,24 @@ pub struct ViewState {
     pub(super) scroll_pending_g: bool,
     // Module-private (type `PagerReturn` is module-private).
     pub(super) pending_pager_return: Option<PagerReturn>,
-    /// Path to the `.spyc-context.json` file (written each loop for MCP).
+    /// This process's MCP context file (`context::process_context_path`).
     pub(super) context_path: PathBuf,
     /// Last context snapshot written to disk — skip the write when the new
     /// snapshot compares equal (avoids serializing just to diff).
     pub(super) last_context: Option<crate::context::SpycContext>,
-    /// `.spyc-context.json` is stale and should be rewritten (debounced +
+    /// The context file is stale and should be rewritten (debounced +
     /// typing-burst-guarded).
     pub(super) context_dirty: bool,
     /// Whether the MCP socket server is running.
     pub(super) mcp_running: bool,
-    /// Whether this instance may take over the MCP socket from another spyc
-    /// when it writes a client config. Captured once at startup (the
-    /// `App::new` arg) and read at agent-launch time, when we actually write
-    /// `.mcp.json` / `.codex/config.toml`.
-    pub(super) mcp_takeover_allowed: bool,
     /// When a focus-switch chord just completed: (when, completing key) —
     /// the next dispatch drops a Press/Repeat of that key within ~60 ms.
     pub(super) focus_chord_completed: Option<(std::time::Instant, KeyCode)>,
     /// Activity monitor (`A`): the overlay visibility toggle. The counters
     /// themselves live in [`activity::ActivityMonitor`] (`self.view.activity`).
     pub(super) show_activity: bool,
+    /// How the activity overlay paints (`:activity transparent|solid`).
+    pub(super) activity_style: activity::HudStyle,
     /// Activity-monitor counters: live/snapshot double-buffer + peaks + proc
     /// stats. See [`activity::ActivityMonitor`].
     pub(super) activity: activity::ActivityMonitor,
@@ -472,9 +469,9 @@ impl ViewState {
             mcp_running,
             // Set from the `App::new` arg in bootstrap; the test harness never
             // writes client configs, so the default is fine there.
-            mcp_takeover_allowed: false,
             focus_chord_completed: None,
             show_activity: false,
+            activity_style: activity::HudStyle::default(),
             activity: activity::ActivityMonitor::new(std::time::Instant::now()),
             pane_send_at: None,
             started_at: std::time::Instant::now(),

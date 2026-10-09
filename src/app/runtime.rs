@@ -103,6 +103,8 @@ pub(super) struct Runtime {
     /// `ensure_agent_mcp_config`; `cleanup_written_mcp_configs` removes our
     /// entry from each on teardown so a dead socket isn't left referenced.
     pub(super) mcp_config_dirs: Vec<PathBuf>,
+    /// Per-agent reporter leases, separate from MCP entry cleanup authority.
+    pub(super) status_hook_claims: Vec<crate::state::dir_owners::hooks::HookClaim>,
     /// Bottom pane tabs (each owns a `PtyHost`).
     pub(super) pane_tabs: Option<PaneTabs>,
     /// Top-area overlay subprocess (`V`/`D`/`;`) — a `PtyHost`. The LEFT
@@ -200,6 +202,13 @@ pub(super) struct Runtime {
     /// click is cheap to repeat, so reads can overlap and must not clobber.
     pub(super) clipboard_paste_results:
         std::sync::Arc<std::sync::Mutex<Vec<std::io::Result<String>>>>,
+    /// Landing slot for `J`'s off-thread default (`spawn_jump_default`).
+    /// Drained by `apply_jump_defaults`, which keeps only the answer to
+    /// `jump_default_seq`.
+    pub(super) jump_default_results:
+        std::sync::Arc<std::sync::Mutex<Vec<super::jump_default::JumpDefaultAnswer>>>,
+    /// The newest `J` default request; an answer to any other is stale.
+    pub(super) jump_default_seq: u64,
     /// Landing slot for off-thread clipboard *writes*. One entry per dispatched
     /// write: `None` succeeded, `Some(msg)` is what to flash.
     ///

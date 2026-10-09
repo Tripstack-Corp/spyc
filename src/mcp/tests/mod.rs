@@ -14,9 +14,12 @@ use crate::mcp_cmd::McpCommand;
 use super::protocol::{dispatch, read_lsp_message, send_message};
 use super::server::{
     collect_project_pids_in, discover_live_socket, handle_socket_connection, pid_from_sock_path,
-    read_context_pids_in_dir,
 };
 use super::*;
+
+mod attribution;
+mod coexistence;
+mod status_events;
 
 fn make_request(id: u64, method: &str, params: Value) -> String {
     let body = json!({
@@ -48,6 +51,12 @@ fn initialize_response() {
     assert_eq!(resp["result"]["serverInfo"]["name"], "spyc");
     // The `instructions` field steers a launched agent toward spyc's tools.
     let instructions = resp["result"]["instructions"].as_str().unwrap();
+    // Clients can repeat this field on every tool; workflows belong in the skill.
+    assert!(
+        instructions.len() <= 800,
+        "shared instructions exceed the 800-byte context budget: {} bytes",
+        instructions.len()
+    );
     assert!(
         instructions.contains("search_content"),
         "names the search tool"
@@ -86,6 +95,7 @@ fn resources_list_response() {
 fn resources_read_with_context_file() {
     let tmp = tempfile::tempdir().unwrap();
     let ctx = context::SpycContext {
+        root: tmp.path().to_path_buf(),
         cwd: PathBuf::from("/home/user/project"),
         cursor_file: Some("main.rs".into()),
         picks: vec![],
@@ -162,6 +172,7 @@ fn tools_list_response() {
 fn tools_call_returns_context() {
     let tmp = tempfile::tempdir().unwrap();
     let ctx = context::SpycContext {
+        root: tmp.path().to_path_buf(),
         cwd: PathBuf::from("/projects/spyc"),
         cursor_file: Some("Cargo.toml".into()),
         picks: vec![PathBuf::from("src/main.rs")],
@@ -209,7 +220,7 @@ fn tools_call_forwards_tool_called_telemetry() {
     .unwrap();
     let req = rx.try_recv().expect("a ToolCalled was forwarded");
     match req.command {
-        McpCommand::ToolCalled { name } => assert_eq!(name, "get_spyc_context"),
+        McpCommand::ToolCalled { name, .. } => assert_eq!(name, "get_spyc_context"),
         other => panic!("expected ToolCalled, got {other:?}"),
     }
 }
@@ -256,6 +267,7 @@ fn search_paths_tool_walks_root() {
     std::fs::write(root.join("beta.rs"), "").unwrap();
     std::fs::write(root.join("gamma.txt"), "").unwrap();
     let ctx = context::SpycContext {
+        root: tmp.path().to_path_buf(),
         cwd: root.to_path_buf(),
         cursor_file: None,
         picks: vec![],
@@ -310,6 +322,7 @@ fn search_root_overrides_project_home() {
     std::fs::write(home.join("in_home.rs"), "").unwrap();
     std::fs::write(worktree.join("in_worktree.rs"), "").unwrap();
     let ctx = context::SpycContext {
+        root: tmp.path().to_path_buf(),
         cwd: worktree.clone(),
         cursor_file: None,
         picks: vec![],
@@ -370,6 +383,7 @@ fn git_diff_tool_honors_explicit_root_arg() {
     std::fs::write(repo.join("f.txt"), "v2\n").unwrap();
 
     let ctx = context::SpycContext {
+        root: tmp.path().to_path_buf(),
         cwd: focused.clone(),
         cursor_file: None,
         picks: vec![],
@@ -469,6 +483,7 @@ fn search_content_tool_returns_matches() {
     std::fs::create_dir_all(root.join(".git")).unwrap();
     std::fs::write(root.join("a.txt"), "hello world\n").unwrap();
     let ctx = context::SpycContext {
+        root: tmp.path().to_path_buf(),
         cwd: root.to_path_buf(),
         cursor_file: None,
         picks: vec![],
@@ -510,6 +525,7 @@ fn search_picks_tool_only_picked_files() {
     std::fs::write(root.join("picked.txt"), "TARGET in picked\n").unwrap();
     std::fs::write(root.join("unpicked.txt"), "TARGET in unpicked\n").unwrap();
     let ctx = context::SpycContext {
+        root: tmp.path().to_path_buf(),
         cwd: root.to_path_buf(),
         cursor_file: None,
         // Picks stored as relative paths in spyc's UI; resolved
@@ -567,6 +583,7 @@ fn read_lsp_message_parses() {
 fn socket_server_responds() {
     let tmp = tempfile::tempdir().unwrap();
     let ctx = context::SpycContext {
+        root: tmp.path().to_path_buf(),
         cwd: PathBuf::from("/test"),
         cursor_file: None,
         picks: vec![],
@@ -611,6 +628,7 @@ fn socket_server_responds() {
 fn disconnect_notification_routes_through_channel() {
     let tmp = tempfile::tempdir().unwrap();
     let ctx = context::SpycContext {
+        root: tmp.path().to_path_buf(),
         cwd: PathBuf::from("/test"),
         cursor_file: None,
         picks: vec![],
@@ -669,9 +687,12 @@ fn pid_from_sock_path_parses() {
 
 #[test]
 fn socket_path_contains_pid() {
-    let path = socket_path().expect("tests run with HOME set");
-    let pid = std::process::id();
-    assert!(path.to_string_lossy().contains(&format!("mcp-{pid}.sock")));
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let path = socket_path().expect("override is Some");
+        let pid = std::process::id();
+        assert!(path.to_string_lossy().contains(&format!("mcp-{pid}.sock")));
+    });
 }
 
 #[test]
@@ -715,14 +736,17 @@ fn no_state_dir_yields_no_socket_path() {
 }
 
 // ── Project-scoped discovery ──────────────────────────────
+//
+// A running spyc records its root in an owner-private sidecar,
+// `<state>/mcp-<pid>.root`. Discovery reads those and nothing in the caller's
+// tree, so no file a repository ships can steer it.
 
 fn touch_context(dir: &Path, pid: u32) {
     std::fs::write(dir.join(format!(".spyc-context-{pid}.json")), b"{}").unwrap();
 }
 
-/// Write the trusted-root sidecar attesting `pid` is rooted at `root`,
-/// mirroring what a live spyc writes next to its socket. Without this a
-/// marker is untrusted, so the genuine-discovery tests must lay one down.
+/// Write the sidecar recording that `pid` is rooted at `root`, as a live spyc
+/// does next to its socket.
 fn touch_root_marker(state_dir: &Path, pid: u32, root: &Path) {
     std::fs::create_dir_all(state_dir).unwrap();
     let canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
@@ -734,49 +758,27 @@ fn touch_root_marker(state_dir: &Path, pid: u32, root: &Path) {
 }
 
 #[test]
-fn read_context_pids_finds_markers() {
-    let tmp = tempfile::tempdir().unwrap();
-    touch_context(tmp.path(), 100);
-    touch_context(tmp.path(), 200);
-    // Decoy: not our prefix.
-    std::fs::write(tmp.path().join("not-spyc-300.json"), "{}").unwrap();
-    // Decoy: malformed PID.
-    std::fs::write(tmp.path().join(".spyc-context-abc.json"), "{}").unwrap();
-    let mut pids = read_context_pids_in_dir(tmp.path());
-    pids.sort_unstable();
-    assert_eq!(pids, vec![100, 200]);
-}
-
-#[test]
-fn read_context_pids_empty_dir() {
-    let tmp = tempfile::tempdir().unwrap();
-    assert!(read_context_pids_in_dir(tmp.path()).is_empty());
-}
-
-#[test]
-fn collect_pids_finds_marker_in_caller_dir() {
+fn collect_pids_finds_a_spyc_rooted_at_the_callers_dir() {
     let tmp = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
-    touch_context(tmp.path(), 42);
     touch_root_marker(state.path(), 42, tmp.path());
     assert_eq!(collect_project_pids_in(tmp.path(), state.path()), vec![42]);
 }
 
 #[test]
-fn collect_pids_walks_up_to_ancestor_marker() {
-    // spyc started at /tmp/.../proj; claude in /tmp/.../proj/src/sub.
+fn collect_pids_finds_a_spyc_rooted_above_the_caller() {
+    // spyc rooted at /tmp/.../proj; claude in /tmp/.../proj/src/sub.
     let tmp = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let proj = tmp.path().join("proj");
     let sub = proj.join("src").join("sub");
     std::fs::create_dir_all(&sub).unwrap();
-    touch_context(&proj, 7);
     touch_root_marker(state.path(), 7, &proj);
     assert_eq!(collect_project_pids_in(&sub, state.path()), vec![7]);
 }
 
 #[test]
-fn collect_pids_first_ancestor_with_match_wins() {
+fn collect_pids_prefers_the_nearest_root() {
     // A spyc at /proj and another at /proj/inner. Caller in
     // /proj/inner should NOT see /proj's spyc — locality
     // beats inheritance.
@@ -785,11 +787,10 @@ fn collect_pids_first_ancestor_with_match_wins() {
     let proj = tmp.path().join("proj");
     let inner = proj.join("inner");
     std::fs::create_dir_all(&inner).unwrap();
-    touch_context(&proj, 1);
     touch_root_marker(state.path(), 1, &proj);
-    touch_context(&inner, 2);
     touch_root_marker(state.path(), 2, &inner);
     assert_eq!(collect_project_pids_in(&inner, state.path()), vec![2]);
+    assert_eq!(collect_project_pids_in(&proj, state.path()), vec![1]);
 }
 
 #[test]
@@ -797,9 +798,7 @@ fn collect_pids_returns_all_pids_at_same_dir() {
     // Two spyc instances rooted at the same dir → both candidates.
     let tmp = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
-    touch_context(tmp.path(), 100);
     touch_root_marker(state.path(), 100, tmp.path());
-    touch_context(tmp.path(), 200);
     touch_root_marker(state.path(), 200, tmp.path());
     let mut pids = collect_project_pids_in(tmp.path(), state.path());
     pids.sort_unstable();
@@ -807,67 +806,96 @@ fn collect_pids_returns_all_pids_at_same_dir() {
 }
 
 #[test]
-fn collect_pids_no_match_returns_empty() {
-    // Cross-project case: caller's tree has no .spyc-context-*.json.
-    // Sibling dir does, but that's deliberately invisible.
+fn collect_pids_never_sees_a_sibling_project() {
     let tmp = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let project_a = tmp.path().join("a");
     let project_b = tmp.path().join("b");
     std::fs::create_dir_all(&project_a).unwrap();
     std::fs::create_dir_all(&project_b).unwrap();
-    touch_context(&project_b, 99);
     touch_root_marker(state.path(), 99, &project_b);
-    // Walking up from project_a hits tmp.path() (no marker), then
-    // ancestors of the temp dir which we can't predict — but the
-    // test passes as long as none of THOSE happen to have a
-    // spyc-context file. In CI / typical dev machines they won't.
-    // To make the test deterministic we anchor at project_a only.
-    let pids = collect_project_pids_in(&project_a, state.path());
-    assert!(
-        !pids.contains(&99),
-        "must not pick up sibling project's spyc"
-    );
+    assert!(collect_project_pids_in(&project_a, state.path()).is_empty());
 }
 
+/// The attack the in-tree marker invited: a cloned repo ships
+/// `.spyc-context-<pid>.json` naming a victim spyc rooted elsewhere. The tree
+/// isn't consulted at all now, so the planted file changes nothing.
 #[test]
-fn collect_pids_rejects_planted_marker_rooted_elsewhere() {
-    // The attack: a malicious repo ships a `.spyc-context-<pid>.json`
-    // whose pid is really a victim spyc rooted in a DIFFERENT project.
-    // The trusted sidecar (which the attacker can't write — it lives in
-    // the victim's private state dir) records that other root, so the
-    // planted marker is refused. No cross-project attachment.
-    let clone = tempfile::tempdir().unwrap(); // the cloned hostile repo
-    let real = tempfile::tempdir().unwrap(); // victim's real project
+fn collect_pids_ignores_a_marker_planted_in_the_tree() {
+    let clone = tempfile::tempdir().unwrap();
+    let real = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
-    touch_context(clone.path(), 4242); // planted marker in the clone
-    touch_root_marker(state.path(), 4242, real.path()); // genuine root ≠ clone
-    assert!(
-        collect_project_pids_in(clone.path(), state.path()).is_empty(),
-        "a marker rooted elsewhere must be refused"
-    );
+    touch_context(clone.path(), 4242);
+    touch_root_marker(state.path(), 4242, real.path());
+    assert!(collect_project_pids_in(clone.path(), state.path()).is_empty());
 }
 
+/// No sidecar, no spyc: a marker in the tree on its own isn't evidence of one.
 #[test]
-fn collect_pids_requires_a_trusted_root_sidecar() {
-    // A marker with no sidecar at all (a stray or planted file with no
-    // matching live spyc) is untrusted — fail safe, don't attach.
+fn collect_pids_requires_a_root_sidecar() {
     let tmp = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     touch_context(tmp.path(), 55);
-    assert!(
-        collect_project_pids_in(tmp.path(), state.path()).is_empty(),
-        "a marker without a trusted-root sidecar must be refused"
-    );
+    assert!(collect_project_pids_in(tmp.path(), state.path()).is_empty());
+}
+
+/// A sidecar is the root's only record, so when a spyc's root moves (a
+/// `spyc -r` restoring a project elsewhere) discovery follows it.
+#[test]
+fn collect_pids_follows_a_rewritten_root() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let launch = tmp.path().join("launch");
+    let restored = tmp.path().join("restored");
+    std::fs::create_dir_all(&launch).unwrap();
+    std::fs::create_dir_all(&restored).unwrap();
+    touch_root_marker(state.path(), 9, &launch);
+    touch_root_marker(state.path(), 9, &restored);
+    assert_eq!(collect_project_pids_in(&restored, state.path()), vec![9]);
+    assert!(collect_project_pids_in(&launch, state.path()).is_empty());
+}
+
+/// A spyc that died without tearing down leaves its sidecar and socket. They
+/// are swept at the next start, and a live one's never are.
+#[test]
+fn orphan_root_markers_are_swept_and_live_ones_kept() {
+    let state = tempfile::tempdir().unwrap();
+    let ours = std::process::id();
+    let dead = 999_999_999;
+    // pid 1 (init / launchd) is always alive and never ours.
+    for name in [
+        "mcp-1.root".to_string(),
+        format!("mcp-{ours}.root"),
+        format!("mcp-{ours}.sock"),
+        format!("mcp-{dead}.root"),
+        format!("mcp-{dead}.sock"),
+        "mcp-owners.json".to_string(),
+    ] {
+        std::fs::write(state.path().join(name), b"x").unwrap();
+    }
+    assert_eq!(sweep_orphan_root_markers(state.path(), ours), 2);
+    let mut left: Vec<String> = std::fs::read_dir(state.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    let mut want = vec![
+        "mcp-1.root".to_string(),
+        "mcp-owners.json".to_string(),
+        format!("mcp-{ours}.root"),
+        format!("mcp-{ours}.sock"),
+    ];
+    want.sort();
+    assert_eq!(left, want);
 }
 
 #[test]
-fn discover_live_socket_returns_none_without_project_marker() {
+fn discover_live_socket_returns_none_with_no_spyc_rooted_above() {
     let tmp = tempfile::tempdir().unwrap();
-    // No .spyc-context-*.json in the caller's tree → discovery
-    // must NOT fall through to scanning every socket on the
-    // host (the cross-project bug we're fixing).
-    assert!(discover_live_socket(tmp.path()).is_none());
+    let state = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(state.path(), || {
+        assert!(discover_live_socket(tmp.path()).is_none());
+    });
 }
 
 #[test]
@@ -885,6 +913,7 @@ fn get_file_content_blocks_path_traversal() {
 
     // Set up context with cwd = project.
     let ctx = context::SpycContext {
+        root: tmp.path().to_path_buf(),
         cwd: project,
         cursor_file: None,
         picks: vec![],
@@ -953,6 +982,7 @@ fn get_file_content_resolves_relative_against_search_root() {
     std::fs::create_dir_all(&sub).unwrap();
     std::fs::write(root.join("top.txt"), "from-root").unwrap();
     let ctx = context::SpycContext {
+        root: tmp.path().to_path_buf(),
         cwd: sub,
         cursor_file: None,
         picks: vec![],
@@ -994,21 +1024,23 @@ fn get_file_content_resolves_relative_against_search_root() {
 #[test]
 fn codex_config_writes_fresh_when_missing() {
     let tmp = tempfile::tempdir().unwrap();
-    let status = ensure_codex_config_toml(tmp.path(), true).unwrap();
+    let status = ensure_codex_config_toml(tmp.path()).unwrap();
     assert!(matches!(status, McpConfigStatus::Configured));
     let written = std::fs::read_to_string(tmp.path().join(".codex").join("config.toml"))
         .expect("config.toml created");
     let parsed: toml::Value = toml::from_str(&written).unwrap();
-    // Schema check: mcp_servers.spyc.{command,args,env.SPYC_MCP_SOCK}
+    // Schema check: mcp_servers.spyc.{command,args,env_vars}, and no pinned socket.
     let spyc = &parsed["mcp_servers"]["spyc"];
     assert!(spyc["command"].as_str().unwrap_or("").contains("spyc"));
     assert_eq!(spyc["args"][0].as_str(), Some("--mcp"));
-    assert!(
-        spyc["env"]["SPYC_MCP_SOCK"]
-            .as_str()
-            .unwrap_or("")
-            .contains("mcp-")
-    );
+    let passed: Vec<&str> = spyc["env_vars"]
+        .as_array()
+        .expect("env_vars")
+        .iter()
+        .filter_map(toml::Value::as_str)
+        .collect();
+    assert_eq!(passed, ["SPYC_MCP_SOCK", "SPYC_PANE_ID"]);
+    assert!(spyc.get("env").is_none(), "no socket pinned");
 }
 
 #[test]
@@ -1030,7 +1062,7 @@ KEY = "val"
 "#,
     )
     .unwrap();
-    ensure_codex_config_toml(tmp.path(), true).unwrap();
+    ensure_codex_config_toml(tmp.path()).unwrap();
     let written = std::fs::read_to_string(&path).unwrap();
     let parsed: toml::Value = toml::from_str(&written).unwrap();
     // Both servers present.
@@ -1052,7 +1084,7 @@ fn codex_config_fresh_rewrite_on_malformed_input() {
     let path = codex_dir.join("config.toml");
     std::fs::write(&path, "not_a_section = 1\nrandom = \"junk\"\n").unwrap();
     // Don't crash; either splice into the (now-empty) file or rewrite.
-    let status = ensure_codex_config_toml(tmp.path(), true).unwrap();
+    let status = ensure_codex_config_toml(tmp.path()).unwrap();
     assert!(matches!(status, McpConfigStatus::Configured));
     let written = std::fs::read_to_string(&path).unwrap();
     let parsed: toml::Value = toml::from_str(&written).unwrap();
@@ -1085,7 +1117,7 @@ fn mcp_json_refuses_to_overwrite_invalid_json() {
 }"#;
     std::fs::write(&path, original).unwrap();
 
-    let err = ensure_agy_mcp_config(tmp.path(), true)
+    let err = ensure_agy_mcp_config(tmp.path())
         .expect_err("an unparseable existing config must not be overwritten");
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     assert!(
@@ -1117,7 +1149,7 @@ fn codex_config_refuses_to_overwrite_invalid_toml() {
     let original = "model = \"o3\"\napproval_policy = \"never\"\n}}}}{{{ not toml";
     std::fs::write(&path, original).unwrap();
 
-    let err = ensure_codex_config_toml(tmp.path(), true)
+    let err = ensure_codex_config_toml(tmp.path())
         .expect_err("an unparseable existing config must not be overwritten");
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     assert!(
@@ -1144,7 +1176,7 @@ fn codex_config_writes_fresh_over_a_blank_file() {
         std::fs::create_dir_all(&codex_dir).unwrap();
         let path = codex_dir.join("config.toml");
         std::fs::write(&path, content).unwrap();
-        let status = ensure_codex_config_toml(tmp.path(), true)
+        let status = ensure_codex_config_toml(tmp.path())
             .expect("a blank file carries no user data to lose");
         assert!(matches!(status, McpConfigStatus::Configured));
         let parsed: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -1267,6 +1299,7 @@ fn mounted_zip(dir: &std::path::Path, staging: &std::path::Path) -> (PathBuf, Pa
     w.finish().unwrap();
 
     let ctx = context::SpycContext {
+        root: dir.to_path_buf(),
         // The user is standing inside the mount, which is what makes `cwd` a
         // path that is not a directory.
         cwd: archive.clone(),
@@ -1490,6 +1523,7 @@ fn an_understated_member_size_does_not_defeat_the_mcp_read_cap() {
     std::fs::write(&archive, &raw).unwrap();
 
     let ctx = context::SpycContext {
+        root: dir.clone(),
         cwd: archive.clone(),
         cursor_file: None,
         picks: vec![],

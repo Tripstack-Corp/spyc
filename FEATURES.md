@@ -72,7 +72,12 @@ do from here?", modelled on Neovim's which-key.
 - **u / -** climb to the parent directory (cursor returns to the dir you came from)
 - **~ / Home** jump to home (`H` is the harpoon prefix — see Harpoon)
 - **J** jump to any path (with `~` and `$VAR` expansion, frecency-ranked
-  suggestions from visit history)
+  suggestions from visit history). With nothing typed it offers the
+  newest path the active pane printed — the one `gf` would find — dimmed
+  in the prompt: `Enter` goes there (a file opens its directory with the
+  cursor on it), `→`/`End` loads it for editing, and typing replaces it.
+  The paths are checked on a worker thread, so the prompt opens at once
+  even when one of them sits on a mount that's stopped answering.
 - **F** project-wide fuzzy filename finder. Walks the focused
   commander's worktree root (its repo root, else `PROJECT_HOME`,
   else the current dir) honouring `.gitignore`, ranks
@@ -205,11 +210,25 @@ The bottom half of the terminal hosts a fully independent pty — by
 default, it runs `claude` (the Claude Code CLI). This is the core of
 spyc's workflow: browse files above, talk to Claude below.
 
+The pane is a terminal in its own right, not a pass-through to the host. A
+program that redraws inside a synchronized update (DEC mode 2026) is shown only
+once the update is finished, so brew's download list doesn't flicker. A program
+that asks before choosing what to emit gets answers about the pane rather than
+the host: device attributes, mode reports, cursor position, and an XTVERSION
+naming `spyc`. That is how claude learns it can use synchronized output in any
+host terminal. The pane answers nothing it can't back: no kitty keyboard
+protocol, no image protocols, no OSC 52 clipboard.
+
 - **^\\ / F10** toggle the pane open/closed
 - **F9** open pane with `claude --resume`
 - **^a j / ^a k** switch focus between the file list and the pane
   (`^w` also works as an alias for `^a`)
-- **^a s** send the current selection (file paths) to the pane as stdin
+- **^a s** send the current selection (file paths) to the pane as stdin,
+  anchored on that pane's working directory, read at the moment you send.
+  A path under it goes out relative, so an agent working in its own
+  worktree can open it as typed. Anything else goes out absolute, never
+  `~`-collapsed. If the pane's directory can't be read, every path goes out
+  absolute.
 - **^a ↓** send a literal `^a` to the pane — the prefix is otherwise
   unreachable by the child, but Claude binds `^a` (e.g. to expand notes),
   so this is the tmux-style "send-prefix" escape hatch
@@ -236,7 +255,7 @@ spyc's workflow: browse files above, talk to Claude below.
   inert while zoomed (only `^a z` exits), and the prior split is restored on
   un-zoom.
 - **Agent-activity dots** — each **agent** pane tab shows a live activity dot
-  in the divider, from these layered sources (a later one always wins):
+  in the divider, from these layered sources:
   - **Output timing** (no hooks, no screen-scraping): a **spicy heat-pulse `●`**
     — a pepper-red → ember → orange → spark color *breath* (~4 Hz) — while
     output is flowing, fading to a quiet `·` once the agent goes silent. The
@@ -249,19 +268,34 @@ spyc's workflow: browse files above, talk to Claude below.
     calm teal square `■`). Shape carries meaning: a **circle `●`** is live /
     animated (working), a **square `■`** is a *settled, waiting* state (blocked
     or done) — so you can tell "needs me / finished" from "busy" at a glance.
-    A live `working`/`done` report overrides the timing guess until it expires
-    or the agent resumes output. **`blocked` is latched**: it stays a steady red
+    For Codex and Claude, live reports survive output and footer redraws until
+    a newer report or TTL expiry; quiet tool waits do not erase `working`.
+    Agy yields non-blocked reports to fresh output for uncovered approvals.
+    Codex's complete command, file-edit, MCP-tool and network approval forms
+    temporarily override a non-blocked report while retaining it for recovery. **`blocked` is latched**: it stays a steady red
     square — no TTL, no output or animation revives it — until you actually
     answer the pane by pressing **Enter** in it (or the agent files a newer
-    report). Non-agent tabs (a plain shell) get no dot.
+    report). Identified Codex questions instead wait for their matching tool
+    completion; Enter alone does not clear them. Non-agent tabs (a plain shell)
+    get no dot.
   - **Auto-reporting (claude + codex; agy partial)** — so it works without the
     agent choosing to call the tool, spyc installs lifecycle hooks (prompt-submit
     → working, needs-permission/approval → blocked, turn-end → done) that run
     `spyc --report-status`. The agents share the same event idea, with per-agent
     config: **claude** writes `.claude/settings.json` (JSON, reloaded live);
-    **codex** writes inline `[[hooks.*]]` into the same `.codex/config.toml` that
-    already holds the MCP entry (read once at startup, so for an already-consented
-    repo the hooks are written *before* codex spawns); **agy** (Antigravity)
+    **codex** writes inline `[[hooks.*]]` into `.codex/config.toml` at its actual
+    hook source. Linked worktrees use the corresponding directory in the root
+    checkout, while their MCP entry stays worktree-local. Hooks are read once at
+    startup, so an already-consented source is written *before* codex spawns.
+    Codex's metadata-bearing `PermissionRequest` is observational: it fires
+    before automatic or human review, so it cannot establish a human wait.
+    Known command, file-edit, MCP-tool and network forms require their default
+    choices and complete footer at the viewport bottom; diagnostics identify
+    this `scrape-fallback`. Missing required text and other forms produce no guess. Codex's `Interrupt` hook
+    reports `idle` after cancellation. Its `request_user_input` hooks report
+    `blocked` on start and recover `working` only for the same pending
+    pane/session/turn/call; other waits stay blocked. Project trust and `/hooks`
+    review are separate from spyc's consent; spyc never auto-approves hooks. **agy** (Antigravity)
     writes a `spyc-status` set into `.agents/hooks.json` and is **partial** — it
     covers `working`, `done`, and `blocked` for agy's own `ask_question` tool
     (a `PreToolUse` hook sees that one exactly when it's called). The *other*
@@ -287,19 +321,29 @@ spyc's workflow: browse files above, talk to Claude below.
     spyc is a throwaway build-dir binary whose path went stale), **`:hooks on!`**
     force-restarts the active claude pane and resumes the conversation so the
     hooks load from launch.
-  - **Scrape fallback** (for a state an agent's hooks can't report) — when an
-    agent has no self-report, spyc reads its **visible screen** for a known
-    prompt and infers status. Today that's `agy`'s tool-approval prompt lighting
-    the red `blocked` square, because agy exposes no approval event to hook.
-    Deliberately last-resort: any live self-report always wins; it waits for the
-    pane to go quiet so a half-drawn prompt can't flip the dot; it requires
-    *several* phrases of a prompt spyc has actually verified, so an agent merely
-    discussing permissions doesn't trip it; and answering with Enter clears it.
-    This is the one place spyc reads the screen, and only as a graceful
-    degradation.
+  - **Scrape fallback** (for a state an agent's hooks can't report) — spyc
+    reads the **visible screen** for verified approval prompts. Agy exposes no
+    approval event. Codex's permission event precedes both automatic and human
+    review, so only a complete default command, file-edit, MCP-tool or network
+    form establishes its user wait. That dialogue temporarily overrides a non-blocked report;
+    semantic question/agent blocks retain precedence. Codex scans within 250 ms
+    of the first pending repaint, so continuous redraws cannot hide a wait;
+    other agents wait for quiet output. Codex requires several prompt phrases
+    and the exact modal footer at the viewport bottom, accepting native word
+    wrapping and excluding old dialogues above the normal composer.
+    Prompt-settling input clears the detected wait.
 
   **`:why-status`** flashes the active tab's state, its source (self-reported /
-  scrape-fallback / output-timing), and seconds since last output, for debugging.
+  scrape-fallback / output-timing), seconds since last output and hook setup
+  facts. **`:activity dump`** retains each pane's last received report even
+  after expiry, distinguishes hook-file presence from startup/restart facts,
+  and never treats a self-report or bound MCP connection as proof of hook
+  execution or trust.
+  Each pane also retains up to eight reported hook-event summaries (event,
+  tool and available turn/call ids), without arguments, prompts or responses.
+  These are claimed metadata, not verified execution; an older reporter may
+  omit them. `--status-trace` logs the same sanitized metadata rather than raw
+  hook input. Metadata does not infer that a permission/question was answered.
   **`:why-git`** opens a saveable pager dumping each column's git-marker refresh
   state — repo root / resolved gitdir, the cached poll key vs the live on-disk
   one (`index`'s mtime plus the latest of `HEAD`, its branch ref, and the shared
@@ -415,7 +459,14 @@ spyc's workflow: browse files above, talk to Claude below.
     (`agy`, under `~/.gemini/antigravity-cli/`) — get the actual
     conversation instead of a screen capture: user turns, agent
     replies, and tool calls rendered in the pager, titled
-    `(transcript)` rather than `(history)`. Tool calls are
+    `(transcript)` rather than `(history)`.
+
+    Codex reads current structured message/command/MCP records and legacy
+    events, including custom-tool calls. Repeated records with matching
+    identities are shown once per session; instruction injections and reasoning
+    records are excluded.
+
+    Tool calls are
     labelled with their salient argument — `⚙ Bash(Find foo call
     sites)`, `⚙ Edit(src/lib.rs)` — and each result shows a dim
     one-line output preview with a `(+N lines)` count. The
@@ -460,6 +511,15 @@ spyc's workflow: browse files above, talk to Claude below.
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of
   output (including scrollback) so paths in large diffs are still found.
+  A path wrapped onto the next row — by the terminal, or by the agent's
+  own line wrapping — is put back together. In a claude pane the scan
+  stops at its input box, so the status line under it (which names
+  `CLAUDE.md`) can't outrank what claude printed. A relative path resolves
+  against the pane's cwd, then its worktree root (a `cargo` run from `src/`
+  prints paths relative to the root), then the focused column's directory
+  and its worktree root, then PROJECT_HOME; the newest line that resolves
+  under any of them wins. `J`'s default and `^a u`'s uppercase open use the
+  same order.
 
 ### Multi-tab
 
@@ -470,6 +530,11 @@ Multiple tabs, each running an independent pty:
   tab's child is still running, so a stray keystroke can't kill a live agent
   session; an already-exited tab closes silently
 - **^a 1..9** switch to tab N
+- **^a P** pipe selected file contents to the pane. Content over 8 MiB asks
+  for confirmation of its size (`y`/`Y` sends, other keys cancel). A confirmed
+  large pipe needs an empty input queue and stays together as one bracketed
+  paste; later input is refused until that batch finishes writing. Ordinary pastes
+  over 8 MiB are refused with a size-limit error.
 - **^a p / ^a [** prev tab
 - **^a n / ^a ]** next tab
 - **^a ^a** jump to the last-active tab (screen/tmux "last window")
@@ -480,7 +545,30 @@ Multiple tabs, each running an independent pty:
   same reason `^a x` does; an already-exited tab restarts silently. The new
   child is a new process, so its `SPYC_PANE_ID`, agent conversation, and
   scrollback all start fresh
+- **^a F** fork the active tab — its conversation carries on in a new tab as a
+  branch, and the original stays where it was. claude branches with
+  `--resume <id> --fork-session` and codex with `codex fork <id>`: a new
+  session that starts from the old one's history, which the agent replays on
+  screen and `^a v` reads back. Each needs a conversation on disk first, so a
+  tab that hasn't had a prompt has nothing to fork yet. agy and zot can resume
+  a conversation but not branch it, so `^a F` says so rather than opening one
+  conversation in two tabs. Codex preserves launch options and quoting even
+  after an old `resume`/`fork` selector; ambiguous commands are refused rather
+  than launching with different settings. A tab running anything else forks
+  into a copy of its command, opened at the tab's current directory. `docs/HARNESS.md` §4
+  has the per-agent detail
 - Activity indicator (**+**) on background tabs that have new output
+- **Startup tabs**: `[pane] tabs = ["claude", "zsh"]` (or `[[pane.tab]]`
+  tables with a per-tab `cwd` and `label`) opens those tabs at launch, the
+  config-driven version of pressing `^a c` once per tab. `spyc -r` restores
+  its saved tabs instead. Yours in `~/.spycrc.toml` open unasked. A
+  project-local `.spycrc.toml` list runs only after you approve it in a
+  pop-up (`y` run, `n` never, `Esc` not now). The approval binds to the
+  exact commands and cwds, so an edited list asks again. `:startup-tabs`
+  shows the answer, and `:startup-tabs forget` clears it. Reference:
+  `CONFIGURATION.md` → "Startup tabs"
+- When the tabs overflow the divider, labels crop so every tab stays visible
+  and clickable
 - **Default command** for `^a c` resolves in this order:
   `$SPYC_PANE_CMD` env var → `[pane] default_command` in
   `.spycrc.toml` → built-in `"claude"` fallback. Switch your daily
@@ -723,7 +811,8 @@ end).
 - **`:sort <mode>`** — sort listing by `name`, `size`, `mtime`, or `ext`
   (persists across chdir); **`:sort reverse`** toggles reverse order
 - **`:marks`** — show all marks in a pager popup
-- **`:set key=value`** — runtime settings (e.g. `:set sort=mtime`)
+- **`:set key=value`** — runtime settings: `:set sort=mtime`, and
+  `:set flags=auto|short|full` for how the status bar writes its state
 - **`:bprev`** / **`:bnext`** — navigate pager buffer history (also `[b`/`]b` in pager)
 - **`:mouse on|off|auto`** — real mouse reporting: the wheel scrolls whatever is under
   the pointer, left-click focuses that region (and clicks through to a mouse-aware
@@ -797,6 +886,11 @@ end).
 
 The `:` prompt shares history with other shell prompts, so Up/Down
 cycles through previous commands.
+
+**`spyc -c <cmd>`** runs a `:` command from the shell once spyc is up:
+after `init.lua` loads, a `-r` session is picked, and any startup question is
+answered. Repeatable, run in order, the `:` optional
+(`spyc -c "sort mtime" -c "limit *.rs"`).
 
 ## Background tasks
 
@@ -1109,12 +1203,17 @@ The status bar uses powerline-style segments in this order:
 - Session name in all caps (hidden when empty)
 - Current path (intelligently truncated)
 - Git branch with dirty flag (`main*`)
-- Active state: pick counts, inventory counts, mask status, hidden
-  file count, active filter
+- The active tab's agent
+- Column state, only what differs from rest: picks, inventory items, a
+  mask switched from its default, the hidden-entry count, the filter, a
+  sort other than by name (`[picks:3 hidden:14]`). A column at rest shows
+  none of it.
 
-Under width pressure, segments are dropped in reverse priority:
-suffix → path becomes basename → git branch. `PROJECT_HOME` and
-session name are retained as the primary workspace identifiers.
+Under width pressure the suffix switches to short forms (`[p:3 h:14]`)
+before the path is cut; past that, the path is shortened in the middle.
+`[layout] status_flags` sets how the suffix is written (`auto`, `short`,
+or `full` for every field on every frame), and `:set flags=` changes it
+for the rest of the run.
 
 `user@host` is no longer in the top bar — run `:whoami` to flash it
 in the status line, or open the `I` info
@@ -1157,17 +1256,33 @@ unambiguous:
 (`.spycrc.toml` in the working directory) configuration:
 
 - **Keymap DSL** — `map KEY action [args]` syntax to rebind any key to
-  any action. Chord bindings (e.g., `^W n`) are supported. Beyond the
+  any action by its snake_case name, the names `spyc.action` takes (listed
+  in CONFIGURATION.md → "Action names"; one with a parameter takes it as
+  `=value`, e.g. `map <F8> harpoon_jump =2`). `unmap KEY` makes a key do
+  nothing, and a later `map` binds it again. A key is one key: a char, a
+  Ctrl-combo (`^P`) or a named key (`<F2>`); a multi-key chord binds from
+  `init.lua` with `spyc.map`. Beyond the
   built-in actions, a key can run a `unix` shell template
   (`map ^P unix ps aux`), a `jump`/`patternpick`, or a **`:` command**
   (`map A command graveyard`), or a **Lua script**
-  (`map z lua mymacro` → runs `~/.config/spyc/lua/mymacro.lua`). The
+  (`map z lua mymacro` → runs `~/.config/spyc/lua/mymacro.lua`), or a
+  **prompt template** (`map <F6> prompt review`). The
   less-frequent features ship as
   `:` commands with no default key (graveyard, activity monitor,
   long-list, file-type, chmod) — `--print-config` lists them as
   commented `command` examples to copy-and-enable. `unix` / `command` /
-  `lua` / `jump` only take effect in `~/.spycrc.toml` (a project file can't
-  bind a single-keypress code runner in an untrusted clone).
+  `lua` / `jump` / `prompt`, and the four actions that type at the pane
+  (`pane_send_selection`, `pane_send_prefix`, `pane_pipe_content`,
+  `pane_pipe_inventory`), only take effect in `~/.spycrc.toml` (a project
+  file can't bind a single-keypress code runner in an untrusted clone).
+- **Prompt templates** — `[prompts]` in `~/.spycrc.toml` names the messages
+  you send an agent over and over; `map KEY prompt <name>` (or `:prompt
+  <name>`) types one into the active pane tab with `%` (the picks, else the
+  cursor row), `%i` (the inventory) and `%d` (the directory) filled in, paths
+  anchored on the pane's own cwd the way `^a s` sends them. It's typed, not
+  sent: the pane gets the keyboard and Enter sends it. A project file's
+  `[prompts]` is ignored with a warning. Reference: `CONFIGURATION.md` →
+  "Prompt templates"
 - **Lua scripting** — embed real logic in your config (`mlua`, vendored
   Lua 5.4). A `map KEY lua <name>` binding runs
   `~/.config/spyc/lua/<name>.lua`, which calls a `spyc.*` API: read context
@@ -1179,8 +1294,8 @@ unambiguous:
   readers; a failure — bad path, not-a-repo, invalid regex — raises a Lua
   error, "nothing here" is an empty table); drive the view (`navigate` / `pick`
   / `filter` / `report_status`), invoke any built-in action by its
-  canonical snake_case name — the full keymap vocabulary, not just the
-  curated DSL verbs (`spyc.action("git_blame")`, `spyc.action("down", 3)`;
+  canonical snake_case name — the same names a `.spycrc.toml` `map` takes
+  (`spyc.action("git_blame")`, `spyc.action("down", 3)`;
   `set_mark` / `jump_mark` are excluded, since they need a mark letter with
   no sensible default — use `spyc.cmd(":…")` there) — or a `:` command
   (`spyc.cmd(":grep foo")`),
@@ -1233,6 +1348,12 @@ self-documenting starting point.
 
 ## Session management
 
+When restoring a saved session, an unsupported Codex tab is left unopened while
+supported tabs resume. Its command and conversation metadata stay saved through
+autosave and quit. Session info (`Space s`, or `^a Space s` from a pane) lists the
+unopened tabs and reasons. If every saved tab is refused, the current session
+stays intact.
+
 spyc auto-saves your workspace on quit and can restore it on startup.
 
 - **Crash-sufficient autosave** — beyond the quit-time save, spyc
@@ -1245,21 +1366,24 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   tabs (command, label, cwd), active tab, pane height, focus state,
   the spice-themed session name, `PROJECT_HOME`, and the vertical split
   (its shape plus the second commander's cwd, or the preview file) —
-  restored on `-r`, reopening column `b` where you left it.
+  restored on `-r`, reopening column `b` where you left it. A quit with
+  nothing to restore (no tabs, split or scope claims) saves nothing, so it
+  doesn't take a picker slot; a restored session is still updated.
 - **`spyc --resume`** (or `-r`) — opens a session picker showing
   the session name (primary column), a human-readable timestamp
   ("just now", "2 hours ago", "3 days ago"), and the cwd.
 - **j/k navigation** — browse sessions with highlighted cursor row.
   Enter to restore, n for a new session, 1-9 for direct selection.
-- Sessions are de-duplicated by cwd + tab commands (most recent kept).
-- Capped at 20 most recent sessions.
+- Capped at the 20 most recently saved sessions. A session you restore
+  keeps its place by when it was last saved, not when it was created.
 - **Agent session resume** — for tabs running `claude`, `codex`,
   `agy`, or `zot`, quitting spyc and launching with `spyc -r`
   will restore. Claude tabs spawn a fresh `claude` and type
   `/resume <id>` once it's settled (the CLI flag has a regression),
   then verify the submit landed — re-sending Enter while the command
   is still visibly unsubmitted, since Claude's async startup can eat
-  a lone `\r`.
+  a lone `\r`. A tab saved before its conversation's first message
+  restores as a fresh `claude`, since there is nothing to resume yet.
   Codex tabs spawn `codex resume <UUID>` directly — the UUID being the
   rollout spyc pinned to that tab while it ran, so a tab still working at
   quit resumes exactly rather than guessing. When no UUID was ever pinned,
@@ -1295,9 +1419,12 @@ Contents:
 | `references/search.md` | which of the four search corpora to use, and `root` scoping |
 | `references/git.md` | the three `git_diff` scopes, and when to shell out anyway |
 
-This is the depth *underneath* the MCP handshake: `initialize`'s
-`SERVER_INSTRUCTIONS` is prepended to every session so it has to stay short and
-can only point at the tools. The skill is loaded on demand instead.
+This is the depth *underneath* the MCP handshake: `initialize`'s shared
+`SERVER_INSTRUCTIONS` stays within an 800-byte budget because clients may repeat
+it across tool descriptions. It retains tool preference, pane/root scoping,
+worktree and file-scope claims, safe cleanup and status reporting. Argument
+details live in each tool's description; full workflows live in the skill,
+which is loaded on demand.
 
 **Staying current.** spyc offers a single `[Y/n]` update on startup when its
 embedded copy differs from what's installed — one prompt covering every host,
@@ -1327,17 +1454,29 @@ Manage it in-app with `:skill`:
 ## MCP server (Claude + Codex integration)
 
 spyc runs a background MCP server on a PID-scoped Unix domain socket
-(`~/.local/state/spyc/mcp-<PID>.sock`). On startup it writes two
-config files so each agent discovers spyc automatically — no
-`--mcp-config` flag needed:
+(`~/.local/state/spyc/mcp-<PID>.sock`). When an agent pane launches it
+writes that agent's config so the agent discovers spyc automatically —
+no `--mcp-config` flag needed:
 
 - **`.mcp.json`** for Claude Code (JSON, `mcpServers.spyc` shape).
 - **`.codex/config.toml`** for the codex CLI (TOML,
   `[mcp_servers.spyc]` shape).
+- **`.agents/mcp_config.json`** for agy (the `.mcp.json` shape).
 
-Both registrations re-exec `spyc --mcp` as a stdio proxy that
-forwards to the same socket, so a single server backs both agents.
-Both files carry `SPYC_MCP_SOCK` in the env block.
+Each registration re-execs `spyc --mcp` as a stdio proxy, which
+connects to the socket named by the agent pane's own env
+(`SPYC_MCP_SOCK`), so an agent always reaches the spyc that launched
+it. The entry names no socket itself; codex's lists
+`env_vars = ["SPYC_MCP_SOCK", "SPYC_PANE_ID"]`, because codex hands
+an MCP server only the variables it is told to.
+
+spyc starts codex panes with **`--no-daemon`**, so codex runs the session
+itself rather than on its shared background server. That server spawns every
+session's hooks and MCP servers with the environment of whichever codex
+started it, so they couldn't reach the spyc, or name the tab, that launched a
+pane. **`[pane] codex_daemon = true`** lets codex panes join it anyway, at the
+cost of their activity dots and MCP attribution. See
+[`docs/HARNESS.md`](docs/HARNESS.md) → "codex's shared daemon".
 
 **`[pane] codex_mcp = false`** (`.spycrc.toml`) stops spyc from registering
 its MCP server for codex — an escape hatch for a codex `/review` bug
@@ -1346,14 +1485,10 @@ codex mis-resolves the MCP tool-call approval elicitation and hangs on the
 first spyc tool call. Status hooks still install (activity dots keep working);
 codex just loses spyc's MCP tools. Claude is unaffected. Default on.
 
-Multiple spyc instances coexist safely; when a new instance opens
-in a directory already owned by a live spyc, it prompts on stderr
-before taking over (`PID N already owns MCP here. Take over?
-[Y/n]`, default Y). The detection checks both `.mcp.json` and
-`.codex/config.toml`. On takeover it sends a `spyc/disconnected`
-notification to the old instance and rewrites both files; on
-decline (`n`), the old instance keeps ownership and the new spyc
-starts without MCP. Non-tty stdin (scripts/CI) auto-takes-over.
+Multiple spyc instances coexist in one directory with nothing to
+take over: they write the same entry, and each one's agents reach it.
+The entry stays until the last spyc relying on it exits. An agent
+started outside spyc finds the spyc rooted in its project.
 Enterprise `managed-settings.json` policies
 (`deniedMcpServers`/`allowedMcpServers`) are respected for the
 claude side; codex has no equivalent enterprise hook.
@@ -1365,14 +1500,21 @@ Claude can query and control the workspace through these tools:
   active filter, git branch, `project_home`, `session_name`, plus the
   running spyc's `pid` and `version` (`<x.y.z> (<git-sha>)`). The version
   string lets a client spot a stale server (a tool it expects is
-  missing → compare the git SHA to the repo HEAD → restart spyc)
+  missing → compare the git SHA to the repo HEAD → restart spyc). Called
+  from an agent pane it also returns `pane`, the caller's own tab (id,
+  index, label, live cwd, worktree root, branch), so an agent in worktree
+  X learns X while the user browses Y
 - **`get_file_content`** -- reads a file's text content (up to 100KB)
 
 **Write tools (Claude can mutate the TUI):**
 - **`report_status(status, [pane], [ttl_ms])`** -- self-report activity for
   your pane's dot: `working` / `blocked` (the "needs me" hot-red dot) / `done` /
-  `idle`. Overrides spyc's output-timing guess; targets the focused tab by
-  default.
+  `idle`. Overrides spyc's output-timing guess; targets the caller's own tab
+  by default (the focused tab for a connection that named none). Non-blocked
+  reports default to five minutes and larger `ttl_ms` values are clamped to
+  that maximum; blocked reports stay latched until settled or replaced.
+  Accepted Escape/`Ctrl-C` retires a working report; Enter, arrows and pasted
+  control bytes preserve it. Closed panes cannot retain or receive activity reports.
 - **`register_scope(paths, intent, [pr], [note])`** / **`list_scopes`** /
   **`release_scope(id)`** / **`wait_for_scope_clear(paths, [timeout_ms])`** --
   merge-coordination registry (P2). Declare the files/globs you're touching and
@@ -1392,13 +1534,21 @@ Claude can query and control the workspace through these tools:
   path}`. Lets a skill spin up a worktree to work in a second column
   while the first stays on its branch.
 - **`remove_worktree(path)`** -- tear down a worktree by the path
-  `create_worktree` returned. Refuses a dirty/locked worktree or one a
-  column is currently open in; leaves the branch ref intact.
-- **`clean_worktree(path)`** -- like `remove_worktree`, but instead of
-  choking on untracked junk it archives the worktree's untracked files
-  into the graveyard (recoverable, under `<worktree>-<timestamp>`) and
-  then removes it. Still refuses uncommitted changes to *tracked* files
-  (commit/stash first) and a column-occupied worktree.
+  `create_worktree` returned, safe by default. It archives untracked and
+  uncommitted content into the graveyard (recoverable, under
+  `<worktree>-<timestamp>`), removes the worktree, and deletes the branch
+  only if it's merged into the integration base. A worktree claimed with
+  `claim_worktree` is refused; a column sitting inside is moved to
+  PROJECT_HOME rather than refused.
+  - **The removal can't strand a half-worktree.** The tree is renamed aside
+    before it's deleted, so a process still writing into `target/` can only
+    leave orphaned bytes, which the reply names.
+  - **A worktree an earlier spyc left half-removed is finished, not
+    refused.** That's one with its `.git` gone but its admin dir and branch
+    still there, and calling `remove_worktree` on it again completes the
+    job.
+- **`clean_worktree(path)`** -- an alias of `remove_worktree`, kept for the
+  tool name.
 - **`open_worktree(path)`** -- open the second spyc column (column `b`)
   at the worktree (re-targets `b` if already open), so the agent can
   work in it while the main column stays put. After this,
@@ -1477,7 +1627,17 @@ jump from Claude's output back to the file list.
   bg-task / git / fs / mcp rates, pid/rss/threads, build identity —
   fixed-width so it doesn't bounce as rates rise and fall — plus an
   extended section tallying cumulative per-tool **MCP call counts**
-  (every agent `tools/call`, read tools included)
+  (every agent `tools/call`, read tools included), led by the live
+  agent connections and how many are bound to a tab (`conn:2 bound:1`).
+  `:activity dump` lists each connection with its tab (or
+  `unattributed`, an older proxy), when it connected, and its call
+  count, which is how to tell which agents are talking to *this*
+  spyc. Transparent by
+  default: only the text is painted, in each row's colour on the
+  terminal background, so the file list or pane shows through the
+  padding (and a click there reaches it). `:activity solid` switches
+  to opaque colour bands; `:activity transparent` switches back —
+  either one also shows the monitor
 - **C** toggle between colour and mono themes
 - **:setenv NAME=VALUE** set an environment variable
 - **:dump-scrollback** write the active pane's scrollback snapshot

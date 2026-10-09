@@ -107,54 +107,122 @@ mod guard_tests {
         );
     }
 
-    /// `state.left`/`right` address a SPECIFIC column (render draws both
-    /// explicitly; the fs-watch dedup-keys per column). "Where the user is
-    /// working" — a spawn cwd, a restore target, the dir an op acts on — must
-    /// use `cur()`/`cur_mut()` so a focused second commander is honoured. The
-    /// June-2026 vsplit review found six spawn/restore sites stranded on
-    /// `state.left.listing.dir` (`:;`, the bare pane spawn, pager-edit,
-    /// graveyard restore, …). A new read outside the allowlist is that smell —
-    /// route it through `cur()`, or (if it's genuinely the left column) add the
-    /// file to ALLOW with a why. See AGENTS.md → per-column scoping.
+    /// `state.left` / `state.right` name a SPECIFIC column. Everywhere else a
+    /// column is reached by handle — `cur()` / `cur_mut()` for the one the user
+    /// is working in, `col(side)` / `get_col(side)` for a named one,
+    /// `active_sides()` / `columns_mut()` for every open one — so what a column
+    /// holds, or how many there are, changes in `state/mod.rs` rather than at
+    /// every caller (#40). The June-2026 vsplit review found six spawn/restore
+    /// sites stranded on `state.left.listing.dir`; widening this guard from that
+    /// one field found nine more (#502), among them a graveyard purge in `b`
+    /// that trashed the entry under `a`'s cursor.
     ///
-    /// Allowlisted: the left-column fs-watch dedup keys (`run.rs`; the right
-    /// column has its own `watched_listing_right`) and the startup `initial_cwd`
-    /// (`bootstrap.rs`, pre-split). **Not** the status bar — `render/chrome.rs`
-    /// was exempted as "deliberately anchored to the primary column", which
-    /// stopped being true when #322 made the status bar describe the focused
-    /// column and `the_status_bar_describes_the_focused_column` pinned it. An
-    /// exemption outliving its reason is worse than none: it pre-approves the
-    /// regression in the one file that had just been fixed for it.
+    /// `ALLOW` is the code that draws or watches each column separately, each
+    /// with why. An entry that stops matching fails too, because an exemption
+    /// outliving its reason is worse than none: `render/chrome.rs` stayed
+    /// exempt as "anchored to the primary column" after #322 made the status bar
+    /// follow focus, pre-approving the regression in the file just fixed for it.
+    /// Paths are relative to `src/app`, so an entry names exactly one file.
     ///
-    /// Entries are matched on the path relative to `src/app`, not the bare file
-    /// name — `chrome.rs` exempted every file so named at any depth.
+    /// Inside `state/` the fields are `self.left` / `self.right`, and only
+    /// `state/mod.rs`, where the handles live, may name them.
     #[test]
-    fn state_left_listing_dir_uses_are_allowlisted() {
-        const ALLOW: &[&str] = &["run.rs", "bootstrap.rs"];
-        // Split so this guard's own source can't match the needle.
-        let needle = format!("{}{}", "state.left", ".listing.dir");
+    fn columns_are_addressed_through_handles() {
+        const ALLOW: &[(&str, &str)] = &[
+            (
+                "render/mod.rs",
+                "each column settles its own row cache and grid, in its own rect",
+            ),
+            ("render/inner.rs", "each column draws into its own rect"),
+            (
+                "watch.rs",
+                "each column's tree and gitdir are watched under their own dedup key",
+            ),
+        ];
         let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app");
         let mut offenders = Vec::new();
+        let mut matched = std::collections::BTreeSet::new();
         scan_rs(&app, &mut |path, src| {
-            // Production portion only — a `#[cfg(test)]` block may legitimately
-            // poke `state.left` to set up a fixture.
-            let production = crate::guard_support::production_half(src);
             let rel = path
                 .strip_prefix(&app)
                 .unwrap_or(path)
                 .to_string_lossy()
-                .into_owned();
-            if production.contains(&needle) && !ALLOW.contains(&rel.as_str()) {
-                offenders.push(rel);
+                .replace('\\', "/");
+            let own_fields = rel.starts_with("state/") && rel != "state/mod.rs";
+            let hits = column_field_receivers(&crate::guard_support::production_half(src))
+                .into_iter()
+                .filter(|r| r == "state" || r.ends_with("_state") || (own_fields && r == "self"))
+                .count();
+            if hits == 0 {
+                return;
+            }
+            if ALLOW.iter().any(|(p, _)| *p == rel) {
+                matched.insert(rel);
+            } else {
+                offenders.push(format!("{rel} ({hits})"));
             }
         });
         offenders.sort();
         assert!(
             offenders.is_empty(),
-            "`state.left.listing.dir` read outside the allowlist in: {offenders:?}. \
-             Use `cur().listing.dir` (the focused column) for spawn/restore cwd so a \
-             second commander is honored; if it's genuinely the left column, add the \
-             file to ALLOW with a why. See AGENTS.md → per-column scoping."
+            "a column is named directly in: {offenders:?}. Reach it by handle: `cur()` / \
+             `cur_mut()` for the focused column (a spawn cwd, a restore target, what an op \
+             acts on), `col(side)` / `get_col(side)` for a named one, `active_sides()` / \
+             `columns_mut()` for every open one. If the file draws or watches each column \
+             separately, add it to ALLOW with why."
+        );
+        let stale: Vec<&str> = ALLOW
+            .iter()
+            .map(|(p, _)| *p)
+            .filter(|p| !matched.contains(*p))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "these ALLOW entries no longer name a column; drop them: {stale:?}"
+        );
+    }
+
+    /// The receiver of each `<recv>.left` / `<recv>.right` field access, comments
+    /// skipped: `self.state.left.cursor` yields `state`. A longer field
+    /// (`right_pager`) is not a column.
+    fn column_field_receivers(src: &str) -> Vec<String> {
+        let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        let mut out = Vec::new();
+        for line in src.lines() {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            let code = line.find(" //").map_or(line, |i| &line[..i]);
+            for field in [".left", ".right"] {
+                for (at, _) in code.match_indices(field) {
+                    let after = code[at + field.len()..].chars().next();
+                    if after.is_some_and(ident) {
+                        continue;
+                    }
+                    let before = &code[..at];
+                    let start = before
+                        .char_indices()
+                        .rev()
+                        .find(|&(_, c)| !ident(c))
+                        .map_or(0, |(i, c)| i + c.len_utf8());
+                    out.push(before[start..].to_string());
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn column_field_receivers_reads_the_receiver_not_the_field() {
+        let src = "let a = self.state.left.cursor;\n\
+                   b(&app_state.right);\n\
+                   self.view.right_pager = None;\n\
+                   let r = layout.right?;\n\
+                   // self.state.left in a comment\n\
+                   x(); // and self.state.right after code\n";
+        assert_eq!(
+            column_field_receivers(src),
+            ["state", "app_state", "layout"]
         );
     }
 
@@ -266,7 +334,7 @@ mod guard_tests {
     #[test]
     fn a_per_file_documented_subdir_is_documented_completely() {
         /// Enumerated file-by-file in the index; every file must be named.
-        const PER_FILE: &[&str] = &["mouse"];
+        const PER_FILE: &[&str] = &["archive", "effect", "mouse"];
         /// Described as a whole; individual files are deliberately not listed.
         const AS_GROUP: &[&str] = &[
             "render",
@@ -1371,6 +1439,38 @@ mod strip_crlf_tests {
         // \t, \n, and \x1b (ESC for ANSI) survive pass 3.
         let input = b"a\tb\nc\x1b[31md";
         assert_eq!(strip_crlf(input), b"a\tb\nc\x1b[31md");
+    }
+
+    #[test]
+    fn cr_run_before_lf_collapses_to_one_lf() {
+        // `ssh -v` writes its own `\r\n` to stderr, and the capture pty's
+        // ONLCR turns that into `\r\r\n` -- so every line arrives with a CR
+        // still ahead of the LF. Collapsing only the LAST pair leaves each
+        // segment ending in a CR, which pass 2 reads as "the line was
+        // overwritten by nothing" and blanks it. Real bytes off a live
+        // `ssh -v` capture.
+        let input = b"debug1: OpenSSH_10.3p1, LibreSSL 3.3.6\r\r\n\
+debug1: Connecting to 127.0.0.1 [127.0.0.1] port 22.\r\r\n";
+        assert_eq!(
+            strip_crlf(input),
+            b"debug1: OpenSSH_10.3p1, LibreSSL 3.3.6\n\
+debug1: Connecting to 127.0.0.1 [127.0.0.1] port 22.\n"
+        );
+    }
+
+    #[test]
+    fn trailing_cr_does_not_erase_its_line() {
+        // A CR moves the cursor to column 0; it erases nothing. A segment
+        // whose last CR sits at its end therefore keeps its text -- both
+        // mid-stream (a progress frame whose overwrite hasn't arrived) and
+        // when a CR run precedes the terminator.
+        assert_eq!(strip_crlf(b"Counting: 50%\r"), b"Counting: 50%");
+        assert_eq!(strip_crlf(b"Counting: 50%\r\r\r"), b"Counting: 50%");
+        // The overwrite still wins when there IS text after the CR.
+        assert_eq!(
+            strip_crlf(b"Counting: 18%\rCounting: 50%\r"),
+            b"Counting: 50%"
+        );
     }
 }
 

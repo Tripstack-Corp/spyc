@@ -135,6 +135,7 @@ press `C` inside spyc for a mono fallback if you'd rather not install one.
 ```sh
 spyc            # opens in the current directory
 spyc -r         # resume a session (tabs + each agent's conversation)
+spyc -c "sort mtime"   # run a : command once it's up (repeatable)
 ```
 
 Move with `hjkl`, `Enter` opens, `e` edits, `?` shows the full help overlay.

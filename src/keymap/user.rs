@@ -1,8 +1,9 @@
 //! User-supplied keymap bindings — the target of `.spycrc` parsing.
 //!
 //! A user binding marries a `KeyChord` (how the binding is triggered) to a
-//! `BoundAction` (what to do). The `Resolver` consults the user table
-//! first; if nothing matches, it falls back to the built-in defaults.
+//! `BoundAction` (what to do). For a key that doesn't complete a pending
+//! chord, the `Resolver` consults the user table first; if nothing matches,
+//! it falls back to the built-in defaults.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -127,6 +128,11 @@ pub enum BoundAction {
     /// [`is_executing`](Self::is_executing) (only `$HOME` config may bind it; a
     /// project `.spycrc.toml` cannot).
     Lua(String),
+    /// `map KEY prompt <name>` — type the `[prompts]` template `<name>` into
+    /// the active pane tab. [`is_executing`](Self::is_executing): a project
+    /// `.spycrc.toml` binding one would let a repo decide what gets typed at
+    /// your agent.
+    Prompt(String),
 }
 
 impl BoundAction {
@@ -140,22 +146,29 @@ impl BoundAction {
             Self::ToggleMaskFixed(n) => format!("toggle mask {n}"),
             Self::Command(cmd) => format!(":{cmd}"),
             Self::Lua(name) => format!("lua: {name}"),
+            Self::Prompt(name) => format!("prompt: {name}"),
         }
     }
 
-    /// True for bindings that, on a single keypress, run a shell command or
-    /// act on an arbitrary baked-in path — the capabilities an untrusted
-    /// project-local `.spycrc.toml` must not be able to introduce (see
-    /// `Config::load_default`). `Plain` built-in actions (incl. the
-    /// copy/move/remove *prompts*, which carry no payload — the user still
-    /// types the target) and the harmless `PatternPick`/`ToggleMaskFixed`
-    /// are not executing. `Command` is — it dispatches arbitrary `:` input,
-    /// including the `:!`/`:;` shell symbols.
+    /// True for bindings that, on a single keypress, run a shell command, act
+    /// on an arbitrary baked-in path or type text at an agent — the
+    /// capabilities an untrusted project-local `.spycrc.toml` must not be able
+    /// to introduce (see `Config::load_default`). `Command` dispatches
+    /// arbitrary `:` input, including the `:!`/`:;` shell symbols, and
+    /// `Prompt` types a template at an agent. A `Plain` built-in action is
+    /// executing only when it [writes to a pane](Action::writes_to_pane); the
+    /// copy/move/remove *prompts* carry no payload (the user still types the
+    /// target), and `PatternPick`/`ToggleMaskFixed` are harmless.
     pub const fn is_executing(&self) -> bool {
-        matches!(
-            self,
-            Self::UnixCmd(_) | Self::Jump(_) | Self::Command(_) | Self::Lua(_)
-        )
+        match self {
+            Self::UnixCmd(_)
+            | Self::Jump(_)
+            | Self::Command(_)
+            | Self::Lua(_)
+            | Self::Prompt(_) => true,
+            Self::Plain(a) => a.writes_to_pane(),
+            Self::PatternPick(_) | Self::ToggleMaskFixed(_) => false,
+        }
     }
 }
 

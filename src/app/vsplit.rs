@@ -68,7 +68,7 @@ impl App {
         // The right region hosts EITHER a preview (`^s |`) or a second
         // commander (`^s n`) — never both. With a commander open, `^s |` is
         // disabled (no nesting); close it with `^s x` first.
-        if self.state.right.is_some() {
+        if self.state.has_col(state::Side::Right) {
             self.state
                 .flash_info("right column has a commander (^s x to close)");
             return;
@@ -213,9 +213,13 @@ impl App {
         // Inherit the worker-available flag from `left` (set at bootstrap) so
         // `b`'s git cache-misses go to the background worker, not a blocking
         // synchronous walk. `Commander::for_dir` defaults it `false`.
-        commander.git_cache.git_worker_available = self.state.left.git_cache.git_worker_available;
+        commander.git_cache.git_worker_available = self
+            .state
+            .col(state::Side::Left)
+            .git_cache
+            .git_worker_available;
         self.view.right_pager = None; // a commander and the preview are exclusive
-        self.state.right = Some(commander);
+        self.state.open_second(commander);
         self.state.vsplit = Some(state::VSplit {
             width_pct: DEFAULT_VSPLIT_PCT,
             mode: state::VsplitMode::TopOnly,
@@ -253,11 +257,10 @@ impl App {
     /// with the shape and focus it had — the user's reading position survives a
     /// worktree the agent opened over it.
     pub(super) fn close_second_commander(&mut self) {
-        if self.state.right.is_none() {
+        if !self.state.close_second() {
             self.state.flash_info("no second commander");
             return;
         }
-        self.state.right = None;
         // Drop any `V`/`D` overlay open in `b` along with its column — otherwise
         // the editor PTY / pager would linger with no column to render into.
         self.runtime.top_overlay_right = None;
@@ -382,7 +385,7 @@ impl App {
     /// should target the RIGHT column's slots: `b` exists and is the focused
     /// column. (The left/single/no-split case targets the existing slots.)
     pub(super) fn overlay_targets_right(&self) -> bool {
-        self.state.right.is_some() && self.focused_side() == state::Side::Right
+        self.state.has_col(state::Side::Right) && self.focused_side() == state::Side::Right
     }
 
     /// Context-sensitive `^a +`/`^a -`: resize the vertical split's width when

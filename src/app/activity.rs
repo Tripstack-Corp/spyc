@@ -6,8 +6,9 @@
 //! hand-maintained parallel field assignments (the bug-prone "add a counter,
 //! forget to wire it into all four lists" hazard).
 //!
-//! The visibility toggle (`show_activity`) stays on `ViewState` — it gates the
-//! overlay and the rollover, but isn't part of the counter double-buffer.
+//! The visibility toggle (`show_activity`) and paint style (`activity_style`)
+//! stay on `ViewState` — they gate the overlay, but aren't part of the counter
+//! double-buffer.
 
 use std::time::Instant;
 
@@ -49,6 +50,17 @@ pub struct ActivityPeaks {
     pub echo_us: u64,
 }
 
+/// How the `A` overlay paints (`:activity transparent|solid`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum HudStyle {
+    /// Text only, in each row's colour on the terminal background; the padding
+    /// that right-justifies a row is left unpainted, so what's beneath shows.
+    #[default]
+    Transparent,
+    /// Black text on opaque colour bands filling the whole block.
+    Solid,
+}
+
 /// Activity-monitor state: the live/snapshot counter pair, the peak pair, the
 /// rollover clock, and the cached proc stats. One field on `ViewState`.
 pub struct ActivityMonitor {
@@ -76,6 +88,19 @@ pub struct ActivityMonitor {
     /// `roll()` — it accumulates for the session. `BTreeMap` for a stable
     /// (name-sorted) display order.
     pub mcp_tool_calls: std::collections::BTreeMap<String, u64>,
+    /// Every agent's live MCP connection, keyed by the socket server's
+    /// connection number: from its `initialize` until it closes.
+    pub mcp_connections: std::collections::BTreeMap<u64, McpConnection>,
+}
+
+/// One agent's live MCP connection.
+#[derive(Debug)]
+pub struct McpConnection {
+    /// The tab it is bound to (its `SPYC_PANE_ID`), `None` when unattributed.
+    pub pane_id: Option<String>,
+    /// When it initialized, as [`crate::sysinfo::format_now`] prints it.
+    pub since: String,
+    pub calls: u64,
 }
 
 impl ActivityMonitor {
@@ -91,7 +116,18 @@ impl ActivityMonitor {
             proc_rss_kb: 0,
             proc_threads: 0,
             mcp_tool_calls: std::collections::BTreeMap::new(),
+            mcp_connections: std::collections::BTreeMap::new(),
         }
+    }
+
+    /// `conn:N bound:M`: live MCP connections, and how many are bound to a tab.
+    pub fn mcp_connection_summary(&self) -> String {
+        let bound = self
+            .mcp_connections
+            .values()
+            .filter(|c| c.pane_id.is_some())
+            .count();
+        format!("conn:{} bound:{bound}", self.mcp_connections.len())
     }
 
     /// Roll the 1-second window: snapshot the live counters/peaks and reset the

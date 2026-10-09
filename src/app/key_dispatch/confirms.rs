@@ -42,7 +42,7 @@ impl App {
         // The picks are the items being removed — clear them now (they're
         // gone from the user's intent); the listing still shows the files
         // until the worker unlinks them and the refresh lands.
-        self.state.left.picks.clear();
+        self.state.cur_mut().picks.clear();
         // Optimistically ghost the removed rows so they don't momentarily
         // vanish before the off-thread `git status` re-adds a tracked file as a
         // struck-through ghost (the post-`R` list "bounce"). Only with a git
@@ -208,62 +208,6 @@ impl App {
         Vec::new()
     }
 
-    /// Single-key confirmation for the auto-fired claude crash recovery
-    /// prompt. `y` / `Y` / Enter kills the broken tab and replaces it with
-    /// a fresh `claude` (the user can then `/resume` manually); anything
-    /// else kills it and removes the tab so the dump is off-screen.
-    pub(super) fn handle_claude_crash_recover_key(&mut self, key: KeyEvent) -> Vec<Effect> {
-        let confirmed = matches!(key.code, KeyCode::Char('y' | 'Y') | KeyCode::Enter);
-        let prev_mode = std::mem::replace(&mut self.state.mode, Mode::Normal);
-        let Mode::Prompting(Prompt {
-            kind: PromptKind::ClaudeCrashRecover { tab_idx },
-            ..
-        }) = prev_mode
-        else {
-            return Vec::new();
-        };
-
-        // Snapshot cwd + fallback from the tab and best-effort kill the
-        // child (bunfs claude is often still alive post-crash; an
-        // already-closed pane errors here, ignored).
-        let Some((cwd, fallback)) = self.runtime.pane_tabs.as_mut().and_then(|tabs| {
-            let entry = tabs.tabs_mut().get_mut(tab_idx)?;
-            entry.pane.try_kill();
-            let fallback = entry
-                .info
-                .restore_fallback
-                .clone()
-                .unwrap_or_else(|| "claude".to_string());
-            Some((entry.info.cwd.clone(), fallback))
-        }) else {
-            return Vec::new();
-        };
-
-        if !confirmed {
-            if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
-                let still_have_tabs = tabs.remove_at(tab_idx);
-                if !still_have_tabs {
-                    self.runtime.pane_tabs = None;
-                }
-            }
-            // Reclaim the dismissed tab's parked scrollback stream (if any).
-            self.prune_orphaned_pager_streams();
-            self.state.flash_info("claude crash dismissed; tab closed");
-            self.view.needs_full_repaint = true;
-            return Vec::new();
-        }
-
-        // Respawn fresh claude into the tab with the agent env injected (so
-        // the recovered pane can report status via its hooks) — shared with
-        // `:hooks on!`. No `/resume` arm here: the user types it manually after
-        // a crash so they can decide whether to recover or start clean.
-        if self.spawn_agent_into_tab(tab_idx, &fallback, &cwd, None) {
-            self.state
-                .flash_info("started fresh claude — type /resume to recover");
-        }
-        Vec::new()
-    }
-
     /// First-launch consent before spyc writes Claude status hooks. Only an
     /// explicit `y`/`n` records a decision — `y` installs the hooks for the
     /// launching cwd, `n` remembers the denial.
@@ -296,9 +240,11 @@ impl App {
                 let live = profile.status_hooks().is_some_and(|s| s.live_reload);
                 let name = profile.name();
                 self.state.flash_info(if live {
-                    format!("status hooks on — {name} reports its live activity (saved; `:hooks off` to undo)")
+                    format!("status hook consent saved — {name} reloads next message; check `:activity dump` (`:hooks off` to undo)")
+                } else if agent == crate::state::sessions::AgentKind::Codex {
+                    "status hook consent saved — restart codex, review /hooks and project trust; check `:activity dump`".to_string()
                 } else {
-                    format!("status hooks on — active on {name}'s next launch (saved; `:hooks off` to undo)")
+                    format!("status hook consent saved — restart {name}; check `:activity dump` (`:hooks off` to undo)")
                 });
             }
             KeyCode::Char('n' | 'N') => {
@@ -337,6 +283,7 @@ impl App {
             prefix,
             buffer,
             editor,
+            suggestion,
         }) = prev_mode
         else {
             return Vec::new();
@@ -373,8 +320,64 @@ impl App {
                     prefix,
                     buffer,
                     editor,
+                    suggestion,
                 });
                 self.state.flash_info("press y or n");
+                return Vec::new();
+            }
+        }
+        self.view.needs_full_repaint = true;
+        Vec::new()
+    }
+
+    /// `[y/n]` on a project-local startup-tab list. Only `y` runs it, and the
+    /// answer binds to this exact list, so an edited rc asks again. `n` is
+    /// remembered the same way; `Esc` answers nothing and asks next launch.
+    /// Both open the user's own tabs instead. Any other key re-raises the
+    /// prompt: unlike the hook consent there is no agent the key could have
+    /// been meant for, and a reflexive `Enter` must not approve a command.
+    pub(super) fn handle_project_tabs_consent_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        let prev_mode = std::mem::replace(&mut self.state.mode, Mode::Normal);
+        let Mode::Prompting(Prompt {
+            kind: PromptKind::ProjectTabsConsent { source, tabs },
+            prefix,
+            buffer,
+            editor,
+            suggestion,
+        }) = prev_mode
+        else {
+            return Vec::new();
+        };
+        let user_tabs = self.state.config.pane.tabs.clone();
+        match key.code {
+            KeyCode::Char('y' | 'Y') => {
+                crate::state::tab_consent::set_consent(&source, &tabs, true);
+                self.seed_startup_tabs(&tabs, Some("project startup tabs approved"));
+            }
+            KeyCode::Char('n' | 'N') => {
+                crate::state::tab_consent::set_consent(&source, &tabs, false);
+                self.seed_startup_tabs(
+                    &user_tabs,
+                    Some(
+                        "project startup tabs declined (`:startup-tabs forget` to be asked again)",
+                    ),
+                );
+            }
+            KeyCode::Esc => {
+                self.seed_startup_tabs(
+                    &user_tabs,
+                    Some("project startup tabs skipped — asks again next launch"),
+                );
+            }
+            _ => {
+                self.state.mode = Mode::Prompting(Prompt {
+                    kind: PromptKind::ProjectTabsConsent { source, tabs },
+                    prefix,
+                    buffer,
+                    editor,
+                    suggestion,
+                });
+                self.state.flash_info("press y or n (Esc: not now)");
                 return Vec::new();
             }
         }

@@ -27,50 +27,20 @@ const SERVER_NAME: &str = "spyc";
 const SERVER_VERSION: &str = crate::VERSION;
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
-/// Returned in the `initialize` response's `instructions` field — the MCP
-/// spec's slot for "how to use this server". Claude Code folds it into the
-/// system prompt at connect, which is the one ephemeral, no-files-written way
-/// to bias a spyc-launched agent toward spyc's own tools (it otherwise reaches
-/// for `Bash rg` / `git worktree` and never touches them). Kept short on
-/// purpose — clients truncate instructions, so the prioritization comes first.
+/// The MCP handshake's shared bootstrap. Clients may attach it to each tool,
+/// so keep it within the response's tested byte budget. Tool descriptions and
+/// the spyc skill carry argument details and complete workflows.
 const SERVER_INSTRUCTIONS: &str = "\
-You are running inside spyc, a terminal file/worktree manager, with its tools \
-on this server. Prefer them over shell equivalents — even mid-task, not only \
-when answering questions about the user's view:\n\
-- Call `get_spyc_context` first to ground yourself: the user's cwd, cursor \
-file, picks, filter, git branch, and the running spyc's pid + version.\n\
-- `search_content` / `search_paths` instead of `Bash rg` / `find`, and \
-`git_status` / `git_log` / `git_diff` instead of shelling out to git — all \
-in-process, gitignore-aware, and structured. `git_diff` has three scopes: \
-default vs HEAD, `cached:true` for staged, and `unstaged:true` for the index \
-vs the working tree (what changed since the last `git add` — use it after a \
-staged checkpoint). They scope to the focused column \
-by default; when you're working in a DIFFERENT worktree, pass its path as the \
-`root` argument so they target it (otherwise shell with explicit paths is the \
-right call).\n\
-- `navigate_to` to move the user's view; `pick_files` / `set_filter` to drive \
-their selection; `get_file_content` to read what they're viewing.\n\
-- `report_status` to keep your pane tab's activity dot accurate: call it \
-`working` when you start a task, `blocked` when you pause to ask the user a \
-question or for permission (so they see at a glance which agent needs them), \
-and `done` when you finish. Cheap and idempotent — call it freely as your turn \
-changes; it overrides spyc's output-timing guess.\n\
-- Worktree lifecycle, all in-process (never `git worktree`): `list_worktrees` \
-lists them (branch, dirty counts, which is current, whether each is merged / \
-ahead-behind the base — the safe-to-remove signal — and whether one is claimed \
-by another session), `create_worktree` adds one (pass `open:true` to also open \
-it in column b and work there right away), `open_worktree` opens an existing one \
-in column b while the user's column stays put, and `remove_worktree` tears one \
-down safely — archiving any untracked + uncommitted changes to spyc's \
-graveyard, then deleting the branch only if it's merged (`clean_worktree` is \
-an alias).\n\
-- Coordinating with another agent on the same repo: `claim_worktree(path, reason)` \
-to lease the worktree you're working in (a cooperative lock — others' \
-remove/clean will refuse it), and `release_worktree(path)` when you're done. \
-Before removing a worktree you didn't create, `list_worktrees` first and skip \
-any that are `locked` by someone else.\n\
-If a tool you expect is missing, the running spyc is older than this repo — \
-tell the user to restart it (compare `version`'s git SHA to the repo HEAD).";
+Prefer spyc's `search_content`/`search_paths` and `git_status`/`git_log`/`git_diff` \
+over shell equivalents. Use its full worktree tools, including `clean_worktree`; \
+never run `git worktree`.\n\
+Call `get_spyc_context` first: `pane` is your tab; other fields describe the user's \
+view. Reads default to the focused column; pass `root` for another worktree.\n\
+Before editing, `claim_worktree` and `register_scope`; release claims when done. \
+Before removing a tree, `list_worktrees` and skip others' claims.\n\
+Use `report_status` on turn changes: `working`, `blocked` when waiting for user \
+input, then `done`.\n\
+See the spyc skill for workflows and tool descriptions for arguments.";
 const CONTEXT_URI: &str = "spyc://context";
 
 /// Socket IO deadline for the stdio proxy. Bounds how long it waits on a
@@ -137,10 +107,9 @@ fn socket_path_in(state_dir: Option<PathBuf>, pid: u32) -> Option<PathBuf> {
 
 /// Trusted-root sidecar path for a PID, in the given state dir:
 /// `<state_dir>/mcp-<pid>.root`. The running spyc writes the directory
-/// it is rooted at here (next to its socket); discovery cross-checks a
-/// `.spyc-context-<pid>.json` marker's location against it so a planted
-/// marker — which an attacker *can* write into a repo, but whose pid is
-/// really rooted elsewhere — can't redirect attachment cross-project.
+/// it is rooted at here (next to its socket), and rewrites it when the root
+/// moves; it is discovery's only record of where a spyc is rooted, so nothing
+/// an attacker can write into a repo takes part.
 /// Parameterized on `state_dir` so tests can inject a temp dir (no env).
 pub fn root_marker_path_in(state_dir: &Path, pid: u32) -> PathBuf {
     state_dir.join(format!("mcp-{pid}.root"))
@@ -163,19 +132,18 @@ mod protocol;
 /// gated by `mcp` being private.
 pub mod readers;
 mod server;
+mod tool_schemas;
 
 pub use config::{
     ConfigCleanup, McpConfigStatus, cleanup_agy_mcp_config, cleanup_codex_config, cleanup_mcp_json,
-    detect_existing_spyc, detect_existing_spyc_agy, detect_existing_spyc_codex,
-    ensure_agy_mcp_config, ensure_codex_config_toml, ensure_mcp_json, enterprise_defines_spyc,
-    sweep_orphan_spyc_configs,
+    ensure_agy_mcp_config, ensure_codex_config_toml, ensure_mcp_json, sweep_orphan_spyc_configs,
 };
 pub use hooks::{
     cleanup_agy_status_hooks, cleanup_claude_status_hooks, cleanup_codex_status_hooks,
-    ensure_agy_status_hooks, ensure_claude_status_hooks, ensure_codex_status_hooks,
-    set_status_trace,
+    codex_legacy_hook_diagnostic, ensure_agy_status_hooks, ensure_claude_status_hooks,
+    ensure_codex_status_hooks, set_status_trace,
 };
-pub use server::{cleanup_socket, start_socket_server};
+pub use server::{cleanup_socket, record_root, start_socket_server, sweep_orphan_root_markers};
 
 use server::{discover_live_socket, run_direct, run_proxy};
 
@@ -278,29 +246,25 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
             "set"
         },
     ));
-    // Claude Code pipes the hook event JSON to the hook's stdin (carrying
-    // `hook_event_name`, `notification_type`, `tool_name`, …) then closes it.
-    // Read it ALWAYS (not just when tracing): the *effective* state depends on
-    // it — `effective_report_state` downgrades an `idle_prompt` Notification
-    // from `blocked` to `done`. Guarded on `!is_terminal()` so a manual
-    // `spyc --report-status …` from a shell never blocks on read, and capped so
-    // a pathological payload can't balloon mcp.log.
+    // Hooks close stdin after sending JSON. Read the complete document while
+    // retaining only bounded root metadata; truncating large tool arguments
+    // erases the event/correlation fields and can create false legacy blocks.
+    // A manual terminal invocation must still never wait for hook input.
     let payload = {
-        use std::io::{IsTerminal, Read};
+        use std::io::IsTerminal;
         let stdin = std::io::stdin();
         if stdin.is_terminal() {
             String::new()
         } else {
-            let mut s = String::new();
-            let _ = stdin.lock().take(8192).read_to_string(&mut s);
-            s.trim().to_string()
+            crate::agent::status_hook::read_payload(stdin.lock()).unwrap_or_default()
         }
     };
-    if trace && !payload.is_empty() {
-        // Max-info diagnostic: see EXACTLY which event fired this report (the
-        // hook *command* is identical across PermissionRequest / Notification /
-        // PreToolUse, so the event name only lives in the payload).
-        trace_log(&format!("report-status: hook stdin: {payload}"));
+    let hook_event = crate::agent::status_hook::StatusHookEvent::from_payload(&payload);
+    if trace {
+        trace_log(&format!(
+            "report-status: hook metadata: {}",
+            serde_json::json!(hook_event)
+        ));
     }
     // An idle Notification means "finished, waiting" → `done`, not the alarming
     // `blocked` square (the false-red-on-idle bug); permission stays `blocked`.
@@ -310,8 +274,8 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
     let session_id = session_id_from_hook_payload(&payload);
     if trace {
         trace_log(&format!("report-status: effective state={state}"));
-        if let Some(sid) = session_id.as_deref() {
-            trace_log(&format!("report-status: session_id={sid}"));
+        if session_id.is_some() {
+            trace_log("report-status: session_id=set");
         }
     }
     if sock.is_empty() {
@@ -329,7 +293,7 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
         "method": "tools/call",
         "params": {
             "name": "report_status",
-            "arguments": { "status": state, "pane_id": pane_id, "session_id": session_id },
+            "arguments": { "status": state, "pane_id": pane_id, "session_id": session_id, "hook_event": hook_event },
         },
     })
     .to_string();
@@ -356,11 +320,12 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
 /// Unix socket is available, proxies through it for writable access.
 ///
 /// Socket resolution order:
-/// 1. `$SPYC_MCP_SOCK` (set in `.mcp.json`'s `env` block) — exact match
-/// 2. Project-scoped discovery: walk `caller_cwd` upward looking for
-///    `.spyc-context-<pid>.json` markers; map those PIDs to live
-///    sockets. Refuses cross-project attachment (a spyc running in
-///    a different project tree can no longer be picked up).
+/// 1. `$SPYC_MCP_SOCK`, from the agent pane's env (spyc sets it when it launches
+///    the agent) — the spyc that launched this agent
+/// 2. Project-scoped discovery: the live spycs whose recorded root
+///    (`mcp-<pid>.root`) contains `caller_cwd`, nearest first. Refuses
+///    cross-project attachment (a spyc rooted in a different project tree
+///    is never picked up).
 /// 3. Falls back to read-only direct mode if nothing matches.
 pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
     // Try explicit socket path from env first.

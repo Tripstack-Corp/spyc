@@ -120,8 +120,10 @@ free optimization — a live report outranks the scrape result in
 of *when* the two settles run. Both fire pre-recv in the same iteration:
 `drain_pane_output` stamps `last_output_at` and sets `scrape_dirty`, then
 `settle_scrape_quiet`, then `settle_agent_activity` — which drops that very
-report through `report_superseded_by_output` (any output newer than a
-non-`Blocked` report supersedes it). So consuming the dirty flag on the
+report through `report_superseded_by_output` (for agy, output newer than a
+non-`Blocked` report supersedes it). Codex and Claude retain semantic reports
+through output until expiry or a newer report.
+So consuming the dirty flag on the
 report's behalf discarded the scan for a report that no longer existed by the
 end of the tick.
 
@@ -135,11 +137,25 @@ single case it exists to serve, and the symptom is a dot that quietly decays
 to Idle instead of going red, which nobody reports as a bug.
 
 `scrape_step` takes `has_rules` rather than a report precisely so the pure
-decision cannot express the skip. Scanning behind a genuinely live report is
-harmless: `settle_agent_activity` clears `scrape_status` while a report is
-still authoritative (so a stale guess can't resurface when the report later
-expires), and a tab with no detection rules — claude, codex, zot, whose hooks
-report every state they have — returns `Skip` before any screen read.
+decision cannot express the skip. Other live reports discard scrape guesses
+so they cannot resurface stale after expiry. A tab without detection rules
+returns `Skip` before any screen read.
+
+Codex's `PermissionRequest` precedes both automatic review and a human
+approval dialogue, and supplies no call id. Its metadata-bearing report is
+observational rather than a semantic user wait. A verified command, file-edit,
+MCP-tool or network approval form at the viewport bottom temporarily overrides
+a non-blocked report. The report remains stored and resumes when the dialogue
+disappears. This
+also requires scanning behind a live report. Native question blocks and
+explicit agent blocks retain semantic precedence. `codex_approval::overrides_report`
+is shared by activity settling and both status diagnostics, so the dot and
+its explanation agree. The rules require known phrases and a complete default
+footer at the viewport bottom, including native word wrapping. Missing required
+text and other approval forms produce no guess. Codex's scan deadline starts
+with the first pending repaint rather than moving with every output event;
+continuous modal redraws therefore cannot postpone the scan indefinitely.
+Other agents retain the trailing quiet-window debounce.
 
 ## Update model: Elm-architecture (MVU)
 
@@ -196,6 +212,12 @@ Goal: 0 draws-per-second at idle. Implementation:
 - Per-frame: DEC 2026 synchronized output (`\x1b[?2026h…l`) wraps
   every render so terminals that support it (iTerm2, kitty, WezTerm,
   Alacritty current) draw atomically — no flicker.
+- Inbound, the pane honours a child's own DEC 2026: while its update is
+  open the engine presents the last frame it finished and the parser
+  worker publishes nothing, so a redraw that erases a line before
+  rewriting it (brew's download list) never paints half-done. An update
+  left open past a second is ended, Ghostty's own bound. Detail in the
+  `pane::engine_ghostty` module doc.
 - Per-frame: colour-depth downgrade. The theme is 24-bit `Color::Rgb`;
   terminals that can't parse `\x1b[38;2…m` (old GNU screen) drop all
   colour. `ui::color_depth::downgrade_buffer` rewrites the finished
@@ -206,6 +228,19 @@ Goal: 0 draws-per-second at idle. Implementation:
   truecolor claim it can't honour) else keys off `$COLORTERM`. On the
   buffer, not the theme, so it catches syntect / diffs / ANSI
   passthrough too; a no-op at `TrueColor`.
+- Per-frame: emoji width pinning. When a VS16 emoji's cell (`🌶️`,
+  `❤️`) changes, ratatui's diff also rewrites the column it covers,
+  and the crossterm backend sends that write with no cursor move. A
+  terminal that draws the emoji two wide (Ghostty) is already past
+  that column, so the rest of the run lands one column right and its
+  last glyph survives the next frame's clear. That was a stray `)`
+  after the `gV` version flash replaced the `g-` chord hint.
+  `ui::emoji_diff::pin_emoji_widths` marks each such cell
+  `ForcedWidth`, so the diff skips the covered column as it does for
+  CJK, and the next write starts with a cursor move. It runs on the
+  buffer because the emoji arrives from flashes, file names and agent
+  output alike. Its tests replay ratatui's real diff and backend bytes
+  through libghostty-vt and compare the screen to the buffer.
 - Caching: `build_rows()` and grid stabilization keyed by a
   `list_generation` counter that increments on any listing /
   cursor / pick / mask change.
@@ -222,7 +257,7 @@ Nothing on a live, post-startup code path may read the cursor position
 read the same bytes off stdin — either way the read fails and tears the
 whole session down. This bit us through ratatui 0.30's `Terminal::clear()`
 (closing a pager / any `needs_full_repaint` over SSH crashed the session,
-#444); `force_full_repaint` (`src/lib.rs`) is the cursor-read-free
+#444); `force_full_repaint` (`src/terminal.rs`) is the cursor-read-free
 replacement — `Terminal::resize()` to the current size has the same
 clear-and-full-repaint effect but takes the no-cursor-read branch. Any
 detection that *does* need a probe (the graphics-protocol query feeding
@@ -351,6 +386,21 @@ reopens the second commander there.
 - Pane subprocesses run under their own slave PTY (allocated via
   `portable_pty`). The pane is a VT-emulated rectangle inside
   spyc's TUI; the child has a real tty, ours is unaffected.
+- **Child input never waits for the child on the UI thread.** `PtyHost`
+  queues keys, wheel commands and complete pastes to its private input worker.
+  Ordinary input is bounded to 512 waiting batches and 8 MiB including the
+  batch being written. A single larger paste is rejected with a size-limit
+  error; queue pressure has a separate retryable error. File piping (`^a P`)
+  above that limit asks for explicit confirmation of the payload size. A
+  confirmed large pipe requires an empty queue and moves its existing allocation
+  to the worker as one exclusive batch, preserving its bracketed-paste envelope.
+  No other input is accepted until that batch finishes. Acceptance means queued,
+  not consumed by the child; prompt tracking and attention settlement commit
+  only after acceptance. A rejected batch sends no prefix. The worker preserves
+  FIFO order and owns both the OS writer and its destructor (which may write
+  EOF). Host close never joins it. Process-group teardown normally releases the
+  blocked write, but a background job in another group can retain the slave and
+  leave the detached writer blocked until that job closes it.
 - `!` captured commands also use a slave PTY now (since v1.12.0),
   so programs that open `/dev/tty` for prompts (sudo, ssh, gpg)
   flow through the master into the pager instead of bleeding onto
@@ -441,6 +491,75 @@ the alt screen, in raw mode, and — since `[mouse] capture` defaults on — wit
 session. The plan that introduced default-on capture listed this teardown as
 its prerequisite; the default shipped first, which is how the gap reached users.
 
+## Grapheme clustering (DEC mode 2027)
+
+Pane terminals run mode 2027 **on**, which is not libghostty's default, so a
+cluster costs the columns `ui::display_width` budgets for it rather than one wide
+cell per codepoint.
+
+The choice is forced. spyc is both a terminal emulator and a client of the host,
+so the engine's model has to match the host's — but ratatui is the only writer to
+the host, and its `Buffer` stores one grapheme per cell and skips continuations
+using `unicode-width` on that grapheme, the same rules `display_width` applies to
+the chrome. Emitting a four-column flag through that path would mean
+hand-splitting clusters in the render pass, so the alternative (summing
+`ghostty_unicode_codepoint_width` to match the engine) could only move the
+disagreement to the ratatui boundary. The engine was the one component modelling
+the mode disabled ([#484](https://github.com/Tripstack-Corp/spyc/issues/484)).
+
+The cost is real: that commitment was previously exercised only by the chrome,
+whose sole cluster is the status-bar chilli, and now covers pane content, where
+agents print emoji constantly. A host that does not cluster now disagrees over
+far more cells. Accepted because the alternative is unavailable, not because the
+risk is imaginary.
+
+Set via `OPT_MODE_DEFAULT`, not `OPT_MODE`: it sets the current value *and* the
+one RIS restores, so a child running `reset` keeps clustering.
+
+A child that asks with `CSI ? 2027 $ p` is told the mode is set (see "Answering
+the child's queries" below), though the common producers emit and assume rather
+than ask, which is what made the bug visible. vt100 cannot satisfy this (flag as
+two narrow cells, ZWJ family across six columns, VS16 heart in one), so the
+contract test is scoped to the ghostty engine rather than the `E: Engine`
+conformance suite.
+
+## Answering the child's queries
+
+The pane answers a child's terminal queries, but only with answers that are true
+of spyc's pane ([#486](https://github.com/Tripstack-Corp/spyc/issues/486)).
+libghostty-vt answers once a `write_pty` callback is installed. spyc installs
+one in `pane::engine_ghostty::replies` and passes what the engine produces
+through an allowlist:
+
+| Answered | Why it's true |
+|---|---|
+| DECRQM mode reports | the engine's own modes, so 2026 and 2027 report what spyc does |
+| DSR operating status, cursor position | engine state |
+| DA1 `?62;22c`, DA2 `>1;10;0c` | Ghostty's own answers less clipboard access (52) |
+| XTVERSION `spyc <version>` | not `ghostty` or `kitty`, the names children key image support on |
+| DECRQSS | engine state |
+
+Left unanswered: the kitty keyboard flags (spyc's key encoder is legacy-only,
+so claiming the protocol would switch a child to an encoding spyc never sends),
+XTGETTCAP (answered from Ghostty's terminfo, which advertises OSC 52 clipboard
+spyc lacks), colour reports (Ghostty's palette, not the host's), size reports
+(the engine's cell pixel size is a placeholder), the title report (an injection
+path), and DA3, which Ghostty doesn't answer either. Kitty graphics and the
+glyph protocol are switched off in the engine, so it doesn't answer their queries
+at all. Left on, the engine replies `OK` to a graphics query, and image tools
+then send pictures spyc never draws.
+
+An allowlist rather than a denylist, so an answer a pin bump teaches the engine
+stays unsent until someone judges it.
+
+The callback fires inside `ghostty_terminal_vt_write`, on the parser worker,
+with the engine lock held, so it only buffers (64 KiB at most). The worker takes
+the buffer, releases the lock, and queues it on the pty's input writer as a
+second producer beside the keyboard. That queue never blocks and shares input's
+8 MiB limit, so a child that never reads its input can't stall the worker.
+Replies go out even while a synchronized update holds the output: a child may
+wait on one before it closes the update.
+
 ## Git: 100% in-process gix
 
 Production git is entirely in-process via `gix` (gitoxide) — status,
@@ -508,12 +627,16 @@ All persistent state lives under XDG paths (`$XDG_STATE_HOME` or
 - `pager_positions.json` — persisted pager scroll offsets (LRU).
 - `sessions/<epoch-ms>.json` — workspace snapshots from quit.
 - `mcp-<pid>.sock` — PID-scoped MCP socket.
-- `mcp-<pid>.root` — trusted-root sidecar: the directory that spyc
-  is rooted at. Stdio discovery cross-checks a project's
-  `.spyc-context-<pid>.json` marker against this (owner-private,
-  attacker can't forge it) so a planted marker can't redirect MCP
-  attachment to another project. Written at socket start, removed on
-  cleanup.
+- `.spyc-context-<pid>.json` — the MCP context: the focused column's
+  state and the session's root, which the read tools validate a `root`
+  argument against. It lives here, not in the working directory, so its
+  path never moves with the root (#523).
+- `mcp-<pid>.root` — the root sidecar: the directory that spyc is
+  rooted at (`start_dir`, which `spyc -r` moves). It is stdio
+  discovery's only record of where a spyc is rooted, and it is
+  owner-private, so nothing an attacker can plant in a cloned repo takes
+  part. Written at socket start, rewritten when the root moves, removed
+  on cleanup; a crashed spyc's is swept at the next start.
 
 The debug log is the exception: `spyc_debug!` output goes to
 `/tmp/spyc-debug-<ts>.log` (timestamped per run, not under XDG) so
@@ -528,13 +651,38 @@ The project file is **untrusted** (spyc is routinely pointed at
 hostile content): its cosmetic/behavioural settings and plain
 rebindings are honoured, but *executing* keymap bindings (`unix`
 shell commands, `jump`) are dropped — those take effect only from
-`~/.spycrc.toml`. `^R` reload re-reads the project file from the
-**startup** cwd, never the browsed directory, so browsing into a
-hostile tree can't load its rc.
+`~/.spycrc.toml`. `[pane]` startup tabs spawn their commands at launch
+with no keypress, so a project file's list is held apart
+(`pane.project_tabs`) and opens only after the user approves that exact
+list (`state::tab_consent`, `app::startup_tabs`); an edited list asks
+again. A malformed project list is a warning, not an error, because an
+error would discard the trusted user file too. `^R` reload re-reads the
+project file from the **startup** cwd, never the browsed directory, so
+browsing into a hostile tree can't load its rc.
 
 Startup runs a health check that validates inventory / marks /
 sessions / graveyard, cleans up orphaned files, and warns on
 corrupt JSON.
+
+## Startup-tab consent binds to content
+
+<!-- SPYC-TRAP: startup-tab-consent-content -->
+A project `.spycrc.toml`'s startup tabs run only once the user approves
+them, and `state::tab_consent` records that approval against the list
+itself, not against the project. It stores each tab's `command` and `cwd`,
+in order (`Identity`, built by `identity`), and `consent_for` answers
+`Allowed` only while the declared list still equals the recorded one. So a
+`git pull` that edits the rc raises the prompt again instead of running
+the new commands under an old yes, the way `direnv` re-blocks an edited
+`.envrc`. `label` is left out on purpose: it changes only what the tab bar
+shows.
+
+Load-bearing because the failure is silent. Suppose a `PaneTabConfig`
+field is added that changes what runs (an env map, a shell override,
+arguments split out of `command`) without also being added to `Identity`.
+An approval of one list then covers every list that differs only in that
+field. Nothing crashes, and no test fails unless one pins the new field;
+`any_change_to_what_runs_asks_again` is the test to extend.
 
 ## MCP server
 
@@ -548,25 +696,28 @@ the same dispatch:
 - **In-process socket listener** — the running spyc accepts
   connections from the stdio proxy.
 
-`.mcp.json` (claude) and `.codex/config.toml` (codex) carry
-`SPYC_MCP_SOCK` in the `env` block so the proxy connects to the
-right instance. spyc writes the client config **when an agent pane
-launches** (`open_pane_tab_in` → `ensure_agent_mcp_config`), not at
-startup — so a directory where no agent is ever run doesn't get a
-stray `.mcp.json` / `.codex/` written into it. On startup, if another
-live spyc already owns the entry, spyc prompts on stderr (`PID N
-already owns MCP here. Take over? [Y/n]`); decline keeps the old
-instance as MCP owner and the launch-time write leaves its entry in
-place. Non-tty stdin auto-takes-over so CI isn't blocked.
+The agents' MCP `spyc` entry — `.mcp.json` (claude), `.codex/config.toml`
+(codex), `.agents/mcp_config.json` (agy) — names **no instance**, just
+`spyc --mcp`. An agent pane's env carries its spyc's `SPYC_MCP_SOCK` and its
+own `SPYC_PANE_ID`, and the proxy connects to that socket, so an agent always
+reaches the spyc that launched it and two spycs in one directory each keep
+their own agents (see "The agents' MCP entry names no instance" below). An
+agent started outside spyc has no socket in its env and falls back to
+project-scoped discovery. spyc writes the entry **when an agent pane
+launches** (`open_pane_tab_in` → `ensure_agent_mcp_config`), not at startup —
+so a directory where no agent is ever run doesn't get a stray `.mcp.json` /
+`.codex/` written into it.
 
-On exit, teardown (`cleanup_written_mcp_configs`, run from
-`run_teardown` after the terminal is restored) removes the entries
-*we* wrote — our socket is about to die, so a lingering registration
-would point at nothing. It only touches an entry whose `SPYC_MCP_SOCK`
-is still ours (a successor that took over is left alone), deletes a
-file/`.codex/` dir left empty, preserves any other servers/config the
-user has, and refuses to modify a **git-tracked** config (warning on
-stderr instead) — we never dirty something the user committed.
+Every spyc in a directory shares that one entry, so removing it is
+refcounted like the status hooks (`state::dir_owners`): writing it claims the
+directory, and teardown (`cleanup_written_mcp_configs`, run from
+`run_teardown` after the terminal is restored) removes it only when no other
+live spyc still claims it. It deletes a file/`.codex/`/`.agents/` dir left
+empty, preserves any other servers/config the user has, leaves an entry an
+older spyc pinned to its own live socket, and refuses to modify a
+**git-tracked** config (warning on stderr instead) — we never dirty something
+the user committed. The startup orphan sweep reaps an unclaimed entry that a
+killed spyc left.
 
 Enterprise managed-settings.json policies
 (`deniedMcpServers`/`allowedMcpServers`) are honoured.
@@ -585,6 +736,43 @@ block render/input. Worktree removal is **safe-by-default** (untracked +
 uncommitted content goes to the graveyard; a branch is deleted only if merged),
 and a worktree can be **leased** (`claim_worktree` writes git's native lock) so a
 second agent's cleanup refuses it.
+
+**A connection is attributed to the pane that opened it.** An agent pane's env
+carries `SPYC_PANE_ID`; its `spyc --mcp` proxy reads it once and adds it to the
+`initialize` it forwards, under `params._meta["spyc/paneId"]`. The connection
+thread asks the loop whether a live tab carries that id
+(`McpCommand::PaneContext`) and binds it only if one does: once, for the
+connection's lifetime, and never from a tool argument, since a per-call id is
+one an agent can forget to send. A bound connection's `get_spyc_context` adds
+`pane`, that tab's live cwd, worktree root and branch, beside the fields that
+describe the user's view; `report_status`, `register_scope` and
+`wait_for_scope_clear` default to that tab instead of the focused one. An
+unbound connection (an older proxy, the status hook, an id no live tab has) is
+served exactly as before, and the read tools' default scope and allowed roots
+don't depend on attribution at all. It is attribution, not authorization —
+SECURITY.md says why.
+
+## The agents' MCP entry names no instance
+
+<!-- SPYC-TRAP: mcp-entry-names-no-socket -->
+The `spyc` entry spyc writes into an agent's MCP config must never set
+`SPYC_MCP_SOCK`, or any other per-instance value, in its `env`. One file per
+directory serves every spyc there. It used to pin the writer's socket, and
+claude and agy give an entry's `env` precedence over their own environment, so
+whichever spyc wrote last received every agent launched in that directory —
+including agents the other spyc launched, whose `SPYC_PANE_ID` then matched no
+tab there and left them unattributed (#22). Nothing reported it: the agent's
+tools worked, against the wrong instance, and a startup-only takeover prompt
+couldn't see a directory that had no config yet.
+
+The pane's env already names the right socket, so the entry only has to let it
+through. Claude and agy pass their environment to an MCP server as it is;
+codex clears it to a fixed allow-list, so its entry lists both names in
+`env_vars`. An org-deployed `managed-mcp.json` has always had this shape
+(`command` + `--mcp`, no `env`), which is why the bug never appeared under
+one. `two_spycs_in_one_directory_each_keep_their_own_agents`
+(`src/mcp/tests/coexistence.rs`) holds it, against a model of each agent's env
+handling as probed on 2026-09-30.
 
 ## Mouse routing
 
@@ -716,3 +904,84 @@ resolves to a marker here, and every marker has a code referrer. This is
 a sparse discoverability signal for agents and humans — **not** a
 comment-style change; ordinary "why" comments stay inline. See AGENTS.md
 → "Load-bearing trap anchors" for the authoring protocol.
+
+<!-- SPYC-TRAP: pty-input-never-waits -->
+### Child input must not wait on the UI thread
+
+A child that stops reading can fill its PTY. Blocking writes or a writer
+whose destructor sends EOF must belong to the private `pty-input` worker,
+including for captured commands. The UI enqueues complete batches with
+`try_send`, never waits for capacity and never joins the writer on tab close.
+A confirmed large file pipe changes only admission of that one allocation;
+it cannot change the execution thread. A real raw-mode non-reading child
+regression reaches the pane executor and `PtyHost::write_all`, with an owned-child
+watchdog so a regression fails within a deadline. Rejected input must flash its
+cause, preserve attention and leave prompt replay unchanged.
+
+
+<!-- SPYC-TRAP: hook-cleanup-needs-managed-lease -->
+### Hook cleanup requires a managed lease
+
+An existing reporter marker can belong to a legacy import or a file whose
+installation spyc refused. Borrowing that reporter protects a live pane from
+sibling teardown, but grants no permission to remove it on exit. Hook leases
+in `state::dir_owners::hooks` record the resolved directory, agent kind, pid and
+whether installation succeeded. Teardown requires both the local and recorded
+managed lease, with no live same-agent owner. A Claude-only or MCP-only session
+cannot acquire Codex hook cleanup authority.
+
+The separate lease registry uses a nonblocking advisory lock, held through
+cleanup to prevent another instance registering between the owner check and
+file removal. Corrupt/unreadable state or lock contention preserves hooks;
+installation also skips writes when a lease cannot be registered. Legacy
+untyped owners conservatively protect every agent's hooks in their directory.
+An explicit `:hooks off` retains the user's authority to remove the active
+project's reporters, subject to tracked-file and positional-trust guards.
+
+
+<!-- SPYC-TRAP: partial-restore-keeps-saved-tabs -->
+### Partial restore must keep unopened tabs in the next save
+
+A session restore refuses unsupported agent commands per tab. The valid tabs
+can resume, but autosave and quit overwrite the same session file. Saving only
+the live panes would silently erase the refused records. The pure Model keeps
+those records verbatim and the shared snapshot builder merges them back into
+the saved list, mapping the selected live tab past inserted records. Spawn
+failures receive the same protection. Session info lists the unopened tabs and
+their reasons; none of their commands are executed. A wholly refused tab set
+leaves the current session and its identity intact.
+
+
+<!-- SPYC-TRAP: session-prune-by-last-save -->
+### Session pruning ranks by last save, not by id
+
+Each session lives in `<id>.json`, where the id is the session's creation time
+in epoch millis, and `save_session` prunes the directory back to
+`MAX_SESSIONS`. A restore keeps the id so later saves overwrite one file. The
+filename therefore says nothing about recency: a session restored every day has
+the lowest name in the directory while being the one saved most recently.
+Ranking the prune by name deleted that file in the same call that wrote it,
+whenever the directory already held `MAX_SESSIONS` newer-named files. Nothing
+reported it, and the quit summary still said "session saved". `prune_victims`
+ranks by file write time instead, and never selects the file the current save
+just wrote, whatever its timestamp says.
+
+The quit save skips a session with nothing to restore — no tabs, split or scope
+claims — unless a file already exists under its id. Each file holds one of the
+`MAX_SESSIONS` slots, so an empty quit would push out a real session. An
+existing file is still overwritten, so tabs closed before quitting don't come
+back on `-r`.
+
+
+<!-- SPYC-TRAP: codex-hook-ownership-is-a-command -->
+### Codex hook pruning requires a reporter invocation
+
+A flag mentioned in an unrelated hook grants no permission to remove that
+handler. Codex TOML installation, JSON migration, cleanup and positional-trust
+preflight share a conservative command matcher: a direct `spyc` invocation
+(or the caller's resolved reporter executable), a known wire status, and the
+exact generated or bare legacy command shape. Quoted flags, other programs,
+wrappers, extra shell actions and unknown statuses remain user content. The
+matcher does not execute a command or inspect hook trust. Existing generated
+reporter commands retain their bytes; changing cleanup recognition must not
+force a new native hook trust decision.

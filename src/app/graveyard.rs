@@ -60,21 +60,19 @@ impl App {
                 // surprise purge), and `g` then `j` then `g` would jump to top.
                 self.view.graveyard_pending_d = false;
                 self.view.graveyard_pending_g = false;
-                let rpc = self.state.left.grid_dims.rows_per_col as usize;
-                self.state
-                    .cursor_move_vertical(1, rpc, self.state.left.rows.len());
+                let (rpc, len) = self.cursor_extent();
+                self.state.cursor_move_vertical(1, rpc, len);
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.view.graveyard_pending_d = false;
                 self.view.graveyard_pending_g = false;
-                let rpc = self.state.left.grid_dims.rows_per_col as usize;
-                self.state
-                    .cursor_move_vertical(-1, rpc, self.state.left.rows.len());
+                let (rpc, len) = self.cursor_extent();
+                self.state.cursor_move_vertical(-1, rpc, len);
             }
             KeyCode::Char('g') => {
                 self.view.graveyard_pending_d = false;
                 if self.view.graveyard_pending_g {
-                    self.state.left.cursor.index = 0;
+                    self.state.cur_mut().cursor.index = 0;
                     self.view.graveyard_pending_g = false;
                 } else {
                     self.view.graveyard_pending_g = true;
@@ -83,8 +81,9 @@ impl App {
             KeyCode::Char('G') => {
                 self.view.graveyard_pending_d = false;
                 self.view.graveyard_pending_g = false;
-                if !self.state.left.rows.is_empty() {
-                    self.state.left.cursor.index = self.state.left.rows.len() - 1;
+                let (_, len) = self.cursor_extent();
+                if len > 0 {
+                    self.state.cur_mut().cursor.index = len - 1;
                 }
             }
             KeyCode::Char('p') if bare => {
@@ -127,6 +126,13 @@ impl App {
         Vec::new()
     }
 
+    /// The focused column's rows-per-grid-column and row count: the graveyard
+    /// view lives in whichever column opened it.
+    fn cursor_extent(&self) -> (usize, usize) {
+        let c = self.state.cur();
+        (c.grid_dims.rows_per_col as usize, c.rows.len())
+    }
+
     /// Restore the cursor entry from the graveyard. `to_original`
     /// = true means the original path (use `Graveyard::restore`
     /// with the orig dir as dest); false = current cwd.
@@ -134,7 +140,7 @@ impl App {
         let Some(entry) = self
             .state
             .graveyard
-            .get(self.state.left.cursor.index)
+            .get(self.state.cur().cursor.index)
             .cloned()
         else {
             self.state.flash_error("graveyard: no entry under cursor");
@@ -157,7 +163,8 @@ impl App {
                 self.state
                     .flash_info(format!("restored {} ({where_})", entry.filename));
                 self.state.graveyard = crate::state::graveyard::Graveyard::load().entries;
-                self.state.left.cursor.clamp(self.state.graveyard.len());
+                let n = self.state.graveyard.len();
+                self.state.cur_mut().cursor.clamp(n);
                 self.state.refresh_listing(); // dest may be cwd
                 self.state.rebuild_rows();
             }
@@ -173,7 +180,7 @@ impl App {
         let Some(entry) = self
             .state
             .graveyard
-            .get(self.state.left.cursor.index)
+            .get(self.state.cur().cursor.index)
             .cloned()
         else {
             self.state.flash_error("graveyard: no entry under cursor");
@@ -184,7 +191,8 @@ impl App {
                 self.state
                     .flash_info(format!("→ system trash: {}", entry.filename));
                 self.state.graveyard = crate::state::graveyard::Graveyard::load().entries;
-                self.state.left.cursor.clamp(self.state.graveyard.len());
+                let n = self.state.graveyard.len();
+                self.state.cur_mut().cursor.clamp(n);
                 self.state.rebuild_rows();
             }
             Err(e) => self.state.flash_error(format!("purge failed: {e:#}")),
