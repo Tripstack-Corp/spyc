@@ -12,6 +12,23 @@ pub(super) struct InputWriter {
     outstanding: Arc<AtomicUsize>,
 }
 
+/// The terminal's answers to the child's queries, queued behind the same limit
+/// as input. A second producer: its batches interleave with input whole.
+pub struct ReplyWriter {
+    tx: mpsc::SyncSender<Batch>,
+    outstanding: Arc<AtomicUsize>,
+}
+
+impl ReplyWriter {
+    #[expect(
+        dead_code,
+        reason = "red tests only; the parser worker calls it with the fix"
+    )]
+    pub fn send(&self, bytes: Vec<u8>) -> io::Result<()> {
+        send(&self.tx, &self.outstanding, bytes, false)
+    }
+}
+
 struct Batch {
     bytes: Vec<u8>,
     outstanding: Arc<AtomicUsize>,
@@ -60,6 +77,13 @@ impl InputWriter {
         self.enqueue_owned(bytes.to_vec(), false)
     }
 
+    pub(super) fn reply_writer(&self) -> ReplyWriter {
+        ReplyWriter {
+            tx: self.tx.clone(),
+            outstanding: Arc::clone(&self.outstanding),
+        }
+    }
+
     /// A confirmed file pipe may exceed the ordinary limit, only while empty.
     /// Move its existing allocation; never copy another large payload into the queue.
     pub(super) fn enqueue_confirmed_pipe(&mut self, bytes: Vec<u8>) -> io::Result<()> {
@@ -68,33 +92,62 @@ impl InputWriter {
 
     #[allow(clippy::needless_pass_by_ref_mut)]
     fn enqueue_owned(&mut self, bytes: Vec<u8>, confirmed: bool) -> io::Result<()> {
-        if bytes.is_empty() {
-            return Ok(());
+        send(&self.tx, &self.outstanding, bytes, confirmed)
+    }
+}
+
+fn send(
+    tx: &mpsc::SyncSender<Batch>,
+    outstanding: &Arc<AtomicUsize>,
+    bytes: Vec<u8>,
+    confirmed: bool,
+) -> io::Result<()> {
+    if bytes.is_empty() {
+        return Ok(());
+    }
+    // Include the in-flight batch. A confirmed oversized pipe must be the
+    // only outstanding batch; it cannot accumulate behind a stuck child.
+    outstanding
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+            if confirmed && bytes.len() > MAX_BYTES {
+                (used == 0).then_some(bytes.len())
+            } else {
+                used.checked_add(bytes.len())
+                    .filter(|total| *total <= MAX_BYTES)
+            }
+        })
+        .map_err(|_| queue_full())?;
+    let batch = Batch {
+        bytes,
+        outstanding: Arc::clone(outstanding),
+    };
+    match tx.try_send(batch) {
+        Ok(()) => Ok(()),
+        Err(mpsc::TrySendError::Full(_)) => Err(queue_full()),
+        Err(mpsc::TrySendError::Disconnected(_)) => Err(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "child input writer closed",
+        )),
+    }
+}
+
+#[cfg(test)]
+impl ReplyWriter {
+    /// A reply writer whose writes arrive on the returned channel.
+    pub fn capture() -> (Self, mpsc::Receiver<Vec<u8>>) {
+        struct Capture(mpsc::Sender<Vec<u8>>);
+        impl Write for Capture {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                let _ = self.0.send(bytes.to_vec());
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
         }
-        // Include the in-flight batch. A confirmed oversized pipe must be the
-        // only outstanding batch; it cannot accumulate behind a stuck child.
-        self.outstanding
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
-                if confirmed && bytes.len() > MAX_BYTES {
-                    (used == 0).then_some(bytes.len())
-                } else {
-                    used.checked_add(bytes.len())
-                        .filter(|total| *total <= MAX_BYTES)
-                }
-            })
-            .map_err(|_| queue_full())?;
-        let batch = Batch {
-            bytes,
-            outstanding: Arc::clone(&self.outstanding),
-        };
-        match self.tx.try_send(batch) {
-            Ok(()) => Ok(()),
-            Err(mpsc::TrySendError::Full(_)) => Err(queue_full()),
-            Err(mpsc::TrySendError::Disconnected(_)) => Err(io::Error::new(
-                io::ErrorKind::BrokenPipe,
-                "child input writer closed",
-            )),
-        }
+        let (tx, rx) = mpsc::channel();
+        let input = InputWriter::new(Box::new(Capture(tx))).expect("spawn the pty-input thread");
+        (input.reply_writer(), rx)
     }
 }
 
