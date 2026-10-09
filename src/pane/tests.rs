@@ -304,7 +304,6 @@ mod wake_tests {
 
     /// #486: a child's query is answered through the pty writer.
     #[test]
-    #[ignore = "red: the worker sends no reply"]
     fn a_query_is_answered_through_the_pty_writer() {
         let (tx, _gen, written, handle) = spawn_reply_worker();
         tx.send(PtyEvent::Bytes(b"\x1b[?2027$p".to_vec())).unwrap();
@@ -320,7 +319,6 @@ mod wake_tests {
     /// waiting on the reply before it closes the update would otherwise stall
     /// until the timeout.
     #[test]
-    #[ignore = "red: the worker sends no reply"]
     fn a_query_inside_an_open_update_is_answered_while_output_is_held() {
         let (tx, gen_ctr, written, handle) = spawn_reply_worker();
         tx.send(PtyEvent::Bytes(b"\x1b[?2026h\x1b[6n".to_vec()))

@@ -682,10 +682,6 @@ const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 struct WorkerOpts {
     debug_dump: bool,
     sync_timeout: std::time::Duration,
-    #[expect(
-        dead_code,
-        reason = "red tests only; the worker sends replies with the fix"
-    )]
     replies: Option<pty_host::ReplyWriter>,
 }
 
@@ -756,9 +752,12 @@ fn parser_worker(
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     engine::Engine::process(&mut *p, &bytes);
-                    engine::Engine::synchronized_update(&*p)
+                    (
+                        engine::Engine::synchronized_update(&*p),
+                        engine::Engine::take_replies(&mut *p),
+                    )
                 }));
-                let open = result.unwrap_or_else(|_| {
+                let (open, replies) = result.unwrap_or_else(|_| {
                     crate::spyc_debug!(
                         "vt100 parser panicked on {} bytes; replacing parser to recover",
                         bytes.len()
@@ -776,8 +775,15 @@ fn parser_worker(
                         rebuild_parser_preserving_size(&mut p);
                     }
                     parser.clear_poison();
-                    false
+                    (false, Vec::new())
                 });
+                // Sent with the lock released, and even while output is held:
+                // a child may wait on the reply before it closes its update.
+                if let (false, Some(writer)) = (replies.is_empty(), &opts.replies)
+                    && let Err(e) = writer.send(replies)
+                {
+                    crate::spyc_debug!("reply to a pane query dropped: {e:#}");
+                }
                 if open {
                     sync_opened.get_or_insert_with(std::time::Instant::now);
                 } else {

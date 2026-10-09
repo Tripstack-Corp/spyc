@@ -568,14 +568,12 @@ mod child_queries {
     }
 
     #[test]
-    #[ignore = "red: the pane answers no query"]
     fn decrqm_reports_clustering_set() {
         assert_eq!(replies_to(b"\x1b[?2027$p"), b"\x1b[?2027;1$y");
     }
 
     /// Recognized and currently reset: how claude learns spyc holds frames.
     #[test]
-    #[ignore = "red: the pane answers no query"]
     fn decrqm_reports_synchronized_output_supported() {
         assert_eq!(replies_to(b"\x1b[?2026$p"), b"\x1b[?2026;2$y");
     }
@@ -583,7 +581,6 @@ mod child_queries {
     /// A name that doesn't start with `ghostty` or `kitty`: those would invite
     /// image escapes spyc never draws.
     #[test]
-    #[ignore = "red: the pane answers no query"]
     fn xtversion_names_spyc() {
         let want = concat!("\x1bP>|spyc ", env!("CARGO_PKG_VERSION"), "\x1b\\");
         assert_eq!(replies_to(b"\x1b[>0q"), want.as_bytes());
@@ -591,21 +588,18 @@ mod child_queries {
 
     /// Ghostty's own answers, less clipboard access (52), which spyc lacks.
     #[test]
-    #[ignore = "red: the pane answers no query"]
     fn device_attributes_quack_as_a_colour_vt220() {
         assert_eq!(replies_to(b"\x1b[c"), b"\x1b[?62;22c");
         assert_eq!(replies_to(b"\x1b[>c"), b"\x1b[>1;10;0c");
     }
 
     #[test]
-    #[ignore = "red: the pane answers no query"]
     fn status_and_cursor_position_are_reported() {
         assert_eq!(replies_to(b"\x1b[5n"), b"\x1b[0n");
         assert_eq!(replies_to(b"\x1b[3;5H\x1b[6n"), b"\x1b[3;5R");
     }
 
     #[test]
-    #[ignore = "red: the pane answers no query"]
     fn decrqss_reports_the_scroll_region() {
         assert_eq!(
             replies_to(b"\x1b[2;10r\x1bP$qr\x1b\\"),
@@ -614,7 +608,6 @@ mod child_queries {
     }
 
     #[test]
-    #[ignore = "red: the pane answers no query"]
     fn replies_are_taken_once() {
         let mut e = <GhosttyEngine as Engine>::new(24, 80, 100);
         e.process(b"\x1b[5n");
@@ -663,7 +656,6 @@ mod child_queries {
 
     /// A child flooding queries cannot grow the pending replies without limit.
     #[test]
-    #[ignore = "red: the pane answers no query"]
     fn pending_replies_are_bounded() {
         let mut e = <GhosttyEngine as Engine>::new(24, 80, 100);
         e.process(&b"\x1b[6n".repeat(100_000));

@@ -20,10 +20,6 @@ pub struct ReplyWriter {
 }
 
 impl ReplyWriter {
-    #[expect(
-        dead_code,
-        reason = "red tests only; the parser worker calls it with the fix"
-    )]
     pub fn send(&self, bytes: Vec<u8>) -> io::Result<()> {
         send(&self.tx, &self.outstanding, bytes, false)
     }
