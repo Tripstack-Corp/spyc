@@ -42,6 +42,9 @@ use super::engine::{CellStyle, Color, Engine, MouseEncoding, MouseMode, Terminal
 /// turns it on, and ARCHITECTURE.md → "Grapheme clustering (DEC mode 2027)".
 const MODE_GRAPHEME_CLUSTER: u16 = 2027;
 
+/// DEC mode 2026 — synchronized output.
+const MODE_SYNCHRONIZED_OUTPUT: u16 = 2026;
+
 /// One materialized frame: what every read answers from.
 ///
 /// Text is a flat `String` with a span per cell rather than a `String` per
@@ -749,6 +752,25 @@ impl Engine for GhosttyEngine {
 
     fn process(&mut self, bytes: &[u8]) {
         unsafe { ffi::ghostty_terminal_vt_write(self.inner.t, bytes.as_ptr(), bytes.len()) };
+        self.inner.invalidate();
+    }
+
+    fn synchronized_update(&self) -> bool {
+        self.inner.mode(MODE_SYNCHRONIZED_OUTPUT)
+    }
+
+    fn end_synchronized_update(&mut self) {
+        let off = GhosttyTerminalModeConfig {
+            mode: MODE_SYNCHRONIZED_OUTPUT,
+            value: false,
+        };
+        unsafe {
+            ffi::ghostty_terminal_set(
+                self.inner.t,
+                Opt::GHOSTTY_TERMINAL_OPT_MODE,
+                (&raw const off).cast(),
+            );
+        }
         self.inner.invalidate();
     }
 

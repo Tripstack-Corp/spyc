@@ -211,6 +211,7 @@ impl Pane {
                 gen_clone,
                 debug_dump,
                 wake,
+                SYNC_TIMEOUT,
             );
         });
         Self {
@@ -676,6 +677,10 @@ fn rebuild_parser_preserving_size(p: &mut PaneEngine) {
     *p = <PaneEngine as engine::Engine>::new(rows, cols, 10_000);
 }
 
+/// How long a child's synchronized update may stay open before the pane shows
+/// it anyway. Ghostty's own bound (`sync_reset_ms`).
+const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
 fn parser_worker(
     guard: RxReturn,
     stop: Arc<AtomicBool>,
@@ -683,6 +688,7 @@ fn parser_worker(
     parser_gen: Arc<AtomicU64>,
     debug_dump: bool,
     wake: Wake,
+    _sync_timeout: std::time::Duration,
 ) {
     // `guard` owns the byte receiver and ships it back to the pane on EVERY
     // exit from this function — normal return AND panic-unwind. A worker
