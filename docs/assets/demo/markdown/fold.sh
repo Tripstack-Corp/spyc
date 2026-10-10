@@ -4,22 +4,34 @@ HERE=${0:A:h}
 STAGE=${SPYC_DEMO_STAGE:-/private/tmp/spyc-demo}
 R="$STAGE/aurora-docs"
 CAST="$STAGE/out/fold.cast"
+SPYC=${SPYC_DEMO_BIN:-$(command -v spyc)}
+[[ -x $SPYC ]] || { print -u2 "  ✗ no spyc to film: put it on PATH or set SPYC_DEMO_BIN"; exit 1 }
 mkdir -p "$STAGE/out"
 rm -rf "$R" && mkdir -p "$R" && cp -R "$HERE/aurora-docs/." "$R"
+# A private HOME and ZDOTDIR per run, as in demo.sh.
+H="$STAGE/home"
+rm -rf "$H" "$STAGE/bin" && mkdir -p "$H" "$STAGE/bin"
+ln -s "${SPYC:A}" "$STAGE/bin/spyc"
+print -r -- "PROMPT='%# '" > "$H/.zshrc"
 export TUI_TEST_SESSION=spycfold
 TT=tui-test
 say(){ print -r -- "  ‣ $*" }
 k(){ $TT key press "$1" >/dev/null; sleep "${2:-0.5}" }
 z(){ $TT type "$1" >/dev/null; sleep 0.35; $TT type "$2" >/dev/null; sleep "${3:-1.8}" }   # chord, keyed slowly
-xp(){ $TT expect text "$1" --no-strict --timeout "${2:-15000}" >/dev/null || { print -u2 "  ✗ FAIL: $1"; return 1; } }
+xp(){ $TT expect text "$1" --match any --timeout "${2:-15000}" >/dev/null || { print -u2 "  ✗ FAIL: $1"; return 1; } }
 # assert the NUMBER of fold markers -- an assertion that actually bites
 folds(){ $TT text 2>/dev/null | grep -c "▸" }
 want_folds(){ local want=$1 i n
   for i in {1..30}; do n=$(folds); [[ "$n" == "$want" ]] && { print -r -- "  ✓ $want folds"; return 0 }; sleep 0.4; done
   print -u2 "  ✗ FAIL: wanted $want folds, saw $(folds)"; return 1 }
 
-rm -f "$CAST"; $TT close --all >/dev/null 2>&1
-$TT open --backend ghostty --cols 170 --rows 44 --cwd "$R" --shell zsh --env "COLORTERM=truecolor" >/dev/null
+# Only this script's session: `close --all` would end everyone's.
+rm -f "$CAST"; $TT close >/dev/null 2>&1
+$TT open --backend ghostty --cols 170 --rows 44 --cwd "$R" --shell zsh \
+   --env "HOME=$H" --env "ZDOTDIR=$H" \
+   --env "XDG_CONFIG_HOME=$H/.config" --env "XDG_STATE_HOME=$H/.local/state" \
+   --env "PATH=$STAGE/bin:$PATH" --env "SPYC_MCP_SOCK=" --env "SPYC_PANE_ID=" \
+   --env "COLORTERM=truecolor" >/dev/null
 $TT record start "$CAST" >/dev/null
 
 say "open the handbook in the pager"
@@ -63,4 +75,4 @@ $TT type "m" >/dev/null; sleep 2.5
 
 $TT record stop >/dev/null
 say "cast -> $CAST"
-$TT close --all >/dev/null 2>&1
+$TT close >/dev/null 2>&1
