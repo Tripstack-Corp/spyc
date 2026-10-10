@@ -168,14 +168,16 @@ deny: ## Supply-chain checks: advisories, licenses, sources, bans (cargo-deny)
 package-check: ## Package both crates and build them from the tarballs, as `cargo publish` will (ALLOW_DIRTY=1 for a dirty tree)
 	cargo package --locked --workspace $(if $(ALLOW_DIRTY),--allow-dirty)
 
-# Re-record the README demo GIFs. On-demand: each tape drives a real spyc
-# through ttyd for ~20-30s, so this is minutes of wall clock, not a gate step.
+# Re-record the README demo GIFs. On-demand: each one drives a real spyc for
+# ~20-30s, so this is minutes of wall clock, not a gate step.
 #
-# The tapes record the RELEASE binary from this tree (prepended to PATH), never
-# whatever `spyc` is installed — a demo must show the code it ships beside.
-# TAPE=<name> re-records one; bare `make demos` does the hero + all five tour
-# loops. The hero (spyc.tape) records in THIS repo — its stand-in answers with
-# real spyc paths — so it takes only the fixture's private HOME.
+# They record the RELEASE binary from this tree, never whatever `spyc` is
+# installed — a demo must show the code it ships beside. TAPE=<name> re-records
+# one; bare `make demos` does the hero, all five tour loops and the agents clip.
+# The tapes drive spyc through vhs and ttyd. The hero (spyc.tape) records in
+# THIS repo — its stand-in answers with real spyc paths — so it takes only the
+# fixture's private HOME. The agents clip is filmed through tui-test by
+# docs/assets/demo/agents/demo.py and rendered with agg.
 #
 # Not recordable here, by design of the medium: an inline image (ttyd/xterm.js
 # has no graphics protocol, so spyc correctly draws nothing) and the desktop
@@ -183,18 +185,20 @@ package-check: ## Package both crates and build them from the tarballs, as `carg
 # "an agent needs you" cue — the red dot and the spice-heat border pulse — is
 # in demo-agents.gif.
 .PHONY: demos
-demos: ## Re-record the README demo GIFs (needs vhs; TAPE=spyc|pager|vsplit|lua|review|agents for one)
-	@command -v vhs >/dev/null 2>&1 || { \
-		echo "vhs not found — install with: brew install vhs"; \
-		exit 1; \
-	}
+demos: ## Re-record the README demo GIFs (vhs; agents needs tui-test, agg, rmatrix; TAPE=spyc|pager|vsplit|lua|review|agents for one)
 	@test -x $(TARGET_DIR)/release/spyc || { \
 		echo "no release binary — run: cargo build --release"; \
 		exit 1; \
 	}
 	@for tape in $(or $(TAPE),spyc pager vsplit lua review agents); do \
 		echo "── recording $$tape ──"; \
-		PATH="$(abspath $(TARGET_DIR))/release:$$PATH" vhs docs/assets/demo/$$tape.tape || exit 1; \
+		if [ "$$tape" = agents ]; then \
+			python3 docs/assets/demo/agents/demo.py --binary "$(abspath $(TARGET_DIR))/release/spyc" \
+				--gif docs/assets/demo-agents.gif || exit 1; \
+		else \
+			command -v vhs >/dev/null 2>&1 || { echo "vhs not found — install with: brew install vhs"; exit 1; }; \
+			PATH="$(abspath $(TARGET_DIR))/release:$$PATH" vhs docs/assets/demo/$$tape.tape || exit 1; \
+		fi; \
 	done
 
 .PHONY: fuzz
