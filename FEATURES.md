@@ -1542,10 +1542,12 @@ Claude can query and control the workspace through these tools:
 - **`pick_files`** -- pick files matching glob patterns (additive)
 - **`clear_picks`** -- clear all picks
 - **`create_worktree(branch)`** -- create a git worktree off the
-  focused commander's repo (existing branch, else a new one at HEAD)
-  in a sibling `<repo>.worktrees/<branch>/` dir; returns `{branch,
-  path}`. Lets a skill spin up a worktree to work in a second column
-  while the first stays on its branch.
+  focused commander's repo (existing branch, else a new one off the
+  default branch) in a sibling `<repo>.worktrees/<branch>/` dir;
+  returns `{branch, path}`. When the user is browsing outside any repo,
+  the calling agent's own pane decides the repo, then `PROJECT_HOME`.
+  Lets a skill spin up a worktree to work in a second column while the
+  first stays on its branch.
 - **`remove_worktree(path)`** -- tear down a worktree by the path
   `create_worktree` returned, safe by default. It archives untracked and
   uncommitted content into the graveyard (recoverable, under

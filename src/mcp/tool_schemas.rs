@@ -141,7 +141,7 @@ pub fn tools() -> Value {
             },
             {
                 "name": "create_worktree",
-                "description": "Create a git worktree for the given branch (existing branch reused, else a NEW branch created off the repo's default/integration branch — pass `base` to override that start point). It lands in a sibling `<repo>.worktrees/<branch>/` dir, anchored on the MAIN repo even when called from inside a linked worktree. Returns {branch, path}. Pass `open:true` to also open it in column b and work there right away (otherwise navigate_to / open_worktree later). Errors if not in a repo or the branch is already checked out elsewhere.",
+                "description": "Create a git worktree for the given branch (existing branch reused, else a NEW branch created off the repo's default/integration branch — pass `base` to override that start point). It lands in a sibling `<repo>.worktrees/<branch>/` dir, anchored on the MAIN repo even when called from inside a linked worktree. Returns {branch, path}. Pass `open:true` to also open it in column b and work there right away (otherwise navigate_to / open_worktree later). The repo is the focused column's; when the user is browsing outside any repo, your own pane's, then PROJECT_HOME's. Errors if none is in a repo or the branch is already checked out elsewhere.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

@@ -144,6 +144,7 @@ fn mcp_create_worktree_makes_a_worktree_off_the_focused_repo() {
             branch: "mcp-wt".to_string(),
             base: None,
             open: false,
+            pane_id: None,
         });
         match resp {
             crate::mcp_cmd::McpResponse::Ok { message } => {
@@ -188,6 +189,7 @@ fn mcp_create_worktree_open_opens_column_b() {
             branch: "mcp-open-wt".to_string(),
             base: None,
             open: true,
+            pane_id: None,
         });
         let path = match resp {
             crate::mcp_cmd::McpResponse::Ok { message } => {
@@ -216,11 +218,131 @@ fn mcp_create_worktree_rejects_empty_branch() {
             branch: "   ".to_string(),
             base: None,
             open: false,
+            pane_id: None,
         });
         assert!(
             matches!(resp, crate::mcp_cmd::McpResponse::Error { .. }),
             "blank branch is an error"
         );
+    });
+}
+
+use crate::mcp_cmd::McpResponse;
+
+/// A repo with one commit at `dir`.
+fn init_repo(dir: &std::path::Path) {
+    let run_git = crate::git::test_support::run_git;
+    std::fs::create_dir_all(dir).unwrap();
+    run_git(dir, &["init", "-q", "--initial-branch=main"]);
+    std::fs::write(dir.join("f.txt"), "v1\n").unwrap();
+    run_git(dir, &["add", "f.txt"]);
+    run_git(dir, &["commit", "-q", "-m", "v1"]);
+}
+
+/// `create_worktree` for `branch`, as the agent in `pane_id` calls it.
+fn create_worktree(app: &mut App, branch: &str, pane_id: Option<String>) -> McpResponse {
+    app.execute_mcp_command(crate::mcp_cmd::McpCommand::CreateWorktree {
+        branch: branch.to_string(),
+        base: None,
+        open: false,
+        pane_id,
+    })
+}
+
+fn created_at(resp: McpResponse) -> std::path::PathBuf {
+    match resp {
+        McpResponse::Ok { message } => {
+            let v: serde_json::Value = serde_json::from_str(&message).unwrap();
+            std::path::PathBuf::from(v["path"].as_str().unwrap())
+        }
+        McpResponse::Error { message } => panic!("create_worktree errored: {message}"),
+    }
+}
+
+/// The user browsing outside any repo doesn't refuse an agent working in one:
+/// the worktree comes off the calling agent's own repo, not an error.
+#[test]
+fn mcp_create_worktree_falls_back_to_the_calling_panes_repo() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let repo = root.join("repo");
+        init_repo(&repo);
+        let outside = root.join("outside");
+        std::fs::create_dir(&outside).unwrap();
+
+        let mut app = App::test_app(outside);
+        app.state.project_home = None;
+        assert!(app.open_pane_tab_in("cat", &repo));
+        let pane_id = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+            .info
+            .id
+            .clone();
+
+        let path = created_at(create_worktree(&mut app, "agent-wt", Some(pane_id)));
+        assert_eq!(path, root.join("repo.worktrees/agent-wt"));
+    });
+}
+
+/// With no attributed pane, `PROJECT_HOME` is the fallback, as it is for
+/// `list_worktrees`.
+#[test]
+fn mcp_create_worktree_falls_back_to_project_home() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let repo = root.join("repo");
+        init_repo(&repo);
+        let outside = root.join("outside");
+        std::fs::create_dir(&outside).unwrap();
+
+        let mut app = App::test_app(outside);
+        app.state.project_home = Some(repo);
+        let path = created_at(create_worktree(&mut app, "home-wt", None));
+        assert_eq!(path, root.join("repo.worktrees/home-wt"));
+    });
+}
+
+/// The fallbacks only apply outside a repo: a focused column in one still
+/// decides, even when the calling agent runs in another.
+#[test]
+fn mcp_create_worktree_prefers_the_focused_columns_repo() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let (a, b) = (root.join("a"), root.join("b"));
+        init_repo(&a);
+        init_repo(&b);
+
+        let mut app = App::test_app(a.clone());
+        app.state.update_repo_root(state::Side::Left, &a);
+        assert!(app.open_pane_tab_in("cat", &b));
+        let pane_id = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+            .info
+            .id
+            .clone();
+
+        let path = created_at(create_worktree(&mut app, "col-wt", Some(pane_id)));
+        assert_eq!(path, root.join("a.worktrees/col-wt"));
+    });
+}
+
+/// Nothing in a repo: the error is git's, naming the focused column's dir.
+#[test]
+fn mcp_create_worktree_outside_every_repo_reports_the_columns_dir() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let outside = std::fs::canonicalize(tmp.path()).unwrap().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        let mut app = App::test_app(outside.clone());
+        app.state.project_home = None;
+        match create_worktree(&mut app, "nowhere", None) {
+            McpResponse::Error { message } => assert!(
+                message.contains("open repo") && message.contains(&*outside.to_string_lossy()),
+                "{message}"
+            ),
+            McpResponse::Ok { message } => panic!("created outside a repo: {message}"),
+        }
     });
 }
 
@@ -252,6 +374,7 @@ fn mcp_remove_worktree_tears_down_and_resets_occupied_column() {
             branch: "teardown-wt".to_string(),
             base: None,
             open: false,
+            pane_id: None,
         });
         let path = match created {
             McpResponse::Ok { message } => {
@@ -464,6 +587,7 @@ fn mcp_create_worktree_runs_off_thread_and_replies() {
                 branch: "wt-async".into(),
                 base: None,
                 open: false,
+                pane_id: None,
             })
             .expect("a worktree command")
             .expect("validation passes");
@@ -751,6 +875,7 @@ fn mcp_create_worktree_works_while_the_column_is_inside_an_archive() {
             branch: "from-inside-a-mount".to_string(),
             base: None,
             open: false,
+            pane_id: None,
         });
         match resp {
             crate::mcp_cmd::McpResponse::Ok { message } => {
