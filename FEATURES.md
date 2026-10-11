@@ -760,9 +760,12 @@ Three modes of running commands, each for a different use case:
 - **!** captured — run a command and stream output into the pager in
   real-time with an hourglass timer. Stderr is merged so build
   progress, errors, and output all appear together. `%` expands to
-  the current selection. `^C` interrupts; `^\` hard-kills; `^Z`
-  sends the task to the background (reader thread keeps draining
-  output into a buffer; resume with `:fg` -- see Background tasks).
+  the current selection, relative to the column's directory where the
+  command runs, so `./%` runs the selected script; anything outside
+  stays absolute, and a name starting with `-` gets a `./`. `^C`
+  interrupts; `^\` hard-kills; `^Z` sends the task to the background
+  (reader thread keeps draining output into a buffer; resume with `:fg`
+  -- see Background tasks).
 - **!!** — repeat the last captured command.
 - **!?** — history editor popup. Opens instantly (no Enter needed).
   Also reachable mid-prompt: after `Esc` puts the line editor in

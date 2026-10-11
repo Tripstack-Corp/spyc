@@ -325,7 +325,7 @@ impl App {
                     // Execute the (possibly edited) command directly.
                     self.state.last_captured_cmd = Some(cmd.clone());
                     self.state.history.push(cmd.trim());
-                    match crate::shell::expand_percent(&cmd, &self.state.selection_paths()) {
+                    match self.state.expand_selection_percent(&cmd) {
                         Ok(expanded) => self.start_capture(&expanded, &cmd, &cmd),
                         Err(e) => self.state.flash_error(e.to_string()),
                     }

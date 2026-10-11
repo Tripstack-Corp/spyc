@@ -218,7 +218,7 @@ rectangular selection.
 | `$` | Drop into `$SHELL` |
 | `:` | Command line (`:cd`, `:sort`, `:limit`, `:grep`, `:fg`, `:task`, `:q`) |
 
-`%` in any command expands to the current selection.
+`%` in any command expands to the current selection, relative to the directory the command runs in (`./%` runs the selected script); anything outside it stays absolute.
 
 While a `!` capture is running in the pager:
 

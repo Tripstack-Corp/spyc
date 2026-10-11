@@ -50,6 +50,19 @@ impl AppState {
             .collect()
     }
 
+    /// Expand `%` in a shell command against the selection, each path relative
+    /// to the column's directory, which is where the command runs. Inside an
+    /// archive mount the command runs outside it, so the paths stay absolute:
+    /// relative, they would name files beside the archive.
+    pub fn expand_selection_percent(
+        &self,
+        template: &str,
+    ) -> Result<String, crate::shell::expand::NonUtf8Path> {
+        let dir = self.cur().listing.dir.as_path();
+        let cwd = self.mounts.resolve(dir).is_none().then_some(dir);
+        crate::shell::expand_percent(template, &self.selection_paths(), cwd)
+    }
+
     pub fn set_mark(&mut self, letter: char) {
         let focus = self
             .cur()

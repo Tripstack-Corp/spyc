@@ -17,7 +17,6 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::keymap::{Action, BoundAction, ResolverOutcome};
-use crate::shell;
 
 use super::route;
 use super::update::UiMsg;
@@ -698,7 +697,7 @@ impl App {
         match bound {
             BoundAction::Plain(action) => return self.apply(action),
             BoundAction::UnixCmd(template) => {
-                return match shell::expand_percent(template, &self.state.selection_paths()) {
+                return match self.state.expand_selection_percent(template) {
                     Ok(cmd) => Ok(sh_c(&cmd, true)),
                     Err(e) => {
                         self.state.flash_error(e.to_string());
