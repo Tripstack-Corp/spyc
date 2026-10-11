@@ -553,6 +553,11 @@ impl App {
     /// lost-wakeup CAS hazard); `drain_output`/`drain_all` are generation-gated
     /// so the second drain per frame is a no-op when nothing changed.
     fn prepare_panes(&mut self, layout: &FrameLayout) {
+        if self.view.pane_selection_snapshot.is_some()
+            && (!crate::mouse_capture_is_on() || self.pane_drag_screen().is_none())
+        {
+            self.clear_pane_selection();
+        }
         let overlay_active = self.runtime.top_overlay.is_some();
 
         // Top overlay (`;cmd`/`V`/`D`): resize to the spyc area, drain, and

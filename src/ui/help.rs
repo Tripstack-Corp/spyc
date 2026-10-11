@@ -292,6 +292,10 @@ const SECTIONS: &[Section] = &[
                 "real mouse reporting (scroll what's under the pointer); off restores terminal text selection",
             ),
             (
+                "Ctrl+drag (pane)",
+                "select through spyc; holds the grid while dragging, release copies and resumes live output",
+            ),
+            (
                 ":notify test",
                 "fire every notification channel (bell + visual + desktop) to verify setup",
             ),

@@ -350,16 +350,15 @@ pub struct ViewState {
     /// pager's charwise selection).
     pub(super) list_selection: Option<mouse::ListSelection>,
     /// A spyc-side charwise selection over the pane's visible grid, for a child
-    /// that ignores mouse reports — `(anchor, focus)` in SCREEN coordinates,
+    /// with a spyc-owned drag — `(anchor, focus)` in SCREEN coordinates,
     /// unordered so a backwards drag keeps its direction.
     ///
-    /// Screen coordinates, so it is only meaningful for the frame it was made in:
-    /// [`App::drain_pane_output`] clears it when the child paints, because the grid
-    /// scrolls out from under a selection anchored this way. That is fine for the
-    /// case it exists to serve — reading a static transcript overlay — and is the
-    /// simple half of the tradeoff recorded in
-    /// `docs/archive/mouse_selection_plan.md`.
+    /// The held snapshot stabilizes its grid while dragging. After release the
+    /// live grid resumes, and a highlight is drawn only over the copied text.
+    /// Pane output or new input retires the released selection.
     pub(super) pane_selection: Option<((u16, u16), (u16, u16))>,
+    /// Holds the drag grid and validates the released highlight; the child keeps running.
+    pub(super) pane_selection_snapshot: Option<mouse::PaneSelectionSnapshot>,
     /// A charwise selection over one of the single-line chrome surfaces (the status
     /// bar, the pane divider/tab line) — the row and an unordered column pair.
     pub(super) chrome_selection: Option<mouse::ChromeSelection>,
@@ -496,6 +495,7 @@ impl ViewState {
             mouse_selection: None,
             list_selection: None,
             pane_selection: None,
+            pane_selection_snapshot: None,
             chrome_selection: None,
             chrome_rows: std::cell::RefCell::new(Vec::new()),
             last_chrome_click: None,

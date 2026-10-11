@@ -55,7 +55,7 @@ impl App {
                     PaneWidget {
                         screen,
                         focused: overlay_focused,
-                        selection: self.pane_selection_screen_coords(),
+                        selection: None,
                     },
                     overlay_area,
                 );
@@ -300,12 +300,25 @@ impl App {
             crate::ui::pager::render(frame, rect, view, &self.view.theme);
         } else if let Some(tabs) = self.runtime.pane_tabs.as_ref() {
             let focused = self.state.pane_focused();
+            if self.view.mouse_selection == Some(super::super::mouse::MouseDragTarget::Pane)
+                && let Some(screen) = self.pane_drag_screen()
+            {
+                frame.render_widget(
+                    PaneWidget {
+                        screen,
+                        focused,
+                        selection: self.pane_selection_screen_coords(screen),
+                    },
+                    rect,
+                );
+                return;
+            }
             tabs.active().with_screen(|screen| {
                 frame.render_widget(
                     PaneWidget {
                         screen,
                         focused,
-                        selection: self.pane_selection_screen_coords(),
+                        selection: self.pane_selection_screen_coords(screen),
                     },
                     rect,
                 );
@@ -520,13 +533,22 @@ impl App {
     /// as `(row, col)` PAIRS, not per-axis: a backwards drag up-and-right must keep
     /// each column attached to its own row, the same trap `char_endpoints` documents
     /// for the pager.
-    fn pane_selection_screen_coords(&self) -> Option<((u16, u16), (u16, u16))> {
+    fn pane_selection_screen_coords(
+        &self,
+        screen: &impl crate::pane::engine::TerminalScreen,
+    ) -> Option<((u16, u16), (u16, u16))> {
         let (a, b) = self.view.pane_selection?;
-        Some(if a.0 < b.0 || (a.0 == b.0 && a.1 <= b.1) {
+        let ordered = if a.0 < b.0 || (a.0 == b.0 && a.1 <= b.1) {
             (a, b)
         } else {
             (b, a)
-        })
+        };
+        let held = self.pane_drag_screen()?;
+        // A released highlight must still identify the bytes copied. Compare
+        // under the render's parser lock so output racing release cannot move it.
+        (crate::pane::selection_text(held, ordered.0, ordered.1)
+            == crate::pane::selection_text(screen, ordered.0, ordered.1))
+        .then_some(ordered)
     }
 
     /// The inclusive row range to highlight in `side`'s list, if a mouse row
@@ -604,7 +626,7 @@ impl App {
                         PaneWidget {
                             screen,
                             focused: right_focused,
-                            selection: self.pane_selection_screen_coords(),
+                            selection: None,
                         },
                         rect,
                     );

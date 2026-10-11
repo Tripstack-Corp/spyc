@@ -16,10 +16,12 @@ pub use engine_vt100::{PaneEngine, PaneScreen};
 pub mod input;
 pub mod pathref;
 pub mod quick_select;
+pub mod snapshot;
 pub mod tabs;
 mod widget;
 
 pub use tabs::{AgentActivity, PaneTabs, ReportedStatus, TabEntry, TabInfo};
+pub use widget::selection_text;
 pub use widget::{PaneWidget, cell_style};
 
 // Shared pty kernel that `Pane`, `PendingCapture` and `BackgroundTask`

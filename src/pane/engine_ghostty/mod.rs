@@ -704,6 +704,13 @@ impl TerminalScreen for GhosttyScreen {
         })
     }
 
+    fn row_wrapped(&self, row: u16) -> bool {
+        self.with_frame(|f| f.wrapped.get(usize::from(row)).copied().unwrap_or(false))
+    }
+    fn copy_pads_blank_cells(&self) -> bool {
+        true
+    }
+
     fn scrollback(&self) -> usize {
         self.view
     }
