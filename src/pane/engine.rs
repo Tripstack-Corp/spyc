@@ -149,6 +149,10 @@ pub trait TerminalScreen {
     /// Whether this visible row continues into the next row without a newline.
     fn row_wrapped(&self, row: u16) -> bool;
     /// Copy retains empty cells, rather than adding gaps only before nonblank text.
+    /// The vt100 fallback requires this distinction; [#453] tracks removal of
+    /// this method and the snapshot's vt100 padding branch.
+    ///
+    /// [#453]: https://github.com/Tripstack-Corp/spyc/issues/453
     fn copy_pads_blank_cells(&self) -> bool;
 
     /// Current scrollback view offset in rows.

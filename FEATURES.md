@@ -844,7 +844,10 @@ end).
   it. Release copies those held bytes and resumes live output. An ordinary drag in
   a mouse-aware child keeps reaching the child. A released highlight appears only
   while the live grid still matches the copied text; new output or input clears it.
-  A click without movement copies nothing.
+  Ctrl+click is consumed by spyc even without movement: it copies nothing and
+  never reaches the child. Terminals that reserve Ctrl+click for a context menu
+  must forward it to applications; iTerm2's pointer preference is described in
+  [CONFIGURATION.md](CONFIGURATION.md#selecting-text).
   **Drag in the file list to select rows; release copies their names** — hold
   **Ctrl** while pressing to copy absolute paths instead. The highlight stays up
   after the copy. Distinct from picks: a drag never changes what the next file

@@ -84,6 +84,7 @@ impl ScreenSnapshot {
                 }
                 continue;
             }
+            // #453 tracks removal of this branch with the vt100 fallback.
             // vt100 emits padding only when text follows it, including a range
             // beginning on a wide continuation. A wide head consumes its tail.
             if skip_tail {

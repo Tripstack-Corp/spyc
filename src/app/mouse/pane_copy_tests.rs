@@ -436,3 +436,81 @@ fn disabling_mouse_capture_cancels_the_held_grid() {
         assert!(copied(&release).is_none());
     });
 }
+
+fn command_is_highlighted(app: &mut App) -> bool {
+    let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let pane = app.frame_layout(Rect::new(0, 0, 60, 24)).pane.unwrap();
+    (2..=LAST_COL).all(|col| {
+        terminal
+            .backend()
+            .buffer()
+            .cell((pane.x + col, pane.y + 2))
+            .unwrap()
+            .modifier
+            .contains(ratatui::style::Modifier::REVERSED)
+    })
+}
+
+#[test]
+fn a_released_highlight_does_not_move_to_different_live_text() {
+    let _lock = crate::mouse_test_lock();
+    let _capture = Capture::new();
+    let dir = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(dir.path(), || {
+        let mut app = fixture(dir.path(), true);
+        let (pane, _) = render(&mut app);
+        app.handle_mouse(event(
+            pane,
+            MouseEventKind::Down(MouseButton::Left),
+            2,
+            KeyModifiers::CONTROL,
+        ));
+        app.handle_mouse(event(
+            pane,
+            MouseEventKind::Drag(MouseButton::Left),
+            LAST_COL,
+            KeyModifiers::NONE,
+        ));
+        let release = app.handle_mouse(event(
+            pane,
+            MouseEventKind::Up(MouseButton::Left),
+            LAST_COL,
+            KeyModifiers::NONE,
+        ));
+        assert_eq!(copied(&release), Some(COMMAND));
+        assert!(command_is_highlighted(&mut app));
+        app.runtime
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_mut()
+            .send_bytes(b"r")
+            .unwrap();
+        // Let the parser repaint before the application lands its output wake.
+        // The render must validate the old band under the same lock as the grid.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            use crate::pane::engine::TerminalScreen as _;
+            if app
+                .runtime
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active()
+                .with_screen(|s| s.contents().contains("replacement command"))
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "PTY did not repaint after release"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !command_is_highlighted(&mut app),
+            "a released band must identify only the copied bytes"
+        );
+    });
+}

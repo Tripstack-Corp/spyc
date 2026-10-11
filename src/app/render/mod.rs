@@ -554,7 +554,7 @@ impl App {
     /// so the second drain per frame is a no-op when nothing changed.
     fn prepare_panes(&mut self, layout: &FrameLayout) {
         if self.view.pane_selection_snapshot.is_some()
-            && (!crate::mouse_capture_is_on() || self.pane_drag_screen().is_none())
+            && (!crate::mouse_capture_is_on() || self.pane_drag_screen(layout.pane).is_none())
         {
             self.clear_pane_selection();
         }

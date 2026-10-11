@@ -99,10 +99,17 @@ reporting owns the drag, and a child that didn't gets **spyc's** selection over 
 pane grid. **Ctrl+drag** explicitly gives spyc the gesture in either case, so text
 in Codex's queued-question view can be copied even when Codex cannot select it.
 Hold Ctrl on the press; releasing Ctrl mid-drag does not hand it back to the child.
-Spyc holds the visible grid while you drag, then copies from it on release and
-resumes the live view. The child continues running throughout. A plain click copies
-nothing, and a key, paste, wheel gesture, tab switch or layout change cancels the
-held drag. Turning mouse capture off also cancels it. Shift+drag remains the host terminal's selection gesture.
+spyc holds the visible grid while you drag, then copies from it on release and
+resumes the live view. The child continues running throughout. Ctrl+click without
+movement copies nothing and is consumed: the child gets neither press nor release.
+A key, paste, wheel gesture, tab switch or layout change cancels the held drag.
+Turning mouse capture off also cancels it. Shift+drag remains the host terminal's
+selection gesture.
+
+The host terminal must forward Ctrl+left events. iTerm2 requires its pointer
+preference for reporting Ctrl+click to applications; Terminal.app uses the gesture
+for a shortcut menu. See [the selection caveats](../CONFIGURATION.md#selecting-text)
+for the preference and the host-selection fallback.
 
 ---
 

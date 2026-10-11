@@ -253,7 +253,7 @@ impl super::App {
         // began in the child keeps reaching it after the pointer leaves the pane
         // (children track their own selection across the whole drag).
         //
-        // Spyc-owned drags were handled above. Only gestures whose press was
+        // spyc-owned drags were handled above. Only gestures whose press was
         // forwarded may reach the child here.
         if matches!(ev.kind, MouseEventKind::Drag(_)) {
             return self.forward_drag(ev, frame);

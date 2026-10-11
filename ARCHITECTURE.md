@@ -800,11 +800,15 @@ you are looking at rather than the thing that happens to be focused.
 list rows), each a `begin` + `extend` + `finish` triple. The press *claims* the
 drag; an unclaimed press leaves child-forwarding untouched, which is why an
 ordinary drag inside a mouse-aware child still reaches the child. Ctrl+left press
-claims the pane for spyc even when the child requested mouse reporting.
+claims the pane for spyc even when the child requested mouse reporting. A
+Ctrl+click without movement is also consumed; the child receives no press or release.
 
 Pane selection owns a bounded `pane::snapshot::ScreenSnapshot` captured under the
 parser lock at press. The draw and clipboard extraction use that same immutable
-grid throughout the gesture; the parser worker keeps consuming live output.
+grid throughout the gesture; the parser worker keeps consuming live output. The
+host terminal cursor is suppressed during the drag; the widget's main-screen block
+comes from the held grid. Render reuses its pane rect to validate the snapshot and
+only compares copied bytes with the live grid after release.
 Release resumes the live grid and copies from the held grid. A released highlight
 is compared with the live text under the draw's parser lock, so output racing
 release cannot put it over different text. The snapshot preserves the engine's

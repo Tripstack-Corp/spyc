@@ -343,7 +343,8 @@ focus.
 | Left click | Focus that region — and click *through* to a mouse-aware child |
 | Left click on a pane tab | Switch to that tab |
 | Left drag | Select text: pager content, a non-mouse pane's held grid, any chrome row, or file-list rows. Release copies |
-| `Ctrl` + left drag (pane) | Select through spyc even when the child uses mouse reporting. The grid stays fixed during the drag; release copies it and resumes live output |
+| `Ctrl` + left drag (pane) | Select through spyc even when the child uses mouse reporting. The grid stays fixed during the drag; release copies it and resumes live output. The terminal must forward Ctrl+left events; see [selection caveats](../CONFIGURATION.md#selecting-text) |
+| `Ctrl` + left click (pane) | Consumed by spyc; copies nothing without movement and sends no click to the child |
 | Double click on a chrome row | Select and copy that whole row — the status line, the divider, a flashed error |
 | `Ctrl` + left drag (list) | Copy absolute paths instead of names |
 | Middle click | Paste the clipboard |

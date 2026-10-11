@@ -293,7 +293,7 @@ const SECTIONS: &[Section] = &[
             ),
             (
                 "Ctrl+drag (pane)",
-                "select through spyc; holds the grid while dragging, release copies and resumes live output",
+                "select through spyc; release copies held text; Ctrl+click is consumed (iTerm2 needs Ctrl-click reporting)",
             ),
             (
                 ":notify test",

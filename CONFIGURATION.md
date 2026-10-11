@@ -463,16 +463,27 @@ Capture takes the terminal's own click-drag selection away. Where that leaves yo
 | | |
 |---|---|
 | **Inside a mouse-aware child** (claude, Codex, vim, htop) | An ordinary drag reaches the child. **Ctrl+drag** selects through spyc, including child surfaces that cannot select text. |
-| **Spyc surfaces and non-mouse panes** | Drag normally; release copies the selected text or file names. Hold Ctrl in the file list to copy absolute paths. |
+| **spyc surfaces and non-mouse panes** | Drag normally; release copies the selected text or file names. Hold Ctrl in the file list to copy absolute paths. |
 | **Host terminal selection** | Hold **Shift** (Option/Fn on iTerm2), or use `:mouse off`. |
 | **Copying a diagnostic** | `:activity dump`, `:grep`, `:why-git` etc. open a pager — **`y`** yanks the source to the clipboard, **`Y`** the visible text. No mouse needed. |
 
-Spyc holds a pane's visible grid during its own drag, while the child keeps running.
+spyc holds a pane's visible grid during its own drag, while the child keeps running.
 Release copies from that held grid and resumes live output. Hold Ctrl when pressing
 to claim a mouse-aware pane; the drag remains spyc's if Ctrl is released first.
-A click without movement leaves the clipboard alone. A key, paste, wheel gesture,
-tab switch or layout change cancels the held pane drag. Turning mouse capture off
-also cancels it.
+A Ctrl+click without movement leaves the clipboard alone and is consumed by spyc:
+the child receives neither press nor release. Child Ctrl+click actions, such as
+Vim's tag jump, are unavailable through this gesture while capture is on. A key,
+paste, wheel gesture, tab switch or layout change cancels the held pane drag.
+Turning mouse capture off also cancels it.
+
+The terminal must report Ctrl+left mouse events to spyc. In iTerm2, enable
+**Settings → Pointer → “Ctrl-click reported to apps, does not open menu”**;
+[iTerm2's pointer reference](https://iterm2.com/documentation-preferences-pointer.html)
+describes this forwarding preference. Terminal.app uses Control-click for its
+[shortcut menu](https://support.apple.com/en-bh/guide/terminal/trml135fbc26/mac).
+If your terminal opens a menu instead of starting a selection, spyc never receives
+the gesture. Use `:mouse off` with the terminal's own drag selection, or a terminal
+that forwards Ctrl+left events.
 
 Clicking a *row* in the file list is deliberately not a thing: clicking a region is
 coarse and hard to get wrong, while aiming at a one-cell-tall line invites

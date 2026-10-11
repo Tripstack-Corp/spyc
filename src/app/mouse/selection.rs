@@ -377,7 +377,9 @@ impl super::super::App {
     /// here (`(row, col)` pairs, not per-axis) so a backwards drag copies the same
     /// text as the forward one.
     pub(super) fn finish_pane_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
-        if self.pane_drag_screen().is_none() {
+        let (cols, rows) = self.view.term_size;
+        let area = self.frame_layout(Rect::new(0, 0, cols, rows)).pane;
+        if self.pane_drag_screen(area).is_none() {
             self.clear_pane_selection();
             return Vec::new();
         }
@@ -434,13 +436,13 @@ impl super::super::App {
     /// Only the pane and layout that received the press may show or copy this grid.
     pub(in crate::app) fn pane_drag_screen(
         &self,
+        pane_area: Option<Rect>,
     ) -> Option<&crate::pane::snapshot::ScreenSnapshot> {
         let held = self.view.pane_selection_snapshot.as_ref()?;
         let tabs = self.runtime.pane_tabs.as_ref()?;
-        let (cols, rows) = self.view.term_size;
         (held.tab_id == tabs.active_info().id
-            && held.term_size == (cols, rows)
-            && Some(held.area) == self.frame_layout(Rect::new(0, 0, cols, rows)).pane)
+            && held.term_size == self.view.term_size
+            && Some(held.area) == pane_area)
             .then_some(&held.screen)
     }
 
