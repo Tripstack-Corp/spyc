@@ -366,7 +366,9 @@ fn codex_approval_scan_has_a_deadline_despite_continuous_redraws() {
         let mut app = App::test_app(tmp.path().to_path_buf());
         assert!(app.open_pane_tab_in("sh -c 'stty raw -echo; printf READY; exec cat'", tmp.path()));
         let wait_screen = |app: &mut App, expected: &str| {
-            let deadline = Instant::now() + Duration::from_secs(2);
+            // Startup is not the approval deadline under test. Parallel PTY
+            // launches can take seconds; keep the same budget as agent_argv.
+            let deadline = Instant::now() + Duration::from_secs(10);
             loop {
                 let pane = &mut app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0].pane;
                 pane.drain_output();

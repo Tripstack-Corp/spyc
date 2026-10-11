@@ -20,6 +20,12 @@ impl App {
         let active = tabs.active_index();
         let entry = &tabs.tabs()[active];
         let profile = crate::agent::detect(&entry.info.command);
+        let home = entry.info.codex_home.clone();
+        if profile.kind() == crate::state::sessions::AgentKind::Codex && home.is_none() {
+            self.state
+                .flash_info("fork: Codex launch home is not identified yet");
+            return;
+        }
         let (command, cwd) = match profile.fork_mode() {
             ForkMode::Branch(fork) => {
                 // The other tabs' conversations are theirs, so the resolver's
@@ -29,6 +35,7 @@ impl App {
                 let claimed: HashSet<String> = tabs
                     .tabs()
                     .iter()
+                    .filter(|t| t.info.codex_home == home)
                     .filter_map(|t| t.info.pinned_session_id())
                     .filter(|&id| Some(id) != own)
                     .map(str::to_owned)
@@ -60,7 +67,7 @@ impl App {
                 return;
             }
         };
-        if self.open_pane_tab_in(&command, &cwd) {
+        if self.open_pane_tab_in_home(&command, &cwd, home.as_deref()) {
             let forked = self
                 .runtime
                 .pane_tabs

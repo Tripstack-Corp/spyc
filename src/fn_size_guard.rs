@@ -72,7 +72,7 @@ const FUNCTION: Rule = Rule {
         ("src/app/render/inner.rs::App::render_inner", 141),
         ("src/app/render/mod.rs::App::compute_layout", 183),
         ("src/app/render/overlays.rs::App::render_image_gallery", 129),
-        ("src/app/session_restore.rs::App::restore_session", 126),
+        ("src/app/session_restore.rs::App::restore_session", 122),
         ("src/app/state/apply.rs::AppState::apply", 380),
         ("src/app/state/dispatch.rs::AppState::dispatch_command", 201),
         ("src/config/load.rs::Config::merge_file", 179),

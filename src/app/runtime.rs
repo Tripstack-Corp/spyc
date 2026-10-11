@@ -159,12 +159,12 @@ pub(super) struct Runtime {
     /// flag (see `active_agent_status` / `apply_landed_agent_status`).
     pub(super) agent_status_pending: std::sync::Arc<std::sync::Mutex<Option<AgentStatusCache>>>,
     pub(super) agent_status_refreshing: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Option B (`codex_pin`): off-thread `~/.codex/sessions` scan landing slot
+    /// Option B (`codex_pin`): off-thread home-scoped scan landing slot
     /// (with an in-flight flag). A worker dumps a rollout snapshot here and wakes
     /// the loop with `Message::Wake(Wake::CodexSession)`; `apply_codex_session_pins`
     /// assigns session uuids to unpinned codex tabs.
     pub(super) codex_pin_pending:
-        std::sync::Arc<std::sync::Mutex<Option<Vec<crate::state::codex_transcript::RolloutMeta>>>>,
+        std::sync::Arc<std::sync::Mutex<Option<Vec<super::codex_pin::HomeSnapshot>>>>,
     pub(super) codex_scan_in_flight: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Tier 5: landing slot for off-thread graveyard ops (archive / restore /
     /// purge-all). Each `Effect::Graveyard` worker pushes its

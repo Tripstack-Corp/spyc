@@ -186,3 +186,114 @@ fn argv_display_preserves_argument_boundaries_and_refuses_malformed_records() {
         );
     }
 }
+
+const HOME_SESSION: &str = "019e8b21-9e7c-7553-a118-d1cdada725fd";
+const OTHER_SESSION: &str = "019e8b21-9e7c-7553-a118-d1cdada725fe";
+
+fn home_rollout(home: &Path, uuid: &str) -> PathBuf {
+    let day = home.join("sessions/2026/10/09");
+    std::fs::create_dir_all(&day).unwrap();
+    let path = day.join(format!("rollout-2026-10-09T12-00-00-{uuid}.jsonl"));
+    std::fs::write(
+        &path,
+        serde_json::json!({
+            "type":"session_meta", "payload": {
+                "id": uuid, "cwd":"/repo", "timestamp":"2026-10-09T12:00:00Z"
+            }
+        })
+        .to_string()
+            + "\n",
+    )
+    .unwrap();
+    path
+}
+
+fn home_query<'a>(
+    home: Option<&'a Path>,
+    command: &'a str,
+    id: Option<&'a str>,
+) -> crate::agent::TranscriptQuery<'a> {
+    crate::agent::TranscriptQuery {
+        cwd: Path::new("/repo"),
+        spawn_epoch_secs: 0,
+        command,
+        session_id: id,
+        codex_home: home,
+    }
+}
+
+#[test]
+fn codex_lookup_uses_the_panes_custom_home_for_pinned_and_resumed_ids() {
+    let tmp = tempfile::tempdir().unwrap();
+    let first = tmp.path().join("first");
+    let second = tmp.path().join("second");
+    let expected = home_rollout(&first, HOME_SESSION);
+    let other = home_rollout(&second, HOME_SESSION);
+    let command = format!("codex resume {HOME_SESSION}");
+    assert_eq!(
+        resolve_active_rollout(home_query(Some(&first), "codex", Some(HOME_SESSION))),
+        Some(expected.clone())
+    );
+    assert_eq!(
+        resolve_active_rollout(home_query(Some(&first), &command, None)),
+        Some(expected)
+    );
+    assert_eq!(
+        resolve_active_rollout(home_query(Some(&second), "codex", Some(HOME_SESSION))),
+        Some(other)
+    );
+    assert_eq!(
+        scan_rollout_metas(&first)
+            .iter()
+            .map(|r| r.uuid.as_str())
+            .collect::<Vec<_>>(),
+        [HOME_SESSION]
+    );
+}
+
+#[test]
+fn codex_lookup_never_substitutes_another_rollout_when_identity_is_missing() {
+    let tmp = tempfile::tempdir().unwrap();
+    home_rollout(tmp.path(), OTHER_SESSION);
+    let resume = format!("codex resume {HOME_SESSION}");
+    for query in [
+        home_query(Some(tmp.path()), "codex", Some(HOME_SESSION)),
+        home_query(Some(tmp.path()), &resume, None),
+        home_query(Some(tmp.path()), "codex", None),
+        home_query(Some(tmp.path()), "codex resume --last", None),
+        home_query(None, "codex", Some(OTHER_SESSION)),
+    ] {
+        assert_eq!(resolve_active_rollout(query), None);
+    }
+}
+
+#[test]
+fn codex_lookup_requires_the_exact_trailing_uuid() {
+    let tmp = tempfile::tempdir().unwrap();
+    let decoy = home_rollout(tmp.path(), OTHER_SESSION);
+    std::fs::rename(
+        &decoy,
+        decoy.with_file_name(format!("rollout-{HOME_SESSION}-{OTHER_SESSION}.jsonl")),
+    )
+    .unwrap();
+    assert_eq!(
+        resolve_active_rollout(home_query(Some(tmp.path()), "codex", Some(HOME_SESSION))),
+        None
+    );
+}
+
+#[test]
+fn codex_missing_or_unreadable_session_tree_stays_unbound() {
+    let tmp = tempfile::tempdir().unwrap();
+    let missing = tmp.path().join("missing");
+    assert_eq!(
+        resolve_active_rollout(home_query(Some(&missing), "codex", Some(HOME_SESSION))),
+        None
+    );
+    std::fs::write(tmp.path().join("sessions"), "a file, not a session tree").unwrap();
+    assert_eq!(
+        resolve_active_rollout(home_query(Some(tmp.path()), "codex", Some(HOME_SESSION))),
+        None
+    );
+    assert!(scan_rollout_metas(tmp.path()).is_empty());
+}

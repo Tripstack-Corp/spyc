@@ -470,6 +470,17 @@ in a pane that works fine outside spyc. Restoring `-i` for a shell command
 reintroduces it. The symptom is always third-party (spyc logs nothing), so
 "pane-only rc weirdness + pid-keyed temp files" is the signature.
 
+Agent panes capture only `HOME` and `CODEX_HOME` immediately before the original
+`exec`, after that single rc pass. Explicit per-pane home overrides are reapplied
+at the same point so restore, restart and fork retain their recorded identity.
+`pane::launch_env` bounds reads to 64 KiB and owns a 0600 record inside a 0700
+private directory for the pane's lifetime; dropping the directory also prevents
+a late-starting shell from recreating a closed pane's record. The Codex discovery
+worker reads this metadata and scopes claims by home plus stable pane id. Missing
+metadata stays unbound. New saves record unresolved homes explicitly and refuse
+those tabs on restore; legacy saves without home fields retain their old launch
+behaviour. No second interactive shell or environment dump is introduced.
+
 <!-- SPYC-TRAP: signal-teardown-precomputed -->
 `signal_terminate` (SIGTERM / SIGHUP) restores the terminal from a string built
 in `setup_terminal` — `RESTORE_SEQ` — and from a `termios` captured there before

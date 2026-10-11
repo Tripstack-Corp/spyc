@@ -15,6 +15,7 @@
 pub mod chrome;
 pub mod codex_approval;
 pub mod codex_command;
+pub mod codex_home;
 pub mod codex_records;
 pub mod codex_recovery;
 pub mod detect_rules;
@@ -89,6 +90,9 @@ pub struct TranscriptQuery<'a> {
     /// resolved. The strongest signal: an exact match on the session's rollout.
     /// `None` until pinned (or for agents that don't pin).
     pub session_id: Option<&'a str>,
+    /// Codex home captured from this pane's launch environment, never the
+    /// current spyc environment. Other agents ignore this field.
+    pub codex_home: Option<&'a Path>,
 }
 
 /// Describes an agent's on-disk transcript view for `^a v`.
@@ -688,7 +692,9 @@ impl AgentProfile for CodexProfile {
             render: crate::state::codex_transcript::render_transcript,
             config_key: None,
             default_enabled: true,
-            miss_message: Some("codex: no transcript on disk yet for this session"),
+            miss_message: Some(
+                "codex: session not identified or rollout unavailable in this pane's home",
+            ),
         })
     }
     fn status_hooks(&self) -> Option<StatusHookSupport> {
@@ -1450,6 +1456,8 @@ mod tests {
             agent_kind: AgentKind::Other, // legacy save: field absent → Other
             agent_session_id: Some("sid-legacy".into()),
             agent_session_name: Some("OLD".into()),
+            codex_home: None,
+            codex_home_unresolved: false,
             claim_owner: String::new(),
         };
         // `effective_kind` upgrades the legacy Other → Claude.
@@ -1477,6 +1485,8 @@ mod tests {
             agent_kind: AgentKind::Other,
             agent_session_id: None,
             agent_session_name: None,
+            codex_home: None,
+            codex_home_unresolved: false,
             claim_owner: String::new(),
         };
         assert_eq!(tab.effective_kind(), AgentKind::Other);

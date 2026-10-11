@@ -24,6 +24,7 @@ pub use widget::{PaneWidget, cell_style};
 
 // Shared pty kernel that `Pane`, `PendingCapture` and `BackgroundTask`
 // all wrap.
+pub mod launch_env;
 pub mod pty_host;
 
 // A few call sites reach the engine by method syntax; with vt100 those
@@ -158,6 +159,7 @@ impl Pane {
             // Interactive pane: exec the agent so it replaces the rc-sourcing
             // shell (no job-control wrapper to fight `^z` suspend/resume).
             exec_replace: true,
+            capture_launch_env: !extra_env.is_empty(),
         })?;
         let parser = <PaneEngine as engine::Engine>::new(rows, cols, 10_000);
         Ok(Self::adopt(host, parser, wake))

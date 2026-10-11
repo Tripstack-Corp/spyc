@@ -5,6 +5,18 @@ use super::state::{Focus, Side, VSplit, VsplitMode};
 use super::{App, Effect, RESTORE_BANNER_SETTLE};
 
 impl App {
+    fn spawn_restored_tab(
+        &mut self,
+        command: &str,
+        cwd: &std::path::Path,
+        tab: &crate::state::sessions::SavedTab,
+    ) -> bool {
+        let home = (tab.effective_kind() == crate::state::sessions::AgentKind::Codex)
+            .then_some(tab.codex_home.as_deref())
+            .flatten();
+        self.open_pane_tab_in_home(command, cwd, home)
+    }
+
     pub fn restore_session(&mut self, session: &crate::state::sessions::Session) -> Vec<Effect> {
         let plans: Vec<_> = session
             .tabs
@@ -15,11 +27,7 @@ impl App {
                 } else {
                     &session.cwd
                 };
-                crate::agent::profile_for(tab.effective_kind()).reconstruct_restore(
-                    &tab.command,
-                    tab.agent_session_id.as_deref(),
-                    cwd,
-                )
+                crate::agent::resume::reconstruct_saved_tab(tab, cwd)
             })
             .collect();
         // A wholly refused tab set leaves the current session intact. Mixed
@@ -107,7 +115,7 @@ impl App {
                 // the spawn failed, the last tab is a *different*, already-
                 // restored pane, and we'd type `/resume <sid>` into the wrong
                 // agent.
-                let spawned = self.open_pane_tab_in(&plan.command, cwd);
+                let spawned = self.spawn_restored_tab(&plan.command, cwd, tab);
                 if spawned
                     && let Some(tabs) = self.runtime.pane_tabs.as_mut()
                     && let Some(entry) = tabs.tabs_mut().last_mut()

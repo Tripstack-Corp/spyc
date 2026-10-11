@@ -61,7 +61,10 @@ pub fn pane_invocation(command: &str, exec_replace: bool) -> (String, Vec<String
 /// execs or is killed mid-startup.
 fn pane_shell() -> Option<String> {
     if cfg!(test) {
-        return Some("/bin/sh".to_string());
+        #[cfg(test)]
+        return TEST_SHELL
+            .with(|shell| shell.borrow().clone())
+            .or_else(|| Some("/bin/sh".to_string()));
     }
     crate::envset::var("SHELL")
 }
@@ -310,4 +313,23 @@ mod tests {
             assert!(!command_is_shell(cmd), "{cmd}");
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_SHELL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Controlled rc fixture; every other test still uses the rc-free system shell.
+#[cfg(test)]
+pub fn with_test_shell<T>(shell: &str, run: impl FnOnce() -> T) -> T {
+    struct Reset(Option<String>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            TEST_SHELL.with(|shell| *shell.borrow_mut() = self.0.take());
+        }
+    }
+    let previous = TEST_SHELL.with(|value| value.replace(Some(shell.to_string())));
+    let _reset = Reset(previous);
+    run()
 }

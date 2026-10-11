@@ -144,7 +144,10 @@ impl App {
         // "most-recent JSONL for cwd" fallback handed every Claude
         // pane the same ID and they all collapsed onto one
         // conversation at restore.
-        let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut claims: std::collections::HashMap<
+            Option<std::path::PathBuf>,
+            std::collections::HashSet<String>,
+        > = std::collections::HashMap::new();
         let tabs: Vec<SavedTab> = self
             .runtime
             .pane_tabs
@@ -155,7 +158,8 @@ impl App {
                     .map(|t| {
                         let profile = crate::agent::detect(&t.info.command);
                         let kind = profile.kind();
-                        let (agent_session_id, agent_session_name) = tab_conversation(t, &claimed);
+                        let claimed = claims.entry(t.info.codex_home.clone()).or_default();
+                        let (agent_session_id, agent_session_name) = tab_conversation(t, claimed);
                         if let Some(ref id) = agent_session_id {
                             claimed.insert(id.clone());
                         }
@@ -177,6 +181,9 @@ impl App {
                             agent_kind: kind,
                             agent_session_id,
                             agent_session_name,
+                            codex_home: t.info.codex_home.clone(),
+                            codex_home_unresolved: kind == crate::state::sessions::AgentKind::Codex
+                                && t.info.codex_home.is_none(),
                             claim_owner: t.info.claim_owner.clone(),
                         }
                     })
@@ -329,6 +336,7 @@ impl App {
                 // A pin usually lands after the tab's first save, which then
                 // recorded no conversation, or a guessed one (#584).
                 t.info.pinned_session_id().hash(&mut h);
+                t.info.codex_home.hash(&mut h);
             }
         }
         super::state::restore::hash_deferred_tabs(&self.state.deferred_tabs, &mut h);
@@ -689,6 +697,7 @@ mod tests {
                     .info;
                 info.command = "codex resume OLD --model test --sandbox read-only".to_string();
                 info.codex_session_id = Some(UUID.to_string());
+                info.codex_home = Some(tmp.path().join("codex-home"));
             }
 
             let snapshot = app.build_session_snapshot();
@@ -743,6 +752,73 @@ mod tests {
                 .count();
             assert_eq!(claims, 1, "only one tab may claim a conversation");
         });
+    }
+
+    #[test]
+    fn codex_homes_and_duplicate_ids_survive_a_session_roundtrip() {
+        const UUID: &str = "0198c2f4-1a2b-7c3d-8e4f-5a6b7c8d9e0f";
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.open_pane_tab("cat");
+            app.open_pane_tab("cat");
+            for (index, entry) in app
+                .runtime
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .tabs_mut()
+                .iter_mut()
+                .enumerate()
+            {
+                entry.info.command = "codex".into();
+                entry.info.codex_session_id = Some(UUID.into());
+                entry.info.codex_home = Some(tmp.path().join(format!("home-{index}")));
+            }
+            let saved = app.build_session_snapshot();
+            let json = serde_json::to_string(&saved).unwrap();
+            let restored: crate::state::sessions::Session = serde_json::from_str(&json).unwrap();
+            for (index, tab) in restored.tabs.iter().enumerate() {
+                assert_eq!(tab.agent_session_id.as_deref(), Some(UUID));
+                assert_eq!(
+                    tab.codex_home,
+                    Some(tmp.path().join(format!("home-{index}")))
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn codex_save_before_home_capture_stays_unopened_on_restore() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.open_pane_tab("cat");
+            let entry = &mut app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0];
+            entry.info.command = "codex".into();
+            entry.info.codex_session_id = Some("019e8b21-9e7c-7553-a118-d1cdada725fd".into());
+            entry.info.codex_home = None;
+            let mut saved = app.build_session_snapshot();
+            saved.cwd = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            let id = entry_id(&app).to_owned();
+            let restored: crate::state::sessions::Session =
+                serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+            assert!(restored.tabs[0].codex_home_unresolved);
+            app.restore_session(&restored);
+            assert_eq!(entry_id(&app), id, "a refused restore keeps the live pane");
+            assert!(
+                app.state
+                    .flash
+                    .as_ref()
+                    .unwrap()
+                    .text
+                    .contains("home was not captured")
+            );
+        });
+    }
+
+    fn entry_id(app: &App) -> &str {
+        &app.runtime.pane_tabs.as_ref().unwrap().tabs()[0].info.id
     }
 
     /// A restore point the picker can restore. Its `cwd` is the crate root,
@@ -817,6 +893,8 @@ mod tests {
                 agent_kind: crate::state::sessions::AgentKind::Other,
                 agent_session_id: None,
                 agent_session_name: None,
+                codex_home: None,
+                codex_home_unresolved: false,
                 claim_owner: String::new(),
             });
             crate::state::sessions::save_session(&saved).expect("seed the restore point");

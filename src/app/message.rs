@@ -201,7 +201,7 @@ pub enum Wake {
     /// Payloadless wake — `apply_preview_reloads` drains the slot in the
     /// pre-recv scan. Same shape as `ImageDone`.
     PreviewReload,
-    /// Option B (`codex_pin`): an off-thread `~/.codex/sessions` scan landed a
+    /// Option B (`codex_pin`): an off-thread home-scoped scan landed a
     /// rollout snapshot in `codex_pin_pending`. Payloadless wake — the snapshot
     /// rides the slot, drained by `apply_codex_session_pins` in the pre-recv
     /// scan. Collapses to a Timeout like the other re-scan wakes.
