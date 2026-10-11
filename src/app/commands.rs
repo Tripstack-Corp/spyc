@@ -26,7 +26,7 @@ impl App {
     /// (`ShellCmd`) arms — they had independent copies of this spawn block.
     /// Flashes on expand/spawn error.
     pub(super) fn run_foreground_shell_overlay(&mut self, cmd: &str) {
-        let expanded = match crate::shell::expand_percent(cmd, &self.state.selection_paths()) {
+        let expanded = match self.state.expand_selection_percent(cmd) {
             Ok(s) => s,
             Err(e) => {
                 self.state.flash_error(e.to_string());
@@ -54,7 +54,7 @@ impl App {
     /// command and the `!`-prompt (`ShellCmdCaptured`) arms. Flashes on error.
     pub(super) fn run_captured_shell(&mut self, cmd: &str, display: &str) {
         self.state.last_captured_cmd = Some(cmd.to_string());
-        match crate::shell::expand_percent(cmd, &self.state.selection_paths()) {
+        match self.state.expand_selection_percent(cmd) {
             Ok(expanded) => self.start_capture(&expanded, cmd, display),
             Err(e) => self.state.flash_error(e.to_string()),
         }
@@ -111,12 +111,10 @@ impl App {
         // :!! — repeat last captured command
         if input == "!!" || input == "!" {
             match self.state.last_captured_cmd.clone() {
-                Some(cmd) => {
-                    match crate::shell::expand_percent(&cmd, &self.state.selection_paths()) {
-                        Ok(expanded) => self.start_capture(&expanded, &cmd, &cmd),
-                        Err(e) => self.state.flash_error(e.to_string()),
-                    }
-                }
+                Some(cmd) => match self.state.expand_selection_percent(&cmd) {
+                    Ok(expanded) => self.start_capture(&expanded, &cmd, &cmd),
+                    Err(e) => self.state.flash_error(e.to_string()),
+                },
                 None => self.state.flash_error("no previous ! command"),
             }
             return Vec::new();

@@ -4,10 +4,20 @@ HERE=${0:A:h}
 STAGE=${SPYC_DEMO_STAGE:-/private/tmp/spyc-demo}
 R="$STAGE/aurora-docs"
 CAST="$STAGE/out/take.cast"
+SPYC=${SPYC_DEMO_BIN:-$(command -v spyc)}
+[[ -x $SPYC ]] || { print -u2 "  ✗ no spyc to film: put it on PATH or set SPYC_DEMO_BIN"; exit 1 }
 # Disposable copy of the fixture that ships beside this script: a beat edits
 # RELEASE-NOTES.md, and the repo copy stays pristine.
 mkdir -p "$STAGE/out"
 rm -rf "$R" && mkdir -p "$R" && cp -R "$HERE/aurora-docs/." "$R"
+# A private HOME per run: spyc reads none of the recorder's config, writes none
+# of their state, and the filmed prompt is the bare one in this .zshrc. ZDOTDIR
+# too: tui-test's zsh integration otherwise sources the daemon's ~/.zshrc, in
+# the session shell and in every pane shell spyc spawns.
+H="$STAGE/home"
+rm -rf "$H" "$STAGE/bin" && mkdir -p "$H" "$STAGE/bin"
+ln -s "${SPYC:A}" "$STAGE/bin/spyc"
+print -r -- "PROMPT='%# '" > "$H/.zshrc"
 export TUI_TEST_SESSION=spycdemo
 TT=tui-test
 
@@ -15,7 +25,7 @@ say()  { print -r -- "  ‣ $*" }
 k()    { $TT key press "$1" >/dev/null; sleep "${2:-0.5}" }
 chord(){ $TT key press Ctrl+a >/dev/null; $TT type "$1" >/dev/null; sleep "${2:-1.1}" }
 slowtype(){ local s=$1 d=${2:-0.05} i; for (( i=1; i<=${#s}; i++ )); do $TT type "${s[i]}" >/dev/null; sleep $d; done }
-xp()   { $TT expect text "$1" --no-strict --timeout "${2:-15000}" >/dev/null || { print -u2 "  ✗ FAIL expect: $1"; return 1; } }
+xp()   { $TT expect text "$1" --match any --timeout "${2:-15000}" >/dev/null || { print -u2 "  ✗ FAIL expect: $1"; return 1; } }
 # assert text in the RIGHT column only (cols 101-200) -- proves the PREVIEW re-rendered,
 # not vim's copy of the same string
 xp_right(){ local pat=$1 i
@@ -27,10 +37,14 @@ xp_right(){ local pat=$1 i
 
 cp "$HERE/aurora-docs/RELEASE-NOTES.md" "$R/RELEASE-NOTES.md"
 rm -f "$CAST"
-$TT close --all >/dev/null 2>&1
+# Only this script's session: `close --all` would end everyone's.
+$TT close >/dev/null 2>&1
 
 say "open ghostty session, truecolor"
 $TT open --backend ghostty --cols 200 --rows 50 --cwd "$R" --shell zsh \
+   --env "HOME=$H" --env "ZDOTDIR=$H" \
+   --env "XDG_CONFIG_HOME=$H/.config" --env "XDG_STATE_HOME=$H/.local/state" \
+   --env "PATH=$STAGE/bin:$PATH" --env "SPYC_MCP_SOCK=" --env "SPYC_PANE_ID=" \
    --env "SPYC_PANE_CMD=vim RELEASE-NOTES.md" \
    --env "COLORTERM=truecolor" >/dev/null
 $TT record start "$CAST" >/dev/null
@@ -87,5 +101,5 @@ sleep 4
 
 $TT record stop >/dev/null
 say "cast -> $CAST"
-$TT close --all >/dev/null 2>&1
+$TT close >/dev/null 2>&1
 cp "$HERE/aurora-docs/RELEASE-NOTES.md" "$R/RELEASE-NOTES.md"

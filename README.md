@@ -105,7 +105,7 @@ and event hooks too.
 
 ### See which agent needs you
 
-<img src="docs/assets/demo-agents.gif" alt="Two claude tabs running; one keeps working while the other blocks on a question, turning its tab dot red and pulsing the window border" width="820">
+<img src="docs/assets/demo-agents.gif" alt="Four tabs at a glance: one agent working, one finished, and a suspended rmatrix. A second agent blocks on a question, turning its tab dot red and pulsing the window border; answering it lets the agent finish and move the file list" width="820">
 
 Each tab carries a live dot — pulsing while the agent works, settling to a
 hot-red square the moment it blocks — and that transition fires a border pulse

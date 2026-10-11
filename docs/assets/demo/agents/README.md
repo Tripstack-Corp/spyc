@@ -1,69 +1,79 @@
-# Agent orchestration demo — WORK IN PROGRESS, NOT YET SHOOTING
+# Agent dots demo
 
-The second harness: a ~90s clip answering one question, *which agent needs me?*
-It opens on four panes already in four states and lets the dots carry it.
+The README's "See which agent needs you" clip (`docs/assets/demo-agents.gif`):
+four panes in four states, and the one that needs you.
 
 | Tab | Dot | What it is |
 | --- | --- | --- |
-| `[1]` | heat-pulse `●` | Haiku, mid-task |
-| `[2]` | steady red `■` | Haiku, waiting on you |
-| `[3]` | calm teal `■` | Haiku, finished its turn |
-| `[4]` | `💤` | rmatrix, `^z`-suspended |
+| `[1]` | pulsing `●` | an agent working the whole clip |
+| `[2]` | `●`, then red `■` | an agent that blocks on a question mid-take |
+| `[3]` | teal `■` | an agent that finished its turn |
+| `[4]` | `💤` | rmatrix, suspended with `^z` |
 
-The agents are real (`claude --model haiku`). The fixture is borrowed from the
-markdown harness rather than copied — `fixtureRel` is the one path both the
-locate-check and the staging copy read.
+The take opens on the rain zoomed, suspends it, and comes back to the list.
+Tab 2 then blocks: its dot turns red and the border pulses. Answering it lets
+the agent finish and move the file list to `guides/` over MCP. The rain wakes to
+close, so the loop restarts on it.
+
+## Running it
 
 ```sh
-osascript spyc-agents-demo.applescript setup   # arrange four panes, stop, no recording
-osascript spyc-agents-demo.applescript dry     # arrange + run the beats, no recording
-osascript spyc-agents-demo.applescript         # film it
+make demos TAPE=agents      # films the release build into docs/assets/demo-agents.gif
+python3 demo.py --binary /abs/path/to/spyc            # a take, outside the repo
+python3 demo.py --binary /abs/path/to/spyc --setup    # arrange the panes, leave them running
 ```
 
-## Where it got to
+Needs `tui-test` (`brew tap microsoft/tui-test`), `agg`, and `rmatrix`
+(`cargo install rmatrix-reloaded`). Each take gets a new directory under
+`/tmp/spyc-demo/` holding the cast, the GIF, a step log, and the screen at every
+check, so a failed run can be read back.
 
-The arrangement runs: four panes spawn, the consent popup is answered, and three
-Haiku agents take their prompts. **It has never reached a take.** Verification of
-the four states through `:activity dump` is where it stops, and the last two runs
-both died on an iTerm error (`Can't get tab 1 of window id N`) that means the
-window lost its session mid-run. Both times a person was also driving that
-window, so it is **not yet established** whether that is a harness bug or an
-interrupted run. Establish that first, from an untouched window.
+## How it works
+
+`demo.py` runs spyc in its own `tui-test` session, with a private `HOME` and
+state directory under `/tmp/spyc-demo-agents`, recreated every run. Your config,
+sessions and consent answers are never read or written, and the status bar reads
+`~/aurora-docs`. The fixture is the markdown harness's `aurora-docs/`.
+
+The agents are `agent.py`, installed as `claude` on the pane's `PATH` so spyc
+treats each tab as a Claude pane. Each one opens a `spyc --mcp` session and calls
+`report_status` and `navigate_to` exactly as a real agent does. Only the work is
+scripted. Tab 2 blocks when the driver creates a trigger file, so the
+transition happens on camera rather than during setup.
+
+Setup is not filmed. The driver arranges the four tabs, verifies them through
+`:activity dump`, then starts recording. A cast started mid-session opens on a
+full-screen snapshot, so nothing before the first beat leaks into it. Every beat
+waits on spyc's own state, and the dump is checked again once recording stops.
+`agg` renders the cast in Catppuccin Macchiato, the palette the vhs-recorded
+README GIFs use.
 
 ## Traps, confirmed
 
-- **`blocked` and `done` are the same glyph.** Both render `■` (U+25A0) and
-  differ only in colour — hot red against teal — and `get text` carries no
-  colour. Counting `■` cannot tell "needs me" from "finished". The arrangement
-  is verified through `:activity dump`, which names each state in words. This is
-  the mermaid-beat bug waiting to happen again, and the reason the dump exists.
-- **The status-hooks consent popup is modal and only `y`/`n` closes it.** Esc and
-  every other key are swallowed while it stays up. Miss it and the entire
-  arrangement types itself into a prompt that never closes: no hooks are
-  installed, so no agent can self-report, and every dot silently degrades to
-  output timing. Nothing errors — the run just produces meaningless dots. It is
-  raised on the first agent pane per project root and remembered afterwards, so
-  it reproduces only on a machine that has never consented for that path.
-- **`^a c` prefills the command box** with the default (`claude`). Typing on top
-  of it yields `claudeclaude` and a pane that exits 127. `^u` clears the buffer.
-- **Only `blocked` and `💤` hold indefinitely.** `blocked` latches until
-  settled and `💤` is a sticky toggle. A `done` report lives five minutes, the
-  cap on any non-blocked report, then falls back to output timing and reads
-  idle, so the take has to end within five minutes of tab 3 finishing. `●`
-  lasts only while a turn is running, so tab 1 needs a long read-only task and
-  the take has to be shot while it is still going. Read is not gated by default, which is what keeps that pane
-  `working` rather than stopping on a prompt like tab 2 deliberately does.
-- **Never assert on agent prose.** Real agents are non-deterministic; spyc's own
-  state is not. The beats wait on the dots, the `💤`, and the file list moving
-  under a `navigate_to` — never on what an agent said.
-- **Do not zoom to watch a dot.** The dots live in the divider, so `^a z` on a
-  pane hides the thing the beat is about. And `:activity dump` is a setup
-  instrument only — it throws a pager over the frame, which is fine while
-  arranging and wrong on camera.
-
-## Next
-
-1. Reproduce the `tab 1` error in a window nobody touches; decide bug or interrupt.
-2. Confirm tab 2 actually reaches `blocked` — a permission prompt depends on the
-   local Claude config, and an allowlisted Bash would leave it `working` instead.
-3. Then a `dry` run, then a take.
+- **A real agent shows the recorder's account.** Run under the recorder's
+  `HOME`, Claude Code shows that account's status line (usage and quota) and any
+  notice from the organization's managed settings in its header. Stand-ins keep
+  both out of a public GIF, need no login, and play identically every run.
+- **`blocked` and `done` are the same glyph.** Both render `■` and differ only in
+  colour, red against teal. The driver reads the dot's cell through
+  `tui-test cells` and compares its colour; a text match alone cannot tell
+  "needs you" from "finished".
+- **`[N]` can match more than the divider.** The dot is read from the match on
+  the row that starts with `─`.
+- **The status-hooks consent popup is modal and only `y`/`n` closes it.** Every
+  other key is swallowed while it stays up. A fresh state directory raises it on
+  the first agent pane.
+- **`^a c` prefills the command box** with `$SPYC_PANE_CMD`. Typing on top of it
+  spawns `claudeclaude`; `^u` clears it first.
+- **Four panes overflow one screen of `:activity dump`.** The driver pages
+  through it until the pager reads `Bot` or `All`.
+- **A non-blocked report lives five minutes,** then the dot falls back to output
+  timing. Setup and take together run well under a minute.
+- **Blank `SPYC_MCP_SOCK` and `SPYC_PANE_ID` for the session.** Run from inside a
+  spyc pane, the demo would otherwise inherit them, and its reports would reach
+  the spyc you are using.
+- **Never `tui-test close --all`.** It closes every session on the machine,
+  including other agents' smoke runs. The driver closes only its own.
+- **The rain is what makes the GIF large.** Its frames redraw most of the screen,
+  so the live rain shots are short, `rmatrix` draws at 15fps, and `agg` keeps at
+  most 12. That brought a 1.7 MB take down to about 900 KB.

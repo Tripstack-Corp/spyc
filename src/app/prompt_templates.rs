@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use super::App;
 use super::effect::{Effect, PaneInput, PaneTarget};
+use crate::shell::PanePath;
 
 /// A template split at its tokens, with every path it names already checked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,14 +22,14 @@ pub struct PromptText(Vec<Piece>);
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Piece {
     Text(String),
-    Paths(Vec<PathBuf>),
+    Paths(Vec<PanePath>),
 }
 
 /// What a template's tokens stand for.
 pub(super) struct Sources<'a> {
     /// `%`: the picks, else the cursor row.
-    pub selection: &'a [&'a Path],
-    /// `%i`: the inventory's picked items, else all of them.
+    pub selection: &'a [PanePath],
+    /// `%i`: the inventory's picked items, else all of them. Regular files only.
     pub inventory: &'a [&'a Path],
     /// `%d`: the focused column's directory.
     pub dir: &'a Path,
@@ -58,7 +59,8 @@ impl std::fmt::Display for ComposeError {
 }
 
 /// Split `template` at its tokens: `%` the selection, `%i` the inventory, `%d`
-/// the directory, and `%%` a literal percent sign.
+/// the directory, and `%%` a literal percent sign. A directory ends in `/`
+/// unless the template already follows the token with one (`%d/notes.md`).
 pub(super) fn compose(template: &str, src: &Sources<'_>) -> Result<PromptText, ComposeError> {
     let mut pieces = Vec::new();
     let mut text = String::new();
@@ -68,7 +70,7 @@ pub(super) fn compose(template: &str, src: &Sources<'_>) -> Result<PromptText, C
             text.push(ch);
             continue;
         }
-        let (token, paths): (&'static str, &[&Path]) = match chars.peek() {
+        let (token, mut paths): (&'static str, Vec<PanePath>) = match chars.peek() {
             Some('%') => {
                 chars.next();
                 text.push('%');
@@ -76,26 +78,37 @@ pub(super) fn compose(template: &str, src: &Sources<'_>) -> Result<PromptText, C
             }
             Some('i') => {
                 chars.next();
-                ("%i", src.inventory)
+                let files = src.inventory.iter().map(|p| PanePath {
+                    path: p.to_path_buf(),
+                    is_dir: false,
+                });
+                ("%i", files.collect())
             }
             Some('d') => {
                 chars.next();
-                ("%d", std::slice::from_ref(&src.dir))
+                let dir = PanePath {
+                    path: src.dir.to_path_buf(),
+                    is_dir: true,
+                };
+                ("%d", vec![dir])
             }
-            _ => ("%", src.selection),
+            _ => ("%", src.selection.to_vec()),
         };
         if paths.is_empty() {
             return Err(ComposeError::Empty(token));
         }
-        if let Some(bad) = paths.iter().find(|p| p.to_str().is_none()) {
-            return Err(ComposeError::NonUtf8(bad.to_path_buf()));
+        if let Some(bad) = paths.iter().find(|p| p.path.to_str().is_none()) {
+            return Err(ComposeError::NonUtf8(bad.path.clone()));
+        }
+        if chars.peek() == Some(&'/')
+            && let Some(last) = paths.last_mut()
+        {
+            last.is_dir = false;
         }
         if !text.is_empty() {
             pieces.push(Piece::Text(std::mem::take(&mut text)));
         }
-        pieces.push(Piece::Paths(
-            paths.iter().map(|p| p.to_path_buf()).collect(),
-        ));
+        pieces.push(Piece::Paths(paths));
     }
     if !text.is_empty() {
         pieces.push(Piece::Text(text));
@@ -139,7 +152,7 @@ impl App {
             ));
             return Vec::new();
         };
-        let selection = self.state.selection_paths();
+        let selection = self.state.selection_pane_paths();
         let picked: HashSet<String> = self.state.inventory.selected_ids().into_iter().collect();
         let inventory: Vec<&Path> = self
             .state
@@ -205,6 +218,20 @@ mod tests {
         Path::new(s)
     }
 
+    fn f(s: &str) -> PanePath {
+        PanePath {
+            path: PathBuf::from(s),
+            is_dir: false,
+        }
+    }
+
+    fn d(s: &str) -> PanePath {
+        PanePath {
+            path: PathBuf::from(s),
+            is_dir: true,
+        }
+    }
+
     fn render(template: &str, src: &Sources<'_>, cwd: Option<&str>) -> String {
         compose(template, src)
             .expect("composes")
@@ -214,36 +241,36 @@ mod tests {
     #[test]
     fn each_token_names_its_source() {
         let src = Sources {
-            selection: &[p("/r/a.rs"), p("/r/b.rs")],
+            selection: &[f("/r/a.rs"), f("/r/b.rs")],
             inventory: &[p("/r/notes.md")],
             dir: p("/r"),
         };
         assert_eq!(
             render("review % against %i in %d, 100%% done", &src, None),
-            "review /r/a.rs /r/b.rs against /r/notes.md in /r, 100% done"
+            "review /r/a.rs /r/b.rs against /r/notes.md in /r/, 100% done"
         );
     }
 
     /// The `^a s` anchor: under the receiving pane's cwd a path goes out
-    /// relative, and the directory itself as `.`; anything else stays
+    /// relative, and the directory itself as `./`; anything else stays
     /// absolute.
     #[test]
     fn paths_read_the_way_the_receiving_pane_resolves_them() {
         let src = Sources {
-            selection: &[p("/r/src/a.rs"), p("/elsewhere/b.rs")],
+            selection: &[f("/r/src/a.rs"), f("/elsewhere/b.rs")],
             inventory: &[],
             dir: p("/r"),
         };
         assert_eq!(
             render("% from %d", &src, Some("/r")),
-            "src/a.rs /elsewhere/b.rs from ."
+            "src/a.rs /elsewhere/b.rs from ./"
         );
     }
 
     #[test]
     fn a_path_with_a_space_stays_one_word() {
         let src = Sources {
-            selection: &[p("/r/my file.rs")],
+            selection: &[f("/r/my file.rs")],
             inventory: &[],
             dir: p("/r"),
         };
@@ -253,7 +280,7 @@ mod tests {
     #[test]
     fn text_passes_through_verbatim() {
         let src = Sources {
-            selection: &[p("/r/a.rs")],
+            selection: &[f("/r/a.rs")],
             inventory: &[],
             dir: p("/r"),
         };
@@ -269,7 +296,10 @@ mod tests {
         use std::os::unix::ffi::OsStrExt;
         let bad = Path::new(std::ffi::OsStr::from_bytes(b"/r/\xff.rs"));
         let src = Sources {
-            selection: &[bad],
+            selection: &[PanePath {
+                path: bad.to_path_buf(),
+                is_dir: false,
+            }],
             inventory: &[p("/r/notes.md")],
             dir: p("/r"),
         };
@@ -292,6 +322,33 @@ mod tests {
             compose("summarize %i", &src),
             Err(ComposeError::Empty("%i"))
         );
-        assert_eq!(render("what's in %d?", &src, None), "what's in /r?");
+        assert_eq!(render("what's in %d?", &src, None), "what's in /r/?");
+    }
+
+    /// A selected directory ends in `/` the way `^a s` sends it.
+    #[test]
+    fn a_selected_directory_ends_in_a_slash() {
+        let src = Sources {
+            selection: &[d("/r/src"), f("/r/a.rs")],
+            inventory: &[],
+            dir: p("/r"),
+        };
+        assert_eq!(render("look at %", &src, Some("/r")), "look at src/ a.rs");
+    }
+
+    /// A template that follows a token with its own `/` gets one slash, not
+    /// two: `%d/notes.md` was written before `%d` ended in one.
+    #[test]
+    fn a_slash_in_the_template_is_not_doubled() {
+        let src = Sources {
+            selection: &[d("/r/src")],
+            inventory: &[],
+            dir: p("/r/my dir"),
+        };
+        assert_eq!(
+            render("read %d/notes.md and %/lib.rs", &src, Some("/r")),
+            "read 'my dir'/notes.md and src/lib.rs"
+        );
+        assert_eq!(render("in %d", &src, Some("/r")), "in 'my dir/'");
     }
 }

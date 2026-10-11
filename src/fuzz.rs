@@ -385,6 +385,7 @@ pub fn expand_percent(template: &str) {
             std::path::Path::new("/tmp/a.rs"),
             std::path::Path::new("/tmp/b c.txt"),
         ],
+        Some(std::path::Path::new("/tmp")),
     );
 }
 

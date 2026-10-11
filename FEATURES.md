@@ -228,7 +228,8 @@ protocol, no image protocols, no OSC 52 clipboard.
   A path under it goes out relative, so an agent working in its own
   worktree can open it as typed. Anything else goes out absolute, never
   `~`-collapsed. If the pane's directory can't be read, every path goes out
-  absolute.
+  absolute. A directory goes out with a trailing `/` (`src/`, `./`); a
+  symlink to one goes out without it.
 - **^a ↓** send a literal `^a` to the pane — the prefix is otherwise
   unreachable by the child, but Claude binds `^a` (e.g. to expand notes),
   so this is the tmux-style "send-prefix" escape hatch
@@ -767,9 +768,12 @@ Three modes of running commands, each for a different use case:
 - **!** captured — run a command and stream output into the pager in
   real-time with an hourglass timer. Stderr is merged so build
   progress, errors, and output all appear together. `%` expands to
-  the current selection. `^C` interrupts; `^\` hard-kills; `^Z`
-  sends the task to the background (reader thread keeps draining
-  output into a buffer; resume with `:fg` -- see Background tasks).
+  the current selection, relative to the column's directory where the
+  command runs, so `./%` runs the selected script; anything outside
+  stays absolute, and a name starting with `-` gets a `./`. `^C`
+  interrupts; `^\` hard-kills; `^Z` sends the task to the background
+  (reader thread keeps draining output into a buffer; resume with `:fg`
+  -- see Background tasks).
 - **!!** — repeat the last captured command.
 - **!?** — history editor popup. Opens instantly (no Enter needed).
   Also reachable mid-prompt: after `Esc` puts the line editor in
@@ -1287,7 +1291,8 @@ unambiguous:
   you send an agent over and over; `map KEY prompt <name>` (or `:prompt
   <name>`) types one into the active pane tab with `%` (the picks, else the
   cursor row), `%i` (the inventory) and `%d` (the directory) filled in, paths
-  anchored on the pane's own cwd the way `^a s` sends them. It's typed, not
+  anchored on the pane's own cwd the way `^a s` sends them, a directory
+  ending in `/`. It's typed, not
   sent: the pane gets the keyboard and Enter sends it. A project file's
   `[prompts]` is ignored with a warning. Reference: `CONFIGURATION.md` →
   "Prompt templates"

@@ -328,7 +328,7 @@ const SECTIONS: &[Section] = &[
             ),
             (
                 "^a s",
-                "send selection paths to pane stdin (relative to the pane's cwd)",
+                "send selection paths to pane stdin (relative to the pane's cwd; dirs end in /)",
             ),
             (
                 "^a ↓",
@@ -384,7 +384,7 @@ const SECTIONS: &[Section] = &[
         rows: &[
             (
                 "%",
-                "cursor file (or all picks/inventory if any), shell-quoted",
+                "cursor file (or all picks if any), shell-quoted, relative to the column's dir",
             ),
             ("%%", "literal percent sign"),
             ("^C", "interrupt the running capture (SIGINT to child)"),

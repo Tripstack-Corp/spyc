@@ -44,6 +44,11 @@ harness location with `SPYC_DEMO_HARNESS_DIR` if `path to me` cannot resolve it.
 The `.sh` drivers need `tui-test` (`brew tap microsoft/tui-test`, then `brew
 trust`), `agg`, and `ffmpeg`. macOS asks once for Screen Recording permission.
 
+The `.sh` drivers film `spyc` from your `PATH`, or the binary `SPYC_DEMO_BIN`
+names, under a private `HOME` at `/private/tmp/spyc-demo/home`, recreated every
+run. Your config, sessions and pager positions are never read or written, and
+the take opens on a bare `%` prompt. The AppleScript runs under your own `HOME`.
+
 ## Why two pipelines
 
 `tui-test` drives spyc well — a Ghostty backend, Playwright-style `expect text`,
@@ -124,13 +129,20 @@ Recording:
   `U+1F336` renders and the variation selector fails, and no font fixes it. The
   selector is load-bearing (`ui/line_select.rs`: bare `U+1F336` measures 1 cell,
   not 2), so this is not spyc's bug — render the cast with `agg` instead.
-- **`expect text` needs a unique match** — pass `--no-strict` or a repeated string
-  fails. `--match` is not a valid flag.
+- **`expect text` needs a unique match** — pass `--match any` or a repeated string
+  fails. `tui-test` 0.1.0 rejects the older `--no-strict`.
+- **`--env HOME` does not keep `tui-test` off your `~/.zshrc`.** Its zsh
+  integration sets `ZDOTDIR` to its own directory and sources the `.zshrc` of the
+  home the daemon started under, so the session shell and every pane shell spyc
+  spawns run your rc, and its errors land in the take. Pass `--env ZDOTDIR` too.
+- **Never `tui-test close --all`.** It closes every session on the machine,
+  including other agents' runs. Each driver closes only its own.
 
 Driving spyc:
 
-- **spyc restores pager scroll positions**, so a re-recorded take starts wherever
-  the LAST take ended. Force `gg` after opening any pager or preview — and do it
+- **spyc restores pager scroll positions**, so under your own `HOME` (the
+  AppleScript) a re-recorded take starts wherever the LAST take ended. Force `gg`
+  after opening any pager or preview — and do it
   **before the assertion, not after**. Three beats here asserted on a near-top
   string first and took the top second; they passed for as long as the restored
   position happened to be the top, then all failed the moment a run ended on the

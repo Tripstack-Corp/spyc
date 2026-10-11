@@ -67,8 +67,8 @@ impl App {
     }
 
     /// ^W s — write the current selection as shell-quoted paths to the
-    /// pane's stdin, anchored on that pane's cwd ([`pane_path_payload`]). A
-    /// trailing space is appended so the user can keep typing without
+    /// pane's stdin, anchored on that pane's cwd ([`pane_path_payload`]), a
+    /// directory ending in `/`. A trailing space is appended so the user can keep typing without
     /// concatenating against the last path. No newline — let the user decide
     /// when to submit.
     pub fn send_selection_to_pane(&mut self) -> Vec<Effect> {
@@ -76,12 +76,7 @@ impl App {
             self.state.flash_error("no pane open (Ctrl-\\ to open one)");
             return Vec::new();
         }
-        let paths: Vec<PathBuf> = self
-            .state
-            .selection_paths()
-            .into_iter()
-            .map(Path::to_path_buf)
-            .collect();
+        let paths = self.state.selection_pane_paths();
         if paths.is_empty() {
             self.state.flash_error("nothing selected");
             return Vec::new();
