@@ -775,8 +775,14 @@ tests pass after that test-only change. A fresh signed build is at
 Acceptance above identifies the earlier build. The maintainer subsequently
 requested shipping A4 after this test-only change; production behaviour is
 unchanged. The reboot removed both temporary artifacts. A fresh session has
-working network and Unix-socket access; the unfiltered gate and PR CI still
-must pass before integration.
+working network and Unix-socket access. The signed commit's unfiltered
+pre-commit gate passed with 2,898 library tests, one existing ignored test, all
+integration suites and six VT-system tests. After updating the branch to
+`3de13d1a`, the unfiltered parallel `make check` passed again with 2,912 library
+tests, one ignored test, all integration suites (including six real reporter
+tests) and six VT-system tests. The first run hit a fake `agy` startup timeout;
+its targeted rerun passed, followed by the two full passing gates. PR CI remains
+the integration gate.
 
 Centralize session-root resolution and honour the effective `CODEX_HOME` of the
 agent launch, including per-tab overrides. Share it across discovery, ancestry,
