@@ -128,7 +128,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a R` | Restart tab in place, keeping its number (confirms first while its child is still running) |
 | `^a F` | Fork the tab: claude and codex branch its conversation into a new tab, and a shell tab opens a copy at its cwd (agy and zot can't branch) |
 | `^z` | Suspend / resume the pane's child (💤); a shell tab's `^z` forwards as usual |
-| `^a s` | Send selection paths to pane (relative to the pane's own cwd, else absolute) |
+| `^a s` | Send selection paths to pane (relative to the pane's own cwd, else absolute; a directory ends in `/`) |
 | `^a P` | Pipe file contents to pane |
 | `^a i` | Pipe inventory file contents to pane |
 | `^a z` | Zoom the active region — list or bottom pane (fullscreen toggle) |

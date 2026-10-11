@@ -1,6 +1,7 @@
 //! `AppState` selection: picks, marks, inventory take/drop, and the
 //! inventory/graveyard view toggles. Split from `state` verbatim.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::state::{Cursor, Mark};
@@ -18,6 +19,35 @@ impl AppState {
         } else {
             Vec::new()
         }
+    }
+
+    /// [`Self::selection_paths`], each marked with whether the column lists it
+    /// as a directory. Kinds come from `lstat`, so a symlink to a directory is
+    /// not one. A filter can hide a pick from `rows` but not from the listing,
+    /// so both are consulted.
+    pub fn selection_pane_paths(&self) -> Vec<crate::shell::PanePath> {
+        use crate::fs::EntryKind;
+        let col = self.cur();
+        let dirs: HashSet<&Path> = col
+            .rows
+            .iter()
+            .map(|r| (r.path.as_path(), r.kind))
+            .chain(
+                col.listing
+                    .entries
+                    .iter()
+                    .map(|e| (e.path.as_path(), e.kind)),
+            )
+            .filter(|&(_, kind)| kind == EntryKind::Dir)
+            .map(|(p, _)| p)
+            .collect();
+        self.selection_paths()
+            .into_iter()
+            .map(|p| crate::shell::PanePath {
+                path: p.to_path_buf(),
+                is_dir: dirs.contains(p),
+            })
+            .collect()
     }
 
     pub fn set_mark(&mut self, letter: char) {
