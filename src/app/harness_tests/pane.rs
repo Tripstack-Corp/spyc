@@ -507,6 +507,46 @@ fn rapid_pane_next_prev_chords_each_switch_tabs() {
 // Running). The pure helpers (id alloc, glyph, counts) are unit-tested in
 // src/app/tasks.rs.
 
+/// `!./%` runs the script under the cursor: the capture runs in the column's
+/// directory and `%` names the script relative to it. An absolute `%` made
+/// it `.//abs/path/run.sh`, which exits 127.
+#[cfg(unix)]
+#[test]
+fn a_captured_dot_slash_percent_runs_the_selected_script() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let dir = root.join("w");
+        std::fs::create_dir(&dir).unwrap();
+        let marker = root.join("ran");
+        let script = dir.join("run.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\ntouch {}\n",
+                crate::shell::shell_quote(&marker.to_string_lossy())
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut app = App::test_app(dir.clone());
+        app.state.left.listing = crate::fs::Listing::read(&dir).unwrap();
+        app.state.rebuild_rows();
+        app.run_captured_shell("./%", "./%");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !marker.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "./% never ran the script"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    });
+}
+
 /// `^Z` from a streaming capture backgrounds it (keeps a task entry, closes
 /// the pager); `:fg` re-attaches it as the live capture and removes it from
 /// the list.

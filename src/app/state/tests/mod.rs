@@ -547,6 +547,57 @@ fn selection_empty_when_no_rows() {
     assert!(s.selection_paths().is_empty());
 }
 
+// ── expand_selection_percent ──────────────────────────────────
+
+/// The user's case: `!./%` on a script in the column's directory, where the
+/// command runs, executes it instead of `.//abs/path/run.sh`.
+#[test]
+fn percent_expands_relative_to_the_column_the_command_runs_in() {
+    let s = state_with_rows(&["run.sh", "b.txt"]);
+    assert_eq!(s.expand_selection_percent("./%").unwrap(), "./run.sh");
+}
+
+/// Inside an archive mount a command runs outside it, so a relative `%`
+/// would name a file beside the archive; the paths stay absolute.
+#[test]
+fn percent_stays_absolute_inside_an_archive_mount() {
+    use crate::archive::ArchiveFormat;
+    use crate::archive::index::{Draft, IndexBuilder, Locator};
+    use crate::archive::journal::StagedStats;
+    use crate::archive::mount::ArchiveMount;
+    use crate::archive::scan::Capability;
+
+    let mut b = IndexBuilder::new(100);
+    b.push("a.txt", Draft::file(1, Locator::Zip { index: 0 }));
+    let (index, _) = b.finish(PathBuf::from("/tmp/pkg.zip"), ArchiveFormat::Zip, 10);
+    let mut s = test_state();
+    s.mounts.insert(
+        ArchiveMount {
+            index,
+            journal: crate::archive::Journal::default(),
+            staged: StagedStats::new(),
+            capability: Capability::ReadWrite,
+            warnings: Vec::new(),
+            staging_root: PathBuf::from("/tmp/staging"),
+            last_used: 0,
+            depth: 0,
+            editing: Vec::new(),
+        },
+        &[],
+    );
+    s.left.listing.dir = PathBuf::from("/tmp/pkg.zip");
+    s.left.rows = vec![RowData {
+        path: PathBuf::from("/tmp/pkg.zip/a.txt"),
+        display: "a.txt".to_string(),
+        kind: EntryKind::File,
+        deleted: false,
+    }];
+    assert_eq!(
+        s.expand_selection_percent("cat %").unwrap(),
+        "cat /tmp/pkg.zip/a.txt"
+    );
+}
+
 /// `^a s` marks a real directory, never a symlink to one, and finds a pick a
 /// filter has hidden from `rows` in the listing instead.
 #[test]

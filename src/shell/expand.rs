@@ -1,12 +1,14 @@
 //! `%` substitution for shell commands, spy-style.
 //!
 //! `%` in a user-typed shell command is replaced with the current
-//! selection's paths, each shell-quoted and separated by spaces. A literal
-//! percent sign can be produced with `%%`.
+//! selection's paths, each shell-quoted and separated by spaces, relative to
+//! the directory the command runs in. A literal percent sign can be produced
+//! with `%%`.
 //!
 //! We only generate command *strings* here — execution happens through
 //! `sh -c`, so the shell parses the result.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 /// A selected path whose bytes aren't valid UTF-8. We build the `sh -c`
@@ -91,17 +93,24 @@ pub fn pane_path(p: &PanePath, cwd: Option<&Path>) -> String {
 }
 
 /// Substitute `%` in `template` with a space-separated, shell-quoted list
-/// of `targets`. `%%` is a literal percent.
+/// of `targets`, each as [`command_path`] names it from `cwd`, the directory
+/// the command runs in, so `./%` runs the selected script. `%%` is a literal
+/// percent.
 ///
 /// Returns [`NonUtf8Path`] if any target isn't valid UTF-8: it can't be
 /// represented in the `String` command we hand to `sh -c`, and a lossy
 /// conversion would silently retarget `%` at a different file. The
 /// happy path (valid UTF-8, i.e. every path on macOS and ~all on Linux)
 /// is unchanged — `to_str()` matches the old `to_string_lossy()` there.
-pub fn expand_percent(template: &str, targets: &[&Path]) -> Result<String, NonUtf8Path> {
+pub fn expand_percent(
+    template: &str,
+    targets: &[&Path],
+    cwd: Option<&Path>,
+) -> Result<String, NonUtf8Path> {
     let mut joined = String::new();
     for (i, p) in targets.iter().enumerate() {
-        let s = p.to_str().ok_or_else(|| NonUtf8Path(p.to_path_buf()))?;
+        let shown = command_path(p, cwd);
+        let s = shown.to_str().ok_or_else(|| NonUtf8Path(p.to_path_buf()))?;
         if i > 0 {
             joined.push(' ');
         }
@@ -124,6 +133,21 @@ pub fn expand_percent(template: &str, targets: &[&Path]) -> Result<String, NonUt
         }
     }
     Ok(out)
+}
+
+/// `p` as a command running in `cwd` names it: relative when under `cwd` (`.`
+/// for `cwd` itself), else unchanged, and unchanged for an unknown `cwd`. A
+/// relative name starting with `-` gets a `./` so a command can't take it for
+/// an option, which an absolute path never could be.
+fn command_path<'a>(p: &'a Path, cwd: Option<&Path>) -> Cow<'a, Path> {
+    match cwd.and_then(|c| p.strip_prefix(c).ok()) {
+        Some(rel) if rel.as_os_str().is_empty() => Cow::Borrowed(Path::new(".")),
+        Some(rel) if rel.as_os_str().as_encoded_bytes().starts_with(b"-") => {
+            Cow::Owned(Path::new(".").join(rel))
+        }
+        Some(rel) => Cow::Borrowed(rel),
+        None => Cow::Borrowed(p),
+    }
 }
 
 #[cfg(test)]
@@ -245,7 +269,7 @@ mod tests {
         let files = [p("foo bar.txt")];
         let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
         assert_eq!(
-            words(&expand_percent("ls -la %", &refs).unwrap()),
+            words(&expand_percent("ls -la %", &refs, None).unwrap()),
             vec!["ls", "-la", "foo bar.txt"]
         );
     }
@@ -255,7 +279,7 @@ mod tests {
         let files = [p("a.txt"), p("b c.txt")];
         let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
         assert_eq!(
-            words(&expand_percent("cat %", &refs).unwrap()),
+            words(&expand_percent("cat %", &refs, None).unwrap()),
             vec!["cat", "a.txt", "b c.txt"]
         );
     }
@@ -265,7 +289,7 @@ mod tests {
         let files = [p("x")];
         let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
         assert_eq!(
-            words(&expand_percent("printf '%%s\\n' %", &refs).unwrap()),
+            words(&expand_percent("printf '%%s\\n' %", &refs, None).unwrap()),
             vec!["printf", "%s\\n", "x"]
         );
     }
@@ -276,7 +300,7 @@ mod tests {
         let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
         // `%.bak` appends OUTSIDE the quoting, so the suffix joins the same word.
         assert_eq!(
-            words(&expand_percent("cp % %.bak", &refs).unwrap()),
+            words(&expand_percent("cp % %.bak", &refs, None).unwrap()),
             vec!["cp", "x", "x.bak"]
         );
     }
@@ -288,14 +312,55 @@ mod tests {
         let files = [p("a b")];
         let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
         assert_eq!(
-            words(&expand_percent("cp % %.bak", &refs).unwrap()),
+            words(&expand_percent("cp % %.bak", &refs, None).unwrap()),
             vec!["cp", "a b", "a b.bak"]
+        );
+    }
+
+    /// `%` names the selection the way the command, running in the
+    /// column's directory, resolves it, so `./%` runs the selected script
+    /// rather than `.//abs/path`. Anything outside stays absolute.
+    #[test]
+    fn paths_under_the_commands_cwd_expand_relative() {
+        let files = [p("/w/src/run.sh"), p("/w/src"), p("/etc/hosts")];
+        let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+        assert_eq!(
+            words(&expand_percent("./% %", &refs[..1], Some(Path::new("/w/src"))).unwrap()),
+            vec!["./run.sh", "run.sh"]
+        );
+        assert_eq!(
+            words(&expand_percent("ls %", &refs, Some(Path::new("/w/src"))).unwrap()),
+            vec!["ls", "run.sh", ".", "/etc/hosts"]
+        );
+    }
+
+    /// A relative name starting with `-` would read as an option (`rm -rf`);
+    /// the absolute form never could, so the relative one keeps that safety.
+    #[test]
+    fn a_name_starting_with_a_dash_cannot_become_an_option() {
+        let files = [p("/w/-rf")];
+        let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+        assert_eq!(
+            words(&expand_percent("rm %", &refs, Some(Path::new("/w"))).unwrap()),
+            vec!["rm", "./-rf"]
+        );
+    }
+
+    /// Prefixes match by component, as `^a s` does: a sibling sharing a name
+    /// prefix stays absolute.
+    #[test]
+    fn a_sibling_sharing_a_name_prefix_stays_absolute() {
+        let files = [p("/w/app2/x.rs")];
+        let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+        assert_eq!(
+            expand_percent("cat %", &refs, Some(Path::new("/w/app"))).unwrap(),
+            "cat /w/app2/x.rs"
         );
     }
 
     #[test]
     fn no_percent_passes_through() {
-        assert_eq!(expand_percent("date", &[]).unwrap(), "date");
+        assert_eq!(expand_percent("date", &[], None).unwrap(), "date");
     }
 
     #[test]
@@ -309,7 +374,7 @@ mod tests {
         use std::os::unix::ffi::OsStrExt;
         let bad = PathBuf::from(OsStr::from_bytes(b"caf\xff"));
         let refs: Vec<&Path> = vec![bad.as_path()];
-        let err = expand_percent("ls %", &refs).unwrap_err();
+        let err = expand_percent("ls %", &refs, None).unwrap_err();
         assert!(
             err.to_string().contains("non-UTF-8"),
             "expected a non-UTF-8 refusal, got: {err}"
@@ -318,7 +383,7 @@ mod tests {
         // whole expansion is refused so no command runs on a wrong path.
         let good = p("ok.txt");
         let mixed: Vec<&Path> = vec![good.as_path(), bad.as_path()];
-        assert!(expand_percent("rm %", &mixed).is_err());
+        assert!(expand_percent("rm %", &mixed, None).is_err());
     }
 
     // ── property tests ────────────────────────────────────────────
