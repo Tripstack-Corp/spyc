@@ -139,6 +139,24 @@ fn pane_context(tx: &std::sync::mpsc::Sender<McpRequest>, pane_id: &str) -> Opti
     }
 }
 
+/// `create_worktree`'s arguments, carrying the connection's own pane so the
+/// loop can find the agent's repo when the user is browsing outside one.
+fn create_worktree_command(args: &Value, caller: &Caller) -> Result<McpCommand, &'static str> {
+    let branch = args["branch"].as_str().unwrap_or("").to_string();
+    if branch.trim().is_empty() {
+        return Err("missing required parameter: branch");
+    }
+    Ok(McpCommand::CreateWorktree {
+        branch,
+        base: args["base"]
+            .as_str()
+            .filter(|s| !s.trim().is_empty())
+            .map(String::from),
+        open: args["open"].as_bool().unwrap_or(false),
+        pane_id: caller.pane_id.clone(),
+    })
+}
+
 /// The tab a targeting call (`report_status`, the scope tools) means by
 /// `pane_id`: the one it names, else this connection's own unless it named a
 /// `pane` index instead. `None` leaves the loop's fallback, the focused tab.
@@ -635,18 +653,10 @@ fn handle_tools_call(
                     McpCommand::PickFiles { patterns }
                 }
                 "clear_picks" => McpCommand::ClearPicks,
-                "create_worktree" => {
-                    let branch = args["branch"].as_str().unwrap_or("").to_string();
-                    if branch.trim().is_empty() {
-                        return send_tool_error(w, id, "missing required parameter: branch");
-                    }
-                    let base = args["base"]
-                        .as_str()
-                        .filter(|s| !s.trim().is_empty())
-                        .map(String::from);
-                    let open = args["open"].as_bool().unwrap_or(false);
-                    McpCommand::CreateWorktree { branch, base, open }
-                }
+                "create_worktree" => match create_worktree_command(args, caller) {
+                    Ok(cmd) => cmd,
+                    Err(message) => return send_tool_error(w, id, message),
+                },
                 "remove_worktree" => {
                     let path = args["path"].as_str().unwrap_or("").to_string();
                     if path.trim().is_empty() {
