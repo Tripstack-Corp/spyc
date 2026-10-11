@@ -581,8 +581,10 @@ that table.)
 | `%%` | a literal `%`, so "50%" in a template is written `50%%` |
 
 Paths are written the way `^a s` writes them: relative to the receiving pane's
-own cwd when they're under it (`.` for the cwd itself), absolute otherwise, and
-quoted when they hold a space.
+own cwd when they're under it (`./` for the cwd itself), absolute otherwise, and
+quoted when they hold a space. A directory ends in `/` (a symlink to one
+doesn't), so `%d` always does, unless the template already follows the token
+with a slash: `%d/notes.md` comes out with one slash, not two.
 
 **The prompt is typed, not sent.** The pane gets the keyboard and **Enter**
 sends it, so you can read what was filled in, or finish the sentence, first. An
