@@ -328,7 +328,7 @@ const SECTIONS: &[Section] = &[
             ),
             (
                 "^a s",
-                "send selection paths to pane stdin (relative to the pane's cwd)",
+                "send selection paths to pane stdin (relative to the pane's cwd; dirs end in /)",
             ),
             (
                 "^a ↓",

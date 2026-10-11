@@ -228,7 +228,8 @@ protocol, no image protocols, no OSC 52 clipboard.
   A path under it goes out relative, so an agent working in its own
   worktree can open it as typed. Anything else goes out absolute, never
   `~`-collapsed. If the pane's directory can't be read, every path goes out
-  absolute.
+  absolute. A directory goes out with a trailing `/` (`src/`, `./`); a
+  symlink to one goes out without it.
 - **^a ↓** send a literal `^a` to the pane — the prefix is otherwise
   unreachable by the child, but Claude binds `^a` (e.g. to expand notes),
   so this is the tmux-style "send-prefix" escape hatch

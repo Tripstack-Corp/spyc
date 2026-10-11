@@ -379,7 +379,7 @@ pub enum PaneInput {
     },
     /// `^a s`: paths to type, anchored on the pane's cwd
     /// (`shell::pane_path_payload`).
-    Paths(Vec<std::path::PathBuf>),
+    Paths(Vec<crate::shell::PanePath>),
     /// A `[prompts]` template, rendered against the pane's cwd like `Paths`
     /// and pasted the way the child takes a paste.
     Prompt(super::prompt_templates::PromptText),

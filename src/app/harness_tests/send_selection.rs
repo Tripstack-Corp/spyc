@@ -103,3 +103,39 @@ fn a_pane_that_changed_directory_gets_paths_from_where_it_is_now() {
         assert_eq!(received(&mut app, &got).trim_end(), "f.txt");
     });
 }
+
+/// A directory goes out with a trailing `/`, so the agent reads it as one; a
+/// symlink to a directory goes out bare, still a link. The listing is read
+/// from disk, so the kinds are what `lstat` reports.
+#[cfg(unix)]
+#[test]
+fn a_directory_gets_a_trailing_slash_and_a_symlink_to_one_does_not() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let wt = root.join("wt");
+        std::fs::create_dir_all(wt.join("sub")).unwrap();
+        std::os::unix::fs::symlink(wt.join("sub"), wt.join("link")).unwrap();
+        std::fs::write(wt.join("f.txt"), "x").unwrap();
+        let got = root.join("got.txt");
+
+        let mut app = App::test_app(wt.clone());
+        app.state.left.listing = crate::fs::Listing::read(&wt).unwrap();
+        app.state.rebuild_rows();
+        let cmd = format!(
+            "cat > {}",
+            crate::shell::shell_quote(&got.to_string_lossy())
+        );
+        assert!(app.open_pane_tab_in(&cmd, &wt));
+        for name in ["sub", "link", "f.txt"] {
+            app.state.left.picks.insert(&wt.join(name));
+        }
+
+        let effects = app.send_selection_to_pane();
+        deliver(&mut app, effects);
+        let line = received(&mut app, &got);
+        let mut sent: Vec<&str> = line.split_whitespace().collect();
+        sent.sort_unstable();
+        assert_eq!(sent, ["f.txt", "link", "sub/"], "received: {line:?}");
+    });
+}

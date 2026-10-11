@@ -547,6 +547,59 @@ fn selection_empty_when_no_rows() {
     assert!(s.selection_paths().is_empty());
 }
 
+/// `^a s` marks a real directory, never a symlink to one, and finds a pick a
+/// filter has hidden from `rows` in the listing instead.
+#[test]
+fn selection_pane_paths_marks_only_real_directories() {
+    use crate::fs::Entry;
+    use std::time::SystemTime;
+
+    let mk = |name: &str, kind| Entry {
+        path: PathBuf::from("/tmp/test").join(name),
+        name: name.to_string(),
+        kind,
+        size: 0,
+        mtime: SystemTime::UNIX_EPOCH,
+    };
+    let mut s = test_state();
+    s.left.listing.entries = vec![
+        mk("dir", EntryKind::Dir),
+        mk("link", EntryKind::Symlink),
+        mk("f.txt", EntryKind::File),
+    ];
+    s.rebuild_rows();
+    // A filter hides `dir` from the visible rows.
+    s.left.rows.retain(|r| !r.path.ends_with("dir"));
+    assert_eq!(s.left.rows.len(), 2);
+    for name in ["dir", "link", "f.txt"] {
+        s.left.picks.insert(&PathBuf::from("/tmp/test").join(name));
+    }
+    let mut got: Vec<(String, bool)> = s
+        .selection_pane_paths()
+        .into_iter()
+        .map(|p| (p.path.display().to_string(), p.is_dir))
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            ("/tmp/test/dir".to_string(), true),
+            ("/tmp/test/f.txt".to_string(), false),
+            ("/tmp/test/link".to_string(), false),
+        ]
+    );
+}
+
+/// Without picks the cursor row is the selection, and its own kind decides.
+#[test]
+fn selection_pane_paths_marks_a_directory_under_the_cursor() {
+    let mut s = state_with_rows(&["sub", "a.txt"]);
+    s.left.rows[0].kind = EntryKind::Dir;
+    let got = s.selection_pane_paths();
+    assert_eq!(got.len(), 1);
+    assert!(got[0].is_dir, "{got:?}");
+}
+
 // ── toggle_pick_cursor ────────────────────────────────────────
 
 #[test]
