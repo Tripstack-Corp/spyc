@@ -1283,7 +1283,8 @@ unambiguous:
   you send an agent over and over; `map KEY prompt <name>` (or `:prompt
   <name>`) types one into the active pane tab with `%` (the picks, else the
   cursor row), `%i` (the inventory) and `%d` (the directory) filled in, paths
-  anchored on the pane's own cwd the way `^a s` sends them. It's typed, not
+  anchored on the pane's own cwd the way `^a s` sends them, a directory
+  ending in `/`. It's typed, not
   sent: the pane gets the keyboard and Enter sends it. A project file's
   `[prompts]` is ignored with a warning. Reference: `CONFIGURATION.md` →
   "Prompt templates"

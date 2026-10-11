@@ -72,28 +72,24 @@ pub struct PanePath {
 pub fn pane_path_payload(paths: &[PanePath], cwd: Option<&Path>) -> String {
     let mut out = String::new();
     for p in paths {
-        let mut shown = anchor(&p.path, cwd).to_string_lossy().into_owned();
-        if p.is_dir && !shown.ends_with('/') {
-            shown.push('/');
-        }
-        out.push_str(&shell_quote(&shown));
+        out.push_str(&pane_path(p, cwd));
         out.push(' ');
     }
     out
 }
 
-/// One path anchored and quoted the way [`pane_path_payload`] does it.
-pub fn pane_path(p: &Path, cwd: Option<&Path>) -> String {
-    shell_quote(&anchor(p, cwd).to_string_lossy())
-}
-
-/// `p` relative to `cwd` when it lies under it (`.` for `cwd` itself), else `p`.
-fn anchor<'a>(p: &'a Path, cwd: Option<&Path>) -> &'a Path {
-    match cwd.and_then(|c| p.strip_prefix(c).ok()) {
+/// One path of a [`pane_path_payload`], anchored and quoted the same way.
+pub fn pane_path(p: &PanePath, cwd: Option<&Path>) -> String {
+    let shown = match cwd.and_then(|c| p.path.strip_prefix(c).ok()) {
         Some(rel) if rel.as_os_str().is_empty() => Path::new("."),
         Some(rel) => rel,
-        None => p,
+        None => &p.path,
+    };
+    let mut shown = shown.to_string_lossy().into_owned();
+    if p.is_dir && !shown.ends_with('/') {
+        shown.push('/');
     }
+    shell_quote(&shown)
 }
 
 /// Substitute `%` in `template` with a space-separated, shell-quoted list

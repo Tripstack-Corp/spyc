@@ -15,8 +15,8 @@ fn cat_pane(app: &mut App, cwd: &std::path::Path, got: &std::path::Path) {
 }
 
 /// The template reaches the pane with the picks filled in, relative to the
-/// pane's own cwd the way `^a s` sends them, and the pane has the keyboard so
-/// Enter sends it.
+/// pane's own cwd the way `^a s` sends them, `%d` ending in `/`, and the pane
+/// has the keyboard so Enter sends it.
 #[test]
 fn a_prompt_binding_types_the_template_into_the_pane() {
     let tmp = tempfile::tempdir().unwrap();
@@ -45,8 +45,33 @@ fn a_prompt_binding_types_the_template_into_the_pane() {
         let root_shown = root.to_string_lossy();
         assert_eq!(
             received(&mut app, &got),
-            format!("review sub/f.txt from {root_shown}, 100% please\n")
+            format!("review sub/f.txt from {root_shown}/, 100% please\n")
         );
+    });
+}
+
+/// A picked directory reaches the pane ending in `/`, read off a real listing.
+#[test]
+fn a_picked_directory_reaches_the_pane_with_a_trailing_slash() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        let got = root.join("got.txt");
+
+        let mut app = App::test_app(root.clone());
+        app.state.left.listing = crate::fs::Listing::read(&root).unwrap();
+        app.state.rebuild_rows();
+        app.state
+            .config
+            .prompts
+            .insert("look".into(), "look at %".into());
+        cat_pane(&mut app, &root, &got);
+        app.state.left.picks.insert(&root.join("sub"));
+
+        let effects = app.apply_user(&BoundAction::Prompt("look".into())).unwrap();
+        deliver(&mut app, effects);
+        assert_eq!(received(&mut app, &got), "look at sub/\n");
     });
 }
 
