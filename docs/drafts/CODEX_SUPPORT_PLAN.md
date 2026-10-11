@@ -747,6 +747,43 @@ readiness. Multi-instance cleanup does not remove another instance's hooks.
 
 ### A4. Resolve the correct Codex home and session
 
+**Local candidate:** branch `feat/codex-home-session-binding` captures each pane's
+effective home after shell rc loading, scopes discovery and saved identity to that
+home, and keeps it through restore, restart and fork. Exact rollout lookup fails
+closed; simultaneous launches and ambiguous unnamed resumes wait for an explicit
+id. New saves with unresolved launch homes refuse that tab on restore. Native
+and Linux Clippy pass; 156 focused Codex tests and 2,905 runnable workspace tests
+pass. Deliberate mutations confirmed home capture, frozen rc overrides, exact
+lookup, home-scoped claims, stale-pane rejection, save and lifecycle call sites,
+unknown-home refusal, bounded metadata reads and directory cleanup.
+
+**Local acceptance granted (2026-10-11):** the maintainer accepted scrollback,
+fork and restore with the signed build at
+`/private/tmp/spyc-codex-a4-build.ryteul13/spyc` (SHA-256
+`ec3589170a9a344b8497eec83225f372e2272ba744debbc72d2d46f8225fe4d3`).
+Twenty Unix-socket tests are blocked by this managed session's IPC permissions;
+the full gate needs a normal-terminal run. A4 integration remains pending that
+gate and all PR CI jobs. Merge A4 before advancing to A5.
+
+The maintainer's unfiltered check then reached 2,897 library passes but timed
+out before the approval fixture printed `READY`. Its startup wait now uses
+the shared ten-second launch budget; the synthetic approval deadline assertions
+are unchanged. The targeted test, native fmt/Clippy and 2,905 runnable workspace
+tests pass after that test-only change. A fresh signed build is at
+`/private/tmp/spyc-codex-a4-startup-build.9e_8es8b/spyc` (SHA-256
+`1041c748855cca87f07ca05ea6995c442d681966f909982b712458c9f94dfacd`).
+Acceptance above identifies the earlier build. The maintainer subsequently
+requested shipping A4 after this test-only change; production behaviour is
+unchanged. The reboot removed both temporary artifacts. A fresh session has
+working network and Unix-socket access. The signed commit's unfiltered
+pre-commit gate passed with 2,898 library tests, one existing ignored test, all
+integration suites and six VT-system tests. After updating the branch to
+`3de13d1a`, the unfiltered parallel `make check` passed again with 2,912 library
+tests, one ignored test, all integration suites (including six real reporter
+tests) and six VT-system tests. The first run hit a fake `agy` startup timeout;
+its targeted rerun passed, followed by the two full passing gates. PR CI remains
+the integration gate.
+
 Centralize session-root resolution and honour the effective `CODEX_HOME` of the
 agent launch, including per-tab overrides. Share it across discovery, ancestry,
 images and HUD collection. Pin to an explicit session id when available; retain

@@ -169,6 +169,7 @@ mod tests {
             spawn_epoch_secs: 0,
             command: "agy",
             session_id: sid,
+            codex_home: None,
         };
 
         assert_eq!(

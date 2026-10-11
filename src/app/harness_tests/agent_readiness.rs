@@ -50,6 +50,14 @@ pub(super) fn agent_app(dir: &std::path::Path, name: &str) -> App {
         .unwrap()
         .active_info_mut()
         .command = name.into();
+    if name == "codex" {
+        app.runtime
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut()
+            .codex_home = Some(dir.join("codex-home"));
+    }
     app
 }
 

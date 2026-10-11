@@ -193,6 +193,8 @@ pub struct TabInfo {
     /// exact rollout when present (the strongest signal). `None` for non-codex
     /// tabs and codex tabs not yet pinned.
     pub codex_session_id: Option<String>,
+    /// Effective Codex home frozen at launch and retained across restore/fork.
+    pub codex_home: Option<PathBuf>,
     /// The conversation uuid this tab is known to be running, from either of the
     /// two sources that KNOW rather than guess: the exact `/resume <sid>` session
     /// restore injects, or the id an agent's status hook reported
@@ -261,6 +263,7 @@ impl TabInfo {
             spawn_at: std::time::Instant::now(),
             spawn_epoch_secs: crate::sysinfo::epoch_secs(),
             codex_session_id: None,
+            codex_home: None,
             live_session_id: None,
             scrape_status: None,
             scrape_dirty: false,
@@ -764,6 +767,8 @@ mod tests {
             agent_kind: crate::state::sessions::AgentKind::Claude,
             agent_session_id: None,
             agent_session_name: None,
+            codex_home: None,
+            codex_home_unresolved: false,
             claim_owner: String::new(),
         })
         .expect("SavedTab serializes");

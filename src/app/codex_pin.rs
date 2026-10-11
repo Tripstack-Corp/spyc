@@ -1,27 +1,19 @@
-//! Option B: pin each codex pane's session uuid at/after spawn so `^a v`
-//! resolves to the *exact* rollout — bulletproof against resume/rollover and
-//! against two fresh codex panes sharing a cwd, which the mtime heuristic in
-//! [`crate::state::codex_transcript`] can't fully disambiguate.
-//!
-//! A `codex resume <uuid>` pane is pinned at launch (`open_pane_tab_in`). A
-//! fresh `codex` pane has no id until codex writes its rollout, so an off-thread
-//! scan of `~/.codex/sessions` snapshots `(uuid, cwd, start)` and the pure
-//! [`assign_codex_sessions`] claims an unclaimed rollout for each unpinned codex
-//! tab — processed in spawn order with a shared claimed-set, so two panes in the
-//! same cwd deterministically get *distinct* sessions. Pattern mirrors
-//! `agent_status`: a landing slot + in-flight flag + a worker that wakes the
-//! loop; the kick/apply run in the pre-recv scan, never the render pass.
+//! Pin each Codex pane to its exact session within its captured home.
+//! Explicit resume and hook ids take precedence. The off-thread discovery
+//! worker scans separate home trees and applies only to the panes it captured.
+//! Spawn-ordered claims handle staggered launches; ambiguous simultaneous
+//! launches wait for an explicit id. Readers never select an unclaimed rollout.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
 use super::{App, Message, Wake};
 use crate::state::codex_transcript::RolloutMeta;
 use crate::state::sessions::AgentKind;
 
-/// Stop trying to pin a codex tab this long after spawn. Codex writes its
-/// rollout within a second or two; past this the mtime heuristic resolver
-/// handles `^a v` (still correct for everything but the same-cwd-twins edge).
+/// Quiesce discovery after this long without pane output. A reader stays
+/// unbound rather than substituting another session when discovery is idle.
 const PIN_WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The scan worker waits this long before reading the session dir, so repeated
@@ -51,6 +43,45 @@ pub(super) struct UnpinnedTab {
     pub resuming: bool,
 }
 
+/// Worker result scoped to the home and pane ids that requested its scan.
+pub(super) struct HomeSnapshot {
+    pub home: PathBuf,
+    pub pane_ids: HashSet<String>,
+    pub rollouts: Vec<RolloutMeta>,
+}
+
+/// Pane identity and an owned path to its private post-rc metadata.
+struct LaunchRecord {
+    id: String,
+    cwd: PathBuf,
+    home: Option<PathBuf>,
+    env_file: Option<PathBuf>,
+}
+
+fn collect_home_snapshots(records: Vec<LaunchRecord>) -> Vec<HomeSnapshot> {
+    let mut homes: HashMap<PathBuf, HashSet<String>> = HashMap::new();
+    for record in records {
+        let home = record.home.or_else(|| {
+            let env = crate::pane::pty_host::LaunchEnvironment::read(record.env_file.as_deref()?)?;
+            crate::agent::codex_home::from_launch(&env, &record.cwd)
+        });
+        if let Some(home) = home {
+            homes.entry(home).or_default().insert(record.id);
+        }
+    }
+    homes
+        .into_iter()
+        .map(|(home, pane_ids)| {
+            let rollouts = crate::state::codex_transcript::scan_rollout_metas(&home);
+            HomeSnapshot {
+                home,
+                pane_ids,
+                rollouts,
+            }
+        })
+        .collect()
+}
+
 fn assign_codex_sessions(
     unpinned: &[UnpinnedTab],
     already_claimed: &HashSet<String>,
@@ -59,37 +90,31 @@ fn assign_codex_sessions(
     let mut claimed = already_claimed.clone();
     let mut out = Vec::new();
     for tab in unpinned {
+        // Second-resolution start times cannot identify simultaneous panes.
+        // Wait for an explicit hook id rather than choosing their ownership.
+        if unpinned.iter().any(|other| {
+            other.idx != tab.idx && other.spawn == tab.spawn && cwd_eq(&other.cwd, &tab.cwd)
+        }) {
+            continue;
+        }
         // A fresh session writes a rollout that starts after the pane did.
-        let best = snapshot
-            .iter()
-            .filter(|r| {
-                !claimed.contains(&r.uuid)
-                    && r.started_secs + START_SKEW_SECS >= tab.spawn
-                    && cwd_eq(&r.cwd, &tab.cwd)
-            })
-            .min_by_key(|r| r.started_secs)
-            // A resumed session does not: codex appends to the ORIGINAL rollout
-            // with a frozen `session_meta`, so its `started_secs` can predate
-            // the pane by weeks and the filter above can never match. What does
-            // hold is that the file is being written *now* — so fall back to
-            // the most recently touched matching rollout that has grown since
-            // this pane spawned.
-            //
-            // Gated on `resuming`: a fresh pane whose rollout has not appeared
-            // yet must stay unpinned and retry, never adopt an old one.
-            .or_else(|| {
-                if !tab.resuming {
-                    return None;
-                }
-                snapshot
-                    .iter()
-                    .filter(|r| {
-                        !claimed.contains(&r.uuid)
-                            && r.mtime_secs >= tab.spawn
-                            && cwd_eq(&r.cwd, &tab.cwd)
-                    })
-                    .max_by_key(|r| r.mtime_secs)
-            });
+        let eligible = |r: &&RolloutMeta| !claimed.contains(&r.uuid) && cwd_eq(&r.cwd, &tab.cwd);
+        let best = if tab.resuming {
+            // Activity proves liveness, not ownership: only a unique candidate
+            // may bind an unnamed resume. An explicit id settles ambiguous ones.
+            let mut live = snapshot
+                .iter()
+                .filter(eligible)
+                .filter(|r| r.mtime_secs >= tab.spawn);
+            let first = live.next();
+            if live.next().is_none() { first } else { None }
+        } else {
+            snapshot
+                .iter()
+                .filter(eligible)
+                .filter(|r| r.started_secs.saturating_add(START_SKEW_SECS) >= tab.spawn)
+                .min_by_key(|r| r.started_secs)
+        };
         if let Some(r) = best {
             claimed.insert(r.uuid.clone());
             out.push((tab.idx, r.uuid.clone()));
@@ -139,14 +164,14 @@ impl App {
     fn needs_codex_pin(&self) -> bool {
         self.runtime.pane_tabs.as_ref().is_some_and(|tabs| {
             tabs.tabs().iter().any(|e| {
-                e.info.codex_session_id.is_none()
+                (e.info.codex_session_id.is_none() || e.info.codex_home.is_none())
                     && codex_pin_window_open(e.info.last_output_at, e.info.spawn_at)
                     && crate::agent::detect(&e.info.command).kind() == AgentKind::Codex
             })
         })
     }
 
-    /// Kick an off-thread `~/.codex/sessions` scan when a codex tab still needs
+    /// Kick an off-thread home-scoped scan when a codex tab still needs
     /// pinning and none is in flight. The snapshot lands in `codex_pin_pending`
     /// and wakes the loop (`Message::Wake(Wake::CodexSession)`); `apply_codex_session_pins`
     /// does the assignment. The scan reads every rollout's first line, so it runs
@@ -162,6 +187,28 @@ impl App {
         self.runtime
             .codex_scan_in_flight
             .store(true, Ordering::Release);
+        let records = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .map_or_else(Vec::new, |tabs| {
+                tabs.tabs()
+                    .iter()
+                    .filter(|entry| {
+                        crate::agent::detect(&entry.info.command).kind() == AgentKind::Codex
+                    })
+                    .map(|entry| LaunchRecord {
+                        id: entry.info.id.clone(),
+                        cwd: entry.info.cwd.clone(),
+                        home: entry.info.codex_home.clone(),
+                        env_file: entry
+                            .pane
+                            .host
+                            .launch_environment_path()
+                            .map(std::path::Path::to_path_buf),
+                    })
+                    .collect()
+            });
         let pending = std::sync::Arc::clone(&self.runtime.codex_pin_pending);
         let flight = std::sync::Arc::clone(&self.runtime.codex_scan_in_flight);
         let wake = self.runtime.pane_wake_tx.clone();
@@ -169,7 +216,7 @@ impl App {
             // Brief wait so a not-yet-written rollout gets a chance to appear and
             // repeated kicks poll at ~SCAN_DELAY rather than spin.
             std::thread::sleep(SCAN_DELAY);
-            let snapshot = crate::state::codex_transcript::scan_rollout_metas();
+            let snapshot = collect_home_snapshots(records);
             // The mutex guards a plain `Option` and nothing between lock and store
             // can panic, so it is only poisonable by a panic in `apply_codex_session_pins`
             // — which would have taken the whole loop with it.
@@ -201,39 +248,49 @@ impl App {
         let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
             return false;
         };
-        let claimed: HashSet<String> = tabs
-            .tabs()
-            .iter()
-            .filter_map(|e| e.info.codex_session_id.clone())
-            .collect();
-        let mut unpinned: Vec<UnpinnedTab> = tabs
-            .tabs()
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| {
-                e.info.codex_session_id.is_none()
-                    && crate::agent::detect(&e.info.command).kind() == AgentKind::Codex
-            })
-            .map(|(i, e)| {
-                // Canonicalize once here (impure) so the pure assignment compares
-                // plain strings — handles a symlinked pane cwd vs the canonical
-                // path codex records in session_meta.
-                let cwd = std::fs::canonicalize(&e.info.cwd).map_or_else(
-                    |_| e.info.cwd.to_string_lossy().into_owned(),
-                    |c| c.to_string_lossy().into_owned(),
-                );
-                UnpinnedTab {
-                    idx: i,
-                    cwd,
-                    spawn: e.info.spawn_epoch_secs,
-                    resuming: crate::state::codex_transcript::is_resume_without_id(&e.info.command),
+        for snapshot in snapshot {
+            for entry in tabs.tabs_mut() {
+                if entry.info.codex_home.is_none()
+                    && snapshot.pane_ids.contains(&entry.info.id)
+                    && crate::agent::detect(&entry.info.command).kind() == AgentKind::Codex
+                {
+                    entry.info.codex_home = Some(snapshot.home.clone());
                 }
-            })
-            .collect();
-        unpinned.sort_by_key(|t| t.spawn);
-        for (idx, uuid) in assign_codex_sessions(&unpinned, &claimed, &snapshot) {
-            if let Some(entry) = tabs.tabs_mut().get_mut(idx) {
-                entry.info.codex_session_id = Some(uuid);
+            }
+            let claimed: HashSet<String> = tabs
+                .tabs()
+                .iter()
+                .filter(|entry| entry.info.codex_home.as_ref() == Some(&snapshot.home))
+                .filter_map(|entry| entry.info.codex_session_id.clone())
+                .collect();
+            let mut unpinned: Vec<UnpinnedTab> = tabs
+                .tabs()
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| {
+                    entry.info.codex_session_id.is_none()
+                        && entry.info.codex_home.as_ref() == Some(&snapshot.home)
+                        && snapshot.pane_ids.contains(&entry.info.id)
+                        && crate::agent::detect(&entry.info.command).kind() == AgentKind::Codex
+                })
+                .map(|(idx, entry)| {
+                    let cwd = std::fs::canonicalize(&entry.info.cwd)
+                        .unwrap_or_else(|_| entry.info.cwd.clone());
+                    UnpinnedTab {
+                        idx,
+                        cwd: cwd.to_string_lossy().into_owned(),
+                        spawn: entry.info.spawn_epoch_secs,
+                        resuming: crate::state::codex_transcript::is_resume_without_id(
+                            &entry.info.command,
+                        ),
+                    }
+                })
+                .collect();
+            unpinned.sort_by_key(|tab| tab.spawn);
+            for (idx, uuid) in assign_codex_sessions(&unpinned, &claimed, &snapshot.rollouts) {
+                if let Some(entry) = tabs.tabs_mut().get_mut(idx) {
+                    entry.info.codex_session_id = Some(uuid);
+                }
             }
         }
         false
@@ -371,8 +428,8 @@ mod tests {
     }
 
     #[test]
-    fn two_resuming_panes_do_not_share_one_rollout() {
-        // The claimed-set must still hold on the fallback path.
+    fn simultaneous_resuming_panes_wait_for_explicit_identity() {
+        // Two simultaneous resumes have no timestamp evidence of ownership.
         let snap = vec![
             resumed_meta("older", "/repo", 1, 2_000),
             resumed_meta("newer", "/repo", 2, 2_500),
@@ -392,8 +449,10 @@ mod tests {
             },
         ];
         let out = assign_codex_sessions(&tabs, &HashSet::new(), &snap);
-        assert_eq!(out.len(), 2, "both panes pin");
-        assert_ne!(out[0].1, out[1].1, "and to different rollouts");
+        assert!(
+            out.is_empty(),
+            "activity alone cannot identify simultaneous resumes"
+        );
     }
 
     #[test]
@@ -474,5 +533,39 @@ mod tests {
     #[test]
     fn a_fresh_tab_is_scannable_before_any_output() {
         assert!(codex_pin_window_open(None, std::time::Instant::now()));
+    }
+    #[test]
+    fn simultaneous_fresh_panes_wait_for_identity_instead_of_cross_binding() {
+        let snap = vec![meta("first", "/repo", 1000), meta("second", "/repo", 1000)];
+        let tabs = vec![
+            UnpinnedTab {
+                idx: 0,
+                cwd: "/repo".into(),
+                spawn: 1000,
+                resuming: false,
+            },
+            UnpinnedTab {
+                idx: 1,
+                cwd: "/repo".into(),
+                spawn: 1000,
+                resuming: false,
+            },
+        ];
+        assert!(assign_codex_sessions(&tabs, &HashSet::new(), &snap).is_empty());
+    }
+
+    #[test]
+    fn an_unnamed_resume_with_multiple_live_candidates_does_not_choose_the_newest() {
+        let snap = vec![
+            resumed_meta("older", "/repo", 1, 2000),
+            resumed_meta("newer", "/repo", 2, 2500),
+        ];
+        let tab = UnpinnedTab {
+            idx: 0,
+            cwd: "/repo".into(),
+            spawn: 1000,
+            resuming: true,
+        };
+        assert!(assign_codex_sessions(&[tab], &HashSet::new(), &snap).is_empty());
     }
 }

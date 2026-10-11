@@ -138,6 +138,35 @@ impl App {
         cwd: &std::path::Path,
         slot: TabSlot,
     ) -> bool {
+        let home = match slot {
+            TabSlot::Append => None,
+            TabSlot::Replace(idx) => self
+                .runtime
+                .pane_tabs
+                .as_ref()
+                .and_then(|tabs| tabs.tabs().get(idx))
+                .and_then(|entry| entry.info.codex_home.clone()),
+        };
+        self.spawn_pane_tab(cmd, cwd, slot, home.as_deref())
+    }
+
+    /// Restore and fork reuse their source pane's home instead of current overrides.
+    pub(super) fn open_pane_tab_in_home(
+        &mut self,
+        cmd: &str,
+        cwd: &std::path::Path,
+        home: Option<&std::path::Path>,
+    ) -> bool {
+        self.spawn_pane_tab(cmd, cwd, TabSlot::Append, home)
+    }
+
+    fn spawn_pane_tab(
+        &mut self,
+        cmd: &str,
+        cwd: &std::path::Path,
+        slot: TabSlot,
+        home: Option<&std::path::Path>,
+    ) -> bool {
         // A new pane is meant to be used — if the file list is zoomed (the
         // pane is collapsed to its tab bar), reveal the split so the pane
         // isn't created behind a fullscreen list and silently lost. The
@@ -182,11 +211,19 @@ impl App {
         // there is nothing to point the hook at — spawn without it.
         let sock_str = crate::mcp::socket_path().map(|p| p.to_string_lossy().into_owned());
         let pane_id = info.id.clone();
-        let extra_env: Vec<(&str, &str)> = match (is_agent, sock_str.as_deref()) {
+        let mut extra_env: Vec<(&str, &str)> = match (is_agent, sock_str.as_deref()) {
             (true, Some(sock)) => vec![("SPYC_MCP_SOCK", sock), ("SPYC_PANE_ID", pane_id.as_str())],
             (true, None) => vec![("SPYC_PANE_ID", pane_id.as_str())],
             (false, _) => Vec::new(),
         };
+        if let Some(home) = home {
+            let Some(home) = home.to_str() else {
+                self.state
+                    .flash_error("pane: Codex home cannot be represented in the child environment");
+                return false;
+            };
+            extra_env.push(("CODEX_HOME", home));
+        }
         match Pane::spawn_with_env(
             &self.spawn_command(cmd),
             rows,
@@ -197,6 +234,13 @@ impl App {
             wake,
         ) {
             Ok(p) => {
+                if crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex {
+                    info.codex_home = home.map(std::path::Path::to_path_buf).or_else(|| {
+                        p.host
+                            .launch_environment()
+                            .and_then(|env| crate::agent::codex_home::from_launch(&env, cwd))
+                    });
+                }
                 self.state.focus = state::Focus::Pane;
                 self.state
                     .flash_info(format!("pane: {cmd} (^W k for list)"));
@@ -247,6 +291,21 @@ impl App {
         cwd: &std::path::Path,
         resume_sid: Option<String>,
     ) -> bool {
+        if self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .and_then(|tabs| tabs.tabs().get(tab_idx))
+            .is_some_and(|entry| {
+                crate::agent::detect(&entry.info.command).kind()
+                    == crate::state::sessions::AgentKind::Codex
+                    && entry.info.codex_home.is_none()
+            })
+        {
+            self.state
+                .flash_info("restart: Codex launch home is not identified yet");
+            return false;
+        }
         let (rows, cols) = Self::pane_spawn_size(
             self.effective_pane_pct(),
             self.state.config.layout.status_position,
@@ -263,9 +322,23 @@ impl App {
         // state dir means no socket to advertise (see the fresh-spawn path).
         let sock_str = crate::mcp::socket_path().map(|p| p.to_string_lossy().into_owned());
         let pane_id = info.id.clone();
+        let home = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .and_then(|tabs| tabs.tabs().get(tab_idx))
+            .and_then(|entry| entry.info.codex_home.clone());
         let mut extra_env = vec![("SPYC_PANE_ID", pane_id.as_str())];
         if let Some(sock) = sock_str.as_deref() {
             extra_env.push(("SPYC_MCP_SOCK", sock));
+        }
+        if let Some(home) = home.as_deref() {
+            let Some(home) = home.to_str() else {
+                self.state
+                    .flash_error("pane: Codex home cannot be represented in the child environment");
+                return false;
+            };
+            extra_env.push(("CODEX_HOME", home));
         }
         match Pane::spawn_with_env(
             &self.spawn_command(cmd),
@@ -277,6 +350,15 @@ impl App {
             wake,
         ) {
             Ok(p) => {
+                if crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex {
+                    info.codex_home = home.clone().or_else(|| {
+                        p.host
+                            .launch_environment()
+                            .and_then(|env| crate::agent::codex_home::from_launch(&env, cwd))
+                    });
+                    info.codex_session_id =
+                        crate::state::codex_transcript::resume_uuid_from_command(cmd);
+                }
                 let entry = TabEntry::new(p, info);
                 if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
                     tabs.replace_at(tab_idx, entry);
@@ -559,6 +641,13 @@ impl App {
         let cmd = info.command.clone();
         let cwd = info.cwd.clone();
         let label = info.label.clone();
+        if crate::agent::detect(&cmd).kind() == crate::state::sessions::AgentKind::Codex
+            && info.codex_home.is_none()
+        {
+            self.state
+                .flash_info("restart: Codex launch home is not identified yet");
+            return;
+        }
         let owner = info.claim_owner.clone();
         // Kill the outgoing child before its replacement spawns, so two agents
         // never briefly share the cwd; `replace_at` reaps the rest of the tree.

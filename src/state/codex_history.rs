@@ -59,7 +59,7 @@ fn fork_base(path: &Path) -> Option<(PathBuf, u64)> {
     let thread = base["thread_id"].as_str()?;
     let end = base["end_byte_offset"].as_u64()?;
     // Rollouts live at `<sessions>/YYYY/MM/DD/rollout-*.jsonl`.
-    let sessions = path.ancestors().nth(4)?;
+    let sessions = crate::agent::codex_home::sessions_for_rollout(path)?;
     let parent = super::codex_transcript::find_rollout_by_uuid(sessions, thread)?;
     Some((parent, end))
 }

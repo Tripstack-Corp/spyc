@@ -335,6 +335,7 @@ impl App {
         let label = active_info.label.clone();
         let command = active_info.command.clone();
         let cwd = active_info.cwd.clone();
+        let codex_home = active_info.codex_home.clone();
         let spawn = active_info.spawn_epoch_secs;
         // The session uuid pinned to this pane — the codex rollout claim, or the
         // claude session id lifted from its status hook. The resolver's strongest
@@ -389,6 +390,7 @@ impl App {
                             spawn_epoch_secs: spawn,
                             command: &command,
                             session_id: session_id.as_deref(),
+                            codex_home: codex_home.as_deref(),
                         };
                         let lines = match resolve(query) {
                             Some(path) => render(&path, &theme, width, show_tool_calls),

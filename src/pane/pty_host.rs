@@ -105,7 +105,11 @@ pub struct PtySpec<'a> {
     /// resume. NOT set for `!` captures / background tasks — `exec` would drop
     /// the tail of a compound command (`a && b`). No-op for an empty command.
     pub exec_replace: bool,
+    /// Record home variables after shell rc loading, before the command execs.
+    pub capture_launch_env: bool,
 }
+
+pub use super::launch_env::LaunchEnvironment;
 
 /// Shared pty host: master + writer + child + reader thread + drain
 /// channel, plus the small bag of state every consumer needs
@@ -116,6 +120,7 @@ pub struct PtySpec<'a> {
 /// metadata). Same fields, same semantics — only the shell
 /// differs.
 pub struct PtyHost {
+    launch_env: Option<super::launch_env::RecordFile>,
     pub master: Box<dyn MasterPty + Send>,
     input: InputWriter,
     pub child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -202,7 +207,13 @@ impl PtyHost {
             pixel_height: 0,
         })?;
 
-        let (shell, shell_args) = crate::shell::pane_invocation(spec.command, spec.exec_replace);
+        let (shell, mut shell_args) =
+            crate::shell::pane_invocation(spec.command, spec.exec_replace);
+        let launch_env = if spec.capture_launch_env && !spec.command.trim().is_empty() {
+            Some(super::launch_env::prepare(&mut shell_args, spec.env)?)
+        } else {
+            None
+        };
         let mut cmd = CommandBuilder::new(&shell);
         cmd.args(shell_args.iter().map(String::as_str));
         cmd.cwd(spec.cwd);
@@ -255,6 +266,7 @@ impl PtyHost {
         }
 
         Ok(Self {
+            launch_env,
             wake,
             master: pair.master,
             input,
@@ -266,6 +278,17 @@ impl PtyHost {
             last_size: (spec.rows, spec.cols),
             debug_dump: spec.debug_dump,
         })
+    }
+
+    /// The post-rc record may not have arrived when spawn returns.
+    pub fn launch_environment(&self) -> Option<LaunchEnvironment> {
+        LaunchEnvironment::read(self.launch_environment_path()?)
+    }
+
+    pub fn launch_environment_path(&self) -> Option<&Path> {
+        self.launch_env
+            .as_ref()
+            .map(super::launch_env::RecordFile::path)
     }
 
     /// Take the byte-event receiver out of the host so a worker
@@ -638,6 +661,7 @@ mod tests {
             nudge_winch: false,
             debug_dump: false,
             exec_replace: false,
+            capture_launch_env: false,
         }
     }
 
@@ -852,6 +876,53 @@ mod tests {
         match digest_exit(Err(std::io::Error::other("boom"))) {
             ExitOutcome::Errored(msg) => assert_eq!(msg, "boom"),
             ExitOutcome::Exited { .. } => panic!("expected Errored"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod launch_env_tests {
+
+    #[test]
+    fn pane_launch_captures_the_final_child_home_environment() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().to_str().unwrap();
+        let custom = tmp.path().join("custom");
+        std::fs::create_dir(&custom).unwrap();
+        let custom_text = custom.to_str().unwrap();
+        for codex_home in ["", custom_text] {
+            let pane = crate::pane::Pane::spawn_with_env(
+                "cat",
+                24,
+                80,
+                tmp.path(),
+                &tmp.path().join("context"),
+                &[("HOME", home), ("CODEX_HOME", codex_home)],
+                std::sync::Arc::new(|| {}),
+            )
+            .unwrap();
+            let expected = if codex_home.is_empty() {
+                tmp.path().join(".codex")
+            } else {
+                custom.canonicalize().unwrap()
+            };
+            assert_eq!(
+                {
+                    let mut environment = None;
+                    for _ in 0..500 {
+                        environment = pane.host.launch_environment();
+                        if environment.is_some() {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    crate::agent::codex_home::from_launch(
+                        &environment.expect("post-rc environment"),
+                        tmp.path(),
+                    )
+                },
+                Some(expected)
+            );
         }
     }
 }

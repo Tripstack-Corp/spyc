@@ -2,10 +2,34 @@
 //!
 //! These helpers strip a CLI's resume/continue flags from a saved command
 //! line (so session restore can re-derive a clean baseline) and parse
-//! `agy --list-sessions` output. They're pure string functions with no
-//! `App`/state dependency — they live here, next to the `AgentProfile` impls
+//! `agy --list-sessions` output. They are pure decisions with no
+//! `App` or OS dependency — they live here, next to the `AgentProfile` impls
 //! that call them, rather than in `crate::app` (MVU Stage 4: the agent layer
 //! shouldn't reach back up into `app` for its own behaviour).
+
+/// Modern saves with an unresolved Codex home cannot adopt a new launch home.
+/// Legacy saves retain their inherited-home compatibility.
+pub fn reconstruct_saved_tab(
+    tab: &crate::state::sessions::SavedTab,
+    cwd: &std::path::Path,
+) -> super::RestorePlan {
+    if tab.effective_kind() == crate::state::sessions::AgentKind::Codex
+        && tab.codex_home_unresolved
+        && tab.codex_home.is_none()
+    {
+        return super::RestorePlan {
+            command: tab.command.clone(),
+            resume: super::ResumeAction::Refuse {
+                reason: "the saved Codex home was not captured; reopen this tab manually".into(),
+            },
+        };
+    }
+    super::profile_for(tab.effective_kind()).reconstruct_restore(
+        &tab.command,
+        tab.agent_session_id.as_deref(),
+        cwd,
+    )
+}
 
 /// Strip claude's resume/continue flags from a command line. Used to derive a
 /// fresh-session fallback when an automatic resume fails — we want to preserve

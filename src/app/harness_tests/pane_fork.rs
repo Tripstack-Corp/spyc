@@ -10,7 +10,9 @@ const PARENT: &str = "019e8b21-9e7c-7553-a118-d1cdada725fd";
 fn agent_tab(dir: &std::path::Path, name: &str) -> App {
     let cmd = fake_agent(dir, name).display().to_string();
     let mut app = App::test_app(dir.to_path_buf());
-    assert!(app.open_pane_tab_in(&cmd, dir));
+    let home = dir.join("codex-home");
+    let home = (name == "codex").then_some(home.as_path());
+    assert!(app.open_pane_tab_in_home(&cmd, dir, home));
     agent_argv(dir, name);
     std::fs::remove_file(dir.join(format!("{name}.argv"))).unwrap();
     app
@@ -61,7 +63,7 @@ fn a_conversation_two_tabs_share_still_forks() {
         let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let mut app = agent_tab(&dir, "codex");
         let cmd = tabs(&app).tabs()[0].info.command.clone();
-        assert!(app.open_pane_tab_in(&cmd, &dir));
+        assert!(app.open_pane_tab_in_home(&cmd, &dir, Some(&dir.join("codex-home"))));
         agent_argv(&dir, "codex");
         std::fs::remove_file(dir.join("codex.argv")).unwrap();
         for tab in app.runtime.pane_tabs.as_mut().unwrap().tabs_mut() {

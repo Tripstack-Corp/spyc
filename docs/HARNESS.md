@@ -177,6 +177,18 @@ resumes differs, and the differences leak:
 | **agy** | baked into the spawn command — `--conversation <uuid>` when spyc has a pinned session id for the tab, falling back to `--continue` (the most recent for this cwd) when it does not. |
 | **zot** | `--continue`. spyc doesn't capture a specific session path yet, so restore always continues the most recent. |
 
+Codex's launch home is captured after the pane shell loads its rc, including
+inherited and runtime `:setenv` values. Explicit per-pane home overrides are
+reapplied after rc loading. `CODEX_HOME` selects it, with
+`$HOME/.codex` as the default. Save/restore, restart and fork retain that home
+instead of reading the current spyc environment. Older saves without a home
+inherit the new launch environment. A new save made before its home was captured
+keeps that tab unopened on restore and explains why; fork and restart also wait
+for a known home. Rollout readers use an exact pinned or explicit resume id; a missing session tree or rollout produces a diagnostic and
+returns to the live pane. Spawn-ordered discovery claims within each home;
+simultaneous same-cwd launches and ambiguous unnamed resumes wait for explicit
+hook ids.
+
 ### Forking a tab (`^a F`)
 
 | agent | fork |

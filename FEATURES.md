@@ -522,6 +522,14 @@ protocol, no image protocols, no OSC 52 clipboard.
   under any of them wins. `J`'s default and `^a u`'s uppercase open use the
   same order.
 
+Codex tabs capture their launch `CODEX_HOME` (default: `$HOME/.codex`) after
+shell rc loading, including runtime `:setenv` overrides. Explicit per-pane
+homes are reapplied after rc loading. That home stays attached to the pane
+through restart, session save/restore and fork. Transcript lookup uses its exact
+session id in that home; missing data keeps the pane live with a diagnostic.
+Discovery scopes claims by home and waits for an explicit id when simultaneous
+launches or unnamed resumes have ambiguous ownership.
+
 ### Multi-tab
 
 Multiple tabs, each running an independent pty:

@@ -264,6 +264,7 @@ impl App {
             spawn_epoch_secs: info.spawn_epoch_secs,
             command: &info.command,
             session_id: pinned.as_deref(),
+            codex_home: info.codex_home.as_deref(),
         };
         let path = (spec.resolve)(query);
         if path.is_none() && report {

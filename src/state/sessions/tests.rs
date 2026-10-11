@@ -185,6 +185,8 @@ fn effective_kind_passes_through_explicit_value() {
         agent_kind: AgentKind::Codex,
         agent_session_id: Some("uuid".into()),
         agent_session_name: None,
+        codex_home: None,
+        codex_home_unresolved: false,
         claim_owner: String::new(),
     };
     assert_eq!(tab.effective_kind(), AgentKind::Codex);
@@ -507,6 +509,8 @@ fn save_load_prune_and_keep_distinct_sessions() {
                 agent_kind: crate::state::sessions::AgentKind::Other,
                 agent_session_id: None,
                 agent_session_name: None,
+                codex_home: None,
+                codex_home_unresolved: false,
                 claim_owner: String::new(),
             }],
             active_tab: 0,
@@ -544,6 +548,8 @@ fn save_load_prune_and_keep_distinct_sessions() {
                     agent_kind: crate::state::sessions::AgentKind::Other,
                     agent_session_id: None,
                     agent_session_name: None,
+                    codex_home: None,
+                    codex_home_unresolved: false,
                     claim_owner: String::new(),
                 }],
                 active_tab: 0,
@@ -577,6 +583,8 @@ fn save_load_prune_and_keep_distinct_sessions() {
                     agent_kind: crate::state::sessions::AgentKind::Other,
                     agent_session_id: None,
                     agent_session_name: None,
+                    codex_home: None,
+                    codex_home_unresolved: false,
                     claim_owner: String::new(),
                 }],
                 active_tab: 0,
@@ -692,6 +700,8 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
                     agent_kind: AgentKind::Claude,
                     agent_session_id: Some("sid-A".into()),
                     agent_session_name: Some("AROMA".into()),
+                    codex_home: None,
+                    codex_home_unresolved: false,
                     claim_owner: "owner-A".into(),
                 },
                 SavedTab {
@@ -701,6 +711,8 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
                     agent_kind: AgentKind::Codex,
                     agent_session_id: Some("sid-B".into()),
                     agent_session_name: None,
+                    codex_home: None,
+                    codex_home_unresolved: false,
                     claim_owner: String::new(),
                 },
             ],
@@ -812,6 +824,8 @@ fn tab_omits_absent_session_id_in_json() {
         agent_kind: AgentKind::Other,
         agent_session_id: None,
         agent_session_name: None,
+        codex_home: None,
+        codex_home_unresolved: false,
         claim_owner: String::new(),
     };
     let json = serde_json::to_value(&bare).unwrap();

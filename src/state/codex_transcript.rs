@@ -9,7 +9,8 @@
 //! codex history.
 //!
 //! But codex writes the full transcript, live and flushed per turn,
-//! to `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`. This
+//! under the pane's captured Codex home at
+//! `sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`. This
 //! module reads that file directly — the source of truth — and
 //! renders a clean, structured conversation for the pager. Better
 //! than terminal capture: real text, no grid artifacts, searchable.
@@ -47,159 +48,20 @@ use ratatui::{
 use crate::agent::codex_records::{self, RecordKind};
 use crate::ui::theme::Theme;
 
-/// Clock-jitter tolerance (seconds) when deciding whether a rollout was
-/// written *during* a pane's lifetime. The pane spawn time and the rollout's
-/// file mtime come from the same machine clock, so this only absorbs sub-second
-/// rounding and the brief gap between recording the spawn time and codex's
-/// first flush — it doesn't need to be large.
-const MTIME_SKEW_SECS: u64 = 5;
-
-/// Walk `~/.codex/sessions/` for the rollout file belonging to the codex
-/// session running in this pane.
-///
-/// Resuming a session appends to the original rollout and leaves `session_meta`
-/// frozen at the original creation time, so matching on start-time-closest-to-
-/// spawn picks the wrong session. Signals, strongest first:
-///
-/// 0. **Pinned session id** (`q.session_id`) — the pane's uuid, captured at
-///    spawn by `app::codex_pin`. Exact match; the rest are fallbacks until it lands.
-/// 1. **Resume uuid** from a `codex resume <uuid>` command — codex embeds it in
-///    the rollout filename.
-/// 2. **Written during this pane's lifetime** — among rollouts whose
-///    `session_meta.cwd` matches, keep those with mtime at/after spawn (codex
-///    appends every turn), then rank by *identity* for a fresh pane (start
-///    closest to spawn) or by *activity* for a resume-without-id (largest mtime,
-///    the only live signal when `session_meta` is frozen weeks back). See
-///    [`pick_best_rollout`]. None if only stale sessions.
+/// Resolve only this pane's pinned session or explicit resume selector.
+/// Discovery runs through the spawn-ordered claim worker; a reader must never
+/// substitute another pane's history when its exact rollout is unavailable.
 pub fn resolve_active_rollout(q: crate::agent::TranscriptQuery) -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let sessions_dir = PathBuf::from(home).join(".codex/sessions");
-    if !sessions_dir.is_dir() {
-        return None;
-    }
-
-    // Signal 0 (strongest): the session id pinned to this pane at spawn.
-    if let Some(uuid) = q.session_id
-        && let Some(path) = find_rollout_by_uuid(&sessions_dir, uuid)
-    {
-        return Some(path);
-    }
-
-    // Signal 1: exact match on the resume uuid baked into the command — covers a
-    // resumed pane before its pin has landed.
-    if let Some(uuid) = resume_uuid_from_command(q.command)
-        && let Some(path) = find_rollout_by_uuid(&sessions_dir, &uuid)
-    {
-        return Some(path);
-    }
-
-    let cwd_str = q.cwd.to_string_lossy();
-    // A symlinked cwd is recorded canonicalized in session_meta, so compare the
-    // canonical form too (mirrors the Claude resolver).
-    let canon_str = std::fs::canonicalize(q.cwd)
-        .ok()
-        .map(|c| c.to_string_lossy().into_owned());
-
-    // Signal 2: read each rollout's mtime + session_meta, then let the pure
-    // ranking pick the winner (factored out so it's unit-testable without a
-    // real `~/.codex`).
-    let candidates: Vec<RolloutCandidate> = rollout_files(&sessions_dir)
-        .into_iter()
-        .filter_map(|path| {
-            let mtime = file_mtime_secs(&path).unwrap_or(0);
-            let (session_cwd, started_secs) = read_session_meta(&path)?;
-            Some(RolloutCandidate {
-                path,
-                mtime,
-                session_cwd,
-                started_secs,
-            })
-        })
-        .collect();
-    pick_best_rollout(
-        &candidates,
-        &cwd_str,
-        canon_str.as_deref(),
-        q.spawn_epoch_secs,
-        is_resume_without_id(q.command),
-    )
-}
-
-/// A rollout's inputs to the pure ranking decision ([`pick_best_rollout`]).
-struct RolloutCandidate {
-    path: PathBuf,
-    /// File mtime (epoch secs) — the "last written" / live-activity signal.
-    mtime: u64,
-    /// `session_meta.cwd`.
-    session_cwd: String,
-    /// `session_meta.timestamp` as epoch secs — frozen at original creation.
-    started_secs: u64,
-}
-
-/// Pure ranking for Signal 2 (the `route.rs` / `focus.rs` template): among
-/// candidates whose cwd matches and whose mtime is at/after the pane spawn
-/// (written during this pane's lifetime), pick this pane's session.
-/// `None` when nothing qualifies.
-///
-/// **Which signal ranks depends on `resuming`, because the two cases have
-/// opposite tells.** mtime is *activity*, not identity — whichever codex session
-/// was written most recently anywhere on the machine has the largest mtime, in
-/// any pane, in any spyc instance sharing this cwd.
-///
-/// - **A fresh `codex`** necessarily starts its rollout at ~spawn, so
-///   `|start − spawn|` **is** the identity signal and ranks first. Ranking a
-///   fresh pane by mtime is what let a month-old rollout that happened to be
-///   actively appended win for every codex pane in that cwd.
-/// - **A resume without an id** (`resume --last`, or a restore whose session id
-///   was never captured) appends to the ORIGINAL rollout with a frozen
-///   `session_meta`, so its `started_secs` can predate the pane by weeks and
-///   proximity is worse than useless. mtime is the only thing that shows the
-///   file is live, so it ranks first there — that is deliberate, and it is what
-///   keeps a long resumed session from going stale.
-///
-/// The other signal stays as the tie-break in both directions.
-fn pick_best_rollout(
-    candidates: &[RolloutCandidate],
-    cwd_str: &str,
-    canon_str: Option<&str>,
-    spawn_epoch_secs: u64,
-    resuming: bool,
-) -> Option<PathBuf> {
-    let mut best: Option<(u64, u64, &Path)> = None; // (mtime, start_diff, path)
-    for c in candidates {
-        // A file last touched before this pane existed can't be its session.
-        if c.mtime + MTIME_SKEW_SECS < spawn_epoch_secs {
-            continue;
-        }
-        if !cwd_matches(&c.session_cwd, cwd_str, canon_str) {
-            continue;
-        }
-        let start_diff = c.started_secs.abs_diff(spawn_epoch_secs);
-        let better = best.as_ref().is_none_or(|(m, d, _)| {
-            if resuming {
-                c.mtime > *m || (c.mtime == *m && start_diff < *d)
-            } else {
-                start_diff < *d || (start_diff == *d && c.mtime > *m)
-            }
-        });
-        if better {
-            best = Some((c.mtime, start_diff, &c.path));
-        }
-    }
-    best.map(|(_, _, p)| p.to_path_buf())
-}
-
-/// Whether `session_cwd` (from a rollout's `session_meta`) refers to the same
-/// directory as the pane's cwd, tolerating the macOS `/private` symlink and a
-/// canonicalized form — same matching as the Claude resolver.
-fn cwd_matches(session_cwd: &str, cwd_str: &str, canon_str: Option<&str>) -> bool {
-    session_cwd == cwd_str
-        || session_cwd.strip_prefix("/private").unwrap_or(session_cwd) == cwd_str
-        || canon_str == Some(session_cwd)
+    let sessions = crate::agent::codex_home::sessions(q.codex_home?);
+    let uuid = q
+        .session_id
+        .map(str::to_owned)
+        .or_else(|| resume_uuid_from_command(q.command))?;
+    find_rollout_by_uuid(&sessions, &uuid)
 }
 
 /// File mtime as epoch seconds, or `None` if unreadable. Used as the
-/// "written during this pane's lifetime" signal — see [`resolve_active_rollout`].
+/// "written during this pane's lifetime" signal for the claim worker.
 fn file_mtime_secs(path: &Path) -> Option<u64> {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
@@ -234,11 +96,12 @@ pub fn is_resume_without_id(command: &str) -> bool {
 /// Find the rollout whose filename embeds `uuid` (codex names files
 /// `rollout-<ts>-<uuid>.jsonl`, and the uuid is unique).
 pub(super) fn find_rollout_by_uuid(sessions_dir: &Path, uuid: &str) -> Option<PathBuf> {
-    rollout_files(sessions_dir).into_iter().find(|p| {
-        p.file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.contains(uuid))
-    })
+    if !crate::state::sessions::is_uuid(uuid) {
+        return None;
+    }
+    rollout_files(sessions_dir)
+        .into_iter()
+        .find(|path| uuid_from_rollout_path(path).as_deref() == Some(uuid))
 }
 
 /// A rollout's identity for session pinning (Option B): the uuid (from the
@@ -264,22 +127,15 @@ fn uuid_from_rollout_path(path: &Path) -> Option<String> {
 
 /// Snapshot every rollout's `(uuid, cwd, start)` for session pinning. Heavy IO
 /// (reads each file's first line) — call OFF the loop (`codex_pin`'s worker).
-pub fn scan_rollout_metas() -> Vec<RolloutMeta> {
-    let Some(home) = std::env::var_os("HOME") else {
-        return Vec::new();
-    };
-    let sessions_dir = PathBuf::from(home).join(".codex/sessions");
+pub fn scan_rollout_metas(home: &Path) -> Vec<RolloutMeta> {
+    let sessions_dir = crate::agent::codex_home::sessions(home);
     let mut out = Vec::new();
     for path in rollout_files(&sessions_dir) {
         let Some(uuid) = uuid_from_rollout_path(&path) else {
             continue;
         };
         if let Some((cwd, started_secs)) = read_session_meta(&path) {
-            let mtime_secs = std::fs::metadata(&path)
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or(0, |d| d.as_secs());
+            let mtime_secs = file_mtime_secs(&path).unwrap_or(0);
             out.push(RolloutMeta {
                 uuid,
                 cwd,
@@ -523,15 +379,6 @@ mod tests {
 
     const UUID: &str = "019e8b21-9e7c-7553-a118-d1cdada725fd";
 
-    fn cand(name: &str, mtime: u64, cwd: &str, started: u64) -> RolloutCandidate {
-        RolloutCandidate {
-            path: PathBuf::from(name),
-            mtime,
-            session_cwd: cwd.to_string(),
-            started_secs: started,
-        }
-    }
-
     #[test]
     fn resume_uuid_parsed_only_for_a_real_uuid() {
         assert_eq!(
@@ -562,118 +409,6 @@ mod tests {
         assert_eq!(uuid_from_rollout_path(Path::new("/x/notes.txt")), None);
     }
 
-    #[test]
-    fn cwd_matches_handles_private_and_canonical() {
-        assert!(cwd_matches("/home/x", "/home/x", None));
-        assert!(cwd_matches("/private/tmp/p", "/tmp/p", None)); // macOS symlink
-        assert!(cwd_matches("/canon/p", "/sym/p", Some("/canon/p"))); // canonicalized
-        assert!(!cwd_matches("/other", "/home/x", None));
-    }
-
-    #[test]
-    fn pick_skips_sessions_that_predate_the_pane() {
-        // The "fresh codex shows a previous session" bug: a stale session in
-        // the same cwd whose file was last written long before this pane
-        // spawned must NOT be matched.
-        let spawn = 1_000;
-        let prev = cand("prev.jsonl", 500, "/repo", 400); // mtime well before spawn
-        assert_eq!(
-            pick_best_rollout(&[prev], "/repo", None, spawn, false),
-            None
-        );
-    }
-
-    #[test]
-    fn pick_prefers_resumed_session_over_a_fresh_unrelated_one() {
-        // The "long session goes stale" bug: a resumed session has an OLD start
-        // time (frozen session_meta) but a RECENT mtime. It must win over an
-        // unrelated session that merely started near "now" but isn't being
-        // written to as recently.
-        let spawn = 10_000;
-        let resumed = cand("resumed.jsonl", 10_900, "/repo", 50); // old start, freshest mtime
-        let other = cand("other.jsonl", 10_400, "/repo", 9_999); // start near spawn, older mtime
-        // `resuming: true` — this pane IS the resumed session (`resume --last` or a
-        // restore), so its own rollout's start is frozen weeks back and mtime is the
-        // only signal that the file is live. Ranking by proximity here would pick
-        // `other` and the long session would go stale, which is the bug this test
-        // was written for.
-        let best = pick_best_rollout(&[other, resumed], "/repo", None, spawn, true);
-        assert_eq!(best, Some(PathBuf::from("resumed.jsonl")));
-    }
-
-    #[test]
-    fn pick_filters_by_cwd() {
-        let spawn = 1_000;
-        let wrong = cand("wrong.jsonl", 2_000, "/other", 1_001);
-        let right = cand("right.jsonl", 1_500, "/repo", 1_001);
-        let best = pick_best_rollout(&[wrong, right], "/repo", None, spawn, false);
-        assert_eq!(best, Some(PathBuf::from("right.jsonl")));
-    }
-
-    #[test]
-    fn pick_tie_breaks_equal_mtime_by_start_closest_to_spawn() {
-        // Two fresh codex panes sharing a cwd, files flushed in the same second:
-        // prefer the one whose start is nearest this pane's spawn.
-        let spawn = 5_000;
-        let mine = cand("mine.jsonl", 6_000, "/repo", 5_001);
-        let theirs = cand("theirs.jsonl", 6_000, "/repo", 5_200);
-        let best = pick_best_rollout(&[theirs, mine], "/repo", None, spawn, false);
-        assert_eq!(best, Some(PathBuf::from("mine.jsonl")));
-    }
-
-    /// **The #230 bug.** A month-old rollout that happens to be actively appended
-    /// — another pane, another spyc instance, same cwd — had the largest mtime and
-    /// therefore won for EVERY fresh codex pane in that cwd, so `^a v` opened a
-    /// stranger's transcript. A fresh `codex` writes a rollout starting at ~spawn,
-    /// so proximity identifies it even though its mtime is smaller.
-    #[test]
-    fn a_fresh_pane_prefers_its_own_rollout_over_a_busier_old_one() {
-        let spawn = 100_000;
-        let ancient_but_busy = cand("ancient.jsonl", 100_900, "/repo", 1_000); // month-old start, freshest mtime
-        let mine = cand("mine.jsonl", 100_100, "/repo", 100_001); // starts at spawn, quieter
-        let best = pick_best_rollout(&[ancient_but_busy, mine], "/repo", None, spawn, false);
-        assert_eq!(best, Some(PathBuf::from("mine.jsonl")));
-    }
-
-    /// The same inputs with `resuming: true` must go the OTHER way — that pane's own
-    /// session legitimately has the ancient start. Pins the two modes as genuinely
-    /// opposite rather than one being a softened version of the other.
-    #[test]
-    fn the_same_candidates_invert_when_the_pane_is_resuming() {
-        let spawn = 100_000;
-        let ancient_but_busy = cand("ancient.jsonl", 100_900, "/repo", 1_000);
-        let mine = cand("mine.jsonl", 100_100, "/repo", 100_001);
-        let cands = [ancient_but_busy, mine];
-        assert_eq!(
-            pick_best_rollout(&cands, "/repo", None, spawn, true),
-            Some(PathBuf::from("ancient.jsonl")),
-            "resuming: mtime is the only liveness signal"
-        );
-        assert_eq!(
-            pick_best_rollout(&cands, "/repo", None, spawn, false),
-            Some(PathBuf::from("mine.jsonl")),
-            "fresh: start proximity is the identity signal"
-        );
-    }
-
-    /// Two fresh codex panes in one cwd, both live, no mtime tie — each must still
-    /// resolve to its own session. Before the fix this only worked on an exact-second
-    /// mtime tie, which the issue noted effectively never happens.
-    #[test]
-    fn two_fresh_panes_in_one_cwd_each_get_their_own() {
-        let theirs = cand("theirs.jsonl", 5_400, "/repo", 5_000);
-        let mine = cand("mine.jsonl", 5_300, "/repo", 5_200);
-        let cands = [theirs, mine];
-        assert_eq!(
-            pick_best_rollout(&cands, "/repo", None, 5_200, false),
-            Some(PathBuf::from("mine.jsonl"))
-        );
-        assert_eq!(
-            pick_best_rollout(&cands, "/repo", None, 5_000, false),
-            Some(PathBuf::from("theirs.jsonl"))
-        );
-    }
-
     /// `is_resume_without_id` is what selects the mode, so pin the classification
     /// the ranking depends on.
     #[test]
@@ -686,17 +421,5 @@ mod tests {
         assert!(!is_resume_without_id(
             "codex resume 019df582-fc65-7863-b349-f5c6f691f71c"
         ));
-    }
-
-    #[test]
-    fn pick_allows_small_clock_skew() {
-        // A file whose mtime is a hair before the recorded spawn (sub-second
-        // rounding) still counts as written during the pane's life.
-        let spawn = 1_000;
-        let c = cand("c.jsonl", 1_000 - (MTIME_SKEW_SECS - 1), "/repo", 999);
-        assert_eq!(
-            pick_best_rollout(&[c], "/repo", None, spawn, false),
-            Some(PathBuf::from("c.jsonl"))
-        );
     }
 }

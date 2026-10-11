@@ -17,6 +17,7 @@ fn saved_session(
         "tabs": commands.iter().enumerate().map(|(index, command)| serde_json::json!({
             "command": command, "label": format!("saved-{index}"), "cwd": dir,
             "agent_kind": "codex", "agent_session_id": "019e8b21-9e7c-7553-a118-d1cdada725fd",
+            "codex_home": dir.join("codex-home"),
             "claim_owner": format!("saved-owner-{index}")
         })).collect::<Vec<_>>(),
         "active_tab": active_tab, "pane_height_pct": 75, "pane_focused": true

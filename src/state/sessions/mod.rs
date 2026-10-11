@@ -77,6 +77,13 @@ pub struct SavedTab {
         skip_serializing_if = "Option::is_none"
     )]
     pub agent_session_name: Option<String>,
+    /// Codex home used by the saved pane. Older saves inherit the launch home.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_home: Option<PathBuf>,
+    /// A modern save whose launch home was unavailable; restore keeps it unopened.
+    /// Older saves default false and inherit the new launch home.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub codex_home_unresolved: bool,
     /// P2 scope-coordination owner key (`TabInfo::claim_owner`) — persisted so
     /// a restored tab can reclaim its pre-crash `ScopeClaim`s. Absent on older
     /// saves (`#[serde(default)]`); an empty string means "no claim owner was
@@ -84,6 +91,12 @@ pub struct SavedTab {
     /// spawned tab's own fresh key in that case.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub claim_owner: String,
+}
+
+// Serde's skip callback receives a reference to the field.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl SavedTab {
