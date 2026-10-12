@@ -1,4 +1,4 @@
-//! Index the images an agent actually received, out of its on-disk transcript.
+//! Shared gallery metadata and Claude's transcript image reader.
 //!
 //! This is the record that answers "what *was* `[Image #3]`?" after the prompt
 //! is long gone: the JSONL keeps the base64 next to the prompt text that
@@ -34,6 +34,24 @@ use std::path::Path;
 /// not a case worth defending against; reading the whole payload to compare is.
 const FINGERPRINT_EDGE: usize = 64;
 
+/// Encoded image budget shared by transcript reads and the display worker.
+pub const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy)]
+pub enum Format {
+    Claude,
+    Codex,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImageSource {
+    Claude,
+    Codex {
+        primary: Box<super::codex_images::Location>,
+        fallback: Option<Box<super::codex_images::Location>>,
+    },
+}
+
 /// One image found in a transcript, without its bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranscriptImage {
@@ -55,6 +73,7 @@ pub struct TranscriptImage {
     /// Where to read it back: 0-based line, then which image block in that line.
     pub line: usize,
     pub block: usize,
+    pub source: ImageSource,
 }
 
 /// Longest prompt excerpt kept per row — enough to recognize the message,
@@ -181,6 +200,7 @@ fn index_record(
             prompt_excerpt: excerpt.clone(),
             line: line_no,
             block: nth,
+            source: ImageSource::Claude,
         });
     }
 }
@@ -190,7 +210,9 @@ fn index_record(
 /// Re-reads the file to `entry.line` rather than holding bytes from the index
 /// pass — the point of the split. `Err` carries a reason for the status line.
 pub fn load(path: &Path, entry: &TranscriptImage) -> Result<Vec<u8>, String> {
-    use base64::Engine;
+    if let ImageSource::Codex { primary, fallback } = &entry.source {
+        return super::codex_images::load(primary, fallback.as_deref());
+    }
     let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut reader = BufReader::new(file);
     let mut buf = Vec::new();
@@ -219,13 +241,21 @@ pub fn load(path: &Path, entry: &TranscriptImage) -> Result<Vec<u8>, String> {
         .and_then(|b| b.pointer("/source/data"))
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| "image block is gone".to_string())?;
+    decode_base64(data)
+}
+
+pub(super) fn decode_base64(data: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine;
+    if data.len() as u64 > MAX_IMAGE_BYTES / 3 * 4 + 4 {
+        return Err("image exceeds the 64 MiB limit".into());
+    }
     base64::engine::general_purpose::STANDARD
         .decode(data)
         .map_err(|e| format!("base64: {e}"))
 }
 
 /// The `[Image #N]` labels in a prompt, in the order they appear.
-fn image_labels(text: &str) -> Vec<String> {
+pub(super) fn image_labels(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut rest = text;
     while let Some(start) = rest.find("[Image #") {
@@ -242,7 +272,7 @@ fn image_labels(text: &str) -> Vec<String> {
 
 /// The prompt text without its `[Image #N]` markers (the gallery shows those in
 /// their own column), collapsed to one line and clipped.
-fn excerpt_of(text: &str) -> String {
+pub(super) fn excerpt_of(text: &str) -> String {
     let mut cleaned = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(start) = rest.find("[Image #") {
@@ -267,9 +297,9 @@ fn excerpt_of(text: &str) -> String {
 
 /// Decoded byte count from a base64 length — no decode, so the index pass stays
 /// cheap. Standard base64 with `=` padding.
-fn decoded_len(b64: &str) -> usize {
+pub(super) fn decoded_len(b64: &str) -> usize {
     let padding = b64.bytes().rev().take_while(|&c| c == b'=').count();
-    b64.len() / 4 * 3 - padding.min(2)
+    (b64.len() / 4 * 3).saturating_sub(padding.min(2))
 }
 
 /// Content identity for dedupe: length plus both ends of the payload.
@@ -278,8 +308,8 @@ fn fingerprint(data: &str) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     data.len().hash(&mut h);
     let edge = FINGERPRINT_EDGE.min(data.len());
-    data[..edge].hash(&mut h);
-    data[data.len() - edge..].hash(&mut h);
+    data.as_bytes()[..edge].hash(&mut h);
+    data.as_bytes()[data.len() - edge..].hash(&mut h);
     h.finish()
 }
 
@@ -475,5 +505,15 @@ mod tests {
         wrong_block.block = 7;
         let err = load(&path, &wrong_block).expect_err("block 7 does not exist");
         assert!(err.contains("image block is gone"), "got: {err}");
+    }
+
+    #[test]
+    fn malformed_base64_metadata_is_safe_in_the_shared_claude_reader() {
+        for data in ["=".to_owned(), "a".to_owned() + &"é".repeat(80)] {
+            let (_dir, path) = write(&[user_line("malformed", &[&data], "now")]);
+            let images = index(&path);
+            assert_eq!(images.len(), 1);
+            assert!(load(&path, &images[0]).is_err());
+        }
     }
 }

@@ -521,6 +521,11 @@ impl App {
         // so we can auto-release its claims — a closed tab never holds a stale
         // one (P2). `claim_owner` is unique per tab, so this drops exactly its
         // claims, not a sibling's.
+        let closing_id = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .map(|tabs| tabs.active_info().id.clone());
         let closing_owner = self
             .runtime
             .pane_tabs
@@ -537,6 +542,10 @@ impl App {
         }
         if let Some(owner) = closing_owner {
             self.state.scope_registry.retain(|c| c.owner != owner);
+        }
+        if let Some(id) = closing_id {
+            self.state.pane.pending_images.remove(&id);
+            self.state.pane.image_capture_epochs.remove(&id);
         }
         // The closed tab may have had a stashed scrollback pager whose stream is
         // parked by id; reclaim it now that the tab is gone.

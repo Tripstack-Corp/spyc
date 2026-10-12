@@ -313,6 +313,25 @@ Graphics gotchas, each of which cost real debugging time:
   the input-arm diff draw updates just the footer cells and leaves the
   image untouched. Only verbs that change/remove the image repaint.
 
+### Agent image gallery
+
+`AgentProfile::transcript_images` selects the resolver and reader format. The
+gallery snapshots the pane's home/session query and resolves its path on the
+image worker. A tab id and request epoch reject results from a closed or reopened
+popup. It indexes metadata there, then reads and decodes one selected
+attachment on that same worker pipeline. Claude entries locate a physical line
+and image block. Codex entries retain their source rollout, byte offset and a
+record hash, plus an API-image fallback when a local attachment has a durable
+inline twin. The hash rejects a rewritten source record. A fork's entries keep
+parent-file provenance and stop at each inherited branch offset.
+
+`src/state/codex_images/` bounds the whole index by bytes and row count, in addition
+to the shared per-record cap. Local files must be regular and fit the encoded
+byte budget; the display worker separately limits raster allocation and dimensions.
+Clipboard capture carries the tab id and draft epoch alongside the forwarded
+paste key. Accepted Enter advances that epoch, and late results for submitted or
+closed tabs are discarded. Pending image bytes remain in memory only.
+
 ## Vertical (left/right) split
 
 `^s |` (aliased `^a |`) opens a second column on the right hosting a
@@ -810,8 +829,8 @@ you are looking at rather than the thing that happens to be focused.
 list rows), each a `begin` + `extend` + `finish` triple. The press *claims* the
 drag; an unclaimed press leaves child-forwarding untouched, which is why an
 ordinary drag inside a mouse-aware child still reaches the child. Ctrl+left press
-claims the pane for spyc even when the child requested mouse reporting. A
-Ctrl+click without movement is also consumed; the child receives no press or release.
+claims the pane for spyc even when the child requested mouse reporting.
+[Selection caveats](CONFIGURATION.md#selecting-text) define Ctrl+click behaviour.
 
 Pane selection owns a bounded `pane::snapshot::ScreenSnapshot` captured under the
 parser lock at press. The draw and clipboard extraction use that same immutable

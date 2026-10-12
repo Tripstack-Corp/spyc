@@ -100,8 +100,8 @@ pane grid. **Ctrl+drag** explicitly gives spyc the gesture in either case, so te
 in Codex's queued-question view can be copied even when Codex cannot select it.
 Hold Ctrl on the press; releasing Ctrl mid-drag does not hand it back to the child.
 spyc holds the visible grid while you drag, then copies from it on release and
-resumes the live view. The child continues running throughout. Ctrl+click without
-movement copies nothing and is consumed: the child gets neither press nor release.
+resumes the live view. The child continues running throughout. See
+[the selection caveats](../CONFIGURATION.md#selecting-text) for Ctrl+click behaviour.
 A key, paste, wheel gesture, tab switch or layout change cancels the held drag.
 Turning mouse capture off also cancels it. Shift+drag remains the host terminal's
 selection gesture.
@@ -173,6 +173,40 @@ parent's rollout where the fork branched, instead of copying what came before.
 So `^a v` on a fork reads the parent's rollout up to that offset first, and
 further back for a fork of a fork (`src/state/codex_history.rs`). Without that
 walk a branch would show none of the history it was forked to keep.
+
+---
+
+### Image attachments
+
+`^a g` / `:images` opens the focused Claude or Codex tab's gallery. On macOS and
+Linux, spyc captures the native clipboard alongside `Ctrl+V`; Codex also accepts
+`Ctrl+Alt+V` on terminals that forward it. The original key reaches the agent.
+Pending captures appear before submission and clear on accepted Enter; a slow
+clipboard result from that draft cannot reappear afterwards. The setting
+`[pane] preview_pasted_images = false` disables capture.
+
+Codex attachments come from current `item_completed` user inputs, legacy
+`user_message` events and user API messages. The gallery honours the pane's
+effective `CODEX_HOME` and pinned session. Resolution and indexing run off the UI
+thread, and a closed gallery cannot install an old result after reopening. The
+reader follows fork ancestry through each
+branch offset. Local paths resolve against the rollout's recorded cwd; inline
+image data remains readable after a temporary local image has disappeared.
+Remote URLs and opaque file ids are not fetched. Missing or malformed bytes give
+an error when opened.
+
+The index holds metadata, with a 32 MiB record limit, a 256 MiB scan budget and
+4,096 rows across the ancestry chain. Skipped records and reached limits are
+logged. Opening an image reads only its source record or local file, caps encoded
+bytes at 64 MiB, and applies a separate 256 MiB decode allocation budget and
+16,384-pixel width/height limits.
+
+The paste bindings and record shapes were checked against the installed release's
+[keymap](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/tui/src/keymap.rs),
+[user inputs](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/protocol/src/user_input.rs)
+and [rollout policy](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/rollout/src/policy.rs).
+Native clipboard and terminal graphics still need a local smoke test on each
+platform; fixture coverage does not establish that acceptance.
 
 ---
 

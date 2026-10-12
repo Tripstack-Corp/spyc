@@ -78,23 +78,22 @@ impl App {
             .is_some_and(|v| !v.is_empty());
         // Report a transcript miss only when it leaves the user with nothing:
         // with unsent images to show, the popup opens and an error would be noise.
-        let path = self.transcript_image_path(!has_pending);
-        if path.is_none() && !has_pending {
+        self.view.image_gallery_epoch = self.view.image_gallery_epoch.wrapping_add(1);
+        let request_id = self.view.image_gallery_epoch;
+        let request = self.transcript_image_request(!has_pending, request_id);
+        if request.is_none() && !has_pending {
             return Vec::new();
         }
         self.view.image_gallery = Some(ImageGallery {
             tab_id,
+            request_id,
             received: Vec::new(),
-            transcript_path: path.clone(),
+            transcript_path: None,
             cursor: 0,
-            loading: path.is_some(),
+            loading: request.is_some(),
         });
         self.view.needs_full_repaint = true;
-        path.map_or_else(Vec::new, |path| {
-            vec![Effect::IndexTranscriptImages(
-                image_ops::TranscriptIndexOp { path },
-            )]
-        })
+        request.map_or_else(Vec::new, |op| vec![Effect::IndexTranscriptImages(op)])
     }
 
     pub(crate) fn close_image_gallery(&mut self) {
@@ -109,27 +108,33 @@ impl App {
     /// Dropped if the user already closed the gallery, and pinned to the tab it
     /// was requested for — an index that landed after a tab switch would
     /// otherwise show one agent's images under another's name.
-    pub(crate) fn apply_gallery_index(
-        &mut self,
-        path: &std::path::Path,
-        images: Vec<crate::state::transcript_images::TranscriptImage>,
-    ) {
+    pub(crate) fn apply_gallery_index(&mut self, result: image_ops::TranscriptIndexResult) {
         let Some(g) = self.view.image_gallery.as_mut() else {
             return;
         };
-        if g.transcript_path.as_deref() != Some(path) {
+        if g.tab_id != result.tab_id || g.request_id != result.request_id {
             return;
         }
-        g.received = images;
-        g.loading = false;
-        // Land on the newest received image — the one most likely being checked
-        // — unless unsent ones are showing, which are newer still.
         let pending = self
             .state
             .pane
             .pending_images
             .get(&g.tab_id)
             .map_or(0, Vec::len);
+        g.transcript_path = match result.path {
+            Ok(path) => Some(path),
+            Err(reason) => {
+                if pending == 0 {
+                    self.close_image_gallery();
+                    self.state.flash_error(reason);
+                    return;
+                }
+                None
+            }
+        };
+        g.received = result.images;
+        g.loading = false;
+        // Unsent rows remain first; otherwise land on the newest attachment.
         if pending == 0 {
             g.cursor = g.received.len().saturating_sub(1);
         }
@@ -240,12 +245,14 @@ impl App {
         }
     }
 
-    /// Resolve the transcript file for the focused pane tab. `report` gates the
-    /// flashes — each miss keeps its own message, since "this agent can't do
-    /// it" and "nothing found on disk" are different problems.
-    fn transcript_image_path(&mut self, report: bool) -> Option<std::path::PathBuf> {
-        let tabs = self.runtime.pane_tabs.as_ref()?;
-        let info = tabs.active_info();
+    /// Plan a transcript read for this pane without resolving its path on the
+    /// UI thread. Missing-file diagnostics arrive with the correlated result.
+    fn transcript_image_request(
+        &mut self,
+        report: bool,
+        request_id: u64,
+    ) -> Option<image_ops::TranscriptIndexOp> {
+        let info = self.runtime.pane_tabs.as_ref()?.active_info();
         let profile = crate::agent::detect(&info.command);
         let Some(spec) = profile.transcript_images() else {
             if report {
@@ -256,24 +263,19 @@ impl App {
             }
             return None;
         };
-        // The session uuid pinned to this pane — the resolver's strongest
-        // signal, and the only reliable one when two agent tabs share a cwd.
-        let pinned = info.pinned_session_id().map(str::to_string);
-        let query = crate::agent::TranscriptQuery {
-            cwd: &info.cwd,
-            spawn_epoch_secs: info.spawn_epoch_secs,
-            command: &info.command,
-            session_id: pinned.as_deref(),
-            codex_home: info.codex_home.as_deref(),
-        };
-        let path = (spec.resolve)(query);
-        if path.is_none() && report {
-            self.state.flash_error(format!(
-                "{}: no transcript found for this session",
-                profile.name()
-            ));
-        }
-        path
+        Some(image_ops::TranscriptIndexOp {
+            request_id,
+            tab_id: info.id.clone(),
+            agent_name: profile.name(),
+            spec,
+            query: Box::new(image_ops::TranscriptImageQuery {
+                cwd: info.cwd.clone(),
+                spawn_epoch_secs: info.spawn_epoch_secs,
+                command: info.command.clone(),
+                session_id: info.pinned_session_id().map(str::to_owned),
+                codex_home: info.codex_home.clone(),
+            }),
+        })
     }
 }
 
