@@ -1557,7 +1557,8 @@ codex just loses spyc's MCP tools. Claude is unaffected. Default on.
 Multiple spyc instances coexist in one directory with nothing to
 take over: they write the same entry, and each one's agents reach it.
 The entry stays until the last spyc relying on it exits. An agent
-started outside spyc finds the spyc rooted in its project.
+started outside spyc, in another terminal, gets no spyc tools: only the
+agents spyc launches do.
 Enterprise `managed-settings.json` policies
 (`deniedMcpServers`/`allowedMcpServers`) are respected for the
 claude side; codex has no equivalent enterprise hook.

@@ -29,8 +29,9 @@ What approving this doc agreed to (2026-10-12):
   - Read tools answer from that project.
   - Driving tools (`navigate_to`, `pick_files`, …) move that project's columns,
     never the view the user is looking at.
-  - An agent started outside spyc goes to the project whose home contains its
-    cwd.
+  - A codex session on codex's shared daemon, which has no pane, goes to the
+    project whose home contains its cwd. An agent started outside spyc gets no
+    tools (#619).
 - **Recovery (§3).** One save file per process holds every project. It's a
   version 2 format, and today's files load as one-project saves.
   - `spyc -r` restores every project.
@@ -399,8 +400,9 @@ What changes:
    there may be nobody looking at all. `get_spyc_context` answers for the
    caller's project, and adds `project: {id, label, home, active}`, so an agent
    can tell whether the user is currently in its project.
-6. **Unbound connections pick a project by cwd.** An agent started outside
-   spyc reaches the socket through marker discovery and has no pane. Its proxy
+6. **Unbound connections pick a project by cwd.** A session codex's shared
+   daemon started reaches the socket through marker discovery and has no pane;
+   an agent started outside spyc gets no tools at all (#619). Its proxy
    adds its cwd to `initialize` (`_meta["spyc/cwd"]`, beside `spyc/paneId`),
    and the server binds the connection to the open project whose home contains
    it, else the active project. That's the same "attribution, not
@@ -418,10 +420,9 @@ agent's *user* scope would serve every pane. An org-deployed
 `managed-mcp.json` with that shape already works for claude (decisions log,
 2026-09-30). Moving them would stop
 the per-directory writes and the refcounted cleanup entirely. It changes what an
-agent started outside spyc sees: a spyc server that runs read-only, or none.
-That is why it is its own issue,
-[#619](https://github.com/Tripstack-Corp/spyc/issues/619), after 2.3
-(owner decision, 2026-10-12).
+agent started outside spyc sees, so it got a decision of its own: it sees no
+tools (owner decision, 2026-10-12, in
+[#619](https://github.com/Tripstack-Corp/spyc/issues/619)).
 
 What doesn't change: MCP entries still name no socket (SPYC-TRAP
 `mcp-entry-names-no-socket`), so there is nothing to take over. #509 deleted the

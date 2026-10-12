@@ -1635,3 +1635,41 @@ fn status_trace_lasts_as_long_as_the_spyc_that_started_it() {
         assert!(!status_trace_requested());
     });
 }
+
+/// Who `spyc --mcp` serves follows from the env spyc gives the panes it
+/// launches; under codex's shared daemon that env is ignored, and the session
+/// may or may not be one spyc launched.
+#[test]
+fn spyc_mcp_serves_by_who_launched_the_agent() {
+    let launched = |sock: bool, pane: bool| PaneEnv {
+        sock: sock.then(|| PathBuf::from("/x/mcp-1.sock")),
+        pane_id: pane.then(|| "tab-1".to_string()),
+        context: None,
+    };
+    assert_eq!(route(&launched(true, true), false), Route::Launched);
+    assert_eq!(route(&launched(true, false), false), Route::Launched);
+    assert_eq!(route(&launched(false, true), false), Route::Launched);
+    assert_eq!(route(&PaneEnv::default(), true), Route::SharedDaemon);
+    assert_eq!(route(&PaneEnv::default(), false), Route::Outside);
+}
+
+/// The server an outside agent gets answers a well-formed `initialize` with no
+/// instructions, lists no tools, and refuses anything else.
+#[test]
+fn the_inert_server_offers_nothing() {
+    let reply = |msg: &str| super::server::inert_reply(msg);
+    let init = reply(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#).unwrap();
+    assert_eq!(init["id"], 1);
+    assert!(init["result"]["capabilities"]["tools"].is_object());
+    assert!(init["result"].get("instructions").is_none(), "{init}");
+    let list = reply(r#"{"jsonrpc":"2.0","id":"a","method":"tools/list"}"#).unwrap();
+    assert_eq!(list["result"]["tools"], json!([]));
+    assert_eq!(
+        reply(r#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#).unwrap()["result"],
+        json!({})
+    );
+    let call = reply(r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{}}"#).unwrap();
+    assert_eq!(call["error"]["code"], -32601);
+    assert!(reply(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).is_none());
+    assert!(reply("not json").is_none());
+}

@@ -291,9 +291,10 @@ the bump gate. `deny.toml` records the same.
 - **`spyc --install-agents` puts spyc in every session of the agents it
   wires,** not only those spyc launches. Their status hooks run on every
   turn, and do nothing without the socket a spyc pane sets. Their `spyc --mcp`
-  starts in every session: one started inside the tree a running spyc is rooted
-  at connects to that spyc unattributed, and one started elsewhere serves
-  read-only tools. The entries outlive spyc, so remove them with
+  starts in every session, and serves no tools to one spyc didn't launch,
+  wherever it runs. A codex session on codex's shared daemon is the exception:
+  spyc can't tell who started it, and it reaches the spyc rooted at its
+  directory, unattributed. The entries outlive spyc, so remove them with
   `spyc --remove-agents` before uninstalling it.
 
 ## Reporting a vulnerability
