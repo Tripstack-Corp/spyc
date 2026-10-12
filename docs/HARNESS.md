@@ -502,6 +502,18 @@ tab keeps what you typed). `[pane] codex_daemon = true` turns that off, at the
 cost of the dots and MCP attribution. A codex started outside spyc is
 unaffected either way.
 
+### Claude Code's background sessions
+
+Claude Code can host a session in its own background process, which outlives
+the tab and the spyc that launched it. After `spyc -r` the restored tab shows
+the same conversation, but the agent process, its MCP proxy and its hooks keep
+the `SPYC_MCP_SOCK` and `SPYC_PANE_ID` they started with. The restored tab
+takes back its saved pane id, and the proxy and the status hook fall back to
+the live spyc rooted above the agent when the named socket is gone, so the dot
+and MCP attribution carry on. A save from before spyc recorded pane ids
+restores with fresh ones: until that agent restarts, its hooks name no tab and
+its `report_status` lands on the focused one.
+
 ### The autosave window
 
 Beyond the save on quit, spyc keeps a debounced crash-sufficient autosave —
