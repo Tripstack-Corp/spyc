@@ -1,0 +1,93 @@
+{
+  "probe_version": 1,
+  "cli_version": "0.162.1",
+  "coverage": {
+    "file_bytes": 18873790,
+    "bytes_read": 16777216,
+    "tail_only": true,
+    "line_cap_bytes": 262144,
+    "skipped": {}
+  },
+  "counts_in_read_window": {
+    "item_completed": 1791,
+    "token_count": 490,
+    "token_usage_record": 483,
+    "task_complete": 15,
+    "task_started": 15,
+    "turn_context": 20,
+    "compacted": 5
+  },
+  "latest": {
+    "token_count": {
+      "timestamp": "2026-10-12T14:36:01.417000+00:00",
+      "kind": "token_count",
+      "thread": {
+        "input_tokens": 89610928,
+        "cached_input_tokens": 87360512,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 437486,
+        "reasoning_output_tokens": 238360,
+        "total_tokens": 90048414
+      },
+      "last": {
+        "input_tokens": 240986,
+        "cached_input_tokens": 237696,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2336,
+        "reasoning_output_tokens": 2070,
+        "total_tokens": 243322
+      },
+      "model_context_window": 475000,
+      "limit_id": "codex",
+      "primary_reported": false,
+      "secondary_reported": false
+    },
+    "token_usage_record": {
+      "timestamp": "2026-10-12T14:38:43.277000+00:00",
+      "kind": "token_usage_record",
+      "request": {
+        "input_tokens": 245556,
+        "cached_input_tokens": 240768,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4390,
+        "reasoning_output_tokens": 2385,
+        "total_tokens": 249946
+      },
+      "turn": {
+        "input_tokens": 2626125,
+        "cached_input_tokens": 2533888,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 17325,
+        "reasoning_output_tokens": 9983,
+        "total_tokens": 2643450
+      },
+      "thread": {
+        "input_tokens": 91251161,
+        "cached_input_tokens": 88668288,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 469640,
+        "reasoning_output_tokens": 240745,
+        "total_tokens": 91720801
+      }
+    },
+    "turn_context": {
+      "timestamp": "2026-10-12T14:25:30.100000+00:00",
+      "kind": "turn_context",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "approval": "on-request",
+      "sandbox": "workspace-write"
+    },
+    "compacted": {
+      "timestamp": "2026-10-12T13:15:32.409000+00:00",
+      "kind": "compacted",
+      "window_number": 5
+    }
+  },
+  "provenance": {
+    "kind": "allowlisted field probe of one native TUI rollout",
+    "observed_at": "2026-10-12",
+    "scope": "16 MiB tail, not the whole thread",
+    "identity": "header checked against the explicitly selected thread; identities and paths omitted"
+  }
+}
