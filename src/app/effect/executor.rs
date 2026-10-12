@@ -6,7 +6,7 @@
 use crate::Tui;
 use crate::ui::pager::PagerView;
 
-use super::{Effect, PaneTextKind, PaneTextSink};
+use super::Effect;
 use crate::app::{
     App, ForegroundExec, Message, PagerReturn, Wake, archive_ops, graveyard_ops, image_ops,
     inventory_ops, kill_pg, mermaid_ops, worktree_ops,
@@ -90,72 +90,7 @@ impl App {
                     };
                     self.set_active_pager_flash(msg);
                 }
-                // Read the active pane's text from the live host (bounded,
-                // yank-/gf-gated), then route per `then`. The no-pane guard +
-                // the pane read moved here from the former yank / gf handlers.
-                // The read (lines + the pane's cwd, used by GotoFile) happens
-                // behind one borrow that ends before we flash / copy / navigate
-                // — byte-identical flash strings, same `Event::Key` tick.
-                Effect::ReadPaneText { kind, then } => {
-                    let Some((mut lines, pane_cwd, agent)) =
-                        self.runtime.pane_tabs.as_mut().map(|tabs| {
-                            let lines = match kind {
-                                PaneTextKind::Visible => tabs.active_mut().visible_lines(),
-                                PaneTextKind::Scrollback(n) => tabs.active_mut().recent_lines(n),
-                                PaneTextKind::Pickable(n) => tabs.active_mut().pickable_text(n),
-                            };
-                            let info = tabs.active_info();
-                            (lines, info.cwd.clone(), info.agent())
-                        })
-                    else {
-                        if !matches!(then, PaneTextSink::JumpDefault) {
-                            self.state.flash_error("no pane open");
-                        }
-                        continue;
-                    };
-                    match then {
-                        // A-class: join + copy, byte-identical to the former
-                        // inline yank sites (`yp`/`ya`).
-                        PaneTextSink::Clipboard { ok } => {
-                            let text = lines
-                                .iter()
-                                .map(|l| l.trim_end())
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            if text.trim().is_empty() {
-                                // Empty-flash string is per-kind, byte-identical
-                                // to the former inline yank sites for the two
-                                // kinds yank actually uses (Visible / Scrollback).
-                                // Pickable only ever pairs with `GotoFile`, never
-                                // Clipboard — its arm here is for exhaustiveness.
-                                self.state.flash_error(match kind {
-                                    PaneTextKind::Visible | PaneTextKind::Pickable(_) => {
-                                        "pane is empty"
-                                    }
-                                    PaneTextKind::Scrollback(_) => "pane scrollback is empty",
-                                });
-                            } else {
-                                match self.deliver_clipboard(&text) {
-                                    Ok(()) => self.state.flash_info(ok.success(&text)),
-                                    Err(e) => {
-                                        self.state.flash_error(format!("yank failed: {e:#}"));
-                                    }
-                                }
-                            }
-                        }
-                        // C-class: gf/gF. Resolve a path reference from the
-                        // pickable lines and navigate to it (synchronous, same
-                        // tick); gF also opens it in the pager at the line.
-                        PaneTextSink::GotoFile { open_at_line } => {
-                            lines.truncate(agent.output_len(&lines));
-                            self.goto_file_navigate(lines, pane_cwd, open_at_line);
-                        }
-                        PaneTextSink::JumpDefault => {
-                            lines.truncate(agent.output_len(&lines));
-                            self.spawn_jump_default(lines, pane_cwd);
-                        }
-                    }
-                }
+                Effect::ReadPaneText { kind, then } => self.execute_pane_text(kind, then),
                 // A-class: queue input for the target pane (same tick).
                 // Resolve the target; if it's gone, skip silently (matches
                 // the former `if let Some(…)` guards). Errors flash their cause

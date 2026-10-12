@@ -7,6 +7,9 @@
 //! prints in its output is indented under the reply's `⏺`, which is what keeps
 //! a markdown `---` from being read as the box.
 
+mod codex;
+pub use codex::codex_output_len;
+
 /// Non-blank rows a footer can fill below the input box: a multi-line status
 /// line, the mode line, and an open completion menu. A bottom rule farther up
 /// than this is not the box's.
@@ -135,3 +138,6 @@ mod tests {
         assert_eq!(claude_output_len(&[]), 0);
     }
 }
+
+#[cfg(test)]
+mod codex_tests;

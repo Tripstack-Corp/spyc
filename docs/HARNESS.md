@@ -176,6 +176,26 @@ walk a branch would show none of the history it was forked to keep.
 
 ---
 
+### Output navigation
+
+In a live Codex pane, `gf`/`gF`, `J` and `^a u` Quick Select exclude verified
+composer/footer rows and complete command, file-edit, MCP-tool and network
+approval forms. A composer needs its native input shape, blank separation and
+a recognized context, Vim-mode or shortcut footer; a lone prompt symbol is
+insufficient. Unknown/customized or clipped forms retain all text. Shortcut
+help is excluded when its complete heading and close hint are present.
+
+Quick Select retains the printed rows' original screen coordinates. Terminal
+scrollback and Codex's native transcript view use the visible historical text;
+spyc's `^a v` transcript pager keeps its own navigation semantics. Full-pane
+copying and mouse selection still include the visible input. These rules also
+follow Codex running in a shell tab's foreground.
+
+The renderer fixtures match CLI `0.162.1`; their
+[provenance](../tests/fixtures/codex-output/README.md) distinguishes upstream
+snapshots from synthetic replay data. A local native-CLI smoke test is separate
+from those captures and controlled-PTY regressions.
+
 ### Image attachments
 
 `^a g` / `:images` opens the focused Claude or Codex tab's gallery. On macOS and

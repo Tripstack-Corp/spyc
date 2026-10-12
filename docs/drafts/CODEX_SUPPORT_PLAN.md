@@ -771,8 +771,8 @@ session data yields a diagnostic and fallback, not another pane's history.
 
 ### A5. Bring images into the existing gallery pipeline
 
-**Implementation:** [PR #617](https://github.com/Tripstack-Corp/spyc/pull/617) adds
-verified Ctrl+V and
+**Shipped:** [PR #617](https://github.com/Tripstack-Corp/spyc/pull/617), merged
+2026-10-12 at `3bada817`, adds verified Ctrl+V and
 Ctrl+Alt+V capture, current and legacy user-image readers, and parent-rollout
 provenance through fork branch offsets. It uses A4's home/session resolver and the
 existing pending ring and display worker. Late captures after accepted Enter or
@@ -801,6 +801,22 @@ gallery, not Codex's ability to accept images.
 
 ### A6. Exclude Codex input chrome from output navigation
 
+**Implementation:** [PR #624](https://github.com/Tripstack-Corp/spyc/pull/624)
+supplies a Codex profile
+boundary for live `gf`/`gF`, `J` and Quick Select. It pairs the native composer
+shape with known footer evidence and reuses complete approval rules. Unknown
+or clipped forms retain all text; historical viewports stay readable. Tagged
+`0.162.1` renderer snapshots supply current fixtures, with separate synthetic
+variants and real-PTY App routes. The baseline reproduced footer-path selection
+through `gf` and `J`, plus draft/footer matches in Quick Select. The existing
+pane-text executor arm is extracted for direct coverage and its function-length
+ratchet is lowered. Local native capture failed during Codex sandbox-helper
+bootstrap; no native smoke result is claimed. The maintainer requested shipping
+on 2026-10-12 after the current-base local-build handoff. All fifteen new
+regressions pass, and ten deliberate mutations were caught and restored. The
+full local quality gate passes, including 3,018 library tests and the existing
+single ignored system-Trash test.
+
 Add a verified Codex output-boundary implementation using captured current
 screen fixtures. Cover composer, statusline, approval overlays and narrow panes;
 do not guess a footer from one arbitrary glyph.
@@ -809,13 +825,13 @@ do not guess a footer from one arbitrary glyph.
 printed by the agent over paths in an unfinished prompt. Terminal scrollback
 and transcript navigation retain their separate semantics.
 
-### Deferred shell-tab agent tracking
+### Shell-tab agent tracking (shipped)
 
-[Feature request #544](https://github.com/Tripstack-Corp/spyc/issues/544) records
-the shell → known agent → shell → relaunch expectation, including bash, zsh and
-other shells. Design is deferred at the maintainer's request. Direct agent tabs
-and configured direct startup tabs remain the A3 scope; dynamic shell-tab
-identity is a separate feature and does not expand the Codex compatibility gate.
+[Feature request #544](https://github.com/Tripstack-Corp/spyc/issues/544) is
+implemented separately: shell tabs provision agent environment/MCP/hooks for
+consenting projects and follow known agents in the PTY's foreground process
+group. Exit, backgrounding and relaunch update the effective profile. This
+separate feature does not expand the Codex compatibility gate.
 
 ## Track B — a native Codex session HUD
 

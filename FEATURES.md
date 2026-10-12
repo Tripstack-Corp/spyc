@@ -78,6 +78,8 @@ do from here?", modelled on Neovim's which-key.
   cursor on it), `→`/`End` loads it for editing, and typing replaces it.
   The paths are checked on a worker thread, so the prompt opens at once
   even when one of them sits on a mount that's stopped answering.
+  Codex live navigation excludes verified input chrome; see
+  [output navigation](docs/HARNESS.md#output-navigation) for the boundary and fallback.
 - **F** project-wide fuzzy filename finder. Walks the focused
   commander's worktree root (its repo root, else `PROJECT_HOME`,
   else the current dir) honouring `.gitignore`, ranks
