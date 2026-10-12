@@ -20,7 +20,10 @@ fn replay(app: &mut App, root: &std::path::Path, label: &str) {
     ] {
         std::fs::write(root.join(file), "first\nsecond\nthird\n").unwrap();
     }
-    app.state.chdir(root).unwrap();
+    // Unit tests stay chdir-free: preload the paths' parent directory so
+    // gf/gF still resolve and focus the real file without moving process cwd.
+    app.state.cur_mut().listing = crate::fs::Listing::read(root.join("files")).unwrap();
+    app.state.rebuild_rows();
     let wake = app.make_pane_wake();
     let pane = crate::pane::Pane::spawn(
         "/bin/sh -c 'cat screen.txt; sleep 30'",

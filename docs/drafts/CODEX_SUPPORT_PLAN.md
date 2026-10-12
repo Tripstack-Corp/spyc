@@ -801,7 +801,8 @@ gallery, not Codex's ability to accept images.
 
 ### A6. Exclude Codex input chrome from output navigation
 
-**Implementation:** `fix/codex-output-boundary` supplies a Codex profile
+**Implementation:** [PR #624](https://github.com/Tripstack-Corp/spyc/pull/624)
+supplies a Codex profile
 boundary for live `gf`/`gF`, `J` and Quick Select. It pairs the native composer
 shape with known footer evidence and reuses complete approval rules. Unknown
 or clipped forms retain all text; historical viewports stay readable. Tagged
@@ -813,7 +814,7 @@ ratchet is lowered. Local native capture failed during Codex sandbox-helper
 bootstrap; no native smoke result is claimed. The maintainer requested shipping
 on 2026-10-12 after the current-base local-build handoff. All fifteen new
 regressions pass, and ten deliberate mutations were caught and restored. The
-full local quality gate passes, including 3,017 library tests and the existing
+full local quality gate passes, including 3,018 library tests and the existing
 single ignored system-Trash test.
 
 Add a verified Codex output-boundary implementation using captured current
