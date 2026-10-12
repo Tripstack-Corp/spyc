@@ -38,9 +38,15 @@ impl App {
     ) {
         use crate::mcp::McpConfigStatus;
         use crate::state::sessions::AgentKind;
+        if !self.view.mcp_running {
+            return;
+        }
         // Wired in user scope (`spyc --install-agents`): nothing for this agent
-        // goes into the project.
-        if !self.view.mcp_running || crate::state::wiring_consent::opted_in(kind) {
+        // goes into the project, and a copy an older spyc left there goes.
+        if crate::state::wiring_consent::opted_in(kind) {
+            if let Some(env) = crate::wiring::Env::current() {
+                crate::wiring::legacy::scrub(kind, cwd, &env, std::process::id());
+            }
             return;
         }
         // The entry names no instance (`mcp-entry-names-no-socket`), so writing

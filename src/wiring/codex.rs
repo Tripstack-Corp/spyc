@@ -120,6 +120,14 @@ fn declares_inline_hooks(text: &str) -> bool {
         })
 }
 
+/// The hooks file and the MCP file.
+pub(super) fn files(env: &Env) -> [std::path::PathBuf; 2] {
+    [
+        env.codex_home.join("hooks.json"),
+        env.codex_home.join("config.toml"),
+    ]
+}
+
 /// Run `f` over codex's two parts.
 fn with_parts<R>(env: &Env, f: impl FnOnce(&FilePart, &FilePart) -> R) -> R {
     let hooks_with =

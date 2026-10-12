@@ -33,6 +33,12 @@ pub fn consent_for(root: &Path) -> Option<bool> {
     load().get(&root.to_string_lossy().into_owned()).copied()
 }
 
+/// Every project root that has answered.
+#[must_use]
+pub fn recorded_roots() -> Vec<PathBuf> {
+    load().into_keys().map(PathBuf::from).collect()
+}
+
 /// Persist the user's per-project answer (best-effort; a write failure just
 /// means we ask again next time, never an error to the user).
 pub fn set_consent(root: &Path, allow: bool) {

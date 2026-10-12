@@ -599,6 +599,7 @@ impl App {
             terminal,
             &foreground_exec,
         );
+        self.scrub_legacy_wiring();
 
         // (Pre-v1.50.84 the loop carried `last_pane_render` and
         // `last_active_drain` timestamps to throttle pane renders /

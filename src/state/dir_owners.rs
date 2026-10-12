@@ -77,6 +77,12 @@ fn prune(map: &mut Owners) {
     });
 }
 
+/// Every directory the store names, its owners alive or not.
+#[must_use]
+pub fn recorded_dirs(what: Shared) -> Vec<PathBuf> {
+    load(what).into_keys().map(PathBuf::from).collect()
+}
+
 /// Record that `pid` relies on the `what` in `dir`. Idempotent.
 pub fn claim(what: Shared, dir: &Path, pid: u32) {
     let mut map = load(what);

@@ -515,8 +515,9 @@ CLI execution or fresh onboarding acceptance.
 codex runs the hooks of every layer it loads, user and project alike, without
 merging duplicates. After `spyc --install-agents=codex` puts spyc's hooks in
 `$CODEX_HOME/hooks.json`, a project `.codex/config.toml` that an older spyc
-wrote them into reports each event a second time; `:why-status` names the
-project copy. Those user-scope hooks need one approval in codex's `/hooks`, and
+wrote them into would report each event a second time, so spyc takes that copy
+out at startup and when it launches codex there. It leaves one another running
+spyc still uses, or one git tracks; `:why-status` names a copy that remains. Those user-scope hooks need one approval in codex's `/hooks`, and
 then apply in every project, trusted or not.
 
 Codex loads `.codex/hooks.json` alongside inline hooks in `.codex/config.toml`.

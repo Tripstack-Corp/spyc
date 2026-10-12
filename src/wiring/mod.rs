@@ -14,6 +14,7 @@ mod claude;
 mod cli;
 mod codex;
 mod file;
+pub mod legacy;
 
 pub use cli::run_cli;
 
@@ -122,6 +123,16 @@ pub fn status(kind: AgentKind, env: &Env) -> Option<Status> {
         AgentKind::Codex => Some(codex::status(env)),
         AgentKind::Agy => Some(agy::status(env)),
         _ => None,
+    }
+}
+
+/// The files `kind`'s wiring lives in, for the agents spyc wires here.
+fn user_files(kind: AgentKind, env: &Env) -> Vec<PathBuf> {
+    match kind {
+        AgentKind::Claude => claude::files(env).to_vec(),
+        AgentKind::Codex => codex::files(env).to_vec(),
+        AgentKind::Agy => agy::files(env).to_vec(),
+        AgentKind::Zot | AgentKind::Other => Vec::new(),
     }
 }
 

@@ -1522,7 +1522,9 @@ claude's `settings.json` (in `$CLAUDE_CONFIG_DIR`, else `~/.claude`) and its
 user-scope MCP servers, through `claude mcp add-json -s user`; codex's
 `hooks.json` and `config.toml`; agy's
 `~/.gemini/config/hooks.json` and `mcp_config.json`. From then on spyc writes
-nothing into projects for those agents. `--install-agents=agy` picks agents;
+nothing into projects for those agents, and takes out the copies an older
+spyc left there, unless another running spyc still uses them or git tracks
+them. `--install-agents=agy` picks agents;
 `spyc --remove-agents` takes spyc's part back out and leaves the rest of each
 file. An organization's `managed-mcp.json` keeps control of claude's MCP
 servers, and spyc installs only the hooks there. Files are edited in place:

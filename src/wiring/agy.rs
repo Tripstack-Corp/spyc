@@ -4,9 +4,21 @@
 
 use super::{Env, FilePart, Part, Status, file, foreign_spyc_server, json_object};
 
+fn dir(env: &Env) -> std::path::PathBuf {
+    env.home.join(".gemini/config")
+}
+
+/// The hooks file and the MCP file.
+pub(super) fn files(env: &Env) -> [std::path::PathBuf; 2] {
+    [
+        dir(env).join("hooks.json"),
+        dir(env).join("mcp_config.json"),
+    ]
+}
+
 /// Run `f` over agy's two parts.
 fn with_parts<R>(env: &Env, f: impl FnOnce(&FilePart, &FilePart) -> R) -> R {
-    let dir = env.home.join(".gemini/config");
+    let dir = dir(env);
     let hooks_with = |existing: Option<&str>| {
         crate::mcp::merged_agy_status_hooks_json(existing, &env.spyc)
             .ok_or_else(|| "refusing to overwrite — not a JSON object".to_string())
