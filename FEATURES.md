@@ -848,10 +848,8 @@ end).
   it. Release copies those held bytes and resumes live output. An ordinary drag in
   a mouse-aware child keeps reaching the child. A released highlight appears only
   while the live grid still matches the copied text; new output or input clears it.
-  Ctrl+click is consumed by spyc even without movement: it copies nothing and
-  never reaches the child. Terminals that reserve Ctrl+click for a context menu
-  must forward it to applications; iTerm2's pointer preference is described in
-  [CONFIGURATION.md](CONFIGURATION.md#selecting-text).
+  Ctrl+click behaviour and host-terminal forwarding preferences are documented
+  in [the selection caveats](CONFIGURATION.md#selecting-text).
   **Drag in the file list to select rows; release copies their names** — hold
   **Ctrl** while pressing to copy absolute paths instead. The highlight stays up
   after the copy. Distinct from picks: a drag never changes what the next file
@@ -990,7 +988,7 @@ An agent renders a pasted image as an opaque token (`[Image #3]`), so you
 can't see what you attached and can't check it later. **`^a g`** (or
 `:images`) lists the images the focused agent tab actually *received*, read
 back out of its own transcript — so it survives spyc restarts and
-`claude --resume`:
+`claude --resume` and Codex resume/fork:
 
 ```
   1. #1    jpeg    485 KB  yesterday   it would be helpful to show the creation date…
@@ -1014,8 +1012,9 @@ Images you've pasted but **not sent yet** lead the list, marked 📎:
 That half is what answers "what did I just attach?" *before* you hit
 Enter — the moment the question actually gets asked. It works because an
 agent reads the system clipboard itself when you press its paste key (`^v`
-for Claude; the terminal can't carry image bytes), so spyc reads the same
-clipboard at the same moment and keeps a copy. Purely additive: the paste
+for Claude and Codex, also `Ctrl+Alt+V` for Codex on terminals that forward it).
+The terminal can't carry image bytes, so spyc reads the same clipboard at that
+moment and keeps a copy. Purely additive: the paste
 still reaches the agent untouched.
 
 These live in memory only — nothing is written to disk unless you save it
@@ -1030,8 +1029,14 @@ restarts when a conversation is cleared or resumed, so the same label can
 name two different pictures. Images the agent received without a label
 appear too.
 
-Claude only for now — other agents report that rather than showing an
-empty list, which would read as "spyc lost them".
+Claude and Codex are supported. Codex's gallery reads current turn items and
+legacy user-message/API records from the pane's pinned session and effective
+home. Forks include each parent's attachments only through the branch point.
+Repeated representations of one attachment appear once; separate submissions
+remain separate. Local image files and inline image data can be opened; an inline
+copy keeps an attachment available when Codex's temporary file has disappeared.
+Missing files, malformed data and opaque remote/file references report an error
+when opened. Other agents report that their transcript format is unsupported.
 
 ## Quick Select — labelled overlay picker
 

@@ -664,6 +664,10 @@ pub mod matchers {
 
         /// The sole `InventoryOp`, iff the slice is exactly one `Effect::Inventory`.
         fn inventory(&self) -> Option<&crate::app::inventory_ops::InventoryOp>;
+
+        fn pane_key(&self) -> Option<crossterm::event::KeyEvent>;
+        fn clipboard_capture_tab(&self) -> Option<&str>;
+        fn transcript_index(&self) -> Option<&crate::app::image_ops::TranscriptIndexOp>;
     }
 
     impl EffectSliceExt for [Effect] {
@@ -690,6 +694,30 @@ pub mod matchers {
         fn read_pane_text(&self) -> Option<(&PaneTextKind, &PaneTextSink)> {
             match self {
                 [Effect::ReadPaneText { kind, then, .. }] => Some((kind, then)),
+                _ => None,
+            }
+        }
+
+        fn pane_key(&self) -> Option<crossterm::event::KeyEvent> {
+            self.iter().find_map(|effect| match effect {
+                Effect::SendToPane {
+                    input: super::PaneInput::Key(key),
+                    ..
+                } => Some(*key),
+                _ => None,
+            })
+        }
+
+        fn clipboard_capture_tab(&self) -> Option<&str> {
+            self.iter().find_map(|effect| match effect {
+                Effect::CaptureClipboardImage(op, ..) => Some(op.tab_id.as_str()),
+                _ => None,
+            })
+        }
+
+        fn transcript_index(&self) -> Option<&crate::app::image_ops::TranscriptIndexOp> {
+            match self {
+                [Effect::IndexTranscriptImages(op, ..)] => Some(op),
                 _ => None,
             }
         }

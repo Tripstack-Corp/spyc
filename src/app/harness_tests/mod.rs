@@ -468,6 +468,7 @@ mod agent_readiness;
 mod agent_spawn;
 mod archive;
 mod codex_home;
+mod codex_images;
 mod focused_column;
 mod jump_default;
 mod mcp;

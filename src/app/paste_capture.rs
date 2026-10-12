@@ -19,9 +19,9 @@ use crate::app::{App, Effect, image_ops};
 /// is testable without a pty. `Copy` — same shape as `route.rs`'s snapshot.
 #[derive(Clone, Copy, Debug)]
 pub struct PasteSnapshot {
-    /// The key the agent uses to paste an image, if it has one. `None` for a
+    /// The keys the agent uses to paste an image. Empty for a
     /// shell tab or an agent spyc has no verified key for.
-    pub paste_key: Option<KeyEvent>,
+    pub paste_keys: &'static [KeyEvent],
     /// Whether the user has left the capture enabled (`[pane]
     /// preview_pasted_images`).
     pub enabled: bool,
@@ -37,8 +37,9 @@ pub fn should_capture(snap: PasteSnapshot, key: KeyEvent) -> bool {
     if !snap.enabled {
         return false;
     }
-    snap.paste_key
-        .is_some_and(|k| k.code == key.code && k.modifiers == key.modifiers)
+    snap.paste_keys
+        .iter()
+        .any(|k| k.code == key.code && k.modifiers == key.modifiers)
 }
 
 impl App {
@@ -51,7 +52,7 @@ impl App {
         };
         let info = tabs.active_info();
         let snap = PasteSnapshot {
-            paste_key: info.agent().image_paste_key(),
+            paste_keys: info.agent().image_paste_keys(),
             enabled: self.state.config.pane.preview_pasted_images,
         };
         if !should_capture(snap, key) {
@@ -60,6 +61,13 @@ impl App {
         vec![Effect::CaptureClipboardImage(
             image_ops::ClipboardCaptureOp {
                 tab_id: info.id.clone(),
+                epoch: self
+                    .state
+                    .pane
+                    .image_capture_epochs
+                    .get(&info.id)
+                    .copied()
+                    .unwrap_or(0),
             },
         )]
     }
@@ -76,6 +84,8 @@ impl App {
             return;
         };
         self.state.pane.pending_images.remove(&id);
+        let epoch = self.state.pane.image_capture_epochs.entry(id).or_default();
+        *epoch = epoch.wrapping_add(1);
     }
 }
 
@@ -88,13 +98,19 @@ mod tests {
         KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)
     }
 
-    fn snap(paste_key: Option<KeyEvent>, enabled: bool) -> PasteSnapshot {
-        PasteSnapshot { paste_key, enabled }
+    fn snap(paste_keys: &'static [KeyEvent], enabled: bool) -> PasteSnapshot {
+        PasteSnapshot {
+            paste_keys,
+            enabled,
+        }
     }
 
     #[test]
     fn the_agents_paste_key_captures() {
-        assert!(should_capture(snap(Some(ctrl_v()), true), ctrl_v()));
+        assert!(should_capture(
+            snap(crate::agent::detect("claude").image_paste_keys(), true),
+            ctrl_v()
+        ));
     }
 
     /// The bug this guards: matching the code alone would fire a clipboard read
@@ -102,19 +118,25 @@ mod tests {
     #[test]
     fn a_bare_v_is_not_the_paste_key() {
         let plain_v = KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE);
-        assert!(!should_capture(snap(Some(ctrl_v()), true), plain_v));
+        assert!(!should_capture(
+            snap(crate::agent::detect("claude").image_paste_keys(), true),
+            plain_v
+        ));
     }
 
     /// A shell tab declares no paste key — `^v` there is readline's
     /// quoted-insert, and reading the clipboard would be pure waste.
     #[test]
     fn a_tab_with_no_paste_key_never_captures() {
-        assert!(!should_capture(snap(None, true), ctrl_v()));
+        assert!(!should_capture(snap(&[], true), ctrl_v()));
     }
 
     #[test]
     fn the_config_switch_turns_it_off() {
-        assert!(!should_capture(snap(Some(ctrl_v()), false), ctrl_v()));
+        assert!(!should_capture(
+            snap(crate::agent::detect("claude").image_paste_keys(), false),
+            ctrl_v()
+        ));
     }
 
     /// Sanity on the wiring the decision depends on: claude declares `^v`, and
@@ -122,9 +144,9 @@ mod tests {
     #[test]
     fn claude_declares_ctrl_v_and_a_shell_declares_nothing() {
         assert_eq!(
-            crate::agent::detect("claude").image_paste_key(),
-            Some(ctrl_v())
+            crate::agent::detect("claude").image_paste_keys(),
+            &[ctrl_v()]
         );
-        assert!(crate::agent::detect("zsh").image_paste_key().is_none());
+        assert!(crate::agent::detect("zsh").image_paste_keys().is_empty());
     }
 }

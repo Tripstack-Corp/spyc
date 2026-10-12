@@ -6,6 +6,7 @@ use std::path::PathBuf;
 pub mod agy_transcript;
 pub mod claude_transcript;
 pub mod codex_history;
+pub mod codex_images;
 pub mod codex_transcript;
 pub mod cursor;
 pub mod dir_owners;

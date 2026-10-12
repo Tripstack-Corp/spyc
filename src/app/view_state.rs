@@ -63,9 +63,10 @@ pub struct ImageGallery {
     /// Which pane tab this gallery belongs to. Pins a late-arriving index so a
     /// tab switch mid-load can't show one agent's images under another's name.
     pub(super) tab_id: String,
+    pub(super) request_id: u64,
     pub(super) received: Vec<crate::state::transcript_images::TranscriptImage>,
     /// Where `received` came from, and where an image's bytes are re-read from.
-    /// `None` when there's no readable transcript and only unsent images show.
+    /// `None` while resolving, or when only unsent images are available.
     pub(super) transcript_path: Option<std::path::PathBuf>,
     pub(super) cursor: usize,
     /// The transcript index is still being built off-thread.
@@ -170,6 +171,7 @@ pub struct ViewState {
     pub(super) image_view: Option<ImageView>,
     /// The `^a g` gallery popup, when open.
     pub(super) image_gallery: Option<ImageGallery>,
+    pub(super) image_gallery_epoch: u64,
     pub(super) pager_history: PagerHistory,
     pub(super) pager_pending_bracket: Option<char>,
     /// True after a bare `z` in the pager — the vim fold prefix, awaiting
@@ -429,6 +431,7 @@ impl ViewState {
             preview_dirty: false,
             image_view: None,
             image_gallery: None,
+            image_gallery_epoch: 0,
             pager_history: PagerHistory::new(),
             pager_pending_bracket: None,
             pager_pending_z: false,

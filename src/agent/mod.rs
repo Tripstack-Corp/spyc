@@ -123,10 +123,12 @@ pub struct TranscriptSpec {
 /// `^a v` scrollback view is opt-in per agent (`config_key`), and the gallery
 /// must not inherit that gate — reading the images is useful whether or not the
 /// user wants the structured conversation replacing terminal capture.
+#[derive(Debug, Clone, Copy)]
 pub struct TranscriptImageSpec {
     /// Locate the transcript file for the pane (same contract as
     /// [`TranscriptSpec::resolve`], and in practice the same function).
     pub resolve: fn(TranscriptQuery) -> Option<PathBuf>,
+    pub format: crate::state::transcript_images::Format,
 }
 
 /// How spyc installs an agent's activity-status lifecycle hooks (the ones that
@@ -258,18 +260,18 @@ pub trait AgentProfile: Sync {
         None
     }
 
-    /// The key this agent uses to paste an image from the system clipboard.
+    /// The keys this agent uses to paste an image from the system clipboard.
     ///
     /// The terminal never carries image bytes — bracketed paste is text — so an
     /// agent reads the system clipboard *itself* when this key arrives. spyc
     /// sees only the keystroke, which is enough: it can read the same clipboard
     /// at the same moment and keep its own copy of what the agent just took.
     ///
-    /// Default `None`, and spyc never guesses: a wrong key would fire a
+    /// Default empty, and spyc never guesses: a wrong key would fire a
     /// clipboard read on a keystroke that means something else entirely (`^v`
     /// is readline's quoted-insert in a shell).
-    fn image_paste_key(&self) -> Option<crossterm::event::KeyEvent> {
-        None
+    fn image_paste_keys(&self) -> &'static [crossterm::event::KeyEvent] {
+        &[]
     }
 
     /// Activity-status lifecycle hooks, if spyc can auto-install them for this
@@ -489,16 +491,16 @@ impl AgentProfile for ClaudeProfile {
     fn transcript_images(&self) -> Option<TranscriptImageSpec> {
         Some(TranscriptImageSpec {
             resolve: crate::state::claude_transcript::resolve_active_jsonl,
+            format: crate::state::transcript_images::Format::Claude,
         })
     }
     /// Claude Code pastes an image with `^v`, not the terminal's own paste
     /// (`Cmd+V`/`Ctrl+Shift+V` go through the terminal, which can only carry
     /// text). Same key on macOS and Linux.
-    fn image_paste_key(&self) -> Option<crossterm::event::KeyEvent> {
-        Some(crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Char('v'),
-            crossterm::event::KeyModifiers::CONTROL,
-        ))
+    fn image_paste_keys(&self) -> &'static [crossterm::event::KeyEvent] {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        const KEYS: &[KeyEvent] = &[KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)];
+        KEYS
     }
     fn status_hooks(&self) -> Option<StatusHookSupport> {
         Some(StatusHookSupport {
@@ -700,6 +702,27 @@ impl AgentProfile for CodexProfile {
     fn exit_summary_mode(&self) -> ExitSummaryMode {
         ExitSummaryMode::Count
     }
+    fn transcript_images(&self) -> Option<TranscriptImageSpec> {
+        Some(TranscriptImageSpec {
+            resolve: crate::state::codex_transcript::resolve_active_rollout,
+            format: crate::state::transcript_images::Format::Codex,
+        })
+    }
+
+    /// Codex's fixed image paste binding reads the native clipboard on macOS
+    /// and Linux; terminal text paste cannot carry those image bytes.
+    fn image_paste_keys(&self) -> &'static [crossterm::event::KeyEvent] {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        const KEYS: &[KeyEvent] = &[
+            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),
+            KeyEvent::new(
+                KeyCode::Char('v'),
+                KeyModifiers::CONTROL.union(KeyModifiers::ALT),
+            ),
+        ];
+        KEYS
+    }
+
     fn transcript(&self) -> Option<TranscriptSpec> {
         Some(TranscriptSpec {
             resolve: crate::state::codex_transcript::resolve_active_rollout,

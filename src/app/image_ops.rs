@@ -19,13 +19,11 @@ use std::path::PathBuf;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::Protocol;
 
-/// The largest file spyc will try to decode as an image.
-///
-/// Decoding allocates width × height × 4 bytes regardless of how well the file
-/// compressed, so the guard is on the *encoded* size as a cheap proxy: a 64 MB
-/// PNG is either a pathological image or not an image at all, and either way
-/// the answer is a flash, not an OOM.
-pub const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+/// Encoded image limit, shared by file and transcript reads.
+pub const MAX_IMAGE_BYTES: u64 = crate::state::transcript_images::MAX_IMAGE_BYTES;
+/// The decoder's output and working allocations have a separate budget:
+/// compressed byte size alone does not bound raster memory.
+const MAX_DECODE_BYTES: u64 = 256 * 1024 * 1024;
 
 /// A decoded image ready for the overlay: the blittable protocol, the extension
 /// matching the bytes it came from, and the natural pixel size.
@@ -112,9 +110,43 @@ pub struct ImageOpenOp {
 
 /// Index an agent transcript's images (the `^a g` gallery). A multi-MB file of
 /// base64 — never on the loop.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TranscriptIndexOp {
-    pub path: PathBuf,
+    pub request_id: u64,
+    pub tab_id: String,
+    pub agent_name: &'static str,
+    pub spec: crate::agent::TranscriptImageSpec,
+    pub query: Box<TranscriptImageQuery>,
+}
+
+/// Owned pane snapshot: the worker resolves the same session even if the pane
+/// changes before it runs. No filesystem lookup occurs while planning it.
+#[derive(Debug, Clone)]
+pub struct TranscriptImageQuery {
+    pub cwd: PathBuf,
+    pub spawn_epoch_secs: u64,
+    pub command: String,
+    pub session_id: Option<String>,
+    pub codex_home: Option<PathBuf>,
+}
+
+impl TranscriptImageQuery {
+    fn borrowed(&self) -> crate::agent::TranscriptQuery<'_> {
+        crate::agent::TranscriptQuery {
+            cwd: &self.cwd,
+            spawn_epoch_secs: self.spawn_epoch_secs,
+            command: &self.command,
+            session_id: self.session_id.as_deref(),
+            codex_home: self.codex_home.as_deref(),
+        }
+    }
+}
+
+pub struct TranscriptIndexResult {
+    pub request_id: u64,
+    pub tab_id: String,
+    pub path: Result<PathBuf, String>,
+    pub images: Vec<crate::state::transcript_images::TranscriptImage>,
 }
 
 /// Show already-in-hand bytes full-screen: no fetch, just decode + protocol.
@@ -131,6 +163,7 @@ pub struct ImageBytesOp {
 #[derive(Debug)]
 pub struct ClipboardCaptureOp {
     pub tab_id: String,
+    pub epoch: u64,
 }
 
 /// Open one already-indexed transcript image: re-read its record, decode the
@@ -161,15 +194,11 @@ pub enum ImageOutcome {
     /// A transcript's image index, ready for the gallery. Empty is a legitimate
     /// result (no images in this conversation), so the drain says so rather
     /// than opening an empty list.
-    Indexed {
-        /// Kept so the gallery can re-read an image's bytes on open — the index
-        /// deliberately doesn't hold them.
-        path: PathBuf,
-        images: Vec<crate::state::transcript_images::TranscriptImage>,
-    },
+    Indexed(TranscriptIndexResult),
     /// A clipboard image grabbed as the user pasted it into a pane.
     Captured {
         tab_id: String,
+        epoch: u64,
         encoded: Vec<u8>,
         dims: (u32, u32),
     },
@@ -250,6 +279,7 @@ pub fn capture_clipboard_image(op: ClipboardCaptureOp) -> ImageOutcome {
     match crate::clipboard::read_image() {
         Ok(Some((encoded, dims))) => ImageOutcome::Captured {
             tab_id: op.tab_id,
+            epoch: op.epoch,
             encoded,
             dims,
         },
@@ -262,11 +292,25 @@ pub fn capture_clipboard_image(op: ClipboardCaptureOp) -> ImageOutcome {
 
 /// Index a transcript's images. Runs on the detached worker.
 pub fn index_transcript(op: TranscriptIndexOp) -> ImageOutcome {
-    let images = crate::state::transcript_images::index(&op.path);
-    ImageOutcome::Indexed {
-        path: op.path,
+    let path = (op.spec.resolve)(op.query.borrowed())
+        .ok_or_else(|| format!("{}: no transcript found for this session", op.agent_name));
+    let images = path.as_ref().map_or_else(
+        |_| Vec::new(),
+        |path| match op.spec.format {
+            crate::state::transcript_images::Format::Claude => {
+                crate::state::transcript_images::index(path)
+            }
+            crate::state::transcript_images::Format::Codex => {
+                crate::state::codex_images::index(path)
+            }
+        },
+    );
+    ImageOutcome::Indexed(TranscriptIndexResult {
+        request_id: op.request_id,
+        tab_id: op.tab_id,
+        path,
         images,
-    }
+    })
 }
 
 /// Re-read one indexed transcript image and build its protocol. Runs on the
@@ -315,9 +359,18 @@ pub fn build_view(
     cols: u16,
     rows: u16,
 ) -> Result<BuiltImage, String> {
+    if bytes.len() as u64 > MAX_IMAGE_BYTES {
+        return Err("image exceeds the 64 MiB limit".into());
+    }
     let format =
         image::guess_format(bytes).map_err(|_| "not a recognized image format".to_string())?;
-    let img = image::load_from_memory(bytes).map_err(|e| format!("decode: {e}"))?;
+    let mut reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), format);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16_384);
+    limits.max_image_height = Some(16_384);
+    limits.max_alloc = Some(MAX_DECODE_BYTES);
+    reader.limits(limits);
+    let img = reader.decode().map_err(|e| format!("decode: {e}"))?;
     let dims = (
         image::GenericImageView::width(&img),
         image::GenericImageView::height(&img),
@@ -441,14 +494,13 @@ impl super::App {
                         flash: None,
                     });
                 }
-                ImageOutcome::Indexed { path, images } => {
-                    self.apply_gallery_index(&path, images);
-                }
+                ImageOutcome::Indexed(result) => self.apply_gallery_index(result),
                 ImageOutcome::Captured {
                     tab_id,
+                    epoch,
                     encoded,
                     dims,
-                } => self.stash_pending_image(tab_id, encoded, dims),
+                } => self.stash_pending_image(tab_id, epoch, encoded, dims),
                 // Nothing on the clipboard: stay silent. The redraw is already
                 // suppressed above — this fires on every paste keystroke, so a
                 // frame per press would be a self-inflicted repaint storm at
@@ -467,7 +519,28 @@ impl super::App {
     /// The note is a plain status flash, never a popup: this fires while the
     /// user is mid-prompt, and stealing the screen to show them the image they
     /// just chose would be worse than not having the feature.
-    fn stash_pending_image(&mut self, tab_id: String, encoded: Vec<u8>, dims: (u32, u32)) {
+    fn stash_pending_image(
+        &mut self,
+        tab_id: String,
+        epoch: u64,
+        encoded: Vec<u8>,
+        dims: (u32, u32),
+    ) {
+        let live = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .is_some_and(|tabs| tabs.tabs().iter().any(|tab| tab.info.id == tab_id));
+        let current = self
+            .state
+            .pane
+            .image_capture_epochs
+            .get(&tab_id)
+            .copied()
+            .unwrap_or(0);
+        if !live || epoch != current || encoded.len() as u64 > MAX_IMAGE_BYTES {
+            return;
+        }
         let ring = self.state.pane.pending_images.entry(tab_id).or_default();
         let seq = ring.last().map_or(1, |p| p.seq + 1);
         ring.push(crate::app::state::PendingImage {
@@ -682,5 +755,22 @@ mod tests {
             }
             _ => panic!("expected a failure for a missing file"),
         }
+    }
+
+    #[test]
+    fn compressed_images_with_excessive_dimensions_fail_before_raster_allocation() {
+        let mut bytes = Vec::new();
+        let image = image::RgbaImage::new(16_385, 1);
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+        let error = build_view(&bytes, &Picker::halfblocks(), 40, 20)
+            .err()
+            .expect("dimension limit");
+        assert!(error.contains("limit"), "{error}");
+        assert!(build_view(b"not an image", &Picker::halfblocks(), 40, 20).is_err());
     }
 }

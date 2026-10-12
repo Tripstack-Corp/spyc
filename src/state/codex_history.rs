@@ -48,13 +48,22 @@ pub fn read_with_history(path: &Path, budget: u64) -> std::io::Result<String> {
 
 /// The rollout `path` forked from, and the byte offset in it where the fork
 /// branched, from `path`'s `session_meta.history_base`.
-fn fork_base(path: &Path) -> Option<(PathBuf, u64)> {
-    use std::io::BufRead;
-    let mut first = String::new();
-    std::io::BufReader::new(std::fs::File::open(path).ok()?)
-        .read_line(&mut first)
-        .ok()?;
-    let meta: serde_json::Value = serde_json::from_str(first.trim()).ok()?;
+pub(super) fn fork_base(path: &Path) -> Option<(PathBuf, u64)> {
+    let mut first = Vec::new();
+    if super::read_line_capped(
+        &mut std::io::BufReader::new(std::fs::File::open(path).ok()?),
+        &mut first,
+        super::MAX_TRANSCRIPT_LINE_BYTES,
+    )
+    .ok()?
+        != Some(true)
+    {
+        return None;
+    }
+    let meta: serde_json::Value = serde_json::from_slice(&first).ok()?;
+    if meta["type"] != "session_meta" {
+        return None;
+    }
     let base = &meta["payload"]["history_base"];
     let thread = base["thread_id"].as_str()?;
     let end = base["end_byte_offset"].as_u64()?;

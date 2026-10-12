@@ -496,7 +496,7 @@ The terminal must report Ctrl+left mouse events to spyc. In iTerm2, enable
 **Settings → Pointer → “Ctrl-click reported to apps, does not open menu”**;
 [iTerm2's pointer reference](https://iterm2.com/documentation-preferences-pointer.html)
 describes this forwarding preference. Terminal.app uses Control-click for its
-[shortcut menu](https://support.apple.com/en-bh/guide/terminal/trml135fbc26/mac).
+[shortcut menu](https://support.apple.com/guide/terminal/trml135fbc26/mac).
 If your terminal opens a menu instead of starting a selection, spyc never receives
 the gesture. Use `:mouse off` with the terminal's own drag selection, or a terminal
 that forwards Ctrl+left events.
