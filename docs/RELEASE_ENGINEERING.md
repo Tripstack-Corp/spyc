@@ -328,7 +328,7 @@ are the source of truth — Actions *call them* so local and CI never drift.
 ### `ci.yml` — quality gate (PR + push to `main`) — **IMPLEMENTED**
 - Direct port of the retired `bitbucket-pipelines.yml`: `lint` (fmt + clippy) ∥
   `test` on PRs, plus a `coverage` job (`cargo llvm-cov --locked
-  --all-targets --fail-under-lines 35`) on pushes to `main`. Supply-chain
+  --all-targets --fail-under-lines 84`) on pushes to `main`. Supply-chain
   (cargo-deny) moved to `audit.yml` — see §6. Toolchain cached via
   `Swatinem/rust-cache`; `cargo-llvm-cov` is the same sha-pinned prebuilt binary
   as before; `CARGO_INCREMENTAL=0` throughout. The `coverage` job passes
