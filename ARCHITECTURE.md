@@ -727,27 +727,19 @@ the same dispatch:
 - **In-process socket listener** — the running spyc accepts
   connections from the stdio proxy.
 
-The agents' MCP `spyc` entry — `.mcp.json` (claude), `.codex/config.toml`
-(codex), `.agents/mcp_config.json` (agy) — names **no instance**, just
+The agents' MCP `spyc` entry lives in each agent's own user configuration
+(see "Agent wiring in user scope" below) and names **no instance**, just
 `spyc --mcp`. An agent pane's env carries its spyc's `SPYC_MCP_SOCK` and its
 own `SPYC_PANE_ID`, and the proxy connects to that socket, so an agent always
-reaches the spyc that launched it and two spycs in one directory each keep
-their own agents (see "The agents' MCP entry names no instance" below). A
-shell pane carries both too, so an agent typed into the shell inherits them.
-An agent started outside spyc has no pane env and gets a server with no tools
-and no instructions: spyc's entry can live in an agent's user configuration
-(`spyc --install-agents`), where it starts in every session of that agent, and
-a spyc rooted at `$HOME` would otherwise answer every one. Project-scoped
-discovery serves only an agent whose spyc restarted under it and a session
-codex's shared daemon started. spyc writes the entry **when an agent pane
-launches** (`open_pane_tab_in` → `write_mcp_config`), not at startup —
-so a directory where no agent is ever run doesn't get a stray `.mcp.json` /
-`.codex/` written into it. A shell pane is the exception, because spyc learns
-which agent a shell started only after it has read its config: in a project
-that has consented to status hooks, opening one writes every agent's entry and
-hooks up front (`shell_agents::provision_shell_tab`), owned and cleaned up as
-an agent pane's are. A report reaching a shell tab that isn't running an agent
-is recorded but moves no dot.
+reaches the spyc that launched it, and every spyc on the machine keeps its own
+agents (see "The agents' MCP entry names no instance" below). A shell pane
+carries both too, so an agent typed into the shell inherits them. An agent
+started outside spyc has no pane env and gets a server with no tools and no
+instructions: the entry starts in every session of that agent, and a spyc
+rooted at `$HOME` would otherwise answer every one. Project-scoped discovery
+serves only an agent whose spyc restarted under it and a session codex's
+shared daemon started. A report reaching a shell tab that isn't running an
+agent is recorded but moves no dot.
 
 **A shell tab's agent is the one in its foreground.** A moment after a shell
 tab's output, `shell_agents` looks at the pty's foreground process group: at
@@ -765,19 +757,9 @@ shell needs. Restore and restart still bring back the launch command
 that match a session by start time use `agent_epoch_secs()`, the agent's start
 rather than the tab's spawn.
 
-Every spyc in a directory shares that one entry, so removing it is
-refcounted like the status hooks (`state::dir_owners`): writing it claims the
-directory, and teardown (`cleanup_written_mcp_configs`, run from
-`run_teardown` after the terminal is restored) removes it only when no other
-live spyc still claims it. It deletes a file/`.codex/`/`.agents/` dir left
-empty, preserves any other servers/config the user has, leaves an entry an
-older spyc pinned to its own live socket, and refuses to modify a
-**git-tracked** config (warning on stderr instead) — we never dirty something
-the user committed. The startup orphan sweep reaps an unclaimed entry that a
-killed spyc left.
-
-Enterprise managed-settings.json policies
-(`deniedMcpServers`/`allowedMcpServers`) are honoured.
+Enterprise policies are honoured: a `managed-mcp.json` has exclusive control
+of claude's MCP servers, and `managed-settings.json`'s
+`deniedMcpServers`/`allowedMcpServers` can forbid spyc's entry.
 
 **Two execution lanes** keep the event loop responsive. *Read* tools
 (`get_spyc_context`, `search_*`, `list_worktrees`, `git_status`/`git_log`,
@@ -851,11 +833,17 @@ handling as probed on 2026-09-30.
 ## Agent wiring in user scope
 
 `src/wiring/` installs an agent's `spyc` MCP entry and its status hooks once,
-into that agent's own user configuration, instead of into every directory an
-agent runs in (#619). `spyc --install-agents` does it for claude and agy, and
-records the answer in `state::wiring_consent`. While an agent's answer is yes,
-`write_mcp_config` and `install_status_hooks` write nothing for it into
-projects, because a project copy would run beside the user one. The files:
+into that agent's own user configuration (#619); nothing is written into the
+directories agents run in. The first time spyc launches an agent it asks, once
+for that agent, whether to wire it (`app::wiring::offer_wiring`), and records
+the answer in `state::wiring_consent`; `:hooks on|off|ask <agent>` and
+`spyc --install-agents` / `--remove-agents` change it later. The install runs
+on a worker, because claude's MCP entry goes through its CLI, and wakes the
+loop with `Wake::Wiring`. Agents that read their hooks only at startup (codex,
+agy) are flagged for a restart when an install changes their hooks. At startup
+spyc refreshes every wired agent's files, so a moved or renamed spyc command is
+caught up. Nothing is removed at exit: the wiring serves every spyc and every
+later session. The files:
 
 | Agent | Hooks | MCP entry |
 |---|---|---|
@@ -884,14 +872,17 @@ that would shift one of the user's handlers (`no_codex_hook_ever_moves`). The
 MCP entry is spliced into `config.toml` with `toml_edit`, so comments and layout
 survive, and only the keys spyc needs change; `[pane] codex_mcp = false`, read
 from `$HOME`'s rc alone because the entry it governs is global, keeps the entry
-out.
+out. A codex pane whose shell sets its own `CODEX_HOME` reads its hooks there,
+so once codex reports that home, spyc wires it too.
 
 A project copy an older spyc wrote runs beside the user one, so spyc takes it
 out (`wiring::legacy`): at launch from the agent's own directory, and at startup,
 on a worker, from every directory its per-project consent and ownership records
-name. A directory another live spyc relies on is left for that spyc, a file git
-tracks is left alone, and a project file that is itself a user-scope file
-(`$HOME` as a project) is never touched.
+name, for every agent the user has answered for. A directory another live spyc
+relies on is left for that spyc, a file git tracks is left alone, and a project
+file that is itself a user-scope file (`$HOME` as a project) is never touched.
+Startup also turns every old per-project answer into a no, because an older
+spyc still running reads that store before writing a project its hooks.
 
 <!-- SPYC-TRAP: user-config-write-through-symlink -->
 A user-configuration file is written through a symlink and keeps its mode
@@ -1063,26 +1054,6 @@ watchdog so a regression fails within a deadline. Rejected input must flash its
 cause, preserve attention and leave prompt replay unchanged.
 
 
-<!-- SPYC-TRAP: hook-cleanup-needs-managed-lease -->
-### Hook cleanup requires a managed lease
-
-An existing reporter marker can belong to a legacy import or a file whose
-installation spyc refused. Borrowing that reporter protects a live pane from
-sibling teardown, but grants no permission to remove it on exit. Hook leases
-in `state::dir_owners::hooks` record the resolved directory, agent kind, pid and
-whether installation succeeded. Teardown requires both the local and recorded
-managed lease, with no live same-agent owner. A Claude-only or MCP-only session
-cannot acquire Codex hook cleanup authority.
-
-The separate lease registry uses a nonblocking advisory lock, held through
-cleanup to prevent another instance registering between the owner check and
-file removal. Corrupt/unreadable state or lock contention preserves hooks;
-installation also skips writes when a lease cannot be registered. Legacy
-untyped owners conservatively protect every agent's hooks in their directory.
-An explicit `:hooks off` retains the user's authority to remove the active
-project's reporters, subject to tracked-file and positional-trust guards.
-
-
 <!-- SPYC-TRAP: partial-restore-keeps-saved-tabs -->
 ### Partial restore must keep unopened tabs in the next save
 
@@ -1121,8 +1092,9 @@ back on `-r`.
 ### Codex hook pruning requires a reporter invocation
 
 A flag mentioned in an unrelated hook grants no permission to remove that
-handler. Codex TOML installation, JSON migration, cleanup and positional-trust
-preflight share a conservative command matcher: a direct `spyc` invocation
+handler. The user-scope `hooks.json` install, the cleanup of older spycs'
+per-directory copies and its positional-trust preflight share a conservative
+command matcher: a direct `spyc` invocation
 (or the caller's resolved reporter executable), a known wire status, and the
 exact generated or bare legacy command shape. Quoted flags, other programs,
 wrappers, extra shell actions and unknown statuses remain user content. The

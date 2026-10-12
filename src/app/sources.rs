@@ -544,6 +544,7 @@ mod tests {
             Message::Wake(Wake::Lua),
             Message::Wake(Wake::ClipboardPaste),
             Message::Wake(Wake::ClipboardCopy),
+            Message::Wake(Wake::Wiring),
             Message::Wake(Wake::JumpDefault),
         ];
         for done in wakes {

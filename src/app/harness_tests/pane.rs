@@ -1411,18 +1411,29 @@ fn opening_the_scrollback_pager_does_not_sleep_on_the_loop() {
 #[test]
 fn typing_into_a_fresh_agent_pane_is_not_eaten_by_the_consent_prompt() {
     let tmp = tempfile::tempdir().unwrap();
+    let env = crate::wiring::Env {
+        home: tmp.path().join("home"),
+        claude_config_dir: None,
+        codex_home: tmp.path().join("home/.codex"),
+        codex_mcp: true,
+        managed_mcp: Vec::new(),
+        managed_settings: Vec::new(),
+        claude_cli: None,
+        spyc: "spyc".to_string(),
+    };
     crate::state::with_state_root(tmp.path(), || {
-        use std::os::unix::fs::PermissionsExt as _;
-        let proj = tmp.path().join("proj");
-        let bin = proj.join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        let got = tmp.path().join("received.txt");
-        // Stands in for the agent: reads one line and records what it got, so
-        // the assertion is about DELIVERY, not about the echo. Written aside and
-        // renamed: `>` creates the file before `printf` fills it, and the wait
-        // below ends as soon as the file exists.
-        let claude = bin.join("claude");
-        std::fs::write(
+        crate::wiring::with_env(env, || {
+            use std::os::unix::fs::PermissionsExt as _;
+            let proj = tmp.path().join("proj");
+            let bin = proj.join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let got = tmp.path().join("received.txt");
+            // Stands in for the agent: reads one line and records what it got, so
+            // the assertion is about DELIVERY, not about the echo. Written aside and
+            // renamed: `>` creates the file before `printf` fills it, and the wait
+            // below ends as soon as the file exists.
+            let claude = bin.join("claude");
+            std::fs::write(
             &claude,
             format!(
                 "#!/usr/bin/env bash\nread -r q\nprintf '%s' \"$q\" > {got}.tmp && mv {got}.tmp {got}\nsleep 5\n",
@@ -1430,55 +1441,66 @@ fn typing_into_a_fresh_agent_pane_is_not_eaten_by_the_consent_prompt() {
             ),
         )
         .unwrap();
-        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let mut app = App::test_app(proj.clone());
-        app.state.left.git_cache.current_repo_root = Some(proj.clone());
-        // The consent offer is gated on MCP running; without this the pane
-        // spawns with no prompt and the bug cannot appear.
-        app.view.mcp_running = true;
-        app.open_pane_tab(claude.to_str().unwrap());
-
-        // The reported question. The `y` in "spy" is the tenth character.
-        let typed = "how is spyc structured, per these three docs?";
-        for ch in typed.chars().chain(std::iter::once('\r')) {
-            let key = KeyEvent::new(
-                if ch == '\r' {
-                    KeyCode::Enter
-                } else {
-                    KeyCode::Char(ch)
-                },
-                KeyModifiers::empty(),
+            let mut app = App::test_app(proj.clone());
+            app.state.left.git_cache.current_repo_root = Some(proj);
+            // The consent offer is gated on MCP running; without this the pane
+            // spawns with no prompt and the bug cannot appear.
+            app.view.mcp_running = true;
+            app.open_pane_tab(claude.to_str().unwrap());
+            assert!(
+                matches!(
+                    app.state.mode,
+                    Mode::Prompting(Prompt {
+                        kind: PromptKind::HookConsent { .. },
+                        ..
+                    })
+                ),
+                "the first claude launch asks"
             );
-            for e in app.handle_key(key).unwrap() {
-                if let Effect::SendToPane { mut input, .. } = e {
-                    let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
-                    input.send_to(tabs.active_mut()).unwrap();
+
+            // The reported question. The `y` in "spy" is the tenth character.
+            let typed = "how is spyc structured, per these three docs?";
+            for ch in typed.chars().chain(std::iter::once('\r')) {
+                let key = KeyEvent::new(
+                    if ch == '\r' {
+                        KeyCode::Enter
+                    } else {
+                        KeyCode::Char(ch)
+                    },
+                    KeyModifiers::empty(),
+                );
+                for e in app.handle_key(key).unwrap() {
+                    if let Effect::SendToPane { mut input, .. } = e {
+                        let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+                        input.send_to(tabs.active_mut()).unwrap();
+                    }
                 }
             }
-        }
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while std::time::Instant::now() < deadline && !got.exists() {
-            app.runtime
-                .pane_tabs
-                .as_mut()
-                .expect("a pane tab")
-                .active_mut()
-                .drain_output();
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        let received =
-            std::fs::read_to_string(&got).unwrap_or_else(|_| "<child never read>".into());
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while std::time::Instant::now() < deadline && !got.exists() {
+                app.runtime
+                    .pane_tabs
+                    .as_mut()
+                    .expect("a pane tab")
+                    .active_mut()
+                    .drain_output();
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            let received =
+                std::fs::read_to_string(&got).unwrap_or_else(|_| "<child never read>".into());
 
-        assert_eq!(
-            received, typed,
-            "every typed character must reach the child; the consent prompt ate the prefix"
-        );
-        assert_ne!(
-            crate::state::hook_consent::consent_for(&proj),
-            Some(true),
-            "a `y` typed at the agent must not answer the consent dialogue"
-        );
+            assert_eq!(
+                received, typed,
+                "every typed character must reach the child; the consent prompt ate the prefix"
+            );
+            assert_ne!(
+                crate::state::wiring_consent::answer(crate::state::sessions::AgentKind::Claude),
+                Some(true),
+                "a `y` typed at the agent must not answer the consent dialogue"
+            );
+        });
     });
 }

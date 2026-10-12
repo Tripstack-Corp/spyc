@@ -131,27 +131,21 @@ pub struct TranscriptImageSpec {
     pub format: crate::state::transcript_images::Format,
 }
 
-/// How spyc installs an agent's activity-status lifecycle hooks (the ones that
-/// call `spyc --report-status <state>` so the tab dot tracks the agent's turn).
-/// Returned by [`AgentProfile::status_hooks`] for agents spyc can auto-wire
-/// (claude/codex/agy); `None` for the rest. Alongside the source resolver, the
-/// `fn` pair supplies the format-specific writer/cleaner in [`crate::mcp`] — JSON `settings.json` for
-/// claude, TOML `config.toml` for codex, JSON `.agents/hooks.json` for agy.
+/// An agent's activity-status lifecycle hooks (the ones that call
+/// `spyc --report-status <state>` so the tab dot tracks the agent's turn).
+/// Returned by [`AgentProfile::status_hooks`] for the agents spyc wires
+/// (claude/codex/agy); `None` for the rest. spyc installs them in the agent's
+/// user configuration (`crate::wiring`); `config_dir` and `config_label` name
+/// the per-directory copy older spycs wrote, which `:why-status` still reports.
 pub struct StatusHookSupport {
-    /// Resolve the hook directory the agent actually consumes from this cwd.
+    /// Resolve the hook directory an older spyc wrote for this cwd.
     pub config_dir: fn(&Path) -> std::path::PathBuf,
-    /// Write/refresh our hooks into the project dir; returns whether our hooks
-    /// are present in a file we own (so teardown tracks the dir for cleanup).
-    pub ensure: fn(&Path) -> bool,
-    /// Remove only our hooks from the project dir.
-    pub cleanup: fn(&Path) -> crate::mcp::ConfigCleanup,
-    /// The config file the consent popup names, relative to the project root
-    /// (e.g. `.claude/settings.json`).
+    /// That copy's config file, relative to `config_dir` (e.g.
+    /// `.claude/settings.json`).
     pub config_label: &'static str,
-    /// True if the agent re-reads its hook config live (claude reloads
-    /// `.claude/settings.json` each turn). False = config is read once at
-    /// startup (codex), so the hooks must be written BEFORE the pane spawns and
-    /// a post-launch enable only takes effect on the agent's next launch.
+    /// True if the agent re-reads its hook config live (claude reloads its
+    /// settings each turn). False = config is read once at startup (codex,
+    /// agy), so hooks installed after it started load on its next launch.
     pub live_reload: bool,
 }
 
@@ -505,8 +499,6 @@ impl AgentProfile for ClaudeProfile {
     fn status_hooks(&self) -> Option<StatusHookSupport> {
         Some(StatusHookSupport {
             config_dir: Path::to_path_buf,
-            ensure: crate::mcp::ensure_claude_status_hooks,
-            cleanup: crate::mcp::cleanup_claude_status_hooks,
             config_label: ".claude/settings.json",
             live_reload: true,
         })
@@ -742,8 +734,6 @@ impl AgentProfile for CodexProfile {
         // ordinary config and the MCP entry remain worktree-local.
         Some(StatusHookSupport {
             config_dir: crate::git::discovery::root_checkout_dir,
-            ensure: crate::mcp::ensure_codex_status_hooks,
-            cleanup: crate::mcp::cleanup_codex_status_hooks,
             config_label: ".codex/config.toml",
             live_reload: false,
         })
@@ -856,8 +846,6 @@ impl AgentProfile for AgyProfile {
         // ran. On an older agy that half degrades to output timing.
         Some(StatusHookSupport {
             config_dir: Path::to_path_buf,
-            ensure: crate::mcp::ensure_agy_status_hooks,
-            cleanup: crate::mcp::cleanup_agy_status_hooks,
             config_label: ".agents/hooks.json",
             live_reload: false,
         })

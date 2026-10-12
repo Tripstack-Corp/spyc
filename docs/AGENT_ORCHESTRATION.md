@@ -63,10 +63,11 @@ signal spyc gets.
 
 **Auto-reporting.** So it works without the agent choosing to call the tool, spyc
 installs lifecycle hooks that run `spyc --report-status` (prompt-submit→working,
-needs-permission→blocked, turn-end→done): **claude** (`.claude/settings.json`),
-**codex** (`.codex/config.toml`), **agy** (`.agents/hooks.json` — working/done only;
-agy has no approval event, so its `blocked` comes from spyc reading the approval
-prompt off the pane).
+needs-permission→blocked, turn-end→done), once, in each agent's own user
+configuration: **claude** (`~/.claude/settings.json`), **codex**
+(`$CODEX_HOME/hooks.json`), **agy** (`~/.gemini/config/hooks.json` — working/done
+only; agy has no approval event, so its `blocked` comes from spyc reading the
+approval prompt off the pane).
 
 Codex also reports `idle` through its `Interrupt` hook when the main turn is
 cancelled. No general tool-completion hook clears `blocked`: a concurrent tool
@@ -90,8 +91,9 @@ because that tool was always going to wait for you. Omitting the answer is worse
 than either: agy re-drives the tool, which ran a probe turn to 17 invocations before
 it timed out, never reaching `Stop`. spyc's handler therefore prints its decision
 unconditionally and discards the reporter's own output to keep stdout pure JSON.
-It asks first — a `[Y/n]` on the first launch per repo, saved; change it later
-with **`:hooks on|on!|off`**. Only `y`/`n` answers it: the prompt is raised
+It asks first — a `[Y/n]` on the first launch of each agent, saved for every
+project; change it later with **`:hooks on|on!|off|ask <agent>`**. Only `y`/`n`
+answers it: the prompt is raised
 after the pane has focus, so any other key defers (saving nothing, asked again
 next launch) and goes to the agent, rather than being eaten by a dialogue the
 user was not typing at.
@@ -189,12 +191,13 @@ lifecycle coverage remains open in A3.
 
 ### Duplicate Codex hook sources
 
-Codex loads `.codex/hooks.json` alongside inline hooks in `.codex/config.toml`.
-If both contain spyc reporters, each matching event can report twice. At
-installation, spyc migrates its `--report-status` handlers out of the JSON file
-and keeps its reporters in TOML. Other handlers, matcher fields and trust records
-are preserved. An emptied legacy file is removed; user-only files are not
-rewritten. `:hooks off` and last-owner cleanup also remove legacy reporters.
+Codex loads the hooks of every layer it reads — user and project, `config.toml`
+and `hooks.json` — and runs them all, merging no duplicates. spyc's hooks live in
+the user `$CODEX_HOME/hooks.json`, so a project `.codex/config.toml` or
+`.codex/hooks.json` that an older spyc wrote reporters into would report each
+event a second time. spyc takes those copies out at startup and when it launches
+codex there (`wiring::legacy`), except where another running spyc still uses
+them or git tracks them; `:why-status` names a copy that remains.
 
 Codex identifies an owned handler by a direct `spyc` invocation (or the
 currently resolved reporter executable), a known wire status and the generated
@@ -203,83 +206,40 @@ invocations are also recognized. Quoted flags, other programs, wrappers, unknown
 statuses and extra shell actions are preserved. A non-command handler is never
 pruned. This check does not change generated hook commands or trust records.
 
-Legacy files containing tracked reporters, or malformed/unreadable files,
-block migration; `:activity dump`
-names the source and repair action. Use `:hooks on` to migrate a valid untracked
-file, then restart Codex and review `/hooks`. A running CLI may retain its old
-hook definitions, so removing a duplicate file does not establish single
-delivery before restart. A JSON-only change also sets the restart diagnostic.
-Migration does not approve hooks or infer that a pending question or permission
-request was answered.
-
-### Codex linked-worktree hook sources
-
-Codex loads project hooks from the corresponding directory in the root checkout,
-even when launched in a linked worktree. For example, `repo.worktrees/fix/src/`
-uses `repo/src/.codex/config.toml` and `repo/src/.codex/hooks.json`. Ordinary
-project config and spyc's MCP entry remain worktree-local. Worktree-local hook
-declarations are ignored; their reporter marker cannot establish readiness.
-
-spyc resolves that source for installation, consent, diagnostics, re-healing and
-shared ownership. Consent belongs to the actual source's project root; a prior
-worktree-only grant cannot authorize a write in the root checkout. The consent
-popup names the file, and linked-worktree diagnostics show its full path. A
-source change marks all affected Codex tabs as needing restart. Review `/hooks`
-in the fresh CLI; definition presence still does not establish execution/trust.
+A running CLI keeps the hook definitions it started with, so a change to them
+needs a codex restart, which `:why-status` reports; then review `/hooks`.
+Removing a duplicate does not establish single delivery before that restart,
+and nothing spyc does approves a hook or infers that a pending question or
+permission request was answered.
 
 ### How the hooks get written
 
-Each agent's hook writer/cleaner pair (`mcp::{ensure,cleanup}_{codex,agy}_status_hooks`)
-mirrors the claude pair, and all three share the same three properties:
+`src/wiring/` writes them once, into each agent's own user configuration, when
+the user says yes to that agent's first-launch `[Y/n]` (or runs `:hooks on
+<agent>` / `spyc --install-agents`). All three agents share three properties:
 
 - **Byte-idempotent merge** — spyc splices its entry into the user's existing
-  config rather than rewriting the file. Re-running produces identical bytes,
-  so a repeated launch never churns the file.
-- **Git-tracked guard** — spyc refuses to modify a config the repo tracks.
-  These files are the user's (`.codex/config.toml` carries their `model` and
-  `approval_policy`), and silently rewriting a committed one is data loss.
+  config, keeping their settings and key order. An install that would change
+  nothing writes nothing.
+- **Refusal over loss** — a file that won't parse is left untouched, a symlink
+  is written through, and removal never deletes a file.
 - **Reporter ownership** — Claude and agy use the `--report-status` marker.
   Codex additionally requires the direct reporter command shape described above;
   mentioning the flag in another hook does not permit its removal.
 
-Hook cleanup uses separate per-agent leases rather than MCP directory tracking.
-Non-live-reload agents
-(codex, agy) additionally get their hooks written *pre-spawn* for an
-already-consented repo via `maybe_preinstall_startup_hooks`, because they read
-their config once at startup and would otherwise miss them until next launch.
+The commands never vary, so claude's collapsing of identical handlers and
+agy's of named sets keep a leftover project copy from reporting twice; codex
+merges nothing, which is why the old project copies are taken out. Agents that
+read their hooks once at startup (codex, agy) are flagged for a restart when an
+install changes them.
 
-`spyc --install-agents` (`src/wiring/`) installs the hooks once in each
-agent's own user configuration instead: claude's `settings.json`, codex's
-`$CODEX_HOME/hooks.json`, agy's `~/.gemini/config/hooks.json`. The commands are
-the ones the project writers produce, and they never vary, so claude's
-collapsing of identical handlers and agy's of named sets keep a leftover project
-copy from reporting twice. codex merges nothing: a leftover project copy reports
-too, and `:why-status` says so. For an
-agent wired this way, `install_status_hooks` writes no project copy and the
-per-project consent prompt doesn't appear.
+### Who owns them
 
-### Who owns them (why one spyc's exit can't blind another)
-
-The installed hooks are **shared, not per-instance**: the reporter they invoke
-targets whichever socket the *pane's* env names, so one `.claude/settings.json`
-serves every spyc on the machine. Installing is therefore safe to repeat — but
-removing is not. Until this was refcounted, a second spyc quitting deleted the
-hooks out from under the first one's live panes, and every dot there fell back
-to output timing for the rest of that session, silently. Two things close it:
-
-- **`state/dir_owners/hooks.rs`** records managed or borrowed leases per
-  resolved directory, agent and pid. Successful installation grants cleanup
-  authority; refused installation only protects existing reporters. The last
-  managed owner may remove its agent's hooks, while a borrowed last owner
-  preserves them. Other agent kinds and MCP entries have independent cleanup.
-  Dead pids are pruned, and unknown older instances conservatively protect hooks.
-  A nonblocking lock remains held through cleanup; contention or unreadable
-  state preserves reporters. An explicit `:hooks off` still removes the active
-  project's reporters regardless of siblings, subject to the file/trust guards.
-- **`app/status_hooks.rs`** — `settle_status_hooks` re-installs, at loop bottom
-  behind a 30s throttle, whenever a consented pane's config has lost the hooks
-  by any other route (`git clean -xfd`, a hand edit, an older spyc). It arms no
-  deadline, so idle stays 0 dps.
+Nobody, in the per-instance sense: the reporter targets whichever socket the
+*pane's* env names, so one user-scope file serves every spyc on the machine and
+every later session. Nothing is removed at exit, and there is nothing to
+refcount. At startup spyc refreshes every wired agent's files, so a moved or
+renamed spyc command is caught up; `:hooks off <agent>` is how they come out.
 
 When they *are* missing, `:why-status` and `:activity dump` say so outright
 rather than reporting the output-timing fallback as if it were the answer.

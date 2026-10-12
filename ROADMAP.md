@@ -197,6 +197,13 @@ Everything else already merged to `main` ships with it (decisions log,
   (#520, #535), approved on 2026-10-12 (decisions log). It answers the 2.2
   plan's seven questions, so 2.3's code can start.
 
+- **[#619](https://github.com/Tripstack-Corp/spyc/issues/619): agent wiring
+  in user scope** (#621, #622, #625, #626, #627, #632). An agent's MCP entry
+  and status hooks go into its own configuration once, after one `[Y/n]` per
+  agent; nothing is written into projects, and older versions' project copies
+  are taken out. `spyc --mcp` serves only the agents spyc launched (decisions
+  log, 2026-10-12).
+
 **Open:** nothing.
 
 ## The 2.3 horizon: Projects
@@ -719,6 +726,16 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   [#619](https://github.com/Tripstack-Corp/spyc/issues/619), after 2.3: it
   changes what an agent started outside spyc sees, which wants a decision of
   its own.
+- **#619 lands in 2.2, and agent wiring moves to user scope** (2026-10-12),
+  overriding the timing above. spyc writes an agent's `spyc` MCP entry and
+  status hooks once, into that agent's own configuration, after one `[Y/n]` per
+  agent at its first launch; nothing goes into projects, and nothing is removed
+  at exit. The per-directory writes it replaces needed per-project consent,
+  refcounted cleanup across instances and crash sweeps, missed shell tabs that
+  `cd` elsewhere, and asked codex users to trust spyc's hooks once per project.
+  An agent spyc didn't launch now gets no tools, because the entry starts in
+  every session of that agent; a codex session on the shared daemon keeps
+  discovery by its directory, since spyc can't tell whether it launched it.
 
 ## Doc map
 

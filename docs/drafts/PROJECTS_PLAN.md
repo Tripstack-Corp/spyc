@@ -84,8 +84,9 @@ What approving this doc agreed to (2026-10-12):
 - The saved file is a manifest in this design and the code; the UI keeps
   saying session.
 - The attention jump also gets `^a !`.
-- Moving agent MCP and hook config to user scope is its own issue, after 2.3:
-  [#619](https://github.com/Tripstack-Corp/spyc/issues/619).
+- Moving agent MCP and hook config to user scope is its own issue,
+  [#619](https://github.com/Tripstack-Corp/spyc/issues/619), which then landed
+  in 2.2.
 
 ---
 
@@ -249,7 +250,6 @@ has: restoring a stale pick set is worse than restoring none.
 | `mcp_cmd_rx` | global | One socket per process (§2). | D |
 | `lua`, `lua_registry`, `lua_inflight` | global | One engine. `lua_events` gains the project: `project_changed` fires on a switch as well as on a re-home. | D |
 | `scope_waiters` | global | Parked against claims, which are global. | D |
-| `mcp_config_dirs` | global | `dir_owners` refcounts by pid (`dir_owners.rs:26-41`), and a directory can be used by tabs in two projects. Releasing on project close could remove an entry another project in this process still relies on, so claims stay process-lifetime, as today. The entries are socket-free, so one lingering is harmless. | D |
 | `pending_capture`, `capture_spill_dir`, `background_tasks` | global | `!` tasks are the user's shell work. Each records its cwd, and `:fg` works from any project. | D |
 | `pager_stream`, `scroll_stream`, `stashed_pager_streams`, `find_picker`, `pending_git_view` | global slots, stashed per project | A switch stashes the active project's open pager with its stream, the way a tab switch already stashes a scrollback pager (`stashed_pager_streams` is keyed by stream id, not by tab). | D |
 | `worktree_results` | global, with a change | MCP worktree jobs complete off-thread. The result must name the caller's project, so `create_worktree(open: true)` opens column `b` in the agent's project, not the one the user is looking at. | D |
@@ -258,7 +258,7 @@ has: restoring a stale pick set is worse than restoring none.
 | `autosave_last_saved_fp`, `autosave_due` | global | One manifest (§3). | D |
 | the landing slots (`graveyard_results`, `image_results`, `archive_results`, `file_results`, `clipboard_*`, `inventory_results`) | global | Each result carries what it needs; the ones that touch a column carry the project. | D |
 | `picker` (terminal graphics capability) | global | Probed from the terminal. | C |
-| `pane_wake_tx`, `next_sink_id`, `next_stream_id`, `pane_scroll_settle`, `hook_recheck_at` | global | Loop plumbing. `pane_scroll_settle` holds a tab index, which becomes `(ProjectId, index)`. | D |
+| `pane_wake_tx`, `next_sink_id`, `next_stream_id`, `pane_scroll_settle` | global | Loop plumbing. `pane_scroll_settle` holds a tab index, which becomes `(ProjectId, index)`. | D |
 
 ### 1d. `ViewState` (`src/app/view_state.rs:124`)
 
@@ -411,23 +411,18 @@ What changes:
 7. **Unattributed fallbacks stay "the focused tab"**, meaning the active tab of
    the active project (`resolve_report_target`, `app/mcp.rs:819-836`).
 
-**The same principle, applied further (a follow-up, not 2.3 scope).** spyc
-still writes agent config into working directories: `.mcp.json`,
-`.codex/config.toml`, `.agents/mcp_config.json` and the status hooks. They're
-there because each agent reads its project scope from there. But since #509 the
-MCP entry names no socket and the pane's env decides, so one entry in each
-agent's *user* scope would serve every pane. An org-deployed
-`managed-mcp.json` with that shape already works for claude (decisions log,
-2026-09-30). Moving them would stop
-the per-directory writes and the refcounted cleanup entirely. It changes what an
-agent started outside spyc sees, so it got a decision of its own: it sees no
-tools (owner decision, 2026-10-12, in
+**The same principle, applied further (#619, landed in 2.2).** spyc no longer
+writes agent config into working directories. Since #509 the MCP entry names no
+socket and the pane's env decides, so one entry in each agent's *user* scope
+serves every pane, and the status hooks went with it: nothing per directory,
+no refcounted cleanup, and nothing for Projects to route. An agent started
+outside spyc sees no tools (owner decision, 2026-10-12, in
 [#619](https://github.com/Tripstack-Corp/spyc/issues/619)).
 
 What doesn't change: MCP entries still name no socket (SPYC-TRAP
 `mcp-entry-names-no-socket`), so there is nothing to take over. #509 deleted the
-takeover machinery the §7 brief asks about. `dir_owners` stays keyed by pid.
-Status-hook consent stays keyed by project root. The orphan sweep already runs
+takeover machinery the §7 brief asks about. Wiring consent is per agent, not
+per project. The orphan sweep already runs
 in the state directory (#525), where dead spycs' context files, sidecars and
 sockets now live, so it needs nothing per project. Its pass over the launch
 directory only clears markers that older spycs wrote there.
@@ -756,7 +751,8 @@ The three questions review left open, answered on 2026-10-12.
    pane instead of `^a Space !`'s three (§4). Meta otherwise holds help, quit
    and display toggles; the jump joins them because it is the one project key a
    user reaches for from inside an agent.
-3. **Agent config in user scope: its own issue, after 2.3.** The follow-up in
+3. **Agent config in user scope: its own issue** (#619, which then landed in
+   2.2). The follow-up in
    §2, one MCP entry and one set of status hooks per agent's user scope instead
    of per directory, is
    [#619](https://github.com/Tripstack-Corp/spyc/issues/619). It changes

@@ -246,6 +246,7 @@ impl App {
         let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
             return false;
         };
+        let mut learned: Vec<std::path::PathBuf> = Vec::new();
         for snapshot in snapshot {
             for entry in tabs.tabs_mut() {
                 if entry.info.codex_home.is_none()
@@ -253,6 +254,9 @@ impl App {
                     && entry.info.agent().kind() == AgentKind::Codex
                 {
                     entry.info.codex_home = Some(snapshot.home.clone());
+                    if !learned.contains(&snapshot.home) {
+                        learned.push(snapshot.home.clone());
+                    }
                 }
             }
             let claimed: HashSet<String> = tabs
@@ -290,6 +294,9 @@ impl App {
                     entry.info.codex_session_id = Some(uuid);
                 }
             }
+        }
+        for home in learned {
+            self.wire_codex_home(&home);
         }
         false
     }

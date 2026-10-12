@@ -105,8 +105,9 @@
 #   (claude's ^v), never on a shell tab, and nothing is written to disk unless
 #   you save it. Set false to keep spyc's hands off the clipboard entirely.
 # codex_mcp = true
-#   Set false to stop registering spyc's MCP server for codex panes (the
-#   [mcp_servers.spyc] entry in .codex/config.toml). Workaround for codex's
+#   Set false to keep spyc's MCP server out of codex (the [mcp_servers.spyc]
+#   entry in $CODEX_HOME/config.toml); only $HOME's .spycrc.toml decides,
+#   because that entry serves every project. Workaround for codex's
 #   /review hang (openai/codex#25856): codex mis-resolves the MCP tool-call
 #   approval elicitation and spins forever. Status hooks still install, so
 #   activity dots keep working — codex just loses spyc's MCP tools. Claude

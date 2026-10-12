@@ -8,7 +8,7 @@ use identity::{inline_prune_refused, prune_toml_groups};
 
 use std::path::Path;
 
-use super::{ConfigCleanup, merge_root_toml, reporter_command, spyc_binary};
+use super::{ConfigCleanup, reporter_command, spyc_binary};
 
 // ── Codex status hooks ────────────────────────────────────────────────
 //
@@ -47,52 +47,11 @@ fn codex_group_is_ours(group: &toml::Value, exe: Option<&str>) -> bool {
         })
 }
 
-/// Codex counterpart of [`super::ensure_claude_status_hooks`]: merge spyc's status
-/// hooks into `<dir>/.codex/config.toml` at the caller's resolved hook source,
-/// preserving everything else. Legacy JSON reporters are removed only after
-/// the canonical file is written; an unsafe legacy source refuses installation.
-/// Other handlers survive even when they share a matcher group with a reporter.
-pub fn ensure_codex_status_hooks(dir: &Path) -> bool {
-    let path = dir.join(".codex").join("config.toml");
-    if crate::git::discovery::is_tracked(&path) {
-        return false;
-    }
-    let Some(exe) = spyc_binary() else {
-        return false;
-    };
-    let existing = match std::fs::read_to_string(&path) {
-        Ok(text) => Some(text),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(_) => return false,
-    };
-    let Some(out) = merged_codex_status_hooks_toml(existing.as_deref(), &exe) else {
-        return false;
-    };
-    let Ok(legacy) = legacy_edit(dir) else {
-        return false;
-    };
-    if existing.as_deref() != Some(out.as_str()) {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if crate::fs::write_atomic(&path, out.as_bytes()).is_err() {
-            return false;
-        }
-    }
-    // The canonical file is written before removing a legacy reporter.
-    // Codex executes both representations; unchanged TOML still needs migration.
-    apply_legacy_edit(dir, legacy).is_ok()
-}
-
-/// Pure merge for codex's `config.toml`: add a `[[hooks.<Event>]]` group for
-/// each [`CODEX_STATUS_HOOKS`] entry into `existing` (or a fresh table),
-/// dropping stale spyc handlers from a prior launch and preserving the user's
-/// own config (including our `[mcp_servers.spyc]`). `None` when we refuse: an
-/// unparseable existing file, a non-table root or `hooks` value, or a
-/// serialization failure — see [`merge_root_toml`]. Pure (no I/O) so the merge — and
-/// its byte-level idempotency, which lets the write be skipped — is testable.
+/// The inline `[[hooks.<Event>]]` writer older spycs used for a project's
+/// `.codex/config.toml`: tests build the leftovers it produced with it.
+#[cfg(test)]
 pub(super) fn merged_codex_status_hooks_toml(existing: Option<&str>, exe: &str) -> Option<String> {
-    let mut root = merge_root_toml(existing)?;
+    let mut root = super::merge_root_toml(existing)?;
     let obj = root.as_table_mut()?;
     let hooks = obj
         .entry("hooks")
@@ -332,39 +291,48 @@ fn apply_legacy_edit(dir: &Path, edit: LegacyEdit) -> std::io::Result<bool> {
     }
 }
 
-pub fn codex_legacy_hook_diagnostic(dir: &Path) -> Option<&'static str> {
-    if inline_prune_refused(dir) {
-        return Some(
-            "spyc hook edit in .codex/config.toml would move user hook trust identities; hook declarations preserved; preserve positions or review affected user hooks after manual migration",
-        );
-    }
-    match legacy_edit(dir) {
-        Ok(LegacyEdit::Keep) => None,
-        Ok(_) => Some(
-            "additional spyc reporters in .codex/hooks.json; run `:hooks on`, then restart Codex",
-        ),
-        Err(LegacyError::TrustPositions) => Some(
-            "spyc reporter removal from .codex/hooks.json would move user hook trust identities; hook declarations preserved; preserve positions or review affected user hooks after manual migration",
-        ),
-        Err(LegacyError::Tracked) => Some(
-            "spyc reporters in git-tracked .codex/hooks.json; remove those reporters by hand, then restart Codex",
-        ),
-        Err(LegacyError::Invalid) => Some(
-            "legacy .codex/hooks.json is malformed; repair it before `:hooks on` and restarting Codex",
-        ),
-        Err(LegacyError::Symlink) => Some(
-            "legacy .codex/hooks.json is a symlink; link and target preserved; migrate its reporters manually before :hooks on and restarting Codex",
-        ),
-        Err(LegacyError::Unreadable) => Some(
-            "legacy .codex/hooks.json is unreadable; restore access before `:hooks on` and restarting Codex",
-        ),
-    }
-}
-
 #[cfg(test)]
 mod file_tests;
 #[cfg(test)]
 mod identity_tests;
+
+#[cfg(test)]
+/// Codex counterpart of [`super::ensure_claude_status_hooks`]: merge spyc's status
+/// hooks into `<dir>/.codex/config.toml` at the caller's resolved hook source,
+/// preserving everything else. Legacy JSON reporters are removed only after
+/// the canonical file is written; an unsafe legacy source refuses installation.
+/// Other handlers survive even when they share a matcher group with a reporter.
+pub fn ensure_codex_status_hooks(dir: &Path) -> bool {
+    let path = dir.join(".codex").join("config.toml");
+    if crate::git::discovery::is_tracked(&path) {
+        return false;
+    }
+    let Some(exe) = spyc_binary() else {
+        return false;
+    };
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(text) => Some(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => return false,
+    };
+    let Some(out) = merged_codex_status_hooks_toml(existing.as_deref(), &exe) else {
+        return false;
+    };
+    let Ok(legacy) = legacy_edit(dir) else {
+        return false;
+    };
+    if existing.as_deref() != Some(out.as_str()) {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if crate::fs::write_atomic(&path, out.as_bytes()).is_err() {
+            return false;
+        }
+    }
+    // The canonical file is written before removing a legacy reporter.
+    // Codex executes both representations; unchanged TOML still needs migration.
+    apply_legacy_edit(dir, legacy).is_ok()
+}
 
 #[cfg(test)]
 mod tests {
@@ -664,30 +632,6 @@ mod tests {
         assert_eq!(
             left["hooks"]["Stop"][0]["hooks"][0]["timeout"].as_integer(),
             Some(7)
-        );
-    }
-
-    #[test]
-    fn codex_legacy_diagnostics_explain_refusals_and_clear_after_migration() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = legacy_file(
-            tmp.path(),
-            json!({"hooks":{
-                "Stop":[{"hooks":[own_handler("done")]}]
-            }}),
-        );
-        assert!(
-            codex_legacy_hook_diagnostic(tmp.path())
-                .unwrap()
-                .contains("additional spyc reporters")
-        );
-        assert!(ensure_codex_status_hooks(tmp.path()));
-        assert!(codex_legacy_hook_diagnostic(tmp.path()).is_none());
-        std::fs::write(&path, "{broken").unwrap();
-        assert!(
-            codex_legacy_hook_diagnostic(tmp.path())
-                .unwrap()
-                .contains("malformed")
         );
     }
 }

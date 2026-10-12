@@ -188,27 +188,28 @@ Claude Code installation is managed by an organization or not.
 
 ### Unmanaged (personal) environments
 
-No configuration is needed. On startup spyc writes two config files
-in the working directory so each agent discovers it automatically:
+No configuration is needed. The first time spyc launches an agent it asks,
+once for that agent, whether to wire it in. Saying yes adds spyc's MCP entry
+and status hooks to the agent's own configuration, for every project:
 
-- **`.mcp.json`** for Claude Code (JSON, `mcpServers.spyc` shape).
-- **`.codex/config.toml`** for the codex CLI (TOML,
-  `[mcp_servers.spyc]` shape — spyc ensures the entry, preserving
-  the rest of the file).
+| Agent | MCP entry | Status hooks |
+|---|---|---|
+| Claude Code | its user-scope MCP servers (`claude mcp add-json -s user`) | `~/.claude/settings.json` |
+| codex | `[mcp_servers.spyc]` in `$CODEX_HOME/config.toml` | `$CODEX_HOME/hooks.json` |
+| agy | `~/.gemini/config/mcp_config.json` | `~/.gemini/config/hooks.json` |
 
-Both registrations re-exec `spyc --mcp` as a stdio proxy to the same
-socket, so a single server backs both agents.
+`$CLAUDE_CONFIG_DIR` and `$CODEX_HOME` move claude's and codex's files as
+they do for the agents themselves. Nothing is written into your projects, so
+there is nothing to add to `.gitignore`. codex asks you to approve spyc's hooks
+once, in `/hooks`. `:hooks` in spyc changes an agent's answer later, and
+`spyc --install-agents` / `--remove-agents` do it from the command line.
 
-The generated `.mcp.json` looks like this:
+The entry spyc registers for Claude Code looks like this:
 
 ```json
 {
-  "mcpServers": {
-    "spyc": {
-      "command": "spyc",
-      "args": ["--mcp"]
-    }
-  }
+  "command": "spyc",
+  "args": ["--mcp"]
 }
 ```
 
@@ -216,43 +217,24 @@ The generated `.mcp.json` looks like this:
   hooks name it, else the running binary's absolute path. A codex
   workspace policy can allow MCP servers by their exact command, and
   then disables an entry that names the same binary by its path.
-- **`args`** — `--mcp` runs spyc in stdio MCP proxy mode. Claude
-  Code spawns this process; it proxies JSON-RPC to the running
-  instance's Unix socket.
+- **`args`** — `--mcp` runs spyc in stdio MCP proxy mode. The agent
+  spawns this process; it proxies JSON-RPC to the running instance's
+  Unix socket.
 - **No `env`** — the proxy connects to the socket named by the
   agent pane's `SPYC_MCP_SOCK`, which spyc sets when it launches the
   agent, so each agent reaches the spyc that launched it. (Codex's
   entry adds `env_vars = ["SPYC_MCP_SOCK", "SPYC_PANE_ID"]`, since
-  codex passes an MCP server only the variables listed there.)
+  codex passes an MCP server only the variables listed there.) An
+  agent spyc didn't launch gets a server with no tools.
 
-**You should not need to edit these files.** spyc manages them
-automatically, including:
+spyc edits these files in place: your own settings and their order are kept,
+a symlinked file stays a link, and a file that won't parse is left alone with
+the reason shown. Older versions of spyc wrote `.mcp.json`, `.codex/` and
+`.agents/` files into each project; spyc takes spyc's part of those out on its
+own.
 
-- **Several instances in one directory** — they share the entry; each
-  one's agents reach it, and the last one to exit removes it.
-- **Cleanup** — the socket file is removed on normal exit.
-
-Both are runtime artifacts — add them to `.gitignore`:
-
-```
-.mcp.json
-.codex/
-```
-
-spyc's own repo already has these entries.
-
-To keep these files out of your projects altogether, wire the agents into
-their own user configuration once:
-
-```sh
-spyc --install-agents          # or --install-agents=claude,codex
-```
-
-codex asks you to approve spyc's hooks once, in `/hooks`.
-
-spyc then writes nothing into projects for those agents. Before uninstalling
-spyc, run `spyc --remove-agents`: the entries stay behind otherwise, and an
-agent then reports an MCP server that fails to start.
+**Before uninstalling spyc**, run `spyc --remove-agents`. The entries outlive
+spyc otherwise, and an agent then reports an MCP server that fails to start.
 
 ### Enterprise managed environments
 
@@ -268,8 +250,9 @@ the same directory:
 #### `managed-mcp.json` — deploy MCP servers centrally
 
 This file pushes MCP server entries to every Claude Code installation
-on the machine, so individual users don't need a per-project
-`.mcp.json`. To include spyc alongside other org-wide MCP servers:
+on the machine, and takes exclusive control of Claude's MCP servers: spyc
+then installs only Claude's status hooks. To include spyc alongside other
+org-wide MCP servers:
 
 ```json
 {
@@ -291,17 +274,15 @@ Note that the centrally deployed entry does **not** include
 instance), and needs none: an agent launched from spyc's pane carries its
 spyc's `SPYC_MCP_SOCK` in its env. A claude started outside spyc, in another
 terminal, still starts `spyc --mcp` from the org's entry, and gets a server
-with no tools. The per-directory `.mcp.json` spyc writes when it launches an
-agent names no socket either, so the two configs coexist without conflict.
+with no tools.
 
 #### `managed-settings.json` — control which servers are allowed
 
 This file controls permissions and policies. spyc checks it before
-writing `.mcp.json`:
+registering Claude's MCP entry:
 
 - **`deniedMcpServers`** — if `"spyc"` appears in the denylist,
-  the MCP server will not configure itself. A flash message warns
-  in the TUI: *"MCP: blocked by enterprise policy"*.
+  spyc doesn't register the entry, and says it's blocked.
 - **`allowedMcpServers`** — if an allowlist is present, `"spyc"`
   must be included or configuration is blocked.
 - If neither list mentions spyc, it is allowed by default.

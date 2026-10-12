@@ -226,9 +226,8 @@ impl App {
             crate::context::sweep_orphan_context_files(&dir, our_pid)
                 + crate::mcp::sweep_orphan_root_markers(&dir, our_pid)
         });
-        let swept = crate::context::sweep_orphan_context_files(&app_state.start_dir, our_pid)
-            + crate::mcp::sweep_orphan_spyc_configs(&app_state.start_dir, our_pid)
-            + state_swept;
+        let swept =
+            crate::context::sweep_orphan_context_files(&app_state.start_dir, our_pid) + state_swept;
         if swept > 0 {
             spyc_debug!("startup: reaped {swept} orphaned spyc artifact(s)");
         }
@@ -301,14 +300,11 @@ impl App {
                 autosave_last_saved_fp: None,
                 autosave_due: None,
                 pane_scroll_settle: None,
-                hook_recheck_at: None,
                 scope_waiters: Vec::new(),
                 lua: None,
                 lua_registry: super::lua::LuaRegistry::default(),
                 lua_inflight: None,
                 lua_events: super::lua_events::LuaEventState::default(),
-                mcp_config_dirs: Vec::new(),
-                status_hook_claims: Vec::new(),
                 pane_tabs: None,
                 top_overlay: None,
                 top_overlay_right: None,
@@ -330,6 +326,7 @@ impl App {
                     false,
                 )),
                 graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                wiring_results: std::sync::Arc::default(),
                 image_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 archive_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                 archive_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -409,11 +406,6 @@ impl App {
         if !resume {
             app.maybe_offer_skill_update();
         }
-        // The MCP client config (`.mcp.json` / `.codex/config.toml`) is
-        // written lazily when an agent pane launches (`open_pane_tab_in` →
-        // `write_mcp_config`), so we don't create a config dir in
-        // directories where no agent is ever run. (Restored agent panes go
-        // through the same launch path, so they pick up their config too.)
         app
     }
 }
