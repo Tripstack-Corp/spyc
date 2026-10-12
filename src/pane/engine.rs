@@ -136,10 +136,8 @@ pub trait TerminalScreen {
     ///
     /// Honouring soft wraps is the implementation's job, not the caller's:
     /// `Pane::selection_text` needs a newline at a hard line end and none at a
-    /// wrap, and an engine knows which its rows are. There is deliberately no
-    /// `row_wrapped` on this trait — nothing in spyc asks the question
-    /// directly, and a seam carrying methods no caller uses is speculative
-    /// surface that the next engine has to satisfy for nobody.
+    /// wrap, and an engine knows which its rows are. The immutable drag snapshot
+    /// preserves both the row boundaries and the engine's empty-cell copy policy.
     fn contents_between(
         &self,
         start_row: u16,
@@ -147,6 +145,15 @@ pub trait TerminalScreen {
         end_row: u16,
         end_col: u16,
     ) -> String;
+
+    /// Whether this visible row continues into the next row without a newline.
+    fn row_wrapped(&self, row: u16) -> bool;
+    /// Copy retains empty cells, rather than adding gaps only before nonblank text.
+    /// The vt100 fallback requires this distinction; [#453] tracks removal of
+    /// this method and the snapshot's vt100 padding branch.
+    ///
+    /// [#453]: https://github.com/Tripstack-Corp/spyc/issues/453
+    fn copy_pads_blank_cells(&self) -> bool;
 
     /// Current scrollback view offset in rows.
     fn scrollback(&self) -> usize;

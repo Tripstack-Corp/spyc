@@ -19,8 +19,8 @@ pub struct PaneWidget<'a, S: TerminalScreen> {
     /// A spyc-side text selection over the visible grid, as ordered
     /// `((start_row, start_col), (end_row, end_col))` in SCREEN coordinates.
     ///
-    /// Only ever set for a child that ignores mouse reports — one that speaks mouse
-    /// draws its own selection, and painting ours on top would double it up.
+    /// Set for spyc-owned drags: a non-mouse child, or an explicit Ctrl+drag.
+    /// An ordinary drag in a mouse-aware child belongs to that child.
     pub selection: Option<((u16, u16), (u16, u16))>,
 }
 
@@ -168,11 +168,7 @@ const fn selected(sel: Option<((u16, u16), (u16, u16))>, row: u16, col: u16) -> 
 ///
 /// Trailing whitespace is trimmed per line: the grid is space-padded to its full
 /// width, so an untrimmed copy pastes a ragged block of spaces.
-pub(super) fn selection_text<S: TerminalScreen>(
-    screen: &S,
-    start: (u16, u16),
-    end: (u16, u16),
-) -> String {
+pub fn selection_text<S: TerminalScreen>(screen: &S, start: (u16, u16), end: (u16, u16)) -> String {
     screen
         .contents_between(start.0, start.1, end.0, end.1.saturating_add(1))
         .lines()

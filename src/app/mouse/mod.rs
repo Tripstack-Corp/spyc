@@ -20,6 +20,8 @@ use super::{Effect, FrameLayout};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 mod forward;
+#[cfg(test)]
+mod pane_copy_tests;
 mod route;
 mod scroll;
 mod selection;
@@ -189,6 +191,14 @@ pub struct PaneScrollStreak {
     pub ticks: u32,
 }
 
+/// The pane and geometry a held grid belongs to; a tab or layout change invalidates it.
+pub(super) struct PaneSelectionSnapshot {
+    pub tab_id: String,
+    pub term_size: (u16, u16),
+    pub area: ratatui::layout::Rect,
+    pub screen: crate::pane::snapshot::ScreenSnapshot,
+}
+
 /// One chrome line as drawn, recorded by the renderer for a later mouse copy.
 ///
 /// Carries the drawn `width` because chrome does NOT always span the frame: a
@@ -228,41 +238,8 @@ impl super::App {
         let (cols, rows) = self.view.term_size;
         let frame = ratatui::layout::Rect::new(0, 0, cols, rows);
 
-        // A release is not a routing decision — it belongs to whoever received the
-        // press, and forwarding it is an obligation rather than a choice. A child
-        // that gets a press with no matching release believes the button is still
-        // held: claude's own handler starts a selection on press and fires the
-        // actual click on RELEASE, so a press-only click leaves it drag-selecting
-        // forever and never clicks anything.
-        // A gesture belongs to whoever received its press. When that was a pager,
-        // spyc's own selection owns the drag and the release — checked BEFORE the
-        // forwarding paths below, which would otherwise deliver mouse reports into
-        // the agent while the user is selecting text somewhere else entirely.
-        if let Some(target) = self.view.mouse_selection {
-            match ev.kind {
-                MouseEventKind::Drag(MouseButton::Left) => {
-                    return match target {
-                        MouseDragTarget::Pager(_) => self.extend_pager_selection(ev),
-                        MouseDragTarget::List(side) => self.extend_row_selection(ev, side),
-                        MouseDragTarget::Pane => self.extend_pane_selection(ev),
-                        MouseDragTarget::Chrome => self.extend_chrome_selection(ev),
-                    };
-                }
-                MouseEventKind::Up(MouseButton::Left) => {
-                    return match target {
-                        MouseDragTarget::Pager(_) => self.finish_pager_selection(ev),
-                        MouseDragTarget::List(_) => self.finish_row_selection(ev),
-                        MouseDragTarget::Pane => self.finish_pane_selection(ev),
-                        MouseDragTarget::Chrome => self.finish_chrome_selection(ev),
-                    };
-                }
-                // Any other button mid-drag abandons the selection rather than
-                // interleaving two gestures.
-                MouseEventKind::Down(_) | MouseEventKind::Up(_) => {
-                    self.view.mouse_selection = None;
-                }
-                _ => {}
-            }
+        if let Some(effects) = self.handle_selection_gesture(ev) {
+            return effects;
         }
 
         if let MouseEventKind::Up(button) = ev.kind {
@@ -276,10 +253,8 @@ impl super::App {
         // began in the child keeps reaching it after the pointer leaves the pane
         // (children track their own selection across the whole drag).
         //
-        // spyc-side selection for a NON-mouse child is deliberately not here: this
-        // change only stops throwing drags away, so a child that speaks mouse gets
-        // its own selection back (claude's `onSelectionDrag` was dead solely
-        // because these events were dropped). See `docs/archive/mouse_selection_plan.md`.
+        // spyc-owned drags were handled above. Only gestures whose press was
+        // forwarded may reach the child here.
         if matches!(ev.kind, MouseEventKind::Drag(_)) {
             return self.forward_drag(ev, frame);
         }
@@ -320,6 +295,10 @@ impl super::App {
                 .is_some_and(|t| t.active().wants_mouse()),
             // Same sources `route_input`'s snapshot uses (`route.rs`), so the
             // mouse and the keyboard can't disagree about what owns the screen.
+            force_pane_selection: matches!(gesture, Gesture::Left)
+                && ev
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL),
             is_prompting: matches!(self.state.mode, super::Mode::Prompting(_)),
             has_scroll_pager: self.view.scroll_pager.is_some(),
             pane_closed: self.state.pane.pane_snapshot.is_closed,

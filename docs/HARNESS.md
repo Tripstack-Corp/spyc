@@ -94,11 +94,22 @@ scroll region keeps completed turns off the main buffer, so **zero** rows reach
 spyc's emulator. In both cases "just scroll up" cannot work, no matter what spyc
 does. Section 3 is what does work.
 
-Text selection follows the same fork, and needs nothing extra: a child that asked
-for mouse reporting draws its **own** selection (fullscreen claude), and a child
-that didn't gets **spyc's** drag-select over the pane grid, copied to the
-clipboard on release. Only the wheel needed the third answer above, because it
-has somewhere else to go — spyc's capture — when neither side owns it.
+Ordinary text selection follows the same fork: a child that asked for mouse
+reporting owns the drag, and a child that didn't gets **spyc's** selection over the
+pane grid. **Ctrl+drag** explicitly gives spyc the gesture in either case, so text
+in Codex's queued-question view can be copied even when Codex cannot select it.
+Hold Ctrl on the press; releasing Ctrl mid-drag does not hand it back to the child.
+spyc holds the visible grid while you drag, then copies from it on release and
+resumes the live view. The child continues running throughout. Ctrl+click without
+movement copies nothing and is consumed: the child gets neither press nor release.
+A key, paste, wheel gesture, tab switch or layout change cancels the held drag.
+Turning mouse capture off also cancels it. Shift+drag remains the host terminal's
+selection gesture.
+
+The host terminal must forward Ctrl+left events. iTerm2 requires its pointer
+preference for reporting Ctrl+click to applications; Terminal.app uses the gesture
+for a shortcut menu. See [the selection caveats](../CONFIGURATION.md#selecting-text)
+for the preference and the host-selection fallback.
 
 ---
 

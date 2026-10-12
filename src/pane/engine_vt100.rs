@@ -125,6 +125,13 @@ impl TerminalScreen for vt100::Screen {
         Self::contents_between(self, start_row, start_col, end_row, end_col)
     }
 
+    fn row_wrapped(&self, row: u16) -> bool {
+        Self::row_wrapped(self, row)
+    }
+    fn copy_pads_blank_cells(&self) -> bool {
+        false
+    }
+
     fn scrollback(&self) -> usize {
         Self::scrollback(self)
     }

@@ -161,6 +161,8 @@ pub struct MouseSnapshot {
     /// When false, forwarding would type escape bytes into a prompt that never
     /// asked for them — the bracketed-paste bug (#170) in a new costume.
     pub pane_wants_mouse: bool,
+    /// Ctrl+left press explicitly gives pane selection to spyc.
+    pub force_pane_selection: bool,
     /// A prompt is open (`Mode::Prompting`) — the `:` line, search, a rename, or
     /// any single-key confirm.
     ///
@@ -211,12 +213,13 @@ impl MouseSnapshot {
 
     /// Whether spyc should do the selecting over the pane itself.
     ///
-    /// The complement of [`Self::can_forward_to_child`] on the mouse axis: a child
-    /// that speaks mouse draws its OWN selection (#224), and painting ours on top
-    /// would double it up. What's left — codex, a plain shell — has no other way to
-    /// be selected. Still requires a live, visible grid.
+    /// Ordinary drags belong to a mouse-aware child. Ctrl+drag gives spyc the
+    /// gesture explicitly, including surfaces where the child cannot select text.
+    /// Both paths require a live, visible grid.
     const fn pane_is_selectable(self) -> bool {
-        !self.pane_wants_mouse && !self.pane_closed && !self.has_scroll_pager
+        (self.force_pane_selection || !self.pane_wants_mouse)
+            && !self.pane_closed
+            && !self.has_scroll_pager
     }
 
     /// Whether a pending chord set now would ever be seen by the resolver.
@@ -502,6 +505,12 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
             // Left is click-THROUGH: focus the region, and (for a mouse-aware
             // child) let the event reach it too. The pane is live and visible, so
             // swallowing the first click just to focus would read as broken.
+            if matches!(region, Region::Pane)
+                && snap.force_pane_selection
+                && snap.pane_is_selectable()
+            {
+                return MouseSink::FocusAndSelectPane;
+            }
             if matches!(region, Region::Pane) && snap.can_forward_to_child() {
                 return MouseSink::FocusAndForward;
             }
@@ -659,6 +668,7 @@ mod tests {
             pager_mount: None,
             covering_pager: None,
             pane_wants_mouse: false,
+            force_pane_selection: false,
             is_prompting: false,
             has_scroll_pager: false,
             pane_closed: false,
@@ -2072,5 +2082,51 @@ mod tests {
                 "closed={closed} covered={covered}"
             );
         }
+    }
+    #[test]
+    fn ctrl_override_does_not_select_a_dead_hidden_or_prompt_owned_pane() {
+        let base = MouseSnapshot {
+            pane_wants_mouse: true,
+            force_pane_selection: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(
+            route_mouse(base, Gesture::Left),
+            MouseSink::FocusAndSelectPane
+        );
+        for blocked in [
+            MouseSnapshot {
+                pane_closed: true,
+                ..base
+            },
+            MouseSnapshot {
+                has_scroll_pager: true,
+                ..base
+            },
+            MouseSnapshot {
+                is_prompting: true,
+                ..base
+            },
+            MouseSnapshot {
+                region: None,
+                ..base
+            },
+        ] {
+            assert!(!matches!(
+                route_mouse(blocked, Gesture::Left),
+                MouseSink::FocusAndSelectPane | MouseSink::FocusAndForward
+            ));
+        }
+        assert_eq!(
+            route_mouse(
+                MouseSnapshot {
+                    region: Some(Region::List),
+                    ..base
+                },
+                Gesture::Left
+            ),
+            MouseSink::FocusAndSelectRows(Side::Left)
+        );
+        assert_eq!(route_mouse(base, Gesture::Wheel), MouseSink::PaneForward);
     }
 }

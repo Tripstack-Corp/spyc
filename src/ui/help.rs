@@ -292,6 +292,10 @@ const SECTIONS: &[Section] = &[
                 "real mouse reporting (scroll what's under the pointer); off restores terminal text selection",
             ),
             (
+                "Ctrl+drag (pane)",
+                "select through spyc; release copies held text; Ctrl+click is consumed (iTerm2 needs Ctrl-click reporting)",
+            ),
+            (
                 ":notify test",
                 "fire every notification channel (bell + visual + desktop) to verify setup",
             ),

@@ -55,7 +55,7 @@ impl App {
                     PaneWidget {
                         screen,
                         focused: overlay_focused,
-                        selection: self.pane_selection_screen_coords(),
+                        selection: None,
                     },
                     overlay_area,
                 );
@@ -300,12 +300,29 @@ impl App {
             crate::ui::pager::render(frame, rect, view, &self.view.theme);
         } else if let Some(tabs) = self.runtime.pane_tabs.as_ref() {
             let focused = self.state.pane_focused();
-            tabs.active().with_screen(|screen| {
+            let held = self.pane_drag_screen(Some(rect));
+            if self.view.mouse_selection == Some(super::super::mouse::MouseDragTarget::Pane)
+                && let Some(screen) = held
+            {
                 frame.render_widget(
                     PaneWidget {
                         screen,
                         focused,
                         selection: self.pane_selection_screen_coords(),
+                    },
+                    rect,
+                );
+                // Keep the host terminal cursor hidden on this reading surface.
+                // PaneWidget still paints a main-screen block from the held grid;
+                // live cursor placement resumes on release.
+                return;
+            }
+            tabs.active().with_screen(|screen| {
+                frame.render_widget(
+                    PaneWidget {
+                        screen,
+                        focused,
+                        selection: self.pane_selection_on_live_screen(screen, held),
                     },
                     rect,
                 );
@@ -529,6 +546,20 @@ impl App {
         })
     }
 
+    fn pane_selection_on_live_screen(
+        &self,
+        screen: &impl crate::pane::engine::TerminalScreen,
+        held: Option<&crate::pane::snapshot::ScreenSnapshot>,
+    ) -> Option<((u16, u16), (u16, u16))> {
+        let held = held?;
+        let ordered = self.pane_selection_screen_coords()?;
+        // A released highlight must still identify the bytes copied. Compare
+        // under the render's parser lock so output racing release cannot move it.
+        (crate::pane::selection_text(held, ordered.0, ordered.1)
+            == crate::pane::selection_text(screen, ordered.0, ordered.1))
+        .then_some(ordered)
+    }
+
     /// The inclusive row range to highlight in `side`'s list, if a mouse row
     /// selection is active there. `None` for the other column, so a selection in `a`
     /// never paints in `b`.
@@ -604,7 +635,7 @@ impl App {
                         PaneWidget {
                             screen,
                             focused: right_focused,
-                            selection: self.pane_selection_screen_coords(),
+                            selection: None,
                         },
                         rect,
                     );

@@ -16,6 +16,70 @@ use super::route::clamp_to_area;
 use super::{ChromeSelection, ListSelection, MouseDragTarget};
 
 impl super::super::App {
+    /// An owned drag keeps its press, motion and release on the same surface.
+    pub(super) fn handle_selection_gesture(&mut self, ev: MouseEvent) -> Option<Vec<Effect>> {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        if self.view.mouse_selection.is_none()
+            && matches!(
+                ev.kind,
+                MouseEventKind::Down(_)
+                    | MouseEventKind::ScrollUp
+                    | MouseEventKind::ScrollDown
+                    | MouseEventKind::ScrollLeft
+                    | MouseEventKind::ScrollRight
+            )
+        {
+            self.clear_pane_selection();
+        }
+
+        // A release is not a routing decision — it belongs to whoever received the
+        // press, and forwarding it is an obligation rather than a choice. A child
+        // that gets a press with no matching release believes the button is still
+        // held: claude's own handler starts a selection on press and fires the
+        // actual click on RELEASE, so a press-only click leaves it drag-selecting
+        // forever and never clicks anything.
+        // A gesture belongs to whoever received its press. When that was a pager,
+        // spyc's own selection owns the drag and the release — checked BEFORE the
+        // forwarding paths below, which would otherwise deliver mouse reports into
+        // the agent while the user is selecting text somewhere else entirely.
+        if let Some(target) = self.view.mouse_selection {
+            match ev.kind {
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    return Some(match target {
+                        MouseDragTarget::Pager(_) => self.extend_pager_selection(ev),
+                        MouseDragTarget::List(side) => self.extend_row_selection(ev, side),
+                        MouseDragTarget::Pane => self.extend_pane_selection(ev),
+                        MouseDragTarget::Chrome => self.extend_chrome_selection(ev),
+                    });
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    return Some(match target {
+                        MouseDragTarget::Pager(_) => self.finish_pager_selection(ev),
+                        MouseDragTarget::List(_) => self.finish_row_selection(ev),
+                        MouseDragTarget::Pane => self.finish_pane_selection(ev),
+                        MouseDragTarget::Chrome => self.finish_chrome_selection(ev),
+                    });
+                }
+                // Any other button mid-drag abandons the selection rather than
+                // interleaving two gestures.
+                MouseEventKind::Down(_) | MouseEventKind::Up(_) => {
+                    self.clear_pane_selection();
+                    self.view.mouse_selection = None;
+                }
+                MouseEventKind::ScrollUp
+                | MouseEventKind::ScrollDown
+                | MouseEventKind::ScrollLeft
+                | MouseEventKind::ScrollRight
+                    if target == MouseDragTarget::Pane =>
+                {
+                    self.clear_pane_selection();
+                }
+                _ => {}
+            }
+        }
+
+        None
+    }
     /// Anchor a charwise selection where the pointer pressed.
     ///
     /// Claims the drag (`view.mouse_selection`) only if the press actually landed
@@ -260,6 +324,37 @@ impl super::super::App {
         let Some(cell) = self.pane_cell_at(ev) else {
             return Vec::new();
         };
+        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+            return Vec::new();
+        };
+        let area = self
+            .frame_layout(Rect::new(
+                0,
+                0,
+                self.view.term_size.0,
+                self.view.term_size.1,
+            ))
+            .pane;
+        let Some(area) = area else {
+            return Vec::new();
+        };
+        let Some(screen) = tabs
+            .active()
+            .with_screen(crate::pane::snapshot::ScreenSnapshot::capture)
+        else {
+            self.clear_pane_selection();
+            return Vec::new();
+        };
+        use crate::pane::engine::TerminalScreen as _;
+        if screen.size() != (area.height, area.width) {
+            return Vec::new();
+        }
+        self.view.pane_selection_snapshot = Some(super::PaneSelectionSnapshot {
+            tab_id: tabs.active_info().id.clone(),
+            term_size: self.view.term_size,
+            area,
+            screen,
+        });
         self.view.pane_selection = Some((cell, cell));
         self.view.mouse_selection = Some(MouseDragTarget::Pane);
         Vec::new()
@@ -282,6 +377,12 @@ impl super::super::App {
     /// here (`(row, col)` pairs, not per-axis) so a backwards drag copies the same
     /// text as the forward one.
     pub(super) fn finish_pane_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
+        let (cols, rows) = self.view.term_size;
+        let area = self.frame_layout(Rect::new(0, 0, cols, rows)).pane;
+        if self.pane_drag_screen(area).is_none() {
+            self.clear_pane_selection();
+            return Vec::new();
+        }
         self.view.mouse_selection = None;
         if let Some(cell) = self.pane_cell_at(ev)
             && let Some((_, focus)) = self.view.pane_selection.as_mut()
@@ -292,7 +393,7 @@ impl super::super::App {
             return Vec::new();
         };
         if a == b {
-            self.view.pane_selection = None;
+            self.clear_pane_selection();
             return Vec::new();
         }
         let (start, end) = if a.0 < b.0 || (a.0 == b.0 && a.1 <= b.1) {
@@ -303,7 +404,17 @@ impl super::super::App {
         let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
             return Vec::new();
         };
-        let text = tabs.active().selection_text(start, end);
+        let snapshot = self
+            .view
+            .pane_selection_snapshot
+            .as_ref()
+            .expect("the drag was validated above");
+        let text = crate::pane::selection_text(&snapshot.screen, start, end);
+        if tabs.active().selection_text(start, end) != text {
+            // Release resumes the live grid. Do not paint the held selection over
+            // different text, even though its original bytes are already captured.
+            self.clear_pane_selection();
+        }
         if text.trim().is_empty() {
             return Vec::new();
         }
@@ -311,6 +422,28 @@ impl super::super::App {
             text,
             ok: super::super::effect::ClipMsg::PaneLines,
         }]
+    }
+
+    /// Retire the grid and its gesture together so a late release cannot copy.
+    pub(in crate::app) fn clear_pane_selection(&mut self) {
+        self.view.pane_selection = None;
+        self.view.pane_selection_snapshot = None;
+        if self.view.mouse_selection == Some(MouseDragTarget::Pane) {
+            self.view.mouse_selection = None;
+        }
+    }
+
+    /// Only the pane and layout that received the press may show or copy this grid.
+    pub(in crate::app) fn pane_drag_screen(
+        &self,
+        pane_area: Option<Rect>,
+    ) -> Option<&crate::pane::snapshot::ScreenSnapshot> {
+        let held = self.view.pane_selection_snapshot.as_ref()?;
+        let tabs = self.runtime.pane_tabs.as_ref()?;
+        (held.tab_id == tabs.active_info().id
+            && held.term_size == self.view.term_size
+            && Some(held.area) == pane_area)
+            .then_some(&held.screen)
     }
 
     /// The rect a column's list is drawn into, and a `ListView` over its cached

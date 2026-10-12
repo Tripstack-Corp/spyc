@@ -125,7 +125,7 @@ impl App {
         // The pager's `visual` selection is deliberately NOT cleared here: it is
         // modal by request (vim-consistent), so `j`/`k` extend it and `Esc` cancels.
         self.view.list_selection = None;
-        self.view.pane_selection = None;
+        self.clear_pane_selection();
         self.view.chrome_selection = None;
 
         // Per-key dispatch trace, opt-in via `--key-trace` / SPYC_KEY_TRACE.
@@ -511,6 +511,7 @@ impl App {
     /// (`run_effects`); a paste is infallible, so no `Result` (unlike
     /// `handle_key`, which can fail inside `update`).
     pub(crate) fn handle_paste(&mut self, text: String) -> Vec<Effect> {
+        self.clear_pane_selection();
         if crate::key_trace::is_enabled() {
             crate::key_trace::log(&format!(
                 "RX paste len={} pane_focused={} mode={:?}",

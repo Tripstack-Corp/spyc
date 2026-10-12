@@ -836,10 +836,18 @@ end).
   reload (`:mouse auto` returns to following the config). Default **on**
   (`[mouse] capture`; `capture = false` turns it off permanently). `^a u`
   quick-select and `y` in the pager are the mouse-free yank paths.
-  **Drag in a pane whose agent ignores the mouse to select its text** (codex —
-  including inside its `^T` transcript — and plain shells); release copies it. A
-  child that speaks mouse (claude, vim) keeps doing its own selection instead. The
-  highlight clears when the child paints, since it's anchored to the visible grid.
+  **Drag in a pane whose child ignores the mouse to select its text**; release
+  copies it. **Ctrl+drag selects through spyc in any live pane**, including Codex's
+  queued questions and other surfaces whose child cannot select text. Hold Ctrl
+  when pressing; spyc owns the whole gesture even if you release Ctrl first.
+  The pane's visible grid stays fixed while dragging, with the child running behind
+  it. Release copies those held bytes and resumes live output. An ordinary drag in
+  a mouse-aware child keeps reaching the child. A released highlight appears only
+  while the live grid still matches the copied text; new output or input clears it.
+  Ctrl+click is consumed by spyc even without movement: it copies nothing and
+  never reaches the child. Terminals that reserve Ctrl+click for a context menu
+  must forward it to applications; iTerm2's pointer preference is described in
+  [CONFIGURATION.md](CONFIGURATION.md#selecting-text).
   **Drag in the file list to select rows; release copies their names** — hold
   **Ctrl** while pressing to copy absolute paths instead. The highlight stays up
   after the copy. Distinct from picks: a drag never changes what the next file
