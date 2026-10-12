@@ -246,7 +246,7 @@ impl App {
     fn transcript_image_path(&mut self, report: bool) -> Option<std::path::PathBuf> {
         let tabs = self.runtime.pane_tabs.as_ref()?;
         let info = tabs.active_info();
-        let profile = crate::agent::detect(&info.command);
+        let profile = info.agent();
         let Some(spec) = profile.transcript_images() else {
             if report {
                 self.state.flash_error(format!(

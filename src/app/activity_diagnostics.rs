@@ -18,7 +18,7 @@ const fn state_str(a: AgentActivity) -> &'static str {
 }
 
 fn is_agent(info: &TabInfo) -> bool {
-    crate::agent::detect(&info.command).kind() != AgentKind::Other
+    info.agent().kind() != AgentKind::Other
 }
 
 /// The self-report the dot follows, as `effective_activity` decides it: none
@@ -31,7 +31,7 @@ fn live_report(e: &TabEntry) -> Option<ReportedStatus> {
             && !crate::agent::codex_approval::overrides_report(
                 info.reported,
                 info.scrape_status.map(|(status, _)| status),
-                crate::agent::detect(&info.command).kind(),
+                info.agent().kind(),
             )
     })
 }

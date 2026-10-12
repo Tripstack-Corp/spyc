@@ -19,7 +19,7 @@ impl App {
         };
         let active = tabs.active_index();
         let entry = &tabs.tabs()[active];
-        let profile = crate::agent::detect(&entry.info.command);
+        let profile = entry.info.agent();
         let home = entry.info.codex_home.clone();
         if profile.kind() == crate::state::sessions::AgentKind::Codex && home.is_none() {
             self.state

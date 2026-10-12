@@ -262,7 +262,7 @@ impl App {
         };
         let tabs = self.runtime.pane_tabs.as_ref()?;
         let is_alt_screen = tabs.active().is_alternate_screen();
-        let spec = crate::agent::detect(&tabs.active_info().command).transcript();
+        let spec = tabs.active_info().agent().transcript();
         let transcript_enabled = spec.as_ref().is_some_and(|s| match s.config_key {
             None => s.default_enabled,
             Some(key) => self
@@ -350,7 +350,7 @@ impl App {
         // mode renders on the *alternate screen*, so it captures nothing either.
         // `decide_scroll_source` is the pure routing over `scroll_snapshot`; the
         // engaged read + render runs off-thread (the worker below).
-        let profile = crate::agent::detect(&command);
+        let profile = active_info.agent();
         let spec = profile.transcript();
 
         match decide_scroll_source(snap) {
@@ -484,8 +484,7 @@ impl App {
             return;
         };
         let label = tabs.active_info().label.clone();
-        let command = tabs.active_info().command.clone();
-        let profile = crate::agent::detect(&command);
+        let profile = tabs.active_info().agent();
         let spec = profile.transcript();
         let active = tabs.active_mut();
         active.drain_output();
@@ -552,11 +551,11 @@ impl App {
     /// shows (the worker re-runs `render` with the new flag). A no-op with
     /// a hint on a plain terminal scrollback — there are no tool calls there.
     pub(crate) fn toggle_scrollback_tool_calls(&mut self) {
-        let has_transcript = self.runtime.pane_tabs.as_ref().is_some_and(|tabs| {
-            crate::agent::detect(&tabs.active_info().command)
-                .transcript()
-                .is_some()
-        });
+        let has_transcript = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .is_some_and(|tabs| tabs.active_info().agent().transcript().is_some());
         if !has_transcript {
             self.state
                 .flash_info("tool calls: only in an agent transcript view");

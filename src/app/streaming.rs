@@ -374,10 +374,7 @@ impl App {
                     entry.info.last_output_at = Some(now);
                     // P1-2 scrape fallback: mark dirty so `settle_scrape_quiet`
                     // scans the screen after `SCRAPE_QUIET_WINDOW` of silence.
-                    if !crate::agent::detect(&entry.info.command)
-                        .detection_rules()
-                        .is_empty()
-                    {
+                    if !entry.info.agent().detection_rules().is_empty() {
                         entry.info.scrape_dirty = true;
                     }
                     if i == active_idx {

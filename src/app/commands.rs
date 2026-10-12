@@ -583,7 +583,7 @@ fn agent_list_lines(app: &App) -> Vec<String> {
     let active = tabs.active_index();
     for (i, e) in tabs.tabs().iter().enumerate() {
         let info = &e.info;
-        if crate::agent::detect(&info.command).kind() == AgentKind::Other {
+        if info.agent().kind() == AgentKind::Other {
             continue; // non-agent tab: no dot, no coordination role
         }
         let marker = if i == active { '*' } else { ' ' };

@@ -493,7 +493,7 @@ impl App {
                         message: "pane has exited; activity report rejected".into(),
                     };
                 }
-                let kind = crate::agent::detect(&entry.info.command).kind();
+                let kind = entry.info.agent().kind();
                 let question_signal = matches!(
                     status.as_str(),
                     crate::agent::codex_recovery::QUESTION_START

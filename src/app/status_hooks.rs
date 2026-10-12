@@ -27,7 +27,7 @@ const RECHECK_EVERY: Duration = Duration::from_secs(30);
 /// Report installation facts without treating config presence or an agent's
 /// self-report as proof that a lifecycle hook was trusted and executed.
 pub(super) fn status_hooks_facts(info: &crate::pane::TabInfo) -> Option<Vec<String>> {
-    let profile = crate::agent::detect(&info.command);
+    let profile = info.agent();
     let support = profile.status_hooks()?;
     let dir = (support.config_dir)(&info.cwd);
     let codex = profile.kind() == AgentKind::Codex;
@@ -177,8 +177,7 @@ impl App {
             && let Some(tabs) = self.runtime.pane_tabs.as_mut()
         {
             for entry in tabs.tabs_mut() {
-                if crate::agent::detect(&entry.info.command).kind() == kind
-                    && (support.config_dir)(&entry.info.cwd) == dir
+                if entry.info.agent().kind() == kind && (support.config_dir)(&entry.info.cwd) == dir
                 {
                     entry.info.status_hooks_restart_needed = true;
                 }
@@ -232,12 +231,10 @@ impl App {
             || self.state.cur().listing.dir.clone(),
             |t| {
                 let info = t.active_info();
-                crate::agent::detect(&info.command)
-                    .status_hooks()
-                    .map_or_else(
-                        || info.cwd.clone(),
-                        |support| (support.config_dir)(&info.cwd),
-                    )
+                info.agent().status_hooks().map_or_else(
+                    || info.cwd.clone(),
+                    |support| (support.config_dir)(&info.cwd),
+                )
             },
         );
         state::find_repo_root(&dir).unwrap_or(dir)
@@ -337,7 +334,7 @@ impl App {
             return out;
         };
         for t in tabs.tabs() {
-            let profile = crate::agent::detect(&t.info.command);
+            let profile = t.info.agent();
             let Some(support) = profile.status_hooks() else {
                 continue;
             };
