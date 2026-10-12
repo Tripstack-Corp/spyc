@@ -1612,3 +1612,26 @@ fn a_member_of_an_archive_outside_the_root_is_refused() {
             .expect("and served");
     assert!(!allowed.is_empty());
 }
+
+/// `spyc --status-trace` turns tracing on for every reporter while it runs, and
+/// its own exit turns it off; another spyc's exit leaves it on.
+#[test]
+fn status_trace_lasts_as_long_as_the_spyc_that_started_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        assert!(!status_trace_requested());
+        start_status_trace();
+        assert!(status_trace_requested());
+        assert_eq!(status_trace_pid(), Some(std::process::id()));
+
+        let flag = state_dir().unwrap().join(STATUS_TRACE_FILE);
+        std::fs::write(&flag, "1").unwrap();
+        stop_status_trace();
+        assert!(flag.exists(), "only the spyc that started tracing stops it");
+
+        start_status_trace();
+        stop_status_trace();
+        assert!(!flag.exists());
+        assert!(!status_trace_requested());
+    });
+}

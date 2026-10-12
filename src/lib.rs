@@ -102,10 +102,11 @@ struct Cli {
 
     /// Trace the agent status-reporter to mcp.log: each `--report-status` hook
     /// invocation, bounded event metadata and routing env (SPYC_MCP_SOCK /
-    /// SPYC_PANE_ID), never hook arguments, prompts or responses. Bakes
-    /// `--status-trace` into the status hooks spyc installs, so it logs even if
-    /// Claude sanitizes the hook env. Off by default (the reporter fires every
-    /// agent turn). Diagnose with `grep report-status <state-dir>/mcp.log`.
+    /// SPYC_PANE_ID), never hook arguments, prompts or responses. Every
+    /// agent's reporter traces while this spyc runs, through a flag file in the
+    /// state dir, so the hook commands stay the same. Off by default (the
+    /// reporter fires every agent turn). Diagnose with
+    /// `grep report-status <state-dir>/mcp.log`.
     #[arg(long)]
     status_trace: bool,
 
@@ -180,10 +181,6 @@ pub fn run() -> Result<()> {
     }));
 
     let cli = Cli::parse();
-
-    // Record `--status-trace` so the hook installer bakes `--status-trace` into
-    // the status-reporter commands it writes (the reporter then logs each fire).
-    mcp::set_status_trace(cli.status_trace);
 
     // Disable the embedded Lua engine if requested (no worker thread spawned).
     lua::set_enabled(!cli.no_lua);
@@ -266,6 +263,9 @@ pub fn run() -> Result<()> {
     if let Some(p) = key_trace::init(cli.key_trace) {
         eprintln!("spyc: key trace → {p}");
     }
+    if cli.status_trace {
+        mcp::start_status_trace();
+    }
     // Before the TUI starts: a stray ^C during a child takeover (less/editor/;)
     // must not bring spyc down with the child.
     install_signal_handlers();
@@ -293,6 +293,7 @@ pub fn run() -> Result<()> {
     // PR8b guarantee that pane children are always SIGTERM-graced on exit).
     let restore = restore_terminal(&mut terminal);
     app.run_teardown();
+    mcp::stop_status_trace();
     if let Some(summary) = &app.exit_summary {
         println!("\u{1f336}\u{fe0f} {summary}");
     }

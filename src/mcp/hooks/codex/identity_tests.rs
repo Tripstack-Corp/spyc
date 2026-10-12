@@ -226,12 +226,12 @@ fn codex_preserves_noncommand_handlers_with_reporter_shaped_text() {
 #[test]
 fn renamed_current_reporter_stays_idempotent_without_changing_command_bytes() {
     let exe = "/opt/custom/reporter";
-    let once = merged_codex_status_hooks_toml(None, exe, false).unwrap();
-    let twice = merged_codex_status_hooks_toml(Some(&once), exe, false).unwrap();
+    let once = merged_codex_status_hooks_toml(None, exe).unwrap();
+    let twice = merged_codex_status_hooks_toml(Some(&once), exe).unwrap();
     assert_eq!(once, twice);
     let root: toml::Value = toml::from_str(&once).unwrap();
     assert_eq!(
         root["hooks"]["Stop"][0]["hooks"][0]["command"].as_str(),
-        Some(reporter_command(exe, "done", false).as_str())
+        Some(reporter_command(exe, "done").as_str())
     );
 }

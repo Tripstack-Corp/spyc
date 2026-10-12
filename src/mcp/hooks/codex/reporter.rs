@@ -24,14 +24,15 @@ pub(super) fn is_owned(command: &str, exe: Option<&str>) -> bool {
     }
     // SPYC-TRAP(codex-hook-ownership-is-a-command): a quoted flag grants no permission to prune.
     CODEX_STATUS_HOOKS.iter().any(|(_, state)| {
-        [false, true].into_iter().any(|trace| {
-            let trace_flag = if trace { " --status-trace" } else { "" };
-            let bare = format!(
-                "{} --report-status {state}{trace_flag}",
-                crate::shell::shell_quote(program)
-            );
-            command == bare || command == reporter_command(program, state, trace)
-        })
+        command == reporter_command(program, state)
+            // Older spycs' forms: no fail-soft tail, or a baked `--status-trace`.
+            || ["", " --status-trace"].into_iter().any(|trace| {
+                let bare = format!(
+                    "{} --report-status {state}{trace}",
+                    crate::shell::shell_quote(program)
+                );
+                command == bare || command == format!("{bare} 2>/dev/null || true")
+            })
     })
 }
 
@@ -48,18 +49,19 @@ mod tests {
             "/opt/custom/reporter",
         ] {
             for (_, state) in CODEX_STATUS_HOOKS {
-                for trace in [false, true] {
-                    let command = reporter_command(exe, state, trace);
-                    assert!(is_owned(&command, Some(exe)), "{command}");
+                let command = reporter_command(exe, state);
+                assert!(is_owned(&command, Some(exe)), "{command}");
+                if Path::new(exe).file_name().unwrap() == "spyc" {
+                    assert!(is_owned(&command, None), "moved reporter: {command}");
+                }
+                for trace in ["", " --status-trace"] {
                     let bare = format!(
-                        "{} --report-status {state}{}",
-                        crate::shell::shell_quote(exe),
-                        if trace { " --status-trace" } else { "" }
+                        "{} --report-status {state}{trace}",
+                        crate::shell::shell_quote(exe)
                     );
                     assert!(is_owned(&bare, Some(exe)), "{bare}");
-                    if Path::new(exe).file_name().unwrap() == "spyc" {
-                        assert!(is_owned(&command, None), "moved reporter: {command}");
-                    }
+                    let tailed = format!("{bare} 2>/dev/null || true");
+                    assert!(is_owned(&tailed, Some(exe)), "{tailed}");
                 }
             }
         }
