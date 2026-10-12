@@ -1418,13 +1418,15 @@ fn typing_into_a_fresh_agent_pane_is_not_eaten_by_the_consent_prompt() {
         std::fs::create_dir_all(&bin).unwrap();
         let got = tmp.path().join("received.txt");
         // Stands in for the agent: reads one line and records what it got, so
-        // the assertion is about DELIVERY, not about the echo.
+        // the assertion is about DELIVERY, not about the echo. Written aside and
+        // renamed: `>` creates the file before `printf` fills it, and the wait
+        // below ends as soon as the file exists.
         let claude = bin.join("claude");
         std::fs::write(
             &claude,
             format!(
-                "#!/usr/bin/env bash\nread -r q\nprintf '%s' \"$q\" > {}\nsleep 5\n",
-                got.display()
+                "#!/usr/bin/env bash\nread -r q\nprintf '%s' \"$q\" > {got}.tmp && mv {got}.tmp {got}\nsleep 5\n",
+                got = got.display()
             ),
         )
         .unwrap();
