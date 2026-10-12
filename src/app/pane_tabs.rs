@@ -200,8 +200,16 @@ impl App {
             .status_hooks()
             .is_some_and(|support| support.installed(cwd));
         let is_agent = crate::agent::detect(cmd).kind() != crate::state::sessions::AgentKind::Other;
-        if crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex {
-            info.codex_session_id = crate::state::codex_transcript::resume_uuid_from_command(cmd);
+        match crate::agent::detect(cmd).kind() {
+            crate::state::sessions::AgentKind::Codex => {
+                info.codex_session_id =
+                    crate::state::codex_transcript::resume_uuid_from_command(cmd);
+            }
+            // A hook report replaces it if the user switches conversation.
+            crate::state::sessions::AgentKind::Agy => {
+                info.live_session_id = crate::agent::resume::agy_conversation_in_command(cmd);
+            }
+            _ => {}
         }
         // Agent panes get SPYC_MCP_SOCK + SPYC_PANE_ID in their env so the
         // `report_status` hook (a child of the agent, inheriting its env) can

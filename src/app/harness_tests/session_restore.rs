@@ -300,3 +300,39 @@ fn a_saved_pane_id_is_taken_back_only_once() {
         assert!(!ids[2].is_empty() && ids[2] != ids[1], "{ids:?}");
     });
 }
+
+/// A hookless agy tab restored onto its conversation keeps it through the next
+/// save: the spawn command names it, so the tab is pinned to it. Otherwise the
+/// second restart would find no id and start agy fresh.
+#[test]
+fn a_restored_agy_tab_keeps_its_conversation_through_the_next_save() {
+    const SID: &str = "33333333-3333-4333-8333-333333333333";
+    let tmp = tempfile::tempdir().unwrap();
+    let state_root = tmp.path().join("state");
+    crate::state::with_state_root(&state_root, || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let home = dir.join("home");
+        let transcript = crate::state::sessions::agy_transcript_path(&home, SID);
+        std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+        std::fs::write(&transcript, "{}\n").unwrap();
+        crate::state::sessions::with_agy_home(&home, || {
+            let command = fake_agent(&dir, "agy").display().to_string();
+            let saved: crate::state::sessions::Session =
+                serde_json::from_value(serde_json::json!({
+                    "id": 992, "name": "AGY_RESTORE", "saved_at": "", "epoch_secs": 0,
+                    "cwd": env!("CARGO_MANIFEST_DIR"),
+                    "tabs": [{"command": command, "label": "agy", "cwd": dir,
+                              "agent_kind": "agy", "agent_session_id": SID}],
+                    "active_tab": 0, "pane_height_pct": 50, "pane_focused": false
+                }))
+                .unwrap();
+
+            let mut app = App::test_app(dir.clone());
+            app.restore_session(&saved);
+            assert_eq!(agent_argv(&dir, "agy"), ["--conversation", SID]);
+            app.save_session();
+            let again = read_saved(&state_root, saved.id);
+            assert_eq!(again.tabs[0].agent_session_id.as_deref(), Some(SID));
+        });
+    });
+}

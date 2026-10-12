@@ -1409,7 +1409,11 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   rollout spyc pinned to that tab while it ran, so a tab still working at
   quit resumes exactly rather than guessing. When no UUID was ever pinned,
   codex falls back to `codex resume --last`, which uses codex's native
-  cwd-filtered picker. `zot` tabs
+  cwd-filtered picker. Agy tabs spawn `agy --conversation <id>`, the
+  conversation its status hook reported or the one the tab was launched
+  on. A tab with none, or one agy never wrote, restores as a fresh `agy`
+  rather than `--continue`, which would resume whichever conversation in
+  the workspace was newest, possibly another tab's. `zot` tabs
   restore with `zot --continue` (zot's resume-most-recent-for-cwd);
   specific-session resume and transcript scrollback are a follow-up
   pending its on-disk session-file format.

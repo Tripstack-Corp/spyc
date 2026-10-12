@@ -169,6 +169,36 @@ pub struct SavedVsplit {
 thread_local! {
     static CLAUDE_DIR_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
         const { std::cell::RefCell::new(None) };
+    static AGY_HOME_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The home agy keeps its state under (`.gemini/antigravity-cli/` in it), for
+/// the save and restore reads. A unit test sees none unless it pins one with
+/// [`with_agy_home`], so no test depends on the developer's own conversations.
+fn agy_home() -> Option<PathBuf> {
+    if let Some(home) = AGY_HOME_OVERRIDE.with(|c| c.borrow().clone()) {
+        return Some(home);
+    }
+    if cfg!(test) {
+        return None;
+    }
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+/// Test-only: run `body` with [`agy_home`] pinned to `home`, unwound when
+/// `body` returns or panics.
+#[cfg(test)]
+pub fn with_agy_home<R>(home: &std::path::Path, body: impl FnOnce() -> R) -> R {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            AGY_HOME_OVERRIDE.with(|c| *c.borrow_mut() = None);
+        }
+    }
+    AGY_HOME_OVERRIDE.with(|c| *c.borrow_mut() = Some(home.to_path_buf()));
+    let _guard = Guard;
+    body()
 }
 
 /// `~/.claude`, where claude keeps its per-process session records and its
@@ -537,10 +567,7 @@ pub fn agy_transcript_path(home: &std::path::Path, conversation_id: &str) -> Pat
 /// guessing, and resumed a stale conversation from weeks earlier instead of the
 /// one the user was actually just in.
 pub fn agy_jsonl_exists(_cwd: &std::path::Path, session_id: &str) -> bool {
-    let Some(home) = std::env::var_os("HOME") else {
-        return false;
-    };
-    agy_conversation_exists_under_home(std::path::Path::new(&home), session_id)
+    agy_home().is_some_and(|home| agy_conversation_exists_under_home(&home, session_id))
 }
 
 /// [`agy_jsonl_exists`] with `home` passed in, so it's testable without
@@ -582,10 +609,10 @@ fn agy_workspace_matches(workspace: &str, target: &str) -> bool {
 ///
 /// Returned sorted by `started_at_secs` descending.
 pub fn find_agy_sessions(cwd: &std::path::Path) -> Vec<AgySessionInfo> {
-    let Some(home) = std::env::var_os("HOME") else {
+    let Some(home) = agy_home() else {
         return Vec::new();
     };
-    let history_path = PathBuf::from(home).join(".gemini/antigravity-cli/history.jsonl");
+    let history_path = home.join(".gemini/antigravity-cli/history.jsonl");
     let Ok(text) = std::fs::read_to_string(&history_path) else {
         return Vec::new();
     };
