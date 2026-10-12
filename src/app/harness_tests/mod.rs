@@ -477,5 +477,6 @@ mod prompt_templates;
 mod second_commander;
 mod send_selection;
 mod vsplit;
+mod why_status;
 
 mod session_restore;

@@ -334,9 +334,11 @@ protocol, no image protocols, no OSC 52 clipboard.
     wrapping and excluding old dialogues above the normal composer.
     Prompt-settling input clears the detected wait.
 
-  **`:why-status`** flashes the active tab's state, its source (self-reported /
-  scrape-fallback / output-timing), seconds since last output and hook setup
-  facts. **`:activity dump`** retains each pane's last received report even
+  **`:why-status`** opens the active tab's diagnosis in the pager, like
+  `:why-git`: its state and source (self-reported / scrape-fallback /
+  output-timing) and seconds since last output first, then the tab's
+  `:activity dump` report, with each hook setup fact on its own line. A
+  tab that isn't an agent says it has no dot. **`:activity dump`** retains each pane's last received report even
   after expiry, distinguishes hook-file presence from startup/restart facts,
   and never treats a self-report or bound MCP connection as proof of hook
   execution or trust.
