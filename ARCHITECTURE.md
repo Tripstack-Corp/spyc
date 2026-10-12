@@ -735,7 +735,7 @@ their own agents (see "The agents' MCP entry names no instance" below). A
 shell pane carries both too, so an agent typed into the shell inherits them.
 An agent started outside spyc has no socket in its env and falls back to
 project-scoped discovery. spyc writes the entry **when an agent pane
-launches** (`open_pane_tab_in` → `ensure_agent_mcp_config`), not at startup —
+launches** (`open_pane_tab_in` → `write_mcp_config`), not at startup —
 so a directory where no agent is ever run doesn't get a stray `.mcp.json` /
 `.codex/` written into it. A shell pane is the exception, because spyc learns
 which agent a shell started only after it has read its config: in a project

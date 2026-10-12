@@ -3,7 +3,7 @@
 //! snapshot the current state into the on-disk context file MCP clients read,
 //! and execute writable MCP commands on the main thread. Originally extracted
 //! verbatim from `app/mod.rs` (the impl-extraction sweep), same child-module
-//! `impl App` pattern. `ensure_agent_mcp_config` / `cleanup_written_mcp_configs`
+//! `impl App` pattern. `write_mcp_config` / `cleanup_written_mcp_configs`
 //! / `refresh_process_stats` / `write_context` / `execute_mcp_command` are
 //! `pub` (called from the pane-launch path / `run_teardown` / `loop_steps`);
 //! `snapshot_context` is `pub(super)` (its own module + reachable by tests).
@@ -28,12 +28,8 @@ impl App {
     /// consented to status hooks, `shell_agents`), instead of writing them into
     /// every directory spyc is ever opened in. A no-op when the MCP socket isn't
     /// running or the command isn't a config-needing agent.
-    pub fn ensure_agent_mcp_config(&mut self, cmd: &str, cwd: &std::path::Path) {
-        self.write_mcp_config(crate::agent::detect(cmd).kind(), cwd, true);
-    }
-
-    /// [`Self::ensure_agent_mcp_config`] for `kind`. `announce` flashes what
-    /// happened; a shell tab provisioning every agent at once stays quiet.
+    /// `announce` flashes what happened; a shell tab provisioning every agent
+    /// at once stays quiet.
     pub(super) fn write_mcp_config(
         &mut self,
         kind: crate::state::sessions::AgentKind,
@@ -917,7 +913,7 @@ mod tests {
         crate::state::with_state_root(&dir.join("state"), || {
             let mut app = App::test_app(dir.clone());
             app.view.mcp_running = true;
-            app.ensure_agent_mcp_config("agy", &dir);
+            app.write_mcp_config(crate::state::sessions::AgentKind::Agy, &dir, true);
             let entry = dir.join(".agents").join("mcp_config.json");
             assert!(entry.exists(), "launching an agent writes it");
 

@@ -213,7 +213,7 @@ fn codex_linked_hooks_worktree_consent_never_grants_root_checkout_consent() {
             "consent names the file it will write"
         );
         crate::state::hook_consent::set_consent(&main, false);
-        app.maybe_preinstall_startup_hooks(&command, &linked);
+        app.maybe_preinstall_startup_hooks(crate::agent::detect(&command).kind(), &linked);
         assert!(!main.join(".codex/config.toml").exists());
     });
 }

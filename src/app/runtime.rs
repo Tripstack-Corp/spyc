@@ -100,7 +100,7 @@ pub(super) struct Runtime {
     pub(super) lua_events: lua_events::LuaEventState,
     /// Directories where we wrote an MCP client config we own (`.mcp.json` /
     /// `.codex/config.toml`) when launching an agent pane. Recorded by
-    /// `ensure_agent_mcp_config`; `cleanup_written_mcp_configs` removes our
+    /// `write_mcp_config`; `cleanup_written_mcp_configs` removes our
     /// entry from each on teardown so a dead socket isn't left referenced.
     pub(super) mcp_config_dirs: Vec<PathBuf>,
     /// Per-agent reporter leases, separate from MCP entry cleanup authority.

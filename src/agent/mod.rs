@@ -1338,6 +1338,64 @@ mod tests {
         assert!(!codex_may_use_daemon(&argv("codex --no-daemon -m o3")));
     }
 
+    fn saved(
+        command: &str,
+        kind: &str,
+        hint: Option<&str>,
+        sid: Option<&str>,
+    ) -> crate::state::sessions::SavedTab {
+        serde_json::from_value(serde_json::json!({
+            "command": command, "label": "t", "cwd": "/tmp/p",
+            "agent_kind": kind, "agent_session_id": sid, "agent_hint": hint,
+            "codex_home": "/tmp/codex-home",
+        }))
+        .unwrap()
+    }
+
+    /// A wrapper (#610) restores exactly as written: nothing appended. Claude
+    /// still resumes its conversation, which it does by typing, not by a flag.
+    #[test]
+    fn a_wrapper_restores_verbatim_and_only_claude_resumes() {
+        const SID: &str = "11111111-1111-4111-8111-111111111111";
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = Path::new("/tmp/p");
+        let project = tmp
+            .path()
+            .join("projects")
+            .join(crate::state::sessions::project_slug(cwd));
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join(format!("{SID}.jsonl")), "{}\n").unwrap();
+        crate::state::sessions::with_claude_dir(tmp.path(), || {
+            let plan = resume::reconstruct_saved_tab(
+                &saved("./claude-dev.sh -c", "claude", Some("claude"), Some(SID)),
+                cwd,
+            );
+            assert_eq!(plan.command, "./claude-dev.sh -c");
+            assert!(
+                matches!(plan.resume, ResumeAction::ClaudeStdin { ref session_id } if session_id == SID)
+            );
+
+            let plan = resume::reconstruct_saved_tab(
+                &saved("npx @openai/codex", "codex", Some("codex"), Some(SID)),
+                cwd,
+            );
+            assert_eq!(plan.command, "npx @openai/codex");
+            assert!(matches!(plan.resume, ResumeAction::None));
+        });
+    }
+
+    /// A hint that names the command's own agent changes nothing: the command
+    /// is spyc's to rebuild, as it is without the hint.
+    #[test]
+    fn a_hint_matching_the_command_restores_as_before() {
+        const SID: &str = "11111111-1111-4111-8111-111111111111";
+        let plan = resume::reconstruct_saved_tab(
+            &saved("codex -m o3", "codex", Some("codex"), Some(SID)),
+            Path::new("/tmp/p"),
+        );
+        assert_eq!(plan.command, format!("codex -m o3 resume {SID}"));
+    }
+
     /// Agy: `--conversation <sid>` for a conversation agy wrote. One it never
     /// wrote, or no id at all, starts fresh: `--continue` would resume the
     /// workspace's newest conversation, which another tab may own (#589).
@@ -1510,6 +1568,7 @@ mod tests {
             codex_home_unresolved: false,
             claim_owner: String::new(),
             pane_id: String::new(),
+            agent_hint: None,
         };
         // `effective_kind` upgrades the legacy Other → Claude.
         assert_eq!(tab.effective_kind(), AgentKind::Claude);
@@ -1540,6 +1599,7 @@ mod tests {
             codex_home_unresolved: false,
             claim_owner: String::new(),
             pane_id: String::new(),
+            agent_hint: None,
         };
         assert_eq!(tab.effective_kind(), AgentKind::Other);
         let plan = profile_for(tab.effective_kind()).reconstruct_restore(

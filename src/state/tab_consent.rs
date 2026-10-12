@@ -31,6 +31,11 @@ pub enum Consent {
 struct Identity {
     command: String,
     cwd: Option<PathBuf>,
+    /// Which agent the tab is treated as: it decides the hooks and MCP config
+    /// spyc writes. Absent in records from before the key, which still match
+    /// tabs without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent: Option<crate::state::sessions::AgentKind>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -45,6 +50,7 @@ fn identity(tabs: &[PaneTabConfig]) -> Vec<Identity> {
         .map(|t| Identity {
             command: t.command.clone(),
             cwd: t.cwd.clone(),
+            agent: t.agent,
         })
         .collect()
 }
@@ -130,6 +136,7 @@ mod tests {
             command: command.to_string(),
             cwd: cwd.map(PathBuf::from),
             label: label.map(str::to_string),
+            agent: None,
         }
     }
 
@@ -186,6 +193,45 @@ mod tests {
                     "{changed:?} ran under an approval of {approved:?}"
                 );
             }
+        });
+    }
+
+    /// The agent hint decides which hooks and configs spyc writes for a tab,
+    /// so adding or changing it asks again. A record from before the key still
+    /// matches tabs without one.
+    #[test]
+    fn an_agent_hint_is_part_of_what_was_approved() {
+        use crate::state::sessions::AgentKind;
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let rc = Path::new("/repo/.spycrc.toml");
+            let hinted = |agent| PaneTabConfig {
+                agent,
+                ..tab("npx @openai/codex", None, None)
+            };
+            set_consent(rc, &[hinted(None)], true);
+            assert_eq!(
+                consent_for(rc, &[hinted(Some(AgentKind::Codex))]),
+                Consent::Unasked
+            );
+            set_consent(rc, &[hinted(Some(AgentKind::Codex))], true);
+            assert_eq!(
+                consent_for(rc, &[hinted(Some(AgentKind::Claude))]),
+                Consent::Unasked
+            );
+
+            std::fs::write(
+                tmp.path().join("tab_consent.json"),
+                r#"{"/repo/old/.spycrc.toml":{"allow":true,"tabs":[{"command":"claude","cwd":null}]}}"#,
+            )
+            .unwrap();
+            assert_eq!(
+                consent_for(
+                    Path::new("/repo/old/.spycrc.toml"),
+                    &[tab("claude", None, None)]
+                ),
+                Consent::Allowed
+            );
         });
     }
 
