@@ -181,7 +181,7 @@ zstd = "0.14"
 # 14-feature default set pulls a C `bzip2` binding plus lzma/xz/ppmd/zopfli/aes.
 # We take deflate through the `zlib-rs` already in the tree (gix) and zstd
 # through the crate above, so no new compiled-C dependency enters the build.
-zip = { version = "8", default-features = false, features = [
+zip = { version = "9", default-features = false, features = [
     "deflate-flate2-zlib-rs",
     "zstd",
 ] }
