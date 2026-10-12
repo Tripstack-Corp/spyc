@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use super::{Env, JsonPart, Part, Status, file, runs_spyc};
+use super::{Env, FilePart, Part, Status, file, json_object, runs_spyc};
 
 /// How long a `claude mcp` command may take before spyc gives up on it.
 const CLI_DEADLINE: Duration = Duration::from_secs(20);
@@ -42,15 +42,15 @@ fn hooks_blocked(env: &Env) -> Option<String> {
 }
 
 /// Run `f` over the hooks part.
-fn with_hooks<R>(env: &Env, f: impl FnOnce(&JsonPart) -> R) -> R {
+fn with_hooks<R>(env: &Env, f: impl FnOnce(&FilePart) -> R) -> R {
     let with = |existing: Option<&str>| {
         crate::mcp::merged_status_hooks_json(existing, &env.spyc)
             .ok_or_else(|| "refusing to overwrite — not a JSON object".to_string())
     };
-    f(&JsonPart {
+    f(&FilePart {
         path: config_dir(env).join("settings.json"),
         with: &with,
-        without: crate::mcp::claude_hooks_without_spyc,
+        without: &|text| json_object(crate::mcp::claude_hooks_without_spyc(text)),
         blocked: hooks_blocked(env),
     })
 }
@@ -182,6 +182,7 @@ pub(super) fn status(env: &Env) -> Status {
         hooks_file: hooks.path.clone(),
         mcp: mcp_status(env),
         mcp_file: claude_json(env),
+        notes: Vec::new(),
     })
 }
 
@@ -191,6 +192,7 @@ pub(super) fn install(env: &Env) -> Status {
         hooks_file: hooks.path.clone(),
         mcp: mcp_install(env),
         mcp_file: claude_json(env),
+        notes: Vec::new(),
     })
 }
 
@@ -200,5 +202,6 @@ pub(super) fn remove(env: &Env) -> Status {
         hooks_file: hooks.path.clone(),
         mcp: mcp_remove(env),
         mcp_file: claude_json(env),
+        notes: Vec::new(),
     })
 }

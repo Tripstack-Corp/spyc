@@ -492,6 +492,13 @@ CLI execution or fresh onboarding acceptance.
 
 ### Duplicate Codex hook sources
 
+codex runs the hooks of every layer it loads, user and project alike, without
+merging duplicates. After `spyc --install-agents=codex` puts spyc's hooks in
+`$CODEX_HOME/hooks.json`, a project `.codex/config.toml` that an older spyc
+wrote them into reports each event a second time; `:why-status` names the
+project copy. Those user-scope hooks need one approval in codex's `/hooks`, and
+then apply in every project, trusted or not.
+
 Codex loads `.codex/hooks.json` alongside inline hooks in `.codex/config.toml`.
 If both contain spyc reporters, each matching event can report twice. At
 installation, spyc migrates its `--report-status` handlers out of the JSON file

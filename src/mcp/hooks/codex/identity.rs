@@ -20,7 +20,7 @@ pub(super) fn toml_owned(handler: &toml::Value, exe: Option<&str>) -> bool {
         .is_some_and(|command| reporter::is_owned(command, exe))
 }
 
-fn json_owned(handler: &serde_json::Value, exe: Option<&str>) -> bool {
+pub(super) fn json_owned(handler: &serde_json::Value, exe: Option<&str>) -> bool {
     if handler
         .get("type")
         .is_some_and(|kind| kind.as_str() != Some("command"))

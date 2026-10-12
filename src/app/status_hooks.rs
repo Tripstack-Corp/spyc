@@ -54,7 +54,20 @@ fn user_scope_facts(info: &crate::pane::TabInfo, kind: AgentKind) -> Vec<String>
     if !info.agent().status_hooks().is_some_and(|s| s.live_reload) && !info.status_hooks_at_spawn {
         facts.push("not present at launch".to_string());
     }
-    facts.push("hook execution unverified".to_string());
+    if kind == AgentKind::Codex {
+        // codex runs every layer's hooks, so a project copy reports as well.
+        if let Some(support) = info.agent().status_hooks()
+            && support.installed(&info.cwd)
+        {
+            facts.push(format!(
+                "a project copy in {} runs too: reports may arrive twice",
+                support.config_label
+            ));
+        }
+        facts.push("execution/trust unverified: review /hooks".to_string());
+    } else {
+        facts.push("hook execution unverified".to_string());
+    }
     facts
 }
 

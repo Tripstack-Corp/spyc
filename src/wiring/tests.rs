@@ -34,6 +34,8 @@ impl Sandbox {
         std::fs::write(&cli, FAKE_CLAUDE).unwrap();
         std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
         let env = Env {
+            codex_home: home.join(".codex"),
+            codex_mcp: true,
             home,
             claude_config_dir: None,
             managed_mcp: vec![root.join("managed/managed-mcp.json")],
@@ -122,19 +124,23 @@ fn the_users_key_order_survives() {
 #[test]
 fn a_second_install_writes_nothing() {
     let s = Sandbox::new();
-    install(AgentKind::Claude, &s.env).unwrap();
-    install(AgentKind::Agy, &s.env).unwrap();
+    for kind in super::KINDS {
+        install(kind, &s.env).unwrap();
+    }
     let files = [
         s.home(".claude/settings.json"),
         s.home(".gemini/config/hooks.json"),
         s.home(".gemini/config/mcp_config.json"),
+        s.home(".codex/hooks.json"),
+        s.home(".codex/config.toml"),
     ];
     let inodes: Vec<u64> = files
         .iter()
         .map(|f| std::fs::metadata(f).unwrap().ino())
         .collect();
-    install(AgentKind::Claude, &s.env).unwrap();
-    install(AgentKind::Agy, &s.env).unwrap();
+    for kind in super::KINDS {
+        install(kind, &s.env).unwrap();
+    }
     for (file, ino) in files.iter().zip(inodes) {
         assert_eq!(
             std::fs::metadata(file).unwrap().ino(),
@@ -201,13 +207,22 @@ fn an_unparseable_file_is_refused_byte_for_byte() {
         s.home(".claude/settings.json"),
         s.home(".gemini/config/hooks.json"),
         s.home(".gemini/config/mcp_config.json"),
+        s.home(".codex/hooks.json"),
+        s.home(".codex/config.toml"),
     ];
     for f in &files {
         s.put(f, broken);
     }
     let claude = install(AgentKind::Claude, &s.env).unwrap();
     let agy = install(AgentKind::Agy, &s.env).unwrap();
-    for part in [&claude.hooks, &agy.hooks, &agy.mcp] {
+    let codex = install(AgentKind::Codex, &s.env).unwrap();
+    for part in [
+        &claude.hooks,
+        &agy.hooks,
+        &agy.mcp,
+        &codex.hooks,
+        &codex.mcp,
+    ] {
         assert!(matches!(part, Part::Refused(_)), "{part:?}");
     }
     for f in &files {
@@ -396,11 +411,295 @@ fn an_empty_agy_mcp_config_is_filled_in() {
 }
 
 #[test]
-fn only_claude_and_agy_are_wired_here() {
+fn agents_spyc_has_no_wiring_for_are_left_alone() {
     let s = Sandbox::new();
-    for kind in [AgentKind::Codex, AgentKind::Zot, AgentKind::Other] {
+    for kind in [AgentKind::Zot, AgentKind::Other] {
         assert!(status(kind, &s.env).is_none());
         assert!(install(kind, &s.env).is_none());
     }
+}
+
+/// A codex `config.toml` like a real one: the user's comments, codex's own trust
+/// records, and another MCP server.
+const CODEX_CONFIG: &str = r#"# my codex settings
+model = "gpt-5" # the default
+approval_policy = "on-request"
+
+[projects."/Users/me/src/app"]
+trust_level = "trusted"
+
+# another server
+[mcp_servers.node_repl]
+command = "node"
+args = ["repl.js"]
+
+[mcp_servers.node_repl.env]
+NODE_ENV = "development"
+
+[hooks.state."/Users/me/.codex/hooks.json:stop:0:0"]
+trusted_hash = "abc123"
+"#;
+
+/// The MCP entry is spliced in, beside the other servers: every line the user
+/// wrote survives in order, and removing spyc's table gives the file back.
+#[test]
+fn codex_config_keeps_every_line_the_user_wrote() {
+    let s = Sandbox::new();
+    let config = s.home(".codex/config.toml");
+    s.put(&config, CODEX_CONFIG);
+    let st = install(AgentKind::Codex, &s.env).unwrap();
+    assert_eq!(st.mcp, Part::Current, "{st:?}");
+    let text = std::fs::read_to_string(&config).unwrap();
+    let mut lines = text.lines();
+    for line in CODEX_CONFIG.lines() {
+        assert!(lines.any(|l| l == line), "lost or moved {line:?}:\n{text}");
+    }
+    let v: toml::Value = toml::from_str(&text).unwrap();
+    assert_eq!(
+        v["mcp_servers"]["spyc"]["command"].as_str(),
+        Some("spyc"),
+        "{text}"
+    );
+    assert_eq!(
+        v["mcp_servers"]["spyc"]["env_vars"],
+        toml::Value::try_from(["SPYC_MCP_SOCK", "SPYC_PANE_ID"]).unwrap()
+    );
+
+    assert_eq!(remove(AgentKind::Codex, &s.env).unwrap().mcp, Part::Absent);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), CODEX_CONFIG);
+}
+
+/// Only the keys spyc needs change; the user's own settings for the server
+/// stay, and an older spyc's path is replaced by the bare name.
+#[test]
+fn codex_entry_update_touches_only_what_spyc_needs() {
+    let s = Sandbox::new();
+    let config = s.home(".codex/config.toml");
+    s.put(
+        &config,
+        r#"[mcp_servers.spyc]
+command = "/old/bin/spyc"
+args = ["--mcp"]
+startup_timeout_sec = 30 # slow disk
+env_vars = ["FOO"]
+"#,
+    );
+    assert_eq!(
+        status(AgentKind::Codex, &s.env).unwrap().mcp,
+        Part::Outdated
+    );
+    assert_eq!(
+        install(AgentKind::Codex, &s.env).unwrap().mcp,
+        Part::Current
+    );
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert!(
+        text.contains("startup_timeout_sec = 30 # slow disk"),
+        "{text}"
+    );
+    let v: toml::Value = toml::from_str(&text).unwrap();
+    assert_eq!(v["mcp_servers"]["spyc"]["command"].as_str(), Some("spyc"));
+    assert_eq!(
+        v["mcp_servers"]["spyc"]["env_vars"],
+        toml::Value::try_from(["FOO", "SPYC_MCP_SOCK", "SPYC_PANE_ID"]).unwrap()
+    );
+}
+
+#[test]
+fn an_inline_spyc_table_is_edited_where_it_is() {
+    let s = Sandbox::new();
+    let config = s.home(".codex/config.toml");
+    s.put(
+        &config,
+        r#"[mcp_servers]
+spyc = { command = "/old/spyc", args = ["--mcp"] }
+"#,
+    );
+    assert_eq!(
+        install(AgentKind::Codex, &s.env).unwrap().mcp,
+        Part::Current
+    );
+    let text = std::fs::read_to_string(&config).unwrap();
+    let v: toml::Value = toml::from_str(&text).expect("still one valid table");
+    assert_eq!(
+        v["mcp_servers"]["spyc"]["command"].as_str(),
+        Some("spyc"),
+        "{text}"
+    );
+}
+
+/// `[pane] codex_mcp = false` keeps spyc's entry out of codex: an install takes
+/// it out and leaves everything else.
+#[test]
+fn codex_mcp_off_takes_out_only_spyc() {
+    let mut s = Sandbox::new();
+    let config = s.home(".codex/config.toml");
+    s.put(&config, CODEX_CONFIG);
+    install(AgentKind::Codex, &s.env).unwrap();
+    s.env.codex_mcp = false;
+    let st = install(AgentKind::Codex, &s.env).unwrap();
+    assert_eq!((&st.hooks, &st.mcp), (&Part::Current, &Part::Off));
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), CODEX_CONFIG);
+    assert_eq!(status(AgentKind::Codex, &s.env).unwrap().mcp, Part::Off);
+}
+
+#[test]
+fn a_foreign_codex_server_named_spyc_is_never_touched() {
+    let s = Sandbox::new();
+    let config = s.home(".codex/config.toml");
+    let foreign = r#"[mcp_servers.spyc]
+command = "/opt/other/thing"
+"#;
+    s.put(&config, foreign);
+    for st in [
+        install(AgentKind::Codex, &s.env).unwrap(),
+        remove(AgentKind::Codex, &s.env).unwrap(),
+    ] {
+        assert!(matches!(st.mcp, Part::Blocked(_)), "{st:?}");
+    }
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), foreign);
+}
+
+fn stop_commands(path: &Path) -> Vec<String> {
+    json(path)["hooks"]["Stop"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|g| g["hooks"][0]["command"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// A fresh `hooks.json` holds only what codex's `HooksFile` accepts, with
+/// spyc's group first under each event.
+#[test]
+fn a_fresh_codex_hooks_file_is_one_codex_reads() {
+    let s = Sandbox::new();
+    let st = install(AgentKind::Codex, &s.env).unwrap();
+    assert_eq!(st.hooks, Part::Current);
+    assert_eq!(st.hooks_file, s.home(".codex/hooks.json"));
+    let v = json(&st.hooks_file);
+    assert_eq!(v.as_object().unwrap().keys().collect::<Vec<_>>(), ["hooks"]);
+    assert_eq!(
+        v["hooks"]["PreToolUse"][0]["matcher"],
+        "^request_user_input$"
+    );
+    assert_eq!(
+        stop_commands(&st.hooks_file),
+        ["spyc --report-status done 2>/dev/null || true"]
+    );
+    assert!(
+        st.notes.iter().any(|n| n.contains("/hooks")),
+        "{:?}",
+        st.notes
+    );
+}
+
+/// codex keys trust in a hook on its position, so nothing ever moves: spyc's
+/// handler is rewritten where it stands, and a removal that would shift the
+/// user's hook is refused with the file untouched.
+#[test]
+fn no_codex_hook_ever_moves() {
+    let mut s = Sandbox::new();
+    let hooks = s.home(".codex/hooks.json");
+    let user = |cmd: &str| json!({"hooks": [{"type": "command", "command": cmd}]});
+    s.put(
+        &hooks,
+        &json!({"description": "mine", "hooks": {"Stop": [user("./a.sh")]}}).to_string(),
+    );
+    install(AgentKind::Codex, &s.env).unwrap();
+    let ours = "spyc --report-status done 2>/dev/null || true";
+    assert_eq!(stop_commands(&hooks), ["./a.sh", ours]);
+    assert_eq!(json(&hooks)["description"], "mine");
+
+    s.env.spyc = "/new/bin/spyc".to_string();
+    install(AgentKind::Codex, &s.env).unwrap();
+    assert_eq!(
+        stop_commands(&hooks),
+        [
+            "./a.sh",
+            "/new/bin/spyc --report-status done 2>/dev/null || true"
+        ]
+    );
+
+    let mut v = json(&hooks);
+    v["hooks"]["Stop"]
+        .as_array_mut()
+        .unwrap()
+        .push(user("./b.sh"));
+    s.put(&hooks, &serde_json::to_string_pretty(&v).unwrap());
+    install(AgentKind::Codex, &s.env).unwrap();
+    assert_eq!(stop_commands(&hooks)[2], "./b.sh");
+
+    let before = std::fs::read_to_string(&hooks).unwrap();
+    let st = remove(AgentKind::Codex, &s.env).unwrap();
+    assert!(matches!(st.hooks, Part::Refused(_)), "{st:?}");
+    assert_eq!(std::fs::read_to_string(&hooks).unwrap(), before);
+}
+
+#[test]
+fn removing_codex_hooks_after_the_users_keeps_theirs() {
+    let s = Sandbox::new();
+    let hooks = s.home(".codex/hooks.json");
+    s.put(
+        &hooks,
+        &json!({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "./a.sh"}]}]}})
+            .to_string(),
+    );
+    install(AgentKind::Codex, &s.env).unwrap();
+    assert_eq!(
+        remove(AgentKind::Codex, &s.env).unwrap().hooks,
+        Part::Absent
+    );
+    assert_eq!(stop_commands(&hooks), ["./a.sh"]);
+    assert_eq!(
+        json(&hooks)["hooks"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        ["Stop"]
+    );
+}
+
+/// Hooks the user keeps in `config.toml` are never touched, and get a note,
+/// since codex warns about two representations in one layer. Its own
+/// `[hooks.state]` trust records aren't hooks.
+#[test]
+fn inline_codex_hooks_get_a_note_and_are_left_alone() {
+    let s = Sandbox::new();
+    let config = s.home(".codex/config.toml");
+    s.put(&config, CODEX_CONFIG);
+    let st = install(AgentKind::Codex, &s.env).unwrap();
+    assert!(
+        !st.notes.iter().any(|n| n.contains("declares hooks")),
+        "{:?}",
+        st.notes
+    );
+
+    let inline = r#"[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "./mine.sh"
+"#;
+    s.put(&config, inline);
+    let st = install(AgentKind::Codex, &s.env).unwrap();
+    assert!(
+        st.notes.iter().any(|n| n.contains("declares hooks")),
+        "{:?}",
+        st.notes
+    );
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert!(text.starts_with(inline), "{text}");
+}
+
+#[test]
+fn codex_home_moves_both_files() {
+    let mut s = Sandbox::new();
+    let home = s.root.join("work-codex");
+    s.env.codex_home = home.clone();
+    let st = install(AgentKind::Codex, &s.env).unwrap();
+    assert_eq!(st.hooks_file, home.join("hooks.json"));
+    assert_eq!(st.mcp_file, home.join("config.toml"));
+    assert_eq!((&st.hooks, &st.mcp), (&Part::Current, &Part::Current));
     assert!(!s.home(".codex").exists());
 }

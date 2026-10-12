@@ -1,5 +1,8 @@
 mod identity;
 mod reporter;
+mod user;
+
+pub use user::{codex_hooks_json_with_spyc, codex_hooks_json_without_spyc};
 
 use identity::{inline_prune_refused, prune_toml_groups};
 
