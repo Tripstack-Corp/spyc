@@ -567,6 +567,15 @@ clean: ## Remove build artifacts
 	cargo clean
 	rm -rf $(DIST_DIR)
 
+# Safe on a shared target dir, where `cargo clean` would wipe every worktree's
+# build: this drops only output no build will read again (see the script).
+PRUNE_DAYS ?= 3
+PRUNE_NICE = $(if $(shell command -v taskpolicy),taskpolicy -d utility,nice -n 10)
+
+.PHONY: prune-target
+prune-target: ## Drop stale worktree builds + unreferenced debug objects from the target dir (PRUNE_DAYS=3, DRY_RUN=1 to preview)
+	@$(PRUNE_NICE) python3 scripts/prune-cargo-target.py --days $(PRUNE_DAYS) $(if $(DRY_RUN),--dry-run)
+
 # ---------- Help -------------------------------------------------------------
 
 .PHONY: help
