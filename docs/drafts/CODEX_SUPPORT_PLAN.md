@@ -771,15 +771,22 @@ session data yields a diagnostic and fallback, not another pane's history.
 
 ### A5. Bring images into the existing gallery pipeline
 
-**Local candidate:** `feat/codex-image-gallery` adds verified Ctrl+V and
+**Implementation:** [PR #617](https://github.com/Tripstack-Corp/spyc/pull/617) adds
+verified Ctrl+V and
 Ctrl+Alt+V capture, current and legacy user-image readers, and parent-rollout
 provenance through fork branch offsets. It uses A4's home/session resolver and the
 existing pending ring and display worker. Late captures after accepted Enter or
 tab closure are rejected. Rollout resolution runs on the image worker with a
 captured pane query; request epochs reject results from retired gallery popups.
 Encoded bytes, record reads, index size and raster decoding are bounded
-independently. Local clipboard/graphics acceptance is pending; the full gate is
-required before shipping.
+independently. The maintainer requested shipping on 2026-10-12 after the local
+build handoff. Integration preserves the current `TabInfo::agent()` and
+`agent_epoch_secs()` seam, including foreground agents in shell tabs. There are
+22 new regressions, with eleven deliberate guard mutations caught and restored;
+the integration witness failed before restoring the shared agent lookup. Full
+local gates and Linux lint pass. Fresh current-head builds are supplied for
+review and re-testing; native clipboard/graphics smoke is not inferred from
+fixture coverage.
 
 Verify Codex's actual paste key on supported platforms before adding the profile
 override. Add bounded decoding of current and legacy image inputs, including
