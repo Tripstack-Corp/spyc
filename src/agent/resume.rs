@@ -104,7 +104,9 @@ pub fn agy_conversation_in_command(cmd: &str) -> Option<String> {
     None
 }
 
-/// Strip Antigravity's `--conversation <UUID>`, `-c <UUID>`, and `--continue` flags from a command line.
+/// Strip Antigravity's resume selectors from a command line: `--conversation
+/// <UUID>` and `--continue`, whose alias `-c` takes no value, so the argument
+/// after it stays. Each also has its `--flag=value` spelling.
 pub fn command_without_agy_resume(cmd: &str) -> String {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     let mut out: Vec<&str> = Vec::with_capacity(parts.len());
@@ -114,17 +116,17 @@ pub fn command_without_agy_resume(cmd: &str) -> String {
             skip_next = false;
             continue;
         }
-        if p == "--conversation" || p == "-c" {
+        if p == "--conversation" {
             skip_next = true;
             continue;
         }
-        if p == "--continue" {
+        if p == "--continue" || p == "-c" {
             continue;
         }
-        if let Some(_value) = p.strip_prefix("--conversation=") {
-            continue;
-        }
-        if let Some(_value) = p.strip_prefix("-c=") {
+        if ["--conversation=", "--continue=", "-c="]
+            .iter()
+            .any(|flag| p.starts_with(flag))
+        {
             continue;
         }
         out.push(p);
@@ -320,11 +322,17 @@ mod agy_helpers_tests {
         );
     }
 
+    /// `-c` is agy's alias for `--continue` and takes no value. Reading one
+    /// swallowed whatever came next: `agy -c --mode plan` saved as `agy plan`.
     #[test]
-    fn strips_c_with_value() {
+    fn c_takes_no_value_so_the_next_argument_survives() {
         assert_eq!(
-            command_without_agy_resume("agy -c 11111111-1111-1111-1111-111111111111"),
-            "agy"
+            command_without_agy_resume("agy -c --mode plan"),
+            "agy --mode plan"
+        );
+        assert_eq!(
+            command_without_agy_resume("agy --mode plan -c"),
+            "agy --mode plan"
         );
     }
 
@@ -339,9 +347,10 @@ mod agy_helpers_tests {
     #[test]
     fn strips_c_equals_value() {
         assert_eq!(
-            command_without_agy_resume("agy -c=11111111-1111-1111-1111-111111111111"),
-            "agy"
+            command_without_agy_resume("agy -c=true --mode plan"),
+            "agy --mode plan"
         );
+        assert_eq!(command_without_agy_resume("agy --continue=true"), "agy");
     }
 
     /// The id a tab spawned on a conversation is pinned to; `--continue`
