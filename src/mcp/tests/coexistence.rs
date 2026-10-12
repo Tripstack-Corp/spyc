@@ -93,6 +93,38 @@ fn live_sibling(sock: &Path) -> Receiver<String> {
     rx
 }
 
+/// Write `agent`'s entry over whatever `dir` holds, with the codec spyc's
+/// user-scope wiring uses for it: claude's and agy's JSON shape, and codex's
+/// `config.toml` splice.
+fn write_entry(agent: Agent, dir: &Path) {
+    match agent {
+        Agent::Claude | Agent::Agy => {
+            let file = match agent {
+                Agent::Claude => dir.join(".mcp.json"),
+                _ => dir.join(".agents/mcp_config.json"),
+            };
+            let existing = std::fs::read_to_string(&file).ok();
+            let text = crate::mcp::mcp_json_with_spyc(existing.as_deref(), "spyc").unwrap();
+            std::fs::write(file, text).unwrap();
+        }
+        Agent::Codex => {
+            let env = crate::wiring::Env {
+                home: dir.to_path_buf(),
+                claude_config_dir: None,
+                codex_home: dir.join(".codex"),
+                codex_mcp: true,
+                managed_mcp: Vec::new(),
+                managed_settings: Vec::new(),
+                claude_cli: None,
+                spyc: "spyc".to_string(),
+            };
+            let st = crate::wiring::install(crate::state::sessions::AgentKind::Codex, &env)
+                .expect("codex is wired");
+            assert_eq!(st.mcp, crate::wiring::Part::Current, "{st:?}");
+        }
+    }
+}
+
 /// Sibling `a` configured the directory and has agents there. This spyc (`b`)
 /// then launches an agent of each kind in the same directory. Afterwards an
 /// agent `a` launches must still reach `a`, one `b` launches must reach `b`,
@@ -115,17 +147,7 @@ fn two_spycs_in_one_directory_each_keep_their_own_agents() {
 
         for agent in [Agent::Claude, Agent::Codex, Agent::Agy] {
             pinned_entry(agent, &dir, &a);
-            match agent {
-                // Past `ensure_mcp_json`'s enterprise gate, which reads the
-                // host's managed config and would make this host-dependent.
-                Agent::Claude => {
-                    super::super::config::ensure_spyc_in_mcp_json(&dir.join(".mcp.json"))
-                        .map(|_| ())
-                }
-                Agent::Codex => ensure_codex_config_toml(&dir).map(|_| ()),
-                Agent::Agy => ensure_agy_mcp_config(&dir).map(|_| ()),
-            }
-            .unwrap();
+            write_entry(agent, &dir);
 
             let written = entry(agent, &dir);
             assert_eq!(

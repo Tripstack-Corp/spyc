@@ -32,6 +32,14 @@ impl Config {
         Self::load_layered(user.as_deref(), &cwd.join(".spycrc.toml"))
     }
 
+    /// `home`'s `.spycrc.toml` alone, for a setting whose effect reaches every
+    /// project, which a project's rc must not decide.
+    pub fn load_home(home: &Path) -> anyhow::Result<Self> {
+        let mut cfg = Self::default();
+        cfg.load_one(&home.join(".spycrc.toml"), Trust::Trusted)?;
+        Ok(cfg)
+    }
+
     /// `load_default`'s trust assignment, over explicit paths, so tests
     /// exercise the production layering without reading the real `$HOME`.
     pub(super) fn load_layered(user: Option<&Path>, project: &Path) -> anyhow::Result<Self> {

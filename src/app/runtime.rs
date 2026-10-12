@@ -9,8 +9,6 @@
 //! had as private items of `app`: the whole `app` subtree, which is what the
 //! handler, effect and loop-step modules read them through.
 
-use std::path::PathBuf;
-
 use super::{
     AgentStatusCache, BackgroundTasks, Effect, FindPicker, Message, PendingCapture, archive_ops,
     file_ops, git_view_session, graveyard_ops, image_ops, inventory_ops, lua, lua_events,
@@ -68,10 +66,6 @@ pub(super) struct Runtime {
     /// user can act in — switching tabs mid-window must abandon the snapshot
     /// rather than mount a different pane's history.
     pub(super) pane_scroll_settle: Option<(std::time::Instant, usize)>,
-    /// When the agent status-hook drift check may next run
-    /// (`settle_status_hooks`). A throttle, not a deadline — nothing wakes the
-    /// loop for it, so idle stays 0 dps. `None` = due now (startup).
-    pub(super) hook_recheck_at: Option<std::time::Instant>,
     /// P2 `wait_for_scope_clear`: parked MCP waiters, each holding the one-shot
     /// reply sender the loop fires (from `settle_scope_waiters`) once its scope
     /// clears or its deadline passes. In `Runtime` — it owns OS handles (the
@@ -98,13 +92,6 @@ pub(super) struct Runtime {
     /// own request re-triggers the same event from looping. Rebuilt from
     /// scratch on `:lua off` (the registries go too).
     pub(super) lua_events: lua_events::LuaEventState,
-    /// Directories where we wrote an MCP client config we own (`.mcp.json` /
-    /// `.codex/config.toml`) when launching an agent pane. Recorded by
-    /// `write_mcp_config`; `cleanup_written_mcp_configs` removes our
-    /// entry from each on teardown so a dead socket isn't left referenced.
-    pub(super) mcp_config_dirs: Vec<PathBuf>,
-    /// Per-agent reporter leases, separate from MCP entry cleanup authority.
-    pub(super) status_hook_claims: Vec<crate::state::dir_owners::hooks::HookClaim>,
     /// Bottom pane tabs (each owns a `PtyHost`).
     pub(super) pane_tabs: Option<PaneTabs>,
     /// Top-area overlay subprocess (`V`/`D`/`;`) — a `PtyHost`. The LEFT
@@ -173,6 +160,10 @@ pub(super) struct Runtime {
     /// concurrent ops never clobber each other — no in-flight guard needed).
     pub(super) graveyard_results:
         std::sync::Arc<std::sync::Mutex<Vec<graveyard_ops::GraveyardOutcome>>>,
+    /// Where an agent-wiring worker (`App::start_wiring`) lands its outcome
+    /// before waking the loop with `Wake::Wiring`; `apply_wiring_outcomes`
+    /// drains it every pre-recv scan.
+    pub(super) wiring_results: super::wiring::WiringResults,
     /// Landing slot for every off-thread image render — a mermaid diagram
     /// (`Effect::RenderMermaid`) and an image file (`Effect::OpenImage`) share
     /// it. The worker pushes an `ImageOutcome` here and wakes with

@@ -2,19 +2,9 @@
 
 use anyhow::{Result, bail};
 
-use super::{Env, KINDS, Part, Status, install, remove};
+use super::{Env, KINDS, Part, Status, describe, install, name, named, remove};
 use crate::state::sessions::AgentKind;
 use crate::state::wiring_consent;
-
-const fn name(kind: AgentKind) -> &'static str {
-    match kind {
-        AgentKind::Claude => "claude",
-        AgentKind::Codex => "codex",
-        AgentKind::Agy => "agy",
-        AgentKind::Zot => "zot",
-        AgentKind::Other => "other",
-    }
-}
 
 /// The agents a `--install-agents=LIST` names; `all` is every one spyc wires.
 fn kinds(list: &str) -> Result<Vec<AgentKind>> {
@@ -25,31 +15,13 @@ fn kinds(list: &str) -> Result<Vec<AgentKind>> {
         .map(str::trim)
         .filter(|n| !n.is_empty())
         .map(|n| {
-            KINDS
-                .iter()
-                .copied()
-                .find(|k| name(*k) == n)
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "spyc can't wire `{n}` into user scope (it wires: claude, codex, agy)"
-                    )
-                })
+            named(n).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "spyc can't wire `{n}` into user scope (it wires: claude, codex, agy)"
+                )
+            })
         })
         .collect()
-}
-
-fn describe(part: &Part, file: &std::path::Path, installing: bool) -> String {
-    let file = crate::paths::display_tilde(file);
-    match part {
-        Part::Current => format!("installed in {file}"),
-        Part::Absent if installing => format!("not installed in {file}"),
-        Part::Absent => format!("not in {file}"),
-        Part::Outdated => format!("an older copy is in {file}"),
-        Part::Managed => "provided by your organization".to_string(),
-        Part::Blocked(why) => format!("blocked: {why}"),
-        Part::Refused(why) => format!("left alone: {why}"),
-        Part::Off => "off ([pane] codex_mcp = false)".to_string(),
-    }
 }
 
 fn report(kind: AgentKind, st: &Status, installing: bool) {

@@ -77,7 +77,7 @@ jobs:
       # image and fails PRs that touched nothing. Same reasoning that moved
       # cargo-deny off this path. Keep in step with the version the Makefile
       # names, so a local run and CI agree.
-      - uses: taiki-e/install-action@v2.87.22
+      - uses: taiki-e/install-action@v2.87.27
         with:
           tool: shellcheck@0.11.0
       - name: Lint workflows (actionlint + shellcheck)
@@ -152,7 +152,10 @@ jobs:
             install -m 0755 /tmp/cargo-llvm-cov "$HOME/.cargo/bin/cargo-llvm-cov"
           fi
       # target-cov keeps the instrumented build out of the test job's cache.
-      - name: Coverage (fail under 35% lines)
+      # The floor is a ratchet nothing moves automatically: keep it about a
+      # point under main's measured line coverage, raise it when that climbs,
+      # never lower it to get a merge through.
+      - name: Coverage (fail under 84% lines)
         env:
           CARGO_TARGET_DIR: target-cov
-        run: cargo llvm-cov --locked --all-targets --fail-under-lines 35
+        run: cargo llvm-cov --locked --all-targets --fail-under-lines 84

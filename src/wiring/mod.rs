@@ -14,6 +14,7 @@ mod claude;
 mod cli;
 mod codex;
 mod file;
+pub mod legacy;
 
 pub use cli::run_cli;
 
@@ -48,9 +49,49 @@ pub struct Env {
     pub spyc: String,
 }
 
+#[cfg(test)]
+thread_local! {
+    static ENV_OVERRIDE: std::cell::RefCell<Option<Env>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Run `body` with `env` as the environment [`Env::current`] reports. A test
+/// that pins none sees no environment at all, so no test reaches the
+/// developer's own agent configuration.
+#[cfg(test)]
+pub fn with_env<R>(env: Env, body: impl FnOnce() -> R) -> R {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            ENV_OVERRIDE.with(|c| *c.borrow_mut() = None);
+        }
+    }
+    ENV_OVERRIDE.with(|c| *c.borrow_mut() = Some(env));
+    let _guard = Guard;
+    body()
+}
+
 impl Env {
     /// The process's own environment. `None` without `$HOME`.
     pub fn current() -> Option<Self> {
+        #[cfg(test)]
+        {
+            ENV_OVERRIDE.with(|c| c.borrow().clone())
+        }
+        #[cfg(not(test))]
+        Self::from_process()
+    }
+
+    /// [`Env::current`] with the `$HOME` rc's `[pane] codex_mcp`. Only that rc
+    /// decides, because the entry it governs serves every project.
+    pub fn for_spyc() -> Option<Self> {
+        let mut env = Self::current()?;
+        env.codex_mcp = crate::config::Config::load_home(&env.home)
+            .map_or(true, |config| config.pane.codex_mcp);
+        Some(env)
+    }
+
+    #[cfg_attr(test, allow(dead_code))]
+    fn from_process() -> Option<Self> {
         let var = |name| {
             std::env::var_os(name)
                 .filter(|v| !v.is_empty())
@@ -122,6 +163,57 @@ pub fn status(kind: AgentKind, env: &Env) -> Option<Status> {
         AgentKind::Codex => Some(codex::status(env)),
         AgentKind::Agy => Some(agy::status(env)),
         _ => None,
+    }
+}
+
+/// The name `--install-agents=` and `:hooks` take for `kind`.
+#[must_use]
+pub const fn name(kind: AgentKind) -> &'static str {
+    match kind {
+        AgentKind::Claude => "claude",
+        AgentKind::Codex => "codex",
+        AgentKind::Agy => "agy",
+        AgentKind::Zot => "zot",
+        AgentKind::Other => "other",
+    }
+}
+
+/// The agent spyc wires that `name` names.
+#[must_use]
+pub fn named(name: &str) -> Option<AgentKind> {
+    KINDS.into_iter().find(|kind| self::name(*kind) == name)
+}
+
+/// One part of a [`Status`], said for a user: `installing` reports an install
+/// rather than a removal.
+#[must_use]
+pub fn describe(part: &Part, file: &Path, installing: bool) -> String {
+    let file = crate::paths::display_tilde(file);
+    match part {
+        Part::Current => format!("installed in {file}"),
+        Part::Absent if installing => format!("not installed in {file}"),
+        Part::Absent => format!("not in {file}"),
+        Part::Outdated => format!("an older copy is in {file}"),
+        Part::Managed => "provided by your organization".to_string(),
+        Part::Blocked(why) => format!("blocked: {why}"),
+        Part::Refused(why) => format!("left alone: {why}"),
+        Part::Off => "off ([pane] codex_mcp = false)".to_string(),
+    }
+}
+
+/// The file `kind`'s status hooks live in.
+#[must_use]
+pub fn hooks_file(kind: AgentKind, env: &Env) -> Option<PathBuf> {
+    user_files(kind, env).into_iter().next()
+}
+
+/// The files `kind`'s wiring lives in, for the agents spyc wires here.
+fn user_files(kind: AgentKind, env: &Env) -> Vec<PathBuf> {
+    match kind {
+        AgentKind::Claude => claude::files(env).to_vec(),
+        AgentKind::Codex => codex::files(env).to_vec(),
+        AgentKind::Agy => agy::files(env).to_vec(),
+        AgentKind::Zot | AgentKind::Other => Vec::new(),
     }
 }
 

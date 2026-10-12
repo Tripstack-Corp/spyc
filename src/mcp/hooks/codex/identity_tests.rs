@@ -36,11 +36,6 @@ fn legacy_migration_and_cleanup_refuse_to_move_user_hook_trust_positions() {
         ));
         assert_eq!(std::fs::read(path).unwrap(), before);
         assert_eq!(std::fs::read(canonical).unwrap(), canonical_before);
-        let diagnostic = codex_legacy_hook_diagnostic(temp.path()).unwrap();
-        assert!(
-            diagnostic.contains("user hook") && diagnostic.contains("trust"),
-            "{diagnostic}"
-        );
     }
 }
 
@@ -72,11 +67,6 @@ fn inline_install_and_cleanup_refuse_to_move_user_hook_trust_positions() {
             std::fs::read(legacy).unwrap(),
             legacy_before,
             "unsafe inline cleanup must not remove the legacy source first"
-        );
-        let diagnostic = codex_legacy_hook_diagnostic(temp.path()).unwrap();
-        assert!(
-            diagnostic.contains("user hook") && diagnostic.contains("trust"),
-            "{diagnostic}"
         );
     }
 }

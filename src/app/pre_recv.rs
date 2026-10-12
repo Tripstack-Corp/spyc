@@ -63,6 +63,9 @@ impl App {
         if self.apply_graveyard_outcomes() {
             ctx.draw.mark(3);
         }
+        if self.apply_wiring_outcomes() {
+            ctx.draw.mark(3);
+        }
 
         // Archive mount / materialize / cleanup outcomes — same
         // unconditional pre-recv drain as the graveyard above. Mounting can
@@ -310,15 +313,6 @@ impl App {
         let cwd_fx = self.settle_process_cwd();
         if !cwd_fx.is_empty() {
             self.run_effects(cwd_fx, terminal, foreground_exec);
-        }
-
-        // Re-install an agent pane's status hooks if something removed them
-        // since it launched (a sibling spyc's teardown, a `git clean`).
-        // Throttled and piggybacked on an iteration that was happening
-        // anyway — no deadline, so idle stays 0 dps. Only the flash it
-        // raises is visible, hence the redraw on a heal.
-        if self.settle_status_hooks(now_pre) {
-            ctx.draw.mark(3);
         }
 
         // Execute writable MCP commands buffered into `ctx.mcp_pending` (see

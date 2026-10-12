@@ -223,43 +223,25 @@ impl App {
     pub(super) fn handle_hook_consent_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         let prev_mode = std::mem::replace(&mut self.state.mode, Mode::Normal);
         let Mode::Prompting(Prompt {
-            kind: PromptKind::HookConsent { root, cwd, agent },
+            kind: PromptKind::HookConsent { agent },
             ..
         }) = prev_mode
         else {
             return Vec::new();
         };
         match key.code {
-            KeyCode::Char('y' | 'Y') => {
-                crate::state::hook_consent::set_consent(&root, true);
-                self.install_status_hooks(&cwd, agent);
-                // Claude reloads its config live (effect on the next message);
-                // codex reads config at startup, so the hooks it just got apply
-                // on its next launch.
-                let profile = crate::agent::profile_for(agent);
-                let live = profile.status_hooks().is_some_and(|s| s.live_reload);
-                let name = profile.name();
-                self.state.flash_info(if live {
-                    format!("status hook consent saved — {name} reloads next message; check `:activity dump` (`:hooks off` to undo)")
-                } else if agent == crate::state::sessions::AgentKind::Codex {
-                    "status hook consent saved — restart codex, review /hooks and project trust; check `:activity dump`".to_string()
-                } else {
-                    format!("status hook consent saved — restart {name}; check `:activity dump` (`:hooks off` to undo)")
-                });
-            }
-            KeyCode::Char('n' | 'N') => {
-                crate::state::hook_consent::set_consent(&root, false);
-                self.state
-                    .flash_info("status hooks declined for this project (`:hooks on` to enable)");
-            }
+            KeyCode::Char('y' | 'Y') => self.answer_wiring(agent, true),
+            KeyCode::Char('n' | 'N') => self.answer_wiring(agent, false),
             _ => {
                 // Defer: nothing recorded, so the next launch asks again. The
                 // key was aimed at whatever has focus — usually the agent that
                 // just spawned — so re-dispatch it now that the prompt is
                 // closed rather than consuming it. `mode` is already `Normal`
                 // (taken above), so this cannot re-enter this arm.
-                self.state
-                    .flash_info("status hooks not set up — `:hooks on` to enable");
+                let name = crate::wiring::name(agent);
+                self.state.flash_info(format!(
+                    "{name} not set up — spyc asks again next time (`:hooks on {name}`)"
+                ));
                 self.view.needs_full_repaint = true;
                 return self.handle_key(key).unwrap_or_default();
             }
@@ -398,8 +380,6 @@ mod tests {
     fn seed_hook_consent(app: &mut App) {
         app.state.mode = Mode::Prompting(Prompt::simple(
             PromptKind::HookConsent {
-                root: PathBuf::from("/repo"),
-                cwd: PathBuf::from("/repo"),
                 agent: crate::state::sessions::AgentKind::Claude,
             },
             "consent? [y]es / [n]o ",
@@ -442,7 +422,7 @@ mod tests {
                     "{code:?} must defer the consent dialogue, not hold it open"
                 );
                 assert_eq!(
-                    crate::state::hook_consent::consent_for(&PathBuf::from("/repo")),
+                    crate::state::wiring_consent::answer(crate::state::sessions::AgentKind::Claude),
                     None,
                     "{code:?} must record no decision, so the next launch asks again"
                 );
@@ -450,9 +430,11 @@ mod tests {
         });
     }
 
-    /// An explicit `n` records the (recoverable) denial and closes the prompt.
+    /// An explicit `n` records the (recoverable) denial for that agent alone
+    /// and closes the prompt.
     #[test]
     fn n_closes_hook_consent_prompt() {
+        use crate::state::sessions::AgentKind;
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
@@ -462,6 +444,11 @@ mod tests {
                 matches!(app.state.mode, Mode::Normal),
                 "n must close the consent dialogue"
             );
+            assert_eq!(
+                crate::state::wiring_consent::answer(AgentKind::Claude),
+                Some(false)
+            );
+            assert_eq!(crate::state::wiring_consent::answer(AgentKind::Codex), None);
         });
     }
 }

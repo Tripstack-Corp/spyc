@@ -703,3 +703,17 @@ fn codex_home_moves_both_files() {
     assert_eq!((&st.hooks, &st.mcp), (&Part::Current, &Part::Current));
     assert!(!s.home(".codex").exists());
 }
+
+/// Every entry and hook names spyc as a bare `spyc` when one is on `PATH`: a
+/// codex workspace policy can allow MCP servers by exact command, and disables
+/// an entry naming the same binary by its path (#621).
+#[test]
+fn spyc_is_named_bare_when_one_is_on_path() {
+    let bin = tempfile::tempdir().unwrap();
+    let spyc = bin.path().join("spyc");
+    std::fs::write(&spyc, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&spyc, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let named =
+        crate::mcp::with_search_path(bin.path(), || Env::from_process().map(|env| env.spyc));
+    assert_eq!(named.as_deref(), Some("spyc"));
+}

@@ -1,19 +1,11 @@
-//! Persisted, per-project consent for installing Claude status hooks.
-//!
-//! Writing `report_status` hooks into a project's `.claude/settings.json` makes
-//! `claude` execute a command on every turn — more invasive than the `.mcp.json`
-//! it merely reads — so spyc asks the user first (a `[Y/n]` popup) and remembers
-//! the answer **per project root, forever**. This is that store: a tiny
-//! `{root_path: allowed}` JSON map in the XDG state dir, keyed by the project
-//! root of the actual hook source. Codex linked worktrees share root-checkout
-//! consent; a grant for an ignored worktree source cannot authorize that write.
-//!
-//! `None` = never asked (→ prompt), `Some(true)` = allowed (→ install hooks),
-//! `Some(false)` = denied (→ never install). Best-effort like the other state
-//! files: a missing/corrupt store reads as "never asked".
+//! The per-project answers spyc recorded before an agent's wiring moved to its
+//! user configuration (#619): a `{root: allowed}` JSON map in the state dir.
+//! Read only to find the projects that may still hold a per-directory copy,
+//! and retired at startup: an older spyc still running reads this store before
+//! it writes a project its hooks, so every answer becomes a no.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn disk_path() -> Option<PathBuf> {
     crate::state::state_root().map(|d| d.join("hook_consent.json"))
@@ -26,51 +18,61 @@ fn load() -> HashMap<String, bool> {
         .unwrap_or_default()
 }
 
-/// The recorded consent for installing status hooks in `root`:
-/// `Some(true)` = allowed, `Some(false)` = denied, `None` = never asked.
-#[must_use]
-pub fn consent_for(root: &Path) -> Option<bool> {
-    load().get(&root.to_string_lossy().into_owned()).copied()
-}
-
-/// Persist the user's per-project answer (best-effort; a write failure just
-/// means we ask again next time, never an error to the user).
-pub fn set_consent(root: &Path, allow: bool) {
-    let mut map = load();
-    map.insert(root.to_string_lossy().into_owned(), allow);
+fn save(map: &HashMap<String, bool>) {
     let Some(path) = disk_path() else {
         return;
     };
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(text) = serde_json::to_string(&map) {
+    if let Ok(text) = serde_json::to_string(map) {
         let _ = crate::fs::write_atomic(&path, text.as_bytes());
     }
 }
 
+/// Every project root that has answered.
+#[must_use]
+pub fn recorded_roots() -> Vec<PathBuf> {
+    load().into_keys().map(PathBuf::from).collect()
+}
+
+/// Make every recorded answer a no, so an older spyc stops writing projects
+/// their hooks. The roots stay, for [`recorded_roots`].
+pub fn retire() {
+    let mut map = load();
+    if map.values().all(|allowed| !allowed) {
+        return;
+    }
+    for allowed in map.values_mut() {
+        *allowed = false;
+    }
+    save(&map);
+}
+
+/// Record `root`'s answer, as older spycs did.
+#[cfg(test)]
+pub fn set_consent(root: &std::path::Path, allow: bool) {
+    let mut map = load();
+    map.insert(root.to_string_lossy().into_owned(), allow);
+    save(&map);
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{consent_for, set_consent};
-    use std::path::Path;
+    use super::{load, recorded_roots, retire, set_consent};
+    use std::path::{Path, PathBuf};
 
     #[test]
-    fn consent_round_trips_per_project_and_defaults_to_none() {
+    fn retiring_turns_every_answer_into_a_no_and_keeps_the_roots() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
-            let a = Path::new("/repo/a");
-            let b = Path::new("/repo/b");
-            // Unasked projects read as None.
-            assert_eq!(consent_for(a), None);
-            // A grant and a denial persist independently, keyed by root.
-            set_consent(a, true);
-            set_consent(b, false);
-            assert_eq!(consent_for(a), Some(true));
-            assert_eq!(consent_for(b), Some(false));
-            assert_eq!(consent_for(Path::new("/repo/c")), None);
-            // A later answer overwrites the earlier one.
-            set_consent(a, false);
-            assert_eq!(consent_for(a), Some(false));
+            set_consent(Path::new("/repo/a"), true);
+            set_consent(Path::new("/repo/b"), false);
+            retire();
+            assert!(load().values().all(|allowed| !allowed));
+            let mut roots = recorded_roots();
+            roots.sort();
+            assert_eq!(roots, [PathBuf::from("/repo/a"), PathBuf::from("/repo/b")]);
         });
     }
 }

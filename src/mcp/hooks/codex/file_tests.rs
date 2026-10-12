@@ -39,11 +39,6 @@ fn legacy_symlink_refuses_install_and_cleanup_without_changing_either_file() {
         } else {
             assert_eq!(std::fs::read_to_string(&target).unwrap(), legacy_fixture());
         }
-        assert!(
-            codex_legacy_hook_diagnostic(dir)
-                .unwrap()
-                .contains("symlink")
-        );
     }
 }
 

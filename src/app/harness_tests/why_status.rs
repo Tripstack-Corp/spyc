@@ -12,6 +12,7 @@ fn why_status_opens_a_saveable_pager_with_the_verdict_first() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
         let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        crate::state::wiring_consent::set(crate::state::sessions::AgentKind::Claude, Some(true));
         let mut app = agent_app(&dir, "claude");
         let text = why_status(&mut app);
         let view = app.view.pager.as_ref().expect("a pager opened");

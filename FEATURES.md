@@ -284,13 +284,10 @@ protocol, no image protocols, no OSC 52 clipboard.
   - **Auto-reporting (claude + codex; agy partial)** — so it works without the
     agent choosing to call the tool, spyc installs lifecycle hooks (prompt-submit
     → working, needs-permission/approval → blocked, turn-end → done) that run
-    `spyc --report-status`. The agents share the same event idea, with per-agent
-    config: **claude** writes `.claude/settings.json` (JSON, reloaded live);
-    **codex** writes inline `[[hooks.*]]` into `.codex/config.toml` at its actual
-    hook source. Linked worktrees use the corresponding directory in the root
-    checkout, while their MCP entry stays worktree-local. Hooks are read once at
-    startup, so an already-consented source is written *before* codex spawns.
-    Codex's metadata-bearing `PermissionRequest` is observational: it fires
+    `spyc --report-status`. They go into each agent's own user configuration,
+    once, for every project: **claude**'s `settings.json` (reloaded live),
+    **codex**'s `$CODEX_HOME/hooks.json` (read at startup, so a codex already
+    running picks them up on its next launch). Codex's metadata-bearing `PermissionRequest` is observational: it fires
     before automatic or human review, so it cannot establish a human wait.
     Known command, file-edit, MCP-tool and network forms require their default
     choices and complete footer at the viewport bottom; diagnostics identify
@@ -299,7 +296,7 @@ protocol, no image protocols, no OSC 52 clipboard.
     `blocked` on start and recover `working` only for the same pending
     pane/session/turn/call; other waits stay blocked. Project trust and `/hooks`
     review are separate from spyc's consent; spyc never auto-approves hooks. **agy** (Antigravity)
-    writes a `spyc-status` set into `.agents/hooks.json` and is **partial** — it
+    gets a `spyc-status` set in `~/.gemini/config/hooks.json` and is **partial** — it
     covers `working`, `done`, and `blocked` for agy's own `ask_question` tool
     (a `PreToolUse` hook sees that one exactly when it's called). The *other*
     way agy waits on you — its tool-permission prompt — fires no event in any
@@ -307,23 +304,23 @@ protocol, no image protocols, no OSC 52 clipboard.
     `done` needs **agy ≥ 1.1.10**, which is where `Stop` hooks became reachable
     at all; on an older agy that half falls back to output timing. Full
     mechanics: [`docs/AGENT_ORCHESTRATION.md`](docs/AGENT_ORCHESTRATION.md).
-    **It asks first**, once per project: the first `claude`/`codex`/`agy` launch
-    in a repo pops a `[Y/n]` ("let spyc show this agent's live status? writes
-    hooks to `<config>`, removed on exit"), and the answer is **saved per repo** —
-    never nags again. The write preserves your existing hooks/config; on exit
-    spyc removes only what it added (and never a git-tracked file). Only `y`
-    or `n` answers it; **any other key defers** — the popup closes, nothing is
-    saved, and the next launch asks again. It has to work that way because the
-    popup appears once the pane already has focus, so the first words of a
-    message to the agent would otherwise be swallowed until one of them
-    contained a `y`, which would then answer it. A saved `n` is undoable, so
-    **`:hooks on|on!|off`** changes a project's choice later — `on` also installs
-    the hooks for an already-running agent (claude live-reloads → kicks in on the
-    next message; codex/agy pick them up on their next launch). That's the undo
-    for an accidental "no". If a claude live reload doesn't take (e.g. the running
-    spyc is a throwaway build-dir binary whose path went stale), **`:hooks on!`**
-    force-restarts the active claude pane and resumes the conversation so the
-    hooks load from launch.
+    **It asks first**, once per agent: the first `claude`/`codex`/`agy` launch
+    pops a `[Y/n]` ("show this agent's live status and give it spyc's tools?"),
+    and the answer covers every project — it never asks again for that agent.
+    `y` adds the hooks and the agent's `spyc` MCP entry to its own configuration;
+    nothing is written into your projects, and nothing is removed at exit. The
+    write keeps your own settings and key order. Only `y` or `n` answers it;
+    **any other key defers** — the popup closes, nothing is saved, and the next
+    launch asks again. It has to work that way because the popup appears once
+    the pane already has focus, so the first words of a message to the agent
+    would otherwise be swallowed until one of them contained a `y`, which would
+    then answer it. **`:hooks`** lists each agent's answer, and
+    **`:hooks on|off|ask <agent>`** changes it later (the active tab's agent when
+    none is named): `on` installs, `off` takes spyc's part back out, `ask` forgets
+    the answer. If a claude live reload doesn't take, **`:hooks on!`** also
+    restarts the active claude pane and resumes the conversation so the hooks
+    load from launch. spyc also takes out the per-project copies older versions
+    wrote, unless another running spyc still uses them or git tracks them.
   - **Scrape fallback** (for a state an agent's hooks can't report) — spyc
     reads the **visible screen** for verified approval prompts. Agy exposes no
     approval event. Codex's permission event precedes both automatic and human
@@ -1490,22 +1487,20 @@ Manage it in-app with `:skill`:
 ## MCP server (Claude + Codex integration)
 
 spyc runs a background MCP server on a PID-scoped Unix domain socket
-(`~/.local/state/spyc/mcp-<PID>.sock`). When an agent pane launches it
-writes that agent's config so the agent discovers spyc automatically —
-no `--mcp-config` flag needed:
+(`~/.local/state/spyc/mcp-<PID>.sock`). Saying yes to an agent's first-launch
+`[Y/n]` adds a `spyc` entry to that agent's own MCP configuration, once, so it
+discovers spyc in every project — no `--mcp-config` flag needed:
 
-- **`.mcp.json`** for Claude Code (JSON, `mcpServers.spyc` shape).
-- **`.codex/config.toml`** for the codex CLI (TOML,
-  `[mcp_servers.spyc]` shape).
-- **`.agents/mcp_config.json`** for agy (the `.mcp.json` shape).
+- **Claude Code**: its user-scope MCP servers, through
+  `claude mcp add-json -s user` (or your organization's `managed-mcp.json`).
+- **codex**: `[mcp_servers.spyc]` in `$CODEX_HOME/config.toml`.
+- **agy**: `~/.gemini/config/mcp_config.json`.
 
 Each registration re-execs `spyc --mcp` as a stdio proxy, which
 connects to the socket named by the agent pane's own env
 (`SPYC_MCP_SOCK`), so an agent always reaches the spyc that launched
 it. Shell tabs carry the same env, so an agent typed into a shell
-reaches spyc and names its tab too, and in a project that has consented
-to status hooks, opening a shell tab writes every agent's MCP entry and
-hooks up front, since an agent reads them when it starts. The tab then
+reaches spyc and names its tab too. The tab then
 follows the agent in its foreground: it gets that agent's activity dot
 while it runs, drops its status and session when it exits, reads as a
 shell while it is stopped with `^Z`, and is saved as the shell it was
@@ -1516,15 +1511,15 @@ rooted above the agent. The entry names no socket itself; codex's lists
 `env_vars = ["SPYC_MCP_SOCK", "SPYC_PANE_ID"]`, because codex hands
 an MCP server only the variables it is told to.
 
-**`spyc --install-agents`** writes the MCP entry and the status hooks once,
-into each agent's own user configuration, instead of into each project:
-claude's `settings.json` (in `$CLAUDE_CONFIG_DIR`, else `~/.claude`) and its
-user-scope MCP servers, through `claude mcp add-json -s user`; codex's
-`hooks.json` and `config.toml`; agy's
-`~/.gemini/config/hooks.json` and `mcp_config.json`. From then on spyc writes
-nothing into projects for those agents. `--install-agents=agy` picks agents;
-`spyc --remove-agents` takes spyc's part back out and leaves the rest of each
-file. An organization's `managed-mcp.json` keeps control of claude's MCP
+**`spyc --install-agents`** does the same from the command line, without
+waiting for a launch: claude's `settings.json` (in `$CLAUDE_CONFIG_DIR`, else
+`~/.claude`) and its user-scope MCP servers; codex's `hooks.json` and
+`config.toml`; agy's `~/.gemini/config/hooks.json` and `mcp_config.json`.
+`--install-agents=agy` picks agents; `spyc --remove-agents` takes spyc's part
+back out and leaves the rest of each file, and is what to run before
+uninstalling spyc. spyc writes nothing into projects, and takes out the copies
+older versions left there, unless another running spyc still uses them or git
+tracks them. An organization's `managed-mcp.json` keeps control of claude's MCP
 servers, and spyc installs only the hooks there. Files are edited in place:
 a symlinked `settings.json` stays a link, a file that won't parse is left
 alone with the reason printed, and an MCP server named `spyc` that runs
@@ -1554,11 +1549,9 @@ codex mis-resolves the MCP tool-call approval elicitation and hangs on the
 first spyc tool call. Status hooks still install (activity dots keep working);
 codex just loses spyc's MCP tools. Claude is unaffected. Default on.
 
-Multiple spyc instances coexist in one directory with nothing to
-take over: they write the same entry, and each one's agents reach it.
-The entry stays until the last spyc relying on it exits. An agent
-started outside spyc, in another terminal, gets no spyc tools: only the
-agents spyc launches do.
+Every spyc on the machine shares that one entry, and each one's agents
+reach it, with nothing to take over. An agent started outside spyc, in
+another terminal, gets no spyc tools: only the agents spyc launches do.
 Enterprise `managed-settings.json` policies
 (`deniedMcpServers`/`allowedMcpServers`) are respected for the
 claude side; codex has no equivalent enterprise hook.

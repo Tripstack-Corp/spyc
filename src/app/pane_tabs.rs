@@ -192,23 +192,10 @@ impl App {
             self.state.config.layout.status_position,
         );
         let wake = self.make_pane_wake();
-        // Write the agent's MCP client config (`.mcp.json` / `.codex/config.toml`)
-        // into the launch dir *before* the pty spawns, so claude/codex discover
-        // spyc's socket on startup. Gated on the agent here, so directories where
-        // no agent is ever launched don't get a stray config dir. No-op otherwise.
         // The tab's agent: the hint's for a wrapper, else the command's. It
-        // decides the env, configs and hooks; the command still runs as written.
+        // decides the env and the wiring; the command still runs as written.
         let kind = hint.unwrap_or_else(|| crate::agent::detect(cmd).kind());
-        self.write_mcp_config(kind, cwd, true);
-        // Codex reads `.codex/config.toml` once at startup, so an already-consented
-        // repo's status hooks must be written now, before the pty spawns — else
-        // they'd be missed until codex's next launch. Live-reload agents (claude)
-        // are handled post-spawn. No-op for non-hook agents / un-consented repos.
-        self.maybe_preinstall_startup_hooks(kind, cwd);
         let shell = crate::shell::command_is_shell(cmd);
-        if shell {
-            self.provision_shell_tab(cwd);
-        }
         // Build the tab metadata up front so its stable id is available to
         // inject as `SPYC_PANE_ID` (below). Option B: a `codex resume <uuid>`
         // pane knows its session id immediately — pin it now so `^a v` is exact
@@ -218,7 +205,7 @@ impl App {
             info.id = id.to_string();
         }
         info.agent_hint = hint;
-        info.status_hooks_at_spawn = super::status_hooks::hooks_present(kind, cwd);
+        info.status_hooks_at_spawn = super::wiring::hooks_present(kind);
         let is_agent = kind != crate::state::sessions::AgentKind::Other;
         match kind {
             crate::state::sessions::AgentKind::Codex => {
@@ -280,11 +267,9 @@ impl App {
                     (Some(tabs), TabSlot::Append) => tabs.push(entry),
                     (None, _) => self.runtime.pane_tabs = Some(PaneTabs::new(entry)),
                 }
-                // Claude status hooks: install (consented), skip (denied), or
-                // raise the first-launch per-project consent popup. After the
-                // tab exists so a Yes can target it; the env (SPYC_PANE_ID/SOCK)
-                // is already in place from the spawn above.
-                self.maybe_offer_status_hooks(kind, cwd);
+                // The first launch of an agent asks whether to wire it. After
+                // the tab exists, so the prompt doesn't cover a missing pane.
+                self.offer_wiring(kind, cwd);
                 true
             }
             Err(e) => {
@@ -411,53 +396,42 @@ impl App {
         }
     }
 
-    /// `:hooks on!` — grant consent + install the hooks, then **restart the
-    /// active claude pane** (fresh env + hooks present from launch) and
-    /// auto-`/resume` its conversation. The forceful escape hatch for when a
-    /// live-reload `:hooks on` doesn't take (a stale baked binary path, or
-    /// Claude not picking up the settings change). Reuses the session-restore
-    /// `/resume` injection; falls back to a fresh claude + "type /resume" when
-    /// the live session id can't be resolved.
-    pub(super) fn force_restart_status_hooks(&mut self) {
-        let root = self.status_hooks_target_root();
-        crate::state::hook_consent::set_consent(&root, true);
-
-        let Some((tab_idx, cmd, cwd, kind, live_cwd, wraps)) =
-            self.runtime.pane_tabs.as_ref().map(|t| {
-                let info = t.active_info();
-                // A shell running claude (#544): its cwd is the shell's live one.
-                let live_cwd = (info.launched_agent().kind() != info.agent().kind())
-                    .then(|| t.tabs()[t.active_index()].live_cwd());
+    /// `:hooks on!`, once claude is wired: **restart the claude tab at
+    /// `tab_idx`** (fresh env + hooks present from launch) and auto-`/resume`
+    /// its conversation. The forceful escape hatch for when a live reload
+    /// doesn't take. Reuses the session-restore `/resume` injection; falls back
+    /// to a fresh claude + "type /resume" when the live session id can't be
+    /// resolved.
+    pub(super) fn restart_claude_tab(&mut self, tab_idx: usize) {
+        let Some((cmd, cwd, kind, in_shell, wraps)) = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .and_then(|t| t.tabs().get(tab_idx))
+            .map(|entry| {
+                let info = &entry.info;
                 (
-                    t.active_index(),
                     info.command.clone(),
                     info.cwd.clone(),
                     info.agent().kind(),
-                    live_cwd,
+                    info.launched_agent().kind() != info.agent().kind(),
                     info.wraps_agent(),
                 )
             })
         else {
-            self.state
-                .flash_error(":hooks on! — no active pane to restart");
             return;
         };
         if kind != crate::state::sessions::AgentKind::Claude {
-            self.state
-                .flash_error(":hooks on! — active pane is not claude");
             return;
         }
         // Restarting the tab would restart its shell, not claude, and type
-        // `/resume` into that. Claude reloads its hooks live, so installing
-        // them is the whole job.
-        if let Some(live_cwd) = live_cwd {
-            self.install_status_hooks(&live_cwd, crate::state::sessions::AgentKind::Claude);
+        // `/resume` into that. Claude reloads its hooks live.
+        if in_shell {
             self.state.flash_info(
-                "status hooks on — claude runs in a shell here, so it isn't restarted; it picks the hooks up on its next turn",
+                "claude runs in a shell here, so it isn't restarted; it picks the hooks up on its next turn",
             );
             return;
         }
-        self.install_status_hooks(&cwd, crate::state::sessions::AgentKind::Claude);
 
         // Resolve the live session id (newest claude jsonl for this cwd) so we
         // can auto-`/resume`. Strip any `--resume` from the command so we
@@ -479,11 +453,10 @@ impl App {
         if self.spawn_agent_into_tab(tab_idx, &cmd_fresh, &cwd, sid) {
             self.state.focus = state::Focus::Pane;
             if resumed {
-                self.state
-                    .flash_info("status hooks on — restarting claude + resuming…");
+                self.state.flash_info("restarting claude + resuming…");
             } else {
                 self.state
-                    .flash_info("status hooks on — fresh claude (no session found; type /resume)");
+                    .flash_info("fresh claude (no session found; type /resume)");
             }
         }
     }

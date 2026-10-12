@@ -280,8 +280,8 @@ const SECTIONS: &[Section] = &[
                 "agent tab dot: pulse ● working, red square ■ blocked, teal square ■ done, dim · idle (:why-status explains it in a pager)",
             ),
             (
-                ":hooks on|on!|off",
-                "claude/codex/agy auto-status hooks (asked once on launch); on! restarts+resumes a claude pane",
+                ":hooks [on|on!|off|ask] [agent]",
+                "wire claude/codex/agy into spyc (asked once per agent); on! also restarts+resumes a claude pane",
             ),
             (
                 ":startup-tabs [forget]",

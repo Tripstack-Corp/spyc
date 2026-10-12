@@ -288,13 +288,14 @@ the bump gate. `deny.toml` records the same.
   world-writable `/tmp`. But anyone running as your user on the same
   machine can still open it and exercise the MCP tool surface: we rely
   on user-process isolation, not on stricter ACLs.
-- **`spyc --install-agents` puts spyc in every session of the agents it
-  wires,** not only those spyc launches. Their status hooks run on every
-  turn, and do nothing without the socket a spyc pane sets. Their `spyc --mcp`
-  starts in every session, and serves no tools to one spyc didn't launch,
-  wherever it runs. A codex session on codex's shared daemon is the exception:
-  spyc can't tell who started it, and it reaches the spyc rooted at its
-  directory, unattributed. The entries outlive spyc, so remove them with
+- **Wiring an agent puts spyc in every session of it,** not only those spyc
+  launches: saying yes at its first launch (or `spyc --install-agents`) adds
+  spyc's status hooks and MCP entry to the agent's own configuration. The hooks
+  run on every turn, and do nothing without the socket a spyc pane sets. The
+  `spyc --mcp` entry starts in every session, and serves no tools to one spyc
+  didn't launch, wherever it runs. A codex session on codex's shared daemon is
+  the exception: spyc can't tell who started it, and it reaches the spyc rooted
+  at its directory, unattributed. The entries outlive spyc, so remove them with
   `spyc --remove-agents` before uninstalling it.
 
 ## Reporting a vulnerability

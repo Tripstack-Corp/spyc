@@ -502,9 +502,6 @@ impl App {
     /// unconditionally regardless of the run loop's result.
     pub fn run_teardown(&mut self) {
         crate::context::remove_context_file(&self.view.context_path);
-        // Remove the MCP client configs we wrote on agent launch — our socket
-        // is about to die, so a lingering entry would point at nothing.
-        self.cleanup_written_mcp_configs();
         // Drop every archive staging tree this session created. The startup
         // sweep is the backstop for a process that never gets here.
         self.clean_all_staging();
@@ -599,6 +596,7 @@ impl App {
             terminal,
             &foreground_exec,
         );
+        self.wire_at_startup();
 
         // (Pre-v1.50.84 the loop carried `last_pane_render` and
         // `last_active_drain` timestamps to throttle pane renders /

@@ -835,6 +835,74 @@ separate feature does not expand the Codex compatibility gate.
 
 ## Track B — a native Codex session HUD
 
+### B1 source spike and mockups (approved)
+
+`spike/codex-hud-metrics` contains a one-shot, read-only field probe and an
+[interactive compact/full mockup](../../spikes/codex-hud/mockup.html). The
+[allowlisted observation](../../spikes/codex-hud/observation.json) comes from one
+explicitly selected native `codex-tui` rollout on CLI `0.162.1`, observed
+2026-10-12. Its header was checked against that thread; ids, home paths,
+arguments, output and reasoning were omitted. The probe reads at most a 16 MiB
+tail plus a bounded header and accepts only complete lines under 256 KiB. The
+captured file exceeded the tail budget, so counts describe that read window,
+not the whole conversation. It never discovers sessions, watches, connects to
+an account or writes to Codex's home.
+
+The installed CLI's offline `generate-json-schema` output supplies the separate
+[protocol field inventory](../../spikes/codex-hud/protocol-observation.json).
+This establishes field availability for that binary, not a live observer
+connection. Current official docs say `thread/read` reads stored history without
+subscribing, while start/resume acquire event streams. The stable generated
+surface has no `thread/subscribe` request. No supported read-only attachment to
+the same independently launched `--no-daemon` pane was established. **Initial
+transport choice: the existing home-scoped, pinned rollout, with no sidecar
+resume or account request.** This does not rule out a separately verified future
+observer transport. [Official app-server reference](https://learn.chatgpt.com/docs/app-server).
+
+| Metric | Current evidence | Initial display / reducer requirement |
+|---|---|---|
+| Identity and operating mode | `session_meta`; latest `turn_context` model, effort, approval and sandbox type | Follow the pinned thread and effective pane profile; source each field separately |
+| Request / turn / thread tokens | Top-level `token_usage_record` supplies `usage`, `turn_token_usage`, `thread_token_usage` and response/turn/thread ids | Three explicit scopes; accept cumulative snapshots instead of summing updates or both record families |
+| Older usage | `event_msg/token_count.info` supplies last and total usage plus `model_context_window` | Fallback with its own timestamp; never add it to the newer thread totals |
+| Cached input / reasoning output | Observed totals equal input plus output; cached input is within input, reasoning within output | Use the reported total; subsets are diagnostic detail, never additional tokens |
+| Context occupancy | A context window is reported, but neither a native percentage comparison nor the complete native reserve formula was verified | `Context --`; request size and lifetime totals are not presented as occupancy |
+| Compaction | Five `compacted` records in the bounded read; a completed `ContextCompaction` item also exists | Invalidate occupancy at the boundary; do not clear lifetime totals or use the carried pre-compaction usage as a fresh context measurement |
+| Rate limits | The observed bucket is `codex`, with null primary and secondary windows | `Limits not reported`; do not infer zero, unlimited quota or a weekly period from other flags |
+| Tools | Completed structured items and legacy calls/results exist; no `item_started` records in this read window | Completion metadata can enrich diagnostics; an empty active map is not proof of zero active tools |
+| Plan / agents | No verified progress/count source in this observation | Omit the row; a synthetic lifecycle preset demonstrates its possible geometry only |
+| Activity, hooks and MCP | Existing semantic status/readiness/connection seams | Keep their authority and expiry; configured, installed, connected and reported remain distinct |
+
+The request, turn and thread counters differ by orders of magnitude in the
+capture; thread lifetime tokens exceed the reported context window. A percentage
+made from those lifetime tokens would be plainly wrong. `token_count` and
+`token_usage_record` also arrive at different timestamps, so a reducer must not
+silently combine snapshots from different responses. The probe retains only
+numeric metric fields and bounded identity/mode labels. Its output contains no
+prompt, response, tool arguments, compaction history or account credentials.
+
+**Layout approved 2026-10-12:** compact is two rows; full is up to five, with
+unavailable plan/agent rows omitted. The current rollout preset uses four full
+rows, and a clearly labelled synthetic lifecycle preset uses five. Attention and
+session identity survive narrowing before model/branch and optional counters.
+The strip stays below the child screen; at least six child rows remain. Full
+collapses to compact in short panes, and the HUD hides below eight available
+rows. Monochrome carries attention in text and weight. Off remains the initial
+default; the user's native composer/statusline stays inside the child.
+
+B1 does not add configuration, commands, runtime collection or a native strip.
+The design preview supplies off/compact/full, unknown, compaction, stale and
+synthetic source states with width/height controls. Browser inspection covers
+normal, narrow/short and monochrome views. The native terminal geometry and
+mouse-routing gates remain B3 work, and native context semantics remain a gate
+for any future percentage. The user accepted this layout and the pinned-rollout
+transport on 2026-10-12. B2 proceeds with explicit unknown context and limits.
+
+For reproducing the source probe, pass one exact rollout and its expected
+`session_meta.id` to `spikes/codex-hud/probe.py ROLLOUT --thread THREAD`.
+Privacy, identity, partial-line and byte/line bounds are checked with
+`python3 -m unittest discover -s spikes/codex-hud -p test_probe.py`.
+
+
 ### References and positioning
 
 The supplied screenshot is the visual brief: identity/branch/time, context and
@@ -991,7 +1059,7 @@ does not silently expand the existing RC scope.
 ### Review decisions still open
 
 Approve the recommended P1 RC gate separately from the other parity work;
-choose the release cycle for the new HUD; approve the two-row/five-row layout
-and opt-in default. B1 must settle context semantics and whether fresh account
-limits have a supported observation transport. Missing upstream telemetry must
+choose the release cycle for the new HUD. The layout, opt-in default and initial
+pinned-rollout transport are approved. Context percentage and a fresh account-limit
+transport remain unverified; both stay explicitly unknown in initial delivery. Missing upstream telemetry must
 not hold the useful local HUD hostage or encourage unsafe credential access.
