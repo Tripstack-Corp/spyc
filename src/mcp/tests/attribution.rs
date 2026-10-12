@@ -343,3 +343,24 @@ fn a_connection_that_never_initializes_is_not_listed() {
     });
     assert!(!listed);
 }
+
+/// `create_worktree` carries the connection's own pane, so the loop can find the
+/// agent's repo when the user is browsing outside one. An unattributed
+/// connection carries none.
+#[test]
+fn create_worktree_carries_the_callers_pane() {
+    let created = |pane: Option<&str>| {
+        let (tx, seen) = fake_loop(&["abc"]);
+        let mut conn = Conn::open(tx);
+        conn.initialize(pane);
+        conn.tool("create_worktree", json!({"branch": "wt"}));
+        seen.try_iter()
+            .find_map(|c| match c {
+                McpCommand::CreateWorktree { pane_id, .. } => Some(pane_id),
+                _ => None,
+            })
+            .expect("create_worktree reached the loop")
+    };
+    assert_eq!(created(Some("abc")).as_deref(), Some("abc"));
+    assert_eq!(created(None), None);
+}

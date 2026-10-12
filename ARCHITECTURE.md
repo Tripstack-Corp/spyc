@@ -763,6 +763,16 @@ served exactly as before, and the read tools' default scope and allowed roots
 don't depend on attribution at all. It is attribution, not authorization —
 SECURITY.md says why.
 
+**A restored tab keeps its pane id.** An agent can outlive the spyc that
+launched it: Claude Code can host a session in its own background process, so
+after `spyc -r` the tab shows the same conversation while the agent, its MCP
+proxy and its hooks keep the env they started with. The session records each
+tab's id (`SavedTab::pane_id`) and restore gives it back, unless a live tab
+already holds it, so that env still names the tab. Its `SPYC_MCP_SOCK` is dead
+by then. The proxy already falls back to project-scoped discovery, and the
+status-hook reporter does the same, but only with a pane id to report for:
+without one, discovery would deliver the report to whichever tab is focused.
+
 ## The agents' MCP entry names no instance
 
 <!-- SPYC-TRAP: mcp-entry-names-no-socket -->

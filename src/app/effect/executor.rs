@@ -526,7 +526,7 @@ impl App {
                 // when it lands, not an MCP reply).
                 Effect::WorktreeCreateInteractive { dir, branch, base } => self.spawn_worktree_job(
                     worktree_ops::WorktreeJob::Create {
-                        dir,
+                        anchors: vec![dir],
                         branch,
                         base,
                         open: false,

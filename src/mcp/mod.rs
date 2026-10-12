@@ -204,6 +204,24 @@ fn session_id_from_hook_payload(payload: &str) -> Option<String> {
         .map(String::from)
 }
 
+/// Where a status report goes: the socket the launching spyc named, else the
+/// live spyc rooted above `cwd`, found the way the proxy finds it. The named
+/// socket is dead when spyc restarted under an agent that outlived it, and the
+/// restored tab kept the agent's pane id. Discovery needs that id: without one
+/// the report would land on whatever tab is focused. No named socket means
+/// spyc didn't launch this agent, so nothing is reported.
+fn report_stream(env_sock: &str, pane_id: Option<&str>, cwd: &Path) -> Option<UnixStream> {
+    if env_sock.is_empty() {
+        return None;
+    }
+    UnixStream::connect(env_sock).ok().or_else(|| {
+        pane_id
+            .is_some_and(|id| !id.is_empty())
+            .then(|| discover_live_socket(cwd))
+            .flatten()
+    })
+}
+
 /// Agent status-hook reporter (`spyc --report-status <state>`): a one-shot that
 /// pings the running spyc so it can set this pane's activity dot. Reads
 /// `SPYC_MCP_SOCK` (the socket) + `SPYC_PANE_ID` (which tab) from the
@@ -278,12 +296,10 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
             trace_log("report-status: session_id=set");
         }
     }
-    if sock.is_empty() {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let Some(mut stream) = report_stream(&sock, pane_id.as_deref(), &cwd) else {
+        trace_log(&format!("report-status: no live spyc for {sock}"));
         return;
-    }
-    let Ok(mut stream) = UnixStream::connect(&sock) else {
-        trace_log(&format!("report-status: connect FAILED to {sock}"));
-        return; // spyc not running / different instance — nothing to update
     };
     let _ = stream.set_read_timeout(Some(REPORT_IO_TIMEOUT));
     let _ = stream.set_write_timeout(Some(REPORT_IO_TIMEOUT));

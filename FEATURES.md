@@ -1487,7 +1487,10 @@ no `--mcp-config` flag needed:
 Each registration re-execs `spyc --mcp` as a stdio proxy, which
 connects to the socket named by the agent pane's own env
 (`SPYC_MCP_SOCK`), so an agent always reaches the spyc that launched
-it. The entry names no socket itself; codex's lists
+it. An agent that outlived its spyc (a Claude Code background session
+across `spyc -r`) reaches the restarted one instead: the restored tab
+keeps its pane id, and the proxy and the status hook find the live spyc
+rooted above the agent. The entry names no socket itself; codex's lists
 `env_vars = ["SPYC_MCP_SOCK", "SPYC_PANE_ID"]`, because codex hands
 an MCP server only the variables it is told to.
 
@@ -1550,10 +1553,12 @@ Claude can query and control the workspace through these tools:
 - **`pick_files`** -- pick files matching glob patterns (additive)
 - **`clear_picks`** -- clear all picks
 - **`create_worktree(branch)`** -- create a git worktree off the
-  focused commander's repo (existing branch, else a new one at HEAD)
-  in a sibling `<repo>.worktrees/<branch>/` dir; returns `{branch,
-  path}`. Lets a skill spin up a worktree to work in a second column
-  while the first stays on its branch.
+  focused commander's repo (existing branch, else a new one off the
+  default branch) in a sibling `<repo>.worktrees/<branch>/` dir;
+  returns `{branch, path}`. When the user is browsing outside any repo,
+  the calling agent's own pane decides the repo, then `PROJECT_HOME`.
+  Lets a skill spin up a worktree to work in a second column while the
+  first stays on its branch.
 - **`remove_worktree(path)`** -- tear down a worktree by the path
   `create_worktree` returned, safe by default. It archives untracked and
   uncommitted content into the graveyard (recoverable, under

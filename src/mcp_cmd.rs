@@ -34,10 +34,13 @@ pub enum McpCommand {
     /// `base` overrides the start point for a NEW branch (`None` → PROJECT_HOME's
     /// default branch, the POLA default). `open` also opens it in column `b`
     /// (the create→work flow in one call). Replies with the new worktree's path.
+    /// `pane_id` is the calling agent's own tab, from its attributed
+    /// connection: where the repo is found when the focused column has none.
     CreateWorktree {
         branch: String,
         base: Option<String>,
         open: bool,
+        pane_id: Option<String>,
     },
     /// Tear down a worktree by path (the path `CreateWorktree` returned).
     /// Refuses a dirty/locked worktree or one a column is currently in; the

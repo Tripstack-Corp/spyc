@@ -232,6 +232,14 @@ rather than an instance. See "The 3.0 horizon" below.
 `docs/drafts/PROJECTS_PLAN.md` — a 2.2 deliverable — is where the design gets
 argued. Tracked as [#99](https://github.com/Tripstack-Corp/spyc/issues/99).
 
+**Also in 2.3, after Projects:** the
+[UX 2.0 plan](docs/drafts/UX_2_0_PLAN.md) gives every object spyc draws (a
+file row, a pane, a tab, a divider, a status segment, the pager) a menu of the
+actions that apply to it, opened with `.` or a right-click, and each entry
+shows the key that does the same thing. A Makefile's menu is its targets. Its
+slices start once Projects has landed (owner decision, 2026-10-11), and the
+plan absorbs `CLICKABLE_MENUS_PLAN.md`. Draft for review.
+
 **Candidate addition, not committed to 2.3:** the
 [Git review workspace proposal](docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md)
 connects Changes, branch Compare, History, and shared agent review context.
@@ -290,7 +298,7 @@ icebox — is tracked in **[GitHub Issues](https://github.com/Tripstack-Corp/spy
 labelled by `area:*` / `type:*` and organized on the **[roadmap board](https://github.com/orgs/Tripstack-Corp/projects/1)**. Signposts:
 
 - **`2.2` milestone** — the scoped 2.2 work (see "Road to 2.2" above).
-- **`2.3` milestone** — Projects (see "The 2.3 horizon" above).
+- **`2.3` milestone** — Projects, then UX 2.0 (see "The 2.3 horizon" above).
 - **`icebox`** — speculative / nice-to-have ideas.
 - **`needs-design`** — items with a design doc in `docs/drafts/` or needing a spike.
 - **`needs-repro`** — reported, not yet reproducible; evidence wanted before design.
@@ -718,10 +726,11 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/drafts/V2_2_PLAN.md` | The 2.2 scope, sequencing and exit criteria — the plan behind "Road to 2.2". |
 | `docs/drafts/CODEX_SUPPORT_PLAN.md` | Draft Codex parity remediation and opt-in session HUD: reproduced RC regressions, hook/image/navigation gaps, telemetry contracts, sequencing and validation. HUD scope is proposed and unscheduled, not an added RC gate. |
 | `docs/drafts/PROJECTS_PLAN.md` | The 2.3 Projects design, in review ([#492](https://github.com/Tripstack-Corp/spyc/issues/492)): the per-project state inventory, one MCP socket answering per project, the recovery manifest, the `Space` keys, the `projects` segment, attention across projects, and what an attach snapshot carries. #99's code waits on its approval. |
+| [`docs/drafts/UX_2_0_PLAN.md`](docs/drafts/UX_2_0_PLAN.md) | The 2.3 UX design, draft for review, sequenced after Projects: one object model and hit-test, a menu per object projected from `Action` with each entry's key shown, Makefile targets run in the live pager, and fading key hints. Absorbs `CLICKABLE_MENUS_PLAN.md` as its slices 1–2. |
 | [`docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md`](docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md) | Draft candidate for 2.3, unscheduled: connected Git review, project/worktree context, comparison semantics, MCP reads, delivery slices, and references. Git write operations are a separate assessment. |
 | `docs/drafts/pane-identity-transport-proposal.md` | Option B shipped in #507 ([#491](https://github.com/Tripstack-Corp/spyc/issues/491)): the pane id goes in the MCP `initialize` handshake. Per-pane roots are dropped (decisions log, 2026-09-30). It is also the attribution mechanism Projects extends. |
 | `docs/drafts/VT_ENGINE_SPIKE.md` | The engine spike report plus its dated gate addendum: the evidence behind the libghostty-vt entries in the decisions log. Appended to, never rewritten. |
-| `docs/drafts/CLICKABLE_MENUS_PLAN.md` | Proposal, unscheduled and with no issue yet: make the which-key popup clickable instead of adding right-click context menus (#478). |
+| `docs/drafts/CLICKABLE_MENUS_PLAN.md` | Proposal: make the which-key popup clickable (#478). Absorbed into `UX_2_0_PLAN.md` as its slices 1–2, and archived once that plan is approved. |
 | `docs/drafts/AUTO_APPROVAL_PLAN.md` | Pending design, unscheduled ([#57](https://github.com/Tripstack-Corp/spyc/issues/57)). |
 | `docs/drafts/PATH_HANDOFF_PLAN.md` | Split — Option A shipped for 2.2 ([#9](https://github.com/Tripstack-Corp/spyc/issues/9)); the rest stays exploration ([#59](https://github.com/Tripstack-Corp/spyc/issues/59)). |
 | `docs/drafts/multi-question-bug-investigation.md` | Open bug, parked without a repro — an agent pane going deaf to input. Not in the tracker; this is the record. |

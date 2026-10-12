@@ -889,6 +889,27 @@ fn orphan_root_markers_are_swept_and_live_ones_kept() {
     assert_eq!(left, want);
 }
 
+/// A status hook whose launching spyc restarted reaches the live spyc rooted
+/// above it, as the proxy does. Without a pane id it would land on the focused
+/// tab, and without a named socket spyc never launched the agent: neither
+/// reports anywhere.
+#[test]
+fn a_status_report_finds_a_restarted_spyc() {
+    let state = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(state.path(), || {
+        let dir = state_dir().unwrap();
+        touch_root_marker(&dir, std::process::id(), project.path());
+        let _live = UnixListener::bind(socket_path_for(std::process::id()).unwrap()).unwrap();
+        let dead = dir.join("mcp-999999999.sock");
+        let dead = dead.to_str().unwrap();
+
+        assert!(report_stream(dead, Some("pane"), project.path()).is_some());
+        assert!(report_stream(dead, None, project.path()).is_none());
+        assert!(report_stream("", Some("pane"), project.path()).is_none());
+    });
+}
+
 #[test]
 fn discover_live_socket_returns_none_with_no_spyc_rooted_above() {
     let tmp = tempfile::tempdir().unwrap();

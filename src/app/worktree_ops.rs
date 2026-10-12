@@ -37,10 +37,9 @@ use super::{App, Message, Wake};
 /// validated). Built by [`App::plan_worktree_job`] on the main loop.
 pub enum WorktreeJob {
     /// `create_worktree`: add a worktree for `branch`, discovering the repo from
-    /// `dir` ([`crate::app::state::AppState::worktree_anchor`] — the focused
-    /// column's dir, or the project root when that column is inside an archive).
+    /// the first of `anchors` inside one ([`App::create_anchors`]). Never empty.
     Create {
-        dir: std::path::PathBuf,
+        anchors: Vec<std::path::PathBuf>,
         branch: String,
         /// Start point for a NEW branch — the repo's default branch (POLA: not
         /// the focused column's HEAD). `None` falls back to HEAD in `add`.
@@ -116,12 +115,12 @@ const fn err_result(message: String) -> WorktreeJobResult {
 pub fn run_worktree_job(job: WorktreeJob) -> WorktreeJobResult {
     match job {
         WorktreeJob::Create {
-            dir,
+            anchors,
             branch,
             base,
             open,
         } => {
-            match crate::git::worktree::add(&dir, &branch, base.as_deref()) {
+            match crate::git::worktree::add(create_anchor(&anchors), &branch, base.as_deref()) {
                 Ok(path) => {
                     let json = serde_json::json!({
                         "branch": branch,
@@ -168,6 +167,18 @@ pub fn run_worktree_job(job: WorktreeJob) -> WorktreeJobResult {
 
 /// Build the human/agent-facing message for a safe-remove outcome: what was
 /// archived, and whether the branch was deleted (merged) or kept (unmerged).
+/// The first of `anchors` inside a git repo, else the first, whose discovery
+/// error is then the one the caller sees. Stats the filesystem, so it runs on
+/// the worker rather than in `plan_worktree_job`.
+fn create_anchor(anchors: &[std::path::PathBuf]) -> &std::path::Path {
+    anchors
+        .iter()
+        .find(|dir| super::state::find_repo_root(dir).is_some())
+        .or_else(|| anchors.first())
+        // Invariant: `create_anchors` always starts with the focused column's.
+        .expect("create_worktree has at least one anchor")
+}
+
 fn safe_remove_message(
     target: &std::path::Path,
     report: &crate::app::worktree_clean::SafeRemoveReport,
@@ -221,19 +232,20 @@ impl App {
         cmd: &McpCommand,
     ) -> Option<Result<WorktreeJob, McpResponse>> {
         Some(match cmd {
-            McpCommand::CreateWorktree { branch, base, open } => {
+            McpCommand::CreateWorktree {
+                branch,
+                base,
+                open,
+                pane_id,
+            } => {
                 let branch = branch.trim();
                 if branch.is_empty() {
                     Err(McpResponse::Error {
                         message: "missing required parameter: branch".into(),
                     })
                 } else {
-                    // Anchor on the FOCUSED column's repo (consistent with `W n`):
-                    // `worktree::add` discovers the enclosing repo from any dir
-                    // inside it — so the anchor has to *be* a directory, which a
-                    // column inside an archive mount is not.
                     Ok(WorktreeJob::Create {
-                        dir: self.state.worktree_anchor(),
+                        anchors: self.create_anchors(pane_id.as_deref()),
                         branch: branch.to_string(),
                         // Caller's explicit `base` override, else PROJECT_HOME's
                         // default branch (POLA: not whatever the focused column
@@ -264,6 +276,25 @@ impl App {
             },
             _ => return None,
         })
+    }
+
+    /// Where `create_worktree` looks for its repo, in order: the focused
+    /// column's dir, as `W n` uses ([`AppState::worktree_anchor`]); the calling
+    /// agent's own pane, so an agent in a repo isn't refused because the user is
+    /// browsing outside one; then `PROJECT_HOME`. The worker takes the first
+    /// that is inside a repo. Cached reads only: this runs on the loop.
+    ///
+    /// [`AppState::worktree_anchor`]: crate::app::state::AppState::worktree_anchor
+    fn create_anchors(&self, pane_id: Option<&str>) -> Vec<std::path::PathBuf> {
+        let pane_cwd = pane_id.and_then(|id| {
+            let tabs = self.runtime.pane_tabs.as_ref()?;
+            let tab = tabs.tabs().iter().find(|t| t.info.id == id)?;
+            Some(tab.live_cwd())
+        });
+        std::iter::once(self.state.worktree_anchor())
+            .chain(pane_cwd)
+            .chain(self.state.project_home.clone())
+            .collect()
     }
 
     /// Run a validated worktree job synchronously on the loop (the direct /

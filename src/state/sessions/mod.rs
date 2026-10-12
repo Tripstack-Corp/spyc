@@ -91,6 +91,11 @@ pub struct SavedTab {
     /// spawned tab's own fresh key in that case.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub claim_owner: String,
+    /// The tab's `TabInfo::id`, its `SPYC_PANE_ID`. A restored tab takes it
+    /// back, so an agent that outlived spyc still names this tab. Empty on
+    /// older saves, which restore with a fresh id.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub pane_id: String,
 }
 
 // Serde's skip callback receives a reference to the field.

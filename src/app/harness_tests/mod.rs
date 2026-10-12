@@ -46,6 +46,7 @@ fn fake_agent_script() -> std::path::PathBuf {
         argv=\"$(dirname \"$(dirname \"$0\")\")/$(basename \"$0\").argv\"\n\
         printf '%s\\n' \"$@\" > \"$argv.tmp\"\n\
         printf '%s\n' \"$CODEX_HOME\" > \"$argv.home\"\n\
+        printf '%s\n' \"$SPYC_PANE_ID\" > \"$argv.pane\"\n\
         mv \"$argv.tmp\" \"$argv\"\n\
         exec sleep 30\n";
     static SCRIPT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();

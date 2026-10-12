@@ -1,15 +1,12 @@
 //! Bottom-pane / tab lifecycle: create / hide / close / restart tabs,
-//! directional focus, resize + zoom, the pane/overlay sizing helpers,
-//! the session-restore resume driver + crashed-restore detection, and
-//! the `:dump-scrollback` diagnostic. The methods here are called from
-//! sibling modules (`actions`, `key_dispatch`, `commands`, `tasks`, `render`,
-//! `pager_handler`, `loop_steps`, `session`), so they're `pub` (or
-//! `pub(super)` for the one that only a sibling needs).
+//! directional focus, resize + zoom, the pane/overlay sizing helpers, and the
+//! `:dump-scrollback` diagnostic. The methods here are called from sibling
+//! modules (`actions`, `key_dispatch`, `commands`, `tasks`, `render`,
+//! `pager_handler`, `loop_steps`, `session`, `session_restore`), so they're
+//! `pub` (or `pub(super)` for those only a sibling needs).
 
 use super::{
-    App, Effect, Mode, Pane, PaneTabs, Prompt, PromptKind, RESTORE_RESUME_ENTER_DELAY,
-    RESTORE_RESUME_VERIFY_DELAY, RESTORE_RESUME_VERIFY_RETRIES, RESTORE_RESUME_VERIFY_TAIL,
-    StatusPosition, TabEntry, TabInfo, state,
+    App, Effect, Mode, Pane, PaneTabs, Prompt, PromptKind, StatusPosition, TabEntry, TabInfo, state,
 };
 
 /// Where a freshly-spawned tab lands. `Replace` keeps the restarted tab's
@@ -147,7 +144,7 @@ impl App {
                 .and_then(|tabs| tabs.tabs().get(idx))
                 .and_then(|entry| entry.info.codex_home.clone()),
         };
-        self.spawn_pane_tab(cmd, cwd, slot, home.as_deref())
+        self.spawn_pane_tab(cmd, cwd, slot, home.as_deref(), None)
     }
 
     /// Restore and fork reuse their source pane's home instead of current overrides.
@@ -157,15 +154,16 @@ impl App {
         cwd: &std::path::Path,
         home: Option<&std::path::Path>,
     ) -> bool {
-        self.spawn_pane_tab(cmd, cwd, TabSlot::Append, home)
+        self.spawn_pane_tab(cmd, cwd, TabSlot::Append, home, None)
     }
 
-    fn spawn_pane_tab(
+    pub(super) fn spawn_pane_tab(
         &mut self,
         cmd: &str,
         cwd: &std::path::Path,
         slot: TabSlot,
         home: Option<&std::path::Path>,
+        pane_id: Option<&str>,
     ) -> bool {
         // A new pane is meant to be used — if the file list is zoomed (the
         // pane is collapsed to its tab bar), reveal the split so the pane
@@ -195,6 +193,9 @@ impl App {
         // pane knows its session id immediately — pin it now so `^a v` is exact
         // from the first keypress (the spawn-time scan handles fresh codex panes).
         let mut info = TabInfo::new(cmd, cwd);
+        if let Some(id) = pane_id {
+            info.id = id.to_string();
+        }
         info.status_hooks_at_spawn = crate::agent::detect(cmd)
             .status_hooks()
             .is_some_and(|support| support.installed(cwd));
@@ -472,80 +473,6 @@ impl App {
         {
             self.state.flash_error("pane suspend is unix-only");
             Vec::new()
-        }
-    }
-
-    /// For tabs that have a `pending_resume_send` armed (set by
-    /// `restore_session`), drive the two-phase keystroke injection
-    /// that recovers a Claude conversation. We avoid the `--resume`
-    /// CLI flag because it trips a known regression that crashes at
-    /// mount; the slash-command path goes through `tM_` and works
-    /// fine.
-    ///
-    /// Three phases:
-    /// - `Text` (after banner-settle): write `/resume <sid>` with no
-    ///   trailing Enter and transition to `Enter`.
-    /// - `Enter` (after a small additional delay): write `\r` and
-    ///   transition to `Verify`.
-    /// - `Verify` (closed-loop): if `/resume <sid>` is still sitting
-    ///   unsubmitted in the pane tail, re-send `\r` and re-arm, up to
-    ///   `RESTORE_RESUME_VERIFY_RETRIES` times.
-    ///
-    /// Splitting the text/Enter writes narrows the race where
-    /// Claude's TUI was still mid-render when the original combined
-    /// `/resume <sid>\r` arrived, but no fixed delay closes it —
-    /// async startup work (MCP connects, version check, org-message
-    /// fetch) can remount the input component and eat a lone `\r`
-    /// seconds after spawn. The `Verify` phase makes the submit
-    /// observed rather than hoped-for: the sid vanishing from the
-    /// screen tail is the success signal, and while it's visible a
-    /// retry `\r` is harmless. (The v1.70 "bells" design subsumes
-    /// this; delete the phase when that lands.)
-    pub fn send_pending_resumes(&mut self, now: std::time::Instant) {
-        use crate::pane::tabs::{PendingResumeSend, resume_still_unsubmitted};
-        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
-            return;
-        };
-        for entry in tabs.tabs_mut() {
-            match entry.info.pending_resume_send.take() {
-                Some(PendingResumeSend::Text { sid, after }) if now >= after => {
-                    let _ = entry.pane.send_bytes(format!("/resume {sid}").as_bytes());
-                    entry.info.pending_resume_send = Some(PendingResumeSend::Enter {
-                        sid,
-                        after: now + RESTORE_RESUME_ENTER_DELAY,
-                    });
-                }
-                Some(PendingResumeSend::Enter { sid, after }) if now >= after => {
-                    let _ = entry.pane.send_bytes(b"\r");
-                    entry.info.pending_resume_send = Some(PendingResumeSend::Verify {
-                        sid,
-                        after: now + RESTORE_RESUME_VERIFY_DELAY,
-                        retries_left: RESTORE_RESUME_VERIFY_RETRIES,
-                    });
-                }
-                Some(PendingResumeSend::Verify {
-                    sid,
-                    after,
-                    retries_left,
-                }) if now >= after => {
-                    let tail = entry.pane.recent_lines(RESTORE_RESUME_VERIFY_TAIL);
-                    if resume_still_unsubmitted(&tail, &sid) && retries_left > 0 {
-                        let _ = entry.pane.send_bytes(b"\r");
-                        entry.info.pending_resume_send = Some(PendingResumeSend::Verify {
-                            sid,
-                            after: now + RESTORE_RESUME_VERIFY_DELAY,
-                            retries_left: retries_left - 1,
-                        });
-                    }
-                    // Submitted (sid gone from the tail) or retries
-                    // exhausted: cleared by take(). On exhaustion the
-                    // user recovers by pressing Enter themselves.
-                }
-                other => {
-                    // Not yet due, or empty — put back what we took.
-                    entry.info.pending_resume_send = other;
-                }
-            }
         }
     }
 
