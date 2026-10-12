@@ -205,15 +205,17 @@ The generated `.mcp.json` looks like this:
 {
   "mcpServers": {
     "spyc": {
-      "command": "/Users/you/.local/bin/spyc",
+      "command": "spyc",
       "args": ["--mcp"]
     }
   }
 }
 ```
 
-- **`command`** — path to the spyc binary (auto-detected from
-  the running executable).
+- **`command`** — a bare `spyc` when one is on `PATH`, as the status
+  hooks name it, else the running binary's absolute path. A codex
+  workspace policy can allow MCP servers by their exact command, and
+  then disables an entry that names the same binary by its path.
 - **`args`** — `--mcp` runs spyc in stdio MCP proxy mode. Claude
   Code spawns this process; it proxies JSON-RPC to the running
   instance's Unix socket.

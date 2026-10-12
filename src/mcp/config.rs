@@ -134,6 +134,14 @@ pub fn ensure_mcp_json(dir: &Path) -> Result<McpConfigStatus, io::Error> {
     ensure_spyc_in_mcp_json(&dir.join(".mcp.json"))
 }
 
+/// The command an MCP entry runs: the spyc the status hooks run
+/// ([`super::hooks::spyc_binary`]), so a bare `spyc` whenever one is on `PATH`.
+/// A codex workspace policy can allow MCP servers by exact command, and then
+/// disables an entry naming the same binary by its absolute path.
+fn entry_command() -> String {
+    super::hooks::spyc_binary().unwrap_or_else(|| "spyc".to_string())
+}
+
 /// Write spyc's stdio MCP entry into an `mcpServers`-shaped JSON file at `path`,
 /// preserving any other servers already declared there.
 ///
@@ -142,12 +150,11 @@ pub fn ensure_mcp_json(dir: &Path) -> Result<McpConfigStatus, io::Error> {
 /// the enterprise-policy gate, which is claude-specific and stays in
 /// [`ensure_mcp_json`]).
 pub(super) fn ensure_spyc_in_mcp_json(path: &Path) -> Result<McpConfigStatus, io::Error> {
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
-
+    let command = entry_command();
     // SPYC-TRAP(mcp-entry-names-no-socket): no `env`. Claude and agy start the
     // proxy with the agent's own env, where the pane put its spyc's socket.
     let spyc_entry = json!({
-        "command": exe.to_string_lossy(),
+        "command": &command,
         "args": ["--mcp"],
     });
 
@@ -206,7 +213,7 @@ pub(super) fn ensure_spyc_in_mcp_json(path: &Path) -> Result<McpConfigStatus, io
         std::fs::create_dir_all(parent)?;
     }
     crate::fs::write_atomic(path, (content + "\n").as_bytes())?;
-    mcp_log(&format!("wrote {} (exe={})", path.display(), exe.display()));
+    mcp_log(&format!("wrote {} (command={command})", path.display()));
     Ok(McpConfigStatus::Configured)
 }
 
@@ -233,7 +240,7 @@ pub(super) fn ensure_spyc_in_mcp_json(path: &Path) -> Result<McpConfigStatus, io
 /// Enterprise policies are claude-specific and don't apply here.
 pub fn ensure_codex_config_toml(dir: &Path) -> Result<McpConfigStatus, io::Error> {
     let path = dir.join(".codex").join("config.toml");
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("spyc"));
+    let command = entry_command();
 
     // Build a fresh `[mcp_servers.spyc]` table — used both as the
     // splice target and as the whole-file fallback when the existing
@@ -241,10 +248,7 @@ pub fn ensure_codex_config_toml(dir: &Path) -> Result<McpConfigStatus, io::Error
     // table, mcp_servers not a table, etc.).
     let build_entry = || {
         let mut entry = toml::Table::new();
-        entry.insert(
-            "command".into(),
-            toml::Value::String(exe.to_string_lossy().into_owned()),
-        );
+        entry.insert("command".into(), toml::Value::String(command.clone()));
         entry.insert(
             "args".into(),
             toml::Value::Array(vec![toml::Value::String("--mcp".into())]),
@@ -323,7 +327,7 @@ pub fn ensure_codex_config_toml(dir: &Path) -> Result<McpConfigStatus, io::Error
         std::fs::create_dir_all(parent)?;
     }
     crate::fs::write_atomic(&path, content.as_bytes())?;
-    mcp_log(&format!("wrote .codex/config.toml (exe={})", exe.display()));
+    mcp_log(&format!("wrote .codex/config.toml (command={command})"));
     Ok(McpConfigStatus::Configured)
 }
 
@@ -730,6 +734,38 @@ mod tests {
         )
         .unwrap();
         path
+    }
+
+    /// Every MCP entry names spyc as the status hooks do: a bare `spyc` when one
+    /// is on `PATH`. A codex workspace policy can allow MCP servers by exact
+    /// command, and then disables an entry naming the same binary's absolute path.
+    #[test]
+    fn every_mcp_entry_names_the_spyc_on_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = tempfile::tempdir().unwrap();
+        let spyc = bin.path().join("spyc");
+        std::fs::write(&spyc, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&spyc, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        crate::mcp::hooks::with_search_path(bin.path(), || {
+            super::ensure_spyc_in_mcp_json(&dir.join(".mcp.json")).unwrap();
+            super::ensure_codex_config_toml(dir).unwrap();
+            ensure_agy_mcp_config(dir).unwrap();
+        });
+        for json in [".mcp.json", ".agents/mcp_config.json"] {
+            let v: Value =
+                serde_json::from_str(&std::fs::read_to_string(dir.join(json)).unwrap()).unwrap();
+            assert_eq!(v["mcpServers"]["spyc"]["command"], "spyc", "{json}: {v}");
+        }
+        let codex: toml::Value =
+            toml::from_str(&std::fs::read_to_string(dir.join(".codex/config.toml")).unwrap())
+                .unwrap();
+        assert_eq!(
+            codex["mcp_servers"]["spyc"]["command"].as_str(),
+            Some("spyc"),
+            "{codex}"
+        );
     }
 
     #[test]

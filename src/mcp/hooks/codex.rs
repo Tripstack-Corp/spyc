@@ -5,9 +5,7 @@ use identity::{inline_prune_refused, prune_toml_groups};
 
 use std::path::Path;
 
-use super::{
-    ConfigCleanup, merge_root_toml, reporter_binary, reporter_command, status_trace_enabled,
-};
+use super::{ConfigCleanup, merge_root_toml, reporter_command, spyc_binary, status_trace_enabled};
 
 // ── Codex status hooks ────────────────────────────────────────────────
 //
@@ -56,7 +54,7 @@ pub fn ensure_codex_status_hooks(dir: &Path) -> bool {
     if crate::git::discovery::is_tracked(&path) {
         return false;
     }
-    let Some(exe) = reporter_binary() else {
+    let Some(exe) = spyc_binary() else {
         return false;
     };
     let existing = match std::fs::read_to_string(&path) {
@@ -181,7 +179,7 @@ fn cleanup_codex_toml(dir: &Path) -> ConfigCleanup {
     let Ok(mut root) = toml::from_str::<toml::Value>(&text) else {
         return ConfigCleanup::NothingToDo;
     };
-    let exe = reporter_binary();
+    let exe = spyc_binary();
     let has_ours = root
         .get("hooks")
         .and_then(toml::Value::as_table)
@@ -264,7 +262,7 @@ fn legacy_edit(dir: &Path) -> Result<LegacyEdit, LegacyError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(LegacyEdit::Keep),
         Err(_) => return Err(LegacyError::Unreadable),
     };
-    let exe = reporter_binary();
+    let exe = spyc_binary();
     let edit = pruned_legacy_hooks_json(&text, exe.as_deref())?;
     if !matches!(edit, LegacyEdit::Keep) && crate::git::discovery::is_tracked(&path) {
         return Err(LegacyError::Tracked);
