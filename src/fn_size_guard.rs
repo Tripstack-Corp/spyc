@@ -31,7 +31,6 @@ const FUNCTION: Rule = Rule {
     advice: "Extract a cohesive helper",
     pins: &[
         ("src/app/actions.rs::App::apply_inner", 360),
-        ("src/app/activity_diagnostics.rs::activity_dump_lines", 167),
         ("src/app/agent_status.rs::App::settle_agent_activity", 141),
         ("src/app/archive.rs::App::apply_one_archive_outcome", 134),
         ("src/app/archive_route.rs::classify", 142),

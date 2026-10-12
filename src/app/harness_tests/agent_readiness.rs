@@ -76,7 +76,19 @@ fn report(app: &mut App, status: &str) {
 }
 
 pub(super) fn dump(app: &mut App) -> String {
-    app.dispatch_command("activity dump");
+    pager_text(app, "activity dump")
+}
+
+/// `:why-status`'s pager text.
+pub(super) fn why_status(app: &mut App) -> String {
+    pager_text(app, "why-status")
+}
+
+/// The pager `command` opens. Any pager already open is closed first, so a
+/// command that opens none can't be read as the previous one.
+fn pager_text(app: &mut App, command: &str) -> String {
+    app.view.pager = None;
+    app.dispatch_command(command);
     app.view
         .pager
         .as_ref()
@@ -201,8 +213,7 @@ fn codex_dump_distinguishes_definitions_from_reports_and_retains_last_report() {
             after.contains("execution/trust unverified"),
             "a self-report does not establish hook trust: {after}"
         );
-        app.dispatch_command("why-status");
-        assert!(app.flash_text().unwrap().contains("/hooks"));
+        assert!(why_status(&mut app).contains("/hooks"));
     });
 }
 
@@ -217,7 +228,7 @@ fn codex_hooks_installed_before_spawn_still_require_review_not_assumed_readiness
         crate::state::hook_consent::set_consent(&dir, true);
         assert!(app.open_pane_tab_in(&command, &dir));
         let lines = dump(&mut app);
-        assert!(lines.contains("; present at launch;"), "{lines}");
+        assert!(lines.contains("\n      present at launch\n"), "{lines}");
         assert!(!lines.contains("not present at launch"), "{lines}");
         assert!(!lines.contains("restart needed"), "{lines}");
         assert!(lines.contains("execution/trust unverified"), "{lines}");
@@ -973,8 +984,7 @@ fn a_closed_agent_pane_retires_reports_and_rejects_late_reports() {
         assert!(info.reported.is_none());
         assert_eq!(info.activity, AgentActivity::Idle);
         assert!(dump(&mut app).contains("source: process-exit"));
-        app.dispatch_command("why-status");
-        assert!(app.flash_text().unwrap().contains("(process-exit)"));
+        assert!(why_status(&mut app).contains("(process-exit)"));
         let result = app.execute_mcp_command(McpCommand::ReportStatus {
             pane_id: None,
             pane: None,

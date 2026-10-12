@@ -277,7 +277,7 @@ const SECTIONS: &[Section] = &[
             ),
             (
                 "●  ■  ·",
-                "agent tab dot: pulse ● working, red square ■ blocked, teal square ■ done, dim · idle (:why-status)",
+                "agent tab dot: pulse ● working, red square ■ blocked, teal square ■ done, dim · idle (:why-status explains it in a pager)",
             ),
             (
                 ":hooks on|on!|off",

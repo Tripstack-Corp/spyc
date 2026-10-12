@@ -96,8 +96,8 @@ after the pane has focus, so any other key defers (saving nothing, asked again
 next launch) and goes to the agent, rather than being eaten by a dialogue the
 user was not typing at.
 
-**Debug:** **`:why-status`** flashes the active tab's state + source; **`:activity
-dump`** opens a pager with every pane's derivation.
+**Debug:** **`:why-status`** opens a pager with the active tab's state + source,
+then its full derivation; **`:activity dump`** opens one with every pane's.
 
 The dump retains the last received semantic report after expiry or dismissal;
 its source can be a hook or the agent itself. Hook diagnostics separate the

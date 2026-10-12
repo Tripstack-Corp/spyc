@@ -26,50 +26,51 @@ const RECHECK_EVERY: Duration = Duration::from_secs(30);
 
 /// Report installation facts without treating config presence or an agent's
 /// self-report as proof that a lifecycle hook was trusted and executed.
-pub(super) fn status_hooks_diagnostic(info: &crate::pane::TabInfo) -> Option<String> {
+pub(super) fn status_hooks_facts(info: &crate::pane::TabInfo) -> Option<Vec<String>> {
     let profile = crate::agent::detect(&info.command);
     let support = profile.status_hooks()?;
     let dir = (support.config_dir)(&info.cwd);
+    let codex = profile.kind() == AgentKind::Codex;
     let presence = if support.installed(&info.cwd) {
         "reporter marker found"
     } else {
         "MISSING (`:hooks on`)"
     };
-    let startup = if support.live_reload {
-        "live reload supported"
-    } else if info.status_hooks_restart_needed {
-        "restart needed (changed after launch)"
-    } else if info.status_hooks_at_spawn {
-        "present at launch"
-    } else {
-        "not present at launch"
-    };
-    let verification = if profile.kind() == AgentKind::Codex {
-        "execution/trust unverified; review /hooks and project trust"
-    } else {
-        "hook execution unverified"
-    };
-    let legacy = if profile.kind() == AgentKind::Codex {
-        crate::mcp::codex_legacy_hook_diagnostic(&dir)
-            .map(|note| format!("; {note}"))
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-    let location = if profile.kind() == AgentKind::Codex && dir != info.cwd {
+    let location = if codex && dir != info.cwd {
         format!(
-            "{} or {}; linked-worktree hook declarations are ignored",
+            "{} or {}",
             dir.join(support.config_label).display(),
             dir.join(".codex/hooks.json").display()
         )
-    } else if profile.kind() == AgentKind::Codex {
+    } else if codex {
         ".codex/config.toml or .codex/hooks.json".to_string()
     } else {
         support.config_label.to_string()
     };
-    Some(format!(
-        "{presence} in {location}; {startup}; {verification}{legacy}"
-    ))
+    let mut facts = vec![format!("{presence} in {location}")];
+    if codex && dir != info.cwd {
+        facts.push("linked-worktree hook declarations are ignored".to_string());
+    }
+    facts.push(
+        if support.live_reload {
+            "live reload supported"
+        } else if info.status_hooks_restart_needed {
+            "restart needed (changed after launch)"
+        } else if info.status_hooks_at_spawn {
+            "present at launch"
+        } else {
+            "not present at launch"
+        }
+        .to_string(),
+    );
+    if codex {
+        facts.push("execution/trust unverified".to_string());
+        facts.push("review /hooks and project trust".to_string());
+        facts.extend(crate::mcp::codex_legacy_hook_diagnostic(&dir).map(String::from));
+    } else {
+        facts.push("hook execution unverified".to_string());
+    }
+    Some(facts)
 }
 
 impl App {

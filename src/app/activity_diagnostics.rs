@@ -1,85 +1,102 @@
-//! Agent activity source and hook-readiness diagnostics.
+//! Agent activity source and hook-readiness diagnostics: `:why-status` (the
+//! active tab) and `:activity dump` (every tab) print one shared per-tab report.
+
+use std::time::Instant;
 
 use super::{App, Effect};
+use crate::pane::{AgentActivity, PaneTabs, ReportedStatus, TabEntry, TabInfo};
+use crate::state::sessions::AgentKind;
 
-/// `:why-status` — explain the active tab's agent-activity classification
-/// (debug aid, `docs/archive/AGENT_AWARENESS_PLAN.md`): the current state, its **source**
-/// (a semantic `report_status` self-report vs the output-timing fallback), and
-/// how long since its last pane output. App-layer (reads the live pane tabs +
-/// clock).
-pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
-    use crate::pane::AgentActivity;
-    use crate::state::sessions::AgentKind;
-    let Some(tabs) = app.runtime.pane_tabs.as_ref() else {
-        app.state.flash_info("why-status: no pane open");
-        return Vec::new();
-    };
-    let info = tabs.active_info();
-    let is_agent = crate::agent::detect(&info.command).kind() != AgentKind::Other;
-    let age = match info.last_output_at {
-        Some(at) => format!("{:.1}s since last output", at.elapsed().as_secs_f32()),
-        None => "no output yet".to_string(),
-    };
-    let msg = if is_agent {
-        let state = match info.activity {
-            AgentActivity::Working => "working",
-            AgentActivity::Idle => "idle",
-            AgentActivity::Blocked => "blocked",
-            AgentActivity::Done => "done",
-            AgentActivity::Unknown => "unknown",
-        };
-        // Match `effective_activity`, including Codex's temporary modal override.
-        let source = if tabs.active().is_closed() {
-            "process-exit".to_string()
-        } else if info.reported.is_some()
+const fn state_str(a: AgentActivity) -> &'static str {
+    match a {
+        AgentActivity::Working => "working",
+        AgentActivity::Idle => "idle",
+        AgentActivity::Blocked => "blocked",
+        AgentActivity::Done => "done",
+        AgentActivity::Unknown => "unknown",
+    }
+}
+
+fn is_agent(info: &TabInfo) -> bool {
+    crate::agent::detect(&info.command).kind() != AgentKind::Other
+}
+
+/// The self-report the dot follows, as `effective_activity` decides it: none
+/// once the process has exited, and none while Codex's visible approval modal
+/// overrides it.
+fn live_report(e: &TabEntry) -> Option<ReportedStatus> {
+    let info = &e.info;
+    info.reported.filter(|_| {
+        !e.pane.is_closed()
             && !crate::agent::codex_approval::overrides_report(
                 info.reported,
                 info.scrape_status.map(|(status, _)| status),
                 crate::agent::detect(&info.command).kind(),
             )
-        {
-            "self-reported".to_string()
-        } else if let Some((_, hint)) = info.scrape_status {
-            match hint {
-                Some(h) => format!("scrape-fallback: {h}"),
-                None => "scrape-fallback".to_string(),
-            }
-        } else {
-            "output-timing".to_string()
-        };
-        // Name a missing hook install outright. Without it the fallback reads
-        // as the answer ("idle (output-timing)") when the real story is that
-        // nothing can report — the exact ambiguity that turned one removal into
-        // a forensics session.
-        let hooks = super::status_hooks::status_hooks_diagnostic(info)
-            .map_or_else(String::new, |message| format!(" — hooks: {message}"));
-        format!(
-            "why-status [{}]: {state} ({source}) — {age}{hooks}",
+    })
+}
+
+/// `:why-status` — the active tab's dot explained in the pager, as `:why-git`
+/// does for git markers: the verdict first, then the tab's `:activity dump`
+/// report, so it can be searched, copied and saved.
+pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
+    let Some(tabs) = app.runtime.pane_tabs.as_ref() else {
+        app.state.flash_info("why-status: no pane open");
+        return Vec::new();
+    };
+    let mut view = crate::ui::pager::PagerView::new_plain("why-status", why_status_lines(tabs));
+    view.saveable = true;
+    app.set_pager(view);
+    Vec::new()
+}
+
+fn why_status_lines(tabs: &PaneTabs) -> Vec<String> {
+    let index = tabs.active_index();
+    let entry = &tabs.tabs()[index];
+    let mut out = vec![
+        format!("why-status @ {}", crate::sysinfo::format_now()),
+        String::new(),
+    ];
+    out.extend(verdict(entry));
+    out.push(String::new());
+    out.extend(tab_report(index, entry, true, Instant::now()));
+    out
+}
+
+/// The answer, before the evidence: the dot's state, what it follows, and how
+/// long the pane has been quiet. A tab that isn't an agent has no dot.
+fn verdict(e: &TabEntry) -> Vec<String> {
+    let info = &e.info;
+    if !is_agent(info) {
+        return vec![format!(
+            "\"{}\" is not a known agent, so it has no dot",
             info.label
+        )];
+    }
+    let source = if e.pane.is_closed() {
+        "process-exit".to_string()
+    } else if live_report(e).is_some() {
+        "self-reported".to_string()
+    } else if let Some((_, hint)) = info.scrape_status {
+        hint.map_or_else(
+            || "scrape-fallback".to_string(),
+            |h| format!("scrape-fallback: {h}"),
         )
     } else {
-        format!("why-status: '{}' is not a known agent — no dot", info.label)
+        "output-timing".to_string()
     };
-    app.state.flash_info(msg);
-    Vec::new()
+    let age = match info.last_output_at {
+        Some(at) => format!("{:.1}s since last output", at.elapsed().as_secs_f32()),
+        None => "no output yet".to_string(),
+    };
+    vec![format!("{} ({source})", state_str(info.activity)), age]
 }
 
 /// Build the `:activity dump` report (see [`super::commands::cmd_activity`]). Reads the live
 /// tabs + activity tallies, plus each agent dir's hook config (the one I/O — a
 /// dot that can't report is the first thing to rule out) → plain lines.
 pub(super) fn activity_dump_lines(app: &App) -> Vec<String> {
-    use crate::pane::AgentActivity;
-    use crate::state::sessions::AgentKind;
-
-    let state_str = |a: AgentActivity| match a {
-        AgentActivity::Working => "working",
-        AgentActivity::Idle => "idle",
-        AgentActivity::Blocked => "blocked",
-        AgentActivity::Done => "done",
-        AgentActivity::Unknown => "unknown",
-    };
-
-    let now = std::time::Instant::now();
+    let now = Instant::now();
     let mut out = vec![format!(
         "spyc {} (pid {}) — activity dump @ {}",
         crate::VERSION,
@@ -134,111 +151,120 @@ pub(super) fn activity_dump_lines(app: &App) -> Vec<String> {
     };
     let active = tabs.active_index();
     for (i, e) in tabs.tabs().iter().enumerate() {
-        let info = &e.info;
-        let is_agent = crate::agent::detect(&info.command).kind() != AgentKind::Other;
-        let marker = if i == active { '*' } else { ' ' };
-        out.push(format!(
-            "{marker}[{}] \"{}\"  dot={}  agent={is_agent}  suspended={}",
+        out.extend(tab_report(i, e, i == active, now));
+        out.push(String::new());
+    }
+    out
+}
+
+/// One tab's report: what the dot shows, where that comes from, and the
+/// evidence behind it. The hook facts get a line each, so "a reporter is
+/// installed" and "a hook was seen to run" can't blur into one long line.
+fn tab_report(i: usize, e: &TabEntry, is_active: bool, now: Instant) -> Vec<String> {
+    let info = &e.info;
+    let marker = if is_active { '*' } else { ' ' };
+    let mut out = vec![
+        format!(
+            "{marker}[{}] \"{}\"  dot={}  agent={}  suspended={}",
             i + 1,
             info.label,
             state_str(info.activity),
+            is_agent(info),
             info.suspended,
-        ));
-        out.push(format!("    command: {}", info.command));
-        out.push(format!("    cwd: {}", info.cwd.display()));
-        if let Some(message) = super::status_hooks::status_hooks_diagnostic(info) {
-            out.push(format!("    hooks: {message}"));
-        }
-        // Match the effective source, including Codex's visible approval modal.
-        let closed = e.pane.is_closed();
-        let reported = info.reported.filter(|_| {
-            !closed
-                && !crate::agent::codex_approval::overrides_report(
-                    info.reported,
-                    info.scrape_status.map(|(status, _)| status),
-                    crate::agent::detect(&info.command).kind(),
+        ),
+        format!("    command: {}", info.command),
+        format!("    cwd: {}", info.cwd.display()),
+    ];
+    if let Some(facts) = super::status_hooks::status_hooks_facts(info) {
+        out.push("    hooks:".to_string());
+        out.extend(facts.into_iter().map(|fact| format!("      {fact}")));
+    }
+    out.extend(source_lines(e, now));
+    match info.last_output_at {
+        Some(at) => out.push(format!(
+            "    last_output: {:.1}s ago",
+            at.elapsed().as_secs_f32()
+        )),
+        None => out.push("    last_output: none".to_string()),
+    }
+    out.push(format!(
+        "    spawn: {:.0}s ago",
+        info.spawn_at.elapsed().as_secs_f32()
+    ));
+    out.push(format!("    pane_id: {}", info.id));
+    if let Some(s) = &info.live_session_id {
+        out.push(format!("    live_session_id: {s}"));
+    }
+    if let Some(s) = &info.codex_session_id {
+        out.push(format!("    codex_session_id: {s}"));
+    }
+    out
+}
+
+/// Where the dot's state comes from, the last report received and whether it
+/// still counts, and the hook events behind it.
+fn source_lines(e: &TabEntry, now: Instant) -> Vec<String> {
+    let info = &e.info;
+    let closed = e.pane.is_closed();
+    let reported = live_report(e);
+    let mut out = vec![match (closed, reported, info.scrape_status) {
+        (true, _, _) => "    source: process-exit (no live agent)".to_string(),
+        (false, Some(r), _) => format!(
+            "    source: SELF-REPORT status={} set {:.1}s ago, {}",
+            state_str(r.status),
+            r.at.elapsed().as_secs_f32(),
+            if r.status == AgentActivity::Blocked {
+                "latched until answered/dismissed or a newer report".to_string()
+            } else {
+                format!(
+                    "expires in {:.0}s",
+                    r.expiry.saturating_duration_since(now).as_secs_f32()
                 )
-        });
-        match (closed, reported, info.scrape_status) {
-            (true, _, _) => out.push("    source: process-exit (no live agent)".to_string()),
-            (false, Some(r), _) => out.push(format!(
-                "    source: SELF-REPORT status={} set {:.1}s ago, {}",
-                state_str(r.status),
-                r.at.elapsed().as_secs_f32(),
-                if r.status == AgentActivity::Blocked {
-                    "latched until answered/dismissed or a newer report".to_string()
-                } else {
-                    format!(
-                        "expires in {:.0}s",
-                        r.expiry.saturating_duration_since(now).as_secs_f32()
-                    )
-                },
-            )),
-            (false, None, Some((s, hint))) => out.push(format!(
-                "    source: SCRAPE-FALLBACK status={}{}",
-                state_str(s),
-                match hint {
-                    Some(h) => format!(" ({h})"),
-                    None => String::new(),
-                },
-            )),
-            (false, None, None) => {
-                out.push("    source: output-timing (no live report)".to_string());
-            }
+            },
+        ),
+        (false, None, Some((s, hint))) => format!(
+            "    source: SCRAPE-FALLBACK status={}{}",
+            state_str(s),
+            match hint {
+                Some(h) => format!(" ({h})"),
+                None => String::new(),
+            },
+        ),
+        (false, None, None) => "    source: output-timing (no live report)".to_string(),
+    }];
+    out.push(match info.last_reported {
+        Some(report) => format!(
+            "    last_report: status={} received {:.1}s ago (hook or agent; {})",
+            state_str(report.status),
+            report.at.elapsed().as_secs_f32(),
+            match info.last_report_ignored {
+                Some(reason) => format!("not applied: {reason}"),
+                None if reported.is_some_and(|live| live.at == report.at) => {
+                    "authoritative".into()
+                }
+                None if !closed && info.reported.is_some_and(|live| live.at == report.at) => {
+                    "retained behind visible approval".into()
+                }
+                None => "no longer authoritative".into(),
+            },
+        ),
+        None => "    last_report: none received".to_string(),
+    });
+    if info.recent_hook_events.is_empty() {
+        out.push("    hook_events: none received (older reporters may omit metadata)".to_string());
+    } else {
+        out.push("    hook_events: reported metadata (unverified; oldest first)".to_string());
+        for (event, status, at) in &info.recent_hook_events {
+            out.push(format!(
+                "      event={} status={} tool={} turn={} call={} received {:.1}s ago",
+                event.hook_event_name,
+                state_str(*status),
+                event.tool_name.as_deref().unwrap_or("not-reported"),
+                event.turn_id.as_deref().unwrap_or("not-reported"),
+                event.tool_use_id.as_deref().unwrap_or("not-reported"),
+                at.elapsed().as_secs_f32(),
+            ));
         }
-        match info.last_reported {
-            Some(report) => out.push(format!(
-                "    last_report: status={} received {:.1}s ago (hook or agent; {})",
-                state_str(report.status),
-                report.at.elapsed().as_secs_f32(),
-                match info.last_report_ignored {
-                    Some(reason) => format!("not applied: {reason}"),
-                    None if reported.is_some_and(|live| live.at == report.at) =>
-                        "authoritative".into(),
-                    None if !closed && info.reported.is_some_and(|live| live.at == report.at) =>
-                        "retained behind visible approval".into(),
-                    None => "no longer authoritative".into(),
-                },
-            )),
-            None => out.push("    last_report: none received".to_string()),
-        }
-        if info.recent_hook_events.is_empty() {
-            out.push(
-                "    hook_events: none received (older reporters may omit metadata)".to_string(),
-            );
-        } else {
-            out.push("    hook_events: reported metadata (unverified; oldest first)".to_string());
-            for (event, status, at) in &info.recent_hook_events {
-                out.push(format!(
-                    "      event={} status={} tool={} turn={} call={} received {:.1}s ago",
-                    event.hook_event_name,
-                    state_str(*status),
-                    event.tool_name.as_deref().unwrap_or("not-reported"),
-                    event.turn_id.as_deref().unwrap_or("not-reported"),
-                    event.tool_use_id.as_deref().unwrap_or("not-reported"),
-                    at.elapsed().as_secs_f32(),
-                ));
-            }
-        }
-        match info.last_output_at {
-            Some(at) => out.push(format!(
-                "    last_output: {:.1}s ago",
-                at.elapsed().as_secs_f32()
-            )),
-            None => out.push("    last_output: none".to_string()),
-        }
-        out.push(format!(
-            "    spawn: {:.0}s ago",
-            info.spawn_at.elapsed().as_secs_f32()
-        ));
-        out.push(format!("    pane_id: {}", info.id));
-        if let Some(s) = &info.live_session_id {
-            out.push(format!("    live_session_id: {s}"));
-        }
-        if let Some(s) = &info.codex_session_id {
-            out.push(format!("    codex_session_id: {s}"));
-        }
-        out.push(String::new());
     }
     out
 }

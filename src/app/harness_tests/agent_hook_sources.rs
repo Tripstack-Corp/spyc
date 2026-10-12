@@ -37,7 +37,9 @@ fn codex_linked_hooks_install_claim_and_cleanup_the_root_checkout() {
             "installation must not write ignored declarations"
         );
         let info = app.runtime.pane_tabs.as_ref().unwrap().active_info();
-        let explanation = crate::app::status_hooks::status_hooks_diagnostic(info).unwrap();
+        let explanation = crate::app::status_hooks::status_hooks_facts(info)
+            .unwrap()
+            .join("; ");
         assert!(
             explanation.contains(&main.display().to_string()),
             "{explanation}"

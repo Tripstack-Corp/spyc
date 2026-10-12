@@ -163,12 +163,7 @@ fn visible_codex_approval_temporarily_overrides_working_with_honest_diagnostics(
             dump(&mut app)
                 .contains("source: SCRAPE-FALLBACK status=blocked (awaiting command approval)")
         );
-        app.dispatch_command("why-status");
-        assert!(
-            app.flash_text()
-                .unwrap()
-                .contains("blocked (scrape-fallback:")
-        );
+        assert!(super::agent_readiness::why_status(&mut app).contains("blocked (scrape-fallback:"));
         let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
         assert_eq!(
             info.reported.unwrap().at,
