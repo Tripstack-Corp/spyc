@@ -277,7 +277,7 @@ impl App {
                     UnpinnedTab {
                         idx,
                         cwd: cwd.to_string_lossy().into_owned(),
-                        spawn: entry.info.spawn_epoch_secs,
+                        spawn: entry.info.agent_epoch_secs(),
                         resuming: crate::state::codex_transcript::is_resume_without_id(
                             &entry.info.command,
                         ),

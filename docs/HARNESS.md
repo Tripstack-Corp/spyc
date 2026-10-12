@@ -179,7 +179,9 @@ walk a branch would show none of the history it was forked to keep.
 ## 4. Session recovery, per agent
 
 `spyc -r` restores tabs, agent conversations and the vsplit. **How** each agent
-resumes differs, and the differences leak:
+resumes differs, and the differences leak. A shell tab that was running an
+agent restores as its shell: restore relaunches a tab's command, and a
+conversation started inside a shell isn't the shell's to resume.
 
 | agent | resume mechanism |
 |---|---|

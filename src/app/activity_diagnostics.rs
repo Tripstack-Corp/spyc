@@ -175,6 +175,19 @@ fn tab_report(i: usize, e: &TabEntry, is_active: bool, now: Instant) -> Vec<Stri
         format!("    command: {}", info.command),
         format!("    cwd: {}", info.cwd.display()),
     ];
+    if let Some(running) = info.running {
+        let age = crate::sysinfo::epoch_secs().saturating_sub(running.started_epoch_secs);
+        out.push(format!(
+            "    running: {} (pid {}, started {age}s ago{})",
+            crate::agent::profile_for(running.kind).name(),
+            running.pid,
+            if running.backgrounded {
+                ", in the background; the tab reads as its shell"
+            } else {
+                ""
+            },
+        ));
+    }
     if let Some(facts) = super::status_hooks::status_hooks_facts(info) {
         out.push("    hooks:".to_string());
         out.extend(facts.into_iter().map(|fact| format!("      {fact}")));

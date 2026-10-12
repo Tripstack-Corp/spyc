@@ -83,10 +83,20 @@ impl App {
     /// pre-spawn ([`maybe_preinstall_startup_hooks`](Self::maybe_preinstall_startup_hooks))
     /// so the hooks are live this session; here it's a harmless idempotent re-run.
     pub(super) fn maybe_offer_status_hooks(&mut self, cmd: &str, cwd: &std::path::Path) {
+        self.maybe_offer_status_hooks_for(crate::agent::detect(cmd).kind(), cwd);
+    }
+
+    /// [`Self::maybe_offer_status_hooks`] for `kind`, which a shell tab learns
+    /// from its foreground rather than its command.
+    pub(super) fn maybe_offer_status_hooks_for(
+        &mut self,
+        kind: crate::state::sessions::AgentKind,
+        cwd: &std::path::Path,
+    ) {
         if !self.view.mcp_running {
             return;
         }
-        let profile = crate::agent::detect(cmd);
+        let profile = crate::agent::profile_for(kind);
         let Some(support) = profile.status_hooks() else {
             return;
         };

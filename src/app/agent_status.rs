@@ -273,7 +273,7 @@ impl App {
             profile,
             kind,
             active.cwd.clone(),
-            active.spawn_epoch_secs,
+            active.agent_epoch_secs(),
             pinned,
         ))
     }
@@ -381,7 +381,7 @@ impl App {
             let active = tabs.active_info();
             result.kind == active.agent().kind()
                 && result.cwd == active.cwd
-                && result.spawn_epoch_secs == active.spawn_epoch_secs
+                && result.spawn_epoch_secs == active.agent_epoch_secs()
         });
         if matches {
             self.view.agent_status_cache = Some(result);

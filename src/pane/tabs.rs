@@ -96,6 +96,18 @@ pub struct ReportedStatus {
     pub expiry: std::time::Instant,
 }
 
+/// An agent a shell tab is running, as `shell_agents` detected it in the
+/// pty's foreground process group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RunningAgent {
+    pub kind: crate::state::sessions::AgentKind,
+    pub pid: u32,
+    pub started_epoch_secs: u64,
+    /// Out of the foreground without exiting: stopped with `^Z`, or sent to
+    /// the background. The tab reads as its shell until the agent is back.
+    pub backgrounded: bool,
+}
+
 /// Per-tab metadata displayed in the status line.
 pub struct TabInfo {
     /// Stable per-tab id (uuid), assigned at construction and unique among
@@ -229,15 +241,44 @@ pub struct TabInfo {
     /// on this, so a claim correctly re-binds to its owning tab after a crash
     /// + restart instead of becoming orphaned.
     pub claim_owner: String,
+    /// The agent a shell tab is running now (`shell_agents`). `None` in a tab
+    /// launched as an agent, whose agent is its command, and in a shell that
+    /// is running none.
+    pub running: Option<RunningAgent>,
+    /// When `shell_agents` should next look at this shell tab's foreground.
+    pub fg_check_due: Option<std::time::Instant>,
+    /// When it last looked, which spaces checks out while output streams.
+    pub fg_checked_at: Option<std::time::Instant>,
 }
 
 impl TabInfo {
-    /// The agent this tab runs, named by its launch command. Every question
-    /// about an existing tab's agent (its dot, reports, resume, transcript,
-    /// paste and scroll keys) asks here. A command about to be spawned has no
-    /// tab yet and goes to `agent::detect` directly.
+    /// The agent this tab runs now: the one detected in a shell tab's
+    /// foreground, else the one its launch command names. Every question about
+    /// an existing tab's agent (its dot, reports, resume, transcript, paste and
+    /// scroll keys) asks here. A command about to be spawned has no tab yet and
+    /// goes to `agent::detect` directly.
     pub fn agent(&self) -> &'static dyn crate::agent::AgentProfile {
+        match self.running {
+            Some(running) if !running.backgrounded => crate::agent::profile_for(running.kind),
+            _ => self.launched_agent(),
+        }
+    }
+
+    /// The agent the tab's launch command names: what restore and restart
+    /// bring back, so a shell tab running an agent is saved as its shell.
+    pub fn launched_agent(&self) -> &'static dyn crate::agent::AgentProfile {
         crate::agent::detect(&self.command)
+    }
+
+    /// When the tab's agent started, in epoch seconds: a shell tab's detected
+    /// agent's start, else the tab's spawn. What session lookups that match
+    /// on start time compare against, so a shell's second agent isn't matched
+    /// with its first one's conversation.
+    pub const fn agent_epoch_secs(&self) -> u64 {
+        match self.running {
+            Some(running) if !running.backgrounded => running.started_epoch_secs,
+            _ => self.spawn_epoch_secs,
+        }
     }
 
     pub fn new(command: impl Into<String>, cwd: impl Into<PathBuf>) -> Self {
@@ -282,6 +323,9 @@ impl TabInfo {
             // A separate uuid from `id`: this one is restore-stable (see the
             // field doc), so it must not alias the ephemeral pane-wake id.
             claim_owner: uuid::Uuid::now_v7().to_string(),
+            running: None,
+            fg_check_due: None,
+            fg_checked_at: None,
         }
     }
 
@@ -736,6 +780,33 @@ mod resume_verify_tests {
 mod tests {
     use super::{PaneTabs, TabEntry, TabInfo, strip_exit_suffix};
     use crate::pane::Pane;
+
+    /// A shell tab's agent is the one detected in its foreground, timed from
+    /// that agent's start: the codex pin matches rollouts against it, so a
+    /// shell's second codex isn't matched with its first one's rollout. Out of
+    /// the foreground, the tab is its shell again.
+    #[test]
+    fn a_shell_tabs_detected_agent_is_its_agent_and_sets_its_start() {
+        use crate::state::sessions::AgentKind;
+        let mut info = TabInfo::new("zsh", "/tmp");
+        info.spawn_epoch_secs = 100;
+        assert_eq!(info.agent().kind(), AgentKind::Other);
+        assert_eq!(info.agent_epoch_secs(), 100);
+
+        info.running = Some(super::RunningAgent {
+            kind: AgentKind::Codex,
+            pid: 7,
+            started_epoch_secs: 500,
+            backgrounded: false,
+        });
+        assert_eq!(info.agent().kind(), AgentKind::Codex);
+        assert_eq!(info.launched_agent().kind(), AgentKind::Other);
+        assert_eq!(info.agent_epoch_secs(), 500);
+
+        info.running.as_mut().unwrap().backgrounded = true;
+        assert_eq!(info.agent().kind(), AgentKind::Other);
+        assert_eq!(info.agent_epoch_secs(), 100);
+    }
 
     /// A long-lived dummy tab: `cat` blocks reading stdin so the pty
     /// stays open for the lifetime of the test.

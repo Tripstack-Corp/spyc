@@ -722,8 +722,24 @@ so a directory where no agent is ever run doesn't get a stray `.mcp.json` /
 which agent a shell started only after it has read its config: in a project
 that has consented to status hooks, opening one writes every agent's entry and
 hooks up front (`shell_agents::provision_shell_tab`), owned and cleaned up as
-an agent pane's are. Until the tab knows which agent runs, a report reaching it
+an agent pane's are. A report reaching a shell tab that isn't running an agent
 is recorded but moves no dot.
+
+**A shell tab's agent is the one in its foreground.** A moment after a shell
+tab's output, `shell_agents` looks at the pty's foreground process group: at
+most once a second while output streams, and never while the tab is idle. It
+lists the group's members (`proc_group`: `libproc` on macOS, `/proc` on Linux)
+and matches each one's argv[0], kernel name, or interpreted script against the
+agents' binaries; the earliest-started match wins, and printed text plays no
+part. `TabInfo::running` records what it found and `TabInfo::agent()` follows
+it, so the dot, reports, `^a v` and `^a F` follow the live agent. When the
+agent exits, everything the tab learned about it (reports, scrape, session ids,
+codex home) is dropped. `^Z` leaves it `backgrounded`, the tab reading as its
+shell until `fg`; it is never `suspended`, which would swallow the keys the
+shell needs. Restore and restart still bring back the launch command
+(`TabInfo::launched_agent()`), so such a tab is saved as its shell, and lookups
+that match a session by start time use `agent_epoch_secs()`, the agent's start
+rather than the tab's spawn.
 
 Every spyc in a directory shares that one entry, so removing it is
 refcounted like the status hooks (`state::dir_owners`): writing it claims the

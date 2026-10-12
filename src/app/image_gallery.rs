@@ -261,7 +261,7 @@ impl App {
         let pinned = info.pinned_session_id().map(str::to_string);
         let query = crate::agent::TranscriptQuery {
             cwd: &info.cwd,
-            spawn_epoch_secs: info.spawn_epoch_secs,
+            spawn_epoch_secs: info.agent_epoch_secs(),
             command: &info.command,
             session_id: pinned.as_deref(),
             codex_home: info.codex_home.as_deref(),
