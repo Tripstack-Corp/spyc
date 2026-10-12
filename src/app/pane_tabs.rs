@@ -306,8 +306,7 @@ impl App {
             .as_ref()
             .and_then(|tabs| tabs.tabs().get(tab_idx))
             .is_some_and(|entry| {
-                crate::agent::detect(&entry.info.command).kind()
-                    == crate::state::sessions::AgentKind::Codex
+                entry.info.agent().kind() == crate::state::sessions::AgentKind::Codex
                     && entry.info.codex_home.is_none()
             })
         {
@@ -396,15 +395,20 @@ impl App {
         let root = self.status_hooks_target_root();
         crate::state::hook_consent::set_consent(&root, true);
 
-        let Some((tab_idx, cmd, cwd)) = self.runtime.pane_tabs.as_ref().map(|t| {
+        let Some((tab_idx, cmd, cwd, kind)) = self.runtime.pane_tabs.as_ref().map(|t| {
             let info = t.active_info();
-            (t.active_index(), info.command.clone(), info.cwd.clone())
+            (
+                t.active_index(),
+                info.command.clone(),
+                info.cwd.clone(),
+                info.agent().kind(),
+            )
         }) else {
             self.state
                 .flash_error(":hooks on! — no active pane to restart");
             return;
         };
-        if crate::agent::detect(&cmd).kind() != crate::state::sessions::AgentKind::Claude {
+        if kind != crate::state::sessions::AgentKind::Claude {
             self.state
                 .flash_error(":hooks on! — active pane is not claude");
             return;

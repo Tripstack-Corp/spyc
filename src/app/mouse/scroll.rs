@@ -17,7 +17,7 @@ impl super::super::App {
     /// The active pane agent's verified scroll keybinding, if it has one.
     pub(super) fn active_pane_wheel_scroll(&self) -> Option<crate::agent::WheelScroll> {
         let tabs = self.runtime.pane_tabs.as_ref()?;
-        crate::agent::detect(&tabs.active_info().command).wheel_scroll()
+        tabs.active_info().agent().wheel_scroll()
     }
 
     /// A wheel tick over a pane whose child neither speaks mouse nor has a
@@ -83,7 +83,7 @@ impl super::super::App {
         let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
             return Vec::new();
         };
-        let profile = crate::agent::detect(&tabs.active_info().command);
+        let profile = tabs.active_info().agent();
         if let Some(marker) = profile.transcript_open_marker() {
             let dir: i8 = if delta < 0 { -1 } else { 1 };
             return self.send_agent_view_scroll_keys(profile, marker, dir);

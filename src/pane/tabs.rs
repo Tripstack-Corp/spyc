@@ -232,6 +232,14 @@ pub struct TabInfo {
 }
 
 impl TabInfo {
+    /// The agent this tab runs, named by its launch command. Every question
+    /// about an existing tab's agent (its dot, reports, resume, transcript,
+    /// paste and scroll keys) asks here. A command about to be spawned has no
+    /// tab yet and goes to `agent::detect` directly.
+    pub fn agent(&self) -> &'static dyn crate::agent::AgentProfile {
+        crate::agent::detect(&self.command)
+    }
+
     pub fn new(command: impl Into<String>, cwd: impl Into<PathBuf>) -> Self {
         let command = command.into();
         let label = command

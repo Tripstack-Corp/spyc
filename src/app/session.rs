@@ -75,7 +75,7 @@ pub(super) fn tab_conversation(
     tab: &crate::pane::tabs::TabEntry,
     claimed: &std::collections::HashSet<String>,
 ) -> (Option<String>, Option<String>) {
-    let profile = crate::agent::detect(&tab.info.command);
+    let profile = tab.info.agent();
     match tab
         .info
         .pinned_session_id()
@@ -156,7 +156,7 @@ impl App {
                 pt.tabs_mut()
                     .iter_mut()
                     .map(|t| {
-                        let profile = crate::agent::detect(&t.info.command);
+                        let profile = t.info.agent();
                         let kind = profile.kind();
                         let claimed = claims.entry(t.info.codex_home.clone()).or_default();
                         let (agent_session_id, agent_session_name) = tab_conversation(t, claimed);

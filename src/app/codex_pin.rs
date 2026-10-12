@@ -166,7 +166,7 @@ impl App {
             tabs.tabs().iter().any(|e| {
                 (e.info.codex_session_id.is_none() || e.info.codex_home.is_none())
                     && codex_pin_window_open(e.info.last_output_at, e.info.spawn_at)
-                    && crate::agent::detect(&e.info.command).kind() == AgentKind::Codex
+                    && e.info.agent().kind() == AgentKind::Codex
             })
         })
     }
@@ -194,9 +194,7 @@ impl App {
             .map_or_else(Vec::new, |tabs| {
                 tabs.tabs()
                     .iter()
-                    .filter(|entry| {
-                        crate::agent::detect(&entry.info.command).kind() == AgentKind::Codex
-                    })
+                    .filter(|entry| entry.info.agent().kind() == AgentKind::Codex)
                     .map(|entry| LaunchRecord {
                         id: entry.info.id.clone(),
                         cwd: entry.info.cwd.clone(),
@@ -252,7 +250,7 @@ impl App {
             for entry in tabs.tabs_mut() {
                 if entry.info.codex_home.is_none()
                     && snapshot.pane_ids.contains(&entry.info.id)
-                    && crate::agent::detect(&entry.info.command).kind() == AgentKind::Codex
+                    && entry.info.agent().kind() == AgentKind::Codex
                 {
                     entry.info.codex_home = Some(snapshot.home.clone());
                 }
@@ -271,7 +269,7 @@ impl App {
                     entry.info.codex_session_id.is_none()
                         && entry.info.codex_home.as_ref() == Some(&snapshot.home)
                         && snapshot.pane_ids.contains(&entry.info.id)
-                        && crate::agent::detect(&entry.info.command).kind() == AgentKind::Codex
+                        && entry.info.agent().kind() == AgentKind::Codex
                 })
                 .map(|(idx, entry)| {
                     let cwd = std::fs::canonicalize(&entry.info.cwd)
