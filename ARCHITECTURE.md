@@ -785,8 +785,11 @@ served exactly as before, and the read tools' default scope and allowed roots
 don't depend on attribution at all. A proxy or status hook that codex's shared
 daemon spawned (`codex app-server … --managed-daemon` among its ancestors,
 `proc_group::has_ancestor`) inherited its `SPYC_PANE_ID` from whichever codex
-started that daemon, so it names that tab, not its own session's: the proxy
-connects unattributed and the reporter stays silent. It is attribution, not authorization —
+started that daemon, so it names that tab, not its own session's: the reporter
+stays silent, and the proxy connects unattributed. The proxy's inherited
+`SPYC_MCP_SOCK` and `SPYC_CONTEXT` belong to that tab's spyc too, which may be
+another instance, so it ignores them and discovers its spyc from its cwd, the
+session's directory, where the daemon starts it. It is attribution, not authorization —
 SECURITY.md says why.
 
 **A restored tab keeps its pane id.** An agent can outlive the spyc that
