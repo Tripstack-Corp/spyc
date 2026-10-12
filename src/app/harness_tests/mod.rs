@@ -483,3 +483,5 @@ mod why_status;
 
 mod session_restore;
 mod shell_agents;
+
+mod codex_output;
