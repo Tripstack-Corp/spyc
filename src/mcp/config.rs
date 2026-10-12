@@ -38,7 +38,7 @@ fn refuse(msg: &str) -> io::Error {
 
 /// The variables an agent pane's env carries (`open_pane_tab_into`) that its
 /// `spyc --mcp` proxy needs: which spyc launched it, and which tab it is.
-const PANE_ENV: [&str; 2] = ["SPYC_MCP_SOCK", "SPYC_PANE_ID"];
+pub const PANE_ENV: [&str; 2] = ["SPYC_MCP_SOCK", "SPYC_PANE_ID"];
 
 /// Well-known paths for Claude Code enterprise managed settings.
 pub const MANAGED_SETTINGS_PATHS: &[&str] = &[

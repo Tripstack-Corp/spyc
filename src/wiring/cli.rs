@@ -30,7 +30,9 @@ fn kinds(list: &str) -> Result<Vec<AgentKind>> {
                 .copied()
                 .find(|k| name(*k) == n)
                 .ok_or_else(|| {
-                    anyhow::anyhow!("spyc can't wire `{n}` into user scope (it wires: claude, agy)")
+                    anyhow::anyhow!(
+                        "spyc can't wire `{n}` into user scope (it wires: claude, codex, agy)"
+                    )
                 })
         })
         .collect()
@@ -46,6 +48,7 @@ fn describe(part: &Part, file: &std::path::Path, installing: bool) -> String {
         Part::Managed => "provided by your organization".to_string(),
         Part::Blocked(why) => format!("blocked: {why}"),
         Part::Refused(why) => format!("left alone: {why}"),
+        Part::Off => "off ([pane] codex_mcp = false)".to_string(),
     }
 }
 
@@ -56,15 +59,21 @@ fn report(kind: AgentKind, st: &Status, installing: bool) {
         describe(&st.hooks, &st.hooks_file, installing),
         describe(&st.mcp, &st.mcp_file, installing),
     );
+    for note in &st.notes {
+        println!("   {note}");
+    }
 }
 
 /// Install (or remove) the wiring of the agents `list` names, report each, and
 /// record the answer so spyc stops (or resumes) its per-directory writes.
 pub fn run_cli(installing: bool, list: &str) -> Result<()> {
     let kinds = kinds(list)?;
-    let Some(env) = Env::current() else {
+    let Some(mut env) = Env::current() else {
         bail!("$HOME isn't set, so there is no user configuration to wire");
     };
+    // Only `$HOME`'s rc decides: the entry it governs is global.
+    env.codex_mcp =
+        crate::config::Config::load_default(&env.home).map_or(true, |c| c.pane.codex_mcp);
     let mut refused = 0;
     for kind in kinds {
         let st = if installing {
@@ -97,13 +106,16 @@ mod tests {
 
     #[test]
     fn a_list_names_agents_and_all_means_every_wired_one() {
-        assert_eq!(kinds("all").unwrap(), [AgentKind::Claude, AgentKind::Agy]);
+        assert_eq!(
+            kinds("all").unwrap(),
+            [AgentKind::Claude, AgentKind::Codex, AgentKind::Agy]
+        );
         assert_eq!(kinds("agy").unwrap(), [AgentKind::Agy]);
         assert_eq!(
             kinds("agy, claude").unwrap(),
             [AgentKind::Agy, AgentKind::Claude]
         );
-        assert!(kinds("codex").is_err());
+        assert_eq!(kinds("codex").unwrap(), [AgentKind::Codex]);
         assert!(kinds("bogus").is_err());
     }
 }

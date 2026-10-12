@@ -248,11 +248,13 @@ Non-live-reload agents
 already-consented repo via `maybe_preinstall_startup_hooks`, because they read
 their config once at startup and would otherwise miss them until next launch.
 
-`spyc --install-agents` (`src/wiring/`) installs claude's and agy's hooks once
-in their own user configuration instead: claude's `settings.json`, agy's
-`~/.gemini/config/hooks.json`. The commands are the ones the project writers
-produce, and they never vary, so claude's collapsing of identical handlers and
-agy's of named sets keep a leftover project copy from reporting twice. For an
+`spyc --install-agents` (`src/wiring/`) installs the hooks once in each
+agent's own user configuration instead: claude's `settings.json`, codex's
+`$CODEX_HOME/hooks.json`, agy's `~/.gemini/config/hooks.json`. The commands are
+the ones the project writers produce, and they never vary, so claude's
+collapsing of identical handlers and agy's of named sets keep a leftover project
+copy from reporting twice. codex merges nothing: a leftover project copy reports
+too, and `:why-status` says so. For an
 agent wired this way, `install_status_hooks` writes no project copy and the
 per-project consent prompt doesn't appear.
 

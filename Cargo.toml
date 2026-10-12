@@ -112,6 +112,8 @@ serde = { version = "1", features = ["derive"] }
 # `preserve_order`: spyc edits files users keep (agent settings, MCP configs),
 # and rewriting one must not reorder its keys.
 serde_json = { version = "1", features = ["preserve_order"] }
+# Edits codex's `config.toml` in place: the user's comments and layout survive.
+toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
 toml = { version = "1", default-features = false, features = ["parse", "display", "serde"] }
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 portable-pty = "0.9"

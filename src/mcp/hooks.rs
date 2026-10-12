@@ -320,7 +320,8 @@ pub fn cleanup_claude_status_hooks(dir: &Path) -> ConfigCleanup {
 
 mod codex;
 pub use codex::{
-    cleanup_codex_status_hooks, codex_legacy_hook_diagnostic, ensure_codex_status_hooks,
+    cleanup_codex_status_hooks, codex_hooks_json_with_spyc, codex_hooks_json_without_spyc,
+    codex_legacy_hook_diagnostic, ensure_codex_status_hooks,
 };
 
 // ── Agy (Antigravity CLI) status hooks ────────────────────────────────

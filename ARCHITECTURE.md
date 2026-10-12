@@ -855,6 +855,7 @@ projects, because a project copy would run beside the user one. The files:
 | Agent | Hooks | MCP entry |
 |---|---|---|
 | claude | `settings.json` in `$CLAUDE_CONFIG_DIR`, else `~/.claude` | `.claude.json` beside it, through `claude mcp add-json -s user` |
+| codex | `hooks.json` in `$CODEX_HOME`, else `~/.codex` | `[mcp_servers.spyc]` in `config.toml` beside it |
 | agy | `~/.gemini/config/hooks.json`, set `spyc-status` | `~/.gemini/config/mcp_config.json` |
 
 These files hold the user's own settings, so spyc owns only content it can
@@ -867,6 +868,18 @@ won't parse is refused untouched, and removal never deletes a file. Claude's
 but leaves the edit to `claude mcp`. An organization's `managed-mcp.json` takes
 exclusive control of claude's MCP servers: spyc then reports the entry as
 provided, or forbidden, and installs only the hooks.
+
+codex's hooks go into `hooks.json` rather than `config.toml`, because codex
+rewrites `config.toml` itself (project trust, and the `[hooks.state]` records of
+which hooks the user trusted) and spyc's edits there should be as few as
+possible. codex records that trust against a hook's file, event and indices,
+and runs every layer's hooks without merging duplicates. So spyc rewrites its
+own handler where it stands, appends one that's missing, and refuses a removal
+that would shift one of the user's handlers (`no_codex_hook_ever_moves`). The
+MCP entry is spliced into `config.toml` with `toml_edit`, so comments and layout
+survive, and only the keys spyc needs change; `[pane] codex_mcp = false`, read
+from `$HOME`'s rc alone because the entry it governs is global, keeps the entry
+out.
 
 <!-- SPYC-TRAP: user-config-write-through-symlink -->
 A user-configuration file is written through a symlink and keeps its mode

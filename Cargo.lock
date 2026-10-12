@@ -4429,6 +4429,7 @@ dependencies = [
  "tar",
  "tempfile",
  "toml",
+ "toml_edit",
  "trash",
  "two-face",
  "unicode-segmentation",
@@ -4883,6 +4884,7 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 

@@ -12,6 +12,7 @@
 mod agy;
 mod claude;
 mod cli;
+mod codex;
 mod file;
 
 pub use cli::run_cli;
@@ -22,7 +23,7 @@ use crate::mcp::Removal;
 use crate::state::sessions::AgentKind;
 
 /// The agents whose wiring spyc installs in user scope.
-pub const KINDS: [AgentKind; 2] = [AgentKind::Claude, AgentKind::Agy];
+pub const KINDS: [AgentKind; 3] = [AgentKind::Claude, AgentKind::Codex, AgentKind::Agy];
 
 /// What the wiring reads from the environment, gathered once so that tests
 /// never reach the developer's own configuration.
@@ -39,6 +40,10 @@ pub struct Env {
     /// The `claude` CLI. spyc registers claude's MCP entry through it rather
     /// than editing `.claude.json`, which is claude's own state file.
     pub claude_cli: Option<PathBuf>,
+    /// `$CODEX_HOME`, else `~/.codex`.
+    pub codex_home: PathBuf,
+    /// `[pane] codex_mcp`: `false` keeps spyc's MCP entry out of codex.
+    pub codex_mcp: bool,
     /// How an MCP entry and a hook name spyc.
     pub spyc: String,
 }
@@ -51,8 +56,11 @@ impl Env {
                 .filter(|v| !v.is_empty())
                 .map(PathBuf::from)
         };
+        let home = var("HOME")?;
         Some(Self {
-            home: var("HOME")?,
+            codex_home: var("CODEX_HOME").unwrap_or_else(|| home.join(".codex")),
+            codex_mcp: true,
+            home,
             claude_config_dir: var("CLAUDE_CONFIG_DIR"),
             managed_mcp: crate::mcp::MANAGED_MCP_PATHS
                 .iter()
@@ -83,6 +91,8 @@ pub enum Part {
     Blocked(String),
     /// Its file can't be edited safely; the reason says why.
     Refused(String),
+    /// The user's configuration turns it off.
+    Off,
 }
 
 impl Part {
@@ -100,6 +110,8 @@ pub struct Status {
     pub hooks_file: PathBuf,
     pub mcp: Part,
     pub mcp_file: PathBuf,
+    /// What the user should know beyond the two parts.
+    pub notes: Vec<String>,
 }
 
 /// `kind`'s wiring as it stands. `None` for an agent spyc doesn't wire here.
@@ -107,6 +119,7 @@ pub struct Status {
 pub fn status(kind: AgentKind, env: &Env) -> Option<Status> {
     match kind {
         AgentKind::Claude => Some(claude::status(env)),
+        AgentKind::Codex => Some(codex::status(env)),
         AgentKind::Agy => Some(agy::status(env)),
         _ => None,
     }
@@ -116,6 +129,7 @@ pub fn status(kind: AgentKind, env: &Env) -> Option<Status> {
 pub fn install(kind: AgentKind, env: &Env) -> Option<Status> {
     match kind {
         AgentKind::Claude => Some(claude::install(env)),
+        AgentKind::Codex => Some(codex::install(env)),
         AgentKind::Agy => Some(agy::install(env)),
         _ => None,
     }
@@ -125,23 +139,24 @@ pub fn install(kind: AgentKind, env: &Env) -> Option<Status> {
 pub fn remove(kind: AgentKind, env: &Env) -> Option<Status> {
     match kind {
         AgentKind::Claude => Some(claude::remove(env)),
+        AgentKind::Codex => Some(codex::remove(env)),
         AgentKind::Agy => Some(agy::remove(env)),
         _ => None,
     }
 }
 
-/// A part spyc keeps in a JSON file that it edits itself.
-struct JsonPart<'a> {
+/// A part spyc keeps in a file that it edits itself.
+struct FilePart<'a> {
     path: PathBuf,
     /// The file with spyc's part as this spyc writes it, or why it's refused.
     with: &'a dyn Fn(Option<&str>) -> Result<String, String>,
-    /// The file without spyc's part; `None` when it isn't a JSON object.
-    without: fn(&str) -> Option<Removal>,
+    /// The file without spyc's part, or why it's refused.
+    without: &'a dyn Fn(&str) -> Result<Removal, String>,
     /// Why the part can't be installed even though the file is fine.
     blocked: Option<String>,
 }
 
-impl JsonPart<'_> {
+impl FilePart<'_> {
     fn status(&self) -> Part {
         if let Some(why) = &self.blocked {
             return Part::Blocked(why.clone());
@@ -158,7 +173,7 @@ impl JsonPart<'_> {
             Part::Current
         } else if current
             .as_deref()
-            .and_then(self.without)
+            .and_then(|text| (self.without)(text).ok())
             .is_some_and(|r| r != Removal::NothingOurs)
         {
             Part::Outdated
@@ -193,17 +208,19 @@ impl JsonPart<'_> {
             Err(why) => return Part::Refused(why),
         };
         match (self.without)(&text) {
-            Some(Removal::Rest { text, .. }) => match file::write(&self.path, &text) {
+            Ok(Removal::Rest { text, .. }) => match file::write(&self.path, &text) {
                 Ok(_) => Part::Absent,
                 Err(why) => Part::Refused(why),
             },
-            Some(Removal::NothingOurs) => Part::Absent,
-            None => Part::Refused(format!(
-                "{}: refusing to edit — not a JSON object",
-                self.path.display()
-            )),
+            Ok(Removal::NothingOurs) => Part::Absent,
+            Err(why) => Part::Refused(format!("{}: {why}", self.path.display())),
         }
     }
+}
+
+/// A JSON codec's `None` (not a JSON object) as a refusal.
+fn json_object(removal: Option<Removal>) -> Result<Removal, String> {
+    removal.ok_or_else(|| "refusing to edit — not a JSON object".to_string())
 }
 
 /// Whether an MCP entry's command runs spyc, by any path.

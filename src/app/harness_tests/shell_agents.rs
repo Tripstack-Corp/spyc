@@ -106,25 +106,25 @@ fn an_agent_wired_in_user_scope_gets_no_project_copy() {
         let dir = std::fs::canonicalize(tmp.path()).unwrap().join("project");
         std::fs::create_dir_all(&dir).unwrap();
         crate::state::hook_consent::set_consent(&dir, true);
-        crate::state::wiring_consent::set(AgentKind::Claude, Some(true));
-        crate::state::wiring_consent::set(AgentKind::Agy, Some(true));
+        for kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Agy] {
+            crate::state::wiring_consent::set(kind, Some(true));
+        }
         let mut app = App::test_app(dir.clone());
         app.view.mcp_running = true;
         assert!(app.open_pane_tab_in("sh", &dir));
         app.maybe_offer_status_hooks(AgentKind::Claude, &dir);
+        app.maybe_preinstall_startup_hooks(AgentKind::Codex, &dir);
 
         for file in [
             ".mcp.json",
             ".claude/settings.json",
+            ".codex/config.toml",
+            ".codex/hooks.json",
             ".agents/mcp_config.json",
             ".agents/hooks.json",
         ] {
             assert!(!dir.join(file).exists(), "{file} was written");
         }
-        assert!(
-            dir.join(".codex/config.toml").exists(),
-            "codex isn't wired in user scope yet, so its project copy stays"
-        );
         assert!(
             !matches!(app.state.mode, Mode::Prompting(_)),
             "no per-project consent prompt for a wired agent"
