@@ -10,7 +10,7 @@
 //! fail-soft (`… 2>/dev/null || true`), so a hook survives the binary MOVING
 //! (a cleaned build dir, `~/.local/bin` → Homebrew) and a moved/uninstalled
 //! spyc degrades to a no-op instead of erroring every turn. See
-//! [`reporter_binary`] / [`reporter_command`].
+//! [`spyc_binary`] / [`reporter_command`].
 //!
 //! Three agents are wired (all share the lifecycle-event → reported-state idea):
 //! * **claude** — `.claude/settings.json` (JSON), reloaded live → hooks take
@@ -82,7 +82,7 @@ fn status_trace_enabled() -> bool {
 /// running binary. Falls back to the running binary's absolute path when spyc
 /// isn't on PATH. `None` only when neither is a UTF-8 string embeddable in the
 /// command (mirrors the prior skip-on-non-UTF-8-exe behaviour).
-fn reporter_binary() -> Option<String> {
+pub(super) fn spyc_binary() -> Option<String> {
     if spyc_on_path() {
         return Some("spyc".to_string());
     }
@@ -93,10 +93,39 @@ fn reporter_binary() -> Option<String> {
 
 /// Is an executable `spyc` resolvable on `$PATH`?
 fn spyc_on_path() -> bool {
-    let Some(path) = std::env::var_os("PATH") else {
+    let Some(path) = search_path() else {
         return false;
     };
     std::env::split_paths(&path).any(|dir| is_executable_file(&dir.join("spyc")))
+}
+
+#[cfg(test)]
+thread_local! {
+    static SEARCH_PATH_OVERRIDE: std::cell::RefCell<Option<std::ffi::OsString>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// `$PATH`, or the directory a test pinned with [`with_search_path`].
+fn search_path() -> Option<std::ffi::OsString> {
+    #[cfg(test)]
+    if let Some(path) = SEARCH_PATH_OVERRIDE.with(|c| c.borrow().clone()) {
+        return Some(path);
+    }
+    std::env::var_os("PATH")
+}
+
+/// Run `body` with `dir` as the whole `$PATH` [`spyc_binary`] searches.
+#[cfg(test)]
+pub(super) fn with_search_path<R>(dir: &Path, body: impl FnOnce() -> R) -> R {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            SEARCH_PATH_OVERRIDE.with(|c| *c.borrow_mut() = None);
+        }
+    }
+    SEARCH_PATH_OVERRIDE.with(|c| *c.borrow_mut() = Some(dir.as_os_str().to_owned()));
+    let _guard = Guard;
+    body()
 }
 
 /// A regular file with any execute bit set.
@@ -168,7 +197,7 @@ pub fn ensure_claude_status_hooks(dir: &Path) -> bool {
     }
     // Resolve the reporter binary (PATH-preferring, so the hook survives the
     // binary moving); skip on a non-UTF-8 path a shell would mis-exec.
-    let Some(exe) = reporter_binary() else {
+    let Some(exe) = spyc_binary() else {
         return false;
     };
     let existing = std::fs::read_to_string(&path).ok();
@@ -415,7 +444,7 @@ pub fn ensure_agy_status_hooks(dir: &Path) -> bool {
     if crate::git::discovery::is_tracked(&path) {
         return false;
     }
-    let Some(exe) = reporter_binary() else {
+    let Some(exe) = spyc_binary() else {
         return false;
     };
     let existing = std::fs::read_to_string(&path).ok();

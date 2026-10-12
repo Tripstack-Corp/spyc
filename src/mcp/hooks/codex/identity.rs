@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use super::{CODEX_STATUS_HOOKS, codex_group_is_ours, reporter, reporter_binary};
+use super::{CODEX_STATUS_HOOKS, codex_group_is_ours, reporter, spyc_binary};
 
 pub(super) fn toml_owned(handler: &toml::Value, exe: Option<&str>) -> bool {
     if handler
@@ -132,7 +132,7 @@ pub(super) fn inline_prune_refused(dir: &Path) -> bool {
     else {
         return false;
     };
-    let exe = reporter_binary();
+    let exe = spyc_binary();
     CODEX_STATUS_HOOKS.iter().any(|(event, _)| {
         root.get("hooks")
             .and_then(|hooks| hooks.get(*event))
