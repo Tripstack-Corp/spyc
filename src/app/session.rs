@@ -1188,6 +1188,71 @@ mod tests {
         });
     }
 
+    /// One agy tab in `cwd`, spawned at [`SPAWN`] and pinned to `pin`.
+    fn agy_tab(app: &mut App, cwd: &std::path::Path, pin: Option<&str>) {
+        claude_tab(app, cwd, pin);
+        app.runtime.pane_tabs.as_mut().expect("the tab").tabs_mut()[0]
+            .info
+            .command = "agy".into();
+    }
+
+    /// A line of agy's prompt history: a message sent in `conversation`, in
+    /// `workspace`, at `secs`.
+    fn agy_history(
+        home: &std::path::Path,
+        workspace: &std::path::Path,
+        conversation: &str,
+        secs: u64,
+    ) {
+        use std::io::Write as _;
+        let path = home.join(".gemini/antigravity-cli/history.jsonl");
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("agy dir");
+        let line = serde_json::json!({
+            "workspace": workspace, "conversationId": conversation, "timestamp": secs * 1000,
+        });
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .expect("history");
+        writeln!(f, "{line}").expect("history line");
+    }
+
+    fn with_agy_home(body: impl FnOnce(&std::path::Path, &std::path::Path)) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = std::fs::canonicalize(tmp.path()).expect("canonical tempdir");
+        let (project, home) = (root.join("project"), root.join("home"));
+        std::fs::create_dir_all(&project).expect("project");
+        crate::state::with_state_root(&root.join("state"), || {
+            crate::state::sessions::with_agy_home(&home, || body(&project, &home));
+        });
+    }
+
+    /// #589: an agy tab with no pin and no exit banner saves nothing. History
+    /// lists an older conversation in its workspace, but never a new one, so
+    /// whatever it offers is not this tab's.
+    #[test]
+    fn an_unpinned_agy_tab_never_borrows_an_older_conversation() {
+        with_agy_home(|project, home| {
+            agy_history(home, project, OTHER, SPAWN - 60);
+            let mut app = App::test_app(project.to_path_buf());
+            agy_tab(&mut app, project, None);
+            assert_eq!(saved_conversation(&mut app), None);
+        });
+    }
+
+    /// The pin is saved before agy has written the conversation; restore is
+    /// what checks for the transcript.
+    #[test]
+    fn a_pinned_agy_tab_saves_its_pin_before_agy_writes_it() {
+        with_agy_home(|project, home| {
+            agy_history(home, project, OTHER, SPAWN - 60);
+            let mut app = App::test_app(project.to_path_buf());
+            agy_tab(&mut app, project, Some(MINE));
+            assert_eq!(saved_conversation(&mut app).as_deref(), Some(MINE));
+        });
+    }
+
     /// `^a R` respawns a tab in place with the same command and cwd and a new
     /// pane id. The saved id has to follow, or a crash restores the old one
     /// and the respawned agent's hooks name a tab that isn't there.

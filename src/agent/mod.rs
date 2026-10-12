@@ -747,47 +747,40 @@ impl AgentProfile for AgyProfile {
     fn binary(&self) -> &'static str {
         "agy"
     }
+    /// Only agy's exit banner, which names this pane's own conversation. There
+    /// is no proximity guess: `history.jsonl` never lists a new conversation,
+    /// so a guess from it could only ever be another conversation (#589).
     fn resolve_resume_target(
         &self,
         pane: &Pane,
-        cwd: &Path,
-        spawn_epoch_secs: u64,
+        _cwd: &Path,
+        _spawn_epoch_secs: u64,
         claimed: &HashSet<String>,
     ) -> (Option<String>, Option<String>) {
         let lines = pane.recent_lines(200);
-        if let Some(id) = crate::state::sessions::extract_agy_resume_token(&lines)
-            .filter(|tok| !claimed.contains(tok))
-        {
-            return (Some(id), None);
-        }
-
-        // Fallback: pick the per-pane match by spawn-time proximity
-        let candidates = crate::state::sessions::find_agy_sessions(cwd);
-        if let Some(c) = crate::state::sessions::pick_closest_unclaimed_session(
-            candidates,
-            spawn_epoch_secs,
-            claimed,
-        ) {
-            return (Some(c.session_id), None);
-        }
-
-        (None, None)
+        let id = crate::state::sessions::extract_agy_resume_token(&lines)
+            .filter(|tok| !claimed.contains(tok));
+        (id, None)
     }
-    fn validate_live_session_id(&self, cwd: &Path, id: &str) -> Option<(String, Option<String>)> {
-        if crate::state::sessions::agy_jsonl_exists(cwd, id) {
-            Some((id.to_string(), None))
-        } else {
-            None
-        }
+    /// Agy's pin is taken as-is: the status hook reports it, or the tab was
+    /// spawned on it with `--conversation`. Restore checks the transcript, the
+    /// way claude's does.
+    fn validate_live_session_id(&self, _cwd: &Path, id: &str) -> Option<(String, Option<String>)> {
+        Some((id.to_string(), None))
     }
     fn command_without_resume(&self, cmd: &str) -> String {
         resume::command_without_agy_resume(cmd)
     }
-    fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, _cwd: &Path) -> RestorePlan {
+    /// A conversation agy never wrote, or none at all, starts a fresh agy.
+    /// `--continue` would resume agy's newest conversation in the workspace,
+    /// which another tab may own.
+    fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, cwd: &Path) -> RestorePlan {
         let base = resume::command_without_agy_resume(cmd);
         let command = match sid {
-            Some(s) => format!("{base} --conversation {s}"),
-            None => format!("{base} --continue"),
+            Some(s) if crate::state::sessions::agy_jsonl_exists(cwd, s) => {
+                format!("{base} --conversation {s}")
+            }
+            _ => base,
         };
         RestorePlan {
             command,
@@ -1292,20 +1285,24 @@ mod tests {
         assert_eq!(restored.command, format!("{expected} resume CURRENT"));
     }
 
-    /// Agy: `--conversation <sid>` with an id, `--continue` without.
+    /// Agy: `--conversation <sid>` for a conversation agy wrote. One it never
+    /// wrote, or no id at all, starts fresh: `--continue` would resume the
+    /// workspace's newest conversation, which another tab may own (#589).
     #[test]
-    fn agy_restore_bakes_conversation_or_continues() {
+    fn agy_restore_resumes_only_a_written_conversation() {
+        const SID: &str = "11111111-1111-4111-8111-111111111111";
+        let home = tempfile::tempdir().unwrap();
         let cwd = Path::new("/tmp");
-        assert_eq!(
-            AgyProfile
-                .reconstruct_restore("agy", Some("SID"), cwd)
-                .command,
-            "agy --conversation SID"
-        );
-        assert_eq!(
-            AgyProfile.reconstruct_restore("agy", None, cwd).command,
-            "agy --continue"
-        );
+        crate::state::sessions::with_agy_home(home.path(), || {
+            let restore = |sid| AgyProfile.reconstruct_restore("agy -m x", sid, cwd).command;
+            assert_eq!(restore(Some(SID)), "agy -m x", "never written");
+            assert_eq!(restore(None), "agy -m x", "no id");
+
+            let transcript = crate::state::sessions::agy_transcript_path(home.path(), SID);
+            std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+            std::fs::write(&transcript, "{}\n").unwrap();
+            assert_eq!(restore(Some(SID)), format!("agy -m x --conversation {SID}"));
+        });
     }
 
     /// Other (bash/vim/make): the saved command runs verbatim and any

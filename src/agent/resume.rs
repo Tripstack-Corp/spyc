@@ -89,6 +89,21 @@ pub fn codex_fork_command(cmd: &str, sid: &str) -> anyhow::Result<String> {
     super::codex_command::fork(cmd, sid)
 }
 
+/// The conversation an agy command resumes by id: `--conversation <id>` or
+/// `--conversation=<id>`. `None` for `--continue`, which names none.
+pub fn agy_conversation_in_command(cmd: &str) -> Option<String> {
+    let mut parts = cmd.split_whitespace();
+    while let Some(p) = parts.next() {
+        if p == "--conversation" {
+            return parts.next().map(String::from);
+        }
+        if let Some(id) = p.strip_prefix("--conversation=") {
+            return Some(id.to_string());
+        }
+    }
+    None
+}
+
 /// Strip Antigravity's `--conversation <UUID>`, `-c <UUID>`, and `--continue` flags from a command line.
 pub fn command_without_agy_resume(cmd: &str) -> String {
     let parts: Vec<&str> = cmd.split_whitespace().collect();
@@ -295,7 +310,7 @@ mod claude_resume_tests {
 
 #[cfg(test)]
 mod agy_helpers_tests {
-    use super::command_without_agy_resume;
+    use super::{agy_conversation_in_command, command_without_agy_resume};
 
     #[test]
     fn strips_conversation_with_value() {
@@ -327,6 +342,23 @@ mod agy_helpers_tests {
             command_without_agy_resume("agy -c=11111111-1111-1111-1111-111111111111"),
             "agy"
         );
+    }
+
+    /// The id a tab spawned on a conversation is pinned to; `--continue`
+    /// names none.
+    #[test]
+    fn agy_conversation_in_command_reads_both_spellings() {
+        assert_eq!(
+            agy_conversation_in_command("agy -m x --conversation abc --mode plan").as_deref(),
+            Some("abc")
+        );
+        assert_eq!(
+            agy_conversation_in_command("agy --conversation=abc").as_deref(),
+            Some("abc")
+        );
+        assert_eq!(agy_conversation_in_command("agy --continue"), None);
+        assert_eq!(agy_conversation_in_command("agy --conversation"), None);
+        assert_eq!(agy_conversation_in_command("agy"), None);
     }
 
     #[test]
