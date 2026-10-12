@@ -135,13 +135,17 @@ mod server;
 mod tool_schemas;
 
 pub use config::{
-    ConfigCleanup, McpConfigStatus, cleanup_agy_mcp_config, cleanup_codex_config, cleanup_mcp_json,
-    ensure_agy_mcp_config, ensure_codex_config_toml, ensure_mcp_json, sweep_orphan_spyc_configs,
+    ConfigCleanup, MANAGED_MCP_PATHS, MANAGED_SETTINGS_PATHS, McpConfigStatus, Removal,
+    cleanup_agy_mcp_config, cleanup_codex_config, cleanup_mcp_json, ensure_agy_mcp_config,
+    ensure_codex_config_toml, ensure_mcp_json, enterprise_allows_spyc_in,
+    enterprise_defines_spyc_in, mcp_json_with_spyc, mcp_json_without_spyc,
+    sweep_orphan_spyc_configs,
 };
 pub use hooks::{
-    cleanup_agy_status_hooks, cleanup_claude_status_hooks, cleanup_codex_status_hooks,
-    codex_legacy_hook_diagnostic, ensure_agy_status_hooks, ensure_claude_status_hooks,
-    ensure_codex_status_hooks,
+    agy_hooks_without_spyc, claude_hooks_without_spyc, cleanup_agy_status_hooks,
+    cleanup_claude_status_hooks, cleanup_codex_status_hooks, codex_legacy_hook_diagnostic,
+    ensure_agy_status_hooks, ensure_claude_status_hooks, ensure_codex_status_hooks, find_on_path,
+    merged_agy_status_hooks_json, merged_status_hooks_json, spyc_binary,
 };
 pub use server::{cleanup_socket, record_root, start_socket_server, sweep_orphan_root_markers};
 

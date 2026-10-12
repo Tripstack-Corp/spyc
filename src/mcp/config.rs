@@ -41,7 +41,7 @@ fn refuse(msg: &str) -> io::Error {
 const PANE_ENV: [&str; 2] = ["SPYC_MCP_SOCK", "SPYC_PANE_ID"];
 
 /// Well-known paths for Claude Code enterprise managed settings.
-const MANAGED_SETTINGS_PATHS: &[&str] = &[
+pub const MANAGED_SETTINGS_PATHS: &[&str] = &[
     // macOS system-wide
     "/Library/Application Support/ClaudeCode/managed-settings.json",
     // Linux / WSL system-wide
@@ -52,7 +52,7 @@ const MANAGED_SETTINGS_PATHS: &[&str] = &[
 /// When this file exists and defines a server named "spyc", the org has
 /// already wired Claude → spyc and our per-project `.mcp.json` writes
 /// are redundant (and just collide on the server name).
-const MANAGED_MCP_PATHS: &[&str] = &[
+pub const MANAGED_MCP_PATHS: &[&str] = &[
     "/Library/Application Support/ClaudeCode/managed-mcp.json",
     "/etc/claude-code/managed-mcp.json",
 ];
@@ -63,7 +63,12 @@ const MANAGED_MCP_PATHS: &[&str] = &[
 /// restriction. Returns `Some(false)` if spyc is denied or not in
 /// an allowlist.
 fn enterprise_allows_spyc() -> Option<bool> {
-    for path in MANAGED_SETTINGS_PATHS {
+    enterprise_allows_spyc_in(MANAGED_SETTINGS_PATHS)
+}
+
+/// [`enterprise_allows_spyc`] over the given `managed-settings.json` candidates.
+pub fn enterprise_allows_spyc_in(paths: &[impl AsRef<Path>]) -> Option<bool> {
+    for path in paths {
         let Ok(text) = std::fs::read_to_string(path) else {
             continue;
         };
@@ -99,7 +104,12 @@ fn enterprise_allows_spyc() -> Option<bool> {
 /// files (a name collision results in Claude picking the org
 /// definition, with the per-project entry only adding noise).
 fn enterprise_defines_spyc() -> bool {
-    for path in MANAGED_MCP_PATHS {
+    enterprise_defines_spyc_in(MANAGED_MCP_PATHS)
+}
+
+/// [`enterprise_defines_spyc`] over the given `managed-mcp.json` candidates.
+pub fn enterprise_defines_spyc_in(paths: &[impl AsRef<Path>]) -> bool {
+    for path in paths {
         let Ok(text) = std::fs::read_to_string(path) else {
             continue;
         };
@@ -142,6 +152,68 @@ fn entry_command() -> String {
     super::hooks::spyc_binary().unwrap_or_else(|| "spyc".to_string())
 }
 
+/// What taking spyc's part out of a config file's text leaves behind.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Removal {
+    /// Nothing of spyc's was there.
+    NothingOurs,
+    /// The rest of the file; `empty` when no other content remains.
+    Rest { text: String, empty: bool },
+}
+
+/// `existing`, an `mcpServers`-shaped JSON file (`None` when absent), with
+/// spyc's stdio entry running `command`; any other server is kept. `Err` says
+/// why the file is refused: an existing file is the user's data, and replacing
+/// one that won't parse drops every server it declares.
+pub fn mcp_json_with_spyc(existing: Option<&str>, command: &str) -> Result<String, String> {
+    // SPYC-TRAP(mcp-entry-names-no-socket): no `env`. Claude and agy start the
+    // proxy with the agent's own env, where the pane put its spyc's socket.
+    let spyc_entry = json!({
+        "command": command,
+        "args": ["--mcp"],
+    });
+    let mut parsed = match existing {
+        Some(text) if !text.trim().is_empty() => {
+            serde_json::from_str::<Value>(text).map_err(|e| {
+                format!(
+                    "refusing to overwrite — exists but isn't valid JSON ({e}); fix or delete it"
+                )
+            })?
+        }
+        _ => json!({}),
+    };
+    let servers = parsed.as_object_mut().and_then(|t| {
+        let entry = t.entry("mcpServers").or_insert_with(|| json!({}));
+        entry.as_object_mut()
+    });
+    let Some(map) = servers else {
+        return Err(
+            "refusing to overwrite — top level or `mcpServers` is not an object".to_string(),
+        );
+    };
+    map.insert("spyc".to_string(), spyc_entry);
+    Ok(
+        serde_json::to_string_pretty(&parsed).expect("serializing a serde_json::Value cannot fail")
+            + "\n",
+    )
+}
+
+/// `text` without its `spyc` server, or `None` when `text` isn't a JSON object.
+/// `empty` means nothing but an empty `mcpServers` would remain.
+pub fn mcp_json_without_spyc(text: &str) -> Option<Removal> {
+    let mut parsed = serde_json::from_str::<Value>(text).ok()?;
+    let root = parsed.as_object_mut()?;
+    let Some(servers) = root.get_mut("mcpServers").and_then(Value::as_object_mut) else {
+        return Some(Removal::NothingOurs);
+    };
+    if servers.shift_remove("spyc").is_none() {
+        return Some(Removal::NothingOurs);
+    }
+    let empty = servers.is_empty() && root.len() == 1;
+    let text = serde_json::to_string_pretty(&parsed).ok()? + "\n";
+    Some(Removal::Rest { text, empty })
+}
+
 /// Write spyc's stdio MCP entry into an `mcpServers`-shaped JSON file at `path`,
 /// preserving any other servers already declared there.
 ///
@@ -151,52 +223,15 @@ fn entry_command() -> String {
 /// [`ensure_mcp_json`]).
 pub(super) fn ensure_spyc_in_mcp_json(path: &Path) -> Result<McpConfigStatus, io::Error> {
     let command = entry_command();
-    // SPYC-TRAP(mcp-entry-names-no-socket): no `env`. Claude and agy start the
-    // proxy with the agent's own env, where the pane put its spyc's socket.
-    let spyc_entry = json!({
-        "command": &command,
-        "args": ["--mcp"],
-    });
-
-    // Default content, for an absent or blank file only — there's nothing to
-    // lose in either case.
-    let fresh = || {
-        serde_json::to_string_pretty(&json!({ "mcpServers": { "spyc": spyc_entry } }))
-            .expect("serializing a serde_json::Value cannot fail")
+    // A refused file costs spyc's tools in this repo until it's fixed: the
+    // caller flashes the error and the pane still launches.
+    let merge = |existing: Option<&str>| {
+        mcp_json_with_spyc(existing, &command)
+            .map_err(|why| refuse(&format!("{}: {why}", path.display())))
     };
     let content = match std::fs::read_to_string(path) {
-        // An existing file is the user's data — it can hold other MCP servers,
-        // and rewriting it from scratch drops every one. Refuse instead: the
-        // caller flashes the error and the pane still launches, so the cost is
-        // spyc's tools being unavailable in this repo until they fix the file.
-        Ok(text) if !text.trim().is_empty() => {
-            let mut parsed: Value = serde_json::from_str(&text).map_err(|e| {
-                refuse(&format!(
-                    "{}: refusing to overwrite — exists but isn't valid JSON ({e}); \
-                     fix or delete it",
-                    path.display()
-                ))
-            })?;
-            let servers = parsed.as_object_mut().and_then(|t| {
-                let entry = t.entry("mcpServers").or_insert_with(|| json!({}));
-                entry.as_object_mut()
-            });
-            match servers {
-                Some(map) => {
-                    map.insert("spyc".to_string(), spyc_entry);
-                    serde_json::to_string_pretty(&parsed)
-                        .expect("serializing a serde_json::Value cannot fail")
-                }
-                None => {
-                    return Err(refuse(&format!(
-                        "{}: refusing to overwrite — top level or `mcpServers` is not an object",
-                        path.display()
-                    )));
-                }
-            }
-        }
-        Ok(_) => fresh(),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => fresh(),
+        Ok(text) => merge(Some(&text))?,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => merge(None)?,
         // Anything else (permissions, a directory in the way) is not "no file";
         // writing over it would be a guess.
         Err(e) => {
@@ -212,7 +247,7 @@ pub(super) fn ensure_spyc_in_mcp_json(path: &Path) -> Result<McpConfigStatus, io
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    crate::fs::write_atomic(path, (content + "\n").as_bytes())?;
+    crate::fs::write_atomic(path, content.as_bytes())?;
     mcp_log(&format!("wrote {} (command={command})", path.display()));
     Ok(McpConfigStatus::Configured)
 }
@@ -382,7 +417,7 @@ fn remove_spyc_from_mcp_json(
     let Ok(text) = std::fs::read_to_string(path) else {
         return ConfigCleanup::NothingToDo;
     };
-    let Ok(mut parsed) = serde_json::from_str::<Value>(&text) else {
+    let Ok(parsed) = serde_json::from_str::<Value>(&text) else {
         return ConfigCleanup::NothingToDo;
     };
     let sock = parsed
@@ -394,18 +429,10 @@ fn remove_spyc_from_mcp_json(
     if guard_tracked && crate::git::discovery::is_tracked(path) {
         return ConfigCleanup::SkippedTracked;
     }
-    let Some(root) = parsed.as_object_mut() else {
+    let Some(Removal::Rest { text: rest, empty }) = mcp_json_without_spyc(&text) else {
         return ConfigCleanup::NothingToDo;
     };
-    let Some(servers) = root.get_mut("mcpServers").and_then(Value::as_object_mut) else {
-        return ConfigCleanup::NothingToDo;
-    };
-    if servers.remove("spyc").is_none() {
-        return ConfigCleanup::NothingToDo;
-    }
-    let servers_empty = servers.is_empty();
-    let only_servers = root.len() == 1; // i.e. just `mcpServers`
-    if only_servers && servers_empty {
+    if empty {
         let _ = std::fs::remove_file(path);
         mcp_log(&format!(
             "removed empty .mcp.json after cleaning spyc entry ({})",
@@ -413,13 +440,11 @@ fn remove_spyc_from_mcp_json(
         ));
         return ConfigCleanup::Cleaned;
     }
-    if let Ok(out) = serde_json::to_string_pretty(&parsed) {
-        let _ = crate::fs::write_atomic(path, (out + "\n").as_bytes());
-        mcp_log(&format!(
-            "cleaned spyc entry from .mcp.json (preserved other servers, {})",
-            path.display()
-        ));
-    }
+    let _ = crate::fs::write_atomic(path, rest.as_bytes());
+    mcp_log(&format!(
+        "cleaned spyc entry from .mcp.json (preserved other servers, {})",
+        path.display()
+    ));
     ConfigCleanup::Cleaned
 }
 

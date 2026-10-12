@@ -283,7 +283,7 @@ fn pruned_legacy_hooks_json(text: &str, exe: Option<&str>) -> Result<LegacyEdit,
     }
     hooks.retain(|_, groups| !groups.as_array().is_some_and(Vec::is_empty));
     if hooks.is_empty() {
-        object.remove("hooks");
+        object.shift_remove("hooks");
     }
     if object.is_empty() {
         return Ok(LegacyEdit::Remove);

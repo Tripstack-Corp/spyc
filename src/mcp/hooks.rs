@@ -50,11 +50,11 @@
 //! `--report-status` command), deleting an emptied file/dir; never touch a
 //! git-tracked `settings.json` (don't dirty something the user committed).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use super::config::ConfigCleanup;
+use super::config::{ConfigCleanup, Removal};
 
 /// The spyc binary to bake into an installed status-hook command. Prefers a
 /// `spyc` discoverable on `$PATH` so the hook survives the binary MOVING (a
@@ -63,7 +63,7 @@ use super::config::ConfigCleanup;
 /// running binary. Falls back to the running binary's absolute path when spyc
 /// isn't on PATH. `None` only when neither is a UTF-8 string embeddable in the
 /// command (mirrors the prior skip-on-non-UTF-8-exe behaviour).
-pub(super) fn spyc_binary() -> Option<String> {
+pub fn spyc_binary() -> Option<String> {
     if spyc_on_path() {
         return Some("spyc".to_string());
     }
@@ -74,10 +74,15 @@ pub(super) fn spyc_binary() -> Option<String> {
 
 /// Is an executable `spyc` resolvable on `$PATH`?
 fn spyc_on_path() -> bool {
-    let Some(path) = search_path() else {
-        return false;
-    };
-    std::env::split_paths(&path).any(|dir| is_executable_file(&dir.join("spyc")))
+    find_on_path("spyc").is_some()
+}
+
+/// The first executable `name` on `$PATH`.
+pub fn find_on_path(name: &str) -> Option<PathBuf> {
+    let path = search_path()?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| is_executable_file(candidate))
 }
 
 #[cfg(test)]
@@ -234,7 +239,7 @@ fn merge_root_toml(existing: Option<&str>) -> Option<toml::Value> {
 /// [`merge_root_json`]. Pure (no I/O) so the merge
 /// — and its byte-level idempotency, which is what makes the write skippable —
 /// is unit-testable.
-fn merged_status_hooks_json(existing: Option<&str>, exe: &str) -> Option<String> {
+pub fn merged_status_hooks_json(existing: Option<&str>, exe: &str) -> Option<String> {
     let mut root = merge_root_json(existing)?;
     let obj = root.as_object_mut()?;
     let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
@@ -257,6 +262,34 @@ fn merged_status_hooks_json(existing: Option<&str>, exe: &str) -> Option<String>
         .map(|out| out + "\n")
 }
 
+/// `text`, a claude `settings.json`, without spyc's status hooks: emptied event
+/// arrays go, then an emptied `hooks` key. `None` when `text` isn't a JSON object.
+pub fn claude_hooks_without_spyc(text: &str) -> Option<Removal> {
+    let mut root = serde_json::from_str::<Value>(text).ok()?;
+    let obj = root.as_object_mut()?;
+    let Some(hooks_obj) = obj.get_mut("hooks").and_then(Value::as_object_mut) else {
+        return Some(Removal::NothingOurs);
+    };
+    let mut removed = false;
+    for (event, _, _) in STATUS_HOOKS {
+        if let Some(list) = hooks_obj.get_mut(event).and_then(Value::as_array_mut) {
+            let before = list.len();
+            list.retain(|g| !group_is_ours(g));
+            removed |= list.len() != before;
+        }
+    }
+    if !removed {
+        return Some(Removal::NothingOurs);
+    }
+    hooks_obj.retain(|_, v| !v.as_array().is_some_and(Vec::is_empty));
+    if hooks_obj.is_empty() {
+        obj.shift_remove("hooks");
+    }
+    let empty = obj.is_empty();
+    let text = serde_json::to_string_pretty(&root).ok()? + "\n";
+    Some(Removal::Rest { text, empty })
+}
+
 /// Teardown counterpart: remove only the hook entries spyc wrote from
 /// `<dir>/.claude/settings.json`, preserving the user's other hooks/settings.
 /// Empties cascade: an event whose array becomes empty is dropped, then the
@@ -267,50 +300,13 @@ pub fn cleanup_claude_status_hooks(dir: &Path) -> ConfigCleanup {
     let Ok(text) = std::fs::read_to_string(&path) else {
         return ConfigCleanup::NothingToDo;
     };
-    let Ok(mut root) = serde_json::from_str::<Value>(&text) else {
+    let Some(Removal::Rest { text: rest, empty }) = claude_hooks_without_spyc(&text) else {
         return ConfigCleanup::NothingToDo;
     };
-    // Is any of ours present? (read-only scan, so a tracked file with nothing of
-    // ours reports NothingToDo rather than SkippedTracked.)
-    let has_ours = root
-        .pointer("/hooks")
-        .and_then(Value::as_object)
-        .is_some_and(|h| {
-            STATUS_HOOKS.iter().any(|(event, _, _)| {
-                h.get(*event)
-                    .and_then(Value::as_array)
-                    .is_some_and(|a| a.iter().any(group_is_ours))
-            })
-        });
-    if !has_ours {
-        return ConfigCleanup::NothingToDo;
-    }
     if crate::git::discovery::is_tracked(&path) {
         return ConfigCleanup::SkippedTracked;
     }
-
-    let Some(obj) = root.as_object_mut() else {
-        return ConfigCleanup::NothingToDo;
-    };
-    if let Some(hooks_obj) = obj.get_mut("hooks").and_then(Value::as_object_mut) {
-        for (event, _, _) in STATUS_HOOKS {
-            if let Some(list) = hooks_obj.get_mut(event).and_then(Value::as_array_mut) {
-                list.retain(|g| !group_is_ours(g));
-            }
-        }
-        // Drop emptied event arrays.
-        hooks_obj.retain(|_, v| !v.as_array().is_some_and(Vec::is_empty));
-    }
-    // Drop the `hooks` key if it's now empty.
-    if obj
-        .get("hooks")
-        .and_then(Value::as_object)
-        .is_some_and(serde_json::Map::is_empty)
-    {
-        obj.remove("hooks");
-    }
-
-    if obj.is_empty() {
+    if empty {
         let _ = std::fs::remove_file(&path);
         // Remove `.claude/` too, but only if now empty (no-op otherwise).
         if let Some(parent) = path.parent() {
@@ -318,9 +314,7 @@ pub fn cleanup_claude_status_hooks(dir: &Path) -> ConfigCleanup {
         }
         return ConfigCleanup::Cleaned;
     }
-    if let Ok(out) = serde_json::to_string_pretty(&root) {
-        let _ = crate::fs::write_atomic(&path, (out + "\n").as_bytes());
-    }
+    let _ = crate::fs::write_atomic(&path, rest.as_bytes());
     ConfigCleanup::Cleaned
 }
 
@@ -443,7 +437,7 @@ pub fn ensure_agy_status_hooks(dir: &Path) -> bool {
 /// unparseable existing file, a non-object root, or a serialization failure —
 /// see [`merge_root_json`]. Pure → its byte-idempotency,
 /// which lets the write be skipped, is testable.
-fn merged_agy_status_hooks_json(existing: Option<&str>, exe: &str) -> Option<String> {
+pub fn merged_agy_status_hooks_json(existing: Option<&str>, exe: &str) -> Option<String> {
     let mut root = merge_root_json(existing)?;
     let obj = root.as_object_mut()?;
     let mut set = serde_json::Map::new();
@@ -472,6 +466,20 @@ fn merged_agy_status_hooks_json(existing: Option<&str>, exe: &str) -> Option<Str
         .map(|out| out + "\n")
 }
 
+/// `text`, an agy `hooks.json`, without spyc's `spyc-status` set. `None` when
+/// `text` isn't a JSON object.
+pub fn agy_hooks_without_spyc(text: &str) -> Option<Removal> {
+    let mut root = serde_json::from_str::<Value>(text).ok()?;
+    let obj = root.as_object_mut()?;
+    if !obj.get(AGY_HOOK_SET).is_some_and(agy_set_is_ours) {
+        return Some(Removal::NothingOurs);
+    }
+    obj.shift_remove(AGY_HOOK_SET);
+    let empty = obj.is_empty();
+    let text = serde_json::to_string_pretty(&root).ok()? + "\n";
+    Some(Removal::Rest { text, empty })
+}
+
 /// Teardown counterpart: remove only spyc's `spyc-status` set from
 /// `<dir>/.agents/hooks.json`, preserving the user's other sets; delete the
 /// file (and `.agents/` if now empty) when nothing else remains. Refuses a
@@ -482,29 +490,20 @@ pub fn cleanup_agy_status_hooks(dir: &Path) -> ConfigCleanup {
     let Ok(text) = std::fs::read_to_string(&path) else {
         return ConfigCleanup::NothingToDo;
     };
-    let Ok(mut root) = serde_json::from_str::<Value>(&text) else {
+    let Some(Removal::Rest { text: rest, empty }) = agy_hooks_without_spyc(&text) else {
         return ConfigCleanup::NothingToDo;
     };
-    if !root.get(AGY_HOOK_SET).is_some_and(agy_set_is_ours) {
-        return ConfigCleanup::NothingToDo;
-    }
     if crate::git::discovery::is_tracked(&path) {
         return ConfigCleanup::SkippedTracked;
     }
-    let Some(obj) = root.as_object_mut() else {
-        return ConfigCleanup::NothingToDo;
-    };
-    obj.remove(AGY_HOOK_SET);
-    if obj.is_empty() {
+    if empty {
         let _ = std::fs::remove_file(&path);
         // Remove `.agents/` too, but only if now empty (no-op otherwise — it
         // may hold skills / mcp_config.json).
         let _ = std::fs::remove_dir(&agents_dir);
         return ConfigCleanup::Cleaned;
     }
-    if let Ok(out) = serde_json::to_string_pretty(&root) {
-        let _ = crate::fs::write_atomic(&path, (out + "\n").as_bytes());
-    }
+    let _ = crate::fs::write_atomic(&path, rest.as_bytes());
     ConfigCleanup::Cleaned
 }
 

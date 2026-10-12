@@ -1514,6 +1514,19 @@ rooted above the agent. The entry names no socket itself; codex's lists
 `env_vars = ["SPYC_MCP_SOCK", "SPYC_PANE_ID"]`, because codex hands
 an MCP server only the variables it is told to.
 
+**`spyc --install-agents`** writes the MCP entry and the status hooks once,
+into claude's and agy's own user configuration, instead of into each project:
+claude's `settings.json` (in `$CLAUDE_CONFIG_DIR`, else `~/.claude`) and its
+user-scope MCP servers, through `claude mcp add-json -s user`; agy's
+`~/.gemini/config/hooks.json` and `mcp_config.json`. From then on spyc writes
+nothing into projects for those agents. `--install-agents=agy` picks agents;
+`spyc --remove-agents` takes spyc's part back out and leaves the rest of each
+file. An organization's `managed-mcp.json` keeps control of claude's MCP
+servers, and spyc installs only the hooks there. Files are edited in place:
+a symlinked `settings.json` stays a link, a file that won't parse is left
+alone with the reason printed, and an MCP server named `spyc` that runs
+something else is never replaced. codex follows.
+
 spyc starts codex panes with **`--no-daemon`**, so codex runs the session
 itself rather than on its shared background server. That server spawns every
 session's hooks and MCP servers with the environment of whichever codex

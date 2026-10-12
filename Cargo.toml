@@ -109,7 +109,9 @@ shlex = { version = "2", default-features = false, features = ["std"] }
 # (the no_subprocess_git_in_production guard) or reimplementing diff3.
 diffy = "0.5"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `preserve_order`: spyc edits files users keep (agent settings, MCP configs),
+# and rewriting one must not reorder its keys.
+serde_json = { version = "1", features = ["preserve_order"] }
 toml = { version = "1", default-features = false, features = ["parse", "display", "serde"] }
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 portable-pty = "0.9"

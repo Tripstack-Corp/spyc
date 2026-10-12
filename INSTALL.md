@@ -241,6 +241,17 @@ Both are runtime artifacts — add them to `.gitignore`:
 
 spyc's own repo already has these entries.
 
+To keep these files out of your projects altogether, wire claude and agy into
+their own user configuration once:
+
+```sh
+spyc --install-agents          # or --install-agents=claude
+```
+
+spyc then writes nothing into projects for those agents. Before uninstalling
+spyc, run `spyc --remove-agents`: the entries stay behind otherwise, and an
+agent then reports an MCP server that fails to start.
+
 ### Enterprise managed environments
 
 In enterprise environments, Claude Code supports two system-wide
