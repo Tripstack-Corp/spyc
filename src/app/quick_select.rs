@@ -25,7 +25,12 @@ impl App {
         // text the user can see. Scroll mode falls out of this for
         // free since `visible_lines()` honours the user's current
         // scroll position.
-        let lines = tabs.active().visible_lines();
+        let mut lines = tabs.active().visible_lines();
+        let agent = tabs.active_info().agent();
+        if agent.kind() == crate::state::sessions::AgentKind::Codex && !tabs.active().is_scrolling()
+        {
+            lines.truncate(agent.output_len(&lines));
+        }
         let patterns = build_patterns(&self.state.config.scan_patterns);
         let mut matches = scan(&lines, &patterns);
         if matches.is_empty() {

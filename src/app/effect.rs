@@ -29,6 +29,7 @@ use super::{
 };
 
 mod executor;
+mod pane_text;
 
 /// A side effect for the run loop to execute. Producers (handlers) return
 /// a `Vec<Effect>` describing *what* should happen; `run_effects` is the

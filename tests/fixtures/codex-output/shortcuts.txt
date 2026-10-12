@@ -1,0 +1,21 @@
+  Keyboard shortcuts                                                                                
+                                                                                                    
+  Compose                      Session                  Transcript (open first)                     
+  /       Commands             tab  Send message        ⌃t            Open transcript               
+  @       Mention files        ⌥,   Less reasoning      f3            Find text                     
+  !       Shell command        ⌥.   More reasoning      pgup / pgdn   Scroll                        
+  ⇧enter  New line             f4   Inspect activity    ⌃space        Start selection               
+  ⌃v      Paste image          ⌃c   Quit                ⌃home / ⌃end  Top / latest                  
+  ⌃g      External editor                               ⇧⌥, / ⇧⌥.     Top / latest                  
+  ⌃r      Search history                                                                            
+  esc     Edit last message                                                                         
+                                                                                                    
+  /keymap customize                                                                                 
+                                                                                                    
+› Ask Codex to do anything                                                                          
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+  ? / esc close                                                                                     

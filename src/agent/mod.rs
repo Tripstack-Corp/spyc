@@ -548,6 +548,9 @@ pub fn codex_may_use_daemon(argv: &[String]) -> bool {
 
 pub struct CodexProfile;
 impl AgentProfile for CodexProfile {
+    fn output_len(&self, lines: &[String]) -> usize {
+        chrome::codex_output_len(lines)
+    }
     fn detection_rules(&self) -> &'static [DetectionRule] {
         codex_approval::RULES
     }
