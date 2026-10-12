@@ -712,12 +712,18 @@ The agents' MCP `spyc` entry — `.mcp.json` (claude), `.codex/config.toml`
 `spyc --mcp`. An agent pane's env carries its spyc's `SPYC_MCP_SOCK` and its
 own `SPYC_PANE_ID`, and the proxy connects to that socket, so an agent always
 reaches the spyc that launched it and two spycs in one directory each keep
-their own agents (see "The agents' MCP entry names no instance" below). An
-agent started outside spyc has no socket in its env and falls back to
+their own agents (see "The agents' MCP entry names no instance" below). A
+shell pane carries both too, so an agent typed into the shell inherits them.
+An agent started outside spyc has no socket in its env and falls back to
 project-scoped discovery. spyc writes the entry **when an agent pane
 launches** (`open_pane_tab_in` → `ensure_agent_mcp_config`), not at startup —
 so a directory where no agent is ever run doesn't get a stray `.mcp.json` /
-`.codex/` written into it.
+`.codex/` written into it. A shell pane is the exception, because spyc learns
+which agent a shell started only after it has read its config: in a project
+that has consented to status hooks, opening one writes every agent's entry and
+hooks up front (`shell_agents::provision_shell_tab`), owned and cleaned up as
+an agent pane's are. Until the tab knows which agent runs, a report reaching it
+is recorded but moves no dot.
 
 Every spyc in a directory shares that one entry, so removing it is
 refcounted like the status hooks (`state::dir_owners`): writing it claims the

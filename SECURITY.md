@@ -96,7 +96,10 @@ prompt-injected agent under a harness that auto-approves MCP calls.
 Precisely the actor who would forge an id.
 
 spyc attributes calls anyway, because attribution is useful without
-being a boundary. The `spyc --mcp` proxy sends its `SPYC_PANE_ID` in the
+being a boundary. Shell tabs carry `SPYC_MCP_SOCK` and `SPYC_PANE_ID`
+as agent tabs do, so an agent started from a shell is attributed too;
+that hands the commands run there nothing a same-uid process couldn't
+already find, since the sockets are listable. The `spyc --mcp` proxy sends its `SPYC_PANE_ID` in the
 `initialize` handshake, and the server binds that connection to the tab
 if a live one carries the id. That lets `get_spyc_context` describe the
 caller's own tab, lets `report_status` and a scope claim land on the
