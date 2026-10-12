@@ -46,21 +46,28 @@ struct DividerStyles {
 }
 
 /// The active tab's live cwd, `↪`-marked when it has drifted from where the
-/// tab started (e.g. a `cd` in a shell tab). Its tail, the leaf directories,
-/// is kept when it's longer than `avail` columns; `None` when there's no room.
+/// tab started (e.g. a `cd` in a shell tab), in the `room` columns left after
+/// the tabs. The mode tags (`tags_width` columns) come after it, so the cwd
+/// gives way to them: its tail, the leaf directories, is kept when it's too
+/// long, and it's left off when there's no room.
 fn cwd_span(
     tabs: &crate::pane::tabs::PaneTabs,
     styles: &DividerStyles,
-    avail: usize,
+    room: usize,
+    tags_width: usize,
 ) -> Option<ratatui::text::Span<'static>> {
-    if avail <= 4 {
-        return None;
-    }
     let entry = &tabs.tabs()[tabs.active_index()];
     let live = entry.live_cwd();
     let cwd_display = crate::paths::display_tilde(&live);
     let drift = live != entry.info.cwd;
     let cwd_prefix = if drift { "── ↪ " } else { "── " };
+    // Its own prefix and trailing space, then a dash of rule before the tags,
+    // or the 12 columns a divider without tags keeps clear, whichever is more.
+    let reserve = (crate::ui::display_width(cwd_prefix) + 1 + 1 + tags_width).max(12);
+    let avail = room.saturating_sub(reserve);
+    if avail <= 4 {
+        return None;
+    }
     // Truncate by display columns on a char boundary, keeping the
     // tail (the leaf dirs). A byte slice here panics on a
     // non-ASCII cwd ("résumé", "日本語") when the cut lands
@@ -145,22 +152,6 @@ impl App {
             .as_ref()
             .is_some_and(|t| t.active().is_scrolling());
         let styles = self.divider_styles(is_scrolling);
-        let mut spans: Vec<Span> = Vec::new();
-        let mut used = 0usize;
-        if let Some(tabs) = &self.runtime.pane_tabs {
-            let active_shown;
-            (used, active_shown) =
-                self.push_tab_spans(&mut spans, tabs, &styles, is_scrolling, area.width);
-            // The active tab's cwd follows its tab, so it shows only when that
-            // tab fitted. Leave room for [SCROLL] and a trailing rule.
-            if active_shown
-                && let Some(cwd) = cwd_span(tabs, &styles, width.saturating_sub(used + 12))
-            {
-                used += crate::ui::display_width(cwd.content.as_ref());
-                spans.push(cwd);
-            }
-        }
-
         // Only `BottomPane` zoom keeps a divider (this line) to tag; `TopList`
         // zoom has no divider — its cue rides the status-bar suffix instead
         // (see `header_parts`).
@@ -168,6 +159,22 @@ impl App {
         let zoom_tag = if zoomed { " [ZOOM]" } else { "" };
         let scroll_tag = if is_scrolling { " [SCROLL]" } else { "" };
         let tag_len = crate::ui::display_width(zoom_tag) + crate::ui::display_width(scroll_tag);
+        let mut spans: Vec<Span> = Vec::new();
+        let mut used = 0usize;
+        if let Some(tabs) = &self.runtime.pane_tabs {
+            let active_shown;
+            (used, active_shown) =
+                self.push_tab_spans(&mut spans, tabs, &styles, is_scrolling, area.width);
+            // The active tab's cwd follows its tab, so it shows only when that
+            // tab fitted.
+            if active_shown
+                && let Some(cwd) = cwd_span(tabs, &styles, width.saturating_sub(used), tag_len)
+            {
+                used += crate::ui::display_width(cwd.content.as_ref());
+                spans.push(cwd);
+            }
+        }
+
         // Background-task tags, right-aligned. Distinct colour from pane tabs
         // so the numbering doesn't visually collide (pane tabs are 1..N
         // left-to-right; bg tasks are 1..N right-anchored). Reserve room for at

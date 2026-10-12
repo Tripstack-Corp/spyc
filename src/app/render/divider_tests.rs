@@ -221,12 +221,9 @@ fn a_narrow_divider_drops_the_cwd_first() {
     });
 }
 
-// Found while writing the tests above; the fix un-ignores it.
-
 /// `[SCROLL]` is the cue that the pane isn't live, so a long cwd gives way to
 /// it rather than pushing it off the end of the row.
 #[test]
-#[ignore = "bug: a long cwd leaves 6 of the 12 columns it reserves, so [SCROLL] is cut off"]
 fn scroll_mode_keeps_its_tag_beside_a_long_cwd() {
     with_tabs(&["cat"], |app| {
         tabs(app).tabs_mut()[0].set_live_cwd(PathBuf::from("/usr/local/share/a/b/c/leaf"));
