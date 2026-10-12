@@ -228,7 +228,7 @@ insta = "1"
 # `span-locations` gives `fn_size_guard` the line numbers syn parses outside a proc macro.
 proc-macro2 = { version = "1", features = ["span-locations"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
-syn = { version = "2", default-features = false, features = ["full", "parsing", "visit"] }
+syn = { version = "3", default-features = false, features = ["full", "parsing", "visit"] }
 
 [profile.release]
 opt-level = 3
