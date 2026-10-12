@@ -1493,7 +1493,10 @@ no `--mcp-config` flag needed:
 Each registration re-execs `spyc --mcp` as a stdio proxy, which
 connects to the socket named by the agent pane's own env
 (`SPYC_MCP_SOCK`), so an agent always reaches the spyc that launched
-it. An agent that outlived its spyc (a Claude Code background session
+it. Shell tabs carry the same env, so an agent typed into a shell
+reaches spyc and names its tab too, and in a project that has consented
+to status hooks, opening a shell tab writes every agent's MCP entry and
+hooks up front, since an agent reads them when it starts. An agent that outlived its spyc (a Claude Code background session
 across `spyc -r`) reaches the restarted one instead: the restored tab
 keeps its pane id, and the proxy and the status hook find the live spyc
 rooted above the agent. The entry names no socket itself; codex's lists

@@ -164,6 +164,7 @@ mod runtime;
 mod scheduler;
 mod session;
 mod session_restore;
+mod shell_agents;
 mod skill;
 mod sources;
 mod startup_commands;

@@ -480,3 +480,4 @@ mod vsplit;
 mod why_status;
 
 mod session_restore;
+mod shell_agents;
