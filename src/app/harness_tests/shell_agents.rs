@@ -95,6 +95,43 @@ fn a_shell_tab_in_a_consented_project_provisions_every_agent() {
     });
 }
 
+/// An agent wired into its own user configuration (`spyc --install-agents`)
+/// gets nothing in a project, even one that consented to status hooks: a
+/// project copy would run beside the user one.
+#[test]
+fn an_agent_wired_in_user_scope_gets_no_project_copy() {
+    use crate::state::sessions::AgentKind;
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap().join("project");
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::state::hook_consent::set_consent(&dir, true);
+        crate::state::wiring_consent::set(AgentKind::Claude, Some(true));
+        crate::state::wiring_consent::set(AgentKind::Agy, Some(true));
+        let mut app = App::test_app(dir.clone());
+        app.view.mcp_running = true;
+        assert!(app.open_pane_tab_in("sh", &dir));
+        app.maybe_offer_status_hooks(AgentKind::Claude, &dir);
+
+        for file in [
+            ".mcp.json",
+            ".claude/settings.json",
+            ".agents/mcp_config.json",
+            ".agents/hooks.json",
+        ] {
+            assert!(!dir.join(file).exists(), "{file} was written");
+        }
+        assert!(
+            dir.join(".codex/config.toml").exists(),
+            "codex isn't wired in user scope yet, so its project copy stays"
+        );
+        assert!(
+            !matches!(app.state.mode, Mode::Prompting(_)),
+            "no per-project consent prompt for a wired agent"
+        );
+    });
+}
+
 /// Without consent, or with it declined, a shell tab writes nothing.
 #[test]
 fn a_shell_tab_without_consent_writes_nothing() {

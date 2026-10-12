@@ -38,7 +38,9 @@ impl App {
     ) {
         use crate::mcp::McpConfigStatus;
         use crate::state::sessions::AgentKind;
-        if !self.view.mcp_running {
+        // Wired in user scope (`spyc --install-agents`): nothing for this agent
+        // goes into the project.
+        if !self.view.mcp_running || crate::state::wiring_consent::opted_in(kind) {
             return;
         }
         // The entry names no instance (`mcp-entry-names-no-socket`), so writing

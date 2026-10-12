@@ -24,11 +24,48 @@ use crate::state::sessions::AgentKind;
 /// rather than the session.
 const RECHECK_EVERY: Duration = Duration::from_secs(30);
 
+/// Whether `kind`'s status hooks are in place for an agent in `cwd`: in its
+/// user configuration once the user wired it there, else in the project.
+pub(super) fn hooks_present(kind: AgentKind, cwd: &std::path::Path) -> bool {
+    if crate::state::wiring_consent::opted_in(kind) {
+        return crate::wiring::Env::current()
+            .and_then(|env| crate::wiring::status(kind, &env))
+            .is_some_and(|st| st.hooks.in_place());
+    }
+    crate::agent::profile_for(kind)
+        .status_hooks()
+        .is_some_and(|support| support.installed(cwd))
+}
+
+/// The facts for an agent wired in user scope.
+fn user_scope_facts(info: &crate::pane::TabInfo, kind: AgentKind) -> Vec<String> {
+    let st = crate::wiring::Env::current().and_then(|env| crate::wiring::status(kind, &env));
+    let mut facts = vec![match st {
+        Some(st) if st.hooks.in_place() => format!(
+            "reporter installed in {}",
+            crate::paths::display_tilde(&st.hooks_file)
+        ),
+        Some(st) => format!(
+            "MISSING from {} (`spyc --install-agents`)",
+            crate::paths::display_tilde(&st.hooks_file)
+        ),
+        None => "MISSING: no user configuration to read".to_string(),
+    }];
+    if !info.agent().status_hooks().is_some_and(|s| s.live_reload) && !info.status_hooks_at_spawn {
+        facts.push("not present at launch".to_string());
+    }
+    facts.push("hook execution unverified".to_string());
+    facts
+}
+
 /// Report installation facts without treating config presence or an agent's
 /// self-report as proof that a lifecycle hook was trusted and executed.
 pub(super) fn status_hooks_facts(info: &crate::pane::TabInfo) -> Option<Vec<String>> {
     let profile = info.agent();
     let support = profile.status_hooks()?;
+    if crate::state::wiring_consent::opted_in(profile.kind()) {
+        return Some(user_scope_facts(info, profile.kind()));
+    }
     let dir = (support.config_dir)(&info.cwd);
     let codex = profile.kind() == AgentKind::Codex;
     let presence = if support.installed(&info.cwd) {
@@ -95,6 +132,9 @@ impl App {
             return;
         };
         let kind = profile.kind();
+        if crate::state::wiring_consent::opted_in(kind) {
+            return;
+        }
         let dir = (support.config_dir)(cwd);
         let root = state::find_repo_root(&dir).unwrap_or_else(|| dir.clone());
         match crate::state::hook_consent::consent_for(&root) {
@@ -163,6 +203,10 @@ impl App {
         let Some(support) = crate::agent::profile_for(kind).status_hooks() else {
             return false;
         };
+        // Wired in user scope: the project gets no copy.
+        if crate::state::wiring_consent::opted_in(kind) {
+            return false;
+        }
         let dir = (support.config_dir)(cwd);
         let snapshot = || {
             let mut files = vec![std::fs::read(dir.join(support.config_label)).ok()];
