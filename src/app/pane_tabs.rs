@@ -135,16 +135,29 @@ impl App {
         cwd: &std::path::Path,
         slot: TabSlot,
     ) -> bool {
-        let home = match slot {
-            TabSlot::Append => None,
+        let (home, hint) = match slot {
+            TabSlot::Append => (None, None),
             TabSlot::Replace(idx) => self
                 .runtime
                 .pane_tabs
                 .as_ref()
                 .and_then(|tabs| tabs.tabs().get(idx))
-                .and_then(|entry| entry.info.codex_home.clone()),
+                .map_or((None, None), |entry| {
+                    (entry.info.codex_home.clone(), entry.info.agent_hint)
+                }),
         };
-        self.spawn_pane_tab(cmd, cwd, slot, home.as_deref(), None)
+        self.spawn_pane_tab(cmd, cwd, slot, home.as_deref(), None, hint)
+    }
+
+    /// A startup tab: [`Self::open_pane_tab_in`], as the agent `hint` names
+    /// when its command is a wrapper spyc can't see the agent in.
+    pub(super) fn open_pane_tab_as(
+        &mut self,
+        cmd: &str,
+        cwd: &std::path::Path,
+        hint: Option<crate::state::sessions::AgentKind>,
+    ) -> bool {
+        self.spawn_pane_tab(cmd, cwd, TabSlot::Append, None, None, hint)
     }
 
     /// Restore and fork reuse their source pane's home instead of current overrides.
@@ -154,7 +167,7 @@ impl App {
         cwd: &std::path::Path,
         home: Option<&std::path::Path>,
     ) -> bool {
-        self.spawn_pane_tab(cmd, cwd, TabSlot::Append, home, None)
+        self.spawn_pane_tab(cmd, cwd, TabSlot::Append, home, None, None)
     }
 
     pub(super) fn spawn_pane_tab(
@@ -164,6 +177,7 @@ impl App {
         slot: TabSlot,
         home: Option<&std::path::Path>,
         pane_id: Option<&str>,
+        hint: Option<crate::state::sessions::AgentKind>,
     ) -> bool {
         // A new pane is meant to be used — if the file list is zoomed (the
         // pane is collapsed to its tab bar), reveal the split so the pane
@@ -182,12 +196,15 @@ impl App {
         // into the launch dir *before* the pty spawns, so claude/codex discover
         // spyc's socket on startup. Gated on the agent here, so directories where
         // no agent is ever launched don't get a stray config dir. No-op otherwise.
-        self.ensure_agent_mcp_config(cmd, cwd);
+        // The tab's agent: the hint's for a wrapper, else the command's. It
+        // decides the env, configs and hooks; the command still runs as written.
+        let kind = hint.unwrap_or_else(|| crate::agent::detect(cmd).kind());
+        self.write_mcp_config(kind, cwd, true);
         // Codex reads `.codex/config.toml` once at startup, so an already-consented
         // repo's status hooks must be written now, before the pty spawns — else
         // they'd be missed until codex's next launch. Live-reload agents (claude)
         // are handled post-spawn. No-op for non-hook agents / un-consented repos.
-        self.maybe_preinstall_startup_hooks(cmd, cwd);
+        self.maybe_preinstall_startup_hooks(kind, cwd);
         let shell = crate::shell::command_is_shell(cmd);
         if shell {
             self.provision_shell_tab(cwd);
@@ -200,11 +217,12 @@ impl App {
         if let Some(id) = pane_id {
             info.id = id.to_string();
         }
-        info.status_hooks_at_spawn = crate::agent::detect(cmd)
+        info.agent_hint = hint;
+        info.status_hooks_at_spawn = crate::agent::profile_for(kind)
             .status_hooks()
             .is_some_and(|support| support.installed(cwd));
-        let is_agent = crate::agent::detect(cmd).kind() != crate::state::sessions::AgentKind::Other;
-        match crate::agent::detect(cmd).kind() {
+        let is_agent = kind != crate::state::sessions::AgentKind::Other;
+        match kind {
             crate::state::sessions::AgentKind::Codex => {
                 info.codex_session_id =
                     crate::state::codex_transcript::resume_uuid_from_command(cmd);
@@ -248,7 +266,7 @@ impl App {
             wake,
         ) {
             Ok(p) => {
-                if crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex {
+                if kind == crate::state::sessions::AgentKind::Codex {
                     info.codex_home = home.map(std::path::Path::to_path_buf).or_else(|| {
                         p.host
                             .launch_environment()
@@ -268,7 +286,7 @@ impl App {
                 // raise the first-launch per-project consent popup. After the
                 // tab exists so a Yes can target it; the env (SPYC_PANE_ID/SOCK)
                 // is already in place from the spawn above.
-                self.maybe_offer_status_hooks(cmd, cwd);
+                self.maybe_offer_status_hooks(kind, cwd);
                 true
             }
             Err(e) => {
@@ -325,6 +343,12 @@ impl App {
         );
         let wake = self.make_pane_wake();
         let mut info = TabInfo::new(cmd, cwd);
+        info.agent_hint = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .and_then(|tabs| tabs.tabs().get(tab_idx))
+            .and_then(|entry| entry.info.agent_hint);
         if let Some(sid) = resume_sid {
             info.pending_resume_send = Some(crate::pane::tabs::PendingResumeSend::Text {
                 sid,
@@ -363,7 +387,7 @@ impl App {
             wake,
         ) {
             Ok(p) => {
-                if crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex {
+                if info.launched_agent().kind() == crate::state::sessions::AgentKind::Codex {
                     info.codex_home = home.clone().or_else(|| {
                         p.host
                             .launch_environment()
@@ -400,19 +424,22 @@ impl App {
         let root = self.status_hooks_target_root();
         crate::state::hook_consent::set_consent(&root, true);
 
-        let Some((tab_idx, cmd, cwd, kind, live_cwd)) = self.runtime.pane_tabs.as_ref().map(|t| {
-            let info = t.active_info();
-            // A shell running claude (#544): its cwd is the shell's live one.
-            let live_cwd = (info.launched_agent().kind() != info.agent().kind())
-                .then(|| t.tabs()[t.active_index()].live_cwd());
-            (
-                t.active_index(),
-                info.command.clone(),
-                info.cwd.clone(),
-                info.agent().kind(),
-                live_cwd,
-            )
-        }) else {
+        let Some((tab_idx, cmd, cwd, kind, live_cwd, wraps)) =
+            self.runtime.pane_tabs.as_ref().map(|t| {
+                let info = t.active_info();
+                // A shell running claude (#544): its cwd is the shell's live one.
+                let live_cwd = (info.launched_agent().kind() != info.agent().kind())
+                    .then(|| t.tabs()[t.active_index()].live_cwd());
+                (
+                    t.active_index(),
+                    info.command.clone(),
+                    info.cwd.clone(),
+                    info.agent().kind(),
+                    live_cwd,
+                    info.wraps_agent(),
+                )
+            })
+        else {
             self.state
                 .flash_error(":hooks on! — no active pane to restart");
             return;
@@ -440,7 +467,11 @@ impl App {
         // `--resume` flag crashes at mount — same reason restore avoids it).
         let sid = crate::state::sessions::most_recent_jsonl_for_cwd(&cwd);
         let resumed = sid.is_some();
-        let cmd_fresh = crate::agent::resume::command_without_resume(&cmd);
+        let cmd_fresh = if wraps {
+            cmd
+        } else {
+            crate::agent::resume::command_without_resume(&cmd)
+        };
 
         if let Some(tabs) = self.runtime.pane_tabs.as_mut()
             && let Some(entry) = tabs.tabs_mut().get_mut(tab_idx)

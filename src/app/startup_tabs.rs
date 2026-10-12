@@ -137,6 +137,11 @@ pub(super) fn consent_lines(question: &str, tabs: &[PaneTabConfig], width: usize
             text.push_str(&shown(&cwd.to_string_lossy()));
             text.push(')');
         }
+        if let Some(agent) = tab.agent {
+            text.push_str("   (as ");
+            text.push_str(crate::agent::profile_for(agent).name());
+            text.push(')');
+        }
         rows.extend(char_wrap(&text, width, "• ", "  "));
     }
     rows
@@ -262,7 +267,7 @@ impl App {
             // `state.flash` is a single slot, not a queue, so a per-tab
             // error flashed here would be clobbered by that summary before
             // the first render — failures are counted into it instead.
-            let spawned = self.open_pane_tab_in(&tab.command, &cwd);
+            let spawned = self.open_pane_tab_as(&tab.command, &cwd, tab.agent);
             if spawned {
                 opened += 1;
                 if let Some(label) = &tab.label
@@ -311,6 +316,7 @@ mod app_tests {
                 command: (*c).to_string(),
                 cwd: None,
                 label: None,
+                agent: None,
             })
             .collect()
     }
@@ -528,6 +534,7 @@ mod tests {
             command: command.to_string(),
             cwd: cwd.map(std::path::PathBuf::from),
             label: None,
+            agent: None,
         }
     }
 

@@ -462,6 +462,7 @@ fn agent_transition_notifies_even_when_activity_preset_by_report() {
 }
 
 mod agent_approval;
+mod agent_hint;
 mod agent_hook_sources;
 mod agent_readiness;
 mod agent_spawn;

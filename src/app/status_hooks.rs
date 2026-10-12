@@ -82,13 +82,7 @@ impl App {
     /// installer. For codex the already-consented case is also written
     /// pre-spawn ([`maybe_preinstall_startup_hooks`](Self::maybe_preinstall_startup_hooks))
     /// so the hooks are live this session; here it's a harmless idempotent re-run.
-    pub(super) fn maybe_offer_status_hooks(&mut self, cmd: &str, cwd: &std::path::Path) {
-        self.maybe_offer_status_hooks_for(crate::agent::detect(cmd).kind(), cwd);
-    }
-
-    /// [`Self::maybe_offer_status_hooks`] for `kind`, which a shell tab learns
-    /// from its foreground rather than its command.
-    pub(super) fn maybe_offer_status_hooks_for(
+    pub(super) fn maybe_offer_status_hooks(
         &mut self,
         kind: crate::state::sessions::AgentKind,
         cwd: &std::path::Path,
@@ -136,11 +130,15 @@ impl App {
     /// (claude) skip this; their post-spawn `maybe_offer_status_hooks` install
     /// is picked up on the next turn. First-launch consent is still handled
     /// post-spawn (it can't pre-empt the interactive popup).
-    pub(super) fn maybe_preinstall_startup_hooks(&mut self, cmd: &str, cwd: &std::path::Path) {
+    pub(super) fn maybe_preinstall_startup_hooks(
+        &mut self,
+        kind: crate::state::sessions::AgentKind,
+        cwd: &std::path::Path,
+    ) {
         if !self.view.mcp_running {
             return;
         }
-        let profile = crate::agent::detect(cmd);
+        let profile = crate::agent::profile_for(kind);
         let Some(support) = profile.status_hooks() else {
             return;
         };
@@ -585,7 +583,7 @@ mod tests {
             let (legacy, before) = legacy_fixture(dir);
             let mut app = App::test_app(dir.to_path_buf());
             app.view.mcp_running = true;
-            app.ensure_agent_mcp_config("claude", dir);
+            app.write_mcp_config(crate::state::sessions::AgentKind::Claude, dir, true);
             app.install_status_hooks(dir, AgentKind::Claude);
             let own = dir.join(".claude/settings.json");
             assert!(own.exists());
@@ -610,7 +608,7 @@ mod tests {
             let (legacy, before) = legacy_fixture(dir);
             let mut app = App::test_app(dir.to_path_buf());
             app.view.mcp_running = true;
-            app.ensure_agent_mcp_config("agy", dir);
+            app.write_mcp_config(crate::state::sessions::AgentKind::Agy, dir, true);
             app.cleanup_written_mcp_configs();
             assert_eq!(
                 std::fs::read(&legacy).ok(),

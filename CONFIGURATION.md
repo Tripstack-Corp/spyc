@@ -160,14 +160,30 @@ version of pressing `^a c` once per tab. The compact form lists commands:
 tabs = ["claude", "zsh"]
 ```
 
-The table form adds a working directory and a display label per tab:
+The table form adds a working directory and a display label per tab, and for
+a command that wraps an agent, which agent it runs:
 
 ```toml
 [[pane.tab]]
 command = "claude"
 cwd = "~/Work/my-project"   # ~, absolute, or relative to the launch directory
 label = "coordinator"       # defaults from the command
+
+[[pane.tab]]
+command = "npx @openai/codex --no-daemon"
+agent = "codex"             # claude | codex | agy | zot
 ```
+
+- **`agent` is for wrappers.** spyc recognizes an agent tab by its command's
+  program, so `npx @openai/codex`, `env FOO=1 claude`, `uv run agy` or a script
+  of your own would be a plain tab. Naming the agent gives it that agent's
+  activity dot, status hooks, MCP entry and `^a v` transcript. spyc never edits
+  such a command, though: it runs exactly as written, at launch, on `^a R` and
+  on restore. Claude still resumes its conversation on restore, because it does
+  that by typing `/resume`; codex, agy and zot start fresh. `^a F` can't fork
+  it, and codex needs `--no-daemon` in the command itself for hook status. When
+  the command already names the agent (`codex -m o3`), `agent` changes nothing.
+  An unknown name is a config error.
 
 - **A project's own tabs need your approval first.** Yours, in
   `~/.spycrc.toml`, open unasked. A project-local `.spycrc.toml` can declare a
@@ -180,9 +196,9 @@ label = "coordinator"       # defaults from the command
   - Any other key keeps the pop-up up, so a reflexive `Enter` can't approve a
     command.
 
-  The answer binds to the **exact list**: every command and `cwd`, in order.
-  If a later `git pull` changes the list, spyc asks again. A changed `label`
-  doesn't count, since labels don't change what runs. The prompt escapes
+  The answer binds to the **exact list**: every command, `cwd` and `agent`, in
+  order. If a later `git pull` changes the list, spyc asks again. A changed
+  `label` doesn't count, since labels don't change what runs. The prompt escapes
   control characters and caps very long commands at a visible count, so what
   you read is what would run. `:startup-tabs` shows the current answer, and
   `:startup-tabs forget` drops it so the next launch asks again.

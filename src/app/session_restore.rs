@@ -10,23 +10,24 @@ use super::{
 };
 
 impl App {
-    /// Restore's spawn: [`Self::open_pane_tab_in_home`], taking back the tab's
-    /// saved `pane_id` (see `TabInfo::id`) unless it is empty or a live tab
-    /// already holds it.
+    /// Restore's spawn: [`Self::open_pane_tab_in_home`], as the saved tab's
+    /// agent hint, taking back its saved `pane_id` (see `TabInfo::id`) unless
+    /// it is empty or a live tab already holds it.
     pub(super) fn open_restored_pane_tab(
         &mut self,
         cmd: &str,
         cwd: &std::path::Path,
         home: Option<&std::path::Path>,
-        pane_id: &str,
+        tab: &crate::state::sessions::SavedTab,
     ) -> bool {
+        let pane_id = tab.pane_id.as_str();
         let taken = self
             .runtime
             .pane_tabs
             .as_ref()
             .is_some_and(|tabs| tabs.tabs().iter().any(|t| t.info.id == pane_id));
         let reuse = (!pane_id.is_empty() && !taken).then_some(pane_id);
-        self.spawn_pane_tab(cmd, cwd, TabSlot::Append, home, reuse)
+        self.spawn_pane_tab(cmd, cwd, TabSlot::Append, home, reuse, tab.agent_hint)
     }
 
     /// For tabs that have a `pending_resume_send` armed (set by
@@ -112,7 +113,7 @@ impl App {
         let home = (tab.effective_kind() == crate::state::sessions::AgentKind::Codex)
             .then_some(tab.codex_home.as_deref())
             .flatten();
-        self.open_restored_pane_tab(command, cwd, home, &tab.pane_id)
+        self.open_restored_pane_tab(command, cwd, home, tab)
     }
 
     pub fn restore_session(&mut self, session: &crate::state::sessions::Session) -> Vec<Effect> {

@@ -13,6 +13,25 @@ pub fn reconstruct_saved_tab(
     tab: &crate::state::sessions::SavedTab,
     cwd: &std::path::Path,
 ) -> super::RestorePlan {
+    // A wrapper's command is relaunched as written (#610): only claude, which
+    // resumes by typing `/resume` rather than by a flag, gets its conversation
+    // back; the others start fresh.
+    if tab
+        .agent_hint
+        .is_some_and(|kind| super::detect(&tab.command).kind() != kind)
+    {
+        let resume = if tab.effective_kind() == crate::state::sessions::AgentKind::Claude {
+            super::profile_for(crate::state::sessions::AgentKind::Claude)
+                .reconstruct_restore(&tab.command, tab.agent_session_id.as_deref(), cwd)
+                .resume
+        } else {
+            super::ResumeAction::None
+        };
+        return super::RestorePlan {
+            command: tab.command.clone(),
+            resume,
+        };
+    }
     if tab.effective_kind() == crate::state::sessions::AgentKind::Codex
         && tab.codex_home_unresolved
         && tab.codex_home.is_none()
