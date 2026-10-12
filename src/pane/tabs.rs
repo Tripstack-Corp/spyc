@@ -248,6 +248,9 @@ pub struct TabInfo {
     /// launched as an agent, whose agent is its command, and in a shell that
     /// is running none.
     pub running: Option<RunningAgent>,
+    /// The agent `[[pane.tab]] agent` names, for a command spyc can't see it
+    /// in (#610): the tab is that agent's, but spyc never edits its command.
+    pub agent_hint: Option<crate::state::sessions::AgentKind>,
     /// When `shell_agents` should next look at this shell tab's foreground.
     pub fg_check_due: Option<std::time::Instant>,
     /// When it last looked, which spaces checks out while output streams.
@@ -267,10 +270,22 @@ impl TabInfo {
         }
     }
 
-    /// The agent the tab's launch command names: what restore and restart
-    /// bring back, so a shell tab running an agent is saved as its shell.
+    /// The agent the tab was launched as: its `agent_hint`, else the one its
+    /// command names. What restore and restart bring back, so a shell tab
+    /// running an agent is saved as its shell.
     pub fn launched_agent(&self) -> &'static dyn crate::agent::AgentProfile {
-        crate::agent::detect(&self.command)
+        self.agent_hint.map_or_else(
+            || crate::agent::detect(&self.command),
+            crate::agent::profile_for,
+        )
+    }
+
+    /// Whether the tab's command wraps its agent: a hint the command doesn't
+    /// name itself (`npx @openai/codex` as codex). spyc adds nothing to such a
+    /// command: no resume or fork flags, no `--no-daemon`.
+    pub fn wraps_agent(&self) -> bool {
+        self.agent_hint
+            .is_some_and(|kind| crate::agent::detect(&self.command).kind() != kind)
     }
 
     /// When the tab's agent started, in epoch seconds: a shell tab's detected
@@ -327,6 +342,7 @@ impl TabInfo {
             // field doc), so it must not alias the ephemeral pane-wake id.
             claim_owner: uuid::Uuid::now_v7().to_string(),
             running: None,
+            agent_hint: None,
             fg_check_due: None,
             fg_checked_at: None,
         }
@@ -857,6 +873,7 @@ mod tests {
             codex_home_unresolved: false,
             claim_owner: String::new(),
             pane_id: String::new(),
+            agent_hint: None,
         })
         .expect("SavedTab serializes");
         assert!(

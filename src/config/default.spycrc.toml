@@ -80,6 +80,9 @@
 #     command = "claude"
 #     cwd = "~/Work/my-project"     # ~, absolute, or relative-to-launch-dir
 #     label = "coordinator"         # display name; defaults from command
+#     agent = "codex"               # only for a command that wraps an agent
+#                                   # (`npx @openai/codex`, a script): the tab
+#                                   # is that agent's, run exactly as written
 # Use ONE form per file (both at once is a config error). Max 9 tabs
 # (the ^a 1..9 jump reach). Precedence at startup:
 # `spyc -r` restore (if you pick a session) > these tabs > single tab

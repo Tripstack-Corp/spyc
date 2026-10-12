@@ -130,7 +130,7 @@ impl App {
                 self.state.codex_recovery.remove(&id);
                 // As a launched agent tab does: install where consented, ask
                 // where the project hasn't answered.
-                self.maybe_offer_status_hooks_for(running.kind, &cwd);
+                self.maybe_offer_status_hooks(running.kind, &cwd);
                 true
             }
         }

@@ -174,7 +174,12 @@ impl App {
                         // The sid lives in agent_session_id; baking
                         // --resume / `resume` into `command` would survive
                         // past a resolver miss and pollute the next restore.
-                        let saved_command = profile.command_without_resume(&t.info.command);
+                        // A wrapper's command is never edited (#610).
+                        let saved_command = if t.info.wraps_agent() {
+                            t.info.command.clone()
+                        } else {
+                            profile.command_without_resume(&t.info.command)
+                        };
                         SavedTab {
                             command: saved_command,
                             // Strip any `[exited N]` suffix — that's
@@ -194,6 +199,7 @@ impl App {
                                 && t.info.codex_home.is_none(),
                             claim_owner: t.info.claim_owner.clone(),
                             pane_id: t.info.id.clone(),
+                            agent_hint: t.info.agent_hint,
                         }
                     })
                     .collect()
@@ -908,6 +914,7 @@ mod tests {
                 codex_home_unresolved: false,
                 claim_owner: String::new(),
                 pane_id: String::new(),
+                agent_hint: None,
             });
             crate::state::sessions::save_session(&saved).expect("seed the restore point");
 

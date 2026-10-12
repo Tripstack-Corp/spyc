@@ -311,6 +311,23 @@ impl Config {
     }
 }
 
+/// The agent `[[pane.tab]] agent = "…"` names. An unknown name is an error
+/// rather than a tab silently treated as no agent.
+fn agent_named(name: &str, source: &Path) -> anyhow::Result<crate::state::sessions::AgentKind> {
+    crate::agent::REGISTRY
+        .iter()
+        .find(|profile| profile.name() == name)
+        .map(|profile| profile.kind())
+        .ok_or_else(|| {
+            let known: Vec<&str> = crate::agent::REGISTRY.iter().map(|p| p.name()).collect();
+            anyhow::anyhow!(
+                "{}: [[pane.tab]] agent = \"{name}\" is not an agent spyc knows ({})",
+                source.display(),
+                known.join(", ")
+            )
+        })
+}
+
 /// The startup-tab list one file declares, validated: `None` when it sets
 /// neither form. Both forms at once, more than 9 tabs (the `^a 1..9` reach) or
 /// an empty command is an error.
@@ -330,16 +347,20 @@ fn startup_tabs_from(
                 command,
                 cwd: None,
                 label: None,
+                agent: None,
             })
             .collect(),
         (None, Some(entries)) => entries
             .into_iter()
-            .map(|e| PaneTabConfig {
-                command: e.command,
-                cwd: e.cwd,
-                label: e.label,
+            .map(|e| {
+                Ok(PaneTabConfig {
+                    agent: e.agent.map(|name| agent_named(&name, source)).transpose()?,
+                    command: e.command,
+                    cwd: e.cwd,
+                    label: e.label,
+                })
             })
-            .collect(),
+            .collect::<anyhow::Result<_>>()?,
         (None, None) => return Ok(None),
     };
     if list.len() > 9 {

@@ -411,7 +411,7 @@ impl App {
         }
         // The MCP client config (`.mcp.json` / `.codex/config.toml`) is
         // written lazily when an agent pane launches (`open_pane_tab_in` →
-        // `ensure_agent_mcp_config`), so we don't create a config dir in
+        // `write_mcp_config`), so we don't create a config dir in
         // directories where no agent is ever run. (Restored agent panes go
         // through the same launch path, so they pick up their config too.)
         app

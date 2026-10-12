@@ -570,7 +570,9 @@ Multiple tabs, each running an independent pty:
   has the per-agent detail
 - Activity indicator (**+**) on background tabs that have new output
 - **Startup tabs**: `[pane] tabs = ["claude", "zsh"]` (or `[[pane.tab]]`
-  tables with a per-tab `cwd` and `label`) opens those tabs at launch, the
+  tables with a per-tab `cwd`, `label`, and `agent` for a command that wraps
+  one, like `npx @openai/codex`, which then runs as written but is that
+  agent's tab) opens those tabs at launch, the
   config-driven version of pressing `^a c` once per tab. `spyc -r` restores
   its saved tabs instead. Yours in `~/.spycrc.toml` open unasked. A
   project-local `.spycrc.toml` list runs only after you approve it in a

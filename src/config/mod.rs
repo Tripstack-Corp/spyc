@@ -290,12 +290,15 @@ pub struct ProjectTabs {
 /// One declared startup pane tab. `cwd` resolution: absolute is used
 /// as-is, `~` expands to `$HOME`, relative joins the launch directory;
 /// unset falls back to `[pane] new_tab_cwd`. `label` overrides the
-/// display name derived from the command.
+/// display name derived from the command. `agent` names the agent a wrapper
+/// command runs (`npx @openai/codex`, a script), which spyc can't see from the
+/// command: the tab is then that agent's, but spyc never edits its command.
 #[derive(Debug, Clone)]
 pub struct PaneTabConfig {
     pub command: String,
     pub cwd: Option<PathBuf>,
     pub label: Option<String>,
+    pub agent: Option<crate::state::sessions::AgentKind>,
 }
 
 impl Default for PaneConfig {
@@ -366,6 +369,8 @@ struct FilePaneTab {
     cwd: Option<PathBuf>,
     #[serde(default)]
     label: Option<String>,
+    #[serde(default)]
+    agent: Option<String>,
 }
 
 /// Yank / clipboard knobs.
@@ -1244,6 +1249,30 @@ mod tests {
             Some(std::path::Path::new("~/scratch"))
         );
         assert_eq!(cfg.pane.tabs[1].label.as_deref(), Some("scratch"));
+    }
+
+    /// `agent` names the agent a wrapper command runs; an unknown name is an
+    /// error naming the ones spyc knows, not a tab quietly treated as no agent.
+    #[test]
+    fn pane_startup_tab_agent_is_validated() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("c.toml");
+        std::fs::write(
+            &path,
+            "[[pane.tab]]\ncommand = \"npx @openai/codex\"\nagent = \"codex\"\n",
+        )
+        .unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert_eq!(
+            cfg.pane.tabs[0].agent,
+            Some(crate::state::sessions::AgentKind::Codex)
+        );
+        std::fs::write(&path, "[[pane.tab]]\ncommand = \"x\"\nagent = \"gemini\"\n").unwrap();
+        let err = format!("{:#}", Config::load_from(&[Some(&path)]).unwrap_err());
+        assert!(
+            err.contains("\"gemini\" is not an agent spyc knows (claude, codex, agy, zot)"),
+            "{err}"
+        );
     }
 
     #[test]

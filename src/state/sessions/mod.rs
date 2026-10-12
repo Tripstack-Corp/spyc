@@ -96,6 +96,10 @@ pub struct SavedTab {
     /// older saves, which restore with a fresh id.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub pane_id: String,
+    /// The tab's `[[pane.tab]] agent` hint (#610). With it, `command` may be a
+    /// wrapper, which restore relaunches as written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_hint: Option<AgentKind>,
 }
 
 // Serde's skip callback receives a reference to the field.

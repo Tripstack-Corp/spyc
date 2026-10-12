@@ -205,7 +205,7 @@ demand for "which agent needs me" is now proven, not hypothetical.
 
 **The one insight that turns herdr's weakness into spyc's feature:** herdr's
 status detection is fragile *because it screen-scrapes*. spyc already owns an MCP
-server and already lazily writes per-agent config (`ensure_agent_mcp_config`).
+server and already lazily writes per-agent config (`write_mcp_config`).
 Building agent-status on the **MCP/hook channel** — a cooperative agent
 *self-reporting* working/blocked, plus a tunable scrape *fallback* — dodges the
 entire #671/#803 fragility class. That is how spyc wins a feature herdr struggles

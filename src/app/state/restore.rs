@@ -56,6 +56,10 @@ pub fn hash_deferred_tabs(deferred: &[DeferredTab], hasher: &mut impl Hasher) {
         tab.agent_session_name.hash(hasher);
         tab.claim_owner.hash(hasher);
         tab.pane_id.hash(hasher);
+        tab.agent_hint
+            .as_ref()
+            .map(std::mem::discriminant)
+            .hash(hasher);
     }
 }
 

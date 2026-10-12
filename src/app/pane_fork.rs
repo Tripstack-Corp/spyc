@@ -44,6 +44,13 @@ impl App {
             return;
         }
         let (command, cwd) = match profile.fork_mode() {
+            ForkMode::Branch(_) if entry.info.wraps_agent() => {
+                self.state.flash_info(format!(
+                    "fork: this tab runs {} through its own command, and spyc adds no flags to a wrapper",
+                    profile.name()
+                ));
+                return;
+            }
             ForkMode::Branch(fork) => {
                 // The other tabs' conversations are theirs, so the resolver's
                 // fallbacks must not hand this fork one of them. This tab's own
