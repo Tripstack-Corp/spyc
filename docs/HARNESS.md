@@ -547,7 +547,11 @@ spyc that has since exited, or light the wrong tab's dot. So both check: a
 --managed-daemon` among its ancestors doesn't trust the `SPYC_PANE_ID` it
 inherited. The reporter stays silent and the proxy connects unattributed, so a
 session on the shared server gets an output-timing dot rather than another
-tab's.
+tab's. The proxy doesn't trust the inherited socket either, since it can belong
+to another spyc: the server starts a session's MCP servers in that session's
+directory, and the proxy connects to the spyc rooted there, as an agent started
+outside spyc does. With two spycs rooted at the same directory, either may
+answer.
 
 spyc starts codex panes with `--no-daemon` (added after the program, the tab
 keeps what you typed). `[pane] codex_daemon = true` turns that off, at the cost
