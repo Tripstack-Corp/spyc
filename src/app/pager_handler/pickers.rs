@@ -23,8 +23,6 @@ enum HistoryKey {
     SearchNext,
     SearchPrev,
     JumpPrompt,
-    /// `l` and `v`, swallowed.
-    Ignore,
     /// The line editor's key.
     Edit,
 }
@@ -46,7 +44,6 @@ const fn history_key(key: KeyEvent, normal: bool, g_armed: bool) -> HistoryKey {
         KeyCode::Char('n') => HistoryKey::SearchNext,
         KeyCode::Char('N') => HistoryKey::SearchPrev,
         KeyCode::Char(':') => HistoryKey::JumpPrompt,
-        KeyCode::Char('l' | 'v') => HistoryKey::Ignore,
         _ => HistoryKey::Edit,
     }
 }
@@ -224,7 +221,7 @@ impl App {
         let action = history_key(key, normal, g_armed);
         self.view.history_pending_g = match action {
             HistoryKey::ArmG => true,
-            HistoryKey::Delete | HistoryKey::Ignore => g_armed,
+            HistoryKey::Delete => g_armed,
             HistoryKey::Edit if !normal => g_armed,
             _ => false,
         };
@@ -279,7 +276,7 @@ impl App {
                 view.jump_buf = Some(String::new());
                 false
             }
-            HistoryKey::ArmG | HistoryKey::Ignore | HistoryKey::Delete | HistoryKey::Edit => false,
+            HistoryKey::ArmG | HistoryKey::Delete | HistoryKey::Edit => false,
         };
         if moved {
             Self::show_history_selection(view, editor, &self.state.history, true);
@@ -472,6 +469,13 @@ mod tests {
                 history_key(key(c), true, false),
                 HistoryKey::Edit,
                 "{c:?} in Normal mode"
+            );
+        }
+        for c in ['h', 'l', 'v'] {
+            assert_eq!(
+                history_key(key(c), true, false),
+                HistoryKey::Edit,
+                "{c:?} is vi's"
             );
         }
         assert_eq!(history_key(key('g'), true, false), HistoryKey::ArmG);
