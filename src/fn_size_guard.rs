@@ -251,7 +251,7 @@ fn impl_name(item: &syn::ItemImpl) -> String {
         _ => "_".to_string(),
     };
     match &item.trait_ {
-        Some((_, trait_path, _)) => format!("<{ty} as {}>", last(trait_path)),
+        Some((trait_path, _)) => format!("<{ty} as {}>", last(trait_path)),
         None => ty,
     }
 }
