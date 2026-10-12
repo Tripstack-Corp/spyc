@@ -188,6 +188,10 @@ impl App {
         // they'd be missed until codex's next launch. Live-reload agents (claude)
         // are handled post-spawn. No-op for non-hook agents / un-consented repos.
         self.maybe_preinstall_startup_hooks(cmd, cwd);
+        let shell = crate::shell::command_is_shell(cmd);
+        if shell {
+            self.provision_shell_tab(cwd);
+        }
         // Build the tab metadata up front so its stable id is available to
         // inject as `SPYC_PANE_ID` (below). Option B: a `codex resume <uuid>`
         // pane knows its session id immediately — pin it now so `^a v` is exact
@@ -211,16 +215,17 @@ impl App {
             }
             _ => {}
         }
-        // Agent panes get SPYC_MCP_SOCK + SPYC_PANE_ID in their env so the
-        // `report_status` hook (a child of the agent, inheriting its env) can
-        // reach this spyc instance's socket and target THIS tab by id. Owned
+        // Agent and shell panes get SPYC_MCP_SOCK + SPYC_PANE_ID in their env so
+        // the `report_status` hook (a child of the agent, inheriting its env) can
+        // reach this spyc instance's socket and target THIS tab by id; a shell's
+        // agents inherit it from the shell. Owned
         // locals so the `&str` env slice outlives the spawn call; `info` is then
         // free to move into the `TabEntry`.
         // No state dir (neither XDG_STATE_HOME nor HOME) means no socket, so
         // there is nothing to point the hook at — spawn without it.
         let sock_str = crate::mcp::socket_path().map(|p| p.to_string_lossy().into_owned());
         let pane_id = info.id.clone();
-        let mut extra_env: Vec<(&str, &str)> = match (is_agent, sock_str.as_deref()) {
+        let mut extra_env: Vec<(&str, &str)> = match (is_agent || shell, sock_str.as_deref()) {
             (true, Some(sock)) => vec![("SPYC_MCP_SOCK", sock), ("SPYC_PANE_ID", pane_id.as_str())],
             (true, None) => vec![("SPYC_PANE_ID", pane_id.as_str())],
             (false, _) => Vec::new(),
@@ -306,8 +311,7 @@ impl App {
             .as_ref()
             .and_then(|tabs| tabs.tabs().get(tab_idx))
             .is_some_and(|entry| {
-                crate::agent::detect(&entry.info.command).kind()
-                    == crate::state::sessions::AgentKind::Codex
+                entry.info.agent().kind() == crate::state::sessions::AgentKind::Codex
                     && entry.info.codex_home.is_none()
             })
         {
@@ -396,15 +400,20 @@ impl App {
         let root = self.status_hooks_target_root();
         crate::state::hook_consent::set_consent(&root, true);
 
-        let Some((tab_idx, cmd, cwd)) = self.runtime.pane_tabs.as_ref().map(|t| {
+        let Some((tab_idx, cmd, cwd, kind)) = self.runtime.pane_tabs.as_ref().map(|t| {
             let info = t.active_info();
-            (t.active_index(), info.command.clone(), info.cwd.clone())
+            (
+                t.active_index(),
+                info.command.clone(),
+                info.cwd.clone(),
+                info.agent().kind(),
+            )
         }) else {
             self.state
                 .flash_error(":hooks on! — no active pane to restart");
             return;
         };
-        if crate::agent::detect(&cmd).kind() != crate::state::sessions::AgentKind::Claude {
+        if kind != crate::state::sessions::AgentKind::Claude {
             self.state
                 .flash_error(":hooks on! — active pane is not claude");
             return;

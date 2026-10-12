@@ -75,7 +75,7 @@ pub(super) fn tab_conversation(
     tab: &crate::pane::tabs::TabEntry,
     claimed: &std::collections::HashSet<String>,
 ) -> (Option<String>, Option<String>) {
-    let profile = crate::agent::detect(&tab.info.command);
+    let profile = tab.info.agent();
     match tab
         .info
         .pinned_session_id()
@@ -86,7 +86,7 @@ pub(super) fn tab_conversation(
         None => profile.resolve_resume_target(
             &tab.pane,
             &tab.info.cwd,
-            tab.info.spawn_epoch_secs,
+            tab.info.agent_epoch_secs(),
             claimed,
         ),
     }
@@ -156,10 +156,18 @@ impl App {
                 pt.tabs_mut()
                     .iter_mut()
                     .map(|t| {
-                        let profile = crate::agent::detect(&t.info.command);
+                        // A shell tab running an agent is saved as its shell:
+                        // restore relaunches the command, and the agent's
+                        // conversation isn't the shell's to resume.
+                        let profile = t.info.launched_agent();
                         let kind = profile.kind();
                         let claimed = claims.entry(t.info.codex_home.clone()).or_default();
-                        let (agent_session_id, agent_session_name) = tab_conversation(t, claimed);
+                        let (agent_session_id, agent_session_name) =
+                            if kind == t.info.agent().kind() {
+                                tab_conversation(t, claimed)
+                            } else {
+                                (None, None)
+                            };
                         if let Some(ref id) = agent_session_id {
                             claimed.insert(id.clone());
                         }

@@ -334,9 +334,11 @@ protocol, no image protocols, no OSC 52 clipboard.
     wrapping and excluding old dialogues above the normal composer.
     Prompt-settling input clears the detected wait.
 
-  **`:why-status`** flashes the active tab's state, its source (self-reported /
-  scrape-fallback / output-timing), seconds since last output and hook setup
-  facts. **`:activity dump`** retains each pane's last received report even
+  **`:why-status`** opens the active tab's diagnosis in the pager, like
+  `:why-git`: its state and source (self-reported / scrape-fallback /
+  output-timing) and seconds since last output first, then the tab's
+  `:activity dump` report, with each hook setup fact on its own line. A
+  tab that isn't an agent says it has no dot. **`:activity dump`** retains each pane's last received report even
   after expiry, distinguishes hook-file presence from startup/restart facts,
   and never treats a self-report or bound MCP connection as proof of hook
   execution or trust.
@@ -1496,7 +1498,14 @@ no `--mcp-config` flag needed:
 Each registration re-execs `spyc --mcp` as a stdio proxy, which
 connects to the socket named by the agent pane's own env
 (`SPYC_MCP_SOCK`), so an agent always reaches the spyc that launched
-it. An agent that outlived its spyc (a Claude Code background session
+it. Shell tabs carry the same env, so an agent typed into a shell
+reaches spyc and names its tab too, and in a project that has consented
+to status hooks, opening a shell tab writes every agent's MCP entry and
+hooks up front, since an agent reads them when it starts. The tab then
+follows the agent in its foreground: it gets that agent's activity dot
+while it runs, drops its status and session when it exits, reads as a
+shell while it is stopped with `^Z`, and is saved as the shell it was
+launched as. An agent that outlived its spyc (a Claude Code background session
 across `spyc -r`) reaches the restarted one instead: the restored tab
 keeps its pane id, and the proxy and the status hook find the live spyc
 rooted above the agent. The entry names no socket itself; codex's lists
@@ -1508,7 +1517,11 @@ itself rather than on its shared background server. That server spawns every
 session's hooks and MCP servers with the environment of whichever codex
 started it, so they couldn't reach the spyc, or name the tab, that launched a
 pane. **`[pane] codex_daemon = true`** lets codex panes join it anyway, at the
-cost of their activity dots and MCP attribution. See
+cost of their activity dots and MCP attribution. A codex typed into a shell
+tab joins it unless started with `codex --no-daemon`; its tab shows codex
+with an output-timing dot, and `:why-status` says how to get hook status.
+Hooks and MCP proxies the shared server runs notice it and ignore the pane id
+they inherited, so they never light, or answer for, another tab. See
 [`docs/HARNESS.md`](docs/HARNESS.md) → "codex's shared daemon".
 
 **`[pane] codex_mcp = false`** (`.spycrc.toml`) stops spyc from registering

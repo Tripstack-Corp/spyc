@@ -372,12 +372,12 @@ impl App {
                     // Output stamp for EVERY tab (active + background) — the
                     // activity dot tracks live output, not just unseen output.
                     entry.info.last_output_at = Some(now);
+                    if crate::shell::command_is_shell(&entry.info.command) {
+                        super::shell_agents::schedule_look(&mut entry.info, now);
+                    }
                     // P1-2 scrape fallback: mark dirty so `settle_scrape_quiet`
                     // scans the screen after `SCRAPE_QUIET_WINDOW` of silence.
-                    if !crate::agent::detect(&entry.info.command)
-                        .detection_rules()
-                        .is_empty()
-                    {
+                    if !entry.info.agent().detection_rules().is_empty() {
                         entry.info.scrape_dirty = true;
                     }
                     if i == active_idx {

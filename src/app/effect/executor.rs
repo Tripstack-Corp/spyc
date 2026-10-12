@@ -105,7 +105,7 @@ impl App {
                                 PaneTextKind::Pickable(n) => tabs.active_mut().pickable_text(n),
                             };
                             let info = tabs.active_info();
-                            (lines, info.cwd.clone(), crate::agent::detect(&info.command))
+                            (lines, info.cwd.clone(), info.agent())
                         })
                     else {
                         if !matches!(then, PaneTextSink::JumpDefault) {

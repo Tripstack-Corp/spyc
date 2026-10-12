@@ -317,3 +317,66 @@ fn gallery_worker_miss_keeps_unsent_images_and_reports_only_for_its_live_popup()
         );
     });
 }
+
+#[test]
+fn image_routing_follows_the_agent_in_a_shells_foreground() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let cwd = tmp.path().canonicalize().unwrap();
+        let home = cwd.join("home");
+        let mut app = App::test_app(cwd.clone());
+        launch(&mut app, &cwd, &home);
+        write_attachment(&home, &cwd);
+        let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+        info.command = "zsh".into();
+        info.spawn_epoch_secs = 100;
+        info.running = Some(crate::pane::RunningAgent {
+            kind: crate::state::sessions::AgentKind::Codex,
+            pid: 12345,
+            started_epoch_secs: 500,
+            backgrounded: false,
+            on_shared_daemon: false,
+        });
+        let paste = KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL);
+        let effects = app.handle_key(paste).unwrap();
+        assert_eq!(effects.pane_key(), Some(paste));
+        assert!(
+            effects.clipboard_capture_tab().is_some(),
+            "the foreground Codex owns image paste even though the tab launched zsh"
+        );
+        let op = app
+            .open_image_gallery()
+            .transcript_index()
+            .expect("the foreground agent supplies its gallery reader")
+            .clone();
+        assert_eq!(
+            op.query.spawn_epoch_secs, 500,
+            "lookup belongs to this agent's start, not the shell's"
+        );
+        app.runtime
+            .image_results
+            .lock()
+            .unwrap()
+            .push(image_ops::index_transcript(op));
+        app.apply_image_outcomes();
+        assert_eq!(app.gallery_counts(), (0, 1));
+        app.close_image_gallery();
+        app.runtime
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut()
+            .running
+            .as_mut()
+            .unwrap()
+            .backgrounded = true;
+        let effects = app.handle_key(paste).unwrap();
+        assert_eq!(effects.pane_key(), Some(paste));
+        assert!(
+            effects.clipboard_capture_tab().is_none(),
+            "the shell's quoted-insert cannot read the clipboard while Codex is backgrounded"
+        );
+        assert!(app.open_image_gallery().is_empty());
+        assert!(app.view.image_gallery.is_none());
+    });
+}

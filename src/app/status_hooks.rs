@@ -26,50 +26,51 @@ const RECHECK_EVERY: Duration = Duration::from_secs(30);
 
 /// Report installation facts without treating config presence or an agent's
 /// self-report as proof that a lifecycle hook was trusted and executed.
-pub(super) fn status_hooks_diagnostic(info: &crate::pane::TabInfo) -> Option<String> {
-    let profile = crate::agent::detect(&info.command);
+pub(super) fn status_hooks_facts(info: &crate::pane::TabInfo) -> Option<Vec<String>> {
+    let profile = info.agent();
     let support = profile.status_hooks()?;
     let dir = (support.config_dir)(&info.cwd);
+    let codex = profile.kind() == AgentKind::Codex;
     let presence = if support.installed(&info.cwd) {
         "reporter marker found"
     } else {
         "MISSING (`:hooks on`)"
     };
-    let startup = if support.live_reload {
-        "live reload supported"
-    } else if info.status_hooks_restart_needed {
-        "restart needed (changed after launch)"
-    } else if info.status_hooks_at_spawn {
-        "present at launch"
-    } else {
-        "not present at launch"
-    };
-    let verification = if profile.kind() == AgentKind::Codex {
-        "execution/trust unverified; review /hooks and project trust"
-    } else {
-        "hook execution unverified"
-    };
-    let legacy = if profile.kind() == AgentKind::Codex {
-        crate::mcp::codex_legacy_hook_diagnostic(&dir)
-            .map(|note| format!("; {note}"))
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-    let location = if profile.kind() == AgentKind::Codex && dir != info.cwd {
+    let location = if codex && dir != info.cwd {
         format!(
-            "{} or {}; linked-worktree hook declarations are ignored",
+            "{} or {}",
             dir.join(support.config_label).display(),
             dir.join(".codex/hooks.json").display()
         )
-    } else if profile.kind() == AgentKind::Codex {
+    } else if codex {
         ".codex/config.toml or .codex/hooks.json".to_string()
     } else {
         support.config_label.to_string()
     };
-    Some(format!(
-        "{presence} in {location}; {startup}; {verification}{legacy}"
-    ))
+    let mut facts = vec![format!("{presence} in {location}")];
+    if codex && dir != info.cwd {
+        facts.push("linked-worktree hook declarations are ignored".to_string());
+    }
+    facts.push(
+        if support.live_reload {
+            "live reload supported"
+        } else if info.status_hooks_restart_needed {
+            "restart needed (changed after launch)"
+        } else if info.status_hooks_at_spawn {
+            "present at launch"
+        } else {
+            "not present at launch"
+        }
+        .to_string(),
+    );
+    if codex {
+        facts.push("execution/trust unverified".to_string());
+        facts.push("review /hooks and project trust".to_string());
+        facts.extend(crate::mcp::codex_legacy_hook_diagnostic(&dir).map(String::from));
+    } else {
+        facts.push("hook execution unverified".to_string());
+    }
+    Some(facts)
 }
 
 impl App {
@@ -82,10 +83,20 @@ impl App {
     /// pre-spawn ([`maybe_preinstall_startup_hooks`](Self::maybe_preinstall_startup_hooks))
     /// so the hooks are live this session; here it's a harmless idempotent re-run.
     pub(super) fn maybe_offer_status_hooks(&mut self, cmd: &str, cwd: &std::path::Path) {
+        self.maybe_offer_status_hooks_for(crate::agent::detect(cmd).kind(), cwd);
+    }
+
+    /// [`Self::maybe_offer_status_hooks`] for `kind`, which a shell tab learns
+    /// from its foreground rather than its command.
+    pub(super) fn maybe_offer_status_hooks_for(
+        &mut self,
+        kind: crate::state::sessions::AgentKind,
+        cwd: &std::path::Path,
+    ) {
         if !self.view.mcp_running {
             return;
         }
-        let profile = crate::agent::detect(cmd);
+        let profile = crate::agent::profile_for(kind);
         let Some(support) = profile.status_hooks() else {
             return;
         };
@@ -176,8 +187,7 @@ impl App {
             && let Some(tabs) = self.runtime.pane_tabs.as_mut()
         {
             for entry in tabs.tabs_mut() {
-                if crate::agent::detect(&entry.info.command).kind() == kind
-                    && (support.config_dir)(&entry.info.cwd) == dir
+                if entry.info.agent().kind() == kind && (support.config_dir)(&entry.info.cwd) == dir
                 {
                     entry.info.status_hooks_restart_needed = true;
                 }
@@ -231,12 +241,10 @@ impl App {
             || self.state.cur().listing.dir.clone(),
             |t| {
                 let info = t.active_info();
-                crate::agent::detect(&info.command)
-                    .status_hooks()
-                    .map_or_else(
-                        || info.cwd.clone(),
-                        |support| (support.config_dir)(&info.cwd),
-                    )
+                info.agent().status_hooks().map_or_else(
+                    || info.cwd.clone(),
+                    |support| (support.config_dir)(&info.cwd),
+                )
             },
         );
         state::find_repo_root(&dir).unwrap_or(dir)
@@ -336,7 +344,7 @@ impl App {
             return out;
         };
         for t in tabs.tabs() {
-            let profile = crate::agent::detect(&t.info.command);
+            let profile = t.info.agent();
             let Some(support) = profile.status_hooks() else {
                 continue;
             };

@@ -731,12 +731,34 @@ The agents' MCP `spyc` entry — `.mcp.json` (claude), `.codex/config.toml`
 `spyc --mcp`. An agent pane's env carries its spyc's `SPYC_MCP_SOCK` and its
 own `SPYC_PANE_ID`, and the proxy connects to that socket, so an agent always
 reaches the spyc that launched it and two spycs in one directory each keep
-their own agents (see "The agents' MCP entry names no instance" below). An
-agent started outside spyc has no socket in its env and falls back to
+their own agents (see "The agents' MCP entry names no instance" below). A
+shell pane carries both too, so an agent typed into the shell inherits them.
+An agent started outside spyc has no socket in its env and falls back to
 project-scoped discovery. spyc writes the entry **when an agent pane
 launches** (`open_pane_tab_in` → `ensure_agent_mcp_config`), not at startup —
 so a directory where no agent is ever run doesn't get a stray `.mcp.json` /
-`.codex/` written into it.
+`.codex/` written into it. A shell pane is the exception, because spyc learns
+which agent a shell started only after it has read its config: in a project
+that has consented to status hooks, opening one writes every agent's entry and
+hooks up front (`shell_agents::provision_shell_tab`), owned and cleaned up as
+an agent pane's are. A report reaching a shell tab that isn't running an agent
+is recorded but moves no dot.
+
+**A shell tab's agent is the one in its foreground.** A moment after a shell
+tab's output, `shell_agents` looks at the pty's foreground process group: at
+most once a second while output streams, and never while the tab is idle. It
+lists the group's members (`proc_group`: `libproc` on macOS, `/proc` on Linux)
+and matches each one's argv[0], kernel name, or interpreted script against the
+agents' binaries; the earliest-started match wins, and printed text plays no
+part. `TabInfo::running` records what it found and `TabInfo::agent()` follows
+it, so the dot, reports, `^a v` and `^a F` follow the live agent. When the
+agent exits, everything the tab learned about it (reports, scrape, session ids,
+codex home) is dropped. `^Z` leaves it `backgrounded`, the tab reading as its
+shell until `fg`; it is never `suspended`, which would swallow the keys the
+shell needs. Restore and restart still bring back the launch command
+(`TabInfo::launched_agent()`), so such a tab is saved as its shell, and lookups
+that match a session by start time use `agent_epoch_secs()`, the agent's start
+rather than the tab's spawn.
 
 Every spyc in a directory shares that one entry, so removing it is
 refcounted like the status hooks (`state::dir_owners`): writing it claims the
@@ -779,7 +801,11 @@ describe the user's view; `report_status`, `register_scope` and
 `wait_for_scope_clear` default to that tab instead of the focused one. An
 unbound connection (an older proxy, the status hook, an id no live tab has) is
 served exactly as before, and the read tools' default scope and allowed roots
-don't depend on attribution at all. It is attribution, not authorization —
+don't depend on attribution at all. A proxy or status hook that codex's shared
+daemon spawned (`codex app-server … --managed-daemon` among its ancestors,
+`proc_group::has_ancestor`) inherited its `SPYC_PANE_ID` from whichever codex
+started that daemon, so it names that tab, not its own session's: the proxy
+connects unattributed and the reporter stays silent. It is attribution, not authorization —
 SECURITY.md says why.
 
 **A restored tab keeps its pane id.** An agent can outlive the spyc that

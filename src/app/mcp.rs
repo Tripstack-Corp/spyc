@@ -24,70 +24,81 @@ impl App {
     /// `cwd` (the pane's launch dir). Called from the pane-launch path
     /// ([`open_pane_tab_in`](Self::open_pane_tab_in)) right before the pty
     /// spawns, NOT at startup: we only create these files in directories where
-    /// the user actually runs the agent, instead of writing them into every
-    /// directory spyc is ever opened in. A no-op when the MCP socket isn't
+    /// the user actually runs the agent (or opens a shell tab in a project that
+    /// consented to status hooks, `shell_agents`), instead of writing them into
+    /// every directory spyc is ever opened in. A no-op when the MCP socket isn't
     /// running or the command isn't a config-needing agent.
     pub fn ensure_agent_mcp_config(&mut self, cmd: &str, cwd: &std::path::Path) {
+        self.write_mcp_config(crate::agent::detect(cmd).kind(), cwd, true);
+    }
+
+    /// [`Self::ensure_agent_mcp_config`] for `kind`. `announce` flashes what
+    /// happened; a shell tab provisioning every agent at once stays quiet.
+    pub(super) fn write_mcp_config(
+        &mut self,
+        kind: crate::state::sessions::AgentKind,
+        cwd: &std::path::Path,
+        announce: bool,
+    ) {
+        use crate::mcp::McpConfigStatus;
+        use crate::state::sessions::AgentKind;
         if !self.view.mcp_running {
             return;
         }
         // The entry names no instance (`mcp-entry-names-no-socket`), so writing
         // it is safe whichever spyc wrote it last; what we record is that this
         // one relies on it, so a sibling's teardown leaves it in place.
-        let wrote = match crate::agent::detect(cmd).kind() {
-            crate::state::sessions::AgentKind::Claude => match crate::mcp::ensure_mcp_json(cwd) {
-                Ok(crate::mcp::McpConfigStatus::Configured) => true,
-                Ok(crate::mcp::McpConfigStatus::BlockedByEnterprise) => {
-                    self.state.flash_error(
-                        "MCP: blocked by enterprise policy (deniedMcpServers or allowedMcpServers)",
-                    );
-                    false
-                }
-                Ok(crate::mcp::McpConfigStatus::ManagedByEnterprise) => {
-                    self.state
-                        .flash_info("MCP: enterprise-managed (skipped local .mcp.json)");
-                    false
-                }
-                Err(e) => {
-                    self.state.flash_error(format!(".mcp.json: {e:#}"));
-                    false
-                }
+        let (wrote, note): (bool, Option<Result<String, String>>) = match kind {
+            AgentKind::Claude => match crate::mcp::ensure_mcp_json(cwd) {
+                Ok(McpConfigStatus::Configured) => (true, None),
+                Ok(McpConfigStatus::BlockedByEnterprise) => (
+                    false,
+                    Some(Err(
+                        "MCP: blocked by enterprise policy (deniedMcpServers or allowedMcpServers)"
+                            .into(),
+                    )),
+                ),
+                Ok(McpConfigStatus::ManagedByEnterprise) => (
+                    false,
+                    Some(Ok(
+                        "MCP: enterprise-managed (skipped local .mcp.json)".into()
+                    )),
+                ),
+                Err(e) => (false, Some(Err(format!(".mcp.json: {e:#}")))),
             },
-            crate::state::sessions::AgentKind::Agy => {
-                match crate::mcp::ensure_agy_mcp_config(cwd) {
-                    Ok(crate::mcp::McpConfigStatus::Configured) => true,
-                    Ok(_) => false,
-                    Err(e) => {
-                        self.state.flash_error(format!("mcp_config.json: {e:#}"));
-                        false
-                    }
-                }
-            }
+            AgentKind::Agy => match crate::mcp::ensure_agy_mcp_config(cwd) {
+                Ok(McpConfigStatus::Configured) => (true, None),
+                Ok(_) => (false, None),
+                Err(e) => (false, Some(Err(format!("mcp_config.json: {e:#}")))),
+            },
             // `[pane] codex_mcp = false`: skip registering our MCP server for
             // codex and strip any entry we wrote before, so codex has no spyc
             // tool to call — the escape hatch for codex's /review elicitation
             // hang (openai/codex#25856). Status hooks are written separately
             // (maybe_preinstall_startup_hooks), so activity dots keep working.
-            crate::state::sessions::AgentKind::Codex if !self.state.config.pane.codex_mcp => {
+            AgentKind::Codex if !self.state.config.pane.codex_mcp => {
                 let _ = crate::mcp::cleanup_codex_config(cwd);
-                self.state
-                    .flash_info("codex MCP off ([pane] codex_mcp=false) — /review workaround");
-                false
+                (
+                    false,
+                    Some(Ok(
+                        "codex MCP off ([pane] codex_mcp=false) — /review workaround".into(),
+                    )),
+                )
             }
             // Enterprise-flavoured statuses are claude-specific; codex shouldn't
             // return them, but if it ever does we treat them as a no-op.
-            crate::state::sessions::AgentKind::Codex => {
-                match crate::mcp::ensure_codex_config_toml(cwd) {
-                    Ok(crate::mcp::McpConfigStatus::Configured) => true,
-                    Ok(_) => false,
-                    Err(e) => {
-                        self.state.flash_error(format!(".codex/config.toml: {e:#}"));
-                        false
-                    }
-                }
-            }
-            _ => false,
+            AgentKind::Codex => match crate::mcp::ensure_codex_config_toml(cwd) {
+                Ok(McpConfigStatus::Configured) => (true, None),
+                Ok(_) => (false, None),
+                Err(e) => (false, Some(Err(format!(".codex/config.toml: {e:#}")))),
+            },
+            _ => (false, None),
         };
+        match note.filter(|_| announce) {
+            Some(Ok(info)) => self.state.flash_info(info),
+            Some(Err(error)) => self.state.flash_error(error),
+            None => {}
+        }
         if wrote {
             crate::state::dir_owners::claim(
                 crate::state::dir_owners::Shared::McpEntry,
@@ -493,12 +504,7 @@ impl App {
                         message: "pane has exited; activity report rejected".into(),
                     };
                 }
-                let kind = crate::agent::detect(&entry.info.command).kind();
-                let question_signal = matches!(
-                    status.as_str(),
-                    crate::agent::codex_recovery::QUESTION_START
-                        | crate::agent::codex_recovery::QUESTION_END
-                );
+                let kind = entry.info.agent().kind();
                 let decision = if kind == crate::state::sessions::AgentKind::Codex {
                     self.state
                         .codex_recovery
@@ -510,10 +516,8 @@ impl App {
                             session_id.as_deref(),
                             hook_event.as_ref(),
                         )
-                } else if question_signal {
-                    Err("Codex question hook requires a Codex pane")
                 } else {
-                    Ok(activity)
+                    report_decision(kind, &status, activity)
                 };
                 let received = ReportedStatus {
                     status: activity,
@@ -872,6 +876,25 @@ fn resolve_report_target(
         Some(n) if (1..=ids.len()).contains(&n) => Ok(n - 1),
         Some(n) => Err(format!("no pane {n} (have {})", ids.len())),
         None => Ok(active),
+    }
+}
+
+/// Whether a report to a non-Codex tab moves its dot (Codex's go through its
+/// question recovery). A question signal needs a Codex pane. A tab with no
+/// agent keeps the report as evidence only: a shell tab's agents can reach the
+/// socket, but until the tab knows which one runs, a report is not a status.
+fn report_decision(
+    kind: crate::state::sessions::AgentKind,
+    status: &str,
+    activity: crate::pane::AgentActivity,
+) -> Result<crate::pane::AgentActivity, &'static str> {
+    use crate::agent::codex_recovery::{QUESTION_END, QUESTION_START};
+    if matches!(status, QUESTION_START | QUESTION_END) {
+        Err("Codex question hook requires a Codex pane")
+    } else if kind == crate::state::sessions::AgentKind::Other {
+        Err("no agent is running in this tab")
+    } else {
+        Ok(activity)
     }
 }
 

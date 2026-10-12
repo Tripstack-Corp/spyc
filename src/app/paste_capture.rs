@@ -52,7 +52,7 @@ impl App {
         };
         let info = tabs.active_info();
         let snap = PasteSnapshot {
-            paste_keys: crate::agent::detect(&info.command).image_paste_keys(),
+            paste_keys: info.agent().image_paste_keys(),
             enabled: self.state.config.pane.preview_pasted_images,
         };
         if !should_capture(snap, key) {

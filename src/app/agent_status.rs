@@ -263,7 +263,7 @@ impl App {
     /// freely touch the cache / runtime slots afterward.
     fn active_agent_key(&self) -> Option<ActiveAgentKey> {
         let active = self.runtime.pane_tabs.as_ref()?.active_info();
-        let profile = crate::agent::detect(&active.command);
+        let profile = active.agent();
         let kind = profile.kind();
         if kind == AgentKind::Other {
             return None;
@@ -273,7 +273,7 @@ impl App {
             profile,
             kind,
             active.cwd.clone(),
-            active.spawn_epoch_secs,
+            active.agent_epoch_secs(),
             pinned,
         ))
     }
@@ -379,9 +379,9 @@ impl App {
         };
         let matches = self.runtime.pane_tabs.as_ref().is_some_and(|tabs| {
             let active = tabs.active_info();
-            result.kind == crate::agent::detect(&active.command).kind()
+            result.kind == active.agent().kind()
                 && result.cwd == active.cwd
-                && result.spawn_epoch_secs == active.spawn_epoch_secs
+                && result.spawn_epoch_secs == active.agent_epoch_secs()
         });
         if matches {
             self.view.agent_status_cache = Some(result);
@@ -508,7 +508,7 @@ impl App {
             // SPYC-TRAP(scrape-scan-ignores-live-report): do not skip the scan
             // because `entry.info.reported.is_some()` — agy's report may be
             // dropped this iteration, and Codex's modal can override one.
-            let profile = crate::agent::detect(&entry.info.command);
+            let profile = entry.info.agent();
             let rules = profile.detection_rules();
             let wait_from = if profile.kind() == AgentKind::Codex {
                 Some(
@@ -599,7 +599,7 @@ impl App {
         let mut status_transitions: Vec<(String, AgentActivity)> = Vec::new();
         let mut live_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
-            let kind = crate::agent::detect(&entry.info.command).kind();
+            let kind = entry.info.agent().kind();
             let closed = entry.pane.is_closed();
             if closed {
                 entry.info.reported = None;

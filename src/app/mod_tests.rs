@@ -182,6 +182,31 @@ mod guard_tests {
         );
     }
 
+    /// A tab's agent has one source, `TabInfo::agent()`. Detecting it from the
+    /// tab's `command` field elsewhere answers "what was launched" where the
+    /// question is "what runs here", and those stop being the same once a shell
+    /// tab can run an agent (#544). A command about to be spawned has no tab
+    /// yet, so `agent::detect` on a local `cmd` is fine.
+    #[test]
+    fn a_tabs_agent_is_asked_of_the_tab() {
+        let detect_on_field =
+            regex::Regex::new(r"agent::detect\(\s*&[\w.()]*\.command(\.clone\(\))?\s*\)")
+                .expect("valid regex");
+        let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app");
+        let mut offenders = Vec::new();
+        scan_rs(&app, &mut |path, src| {
+            let production = crate::guard_support::production_half(src);
+            for m in detect_on_field.find_iter(&production) {
+                let rel = path.strip_prefix(&app).unwrap_or(path).display();
+                offenders.push(format!("{rel}: {}", m.as_str()));
+            }
+        });
+        assert!(
+            offenders.is_empty(),
+            "ask the tab with `info.agent()`, not `agent::detect` on its command: {offenders:?}"
+        );
+    }
+
     /// The receiver of each `<recv>.left` / `<recv>.right` field access, comments
     /// skipped: `self.state.left.cursor` yields `state`. A longer field
     /// (`right_pager`) is not a column.

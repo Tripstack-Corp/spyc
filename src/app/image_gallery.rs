@@ -253,7 +253,7 @@ impl App {
         request_id: u64,
     ) -> Option<image_ops::TranscriptIndexOp> {
         let info = self.runtime.pane_tabs.as_ref()?.active_info();
-        let profile = crate::agent::detect(&info.command);
+        let profile = info.agent();
         let Some(spec) = profile.transcript_images() else {
             if report {
                 self.state.flash_error(format!(
@@ -270,7 +270,7 @@ impl App {
             spec,
             query: Box::new(image_ops::TranscriptImageQuery {
                 cwd: info.cwd.clone(),
-                spawn_epoch_secs: info.spawn_epoch_secs,
+                spawn_epoch_secs: info.agent_epoch_secs(),
                 command: info.command.clone(),
                 session_id: info.pinned_session_id().map(str::to_owned),
                 codex_home: info.codex_home.clone(),
