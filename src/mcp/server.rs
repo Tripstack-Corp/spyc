@@ -16,8 +16,8 @@ use super::protocol::{
     Caller, PANE_ID_META, dispatch, dispatch_for, read_lsp_message, send_message,
 };
 use super::{
-    PROXY_IO_TIMEOUT, log_bodies, mcp_log, resolve_context_path, root_marker_path_in, socket_path,
-    socket_path_for, state_dir,
+    PROXY_IO_TIMEOUT, log_bodies, mcp_log, root_marker_path_in, socket_path, socket_path_for,
+    state_dir,
 };
 
 /// Project-scoped discovery: the running spycs whose root contains
@@ -187,10 +187,10 @@ pub fn sweep_orphan_root_markers(state_dir: &Path, our_pid: u32) -> usize {
     removed
 }
 
-/// Direct JSONL stdio server — no socket proxy.
+/// Direct JSONL stdio server — no socket proxy — answering from the context
+/// file at `context_path`.
 #[allow(clippy::significant_drop_tightening)]
-pub(super) fn run_direct(project_root: PathBuf) -> anyhow::Result<()> {
-    let context_path = resolve_context_path(&project_root);
+pub(super) fn run_direct(context_path: PathBuf) -> anyhow::Result<()> {
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut reader = stdin.lock();
@@ -263,21 +263,10 @@ pub(super) fn annotate_initialize<'a>(msg: &'a str, pane_id: Option<&str>) -> Co
     Cow::Owned(request.to_string())
 }
 
-/// Proxy stdin/stdout ↔ Unix socket. Messages use Content-Length
-/// framing on both sides.
-pub(super) fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
-    // Read once: the connection's attribution is fixed at its `initialize`.
-    // Under codex's shared daemon the id names whichever tab started it, so the
-    // connection goes unattributed rather than answer for that tab.
-    let pane_id = std::env::var("SPYC_PANE_ID")
-        .ok()
-        .filter(|_| !super::under_codex_shared_daemon());
-    proxy_io(
-        io::stdin().lock(),
-        io::stdout().lock(),
-        stream,
-        pane_id.as_deref(),
-    )
+/// Proxy stdin/stdout ↔ Unix socket, naming `pane_id` in the `initialize` it
+/// forwards. Messages use Content-Length framing on both sides.
+pub(super) fn run_proxy(stream: UnixStream, pane_id: Option<&str>) -> anyhow::Result<()> {
+    proxy_io(io::stdin().lock(), io::stdout().lock(), stream, pane_id)
 }
 
 /// [`run_proxy`] over any agent-side reader and writer, naming `pane_id` in

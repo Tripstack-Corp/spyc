@@ -147,14 +147,32 @@ pub use server::{cleanup_socket, record_root, start_socket_server, sweep_orphan_
 
 use server::{discover_live_socket, run_direct, run_proxy};
 
-/// Resolve context path from env var or project root.
-fn resolve_context_path(project_root: &Path) -> PathBuf {
-    if let Ok(p) = std::env::var(context::CONTEXT_ENV_VAR)
-        && !p.is_empty()
-    {
-        return PathBuf::from(p);
+/// What `spyc --mcp` inherited from its agent's pane: that pane's spyc socket,
+/// its tab, and that spyc's context file.
+#[derive(Default)]
+struct PaneEnv {
+    sock: Option<PathBuf>,
+    pane_id: Option<String>,
+    context: Option<PathBuf>,
+}
+
+impl PaneEnv {
+    /// Under codex's shared daemon every one of these names whichever tab
+    /// started the daemon, possibly in another spyc, so none is kept: the
+    /// daemon starts a session's MCP server in that session's cwd, where
+    /// discovery finds its spyc.
+    fn inherited() -> Self {
+        if under_codex_shared_daemon() {
+            mcp_log("stdio: under codex's shared daemon; ignoring the SPYC_* it inherited");
+            return Self::default();
+        }
+        let var = |name| std::env::var(name).ok().filter(|v| !v.is_empty());
+        Self {
+            sock: var("SPYC_MCP_SOCK").map(PathBuf::from),
+            pane_id: var("SPYC_PANE_ID"),
+            context: var(context::CONTEXT_ENV_VAR).map(PathBuf::from),
+        }
     }
-    context::context_path(project_root)
 }
 
 /// The *effective* report state, given the hook's configured state and the
@@ -360,34 +378,35 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
 ///
 /// Socket resolution order:
 /// 1. `$SPYC_MCP_SOCK`, from the agent pane's env (spyc sets it when it launches
-///    the agent) — the spyc that launched this agent
+///    the agent) — the spyc that launched this agent. Not under codex's shared
+///    daemon (see [`PaneEnv::inherited`]).
 /// 2. Project-scoped discovery: the live spycs whose recorded root
 ///    (`mcp-<pid>.root`) contains `caller_cwd`, nearest first. Refuses
 ///    cross-project attachment (a spyc rooted in a different project tree
 ///    is never picked up).
 /// 3. Falls back to read-only direct mode if nothing matches.
 pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
-    // Try explicit socket path from env first.
-    if let Ok(p) = std::env::var("SPYC_MCP_SOCK")
-        && !p.is_empty()
-    {
-        let sock = PathBuf::from(&p);
+    let env = PaneEnv::inherited();
+    if let Some(sock) = &env.sock {
         mcp_log(&format!("stdio: trying env socket {}", sock.display()));
-        if let Ok(stream) = UnixStream::connect(&sock) {
+        if let Ok(stream) = UnixStream::connect(sock) {
             mcp_log("stdio: connected via env socket, proxying");
-            return run_proxy(stream);
+            return run_proxy(stream, env.pane_id.as_deref());
         }
     }
 
     // Discovery: only consider spyc instances rooted in this project
     // tree (caller's cwd or any ancestor). See `discover_live_socket`.
     if let Some(stream) = discover_live_socket(&project_root) {
-        return run_proxy(stream);
+        return run_proxy(stream, env.pane_id.as_deref());
     }
 
     // Direct mode: read-only local dispatch (no writable actions).
     mcp_log("stdio: no live socket found, running direct JSONL");
-    run_direct(project_root)
+    run_direct(
+        env.context
+            .unwrap_or_else(|| context::context_path(&project_root)),
+    )
 }
 
 #[cfg(test)]

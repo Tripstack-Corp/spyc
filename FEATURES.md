@@ -1518,7 +1518,9 @@ cost of their activity dots and MCP attribution. A codex typed into a shell
 tab joins it unless started with `codex --no-daemon`; its tab shows codex
 with an output-timing dot, and `:why-status` says how to get hook status.
 Hooks and MCP proxies the shared server runs notice it and ignore the pane id
-they inherited, so they never light, or answer for, another tab. See
+they inherited, so they never light, or answer for, another tab. A proxy there
+also ignores the inherited socket, which can belong to another spyc, and
+connects to the spyc rooted at its session's directory. See
 [`docs/HARNESS.md`](docs/HARNESS.md) → "codex's shared daemon".
 
 **`[pane] codex_mcp = false`** (`.spycrc.toml`) stops spyc from registering
