@@ -248,6 +248,14 @@ Non-live-reload agents
 already-consented repo via `maybe_preinstall_startup_hooks`, because they read
 their config once at startup and would otherwise miss them until next launch.
 
+`spyc --install-agents` (`src/wiring/`) installs claude's and agy's hooks once
+in their own user configuration instead: claude's `settings.json`, agy's
+`~/.gemini/config/hooks.json`. The commands are the ones the project writers
+produce, and they never vary, so claude's collapsing of identical handlers and
+agy's of named sets keep a leftover project copy from reporting twice. For an
+agent wired this way, `install_status_hooks` writes no project copy and the
+per-project consent prompt doesn't appear.
+
 ### Who owns them (why one spyc's exit can't blind another)
 
 The installed hooks are **shared, not per-instance**: the reporter they invoke

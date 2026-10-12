@@ -218,9 +218,7 @@ impl App {
             info.id = id.to_string();
         }
         info.agent_hint = hint;
-        info.status_hooks_at_spawn = crate::agent::profile_for(kind)
-            .status_hooks()
-            .is_some_and(|support| support.installed(cwd));
+        info.status_hooks_at_spawn = super::status_hooks::hooks_present(kind, cwd);
         let is_agent = kind != crate::state::sessions::AgentKind::Other;
         match kind {
             crate::state::sessions::AgentKind::Codex => {

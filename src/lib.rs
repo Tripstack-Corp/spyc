@@ -43,6 +43,7 @@ mod sysinfo;
 mod term_title;
 mod terminal;
 mod ui;
+mod wiring;
 
 /// Human-readable build identity, e.g. `1.59.0 (25abd0a)`.
 ///
@@ -142,6 +143,30 @@ struct Cli {
     #[arg(long)]
     install_skill: bool,
 
+    /// Wire spyc into each agent's own user configuration and exit: its MCP
+    /// entry and status hooks, for `claude` and `agy` (a comma-separated list;
+    /// none means both). spyc then stops writing them into project directories
+    /// for those agents. Undo with `--remove-agents`.
+    #[arg(
+        long,
+        value_name = "AGENTS",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "all"
+    )]
+    install_agents: Option<String>,
+
+    /// Remove what `--install-agents` wrote, leaving the rest of each file, and
+    /// exit.
+    #[arg(
+        long,
+        value_name = "AGENTS",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "all"
+    )]
+    remove_agents: Option<String>,
+
     /// Disable the embedded Lua engine for this session — no worker thread, and
     /// `map KEY lua` / init.lua won't run. The startup equivalent of `:lua off`.
     #[arg(long)]
@@ -160,6 +185,45 @@ struct Cli {
     /// every concurrent PR collides on; exits non-zero on any real conflict.
     #[arg(long, num_args = 3, value_names = ["BASE", "CURRENT", "OTHER"], hide = true)]
     merge_driver: Option<Vec<String>>,
+}
+
+/// A one-shot setup command (`--print-config`, `--install-skill`,
+/// `--install-agents`, `--remove-agents`), run instead of the TUI. `None` when
+/// none was asked for.
+fn run_setup_command(cli: &Cli) -> Option<Result<()>> {
+    if cli.print_config {
+        print!("{}", config::DEFAULT_TEMPLATE);
+        return Some(Ok(()));
+    }
+    if cli.install_skill {
+        return Some(install_skill());
+    }
+    if let Some(list) = cli.install_agents.as_deref() {
+        return Some(wiring::run_cli(true, list));
+    }
+    cli.remove_agents
+        .as_deref()
+        .map(|list| wiring::run_cli(false, list))
+}
+
+fn install_skill() -> Result<()> {
+    // Note where hand-edits were replaced: --install-skill overwrites
+    // unconditionally, and that is otherwise silent.
+    let before = skill::status_all();
+    for (host, dir) in skill::install_all(false)? {
+        let note = match before.iter().find(|(h, _)| *h == host).map(|(_, s)| s) {
+            Some(skill::Status::Modified { .. }) => " (replaced your local edits)",
+            _ => "",
+        };
+        println!(
+            "\u{1f336}\u{fe0f} installed the spyc skill v{} for {} \u{2192} {}{}",
+            skill::embedded_version(),
+            host.label(),
+            dir.display(),
+            note
+        );
+    }
+    Ok(())
 }
 
 /// Binary entry point. `src/main.rs` is a thin shim that just calls this;
@@ -185,29 +249,8 @@ pub fn run() -> Result<()> {
     // Disable the embedded Lua engine if requested (no worker thread spawned).
     lua::set_enabled(!cli.no_lua);
 
-    if cli.print_config {
-        print!("{}", config::DEFAULT_TEMPLATE);
-        return Ok(());
-    }
-
-    if cli.install_skill {
-        // Note where hand-edits were replaced: --install-skill overwrites
-        // unconditionally, and that is otherwise silent.
-        let before = skill::status_all();
-        for (host, dir) in skill::install_all(false)? {
-            let note = match before.iter().find(|(h, _)| *h == host).map(|(_, s)| s) {
-                Some(skill::Status::Modified { .. }) => " (replaced your local edits)",
-                _ => "",
-            };
-            println!(
-                "\u{1f336}\u{fe0f} installed the spyc skill v{} for {} \u{2192} {}{}",
-                skill::embedded_version(),
-                host.label(),
-                dir.display(),
-                note
-            );
-        }
-        return Ok(());
+    if let Some(done) = run_setup_command(&cli) {
+        return done;
     }
 
     if cli.mcp {

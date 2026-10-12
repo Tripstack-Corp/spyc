@@ -28,6 +28,7 @@ pub mod sessions;
 pub mod skill_prompt;
 pub mod tab_consent;
 pub mod transcript_images;
+pub mod wiring_consent;
 
 pub use cursor::Cursor;
 pub use frecency::Frecency;

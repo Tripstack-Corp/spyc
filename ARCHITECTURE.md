@@ -843,6 +843,40 @@ one. `two_spycs_in_one_directory_each_keep_their_own_agents`
 (`src/mcp/tests/coexistence.rs`) holds it, against a model of each agent's env
 handling as probed on 2026-09-30.
 
+## Agent wiring in user scope
+
+`src/wiring/` installs an agent's `spyc` MCP entry and its status hooks once,
+into that agent's own user configuration, instead of into every directory an
+agent runs in (#619). `spyc --install-agents` does it for claude and agy, and
+records the answer in `state::wiring_consent`. While an agent's answer is yes,
+`write_mcp_config` and `install_status_hooks` write nothing for it into
+projects, because a project copy would run beside the user one. The files:
+
+| Agent | Hooks | MCP entry |
+|---|---|---|
+| claude | `settings.json` in `$CLAUDE_CONFIG_DIR`, else `~/.claude` | `.claude.json` beside it, through `claude mcp add-json -s user` |
+| agy | `~/.gemini/config/hooks.json`, set `spyc-status` | `~/.gemini/config/mcp_config.json` |
+
+These files hold the user's own settings, so spyc owns only content it can
+recognize: a hook whose command runs `--report-status`, agy's `spyc-status`
+set, and an MCP server named `spyc` whose command runs spyc. An MCP server named
+`spyc` that runs anything else is someone else's, and spyc neither replaces nor
+removes it. An install that would change nothing writes nothing, a file that
+won't parse is refused untouched, and removal never deletes a file. Claude's
+`.claude.json` is claude's own state file, rewritten constantly, so spyc reads it
+but leaves the edit to `claude mcp`. An organization's `managed-mcp.json` takes
+exclusive control of claude's MCP servers: spyc then reports the entry as
+provided, or forbidden, and installs only the hooks.
+
+<!-- SPYC-TRAP: user-config-write-through-symlink -->
+A user-configuration file is written through a symlink and keeps its mode
+(`wiring::file::write`). Dotfiles managers keep files like `settings.json` as
+links into their repository, and spyc's usual `fs::write_atomic` renames a new
+file over the path, which would replace the link with a plain file and quietly
+cut the user's configuration off from that repository. It would also reset the
+file to the temp file's mode. `a_linked_settings_file_stays_a_link` and
+`an_edited_file_keeps_its_mode_and_a_new_one_is_readable` hold both.
+
 ## Mouse routing
 
 `src/app/mouse/`. The layer is split pure/impure on the `route.rs` / `focus.rs`

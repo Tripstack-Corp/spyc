@@ -288,6 +288,13 @@ the bump gate. `deny.toml` records the same.
   world-writable `/tmp`. But anyone running as your user on the same
   machine can still open it and exercise the MCP tool surface: we rely
   on user-process isolation, not on stricter ACLs.
+- **`spyc --install-agents` puts spyc in every session of the agents it
+  wires,** not only those spyc launches. Their status hooks run on every
+  turn, and do nothing without the socket a spyc pane sets. Their `spyc --mcp`
+  starts in every session: one started inside the tree a running spyc is rooted
+  at connects to that spyc unattributed, and one started elsewhere serves
+  read-only tools. The entries outlive spyc, so remove them with
+  `spyc --remove-agents` before uninstalling it.
 
 ## Reporting a vulnerability
 

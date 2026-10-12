@@ -123,9 +123,7 @@ impl App {
                 forget_agent(info);
                 info.running = Some(running);
                 let cwd = info.cwd.clone();
-                info.status_hooks_at_spawn = crate::agent::profile_for(running.kind)
-                    .status_hooks()
-                    .is_some_and(|support| support.installed(&cwd));
+                info.status_hooks_at_spawn = super::status_hooks::hooks_present(running.kind, &cwd);
                 let id = info.id.clone();
                 self.state.codex_recovery.remove(&id);
                 // As a launched agent tab does: install where consented, ask
