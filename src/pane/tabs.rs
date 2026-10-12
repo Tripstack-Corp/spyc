@@ -98,10 +98,13 @@ pub struct ReportedStatus {
 
 /// Per-tab metadata displayed in the status line.
 pub struct TabInfo {
-    /// Stable per-tab id (uuid), assigned at construction and never reused.
-    /// Injected as `SPYC_PANE_ID` into the agent pane's env so an agent's
-    /// `report_status` hook can target THIS tab regardless of its (mutable)
-    /// 1-based index. Survives reorder/insert/remove; not persisted.
+    /// Stable per-tab id (uuid), assigned at construction and unique among
+    /// live tabs. Injected as `SPYC_PANE_ID` into the agent pane's env so an
+    /// agent's `report_status` hook can target THIS tab regardless of its
+    /// (mutable) 1-based index. Survives reorder/insert/remove, and a restore:
+    /// the session records it and the restored tab takes it back, because an
+    /// agent can outlive spyc (Claude Code's background sessions do) and its
+    /// MCP connection and hooks still carry the id it was launched with.
     pub id: String,
     /// Full command string passed to `Pane::spawn`.
     pub command: String,
@@ -770,6 +773,7 @@ mod tests {
             codex_home: None,
             codex_home_unresolved: false,
             claim_owner: String::new(),
+            pane_id: String::new(),
         })
         .expect("SavedTab serializes");
         assert!(

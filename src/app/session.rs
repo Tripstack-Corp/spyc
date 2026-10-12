@@ -185,6 +185,7 @@ impl App {
                             codex_home_unresolved: kind == crate::state::sessions::AgentKind::Codex
                                 && t.info.codex_home.is_none(),
                             claim_owner: t.info.claim_owner.clone(),
+                            pane_id: t.info.id.clone(),
                         }
                     })
                     .collect()
@@ -337,6 +338,8 @@ impl App {
                 // recorded no conversation, or a guessed one (#584).
                 t.info.pinned_session_id().hash(&mut h);
                 t.info.codex_home.hash(&mut h);
+                // `^a R` respawns in place with the same command and a new id.
+                t.info.id.hash(&mut h);
             }
         }
         super::state::restore::hash_deferred_tabs(&self.state.deferred_tabs, &mut h);
@@ -896,6 +899,7 @@ mod tests {
                 codex_home: None,
                 codex_home_unresolved: false,
                 claim_owner: String::new(),
+                pane_id: String::new(),
             });
             crate::state::sessions::save_session(&saved).expect("seed the restore point");
 
@@ -1180,6 +1184,22 @@ mod tests {
             app.runtime.pane_tabs.as_mut().expect("the tab").tabs_mut()[0]
                 .info
                 .live_session_id = Some(MINE.into());
+            assert_ne!(app.session_fingerprint(), before);
+        });
+    }
+
+    /// `^a R` respawns a tab in place with the same command and cwd and a new
+    /// pane id. The saved id has to follow, or a crash restores the old one
+    /// and the respawned agent's hooks name a tab that isn't there.
+    #[test]
+    fn a_new_pane_id_moves_the_autosave_fingerprint() {
+        with_claude_home(|project, _| {
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            let before = app.session_fingerprint();
+            app.runtime.pane_tabs.as_mut().expect("the tab").tabs_mut()[0]
+                .info
+                .id = "respawned".into();
             assert_ne!(app.session_fingerprint(), before);
         });
     }

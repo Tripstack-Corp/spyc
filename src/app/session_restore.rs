@@ -1,10 +1,108 @@
-//! Rebuild safe tabs and workspace layout without losing refused saved records.
+//! Rebuild safe tabs and workspace layout without losing refused saved records,
+//! and drive the `/resume` keystrokes that recover a Claude conversation.
 
+use super::pane_tabs::TabSlot;
 use super::state::restore::{DeferredTab, restored_active_index};
 use super::state::{Focus, Side, VSplit, VsplitMode};
-use super::{App, Effect, RESTORE_BANNER_SETTLE};
+use super::{
+    App, Effect, RESTORE_BANNER_SETTLE, RESTORE_RESUME_ENTER_DELAY, RESTORE_RESUME_VERIFY_DELAY,
+    RESTORE_RESUME_VERIFY_RETRIES, RESTORE_RESUME_VERIFY_TAIL,
+};
 
 impl App {
+    /// Restore's spawn: [`Self::open_pane_tab_in_home`], taking back the tab's
+    /// saved `pane_id` (see `TabInfo::id`) unless it is empty or a live tab
+    /// already holds it.
+    pub(super) fn open_restored_pane_tab(
+        &mut self,
+        cmd: &str,
+        cwd: &std::path::Path,
+        home: Option<&std::path::Path>,
+        pane_id: &str,
+    ) -> bool {
+        let taken = self
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .is_some_and(|tabs| tabs.tabs().iter().any(|t| t.info.id == pane_id));
+        let reuse = (!pane_id.is_empty() && !taken).then_some(pane_id);
+        self.spawn_pane_tab(cmd, cwd, TabSlot::Append, home, reuse)
+    }
+
+    /// For tabs that have a `pending_resume_send` armed (set by
+    /// `restore_session`), drive the two-phase keystroke injection
+    /// that recovers a Claude conversation. We avoid the `--resume`
+    /// CLI flag because it trips a known regression that crashes at
+    /// mount; the slash-command path goes through `tM_` and works
+    /// fine.
+    ///
+    /// Three phases:
+    /// - `Text` (after banner-settle): write `/resume <sid>` with no
+    ///   trailing Enter and transition to `Enter`.
+    /// - `Enter` (after a small additional delay): write `\r` and
+    ///   transition to `Verify`.
+    /// - `Verify` (closed-loop): if `/resume <sid>` is still sitting
+    ///   unsubmitted in the pane tail, re-send `\r` and re-arm, up to
+    ///   `RESTORE_RESUME_VERIFY_RETRIES` times.
+    ///
+    /// Splitting the text/Enter writes narrows the race where
+    /// Claude's TUI was still mid-render when the original combined
+    /// `/resume <sid>\r` arrived, but no fixed delay closes it —
+    /// async startup work (MCP connects, version check, org-message
+    /// fetch) can remount the input component and eat a lone `\r`
+    /// seconds after spawn. The `Verify` phase makes the submit
+    /// observed rather than hoped-for: the sid vanishing from the
+    /// screen tail is the success signal, and while it's visible a
+    /// retry `\r` is harmless. (The v1.70 "bells" design subsumes
+    /// this; delete the phase when that lands.)
+    pub fn send_pending_resumes(&mut self, now: std::time::Instant) {
+        use crate::pane::tabs::{PendingResumeSend, resume_still_unsubmitted};
+        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+            return;
+        };
+        for entry in tabs.tabs_mut() {
+            match entry.info.pending_resume_send.take() {
+                Some(PendingResumeSend::Text { sid, after }) if now >= after => {
+                    let _ = entry.pane.send_bytes(format!("/resume {sid}").as_bytes());
+                    entry.info.pending_resume_send = Some(PendingResumeSend::Enter {
+                        sid,
+                        after: now + RESTORE_RESUME_ENTER_DELAY,
+                    });
+                }
+                Some(PendingResumeSend::Enter { sid, after }) if now >= after => {
+                    let _ = entry.pane.send_bytes(b"\r");
+                    entry.info.pending_resume_send = Some(PendingResumeSend::Verify {
+                        sid,
+                        after: now + RESTORE_RESUME_VERIFY_DELAY,
+                        retries_left: RESTORE_RESUME_VERIFY_RETRIES,
+                    });
+                }
+                Some(PendingResumeSend::Verify {
+                    sid,
+                    after,
+                    retries_left,
+                }) if now >= after => {
+                    let tail = entry.pane.recent_lines(RESTORE_RESUME_VERIFY_TAIL);
+                    if resume_still_unsubmitted(&tail, &sid) && retries_left > 0 {
+                        let _ = entry.pane.send_bytes(b"\r");
+                        entry.info.pending_resume_send = Some(PendingResumeSend::Verify {
+                            sid,
+                            after: now + RESTORE_RESUME_VERIFY_DELAY,
+                            retries_left: retries_left - 1,
+                        });
+                    }
+                    // Submitted (sid gone from the tail) or retries
+                    // exhausted: cleared by take(). On exhaustion the
+                    // user recovers by pressing Enter themselves.
+                }
+                other => {
+                    // Not yet due, or empty — put back what we took.
+                    entry.info.pending_resume_send = other;
+                }
+            }
+        }
+    }
+
     fn spawn_restored_tab(
         &mut self,
         command: &str,
@@ -14,7 +112,7 @@ impl App {
         let home = (tab.effective_kind() == crate::state::sessions::AgentKind::Codex)
             .then_some(tab.codex_home.as_deref())
             .flatten();
-        self.open_pane_tab_in_home(command, cwd, home)
+        self.open_restored_pane_tab(command, cwd, home, &tab.pane_id)
     }
 
     pub fn restore_session(&mut self, session: &crate::state::sessions::Session) -> Vec<Effect> {

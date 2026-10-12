@@ -1459,6 +1459,7 @@ mod tests {
             codex_home: None,
             codex_home_unresolved: false,
             claim_owner: String::new(),
+            pane_id: String::new(),
         };
         // `effective_kind` upgrades the legacy Other → Claude.
         assert_eq!(tab.effective_kind(), AgentKind::Claude);
@@ -1488,6 +1489,7 @@ mod tests {
             codex_home: None,
             codex_home_unresolved: false,
             claim_owner: String::new(),
+            pane_id: String::new(),
         };
         assert_eq!(tab.effective_kind(), AgentKind::Other);
         let plan = profile_for(tab.effective_kind()).reconstruct_restore(

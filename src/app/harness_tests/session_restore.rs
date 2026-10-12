@@ -241,3 +241,62 @@ fn a_refused_tab_does_not_prevent_layout_or_scope_restore() {
         );
     });
 }
+
+/// A restored tab takes back its saved pane id and launches its child with it.
+/// An agent that outlived spyc (Claude Code's background sessions do) still
+/// names that id, so its MCP connection and status hooks keep reaching the tab.
+#[test]
+fn a_restored_tab_takes_back_its_saved_pane_id() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state_root = tmp.path().join("state");
+    crate::state::with_state_root(&state_root, || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let command = fake_agent(&dir, "codex").display().to_string();
+        let mut saved = saved_session(&dir, &[command], 0);
+        saved.tabs[0].pane_id = "saved-pane".into();
+
+        let mut app = App::test_app(dir.clone());
+        app.restore_session(&saved);
+        agent_argv(&dir, "codex");
+        let tabs = app.runtime.pane_tabs.as_ref().expect("the tab restored");
+        assert_eq!(tabs.tabs()[0].info.id, "saved-pane");
+        let env = std::fs::read_to_string(dir.join("codex.argv.pane")).unwrap();
+        assert_eq!(env.trim_end(), "saved-pane", "the child's SPYC_PANE_ID");
+
+        app.save_session();
+        assert_eq!(
+            read_saved(&state_root, saved.id).tabs[0].pane_id,
+            "saved-pane"
+        );
+    });
+}
+
+/// Ids stay unique among live tabs: a saved id is taken back once, and an
+/// older save with none restores with fresh ones.
+#[test]
+fn a_saved_pane_id_is_taken_back_only_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let command = fake_agent(&dir, "codex").display().to_string();
+        let mut saved = saved_session(&dir, &[command.clone(), command.clone(), command], 0);
+        saved.tabs[0].pane_id = "dup".into();
+        saved.tabs[1].pane_id = "dup".into();
+
+        let mut app = App::test_app(dir);
+        app.restore_session(&saved);
+        let ids: Vec<&str> = app
+            .runtime
+            .pane_tabs
+            .as_ref()
+            .expect("the tabs restored")
+            .tabs()
+            .iter()
+            .map(|t| t.info.id.as_str())
+            .collect();
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids[0], "dup");
+        assert!(ids[1] != "dup" && !ids[1].is_empty(), "{ids:?}");
+        assert!(!ids[2].is_empty() && ids[2] != ids[1], "{ids:?}");
+    });
+}
