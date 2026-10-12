@@ -322,3 +322,45 @@ fn a_shell_tab_running_an_agent_is_saved_as_its_shell() {
         type_until(&mut app, "\x03", "exit", |info| info.running.is_none());
     });
 }
+
+/// `:hooks on!` restarts claude so it reads new hooks. In a shell tab that
+/// would restart the shell, and type `/resume` into it, so there it installs
+/// the hooks, which claude reloads on its own, and leaves the tab alone.
+#[test]
+fn hooks_on_bang_leaves_a_shell_tab_running_claude_alone() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap().join("project");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        assert!(app.open_pane_tab_in("sh", &dir));
+        let shell = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+            .pane
+            .process_id();
+        app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0]
+            .info
+            .running = Some(crate::pane::RunningAgent {
+            kind: crate::state::sessions::AgentKind::Claude,
+            pid: 1,
+            started_epoch_secs: 1,
+            backgrounded: false,
+            on_shared_daemon: false,
+        });
+
+        app.dispatch_command("hooks on!");
+
+        let entry = &app.runtime.pane_tabs.as_ref().unwrap().tabs()[0];
+        assert_eq!(entry.info.command, "sh");
+        assert_eq!(entry.pane.process_id(), shell, "the shell was restarted");
+        assert!(
+            dir.join(".claude/settings.json").exists(),
+            "hooks installed"
+        );
+        assert!(
+            app.flash_text()
+                .is_some_and(|f| f.contains("isn't restarted")),
+            "{:?}",
+            app.flash_text()
+        );
+    });
+}

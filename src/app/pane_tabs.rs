@@ -400,13 +400,17 @@ impl App {
         let root = self.status_hooks_target_root();
         crate::state::hook_consent::set_consent(&root, true);
 
-        let Some((tab_idx, cmd, cwd, kind)) = self.runtime.pane_tabs.as_ref().map(|t| {
+        let Some((tab_idx, cmd, cwd, kind, live_cwd)) = self.runtime.pane_tabs.as_ref().map(|t| {
             let info = t.active_info();
+            // A shell running claude (#544): its cwd is the shell's live one.
+            let live_cwd = (info.launched_agent().kind() != info.agent().kind())
+                .then(|| t.tabs()[t.active_index()].live_cwd());
             (
                 t.active_index(),
                 info.command.clone(),
                 info.cwd.clone(),
                 info.agent().kind(),
+                live_cwd,
             )
         }) else {
             self.state
@@ -416,6 +420,16 @@ impl App {
         if kind != crate::state::sessions::AgentKind::Claude {
             self.state
                 .flash_error(":hooks on! — active pane is not claude");
+            return;
+        }
+        // Restarting the tab would restart its shell, not claude, and type
+        // `/resume` into that. Claude reloads its hooks live, so installing
+        // them is the whole job.
+        if let Some(live_cwd) = live_cwd {
+            self.install_status_hooks(&live_cwd, crate::state::sessions::AgentKind::Claude);
+            self.state.flash_info(
+                "status hooks on — claude runs in a shell here, so it isn't restarted; it picks the hooks up on its next turn",
+            );
             return;
         }
         self.install_status_hooks(&cwd, crate::state::sessions::AgentKind::Claude);
