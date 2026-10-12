@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>spyc Codex HUD - B1 design preview</title>
+  <style>
+    :root { color-scheme: dark light; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 28px; background: light-dark(#f4f4f5,#171820); color: light-dark(#252836,#c0caf5); font: 15px/1.5 system-ui,sans-serif; }
+    main { max-width: 1180px; margin: auto; }
+    h1 { font-size: 24px; font-weight: 500; margin: 0 0 4px; }
+    p { margin: 0 0 20px; }
+    .muted { color: light-dark(#555969,#a5abc5); }
+    .controls { display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: end; margin: 20px 0; }
+    label { display: grid; gap: 5px; }
+    select,input,button { font: inherit; }
+    select { min-height: 38px; padding: 6px 10px; border: 1px solid light-dark(#b7bac6,#565f89); background: light-dark(#fff,#242634); color: inherit; border-radius: 4px; }
+    input[type="range"] { width: 180px; min-height: 32px; accent-color: #73daca; }
+    .check { display: flex; align-items: center; min-height: 38px; gap: 8px; }
+    .preview { overflow: auto; padding: 18px; background: light-dark(#e3e4e9,#11121a); border-radius: 5px; }
+    .terminal { --fg: #c0caf5; --muted: #a5abc5; --accent: #e0af68; --teal: #73daca; --red: #f7768e; background: #1a1b26; color: var(--fg); font: 14px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; width: max-content; padding: 8px 0; }
+    .terminal.mono { --fg: #ededed; --muted: #d0d0d0; --accent: #ededed; --teal: #ededed; --red: #ededed; background: #191919; }
+    .row { white-space: pre; height: 1.65em; width: calc(var(--cols) * 1ch); }
+    .divider { color: var(--accent); font-weight: 600; }
+    .child .row { color: var(--fg); }
+    .child .muted-row { color: var(--muted); }
+    .hud { border-top: 1px solid #3b4061; background: #202231; }
+    .mono .hud { border-top-color: #777; background: #252525; }
+    .hud .row { color: var(--muted); }
+    .hud .identity { color: var(--teal); font-weight: 600; }
+    .hud .attention { color: var(--red); font-weight: 600; }
+    .geometry { margin: 12px 0 22px; font-variant-numeric: tabular-nums; }
+    details { margin: 18px 0; }
+    summary { cursor: pointer; font-weight: 500; }
+    ul { padding-left: 24px; }
+    .facts { display: grid; grid-template-columns: 130px 1fr; gap: 5px 12px; max-width: 850px; }
+    .facts dt { font-weight: 500; }
+    .facts dd { margin: 0; }
+    @media (max-width: 600px) { body { padding: 16px; } .preview { padding: 10px; } .facts { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main id="codex-hud-preview">
+  <h1>Codex session HUD</h1>
+  <p class="muted">B1 design preview. Illustrative data; no live connection or installed feature.</p>
+  <div class="controls">
+    <label>HUD mode
+      <select id="mode"><option value="compact">Compact</option><option value="full">Full</option><option value="off">Off (initial default)</option></select>
+    </label>
+    <label>Source snapshot
+      <select id="source"><option value="rollout">Current rollout capabilities</option><option value="unknown">Session not yet bound</option><option value="compacted">After compaction</option><option value="stale">Stale metrics / needs you</option><option value="lifecycle">Synthetic complete lifecycle</option></select>
+    </label>
+    <label>Pane width <output id="width-value">80 columns</output><input id="width" type="range" min="32" max="120" step="8" value="80"></label>
+    <label>Pane height <output id="height-value">24 rows</output><input id="height" type="range" min="6" max="30" step="2" value="24"></label>
+    <label class="check"><input id="mono" type="checkbox">Monochrome</label>
+  </div>
+  <div class="preview">
+    <div class="terminal" id="terminal" role="img" aria-label="Codex pane with a proposed session HUD">
+      <div class="divider row" id="divider"></div>
+      <div class="child" id="child"></div>
+      <div class="hud" id="hud"></div>
+    </div>
+  </div>
+  <p class="geometry" id="geometry" aria-live="polite"></p>
+  <details open>
+    <summary>What the rows mean</summary>
+    <dl class="facts">
+      <dt>Identity</dt><dd>Attention and the pinned session survive first; model, branch and elapsed time fit when space permits.</dd>
+      <dt>Usage</dt><dd>Request, turn and thread totals are separate measurements. Context remains unknown until checked against the native display.</dd>
+      <dt>Limits</dt><dd>Null windows mean not reported. The synthetic preset has one explicitly reported 15-minute bucket; it is not a session budget.</dd>
+      <dt>Full mode</dt><dd>Shows operating mode, observed hooks/MCP and tool completeness. A fifth row appears only with verified plan/agent records.</dd>
+      <dt>Geometry</dt><dd>Keep at least six child rows. Full collapses to compact in short panes; the HUD hides when it would leave fewer than six.</dd>
+    </dl>
+  </details>
+  <p class="muted">The strip sits below the child screen. Codex keeps its own composer and statusline. This preview has no keyboard interception, telemetry polling or quota inference.</p>
+</main>
+<script>
+(() => {
+  const root = document.getElementById('codex-hud-preview');
+  const get = id => root.querySelector('#' + id);
+  const controls = ['mode','source','width','height','mono'];
+  const sample = {
+    model: 'gpt-6.1-sol', effort: 'xhigh', session: '0123abcd', repo: 'spyc (main)',
+    status: 'working', elapsed: '2m12s', request: 239551, turn: 2150182, thread: 91227533,
+    approval: 'on-request', sandbox: 'workspace-write', hooks: 'reported', mcp: 'connected',
+    limits: null, activeTools: null, plan: null, agents: null, stale: false
+  };
+  function snapshot(source) {
+    const data = {...sample};
+    if (source === 'unknown') Object.assign(data, {model:null,effort:null,session:null,status:'idle',elapsed:null,request:null,turn:null,thread:null,approval:null,sandbox:null,hooks:'installed, no report',mcp:'configured'});
+    if (source === 'compacted') Object.assign(data, {request:null,elapsed:null});
+    if (source === 'stale') Object.assign(data, {status:'needs you',elapsed:null,stale:true});
+    if (source === 'lifecycle') Object.assign(data, {limits:{bucket:'codex',usedPercent:25,windowMins:15},activeTools:1,plan:{done:2,total:4},agents:1});
+    return data;
+  }
+  function amount(value) {
+    if (value === null) return '--';
+    if (value >= 1000000) return (value/1000000).toFixed(1)+'M';
+    if (value >= 1000) return (value/1000).toFixed(1)+'k';
+    return String(value);
+  }
+  function fit(parts, width) {
+    let result = '';
+    for (const part of parts.filter(Boolean)) {
+      const candidate = result ? result+' | '+part : part;
+      if (candidate.length <= width) result = candidate;
+    }
+    return result || '--';
+  }
+  function rows(data, mode, width) {
+    if (mode === 'off') return [];
+    const identity = fit([data.status, data.session ? 'session '+data.session : 'session unbound', data.model && data.model+' '+data.effort, data.repo, data.elapsed], width);
+    const limit = data.limits ? 'Limits '+data.limits.bucket+' '+data.limits.usedPercent+'% used / '+data.limits.windowMins+'m' : width < 64 ? 'Limits --' : 'Limits not reported';
+    const usage = fit([data.stale ? 'Usage stale' : 'Context --', 'Thread '+amount(data.thread), limit, 'Turn '+amount(data.turn), 'Request '+amount(data.request)], width);
+    const output = [{text:identity,kind:data.status==='needs you'?'attention':'identity'},{text:usage,kind:'usage'}];
+    if (mode === 'full') {
+      output.push({text:fit(['Mode '+(data.sandbox||'--')+' / '+(data.approval||'--'),'Hooks '+data.hooks,'MCP '+data.mcp],width),kind:'mode'});
+      output.push({text:fit([data.activeTools===null?(data.session?'Tools: completion records only':'Tools not reported'):'Tools: '+data.activeTools+' active','active state '+(data.activeTools===null?'unknown':'reported')],width),kind:'tools'});
+      if (data.plan || data.agents !== null) output.push({text:fit([data.plan&&'Plan '+data.plan.done+'/'+data.plan.total,data.agents!==null&&'Agents '+data.agents+' reported'],width),kind:'progress'});
+    }
+    return output;
+  }
+  function layout(mode, height, data, width) {
+    if (mode === 'off' || height < 8) return {mode:'off',hud:[],reason:mode==='off'?'off by choice':'hidden to preserve child rows'};
+    let output = rows(data,mode,width);
+    if (mode==='full' && height-output.length<10) return {mode:'compact',hud:rows(data,'compact',width),reason:'full collapsed in a short pane'};
+    return {mode,hud:output,reason:'below child screen'};
+  }
+  function addRow(parent,text,className='') {
+    const node = document.createElement('div');
+    node.className = 'row '+className;
+    node.textContent = text;
+    parent.appendChild(node);
+  }
+  function render() {
+    const width = Number(get('width').value), height = Number(get('height').value);
+    const data = snapshot(get('source').value);
+    const current = layout(get('mode').value,height,data,width);
+    const childRows = height-current.hud.length;
+    const terminal = get('terminal');
+    terminal.style.setProperty('--cols',width);
+    terminal.classList.toggle('mono',get('mono').checked);
+    get('width-value').textContent = width+' columns';
+    get('height-value').textContent = height+' rows';
+    get('divider').textContent = fit(['[1*] codex','[2] shell','~/src/spyc'],width).padEnd(width,'-');
+    get('child').replaceChildren();
+    const transcript = ['• I will check the remaining work.', '', '  Printed path: src/agent/chrome.rs', '', '  I will verify the change before handing it off.'];
+    const footer = ['','› Inspect src/app/quick_select.rs','  ? for shortcuts'];
+    for(let i=0;i<childRows;i++) {
+      const footerIndex=i-(childRows-footer.length);
+      const text=footerIndex>=0?footer[footerIndex]:(transcript[i]||'');
+      addRow(get('child'),text.slice(0,width),footerIndex>=0?'muted-row':'');
+    }
+    get('hud').replaceChildren();
+    get('hud').hidden=current.hud.length===0;
+    for(const row of current.hud) addRow(get('hud'),row.text,row.kind);
+    get('geometry').textContent=childRows+' child rows + '+current.hud.length+' HUD rows = '+height+' pane rows · '+current.reason;
+    terminal.setAttribute('aria-label','Illustrative Codex pane, '+current.mode+' HUD: '+current.hud.map(row=>row.text).join('; '));
+    window.codexHudPreviewState={width,height,childRows,hudRows:current.hud.length,effectiveMode:current.mode,lines:current.hud.map(row=>row.text)};
+  }
+  for(const id of controls) get(id).addEventListener('input',render);
+  render();
+})();
+</script>
+</body>
+</html>

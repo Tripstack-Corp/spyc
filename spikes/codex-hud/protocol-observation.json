@@ -1,0 +1,46 @@
+{
+  "provenance": "offline generate-json-schema from installed codex-cli 0.162.1, stable surface, 2026-10-12",
+  "thread_read_params": [
+    "includeTurns",
+    "threadId"
+  ],
+  "thread_observation_methods": [
+    "thread/start",
+    "thread/resume",
+    "thread/unsubscribe",
+    "thread/loaded/list",
+    "thread/read"
+  ],
+  "token_usage_notification_fields": [
+    "threadId",
+    "tokenUsage",
+    "turnId"
+  ],
+  "thread_token_usage_fields": [
+    "last",
+    "modelContextWindow",
+    "total"
+  ],
+  "token_breakdown_fields": [
+    "cacheWriteInputTokens",
+    "cachedInputTokens",
+    "inputTokens",
+    "outputTokens",
+    "reasoningOutputTokens",
+    "totalTokens"
+  ],
+  "rate_limit_response_fields": [
+    "accountId",
+    "ordinaryUsageAllowed",
+    "rateLimitResetCredits",
+    "rateLimitUpsell",
+    "rateLimits",
+    "rateLimitsByLimitId"
+  ],
+  "rate_limit_window_fields": [
+    "resetsAt",
+    "usedPercent",
+    "windowDurationMins"
+  ],
+  "transport_decision": "No observer subscription established for the same --no-daemon native pane. Use its pinned rollout; no sidecar resume, account read or daemon attachment attempted."
+}
