@@ -51,29 +51,10 @@
 //! git-tracked `settings.json` (don't dirty something the user committed).
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Value, json};
 
 use super::config::ConfigCleanup;
-
-/// Set once at launch from the `--status-trace` CLI flag. When on, the hook
-/// commands spyc installs get a baked `--status-trace` arg so the one-shot
-/// reporter subprocess logs each invocation — and crucially the arg rides in the
-/// command string, so it survives even if Claude runs hooks with a sanitized
-/// env. Off by default (the reporter fires every agent turn; always-on logging
-/// would spam `mcp.log`). Mirrors the `--key-trace` debug-flag pattern.
-static STATUS_TRACE: AtomicBool = AtomicBool::new(false);
-
-/// Enable baking `--status-trace` into installed hook commands. Called once at
-/// startup from `spyc --status-trace`.
-pub fn set_status_trace(on: bool) {
-    STATUS_TRACE.store(on, Ordering::Relaxed);
-}
-
-fn status_trace_enabled() -> bool {
-    STATUS_TRACE.load(Ordering::Relaxed)
-}
 
 /// The spyc binary to bake into an installed status-hook command. Prefers a
 /// `spyc` discoverable on `$PATH` so the hook survives the binary MOVING (a
@@ -135,18 +116,17 @@ fn is_executable_file(p: &Path) -> bool {
 }
 
 /// Build the shell command an installed status hook runs: the (shell-quoted)
-/// reporter binary, `--report-status <state>`, `--status-trace` when tracing, and
+/// reporter binary, `--report-status <state>`, and
 /// a fail-soft tail. The reporter is fire-and-forget (it just pings the pane's
 /// MCP socket), so a moved/uninstalled binary must degrade to a no-op — WITHOUT
 /// the `2>/dev/null || true`, a missing binary's nonzero exit surfaces as a
 /// per-turn hook error in the agent (the "No such file or directory" report a
 /// stale absolute path produced). The `--report-status` token stays in the
 /// string: it's the "ours" marker cleanup keys on.
-fn reporter_command(exe: &str, state: &str, trace: bool) -> String {
-    let trace = if trace { " --status-trace" } else { "" };
+fn reporter_command(exe: &str, state: &str) -> String {
     // Shell-quote so a spaced install path stays one token or the hook never fires.
     let exe = crate::shell::shell_quote(exe);
-    format!("{exe} --report-status {state}{trace} 2>/dev/null || true")
+    format!("{exe} --report-status {state} 2>/dev/null || true")
 }
 
 /// The (event, matcher, reported-state) hooks spyc installs. `matcher` is the
@@ -201,8 +181,7 @@ pub fn ensure_claude_status_hooks(dir: &Path) -> bool {
         return false;
     };
     let existing = std::fs::read_to_string(&path).ok();
-    let Some(out) = merged_status_hooks_json(existing.as_deref(), &exe, status_trace_enabled())
-    else {
+    let Some(out) = merged_status_hooks_json(existing.as_deref(), &exe) else {
         return false;
     };
     // Already current → skip the write (and its mtime bump), but still report
@@ -255,7 +234,7 @@ fn merge_root_toml(existing: Option<&str>) -> Option<toml::Value> {
 /// [`merge_root_json`]. Pure (no I/O) so the merge
 /// — and its byte-level idempotency, which is what makes the write skippable —
 /// is unit-testable.
-fn merged_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) -> Option<String> {
+fn merged_status_hooks_json(existing: Option<&str>, exe: &str) -> Option<String> {
     let mut root = merge_root_json(existing)?;
     let obj = root.as_object_mut()?;
     let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
@@ -263,7 +242,7 @@ fn merged_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) -> O
     for (event, matcher, state) in STATUS_HOOKS {
         let group = json!({
             "matcher": matcher,
-            "hooks": [ { "type": "command", "command": reporter_command(exe, state, trace) } ],
+            "hooks": [ { "type": "command", "command": reporter_command(exe, state) } ],
         });
         let arr = hooks_obj.entry(event).or_insert_with(|| json!([]));
         let Some(list) = arr.as_array_mut() else {
@@ -401,11 +380,10 @@ const AGY_STATUS_HOOKS: [(&str, &str, &str); 3] = [
 /// own output is discarded to keep stdout pure JSON. `allow` is a no-op for
 /// `ask_question`, whose whole purpose is to wait for the user: spyc observes the
 /// wait, it never arbitrates it.
-fn agy_tool_reporter_command(exe: &str, state: &str, trace: bool) -> String {
-    let trace = if trace { " --status-trace" } else { "" };
+fn agy_tool_reporter_command(exe: &str, state: &str) -> String {
     let exe = crate::shell::shell_quote(exe);
     format!(
-        "{exe} --report-status {state}{trace} >/dev/null 2>&1 || true; printf '{{\"decision\":\"allow\"}}'"
+        "{exe} --report-status {state} >/dev/null 2>&1 || true; printf '{{\"decision\":\"allow\"}}'"
     )
 }
 
@@ -448,8 +426,7 @@ pub fn ensure_agy_status_hooks(dir: &Path) -> bool {
         return false;
     };
     let existing = std::fs::read_to_string(&path).ok();
-    let Some(out) = merged_agy_status_hooks_json(existing.as_deref(), &exe, status_trace_enabled())
-    else {
+    let Some(out) = merged_agy_status_hooks_json(existing.as_deref(), &exe) else {
         return false;
     };
     if existing.as_deref() == Some(out.as_str()) {
@@ -466,15 +443,15 @@ pub fn ensure_agy_status_hooks(dir: &Path) -> bool {
 /// unparseable existing file, a non-object root, or a serialization failure —
 /// see [`merge_root_json`]. Pure → its byte-idempotency,
 /// which lets the write be skipped, is testable.
-fn merged_agy_status_hooks_json(existing: Option<&str>, exe: &str, trace: bool) -> Option<String> {
+fn merged_agy_status_hooks_json(existing: Option<&str>, exe: &str) -> Option<String> {
     let mut root = merge_root_json(existing)?;
     let obj = root.as_object_mut()?;
     let mut set = serde_json::Map::new();
     for (event, matcher, state) in AGY_STATUS_HOOKS {
         let handler = if matcher.is_empty() {
-            json!({ "type": "command", "command": reporter_command(exe, state, trace) })
+            json!({ "type": "command", "command": reporter_command(exe, state) })
         } else {
-            json!({ "type": "command", "command": agy_tool_reporter_command(exe, state, trace) })
+            json!({ "type": "command", "command": agy_tool_reporter_command(exe, state) })
         };
         // Lifecycle events take a flat handler list; tool events wrap it in a
         // `{matcher, hooks}` group.
@@ -636,38 +613,23 @@ mod tests {
         // this is the invariant that lets `ensure_claude_status_hooks` skip the
         // write (and the mtime bump) on a re-launch instead of churning the
         // shared settings.json.
-        let once = merged_status_hooks_json(None, "spyc", false).expect("fresh merge");
-        let twice = merged_status_hooks_json(Some(&once), "spyc", false).expect("re-merge");
+        let once = merged_status_hooks_json(None, "spyc").expect("fresh merge");
+        let twice = merged_status_hooks_json(Some(&once), "spyc").expect("re-merge");
         assert_eq!(once, twice, "re-applying the merge changed a byte");
         // It really installed our hooks (guards against a vacuous equality).
         assert!(once.contains("--report-status blocked"));
-        assert!(
-            !once.contains("--status-trace"),
-            "trace off → no baked flag"
-        );
         // A user's own settings/hooks survive the round-trip unchanged too.
         let with_user = merged_status_hooks_json(
             Some(r#"{"theme":"dark","hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo bye"}]}]}}"#),
             "spyc",
-            false,
         )
         .expect("merge over user config");
         assert_eq!(
             with_user,
-            merged_status_hooks_json(Some(&with_user), "spyc", false)
-                .expect("re-merge over user config"),
+            merged_status_hooks_json(Some(&with_user), "spyc").expect("re-merge over user config"),
             "merge over a user config is not idempotent"
         );
         assert!(with_user.contains("echo bye"), "user hook dropped");
-
-        // `--status-trace` on bakes the flag into every command, still idempotently.
-        let traced = merged_status_hooks_json(None, "spyc", true).expect("traced merge");
-        assert!(traced.contains("--report-status blocked --status-trace"));
-        assert_eq!(
-            traced,
-            merged_status_hooks_json(Some(&traced), "spyc", true).expect("re-merge traced"),
-            "traced merge is not idempotent"
-        );
     }
 
     #[test]
@@ -677,34 +639,29 @@ mod tests {
         // and the hook would silently never fire. All three writers share the guard.
         let exe = "/Users/My User/bin/spyc";
         let quoted = "'/Users/My User/bin/spyc' --report-status";
-        let claude = merged_status_hooks_json(None, exe, false).expect("claude merge");
+        let claude = merged_status_hooks_json(None, exe).expect("claude merge");
         assert!(claude.contains(quoted), "claude not quoted: {claude}");
-        let codex = merged_codex_status_hooks_toml(None, exe, false).expect("codex merge");
+        let codex = merged_codex_status_hooks_toml(None, exe).expect("codex merge");
         assert!(codex.contains(quoted), "codex not quoted: {codex}");
-        let agy = merged_agy_status_hooks_json(None, exe, false).expect("agy merge");
+        let agy = merged_agy_status_hooks_json(None, exe).expect("agy merge");
         assert!(agy.contains(quoted), "agy not quoted: {agy}");
     }
 
     #[test]
     fn reporter_command_is_fail_soft_and_quoted() {
         // A moved/uninstalled binary must no-op, not error the agent turn: every
-        // installed command ends in the fail-soft tail; `--status-trace` rides
-        // before it.
+        // installed command ends in the fail-soft tail.
         // `shell_quote` (shlex) leaves an already-safe word bare, so a bare
         // install name stays bare and the shell PATH-resolves it — the
         // bare-name preference holds. Quoting kicks in once the path needs it,
         // asserted just below and in `hook_command_shell_quotes_spaced_exe_path`.
         assert_eq!(
-            reporter_command("spyc", "done", false),
+            reporter_command("spyc", "done"),
             "spyc --report-status done 2>/dev/null || true"
-        );
-        assert_eq!(
-            reporter_command("spyc", "working", true),
-            "spyc --report-status working --status-trace 2>/dev/null || true"
         );
         // A spaced install path stays one shell token, tail still present, and the
         // `--report-status` "ours" marker survives (cleanup keys on it).
-        let q = reporter_command("/opt/my spyc/spyc", "blocked", false);
+        let q = reporter_command("/opt/my spyc/spyc", "blocked");
         assert!(
             q.starts_with("'/opt/my spyc/spyc' --report-status blocked"),
             "not quoted: {q}"
@@ -854,7 +811,7 @@ mod tests {
     /// Getting this wrong cost a 17-invocation runaway turn during development.
     #[test]
     fn agy_tool_hook_always_answers_with_a_clean_decision() {
-        let cmd = agy_tool_reporter_command("spyc", "blocked", false);
+        let cmd = agy_tool_reporter_command("spyc", "blocked");
         assert_eq!(
             cmd,
             "spyc --report-status blocked >/dev/null 2>&1 || true; printf '{\"decision\":\"allow\"}'"
@@ -872,12 +829,6 @@ mod tests {
             reporter.contains(">/dev/null 2>&1"),
             "reporter stdout would pollute the JSON: {cmd:?}"
         );
-        // Trace mode rides along without disturbing either property.
-        let traced = agy_tool_reporter_command("spyc", "blocked", true);
-        assert!(
-            traced.contains(" --status-trace >/dev/null 2>&1 || true; printf "),
-            "{traced:?}"
-        );
     }
 
     /// Running the built command through a real shell is the only way to prove the
@@ -887,7 +838,7 @@ mod tests {
     fn agy_tool_hook_emits_parseable_json_through_a_shell() {
         // A binary name that cannot exist, so the `|| true` branch is what runs —
         // the missing-spyc case, where printing the decision matters most.
-        let cmd = agy_tool_reporter_command("/nonexistent/spyc-does-not-exist", "blocked", false);
+        let cmd = agy_tool_reporter_command("/nonexistent/spyc-does-not-exist", "blocked");
         let out = std::process::Command::new("sh")
             .arg("-c")
             .arg(&cmd)
@@ -917,8 +868,8 @@ mod tests {
 
     #[test]
     fn agy_merge_is_byte_idempotent() {
-        let once = merged_agy_status_hooks_json(None, "spyc", false).expect("fresh merge");
-        let twice = merged_agy_status_hooks_json(Some(&once), "spyc", false).expect("re-merge");
+        let once = merged_agy_status_hooks_json(None, "spyc").expect("fresh merge");
+        let twice = merged_agy_status_hooks_json(Some(&once), "spyc").expect("re-merge");
         assert_eq!(once, twice, "re-applying the merge changed a byte");
         assert!(once.contains("--report-status working"));
         assert!(once.contains("--report-status done"));
@@ -946,30 +897,17 @@ mod tests {
                 "`blocked` must be scoped to the ask_question tool: {text}"
             );
         }
-        assert!(
-            !once.contains("--status-trace"),
-            "trace off → no baked flag"
-        );
-
         let with_user = merged_agy_status_hooks_json(
             Some(r#"{"linter":{"Stop":[{"type":"command","command":"./x.sh"}]}}"#),
             "spyc",
-            false,
         )
         .expect("merge over user config");
         assert_eq!(
             with_user,
-            merged_agy_status_hooks_json(Some(&with_user), "spyc", false).expect("re-merge"),
+            merged_agy_status_hooks_json(Some(&with_user), "spyc").expect("re-merge"),
             "merge over a user config is not idempotent"
         );
         assert!(with_user.contains("./x.sh"), "user set dropped");
-
-        let traced = merged_agy_status_hooks_json(None, "spyc", true).expect("traced merge");
-        assert!(traced.contains("--report-status working --status-trace"));
-        assert_eq!(
-            traced,
-            merged_agy_status_hooks_json(Some(&traced), "spyc", true).expect("re-merge traced"),
-        );
     }
     /// Every status-hook merge REFUSES an existing file it can't parse, rather
     /// than starting from an empty document and writing the user's content away.
@@ -987,17 +925,17 @@ mod tests {
             "}}}}{{{",
         ] {
             assert!(
-                merged_status_hooks_json(Some(bad), "spyc", false).is_none(),
+                merged_status_hooks_json(Some(bad), "spyc").is_none(),
                 "claude merge must refuse {bad:?}"
             );
             assert!(
-                merged_agy_status_hooks_json(Some(bad), "spyc", false).is_none(),
+                merged_agy_status_hooks_json(Some(bad), "spyc").is_none(),
                 "agy merge must refuse {bad:?}"
             );
         }
         for bad in ["}}}}{{{ not toml", "model = \n"] {
             assert!(
-                merged_codex_status_hooks_toml(Some(bad), "spyc", false).is_none(),
+                merged_codex_status_hooks_toml(Some(bad), "spyc").is_none(),
                 "codex merge must refuse {bad:?}"
             );
         }
@@ -1010,11 +948,11 @@ mod tests {
     fn every_merge_refuses_a_wrong_shaped_root() {
         for bad in ["[1, 2, 3]", "\"just a string\"", "42"] {
             assert!(
-                merged_status_hooks_json(Some(bad), "spyc", false).is_none(),
+                merged_status_hooks_json(Some(bad), "spyc").is_none(),
                 "claude merge must refuse root {bad:?}"
             );
             assert!(
-                merged_agy_status_hooks_json(Some(bad), "spyc", false).is_none(),
+                merged_agy_status_hooks_json(Some(bad), "spyc").is_none(),
                 "agy merge must refuse root {bad:?}"
             );
         }
@@ -1027,15 +965,15 @@ mod tests {
     fn absent_or_blank_still_merges_fresh() {
         for existing in [None, Some(""), Some("   \n\t\n")] {
             assert!(
-                merged_status_hooks_json(existing, "spyc", false).is_some(),
+                merged_status_hooks_json(existing, "spyc").is_some(),
                 "claude merge must accept {existing:?}"
             );
             assert!(
-                merged_agy_status_hooks_json(existing, "spyc", false).is_some(),
+                merged_agy_status_hooks_json(existing, "spyc").is_some(),
                 "agy merge must accept {existing:?}"
             );
             assert!(
-                merged_codex_status_hooks_toml(existing, "spyc", false).is_some(),
+                merged_codex_status_hooks_toml(existing, "spyc").is_some(),
                 "codex merge must accept {existing:?}"
             );
         }

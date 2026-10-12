@@ -141,7 +141,7 @@ pub use config::{
 pub use hooks::{
     cleanup_agy_status_hooks, cleanup_claude_status_hooks, cleanup_codex_status_hooks,
     codex_legacy_hook_diagnostic, ensure_agy_status_hooks, ensure_claude_status_hooks,
-    ensure_codex_status_hooks, set_status_trace,
+    ensure_codex_status_hooks,
 };
 pub use server::{cleanup_socket, record_root, start_socket_server, sweep_orphan_root_markers};
 
@@ -251,6 +251,43 @@ fn under_codex_shared_daemon() -> bool {
     })
 }
 
+/// Where `spyc --status-trace` records its pid. An installed hook's command
+/// can't carry the switch: codex hashes the command to keep the user's trust in
+/// the hook, and claude collapses identical handlers across settings files, so
+/// the command stays the same whether or not anyone traces.
+const STATUS_TRACE_FILE: &str = "status-trace";
+
+/// Trace the status reports of every agent, for as long as this spyc runs
+/// (`spyc --status-trace`).
+pub fn start_status_trace() {
+    if let Some(dir) = state_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        let pid = std::process::id().to_string();
+        let _ = crate::fs::write_atomic(&dir.join(STATUS_TRACE_FILE), pid.as_bytes());
+    }
+}
+
+/// Stop tracing, if this spyc is the one that started it.
+pub fn stop_status_trace() {
+    if status_trace_pid() == Some(std::process::id())
+        && let Some(dir) = state_dir()
+    {
+        let _ = std::fs::remove_file(dir.join(STATUS_TRACE_FILE));
+    }
+}
+
+fn status_trace_pid() -> Option<u32> {
+    let text = std::fs::read_to_string(state_dir()?.join(STATUS_TRACE_FILE)).ok()?;
+    text.trim().parse().ok()
+}
+
+/// Whether a live spyc asked for status reports to be traced. A spyc that
+/// exited without stopping (a crash, `SIGTERM`) leaves its pid behind, and a
+/// dead pid traces nothing.
+fn status_trace_requested() -> bool {
+    status_trace_pid().is_some_and(crate::sysinfo::pid_alive)
+}
+
 /// Agent status-hook reporter (`spyc --report-status <state>`): a one-shot that
 /// pings the running spyc so it can set this pane's activity dot. Reads
 /// `SPYC_MCP_SOCK` (the socket) + `SPYC_PANE_ID` (which tab) from the
@@ -266,12 +303,13 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
     use std::io::{BufRead, BufReader};
     const REPORT_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
-    // Opt-in diagnostic trace (`--status-trace`, baked into the installed hook
-    // command so it survives any env sanitization — it travels as a cmdline arg,
-    // not an env var). OFF by default: this reporter fires on every agent turn,
-    // so always-on would spam mcp.log. When on, it logs each invocation + the
-    // env it actually saw, distinguishing a hook that FIRED-but-couldn't-reach
-    // (no SPYC_MCP_SOCK) from one that never fired. `grep report-status mcp.log`.
+    // Opt-in diagnostic trace: a live `spyc --status-trace`, or the
+    // `--status-trace` argument hooks installed by older spycs carry. OFF by
+    // default: this reporter fires on every agent turn, so always-on would spam
+    // mcp.log. When on, it logs each invocation + the env it actually saw,
+    // distinguishing a hook that FIRED-but-couldn't-reach (no SPYC_MCP_SOCK)
+    // from one that never fired. `grep report-status mcp.log`.
+    let trace = trace || status_trace_requested();
     let trace_log = |msg: &str| {
         if trace {
             mcp_log(msg);

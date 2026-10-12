@@ -32,11 +32,33 @@ fn warm_binary() {
 }
 
 fn run_reporter_for(state: &str, payload: &str) -> (Value, String) {
+    run_reporter_traced(state, payload, Trace::Arg)
+}
+
+/// How a reporter run is told to trace.
+enum Trace {
+    /// The `--status-trace` argument hooks installed by older spycs carry.
+    Arg,
+    /// `<state>/spyc/status-trace` naming this pid, as `spyc --status-trace`
+    /// writes it.
+    FlagFile(u32),
+}
+
+fn run_reporter_traced(state: &str, payload: &str, trace: Trace) -> (Value, String) {
     warm_binary();
     let temp = tempfile::Builder::new()
         .prefix("spyc-hook-")
         .tempdir_in("/tmp")
         .unwrap();
+    let mut args = vec!["--report-status", state];
+    match trace {
+        Trace::Arg => args.push("--status-trace"),
+        Trace::FlagFile(pid) => {
+            let dir = temp.path().join("state/spyc");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("status-trace"), pid.to_string()).unwrap();
+        }
+    }
     let socket = temp.path().join("hook.sock");
     let listener = UnixListener::bind(&socket).unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -80,7 +102,7 @@ fn run_reporter_for(state: &str, payload: &str) -> (Value, String) {
         serde_json::from_slice::<Value>(&body).unwrap()
     });
     let mut child = Command::new(env!("CARGO_BIN_EXE_spyc"))
-        .args(["--report-status", state, "--status-trace"])
+        .args(&args)
         .env("SPYC_MCP_SOCK", &socket)
         .env("SPYC_PANE_ID", "pane-1")
         .env("XDG_STATE_HOME", temp.path().join("state"))
@@ -110,8 +132,24 @@ fn run_reporter_for(state: &str, payload: &str) -> (Value, String) {
     assert!(output.status.success(), "{:?}", output.stderr);
     assert!(output.stdout.is_empty());
     let request = server.join().unwrap();
-    let log = std::fs::read_to_string(temp.path().join("state/spyc/mcp.log")).unwrap();
+    let log = std::fs::read_to_string(temp.path().join("state/spyc/mcp.log")).unwrap_or_default();
     (request, log)
+}
+
+/// A hook's command is the same whether or not spyc traces, because codex
+/// hashes the command to decide the hook is still the one the user trusted.
+/// So `spyc --status-trace` reaches the reporter through a flag file naming
+/// the tracing spyc, and tracing stops when that spyc is gone.
+#[test]
+fn the_reporter_traces_while_the_spyc_that_asked_lives() {
+    let (_, log) = run_reporter_traced("working", "{}", Trace::FlagFile(std::process::id()));
+    assert!(log.contains("report-status: state=working"), "{log}");
+
+    let mut gone = Command::new("true").spawn().unwrap();
+    let dead = gone.id();
+    gone.wait().unwrap();
+    let (_, log) = run_reporter_traced("working", "{}", Trace::FlagFile(dead));
+    assert!(!log.contains("report-status:"), "{log}");
 }
 
 #[test]

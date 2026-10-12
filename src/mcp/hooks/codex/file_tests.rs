@@ -23,7 +23,7 @@ fn legacy_symlink_refuses_install_and_cleanup_without_changing_either_file() {
             "a symlink must not be migrated"
         );
         assert!(!dir.join(".codex/config.toml").exists());
-        let canonical = merged_codex_status_hooks_toml(None, "spyc", false).unwrap();
+        let canonical = merged_codex_status_hooks_toml(None, "spyc").unwrap();
         std::fs::write(dir.join(".codex/config.toml"), &canonical).unwrap();
         assert!(matches!(
             cleanup_codex_status_hooks(dir),

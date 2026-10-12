@@ -5,7 +5,7 @@ use identity::{inline_prune_refused, prune_toml_groups};
 
 use std::path::Path;
 
-use super::{ConfigCleanup, merge_root_toml, reporter_command, spyc_binary, status_trace_enabled};
+use super::{ConfigCleanup, merge_root_toml, reporter_command, spyc_binary};
 
 // ── Codex status hooks ────────────────────────────────────────────────
 //
@@ -62,9 +62,7 @@ pub fn ensure_codex_status_hooks(dir: &Path) -> bool {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(_) => return false,
     };
-    let Some(out) =
-        merged_codex_status_hooks_toml(existing.as_deref(), &exe, status_trace_enabled())
-    else {
+    let Some(out) = merged_codex_status_hooks_toml(existing.as_deref(), &exe) else {
         return false;
     };
     let Ok(legacy) = legacy_edit(dir) else {
@@ -90,11 +88,7 @@ pub fn ensure_codex_status_hooks(dir: &Path) -> bool {
 /// unparseable existing file, a non-table root or `hooks` value, or a
 /// serialization failure — see [`merge_root_toml`]. Pure (no I/O) so the merge — and
 /// its byte-level idempotency, which lets the write be skipped — is testable.
-pub(super) fn merged_codex_status_hooks_toml(
-    existing: Option<&str>,
-    exe: &str,
-    trace: bool,
-) -> Option<String> {
+pub(super) fn merged_codex_status_hooks_toml(existing: Option<&str>, exe: &str) -> Option<String> {
     let mut root = merge_root_toml(existing)?;
     let obj = root.as_table_mut()?;
     let hooks = obj
@@ -106,7 +100,7 @@ pub(super) fn merged_codex_status_hooks_toml(
         handler.insert("type".into(), toml::Value::String("command".into()));
         handler.insert(
             "command".into(),
-            toml::Value::String(reporter_command(exe, state, trace)),
+            toml::Value::String(reporter_command(exe, state)),
         );
         let mut group = toml::Table::new();
         if matches!(event, "PreToolUse" | "PostToolUse") {
@@ -472,39 +466,24 @@ mod tests {
     fn codex_merge_is_byte_idempotent() {
         // The invariant that lets `ensure_codex_status_hooks` skip a re-write:
         // re-applying the merge to its own output reproduces it byte-for-byte.
-        let once = merged_codex_status_hooks_toml(None, "spyc", false).expect("fresh merge");
-        let twice = merged_codex_status_hooks_toml(Some(&once), "spyc", false).expect("re-merge");
+        let once = merged_codex_status_hooks_toml(None, "spyc").expect("fresh merge");
+        let twice = merged_codex_status_hooks_toml(Some(&once), "spyc").expect("re-merge");
         assert_eq!(once, twice, "re-applying the merge changed a byte");
         assert!(once.contains("--report-status blocked"));
-        assert!(
-            !once.contains("--status-trace"),
-            "trace off → no baked flag"
-        );
-
         // A user's own codex config (incl. our MCP entry) survives the round-trip.
         let with_user = merged_codex_status_hooks_toml(
             Some("model = \"gpt-5\"\n[mcp_servers.spyc]\ncommand = \"spyc\"\n"),
             "spyc",
-            false,
         )
         .expect("merge over user config");
         assert_eq!(
             with_user,
-            merged_codex_status_hooks_toml(Some(&with_user), "spyc", false)
+            merged_codex_status_hooks_toml(Some(&with_user), "spyc")
                 .expect("re-merge over user config"),
             "merge over a user config is not idempotent"
         );
         assert!(with_user.contains("gpt-5"), "user config dropped");
         assert!(with_user.contains("mcp_servers"), "MCP entry dropped");
-
-        // `--status-trace` on bakes the flag into every command, still idempotently.
-        let traced = merged_codex_status_hooks_toml(None, "spyc", true).expect("traced merge");
-        assert!(traced.contains("--report-status blocked --status-trace"));
-        assert_eq!(
-            traced,
-            merged_codex_status_hooks_toml(Some(&traced), "spyc", true).expect("re-merge traced"),
-            "traced merge is not idempotent"
-        );
     }
 
     fn legacy_file(dir: &Path, hooks: Value) -> std::path::PathBuf {
