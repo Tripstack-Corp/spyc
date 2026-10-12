@@ -192,11 +192,12 @@ Everything else already merged to `main` ships with it (decisions log,
   forms (`[h:1]`) take over when the words would cut the path, and
   `[layout] status_flags = "full"` keeps the old bar.
 
-**Open:**
+- **[#492](https://github.com/Tripstack-Corp/spyc/issues/492): the Projects
+  design, [`docs/drafts/PROJECTS_PLAN.md`](docs/drafts/PROJECTS_PLAN.md)**
+  (#520, #535), approved on 2026-10-12 (decisions log). It answers the 2.2
+  plan's seven questions, so 2.3's code can start.
 
-- **[#492](https://github.com/Tripstack-Corp/spyc/issues/492):
-  `docs/drafts/PROJECTS_PLAN.md`**, authored in 2.2, design only. 2.3's scope
-  depends on it being written and approved before code lands.
+**Open:** nothing.
 
 ## The 2.3 horizon: Projects
 
@@ -229,8 +230,9 @@ discovers, mirrors or forwards to) and CounterTop. They may be revisited later.
 The daemonized *monolith* is a different thing: it returns in 3.0, and it is not
 a peer. It is one process with nothing mirrored, and its client is a renderer
 rather than an instance. See "The 3.0 horizon" below.
-`docs/drafts/PROJECTS_PLAN.md` — a 2.2 deliverable — is where the design gets
-argued. Tracked as [#99](https://github.com/Tripstack-Corp/spyc/issues/99).
+[`docs/drafts/PROJECTS_PLAN.md`](docs/drafts/PROJECTS_PLAN.md), a 2.2
+deliverable approved on 2026-10-12, is the design. Tracked as
+[#99](https://github.com/Tripstack-Corp/spyc/issues/99).
 
 **Also in 2.3, after Projects:** the
 [UX 2.0 plan](docs/drafts/UX_2_0_PLAN.md) gives every object spyc draws (a
@@ -705,6 +707,18 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   crates.io users on it than with one daily driver. Holding the tag on a
   design review adds nothing to the code under it. The doc ships authored and
   in review, and 2.3 opens only once it is approved.
+- **`PROJECTS_PLAN.md` approved** (2026-10-12), and with it the three questions
+  review had left open. The saved file is a *manifest* in the design and the
+  code, and the UI keeps saying session: the 2026-09-04 entry reserves "session" for
+  agent conversations, but renaming words daily users already know is its own
+  change, and nothing in 2.3 needs it. The attention jump is `Tier::Meta`, so
+  `^a !` reaches it from an agent pane in two keys as well as `Space !`; it is
+  the one project key a user reaches for from inside an agent, which is what a
+  both-prefixes tier is for. Moving agent MCP entries and status hooks into
+  each agent's user scope is
+  [#619](https://github.com/Tripstack-Corp/spyc/issues/619), after 2.3: it
+  changes what an agent started outside spyc sees, which wants a decision of
+  its own.
 
 ## Doc map
 
@@ -725,7 +739,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/AGENT_ORCHESTRATION.md` | How the agent activity-dots / notifications / session-resume / scope registry fit together (living reference). |
 | `docs/drafts/V2_2_PLAN.md` | The 2.2 scope, sequencing and exit criteria — the plan behind "Road to 2.2". |
 | `docs/drafts/CODEX_SUPPORT_PLAN.md` | Draft Codex parity remediation and opt-in session HUD: reproduced RC regressions, hook/image/navigation gaps, telemetry contracts, sequencing and validation. HUD scope is proposed and unscheduled, not an added RC gate. |
-| `docs/drafts/PROJECTS_PLAN.md` | The 2.3 Projects design, in review ([#492](https://github.com/Tripstack-Corp/spyc/issues/492)): the per-project state inventory, one MCP socket answering per project, the recovery manifest, the `Space` keys, the `projects` segment, attention across projects, and what an attach snapshot carries. #99's code waits on its approval. |
+| `docs/drafts/PROJECTS_PLAN.md` | The 2.3 Projects design, approved 2026-10-12 ([#492](https://github.com/Tripstack-Corp/spyc/issues/492)): the per-project state inventory, one MCP socket answering per project, the recovery manifest, the `Space` keys, the `projects` segment, attention across projects, and what an attach snapshot carries. #99's code starts from it. |
 | [`docs/drafts/UX_2_0_PLAN.md`](docs/drafts/UX_2_0_PLAN.md) | The 2.3 UX design, draft for review, sequenced after Projects: one object model and hit-test, a menu per object projected from `Action` with each entry's key shown, Makefile targets run in the live pager, and fading key hints. Absorbs `CLICKABLE_MENUS_PLAN.md` as its slices 1–2. |
 | [`docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md`](docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md) | Draft candidate for 2.3, unscheduled: connected Git review, project/worktree context, comparison semantics, MCP reads, delivery slices, and references. Git write operations are a separate assessment. |
 | `docs/drafts/pane-identity-transport-proposal.md` | Option B shipped in #507 ([#491](https://github.com/Tripstack-Corp/spyc/issues/491)): the pane id goes in the MCP `initialize` handshake. Per-pane roots are dropped (decisions log, 2026-09-30). It is also the attribution mechanism Projects extends. |

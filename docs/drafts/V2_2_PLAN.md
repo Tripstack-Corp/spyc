@@ -1,14 +1,14 @@
 # spyc 2.2 — projects-prep and the daily-driver loop
 
-**Status:** shipped, apart from §7's approval. Reconciled against `fed859b7`
+**Status:** shipped; §7's doc approved 2026-10-12. Reconciled against `fed859b7`
 on 2026-10-02: each item's section, the exit criteria and the docs list say
 what shipped, and a section's plan, where kept, is the record of what was
 proposed. Archived when 2.2 tags.
 **Measured against:** `9df4d7a` (`main`, `2.2.0-CURRENT`).
 **Predecessor:** [`docs/archive/LAUNCH_PLAN_2_0.md`](../archive/LAUNCH_PLAN_2_0.md)
 (the 2.0 distribution pass). Strategy context: `ROADMAP.md` → "Road to 2.2".
-**Progress (2026-10-02):** every item is on `main`. §7's deliverable,
-`PROJECTS_PLAN.md`, is authored (#520) and in the owner's review. The tag waits
+**Progress (2026-10-12):** every item is on `main`. §7's deliverable,
+`PROJECTS_PLAN.md`, is authored (#520) and approved (2026-10-12). The tag waits
 for the doc to ship, not for its approval: approval gates 2.3, which is where
 its exit criterion always put it (ROADMAP decisions log, 2026-10-02). The one
 release blocker outside the scope,
@@ -42,7 +42,7 @@ load-bearing.
 | 4 | Session forking (`^a F`) | feature | [#8](https://github.com/Tripstack-Corp/spyc/issues/8) | shipped (#516) |
 | 5 | Prompt templates in `.spycrc.toml` | feature | [#71](https://github.com/Tripstack-Corp/spyc/issues/71) | shipped (#517) |
 | 6 | The daily-driver bug set | fix | [#326](https://github.com/Tripstack-Corp/spyc/issues/326), [#327](https://github.com/Tripstack-Corp/spyc/issues/327), [#9](https://github.com/Tripstack-Corp/spyc/issues/9), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#22](https://github.com/Tripstack-Corp/spyc/issues/22), [#11](https://github.com/Tripstack-Corp/spyc/issues/11) | shipped: #326 (#464), #452 (#457), #34 (#465), #327 (#500), #9, #22 + #11 (#509) |
-| 7 | Author `docs/drafts/PROJECTS_PLAN.md` | design | [#492](https://github.com/Tripstack-Corp/spyc/issues/492), this doc, §7 | drafted, in review |
+| 7 | Author `docs/drafts/PROJECTS_PLAN.md` | design | [#492](https://github.com/Tripstack-Corp/spyc/issues/492), this doc, §7 | approved 2026-10-12 |
 | 8 | The VT engine — libghostty-vt replaces vt100 | prep + fix | [spike](VT_ENGINE_SPIKE.md), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#453](https://github.com/Tripstack-Corp/spyc/issues/453) | shipped (PRs 10–16: #457–#462, #465); the vt100 deletion (#453) is the first commit after the tag |
 
 ---
@@ -771,9 +771,10 @@ engine: `scs_box_drawing_draws_boxes`, `a_row_written_before_decstbm_survives`,
 (`src/pane/engine_ghostty/tests.rs`). The issue's own suggestion (pin the CLI to
 the bottom) was never a criterion; see §6.
 
-**`PROJECTS_PLAN.md` — authored; approval open.** All seven questions in §7
-answered, each with a decision and a reason (#520). The owner's review is in
-progress, and approval gates 2.3, not the 2.2 tag.
+**`PROJECTS_PLAN.md` — authored and approved.** All seven questions in §7
+answered, each with a decision and a reason (#520). The owner approved it on
+2026-10-12, answering the three questions review had left open, so 2.3 can
+start.
 
 ## Docs each PR must carry (same commit, not a follow-up)
 

@@ -1,11 +1,11 @@
 # Projects — one spyc, many project homes (2.3 design)
 
-**TL;DR for reviewers.** One spyc process holds several **projects**. A project
-is a home directory plus its columns, split, pane tabs and agents. One project is
-active, meaning drawn and driven by the keyboard, and the others keep running.
+**TL;DR.** One spyc process holds several **projects**. A project is a home
+directory plus its columns, split, pane tabs and agents. One project is active,
+meaning drawn and driven by the keyboard, and the others keep running.
 With one project open, spyc looks and behaves exactly as it does today.
 
-What approving this doc agrees to:
+What approving this doc agreed to (2026-10-12):
 
 - **State (§1).** `AppState`, `Runtime` and `ViewState` each gain a per-project
   part, keyed by a `ProjectId` (a uuid, never an index or a path).
@@ -47,7 +47,7 @@ What approving this doc agrees to:
   | `Space ]` / `Space [` | next / previous project |
   | `Space n` | new project |
   | `Space x` | close the active project |
-  | `Space !` (decided) | jump to the agent that needs you, in any project |
+  | `Space !`, or `^a !` from a pane | jump to the agent that needs you, in any project |
 
 - **Status bar (§5).** The `project` segment becomes `projects`: each label with
   its attention glyph, as in `spyc ■ · web ● · api`.
@@ -72,30 +72,33 @@ What approving this doc agrees to:
 
 **Rollout (Sequencing for 2.3).** Eight steps, one PR each.
 
-- **Steps 1–2 change no behaviour** and can land once this doc is approved. Step
-  1 introduces `Project`, holding today's single set of state. Step 2 tags
-  background results with the project they belong to.
+- **Steps 1–2 change no behaviour** and land first. Step 1 introduces
+  `Project`, holding today's single set of state. Step 2 tags background results
+  with the project they belong to.
 - **Steps 3–6 are the release:** per-project MCP, the new save format,
   open/close/switch, and attention.
 
-**Needs your call** ([Open questions](#open-questions-for-review)):
+**Decided at approval** ([Owner decisions at approval](#owner-decisions-at-approval)):
 
-- What to call the saved file: "session", as the UI says today, or "manifest".
-- Whether the attention jump also gets `^a !`.
-- Whether moving agent MCP and hook config to user scope gets its own issue.
+- The saved file is a manifest in this design and the code; the UI keeps
+  saying session.
+- The attention jump also gets `^a !`.
+- Moving agent MCP and hook config to user scope is its own issue, after 2.3:
+  [#619](https://github.com/Tripstack-Corp/spyc/issues/619).
 
 ---
 
-**Status: draft for review.** A 2.2 deliverable
+**Status: approved** (2026-10-12). A 2.2 deliverable
 ([#492](https://github.com/Tripstack-Corp/spyc/issues/492)); 2.3's implementation
-([#99](https://github.com/Tripstack-Corp/spyc/issues/99)) starts once this doc is
-approved. It answers the seven questions in
+([#99](https://github.com/Tripstack-Corp/spyc/issues/99)) starts from it. It
+answers the seven questions in
 [`V2_2_PLAN.md`](V2_2_PLAN.md) §7, each with a decision and a reason, against the
 tree as of `main` after #518. Facts about today's code
 carry a `file:line`; where a decision needs the owner's call rather than an
-argument, it is listed under [Open questions](#open-questions-for-review).
+argument, it is recorded under
+[Owner decisions at approval](#owner-decisions-at-approval).
 
-**Owner decisions so far** (2026-10-01; the rest of the doc is still in review):
+**Owner decisions during review** (2026-10-01):
 
 - Per-project configuration lives under `~/.config/spyc/`, not in the
   project's directory (§1f). The same principle moved the MCP context marker
@@ -416,7 +419,9 @@ agent's *user* scope would serve every pane. An org-deployed
 2026-09-30). Moving them would stop
 the per-directory writes and the refcounted cleanup entirely. It changes what an
 agent started outside spyc sees: a spyc server that runs read-only, or none.
-That is why it wants its own issue and its own decision.
+That is why it is its own issue,
+[#619](https://github.com/Tripstack-Corp/spyc/issues/619), after 2.3
+(owner decision, 2026-10-12).
 
 What doesn't change: MCP entries still name no socket (SPYC-TRAP
 `mcp-entry-names-no-socket`), so there is nothing to take over. #509 deleted the
@@ -528,7 +533,7 @@ The leader today holds `w` (worktree submenu), `p`, `P`, `s`/`S`, `?` and `a`
 | `Space ]` / `Space [` | next / previous project | the bracket pair spyc uses for next/previous everywhere |
 | `Space n` | new project: prompt for a directory, defaulting to the focused column's worktree root; switches if that home is open | `n` is new, as in `Space w n` |
 | `Space x` | close the active project, with the live-children confirm `^a x` uses (`needs_live_child_confirm`) | `x` is close, as in `^a x` |
-| `Space !` | go to the agent that needs you: the oldest blocked tab in any project, then unseen done ones, switching project and tab and focusing the pane | "urgent"; owner decision, 2026-10-01 |
+| `Space !`, `^a !` | go to the agent that needs you: the oldest blocked tab in any project, then unseen done ones, switching project and tab and focusing the pane | "urgent"; owner decisions, 2026-10-01 and 2026-10-12 (`^a !`) |
 
 **From the pane, the leader is `^a Space`.** `Space` is literal text to the
 agent, so while the pane has the keyboard spyc sees only its prefixes
@@ -536,9 +541,9 @@ agent, so while the pane has the keyboard spyc sees only its prefixes
 leader, so every key above is `^a Space <key>` from inside an agent:
 `^a Space !` is three keys. That bridge is the only way a `Tier::Global` action
 reaches the pane, and the tier guard keeps it so. The attention jump is the one
-key a user reaches for *from* an agent pane, so it may earn `Tier::Meta` (the
-tier `Help` and `Quit` share), which may bind on both prefixes, making it
-`^a !` as well. See open question 2.
+key a user reaches for *from* an agent pane, so it is `Tier::Meta` (the tier
+`Help` and `Quit` share), which may bind on both prefixes, making it `^a !` as
+well: two keys from an agent instead of three (owner decision, 2026-10-12).
 
 Outside spyc — another terminal window, another app — no key reaches it. A
 terminal program can't register a system-wide hotkey. The signals that do
@@ -727,26 +732,32 @@ PR:
    switch, watch and poll on the active project only, and refresh on
    activation.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
-   the title, notification text and `Space !`.
+   the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).
 8. **Recently-closed projects in the switcher.**
 
-Steps 1 and 2 are invisible and can land as soon as this doc is approved. Steps
-3-6 are the release.
+Steps 1 and 2 are invisible and land first. Steps 3-6 are the release.
 
 ---
 
-## Open questions for review
+## Owner decisions at approval
 
-1. **The saved thing's name.** The 3.0 decisions log reserves "session" for
-   agent conversations, but spyc's UI already says session for the spice-named
-   save (`-r`'s "session picker", `:name`, the `session` segment, `Space s`).
-   This doc calls the file a manifest and leaves the UI words alone. Renaming
-   user-facing terms is its own change, and it wants the owner's word.
-2. **`^a !` for the attention jump.** `Space !` is decided. Whether the jump
-   also earns `Tier::Meta`, so `^a !` reaches it in two keys from an agent pane
-   instead of `^a Space !`'s three, is a taxonomy call: Meta is today reserved
-   for help, quit and display toggles (§4).
-3. **Agent config in user scope.** Whether the follow-up in §2, one MCP entry
-   and one set of status hooks per agent's user scope instead of per directory,
-   gets an issue.
+The three questions review left open, answered on 2026-10-12.
+
+1. **The saved thing's name: manifest, and the UI keeps saying session.** The
+   3.0 decisions log reserves "session" for agent conversations, but spyc's UI
+   already says session for the spice-named save (`-r`'s "session picker",
+   `:name`, the `session` segment, `Space s`). This design and the code call
+   the file a manifest, and the UI words stay as they are. Renaming words daily
+   users already know would be its own change, and nothing in 2.3 needs it.
+2. **`^a !` for the attention jump: yes.** `Space !` was already decided. The
+   jump is also `Tier::Meta`, so `^a !` reaches it in two keys from an agent
+   pane instead of `^a Space !`'s three (§4). Meta otherwise holds help, quit
+   and display toggles; the jump joins them because it is the one project key a
+   user reaches for from inside an agent.
+3. **Agent config in user scope: its own issue, after 2.3.** The follow-up in
+   §2, one MCP entry and one set of status hooks per agent's user scope instead
+   of per directory, is
+   [#619](https://github.com/Tripstack-Corp/spyc/issues/619). It changes
+   what an agent started outside spyc sees, so it gets a decision of its own and
+   isn't part of Projects.
