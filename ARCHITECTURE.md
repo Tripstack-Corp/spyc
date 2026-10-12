@@ -886,6 +886,13 @@ survive, and only the keys spyc needs change; `[pane] codex_mcp = false`, read
 from `$HOME`'s rc alone because the entry it governs is global, keeps the entry
 out.
 
+A project copy an older spyc wrote runs beside the user one, so spyc takes it
+out (`wiring::legacy`): at launch from the agent's own directory, and at startup,
+on a worker, from every directory its per-project consent and ownership records
+name. A directory another live spyc relies on is left for that spyc, a file git
+tracks is left alone, and a project file that is itself a user-scope file
+(`$HOME` as a project) is never touched.
+
 <!-- SPYC-TRAP: user-config-write-through-symlink -->
 A user-configuration file is written through a symlink and keeps its mode
 (`wiring::file::write`). Dotfiles managers keep files like `settings.json` as

@@ -205,6 +205,32 @@ impl App {
         }
     }
 
+    /// Take spyc's old per-directory wiring out of every project it may have
+    /// written it into, for the agents wired in user scope. On a worker, since
+    /// it reads every directory spyc's records name.
+    pub(super) fn scrub_legacy_wiring(&self) {
+        let kinds: Vec<AgentKind> = crate::wiring::KINDS
+            .into_iter()
+            .filter(|kind| crate::state::wiring_consent::opted_in(*kind))
+            .collect();
+        if kinds.is_empty() {
+            return;
+        }
+        let start = self.state.start_dir.clone();
+        std::thread::spawn(move || {
+            let Some(env) = crate::wiring::Env::current() else {
+                return;
+            };
+            let done = crate::wiring::legacy::scrub_all(&kinds, &[start], &env, std::process::id());
+            crate::mcp::mcp_log(&format!(
+                "wiring: took spyc's project copies out of {} file(s); left {} directory(ies) another spyc uses and {} tracked",
+                done.cleaned,
+                done.in_use.len(),
+                done.tracked.len()
+            ));
+        });
+    }
+
     /// Install `kind`'s reporters and record a per-agent lease. Existing
     /// reporters on a refused install are borrowed: protected from sibling
     /// teardown, but never eligible for this instance's exit cleanup.

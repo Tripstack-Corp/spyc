@@ -22,6 +22,11 @@ fn config_dir(env: &Env) -> PathBuf {
         .unwrap_or_else(|| env.home.join(".claude"))
 }
 
+/// The hooks file and the MCP file.
+pub(super) fn files(env: &Env) -> [PathBuf; 2] {
+    [config_dir(env).join("settings.json"), claude_json(env)]
+}
+
 fn claude_json(env: &Env) -> PathBuf {
     env.claude_config_dir.as_ref().map_or_else(
         || env.home.join(".claude.json"),

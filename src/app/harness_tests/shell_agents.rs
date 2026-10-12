@@ -96,8 +96,8 @@ fn a_shell_tab_in_a_consented_project_provisions_every_agent() {
 }
 
 /// An agent wired into its own user configuration (`spyc --install-agents`)
-/// gets nothing in a project, even one that consented to status hooks: a
-/// project copy would run beside the user one.
+/// gets nothing in a project, even one that consented to status hooks, and
+/// loses the copy an older spyc left there: it would run beside the user one.
 #[test]
 fn an_agent_wired_in_user_scope_gets_no_project_copy() {
     use crate::state::sessions::AgentKind;
@@ -106,6 +106,10 @@ fn an_agent_wired_in_user_scope_gets_no_project_copy() {
         let dir = std::fs::canonicalize(tmp.path()).unwrap().join("project");
         std::fs::create_dir_all(&dir).unwrap();
         crate::state::hook_consent::set_consent(&dir, true);
+        assert!(crate::mcp::ensure_claude_status_hooks(&dir));
+        assert!(crate::mcp::ensure_agy_status_hooks(&dir));
+        crate::mcp::ensure_codex_config_toml(&dir).unwrap();
+        assert!(crate::mcp::ensure_codex_status_hooks(&dir));
         for kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Agy] {
             crate::state::wiring_consent::set(kind, Some(true));
         }

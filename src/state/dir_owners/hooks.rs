@@ -87,6 +87,15 @@ impl Registry {
     }
 }
 
+/// Every directory a lease names, its owners alive or not.
+#[must_use]
+pub fn recorded_dirs() -> Vec<PathBuf> {
+    crate::state::state_root()
+        .and_then(|root| read::<Leases>(&root.join("hook_leases.json")))
+        .map(|leases| leases.into_keys().map(PathBuf::from).collect())
+        .unwrap_or_default()
+}
+
 /// Register a borrow or successful installation. A repeated refusal revokes
 /// this instance's earlier cleanup authority for that agent and directory.
 pub fn claim(dir: &Path, kind: AgentKind, pid: u32, managed: bool) -> bool {

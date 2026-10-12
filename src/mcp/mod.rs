@@ -54,7 +54,7 @@ const PROXY_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20)
 /// Append a line to `<state>/mcp.log` for debugging MCP connection issues.
 /// Owner-only (0600) in the XDG state dir — not the old world-readable,
 /// symlink-followable `/tmp/spyc-mcp.log`.
-fn mcp_log(msg: &str) {
+pub fn mcp_log(msg: &str) {
     use std::io::Write;
     if let Some(mut f) = crate::state::open_state_file_append("mcp.log") {
         let _ = writeln!(f, "spyc-mcp: {msg}");
