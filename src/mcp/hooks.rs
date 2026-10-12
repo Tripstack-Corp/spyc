@@ -102,7 +102,7 @@ fn search_path() -> Option<std::ffi::OsString> {
 
 /// Run `body` with `dir` as the whole `$PATH` [`spyc_binary`] searches.
 #[cfg(test)]
-pub(super) fn with_search_path<R>(dir: &Path, body: impl FnOnce() -> R) -> R {
+pub fn with_search_path<R>(dir: &Path, body: impl FnOnce() -> R) -> R {
     struct Guard;
     impl Drop for Guard {
         fn drop(&mut self) {
@@ -164,42 +164,6 @@ fn group_is_ours(group: &Value) -> bool {
         })
 }
 
-/// Write/merge the spyc status hooks into `<dir>/.claude/settings.json`,
-/// preserving any existing settings + the user's own hooks. Idempotent at the
-/// byte level: when the file already holds exactly the merged content the write
-/// is **skipped**, so re-launching a pane in a cwd whose hooks are already
-/// installed doesn't touch the file. (All agent panes in a repo share one
-/// settings.json and Claude reloads it live — an identical rewrite still bumps
-/// mtime and would trip every sibling agent's hook reload for nothing.)
-/// Returns whether our hooks are present in a file we own (so teardown knows to
-/// clean it) — `true` both when we wrote and when an already-current file let us
-/// skip. `false` if the file is git-tracked (we never dirty a committed config)
-/// or its `hooks` value is a non-object we won't clobber.
-pub fn ensure_claude_status_hooks(dir: &Path) -> bool {
-    let path = dir.join(".claude").join("settings.json");
-    if crate::git::discovery::is_tracked(&path) {
-        return false;
-    }
-    // Resolve the reporter binary (PATH-preferring, so the hook survives the
-    // binary moving); skip on a non-UTF-8 path a shell would mis-exec.
-    let Some(exe) = spyc_binary() else {
-        return false;
-    };
-    let existing = std::fs::read_to_string(&path).ok();
-    let Some(out) = merged_status_hooks_json(existing.as_deref(), &exe) else {
-        return false;
-    };
-    // Already current → skip the write (and its mtime bump), but still report
-    // `true`: our hooks ARE present, so teardown must track this dir.
-    if existing.as_deref() == Some(out.as_str()) {
-        return true;
-    }
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    crate::fs::write_atomic(&path, out.as_bytes()).is_ok()
-}
-
 /// The root value a status-hook merge splices into, or `None` to refuse.
 ///
 /// The distinction that matters is **absent vs. unparseable**, and conflating
@@ -223,6 +187,7 @@ fn merge_root_json(existing: Option<&str>) -> Option<Value> {
 }
 
 /// [`merge_root_json`] for codex's TOML config. Same rule, same reasoning.
+#[cfg(test)]
 fn merge_root_toml(existing: Option<&str>) -> Option<toml::Value> {
     match existing {
         Some(t) if !t.trim().is_empty() => toml::from_str::<toml::Value>(t)
@@ -319,9 +284,10 @@ pub fn cleanup_claude_status_hooks(dir: &Path) -> ConfigCleanup {
 }
 
 mod codex;
+#[cfg(test)]
+pub use codex::ensure_codex_status_hooks;
 pub use codex::{
     cleanup_codex_status_hooks, codex_hooks_json_with_spyc, codex_hooks_json_without_spyc,
-    codex_legacy_hook_diagnostic, ensure_codex_status_hooks,
 };
 
 // ── Agy (Antigravity CLI) status hooks ────────────────────────────────
@@ -409,30 +375,6 @@ fn agy_set_is_ours(set: &Value) -> bool {
     })
 }
 
-/// Agy counterpart of [`ensure_claude_status_hooks`]: merge spyc's status hooks
-/// into `<dir>/.agents/hooks.json`. Byte-idempotent skip, git-tracked guard,
-/// and return contract mirror the claude version.
-pub fn ensure_agy_status_hooks(dir: &Path) -> bool {
-    let path = dir.join(".agents").join("hooks.json");
-    if crate::git::discovery::is_tracked(&path) {
-        return false;
-    }
-    let Some(exe) = spyc_binary() else {
-        return false;
-    };
-    let existing = std::fs::read_to_string(&path).ok();
-    let Some(out) = merged_agy_status_hooks_json(existing.as_deref(), &exe) else {
-        return false;
-    };
-    if existing.as_deref() == Some(out.as_str()) {
-        return true;
-    }
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    crate::fs::write_atomic(&path, out.as_bytes()).is_ok()
-}
-
 /// Pure merge for agy's `hooks.json`: own the `spyc-status` named set (replace
 /// any prior ours, preserving the user's other sets). `None` when we refuse: an
 /// unparseable existing file, a non-object root, or a serialization failure —
@@ -506,6 +448,68 @@ pub fn cleanup_agy_status_hooks(dir: &Path) -> ConfigCleanup {
     }
     let _ = crate::fs::write_atomic(&path, rest.as_bytes());
     ConfigCleanup::Cleaned
+}
+
+#[cfg(test)]
+/// Write/merge the spyc status hooks into `<dir>/.claude/settings.json`,
+/// preserving any existing settings + the user's own hooks. Idempotent at the
+/// byte level: when the file already holds exactly the merged content the write
+/// is **skipped**, so re-launching a pane in a cwd whose hooks are already
+/// installed doesn't touch the file. (All agent panes in a repo share one
+/// settings.json and Claude reloads it live — an identical rewrite still bumps
+/// mtime and would trip every sibling agent's hook reload for nothing.)
+/// Returns whether our hooks are present in a file we own (so teardown knows to
+/// clean it) — `true` both when we wrote and when an already-current file let us
+/// skip. `false` if the file is git-tracked (we never dirty a committed config)
+/// or its `hooks` value is a non-object we won't clobber.
+pub fn ensure_claude_status_hooks(dir: &Path) -> bool {
+    let path = dir.join(".claude").join("settings.json");
+    if crate::git::discovery::is_tracked(&path) {
+        return false;
+    }
+    // Resolve the reporter binary (PATH-preferring, so the hook survives the
+    // binary moving); skip on a non-UTF-8 path a shell would mis-exec.
+    let Some(exe) = spyc_binary() else {
+        return false;
+    };
+    let existing = std::fs::read_to_string(&path).ok();
+    let Some(out) = merged_status_hooks_json(existing.as_deref(), &exe) else {
+        return false;
+    };
+    // Already current → skip the write (and its mtime bump), but still report
+    // `true`: our hooks ARE present, so teardown must track this dir.
+    if existing.as_deref() == Some(out.as_str()) {
+        return true;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    crate::fs::write_atomic(&path, out.as_bytes()).is_ok()
+}
+
+#[cfg(test)]
+/// Agy counterpart of [`ensure_claude_status_hooks`]: merge spyc's status hooks
+/// into `<dir>/.agents/hooks.json`. Byte-idempotent skip, git-tracked guard,
+/// and return contract mirror the claude version.
+pub fn ensure_agy_status_hooks(dir: &Path) -> bool {
+    let path = dir.join(".agents").join("hooks.json");
+    if crate::git::discovery::is_tracked(&path) {
+        return false;
+    }
+    let Some(exe) = spyc_binary() else {
+        return false;
+    };
+    let existing = std::fs::read_to_string(&path).ok();
+    let Some(out) = merged_agy_status_hooks_json(existing.as_deref(), &exe) else {
+        return false;
+    };
+    if existing.as_deref() == Some(out.as_str()) {
+        return true;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    crate::fs::write_atomic(&path, out.as_bytes()).is_ok()
 }
 
 #[cfg(test)]

@@ -57,7 +57,7 @@ new_tab_cwd = "worktree_root"  # focused column's worktree root (gw's target); o
 claude_transcript_scrollback = false  # `^a v` reads Claude's JSONL transcript instead of terminal scrollback
                                       # (only decides which comes up FIRST — `T` swaps in the view, and the
                                       #  transcript is used regardless when there's no terminal capture)
-codex_mcp = true               # register spyc's MCP server for codex panes ($HOME rc alone governs spyc --install-agents)
+codex_mcp = true               # register spyc's MCP server in codex's user config; only $HOME's rc decides
 codex_daemon = false           # false: codex panes run `--no-daemon`, so their hooks + MCP reach the spyc that launched them
 preview_pasted_images = true   # keep a copy of images you paste into an agent pane, for `^a g`
 

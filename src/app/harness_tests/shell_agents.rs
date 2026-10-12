@@ -41,124 +41,6 @@ fn a_shell_tab_carries_the_agent_env() {
     });
 }
 
-/// Every supported agent reads its MCP entry, and codex and agy their hooks,
-/// at startup, before spyc can see which one a shell started. In a project
-/// that consented to status hooks, a shell tab writes them all up front, and
-/// exit cleanup removes them as it does an agent tab's.
-#[test]
-fn a_shell_tab_in_a_consented_project_provisions_every_agent() {
-    let tmp = tempfile::tempdir().unwrap();
-    crate::state::with_state_root(&tmp.path().join("state"), || {
-        let dir = std::fs::canonicalize(tmp.path()).unwrap().join("project");
-        std::fs::create_dir_all(&dir).unwrap();
-        crate::state::hook_consent::set_consent(&dir, true);
-        let mut app = App::test_app(dir.clone());
-        app.view.mcp_running = true;
-        assert!(app.open_pane_tab_in("sh", &dir));
-
-        let mut written = vec![
-            ".agents/mcp_config.json",
-            ".codex/config.toml",
-            ".claude/settings.json",
-            ".agents/hooks.json",
-        ];
-        // Claude Code's enterprise policy can own or forbid the spyc entry, and
-        // then no `.mcp.json` is written for any tab. Ask this machine.
-        let probe = tmp.path().join("probe");
-        std::fs::create_dir_all(&probe).unwrap();
-        if matches!(
-            crate::mcp::ensure_mcp_json(&probe),
-            Ok(crate::mcp::McpConfigStatus::Configured)
-        ) {
-            written.push(".mcp.json");
-        }
-        for file in written {
-            assert!(dir.join(file).exists(), "{file} was not provisioned");
-        }
-        let codex = std::fs::read_to_string(dir.join(".codex/config.toml")).unwrap();
-        assert!(codex.contains("--report-status"), "codex hooks: {codex}");
-        assert!(
-            app.flash_text().is_some_and(|f| f.starts_with("pane: sh")),
-            "provisioning is quiet: {:?}",
-            app.flash_text()
-        );
-
-        app.cleanup_written_mcp_configs();
-        for file in [".mcp.json", ".agents/mcp_config.json", ".agents/hooks.json"] {
-            assert!(!dir.join(file).exists(), "{file} survived cleanup");
-        }
-        let codex = std::fs::read_to_string(dir.join(".codex/config.toml")).unwrap_or_default();
-        assert!(
-            !codex.contains("--report-status"),
-            "codex hooks survived cleanup"
-        );
-    });
-}
-
-/// An agent wired into its own user configuration (`spyc --install-agents`)
-/// gets nothing in a project, even one that consented to status hooks, and
-/// loses the copy an older spyc left there: it would run beside the user one.
-#[test]
-fn an_agent_wired_in_user_scope_gets_no_project_copy() {
-    use crate::state::sessions::AgentKind;
-    let tmp = tempfile::tempdir().unwrap();
-    crate::state::with_state_root(&tmp.path().join("state"), || {
-        let dir = std::fs::canonicalize(tmp.path()).unwrap().join("project");
-        std::fs::create_dir_all(&dir).unwrap();
-        crate::state::hook_consent::set_consent(&dir, true);
-        assert!(crate::mcp::ensure_claude_status_hooks(&dir));
-        assert!(crate::mcp::ensure_agy_status_hooks(&dir));
-        crate::mcp::ensure_codex_config_toml(&dir).unwrap();
-        assert!(crate::mcp::ensure_codex_status_hooks(&dir));
-        for kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Agy] {
-            crate::state::wiring_consent::set(kind, Some(true));
-        }
-        let mut app = App::test_app(dir.clone());
-        app.view.mcp_running = true;
-        assert!(app.open_pane_tab_in("sh", &dir));
-        app.maybe_offer_status_hooks(AgentKind::Claude, &dir);
-        app.maybe_preinstall_startup_hooks(AgentKind::Codex, &dir);
-
-        for file in [
-            ".mcp.json",
-            ".claude/settings.json",
-            ".codex/config.toml",
-            ".codex/hooks.json",
-            ".agents/mcp_config.json",
-            ".agents/hooks.json",
-        ] {
-            assert!(!dir.join(file).exists(), "{file} was written");
-        }
-        assert!(
-            !matches!(app.state.mode, Mode::Prompting(_)),
-            "no per-project consent prompt for a wired agent"
-        );
-    });
-}
-
-/// Without consent, or with it declined, a shell tab writes nothing.
-#[test]
-fn a_shell_tab_without_consent_writes_nothing() {
-    for consent in [None, Some(false)] {
-        let tmp = tempfile::tempdir().unwrap();
-        crate::state::with_state_root(&tmp.path().join("state"), || {
-            let dir = std::fs::canonicalize(tmp.path()).unwrap().join("project");
-            std::fs::create_dir_all(&dir).unwrap();
-            if let Some(answer) = consent {
-                crate::state::hook_consent::set_consent(&dir, answer);
-            }
-            let mut app = App::test_app(dir.clone());
-            app.view.mcp_running = true;
-            assert!(app.open_pane_tab_in("sh", &dir));
-            let entries: Vec<_> = std::fs::read_dir(&dir)
-                .unwrap()
-                .map(|e| e.unwrap().file_name())
-                .collect();
-            assert!(entries.is_empty(), "consent {consent:?} wrote {entries:?}");
-        });
-    }
-}
-
 /// A report reaching a shell tab is kept for the diagnostics but moves no dot:
 /// until the tab knows which agent runs, it is evidence, not a status.
 #[test]
@@ -364,44 +246,103 @@ fn a_shell_tab_running_an_agent_is_saved_as_its_shell() {
     });
 }
 
-/// `:hooks on!` restarts claude so it reads new hooks. In a shell tab that
-/// would restart the shell, and type `/resume` into it, so there it installs
-/// the hooks, which claude reloads on its own, and leaves the tab alone.
+/// The wiring env a test pins: a throwaway home, so nothing reaches the
+/// developer's own agent configuration.
+fn wiring_env(root: &std::path::Path) -> crate::wiring::Env {
+    crate::wiring::Env {
+        home: root.join("home"),
+        claude_config_dir: None,
+        codex_home: root.join("home/.codex"),
+        codex_mcp: true,
+        managed_mcp: Vec::new(),
+        managed_settings: Vec::new(),
+        claude_cli: None,
+        spyc: "spyc".to_string(),
+    }
+}
+
+/// A shell tab writes nothing into its project: agents are wired in their own
+/// user configuration. An agent that starts there takes out the copy an older
+/// spyc left, once the user has answered for it.
+#[test]
+fn a_shell_tab_writes_nothing_and_an_answered_agent_takes_out_old_copies() {
+    use crate::state::sessions::AgentKind;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(tmp.path()).unwrap();
+    crate::state::with_state_root(&root.join("state"), || {
+        crate::wiring::with_env(wiring_env(&root), || {
+            let dir = root.join("project");
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut app = App::test_app(dir.clone());
+            app.view.mcp_running = true;
+            assert!(app.open_pane_tab_in("sh", &dir));
+            assert_eq!(
+                std::fs::read_dir(&dir).unwrap().count(),
+                0,
+                "the shell wrote nothing"
+            );
+
+            assert!(crate::mcp::ensure_claude_status_hooks(&dir));
+            assert!(crate::mcp::ensure_agy_status_hooks(&dir));
+            crate::mcp::ensure_codex_config_toml(&dir).unwrap();
+            assert!(crate::mcp::ensure_codex_status_hooks(&dir));
+            for kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Agy] {
+                crate::state::wiring_consent::set(kind, Some(true));
+                app.offer_wiring(kind, &dir);
+            }
+            for file in [
+                ".claude/settings.json",
+                ".codex/config.toml",
+                ".agents/hooks.json",
+            ] {
+                assert!(!dir.join(file).exists(), "{file} survived");
+            }
+        });
+    });
+}
+
+/// `:hooks on!` wires claude, then restarts its tab — but restarting a shell
+/// running claude would restart the shell, so that tab is left alone.
 #[test]
 fn hooks_on_bang_leaves_a_shell_tab_running_claude_alone() {
     let tmp = tempfile::tempdir().unwrap();
-    crate::state::with_state_root(&tmp.path().join("state"), || {
-        let dir = std::fs::canonicalize(tmp.path()).unwrap().join("project");
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut app = App::test_app(dir.clone());
-        assert!(app.open_pane_tab_in("sh", &dir));
-        let shell = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
-            .pane
-            .process_id();
-        app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0]
-            .info
-            .running = Some(crate::pane::RunningAgent {
-            kind: crate::state::sessions::AgentKind::Claude,
-            pid: 1,
-            started_epoch_secs: 1,
-            backgrounded: false,
-            on_shared_daemon: false,
+    let root = std::fs::canonicalize(tmp.path()).unwrap();
+    crate::state::with_state_root(&root.join("state"), || {
+        crate::wiring::with_env(wiring_env(&root), || {
+            let dir = root.join("project");
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut app = App::test_app(dir.clone());
+            assert!(app.open_pane_tab_in("sh", &dir));
+            let shell = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+                .pane
+                .process_id();
+            app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0]
+                .info
+                .running = Some(crate::pane::RunningAgent {
+                kind: crate::state::sessions::AgentKind::Claude,
+                pid: 1,
+                started_epoch_secs: 1,
+                backgrounded: false,
+                on_shared_daemon: false,
+            });
+
+            app.dispatch_command("hooks on!");
+            assert!(app.apply_wiring_outcomes());
+
+            let entry = &app.runtime.pane_tabs.as_ref().unwrap().tabs()[0];
+            assert_eq!(entry.info.command, "sh");
+            assert_eq!(entry.pane.process_id(), shell, "the shell was restarted");
+            assert!(
+                root.join("home/.claude/settings.json").exists(),
+                "hooks installed in user scope"
+            );
+            assert!(!dir.join(".claude").exists(), "nothing in the project");
+            assert!(
+                app.flash_text()
+                    .is_some_and(|f| f.contains("isn't restarted")),
+                "{:?}",
+                app.flash_text()
+            );
         });
-
-        app.dispatch_command("hooks on!");
-
-        let entry = &app.runtime.pane_tabs.as_ref().unwrap().tabs()[0];
-        assert_eq!(entry.info.command, "sh");
-        assert_eq!(entry.pane.process_id(), shell, "the shell was restarted");
-        assert!(
-            dir.join(".claude/settings.json").exists(),
-            "hooks installed"
-        );
-        assert!(
-            app.flash_text()
-                .is_some_and(|f| f.contains("isn't restarted")),
-            "{:?}",
-            app.flash_text()
-        );
     });
 }

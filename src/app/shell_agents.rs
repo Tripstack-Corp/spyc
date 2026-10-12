@@ -8,7 +8,7 @@
 use std::time::{Duration, Instant};
 
 use super::scheduler::Deadline;
-use super::{App, RunCtx, state};
+use super::{App, RunCtx};
 use crate::pane::{RunningAgent, TabInfo};
 
 /// How long after a shell tab's output to look at its foreground: long enough
@@ -123,37 +123,13 @@ impl App {
                 forget_agent(info);
                 info.running = Some(running);
                 let cwd = info.cwd.clone();
-                info.status_hooks_at_spawn = super::status_hooks::hooks_present(running.kind, &cwd);
+                info.status_hooks_at_spawn = super::wiring::hooks_present(running.kind);
                 let id = info.id.clone();
                 self.state.codex_recovery.remove(&id);
-                // As a launched agent tab does: install where consented, ask
-                // where the project hasn't answered.
-                self.maybe_offer_status_hooks(running.kind, &cwd);
+                // As a launched agent tab does: ask once for the agent.
+                self.offer_wiring(running.kind, &cwd);
                 true
             }
-        }
-    }
-
-    /// Write, for each agent spyc supports, what it reads at startup: its MCP
-    /// entry and its status hooks, each recorded for cleanup on exit exactly as
-    /// an agent tab's are. Only where that agent's hook root has consented; a
-    /// shell tab anywhere else writes nothing. Quiet, because opening a shell
-    /// is not launching an agent.
-    pub(super) fn provision_shell_tab(&mut self, cwd: &std::path::Path) {
-        if !self.view.mcp_running {
-            return;
-        }
-        for profile in crate::agent::REGISTRY {
-            let Some(support) = profile.status_hooks() else {
-                continue;
-            };
-            let dir = (support.config_dir)(cwd);
-            let root = state::find_repo_root(&dir).unwrap_or_else(|| dir.clone());
-            if crate::state::hook_consent::consent_for(&root) != Some(true) {
-                continue;
-            }
-            self.write_mcp_config(profile.kind(), cwd, false);
-            self.install_status_hooks(cwd, profile.kind());
         }
     }
 }

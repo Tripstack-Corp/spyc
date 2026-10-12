@@ -950,12 +950,11 @@ mod render_tests {
         let mut app = demo_app(&files());
         app.state.mode = Mode::Prompting(Prompt::simple(
             PromptKind::HookConsent {
-                root: PathBuf::from("/projects/demo"),
-                cwd: PathBuf::from("/projects/demo"),
                 agent: crate::state::sessions::AgentKind::Claude,
             },
-            "Show this agent's live status on its tab? spyc will write status \
-             hooks to .claude/settings.json (removed when the pane exits)."
+            "Show claude's live status on its tab, and give it spyc's tools? spyc \
+             adds its hooks to ~/.claude/settings.json and its MCP entry to \
+             claude's own settings, once, for every project."
                 .to_string(),
         ));
         let out = render_to_string(&mut app, 80, 24);

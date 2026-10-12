@@ -170,7 +170,6 @@ mod sources;
 mod startup_commands;
 mod startup_tabs;
 pub mod state;
-mod status_hooks;
 mod streaming;
 mod tasks;
 #[cfg(test)]
@@ -180,6 +179,7 @@ mod util;
 mod view_state;
 mod vsplit;
 mod watch;
+mod wiring;
 mod worktree_clean;
 mod worktree_ops;
 

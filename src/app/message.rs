@@ -177,6 +177,11 @@ pub enum Wake {
     /// `ClipboardPasteDone`; `apply_clipboard_writes` drains the slot in the
     /// pre-recv scan and flashes anything that failed.
     ClipboardCopy,
+    /// An agent-wiring worker (`App::start_wiring`) installed or removed an
+    /// agent's user-scope wiring and pushed its outcome onto
+    /// `runtime.wiring_results`. Payloadless; `apply_wiring_outcomes` drains
+    /// the slot in the pre-recv scan and flashes what happened.
+    Wiring,
     /// `J`'s off-thread default (`spawn_jump_default`) found its path, or
     /// didn't, and pushed the answer onto `runtime.jump_default_results`.
     /// Payloadless, same shape as `ClipboardPasteDone`; `apply_jump_defaults`

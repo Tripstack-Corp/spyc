@@ -110,16 +110,11 @@ pub enum PromptKind {
     Limit,
     /// `:` — vim-style command line.
     Command,
-    /// First-launch consent (per project, saved) before spyc writes an agent's
-    /// status hooks into `root`'s config (claude `.claude/settings.json` /
-    /// codex `.codex/config.toml`). `y`/`Y` → remember-allow + install hooks for
-    /// `cwd`; `n`/`N` → remember-deny. Any other key (including Esc) defers the
-    /// prompt without recording consent. `root` keys the persisted consent (`state::hook_consent`);
-    /// `cwd` is the launching pane's dir, resolved to the actual hook source by
-    /// `agent`'s support profile (including Codex's root-checkout routing).
+    /// The first time `agent` starts in spyc: wire it into its own user
+    /// configuration (status hooks + MCP entry), once, for every project?
+    /// `y`/`Y` → remember-allow + install; `n`/`N` → remember-deny. Any other
+    /// key (including Esc) defers the prompt without recording anything.
     HookConsent {
-        root: std::path::PathBuf,
-        cwd: std::path::PathBuf,
         agent: crate::state::sessions::AgentKind,
     },
     /// A project-local `.spycrc.toml` declares startup tabs this user hasn't
@@ -873,8 +868,6 @@ mod tests {
             (
                 "HookConsent",
                 K::HookConsent {
-                    root: std::path::PathBuf::new(),
-                    cwd: std::path::PathBuf::new(),
                     agent: crate::state::sessions::AgentKind::Claude,
                 },
             ),

@@ -362,26 +362,7 @@ pub(super) fn cmd_notify(app: &mut App, args: &str) -> Vec<Effect> {
 /// only); `off` revokes + uninstalls; no arg reports the current state. Consent
 /// is keyed by the project root and saved.
 pub(super) fn cmd_hooks(app: &mut App, args: &str) -> Vec<Effect> {
-    match args.trim() {
-        "on!" | "enable!" => app.force_restart_status_hooks(),
-        "on" | "enable" | "yes" | "y" => app.set_status_hooks(true),
-        "off" | "disable" | "no" | "n" => app.set_status_hooks(false),
-        "" | "status" => {
-            let root = app.status_hooks_target_root();
-            let state = match crate::state::hook_consent::consent_for(&root) {
-                Some(true) => "on",
-                Some(false) => "off",
-                None => "unset (asks on next claude/codex launch)",
-            };
-            app.state.flash_info(format!(
-                "status hooks: {state} for {} — `:hooks on|on!|off` to change",
-                crate::paths::display_tilde(&root)
-            ));
-        }
-        other => app
-            .state
-            .flash_error(format!("usage: :hooks on|on!|off  (got `{other}`)")),
-    }
+    app.hooks_command(args);
     Vec::new()
 }
 

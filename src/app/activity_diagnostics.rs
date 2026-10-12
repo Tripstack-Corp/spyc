@@ -201,7 +201,7 @@ fn tab_report(i: usize, e: &TabEntry, is_active: bool, now: Instant) -> Vec<Stri
             },
         ));
     }
-    if let Some(facts) = super::status_hooks::status_hooks_facts(info) {
+    if let Some(facts) = super::wiring::status_hooks_facts(info) {
         out.push("    hooks:".to_string());
         out.extend(facts.into_iter().map(|fact| format!("      {fact}")));
     }

@@ -52,7 +52,7 @@ sudo -v && python3 -c "import json;print(json.load(open('/Library/Application Su
 | Setting | Suggested | Why |
 |---|---|---|
 | `[mouse] capture` | `true` (default) | The wheel scrolls whatever the pointer is over, including panes whose child ignores mouse reports. Costs your terminal's native click-drag select — hold **Shift** (most terminals) or **Option/Fn** (iTerm2), or `:mouse off` for the session. |
-| status hooks | on | Per-agent hooks let the agent *report* `working`/`blocked`/`done`, which is what makes the tab dots trustworthy instead of guesses from output timing. `:hooks` shows state. |
+| status hooks | `y` at each agent's first launch | Per-agent hooks let the agent *report* `working`/`blocked`/`done`, which is what makes the tab dots trustworthy instead of guesses from output timing. They live in the agent's own configuration, once for every project; `:hooks` shows each agent's answer. |
 | `[notify]` | `desktop = true` | The "which agent needs me" ping. `Blocked` fires every enabled channel; the routine `Done` only fires channels that opt in via `*_done`. Details in [`AGENT_ORCHESTRATION.md`](AGENT_ORCHESTRATION.md). |
 | `[pane] codex_daemon` | `false` (default) | spyc starts codex panes with `--no-daemon`. See "codex's shared daemon" below. |
 | `[clipboard] command` | set it on WSL | No X display by default under WSL2 — point it at `clip.exe`. Alternatively `[clipboard] via = "osc52"`. |
@@ -513,19 +513,13 @@ CLI execution or fresh onboarding acceptance.
 ### Duplicate Codex hook sources
 
 codex runs the hooks of every layer it loads, user and project alike, without
-merging duplicates. After `spyc --install-agents=codex` puts spyc's hooks in
-`$CODEX_HOME/hooks.json`, a project `.codex/config.toml` that an older spyc
-wrote them into would report each event a second time, so spyc takes that copy
-out at startup and when it launches codex there. It leaves one another running
-spyc still uses, or one git tracks; `:why-status` names a copy that remains. Those user-scope hooks need one approval in codex's `/hooks`, and
-then apply in every project, trusted or not.
-
-Codex loads `.codex/hooks.json` alongside inline hooks in `.codex/config.toml`.
-If both contain spyc reporters, each matching event can report twice. At
-installation, spyc migrates its `--report-status` handlers out of the JSON file
-and keeps its reporters in TOML. Other handlers, matcher fields and trust records
-are preserved. An emptied legacy file is removed; user-only files are not
-rewritten. `:hooks off` and last-owner cleanup also remove legacy reporters.
+merging duplicates. spyc's hooks live in `$CODEX_HOME/hooks.json`, so a project
+`.codex/config.toml` or `.codex/hooks.json` that an older spyc wrote them into
+would report each event a second time. spyc takes that copy out at startup and
+when it launches codex there; it leaves one another running spyc still uses, or
+one git tracks, and `:why-status` names a copy that remains. The user-scope hooks
+need one approval in codex's `/hooks`, and then apply in every project, trusted
+or not.
 
 Codex identifies an owned handler by a direct `spyc` invocation (or the
 currently resolved reporter executable), a known wire status and the generated
@@ -535,31 +529,12 @@ statuses and extra shell actions are preserved. A non-command handler is never
 pruned. This check does not change generated hook commands or trust records.
 
 Removing a spyc reporter before a user hook can change Codex's positional trust
-key and silently disable that user hook. Installation and cleanup refuse such
-pruning in either source; hook declarations remain in place and `:activity dump` names
-the trust-identity reason. Trailing reporters can still be removed without
-moving user hooks. Manual migration requires restarting Codex and reviewing the
-affected user hooks in `/hooks`; spyc does not rewrite their trust records.
-
-Legacy files containing tracked reporters, or malformed/unreadable files,
-block migration; `:activity dump`
-names the source and repair action. Use `:hooks on` to migrate a valid untracked
-file, then restart Codex and review `/hooks`. A running CLI may retain its old
-hook definitions, so removing a duplicate file does not establish single
-delivery before restart. A JSON-only change also sets the restart diagnostic.
-Migration does not approve hooks or infer that a pending question or permission
-request was answered.
-
-### Codex hooks in linked worktrees
-
-Codex takes project hook definitions from the corresponding root-checkout
-directory, while ordinary config and the MCP entry stay worktree-local. spyc
-therefore installs and refcounts those hooks at the root-checkout source, using
-that project's saved consent. `:activity dump` names the actual source for a
-linked worktree; a reporter marker in the worktree's ignored file is insufficient.
-After a hook change, restart Codex and review `/hooks` from the new session.
-Native `request_user_input` has exact start/completion hooks; the async question
-tool's immediate acknowledgement is not an answer signal.
+key and silently disable that user hook, so spyc refuses such a removal, in the
+user `hooks.json` and in an old project copy alike; the declarations stay, and
+the refusal names the reason. Its own handlers never move: an install rewrites a
+handler where it stands. A running CLI keeps the definitions it started with, so
+restart Codex after a change and review `/hooks`; nothing spyc does approves a
+hook or infers that a pending question or permission request was answered.
 
 ### codex's shared daemon
 
@@ -664,53 +639,6 @@ spyc's own activity pager must still open. It also checks capture input, a
 pane producing continuous output, session restore and cancellation/complete
 byte delivery of a confirmed 9 MiB file pipe. A failure can capture a macOS stack sample
 before killing the owned test child. It never drives the user's current pane.
-
-### Test Codex hook identity during installation and cleanup
-
-`scripts/codex-hook-trust-smoke.py` drives a controlled Codex-profile PTY child
-through actual spyc hook installation, `:hooks off` and teardown. It reads native
-Codex `hooks/list` before and after each step, asserting that the fixture user
-hook keeps its key, current hash, enabled flag and untrusted status.
-
-```sh
-python3 scripts/codex-hook-trust-smoke.py --binary /tmp/spyc-build/spyc \
-  --scenario json_shared --output /tmp/spyc-hook-json-identity
-python3 scripts/codex-hook-trust-smoke.py --binary /tmp/spyc-build/spyc \
-  --scenario toml_groups --output /tmp/spyc-hook-toml-identity
-python3 scripts/codex-hook-trust-smoke.py --binary /tmp/spyc-build/spyc \
-  --scenario safe --output /tmp/spyc-hook-safe-identity
-```
-
-The shared-handler and separate-group cases cover both JSON and TOML. The safe
-case allows trailing reporter removal. Each creates a disposable project and
-`CODEX_HOME`; project-load permission is fixture data, while every hook remains
-untrusted. The native CLI only lists hooks: no turn, hook approval or hook
-execution is requested. The real user's trust records are untouched. Stable keys
-and hashes protect the lookup of an existing trust record; this is discovery
-coverage, not live trusted-hook execution. Captures, recordings, discovery JSON,
-binary hashes and results are retained, and only the owned session is closed.
-
-
-### Test hook cleanup ownership across hosts
-
-`scripts/codex-hook-ownership-smoke.py` runs controlled PTY children through
-actual spyc installation and graceful `:q` teardown. It uses disposable home,
-project and state directories, disables the unrelated Codex MCP writer and
-never executes native agents, hooks or trust approvals.
-
-```sh
-python3 scripts/codex-hook-ownership-smoke.py --binary /tmp/spyc-build/spyc \
-  --scenario tracked --output /tmp/spyc-hook-borrowed
-python3 scripts/codex-hook-ownership-smoke.py --binary /tmp/spyc-build/spyc \
-  --scenario mixed --output /tmp/spyc-hook-mixed-hosts
-```
-
-The seven scenarios cover tracked/malformed refused installs, Claude-only and
-MCP-only sessions, two managed Codex hosts, mixed-agent hosts and a borrowed
-last owner. The driver waits for the host process to exit before checking file
-preservation or cleanup. Manifests, recordings, activity dumps, viewport captures
-and results identify the binary and distinguish this coverage from native hook
-execution.
 
 ### Test interruption, exit and report lifetimes
 

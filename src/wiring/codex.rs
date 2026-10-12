@@ -65,7 +65,17 @@ fn mcp_with_spyc(existing: Option<&str>, command: &str) -> Result<String, String
         spyc.insert("args", toml_edit::value(Array::from_iter(["--mcp"])));
     }
     // SPYC-TRAP(mcp-entry-names-no-socket): codex clears an MCP server's
-    // environment, so the pane's own socket and id are passed through by name.
+    // environment, so the pane's own socket and id are passed through by name,
+    // and a value an older spyc pinned in `env` would override them for every
+    // session.
+    if let Some(env) = spyc.get_mut("env").and_then(Item::as_table_like_mut) {
+        for name in PANE_ENV {
+            env.remove(name);
+        }
+        if env.is_empty() {
+            spyc.remove("env");
+        }
+    }
     match spyc.get_mut("env_vars").and_then(Item::as_array_mut) {
         Some(names) => {
             for name in PANE_ENV {

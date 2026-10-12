@@ -183,107 +183,6 @@ fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
 }
 
 #[test]
-fn codex_dump_distinguishes_definitions_from_reports_and_retains_last_report() {
-    let tmp = tempfile::tempdir().unwrap();
-    crate::state::with_state_root(tmp.path(), || {
-        let mut app = agent_app(tmp.path(), "codex");
-        app.install_status_hooks(tmp.path(), crate::state::sessions::AgentKind::Codex);
-        let before = dump(&mut app);
-        assert!(before.contains("restart needed"), "{before}");
-        assert!(before.contains("execution/trust unverified"), "{before}");
-        assert!(before.contains("last_report: none received"), "{before}");
-        assert!(before.contains("/hooks"), "{before}");
-
-        report(&mut app, "working");
-        let at = app
-            .runtime
-            .pane_tabs
-            .as_ref()
-            .unwrap()
-            .active_info()
-            .reported
-            .unwrap()
-            .at;
-        let mut ctx = RunCtx::for_test();
-        app.settle_agent_activity(at + Duration::from_secs(121), &mut ctx);
-        let after = dump(&mut app);
-        assert!(after.contains("last_report: status=working"), "{after}");
-        assert!(after.contains("no longer authoritative"), "{after}");
-        assert!(
-            after.contains("execution/trust unverified"),
-            "a self-report does not establish hook trust: {after}"
-        );
-        assert!(why_status(&mut app).contains("/hooks"));
-    });
-}
-
-#[test]
-fn codex_hooks_installed_before_spawn_still_require_review_not_assumed_readiness() {
-    let tmp = tempfile::tempdir().unwrap();
-    crate::state::with_state_root(&tmp.path().join("state"), || {
-        let dir = std::fs::canonicalize(tmp.path()).unwrap();
-        let command = fake_agent(&dir, "codex").display().to_string();
-        let mut app = App::test_app(dir.clone());
-        app.view.mcp_running = true;
-        crate::state::hook_consent::set_consent(&dir, true);
-        assert!(app.open_pane_tab_in(&command, &dir));
-        let lines = dump(&mut app);
-        assert!(lines.contains("\n      present at launch\n"), "{lines}");
-        assert!(!lines.contains("not present at launch"), "{lines}");
-        assert!(!lines.contains("restart needed"), "{lines}");
-        assert!(lines.contains("execution/trust unverified"), "{lines}");
-        assert!(lines.contains("last_report: none received"), "{lines}");
-
-        app.install_status_hooks(&dir, crate::state::sessions::AgentKind::Codex);
-        assert!(
-            !dump(&mut app).contains("restart needed"),
-            "idempotent installation is not a config change"
-        );
-        let config = dir.join(".codex/config.toml");
-        let content = std::fs::read_to_string(&config).unwrap();
-        std::fs::write(
-            &config,
-            content.replace("--report-status working", "--report-status idle"),
-        )
-        .unwrap();
-        app.install_status_hooks(&dir, crate::state::sessions::AgentKind::Codex);
-        let changed = dump(&mut app);
-        assert!(
-            changed.contains("restart needed"),
-            "changed startup-only hooks require reload: {changed}"
-        );
-    });
-}
-
-#[test]
-fn first_codex_consent_explains_restart_and_review_without_authorizing_hooks() {
-    let tmp = tempfile::tempdir().unwrap();
-    crate::state::with_state_root(&tmp.path().join("state"), || {
-        let dir = std::fs::canonicalize(tmp.path()).unwrap();
-        let command = fake_agent(&dir, "codex").display().to_string();
-        let mut app = App::test_app(dir.clone());
-        app.view.mcp_running = true;
-        assert!(app.open_pane_tab_in(&command, &dir));
-        let Mode::Prompting(prompt) = &app.state.mode else {
-            panic!("first launch should ask for consent")
-        };
-        assert!(prompt.prefix.contains("/hooks"));
-        app.handle_key(key('y')).unwrap();
-        assert!(app.flash_text().unwrap().contains("review /hooks"));
-        let text = dump(&mut app);
-        assert!(text.contains("restart needed"), "{text}");
-        assert!(text.contains("last_report: none received"), "{text}");
-        let value: toml::Value =
-            toml::from_str(&std::fs::read_to_string(dir.join(".codex/config.toml")).unwrap())
-                .unwrap();
-        assert!(
-            value["hooks"].get("state").is_none(),
-            "spyc must not author hook-trust state"
-        );
-    });
-}
-
-#[test]
 fn codex_report_history_is_pane_local_and_not_carried_into_a_restart() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -412,6 +311,7 @@ fn status_hook_event_history_is_bounded_pane_local_and_cleared_on_restart() {
 fn status_hook_event_metadata_does_not_infer_permission_answers_or_hook_trust() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
+        crate::state::wiring_consent::set(crate::state::sessions::AgentKind::Codex, Some(true));
         let mut app = agent_app(tmp.path(), "codex");
         let event = crate::agent::status_hook::StatusHookEvent::from_value(&serde_json::json!({
             "hook_event_name":"PostToolUse", "tool_name":"Bash", "turn_id":"turn-1", "tool_use_id":"unrelated-call"
@@ -466,92 +366,6 @@ fn status_hook_event_metadata_does_not_infer_permission_answers_or_hook_trust() 
         );
         assert!(lines.contains("last_report: status=done"), "{lines}");
         assert!(lines.contains("no longer authoritative"), "{lines}");
-    });
-}
-
-#[test]
-fn codex_legacy_only_hook_migration_requires_restart_and_clears_duplicate_diagnostics() {
-    let tmp = tempfile::tempdir().unwrap();
-    crate::state::with_state_root(tmp.path(), || {
-        let mut app = agent_app(tmp.path(), "codex");
-        app.install_status_hooks(tmp.path(), crate::state::sessions::AgentKind::Codex);
-        let canonical = tmp.path().join(".codex/config.toml");
-        let before = std::fs::read(&canonical).unwrap();
-        app.runtime
-            .pane_tabs
-            .as_mut()
-            .unwrap()
-            .active_info_mut()
-            .status_hooks_restart_needed = false;
-        std::fs::write(
-            tmp.path().join(".codex/hooks.json"),
-            r#"{"hooks":{"Stop":[{"hooks":[{"command":"spyc --report-status done"}]}]}}"#,
-        )
-        .unwrap();
-        assert!(dump(&mut app).contains("additional spyc reporters"));
-        app.install_status_hooks(tmp.path(), crate::state::sessions::AgentKind::Codex);
-        let after = dump(&mut app);
-        assert!(
-            after.contains("restart needed"),
-            "a JSON-only change requires restart: {after}"
-        );
-        assert!(!after.contains("additional spyc reporters"), "{after}");
-        assert_eq!(
-            std::fs::read(canonical).unwrap(),
-            before,
-            "canonical hooks were already current"
-        );
-        assert!(
-            after.contains("execution/trust unverified"),
-            "migration cannot establish trust: {after}"
-        );
-    });
-}
-
-#[test]
-fn codex_refused_migration_retains_shared_ownership_of_existing_reporters() {
-    let tmp = tempfile::tempdir().unwrap();
-    crate::state::with_state_root(tmp.path(), || {
-        assert!(crate::mcp::ensure_codex_status_hooks(tmp.path()));
-        std::fs::write(tmp.path().join(".codex/hooks.json"), "{broken").unwrap();
-        let mut app = agent_app(tmp.path(), "codex");
-        app.install_status_hooks(tmp.path(), crate::state::sessions::AgentKind::Codex);
-        assert!(dump(&mut app).contains("legacy .codex/hooks.json is malformed"));
-        assert!(
-            !crate::state::dir_owners::release(
-                crate::state::dir_owners::Shared::StatusHooks,
-                tmp.path(),
-                1
-            ),
-            "a sibling must not be allowed to remove this pane's existing reporters"
-        );
-        assert!(tmp.path().join(".codex/config.toml").exists());
-    });
-}
-
-#[test]
-fn codex_refused_migration_retains_shared_ownership_of_legacy_only_reporters() {
-    let tmp = tempfile::tempdir().unwrap();
-    crate::state::with_state_root(tmp.path(), || {
-        std::fs::create_dir_all(tmp.path().join(".codex")).unwrap();
-        std::fs::write(tmp.path().join(".codex/config.toml"), "{broken").unwrap();
-        let legacy = tmp.path().join(".codex/hooks.json");
-        std::fs::write(
-            &legacy,
-            r#"{"hooks":{"Stop":[{"hooks":[{"command":"spyc --report-status done"}]}]}}"#,
-        )
-        .unwrap();
-        let mut app = agent_app(tmp.path(), "codex");
-        app.install_status_hooks(tmp.path(), crate::state::sessions::AgentKind::Codex);
-        assert!(
-            !crate::state::dir_owners::release(
-                crate::state::dir_owners::Shared::StatusHooks,
-                tmp.path(),
-                1
-            ),
-            "a refused migration must retain ownership of legacy-only reporters"
-        );
-        assert!(legacy.exists());
     });
 }
 
@@ -997,5 +811,140 @@ fn a_closed_agent_pane_retires_reports_and_rejects_late_reports() {
             matches!(result, McpResponse::Error { .. }),
             "a late child report resurrected an exited pane: {result:?}"
         );
+    });
+}
+
+/// The wiring env a test pins: a throwaway home, so nothing reaches the
+/// developer's own agent configuration.
+fn wiring_env(root: &std::path::Path) -> crate::wiring::Env {
+    crate::wiring::Env {
+        home: root.join("home"),
+        claude_config_dir: None,
+        codex_home: root.join("home/.codex"),
+        codex_mcp: true,
+        managed_mcp: Vec::new(),
+        managed_settings: Vec::new(),
+        claude_cli: None,
+        spyc: "spyc".to_string(),
+    }
+}
+
+/// `:hooks on codex`, and the outcome its worker landed.
+fn wire_codex(app: &mut App) {
+    app.dispatch_command("hooks on codex");
+    assert!(app.apply_wiring_outcomes(), "the install landed");
+}
+
+#[test]
+fn codex_dump_distinguishes_definitions_from_reports_and_retains_last_report() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        crate::wiring::with_env(wiring_env(tmp.path()), || {
+            let mut app = agent_app(tmp.path(), "codex");
+            wire_codex(&mut app);
+            let before = dump(&mut app);
+            assert!(before.contains("restart needed"), "{before}");
+            assert!(before.contains("execution/trust unverified"), "{before}");
+            assert!(before.contains("last_report: none received"), "{before}");
+            assert!(before.contains("/hooks"), "{before}");
+
+            report(&mut app, "working");
+            let at = app
+                .runtime
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .reported
+                .unwrap()
+                .at;
+            let mut ctx = RunCtx::for_test();
+            app.settle_agent_activity(at + Duration::from_secs(121), &mut ctx);
+            let after = dump(&mut app);
+            assert!(after.contains("last_report: status=working"), "{after}");
+            assert!(after.contains("no longer authoritative"), "{after}");
+            assert!(
+                after.contains("execution/trust unverified"),
+                "a self-report does not establish hook trust: {after}"
+            );
+            assert!(why_status(&mut app).contains("/hooks"));
+        });
+    });
+}
+
+#[test]
+fn codex_hooks_installed_before_spawn_still_require_review_not_assumed_readiness() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = std::fs::canonicalize(tmp.path()).unwrap();
+    crate::state::with_state_root(&dir.join("state"), || {
+        crate::wiring::with_env(wiring_env(&dir), || {
+            let command = fake_agent(&dir, "codex").display().to_string();
+            let mut app = App::test_app(dir.clone());
+            app.view.mcp_running = true;
+            wire_codex(&mut app);
+            assert!(app.open_pane_tab_in(&command, &dir));
+            let lines = dump(&mut app);
+            assert!(lines.contains("\n      present at launch\n"), "{lines}");
+            assert!(!lines.contains("not present at launch"), "{lines}");
+            assert!(!lines.contains("restart needed"), "{lines}");
+            assert!(lines.contains("execution/trust unverified"), "{lines}");
+            assert!(lines.contains("last_report: none received"), "{lines}");
+
+            wire_codex(&mut app);
+            assert!(
+                !dump(&mut app).contains("restart needed"),
+                "an install that changes nothing is not a config change"
+            );
+            let hooks = dir.join("home/.codex/hooks.json");
+            let content = std::fs::read_to_string(&hooks).unwrap();
+            std::fs::write(
+                &hooks,
+                content.replace("--report-status working", "--report-status idle"),
+            )
+            .unwrap();
+            wire_codex(&mut app);
+            let changed = dump(&mut app);
+            assert!(
+                changed.contains("restart needed"),
+                "changed startup-only hooks require reload: {changed}"
+            );
+        });
+    });
+}
+
+#[test]
+fn first_codex_consent_explains_restart_and_review_without_authorizing_hooks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = std::fs::canonicalize(tmp.path()).unwrap();
+    crate::state::with_state_root(&dir.join("state"), || {
+        crate::wiring::with_env(wiring_env(&dir), || {
+            let command = fake_agent(&dir, "codex").display().to_string();
+            let mut app = App::test_app(dir.clone());
+            app.view.mcp_running = true;
+            assert!(app.open_pane_tab_in(&command, &dir));
+            let Mode::Prompting(prompt) = &app.state.mode else {
+                panic!("first launch should ask for consent")
+            };
+            assert!(prompt.prefix.contains("/hooks"));
+            app.handle_key(key('y')).unwrap();
+            assert!(app.apply_wiring_outcomes());
+            let flash = app.flash_text().unwrap();
+            assert!(
+                flash.contains("restart codex") && flash.contains("/hooks"),
+                "{flash}"
+            );
+            let text = dump(&mut app);
+            assert!(text.contains("restart needed"), "{text}");
+            assert!(text.contains("last_report: none received"), "{text}");
+            let value: toml::Value = toml::from_str(
+                &std::fs::read_to_string(dir.join("home/.codex/config.toml")).unwrap(),
+            )
+            .unwrap();
+            assert!(
+                value.get("hooks").is_none(),
+                "spyc must not author hook-trust state"
+            );
+            assert!(!dir.join(".codex").exists(), "nothing in the project");
+        });
     });
 }
