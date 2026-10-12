@@ -288,18 +288,11 @@ For per-user installs, the path is `$HOME/.local/bin/spyc`.)
 
 Note that the centrally deployed entry does **not** include
 `env.SPYC_MCP_SOCK` (IT doesn't know the PID of each user's running
-instance). The stdio proxy handles this automatically via
-**project-scoped discovery**: it reads the root each running spyc
-records in its state directory and connects to a live spyc rooted at
-the caller's working directory or nearest above it. A spyc running in a
-*different* project tree is never picked up — cross-project attachment
-is refused — and if none matches, the proxy falls back to read-only
-direct mode.
-
-An agent launched from spyc's pane doesn't need discovery at all: the
-pane's `SPYC_MCP_SOCK` names its spyc, and the per-directory `.mcp.json`
-spyc writes when it launches an agent names no socket either. The two
-configs coexist without conflict.
+instance), and needs none: an agent launched from spyc's pane carries its
+spyc's `SPYC_MCP_SOCK` in its env. A claude started outside spyc, in another
+terminal, still starts `spyc --mcp` from the org's entry, and gets a server
+with no tools. The per-directory `.mcp.json` spyc writes when it launches an
+agent names no socket either, so the two configs coexist without conflict.
 
 #### `managed-settings.json` — control which servers are allowed
 

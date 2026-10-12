@@ -237,6 +237,44 @@ pub(super) fn run_direct(context_path: PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Serve an agent spyc didn't launch: a well-formed server with nothing in it,
+/// so the agent reports no failure and is pointed at no tool.
+pub(super) fn run_inert() -> anyhow::Result<()> {
+    let mut out = io::stdout().lock();
+    for line in io::stdin().lock().lines() {
+        let line = line?;
+        if let Some(reply) = inert_reply(line.trim()) {
+            writeln!(out, "{reply}")?;
+            out.flush()?;
+        }
+    }
+    Ok(())
+}
+
+/// The inert server's answer to one JSON-RPC message; `None` for a
+/// notification or anything that isn't a request.
+pub(super) fn inert_reply(msg: &str) -> Option<Value> {
+    let request: Value = serde_json::from_str(msg).ok()?;
+    let id = request.get("id")?.clone();
+    let result = match request["method"].as_str()? {
+        "initialize" => json!({
+            "protocolVersion": super::PROTOCOL_VERSION,
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": super::SERVER_NAME, "version": super::SERVER_VERSION },
+        }),
+        "tools/list" => json!({ "tools": [] }),
+        "ping" => json!({}),
+        _ => {
+            return Some(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32601, "message": "spyc serves only the agents it launches" },
+            }));
+        }
+    };
+    Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
+}
+
 /// `msg` with `pane_id` under `params._meta` when it is an `initialize`
 /// request, so the server can bind this connection to the pane; anything
 /// else, or no pane id, passes through untouched.

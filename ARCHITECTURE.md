@@ -721,8 +721,9 @@ socket so multiple spyc instances coexist. Two transports share
 the same dispatch:
 
 - **`spyc --mcp`** (stdio) — what Claude Code spawns. Proxies to
-  the live spyc instance via the socket. Falls back to read-only
-  direct mode if no live instance is reachable.
+  the live spyc instance via the socket. An agent spyc launched falls back
+  to read-only tools in place once its spyc is gone; any other agent gets a
+  server with no tools (`mcp::route`).
 - **In-process socket listener** — the running spyc accepts
   connections from the stdio proxy.
 
@@ -733,8 +734,12 @@ own `SPYC_PANE_ID`, and the proxy connects to that socket, so an agent always
 reaches the spyc that launched it and two spycs in one directory each keep
 their own agents (see "The agents' MCP entry names no instance" below). A
 shell pane carries both too, so an agent typed into the shell inherits them.
-An agent started outside spyc has no socket in its env and falls back to
-project-scoped discovery. spyc writes the entry **when an agent pane
+An agent started outside spyc has no pane env and gets a server with no tools
+and no instructions: spyc's entry can live in an agent's user configuration
+(`spyc --install-agents`), where it starts in every session of that agent, and
+a spyc rooted at `$HOME` would otherwise answer every one. Project-scoped
+discovery serves only an agent whose spyc restarted under it and a session
+codex's shared daemon started. spyc writes the entry **when an agent pane
 launches** (`open_pane_tab_in` → `write_mcp_config`), not at startup —
 so a directory where no agent is ever run doesn't get a stray `.mcp.json` /
 `.codex/` written into it. A shell pane is the exception, because spyc learns

@@ -150,7 +150,7 @@ pub use hooks::{
 };
 pub use server::{cleanup_socket, record_root, start_socket_server, sweep_orphan_root_markers};
 
-use server::{discover_live_socket, run_direct, run_proxy};
+use server::{discover_live_socket, run_direct, run_inert, run_proxy};
 
 /// What `spyc --mcp` inherited from its agent's pane: that pane's spyc socket,
 /// its tab, and that spyc's context file.
@@ -162,21 +162,39 @@ struct PaneEnv {
 }
 
 impl PaneEnv {
-    /// Under codex's shared daemon every one of these names whichever tab
-    /// started the daemon, possibly in another spyc, so none is kept: the
-    /// daemon starts a session's MCP server in that session's cwd, where
-    /// discovery finds its spyc.
-    fn inherited() -> Self {
-        if under_codex_shared_daemon() {
-            mcp_log("stdio: under codex's shared daemon; ignoring the SPYC_* it inherited");
-            return Self::default();
-        }
+    fn from_process() -> Self {
         let var = |name| std::env::var(name).ok().filter(|v| !v.is_empty());
         Self {
             sock: var("SPYC_MCP_SOCK").map(PathBuf::from),
             pane_id: var("SPYC_PANE_ID"),
             context: var(context::CONTEXT_ENV_VAR).map(PathBuf::from),
         }
+    }
+}
+
+/// Who `spyc --mcp` is serving, which decides what it may reach.
+#[derive(Debug, PartialEq, Eq)]
+enum Route {
+    /// An agent spyc launched, which carries its pane's env: that pane's spyc,
+    /// else the spyc rooted at its directory, else read-only tools in place.
+    Launched,
+    /// A session codex's shared daemon started, which may or may not be one
+    /// spyc launched: the spyc rooted at the session's directory, else nothing.
+    SharedDaemon,
+    /// An agent started outside spyc: nothing. spyc's entry can live in an
+    /// agent's user configuration, so it starts in every session of that agent.
+    Outside,
+}
+
+/// Under codex's shared daemon the inherited env names whichever tab started
+/// the daemon, possibly in another spyc, so `env` is empty there.
+const fn route(env: &PaneEnv, under_daemon: bool) -> Route {
+    if env.sock.is_some() || env.pane_id.is_some() {
+        Route::Launched
+    } else if under_daemon {
+        Route::SharedDaemon
+    } else {
+        Route::Outside
     }
 }
 
@@ -415,21 +433,27 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
     let _ = BufReader::new(stream).read_line(&mut line);
 }
 
-/// Run the stdio MCP server. Reads JSONL from stdin, dispatches
-/// locally, writes JSONL to stdout. If the running spyc instance's
-/// Unix socket is available, proxies through it for writable access.
-///
-/// Socket resolution order:
-/// 1. `$SPYC_MCP_SOCK`, from the agent pane's env (spyc sets it when it launches
-///    the agent) — the spyc that launched this agent. Not under codex's shared
-///    daemon (see [`PaneEnv::inherited`]).
+/// Run the stdio MCP server, as [`route`] decides:
+/// 1. `$SPYC_MCP_SOCK`, from the agent pane's env — the spyc that launched this
+///    agent.
 /// 2. Project-scoped discovery: the live spycs whose recorded root
-///    (`mcp-<pid>.root`) contains `caller_cwd`, nearest first. Refuses
-///    cross-project attachment (a spyc rooted in a different project tree
-///    is never picked up).
-/// 3. Falls back to read-only direct mode if nothing matches.
+///    (`mcp-<pid>.root`) contains the agent's directory, nearest first. A spyc
+///    rooted in a different project tree is never picked up.
+/// 3. For an agent spyc launched, read-only tools in place; for any other, a
+///    server with no tools.
 pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
-    let env = PaneEnv::inherited();
+    let under_daemon = under_codex_shared_daemon();
+    let env = if under_daemon {
+        mcp_log("stdio: under codex's shared daemon; ignoring the SPYC_* it inherited");
+        PaneEnv::default()
+    } else {
+        PaneEnv::from_process()
+    };
+    let route = route(&env, under_daemon);
+    if route == Route::Outside {
+        mcp_log("stdio: no spyc launched this agent; serving no tools");
+        return run_inert();
+    }
     if let Some(sock) = &env.sock {
         mcp_log(&format!("stdio: trying env socket {}", sock.display()));
         if let Ok(stream) = UnixStream::connect(sock) {
@@ -437,14 +461,13 @@ pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
             return run_proxy(stream, env.pane_id.as_deref());
         }
     }
-
-    // Discovery: only consider spyc instances rooted in this project
-    // tree (caller's cwd or any ancestor). See `discover_live_socket`.
     if let Some(stream) = discover_live_socket(&project_root) {
         return run_proxy(stream, env.pane_id.as_deref());
     }
-
-    // Direct mode: read-only local dispatch (no writable actions).
+    if route == Route::SharedDaemon {
+        mcp_log("stdio: no spyc rooted at this codex session; serving no tools");
+        return run_inert();
+    }
     mcp_log("stdio: no live socket found, running direct JSONL");
     run_direct(
         env.context
