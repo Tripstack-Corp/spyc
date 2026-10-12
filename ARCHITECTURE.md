@@ -782,7 +782,11 @@ describe the user's view; `report_status`, `register_scope` and
 `wait_for_scope_clear` default to that tab instead of the focused one. An
 unbound connection (an older proxy, the status hook, an id no live tab has) is
 served exactly as before, and the read tools' default scope and allowed roots
-don't depend on attribution at all. It is attribution, not authorization —
+don't depend on attribution at all. A proxy or status hook that codex's shared
+daemon spawned (`codex app-server … --managed-daemon` among its ancestors,
+`proc_group::has_ancestor`) inherited its `SPYC_PANE_ID` from whichever codex
+started that daemon, so it names that tab, not its own session's: the proxy
+connects unattributed and the reporter stays silent. It is attribution, not authorization —
 SECURITY.md says why.
 
 **A restored tab keeps its pane id.** An agent can outlive the spyc that

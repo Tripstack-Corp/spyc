@@ -35,14 +35,7 @@ pub(super) fn schedule_look(info: &mut TabInfo, now: Instant) {
 /// than the shell's pid is a job it is running.
 fn look(pane: &crate::pane::Pane, running: Option<RunningAgent>) -> (Seen, bool) {
     let seen = match (pane.process_id(), pane.foreground_pgrp()) {
-        (Some(shell), Some(fg)) if fg != shell => {
-            let members = crate::proc_group::members(fg);
-            identify(&members).map_or(Seen::Shell, |(kind, member)| Seen::Agent {
-                kind,
-                pid: member.pid,
-                started_epoch_secs: member.started_epoch_secs,
-            })
-        }
+        (Some(shell), Some(fg)) if fg != shell => seen(&crate::proc_group::members(fg)),
         _ => Seen::Shell,
     };
     let alive = running.is_some_and(|r| crate::proc_group::alive(r.pid));
@@ -218,6 +211,18 @@ pub(super) fn identify(
         .min_by_key(|(_, member)| (member.started_epoch_secs, member.pid))
 }
 
+/// What a foreground group holds: the agent `identify` finds, and for codex
+/// whether it was started without `--no-daemon`.
+pub(super) fn seen(members: &[crate::proc_group::Member]) -> Seen {
+    identify(members).map_or(Seen::Shell, |(kind, member)| Seen::Agent {
+        kind,
+        pid: member.pid,
+        started_epoch_secs: member.started_epoch_secs,
+        on_shared_daemon: kind == crate::state::sessions::AgentKind::Codex
+            && crate::agent::codex_may_use_daemon(&member.argv),
+    })
+}
+
 /// What a shell tab's foreground holds when it is looked at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Seen {
@@ -227,6 +232,7 @@ pub(super) enum Seen {
         kind: crate::state::sessions::AgentKind,
         pid: u32,
         started_epoch_secs: u64,
+        on_shared_daemon: bool,
     },
 }
 
@@ -267,12 +273,14 @@ pub(super) const fn transition(
                 kind,
                 pid,
                 started_epoch_secs,
+                on_shared_daemon,
             },
         ) => Change::Started(crate::pane::RunningAgent {
             kind,
             pid,
             started_epoch_secs,
             backgrounded: false,
+            on_shared_daemon,
         }),
         (Some(prev), Seen::Shell) if prev_alive => {
             if prev.backgrounded {
@@ -374,6 +382,7 @@ mod tests {
             pid,
             started_epoch_secs: 100,
             backgrounded,
+            on_shared_daemon: false,
         }
     }
 
@@ -382,6 +391,7 @@ mod tests {
             kind,
             pid,
             started_epoch_secs: 200,
+            on_shared_daemon: false,
         }
     }
 
@@ -455,5 +465,38 @@ mod tests {
             transition(Some(running(7, true)), seen(AgentKind::Claude, 7), true),
             Change::Foregrounded
         );
+    }
+
+    /// A codex started without `--no-daemon` may be on the shared daemon,
+    /// and the agent it starts carries that; other agents never are.
+    #[test]
+    fn a_codex_without_no_daemon_is_marked_and_kept_so() {
+        let daemon_flag = |members: &[Member]| match super::seen(members) {
+            Seen::Agent {
+                on_shared_daemon, ..
+            } => on_shared_daemon,
+            Seen::Shell => panic!("no agent"),
+        };
+        assert!(daemon_flag(&[member(
+            1,
+            "codex",
+            &["codex", "-m", "o3"],
+            1
+        )]));
+        assert!(!daemon_flag(&[member(
+            1,
+            "codex",
+            &["codex", "--no-daemon"],
+            1
+        )]));
+        assert!(!daemon_flag(&[member(1, "claude", &["claude"], 1)]));
+        let Change::Started(r) = transition(
+            None,
+            super::seen(&[member(9, "codex", &["codex"], 1)]),
+            false,
+        ) else {
+            panic!("not started");
+        };
+        assert!(r.on_shared_daemon);
     }
 }

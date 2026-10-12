@@ -73,3 +73,35 @@ fn why_status_with_no_pane_says_so_in_the_status_line() {
         assert_eq!(app.flash_text(), Some("why-status: no pane open"));
     });
 }
+
+/// A codex a shell started without `--no-daemon` may run on its shared
+/// daemon, whose hooks can't reach the tab: `:why-status` says why the dot
+/// follows output, and how to get hook status.
+#[test]
+fn why_status_explains_a_shell_codex_on_the_shared_daemon() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let mut app = App::test_app(dir.clone());
+        assert!(app.open_pane_tab_in("sh", &dir));
+        app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0]
+            .info
+            .running = Some(crate::pane::RunningAgent {
+            kind: crate::state::sessions::AgentKind::Codex,
+            pid: 1,
+            started_epoch_secs: 1,
+            backgrounded: false,
+            on_shared_daemon: true,
+        });
+        let text = why_status(&mut app);
+        assert!(text.contains("Start it with `codex --no-daemon`"), "{text}");
+        assert!(
+            text.contains("`codex agents` and `codex queue` can't reach it"),
+            "names the cost: {text}"
+        );
+        assert!(
+            text.contains("without --no-daemon: hooks can't name this tab"),
+            "{text}"
+        );
+    });
+}

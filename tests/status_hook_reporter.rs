@@ -232,3 +232,54 @@ fn large_hook_body_preserves_legacy_idle_remap_and_camel_case_session() {
     assert!(!request.to_string().contains("private-content"));
     assert!(!log.contains("private-content"));
 }
+
+/// Under codex's shared daemon, the reporter's `SPYC_PANE_ID` is whichever tab
+/// started the daemon, not its own session's, so it reports nothing rather
+/// than light that tab. The stand-in daemon's argv is the shared server's, and
+/// it runs the reporter as its child, as the daemon runs a session's hooks.
+#[test]
+fn status_hook_reporter_under_codex_shared_daemon_reports_nothing() {
+    warm_binary();
+    let temp = tempfile::Builder::new()
+        .prefix("spyc-hook-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let socket = temp.path().join("hook.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let mut daemon = Command::new("sh")
+        .args([
+            "-c",
+            "\"$0\" --report-status working --status-trace </dev/null; :",
+            env!("CARGO_BIN_EXE_spyc"),
+            "app-server",
+            "--managed-daemon",
+        ])
+        .env("SPYC_MCP_SOCK", &socket)
+        .env("SPYC_PANE_ID", "starter-tab")
+        .env("XDG_STATE_HOME", temp.path().join("state"))
+        .env("HOME", temp.path())
+        .env_remove("SPYC_MCP_DEBUG")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + HANG_GUARD;
+    while daemon.try_wait().unwrap().is_none() {
+        if Instant::now() >= deadline {
+            daemon.kill().unwrap();
+            let _ = daemon.wait();
+            panic!("reporter did not exit");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(daemon.wait().unwrap().success());
+    let log = std::fs::read_to_string(temp.path().join("state/spyc/mcp.log")).unwrap_or_default();
+    // The reporter has exited, so a connection it didn't make never will.
+    match listener.accept() {
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+        Ok(_) => panic!("reported under codex's shared daemon; trace:\n{log}"),
+        Err(error) => panic!("accept: {error}"),
+    }
+    assert!(log.contains("under codex's shared daemon"), "{log}");
+}

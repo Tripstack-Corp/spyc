@@ -1512,7 +1512,11 @@ itself rather than on its shared background server. That server spawns every
 session's hooks and MCP servers with the environment of whichever codex
 started it, so they couldn't reach the spyc, or name the tab, that launched a
 pane. **`[pane] codex_daemon = true`** lets codex panes join it anyway, at the
-cost of their activity dots and MCP attribution. See
+cost of their activity dots and MCP attribution. A codex typed into a shell
+tab joins it unless started with `codex --no-daemon`; its tab shows codex
+with an output-timing dot, and `:why-status` says how to get hook status.
+Hooks and MCP proxies the shared server runs notice it and ignore the pane id
+they inherited, so they never light, or answer for, another tab. See
 [`docs/HARNESS.md`](docs/HARNESS.md) → "codex's shared daemon".
 
 **`[pane] codex_mcp = false`** (`.spycrc.toml`) stops spyc from registering

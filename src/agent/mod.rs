@@ -530,6 +530,20 @@ pub fn codex_without_daemon(cmd: &str) -> Cow<'_, str> {
     Cow::Owned(format!("{} --no-daemon{}", &cmd[..end], &cmd[end..]))
 }
 
+/// Whether `argv` is codex's shared background server (`codex app-server …
+/// --managed-daemon`). It spawns every session's hooks and MCP servers with the
+/// environment of whichever codex started it, so their `SPYC_PANE_ID` names
+/// that codex's tab, not their own session's.
+pub fn is_codex_shared_daemon(argv: &[String]) -> bool {
+    argv.iter().any(|a| a == "app-server") && argv.iter().any(|a| a == "--managed-daemon")
+}
+
+/// Whether a codex started with `argv` may run on that shared server: it does
+/// unless told `--no-daemon`.
+pub fn codex_may_use_daemon(argv: &[String]) -> bool {
+    !argv.iter().any(|a| a == "--no-daemon")
+}
+
 pub struct CodexProfile;
 impl AgentProfile for CodexProfile {
     fn detection_rules(&self) -> &'static [DetectionRule] {
@@ -1283,6 +1297,22 @@ mod tests {
         assert_eq!(saved, expected);
         let restored = CodexProfile.reconstruct_restore(&saved, Some("CURRENT"), Path::new("/tmp"));
         assert_eq!(restored.command, format!("{expected} resume CURRENT"));
+    }
+
+    /// The shared server as it runs (`app-server … --managed-daemon`) is the
+    /// daemon; an app-server another app hosts, and a plain codex, are not.
+    #[test]
+    fn codex_shared_daemon_is_known_by_its_argv() {
+        let argv = |s: &str| s.split_whitespace().map(String::from).collect::<Vec<_>>();
+        assert!(is_codex_shared_daemon(&argv(
+            "/x/releases/0.162.1/bin/codex app-server --listen unix:// --analytics-default-enabled --managed-daemon"
+        )));
+        assert!(!is_codex_shared_daemon(&argv(
+            "/Applications/ChatGPT.app/codex app-server --analytics-default-enabled"
+        )));
+        assert!(!is_codex_shared_daemon(&argv("codex --no-daemon")));
+        assert!(codex_may_use_daemon(&argv("codex -m o3")));
+        assert!(!codex_may_use_daemon(&argv("codex --no-daemon -m o3")));
     }
 
     /// Agy: `--conversation <sid>` for a conversation agy wrote. One it never
