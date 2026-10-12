@@ -106,6 +106,9 @@ pub struct RunningAgent {
     /// Out of the foreground without exiting: stopped with `^Z`, or sent to
     /// the background. The tab reads as its shell until the agent is back.
     pub backgrounded: bool,
+    /// A codex started without `--no-daemon`, so it may run on codex's shared
+    /// daemon, whose hooks can't name this tab: its dot follows output.
+    pub on_shared_daemon: bool,
 }
 
 /// Per-tab metadata displayed in the status line.
@@ -798,6 +801,7 @@ mod tests {
             pid: 7,
             started_epoch_secs: 500,
             backgrounded: false,
+            on_shared_daemon: false,
         });
         assert_eq!(info.agent().kind(), AgentKind::Codex);
         assert_eq!(info.launched_agent().kind(), AgentKind::Other);

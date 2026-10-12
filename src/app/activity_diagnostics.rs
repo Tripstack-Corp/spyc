@@ -89,7 +89,20 @@ fn verdict(e: &TabEntry) -> Vec<String> {
         Some(at) => format!("{:.1}s since last output", at.elapsed().as_secs_f32()),
         None => "no output yet".to_string(),
     };
-    vec![format!("{} ({source})", state_str(info.activity)), age]
+    let mut out = vec![format!("{} ({source})", state_str(info.activity)), age];
+    if info
+        .running
+        .is_some_and(|r| r.on_shared_daemon && !r.backgrounded)
+    {
+        out.push(
+            "codex was started without --no-daemon: on codex's shared daemon its hooks can't \
+             reach this tab, so the dot follows output. Start it with `codex --no-daemon` for \
+             hook status; that session then isn't on the shared server, so `codex agents` and \
+             `codex queue` can't reach it."
+                .to_string(),
+        );
+    }
+    out
 }
 
 /// Build the `:activity dump` report (see [`super::commands::cmd_activity`]). Reads the live
@@ -181,10 +194,10 @@ fn tab_report(i: usize, e: &TabEntry, is_active: bool, now: Instant) -> Vec<Stri
             "    running: {} (pid {}, started {age}s ago{})",
             crate::agent::profile_for(running.kind).name(),
             running.pid,
-            if running.backgrounded {
-                ", in the background; the tab reads as its shell"
-            } else {
-                ""
+            match (running.backgrounded, running.on_shared_daemon) {
+                (true, _) => ", in the background; the tab reads as its shell",
+                (false, true) => ", without --no-daemon: hooks can't name this tab",
+                (false, false) => "",
             },
         ));
     }

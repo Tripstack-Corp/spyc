@@ -507,13 +507,23 @@ That server spawns every session's MCP servers and hooks, and gives them its
 own environment, not the environment of the codex in the tab. spyc's status
 hooks and MCP proxy find their spyc and their tab through `SPYC_MCP_SOCK` and
 `SPYC_PANE_ID` in the pane's env, so on the shared server they all get the
-values of whichever pane happened to start it. Reports go to a spyc that has
-since exited, or light the wrong tab's dot.
+values of whichever pane happened to start it, which would send reports to a
+spyc that has since exited, or light the wrong tab's dot. So both check: a
+`spyc --report-status` or `spyc --mcp` with `codex app-server …
+--managed-daemon` among its ancestors doesn't trust the `SPYC_PANE_ID` it
+inherited. The reporter stays silent and the proxy connects unattributed, so a
+session on the shared server gets an output-timing dot rather than another
+tab's.
 
-So spyc starts codex panes with `--no-daemon` (added after the program, the
-tab keeps what you typed). `[pane] codex_daemon = true` turns that off, at the
-cost of the dots and MCP attribution. A codex started outside spyc is
-unaffected either way.
+spyc starts codex panes with `--no-daemon` (added after the program, the tab
+keeps what you typed). `[pane] codex_daemon = true` turns that off, at the cost
+of the dots and MCP attribution. A codex typed into a shell tab is the user's
+command, so spyc can't add the flag: it still shows as codex with an
+output-timing dot, and `:why-status` says to start it with `codex --no-daemon`
+for hook status. That is a trade, not a fix: a session run that way isn't on
+the shared server, so `codex agents` and `codex queue` can't reach it, which is
+also what `[pane] codex_daemon = true` gives back to direct codex tabs. A codex
+started outside spyc is unaffected either way.
 
 ### Claude Code's background sessions
 

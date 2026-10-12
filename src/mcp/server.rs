@@ -267,7 +267,11 @@ pub(super) fn annotate_initialize<'a>(msg: &'a str, pane_id: Option<&str>) -> Co
 /// framing on both sides.
 pub(super) fn run_proxy(stream: UnixStream) -> anyhow::Result<()> {
     // Read once: the connection's attribution is fixed at its `initialize`.
-    let pane_id = std::env::var("SPYC_PANE_ID").ok();
+    // Under codex's shared daemon the id names whichever tab started it, so the
+    // connection goes unattributed rather than answer for that tab.
+    let pane_id = std::env::var("SPYC_PANE_ID")
+        .ok()
+        .filter(|_| !super::under_codex_shared_daemon());
     proxy_io(
         io::stdin().lock(),
         io::stdout().lock(),
