@@ -336,7 +336,7 @@ impl App {
         let command = active_info.command.clone();
         let cwd = active_info.cwd.clone();
         let codex_home = active_info.codex_home.clone();
-        let spawn = active_info.spawn_epoch_secs;
+        let spawn = active_info.agent_epoch_secs();
         // The session uuid pinned to this pane — the codex rollout claim, or the
         // claude session id lifted from its status hook. The resolver's strongest
         // signal, and the only reliable one when two agent tabs share a cwd (the

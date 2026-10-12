@@ -35,6 +35,7 @@ mod notifications;
 mod pane;
 mod paths;
 mod proc_cwd;
+mod proc_group;
 mod shell;
 mod skill;
 mod state;

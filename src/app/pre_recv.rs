@@ -211,6 +211,12 @@ impl App {
             ctx.draw.mark(3);
         }
 
+        // #544: a shell tab's agent, from its foreground, before the scrape and
+        // activity settles below ask which agent each tab runs.
+        if self.settle_shell_agents(now_pre, ctx) {
+            ctx.draw.mark(3);
+        }
+
         // P1-2 viewport scan: bounded Codex delay; other agents wait for quiet.
         // Runs BEFORE settle_agent_activity so scrape_status is fresh.
         // Armed only while a dirty tab exists ⇒ idle stays 0 dps.

@@ -91,6 +91,10 @@ pub enum Deadline {
     /// waiter is parked, disarmed when none remain — idle stays 0 dps. PRE-recv
     /// (`settle_scope_waiters`).
     ScopeWait,
+    /// #544: wake to look at a shell tab's foreground for an agent starting,
+    /// stopping or exiting, a moment after its output. Armed only while a look
+    /// is pending, so idle stays 0 dps. PRE-recv (`settle_shell_agents`).
+    ShellAgentLook,
 }
 
 /// Run()-local deadline scheduler (MVU Phase 2). **Advisory** — it only
