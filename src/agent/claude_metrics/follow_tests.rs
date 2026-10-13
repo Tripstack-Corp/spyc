@@ -226,7 +226,22 @@ fn the_watch_wakes_on_append_and_is_silent_at_idle() {
     rx.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(subscription.take().unwrap().snapshot.messages, 2);
 
-    let before = subscription.work();
+    // Idle starts once the append's own events are spent: a backend may report
+    // one write more than once, and that is not work at idle.
+    let mut before = subscription.work();
+    let settle = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        std::thread::sleep(Duration::from_millis(100));
+        let now = subscription.work();
+        if now == before {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < settle,
+            "the watch never went idle"
+        );
+        before = now;
+    }
     assert_eq!(
         rx.recv_timeout(Duration::from_millis(200)),
         Err(mpsc::RecvTimeoutError::Timeout)

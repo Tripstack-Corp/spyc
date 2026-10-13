@@ -105,10 +105,13 @@ fn unread_bursts_replace_the_single_mailbox_slot_without_repeated_wakes() {
 fn read_access_and_other_files_do_not_trigger_collection() {
     use notify::event::{AccessKind, AccessMode, ModifyKind};
     let rollout = Path::new("/home/sessions/day/rollout.jsonl");
+    // A write's close follows its own `Modify`: counting it read each append twice.
     for kind in [
         AccessKind::Open(AccessMode::Read),
         AccessKind::Read,
         AccessKind::Close(AccessMode::Read),
+        AccessKind::Close(AccessMode::Write),
+        AccessKind::Open(AccessMode::Write),
     ] {
         assert!(!relevant(
             EventKind::Access(kind),
