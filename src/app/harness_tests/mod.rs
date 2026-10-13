@@ -477,6 +477,7 @@ mod per_column;
 mod prompt_templates;
 mod second_commander;
 mod send_selection;
+mod tab_completion;
 mod vsplit;
 mod why_status;
 
