@@ -37,13 +37,14 @@ python3 -m unittest discover -s spikes/claude-hud -p test_probe.py
 | Compaction | A `system` record of subtype `compact_boundary`, whose `compactMetadata` carries `trigger` (`auto`) and `preTokens`, then one `isCompactSummary` user record. | Invalidate occupancy at the boundary; keep lifetime totals. |
 | Turn timing | `system` records of subtype `turn_duration` (9) and `stop_hook_summary` (9). | Possible source for elapsed time; not yet inspected. |
 
-`src/agent/claude_metrics/` is the reducer these rules describe. Its example
-driver folds the same transcript to the same 246 messages and four totals as the
-probe, an independent implementation, and reports the context as unknown, since
-the compaction came last:
+`src/agent/claude_metrics/` is the reducer these rules describe, with a reader
+and watch that follow a live transcript. Its example driver folds the same
+transcript to the same 246 messages and four totals as the probe, an independent
+implementation, and reports the context as unknown, since the compaction came
+last:
 
 ```sh
-cargo run --example claude_metrics -- SESSION_ID TRANSCRIPT
+cargo run --example claude_metrics -- CLAUDE_HOME SESSION_ID TRANSCRIPT
 ```
 
 Not HUD sources, though they look like it:
