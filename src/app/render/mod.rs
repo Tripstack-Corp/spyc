@@ -33,6 +33,8 @@ use super::{App, FrameLayout, View, state};
 
 mod activity_hud;
 mod chrome;
+#[cfg(test)]
+mod divider_tests;
 mod inner;
 mod overlays;
 
