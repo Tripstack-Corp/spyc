@@ -1,5 +1,7 @@
 //! Pure normalization of Codex rollout records shared by conversation consumers.
 
+pub mod metrics;
+
 use serde_json::Value;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -47,11 +49,14 @@ pub fn decode(value: &Value) -> Vec<Record> {
 }
 
 fn identity(value: &Value) -> Option<String> {
+    identity_ref(value).map(str::to_owned)
+}
+
+fn identity_ref(value: &Value) -> Option<&str> {
     value["call_id"]
         .as_str()
         .filter(|id| !id.is_empty())
         .or_else(|| value["id"].as_str().filter(|id| !id.is_empty()))
-        .map(str::to_owned)
 }
 
 fn completed_item(item: &Value) -> Vec<Record> {

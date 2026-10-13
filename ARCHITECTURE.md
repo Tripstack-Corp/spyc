@@ -200,6 +200,31 @@ one `Update`), the mutation-free render behind snapshots, the `:command` surface
 compile-checked via `COMMAND_TABLE` handler fn-pointers, and a one-way
 `app → agent` dependency. See `docs/archive/MVU_PLAN.md` for the decision logs.
 
+## Codex telemetry is consumer-owned and bounded
+
+`agent::codex_records::metrics` projects numeric usage and bounded mode/tool
+metadata through the shared rollout identity rule. It does not retain transcript
+content. `agent::codex_metrics` owns the pure reducer and the read-only collector;
+the application has no HUD consumer. The library's narrow collector export lets
+the standalone acceptance example drive the same code.
+
+The caller supplies the pane's captured home, pinned thread, exact rollout and
+agent generation. Results match that whole binding; a closed or rebound pane
+cannot accept an old snapshot. The reader checks the header and home, holds only
+complete bounded records, caps initial/backlog reads, and clears state across
+truncation, replacement and gaps. Cumulative token families replace samples on
+their own clocks; they are never summed. Context percentage stays unknown and
+unsupported limit windows remain explicit.
+
+Collection starts only for an explicit consumer. Runtime owners hold the worker
+subscription, offsets and watcher; dropping the subscription cancels it. A
+bounded signal and one-slot snapshot mailbox coalesce bursts, waking a consumer
+only for changed metrics/source state. Blocking receives have no idle timeout.
+macOS watches exactly the file and parent through kernel vnode descriptors, so
+replacement can re-arm before the first read of the new inode. Linux watches the
+parent non-recursively and filters read/open events. There is no sessions-tree
+scan, account access or idle polling.
+
 ## Repaint strategy: event-driven, dirty-frame
 
 Goal: 0 draws-per-second at idle. Implementation:
