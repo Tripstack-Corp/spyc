@@ -562,8 +562,18 @@ doctor: ## Check build prerequisites
 
 # ---------- Clean ------------------------------------------------------------
 
+# A target dir outside the checkout is shared with every other worktree, and
+# `cargo clean` there deletes all of their builds, not this one's.
 .PHONY: clean
-clean: ## Remove build artifacts
+clean: ## Remove build artifacts (refuses on a shared target dir; FORCE=1 overrides)
+	@case "$(abspath $(TARGET_DIR))/" in "$(CURDIR)/"*) ;; *) \
+		if [ -z "$(FORCE)" ]; then \
+			echo "refusing: $(TARGET_DIR) is outside this checkout, so it is shared:"; \
+			echo "  cargo clean would delete every worktree's build, not just this one's."; \
+			echo "  'make prune-target' drops only dead output; 'make clean FORCE=1' wipes it anyway."; \
+			exit 1; \
+		fi ;; \
+	esac
 	cargo clean
 	rm -rf $(DIST_DIR)
 
