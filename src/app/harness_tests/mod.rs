@@ -469,6 +469,7 @@ mod archive;
 mod codex_home;
 mod codex_images;
 mod focused_column;
+mod history_editor;
 mod jump_default;
 mod mcp;
 mod pane;
@@ -477,6 +478,7 @@ mod per_column;
 mod prompt_templates;
 mod second_commander;
 mod send_selection;
+mod tab_completion;
 mod vsplit;
 mod why_status;
 
