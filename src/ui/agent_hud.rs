@@ -1,5 +1,6 @@
-//! Pure native agent strip geometry and text. The caller supplies every source,
-//! timestamp and attention state; this renderer owns no clock or collection.
+//! Pure native agent strip geometry and text, for Codex and Claude Code tabs.
+//! The caller supplies every source, timestamp and attention state; this
+//! renderer owns no clock or collection.
 
 use jiff::Timestamp;
 use ratatui::{
@@ -9,8 +10,11 @@ use ratatui::{
 };
 
 use super::{display_truncate, display_truncate_tail, display_width, theme::Theme};
+use crate::agent::claude_metrics;
 use crate::agent::codex_metrics::{Availability, LimitState, Sample, Snapshot, Tokens, ToolStatus};
 use crate::config::{AgentHudMode, HUD_STALE_AFTER_SECS};
+
+mod claude;
 
 pub struct HudLayout {
     pub child: Rect,
@@ -36,6 +40,18 @@ pub fn partition(rect: Rect, requested: AgentHudMode) -> HudLayout {
     HudLayout { child, strip }
 }
 
+/// The agent's own metrics, `None` until its source is available.
+#[derive(Clone, Copy)]
+pub enum Metrics<'a> {
+    Codex(Option<&'a Snapshot>),
+    Claude {
+        snapshot: Option<&'a claude_metrics::Snapshot>,
+        /// The read began part-way through the transcript, so its totals
+        /// miss what came before.
+        tail_only: bool,
+    },
+}
+
 pub struct HudView<'a> {
     pub session: Option<&'a str>,
     pub attention: &'a str,
@@ -43,7 +59,7 @@ pub struct HudView<'a> {
     pub repository: Option<&'a str>,
     pub branch: Option<&'a str>,
     pub elapsed_secs: Option<u64>,
-    pub snapshot: Option<&'a Snapshot>,
+    pub metrics: Metrics<'a>,
     pub availability: Option<Availability>,
     pub now: Option<Timestamp>,
     pub hooks: &'a str,
@@ -59,15 +75,54 @@ pub fn lines(
     if mode == AgentHudMode::Off || width == 0 {
         return Vec::new();
     }
-    let mut out = vec![
-        identity(view, width, theme),
-        plain(metrics(view), width, theme),
-    ];
+    let (metrics, mode_row, tools) = match view.metrics {
+        Metrics::Codex(snapshot) => (
+            metrics(snapshot, view),
+            operating_mode(snapshot, view),
+            tools(snapshot),
+        ),
+        Metrics::Claude {
+            snapshot,
+            tail_only,
+        } => (
+            claude::metrics(snapshot, tail_only, view.availability),
+            claude::operating_mode(snapshot, view),
+            claude::tools(snapshot, tail_only),
+        ),
+    };
+    let mut out = vec![identity(view, width, theme), plain(metrics, width, theme)];
     if mode == AgentHudMode::Full {
-        out.push(plain(operating_mode(view), width, theme));
-        out.push(plain(tools(view), width, theme));
+        out.push(plain(mode_row, width, theme));
+        out.push(plain(tools, width, theme));
     }
     out
+}
+
+/// The model, effort and whether that report is stale, once one arrived.
+fn model(view: &HudView<'_>) -> Option<String> {
+    let fresh = |stale: bool| if stale { " (stale)" } else { "" };
+    let (model, effort, stale) = match view.metrics {
+        Metrics::Codex(snapshot) => {
+            let mode = snapshot?.mode.as_ref()?;
+            let value = &mode.value;
+            (&value.model, &value.effort, stale(mode, view.now))
+        }
+        Metrics::Claude { snapshot, .. } => {
+            let mode = snapshot?.mode.as_ref()?;
+            let value = &mode.value;
+            let stale = view
+                .now
+                .is_some_and(|now| mode.is_stale_at(now, HUD_STALE_AFTER_SECS));
+            (&value.model, &value.effort, stale)
+        }
+    };
+    let mut label = model.as_deref().unwrap_or("model --").to_owned();
+    if let Some(effort) = effort.as_deref() {
+        label.push_str(" · ");
+        label.push_str(effort);
+    }
+    label.push_str(fresh(stale));
+    Some(label)
 }
 
 fn identity(view: &HudView<'_>, width: u16, theme: &Theme) -> Line<'static> {
@@ -76,17 +131,7 @@ fn identity(view: &HudView<'_>, width: u16, theme: &Theme) -> Line<'static> {
         .map_or("session --", |id| display_truncate_tail(id, 8));
     let primary = safe_label(&format!("{} · {session}", view.attention));
     let mut text = display_truncate(&primary, usize::from(width)).to_owned();
-    let mode = view.snapshot.and_then(|s| s.mode.as_ref());
-    if let Some(mode) = mode {
-        let value = &mode.value;
-        let mut model = value.model.as_deref().unwrap_or("model --").to_owned();
-        if let Some(effort) = value.effort.as_deref() {
-            model.push_str(" · ");
-            model.push_str(effort);
-        }
-        if stale(mode, view.now) {
-            model.push_str(" (stale)");
-        }
+    if let Some(model) = model(view) {
         append(&mut text, &model, width);
     }
     if let Some(repository) = view.repository {
@@ -112,11 +157,11 @@ fn identity(view: &HudView<'_>, width: u16, theme: &Theme) -> Line<'static> {
     ))
 }
 
-fn metrics(view: &HudView<'_>) -> String {
-    let Some(s) = view.snapshot else {
+fn metrics(snapshot: Option<&Snapshot>, view: &HudView<'_>) -> String {
+    let Some(s) = snapshot else {
         return format!(
             "Context -- | Usage -- | {}",
-            source_label(view.availability)
+            source_label(view.availability, "rollout")
         );
     };
     let request = s.request.as_ref().or(s.legacy_last.as_ref());
@@ -151,11 +196,8 @@ fn metrics(view: &HudView<'_>) -> String {
     )
 }
 
-fn operating_mode(view: &HudView<'_>) -> String {
-    let mode = view
-        .snapshot
-        .and_then(|s| s.mode.as_ref())
-        .map(|s| &s.value);
+fn operating_mode(snapshot: Option<&Snapshot>, view: &HudView<'_>) -> String {
+    let mode = snapshot.and_then(|s| s.mode.as_ref()).map(|s| &s.value);
     let approval = mode.and_then(|m| m.approval.as_deref()).unwrap_or("--");
     let sandbox = mode.and_then(|m| m.sandbox.as_deref()).unwrap_or("--");
     format!(
@@ -164,8 +206,8 @@ fn operating_mode(view: &HudView<'_>) -> String {
     )
 }
 
-fn tools(view: &HudView<'_>) -> String {
-    let Some(snapshot) = view.snapshot else {
+fn tools(snapshot: Option<&Snapshot>) -> String {
+    let Some(snapshot) = snapshot else {
         return "Observed tools: --".to_owned();
     };
     if snapshot.tools.is_empty() {
@@ -201,7 +243,7 @@ fn stale<T>(sample: &Sample<T>, now: Option<Timestamp>) -> bool {
     now.is_some_and(|now| sample.is_stale_at(now, HUD_STALE_AFTER_SECS))
 }
 
-fn short_count(n: u64) -> String {
+pub(super) fn short_count(n: u64) -> String {
     for (scale, suffix) in [(1_000_000_000, "B"), (1_000_000, "M"), (1_000, "k")] {
         if n >= scale {
             return format!("{}.{}{suffix}", n / scale, n % scale / (scale / 10));
@@ -210,15 +252,16 @@ fn short_count(n: u64) -> String {
     n.to_string()
 }
 
-const fn source_label(source: Option<Availability>) -> &'static str {
+/// Why the metrics are unknown. `file` names the agent's session file.
+fn source_label(source: Option<Availability>, file: &str) -> String {
     match source {
-        None => "awaiting pinned metrics",
-        Some(Availability::Available) => "Limits not reported",
-        Some(Availability::Missing) => "rollout missing",
-        Some(Availability::Unreadable) => "rollout unreadable",
-        Some(Availability::IdentityMismatch) => "identity mismatch",
-        Some(Availability::InvalidHeader) => "invalid rollout header",
-        Some(Availability::WatchFailed) => "watch unavailable",
+        None => "awaiting pinned metrics".to_owned(),
+        Some(Availability::Available) => "Limits not reported".to_owned(),
+        Some(Availability::Missing) => format!("{file} missing"),
+        Some(Availability::Unreadable) => format!("{file} unreadable"),
+        Some(Availability::IdentityMismatch) => "identity mismatch".to_owned(),
+        Some(Availability::InvalidHeader) => format!("invalid {file} header"),
+        Some(Availability::WatchFailed) => "watch unavailable".to_owned(),
     }
 }
 
@@ -271,7 +314,7 @@ mod tests {
             repository: Some("中文\x1b[31m\nrepo"),
             branch: Some("emoji❤️\tbranch"),
             elapsed_secs: None,
-            snapshot: None,
+            metrics: Metrics::Codex(None),
             availability: None,
             now: None,
             hooks: "defined; unverified",
@@ -349,7 +392,7 @@ mod tests {
             repository: Some("中文❤️"),
             branch: Some("👨‍👩‍👧"),
             elapsed_secs: None,
-            snapshot: Some(&snapshot),
+            metrics: Metrics::Codex(Some(&snapshot)),
             availability: Some(Availability::Available),
             now: Some(at),
             hooks: "defined, unverified",

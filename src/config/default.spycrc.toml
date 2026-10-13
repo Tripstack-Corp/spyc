@@ -98,8 +98,9 @@
 # claude_transcript_scrollback = false
 # agy_transcript_scrollback = true
 # preview_pasted_images = true
-# Native Codex strip, off by default. Home config only; no native Codex setting
-# is changed. Runtime control: :agent hud off|compact|full; :agent hud info.
+# Native strip for Codex and Claude Code tabs, off by default. Home config only;
+# no agent setting is changed. Runtime control: :agent hud off|compact|full;
+# :agent hud info.
 # agent_hud = "off"
 #   Keep a copy of each image you paste into an agent pane, so `^a g` can show
 #   it before you send. An agent reads the system clipboard itself on its paste

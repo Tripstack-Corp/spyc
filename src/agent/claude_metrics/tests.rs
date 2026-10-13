@@ -375,3 +375,42 @@ fn absence_and_invalid_values_do_not_become_zero() {
     assert_eq!(snapshot.mode, None, "unprintable labels are not a mode");
     assert_eq!(snapshot.messages, 1);
 }
+
+/// An MCP tool's name carries its server's, which can be private.
+#[test]
+fn only_spycs_mcp_server_keeps_its_name() {
+    let content = json!([
+        {"type": "tool_use", "id": "call-1", "name": "mcp__PRIVATE_SERVER__lookup", "input": {}},
+        {"type": "tool_use", "id": "call-2", "name": "mcp__spycish__lookup", "input": {}},
+        {"type": "tool_use", "id": "call-3", "name": "mcp__spyc__report_status", "input": {}},
+        {"type": "tool_use", "id": "call-4", "name": "Bash", "input": {}},
+    ]);
+    let snapshot = fold_all(&[assistant("msg-1", 1, usage(1, 1, 1, 1), content)]);
+    let names: Vec<_> = snapshot
+        .tools
+        .iter()
+        .map(|tool| tool.name.as_deref())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            Some("mcp"),
+            Some("mcp"),
+            Some("mcp__spyc__report_status"),
+            Some("Bash")
+        ]
+    );
+}
+
+#[test]
+fn the_home_is_the_config_dir_else_dot_claude_and_never_relative() {
+    let os = |s: &str| Some(std::ffi::OsString::from(s));
+    let path = |s: &str| Some(std::path::PathBuf::from(s));
+    assert_eq!(home(os("/etc/claude"), os("/home/u")), path("/etc/claude"));
+    assert_eq!(home(os(""), os("/home/u")), path("/home/u/.claude"));
+    assert_eq!(home(None, os("/home/u")), path("/home/u/.claude"));
+    assert_eq!(home(os("claude"), os("/home/u")), None);
+    assert_eq!(home(None, os("home")), None);
+    assert_eq!(home(None, os("")), None);
+    assert_eq!(home(None, None), None);
+}

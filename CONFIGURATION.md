@@ -83,28 +83,30 @@ for the annotated version of each.
 
 ### Agent HUD — `[pane] agent_hud`
 
-The native Codex strip is **off by default**. Set `agent_hud = "compact"` or
-`"full"` in `~/.spycrc.toml`; project-local values are ignored. Use
-`:agent hud off|compact|full` to change it for the current run. A config reload
-restores the file preference. `:agent hud info` opens saveable source diagnostics.
+The native agent strip, for Codex and Claude Code tabs, is **off by default**.
+Set `agent_hud = "compact"` or `"full"` in `~/.spycrc.toml`; project-local
+values are ignored. Use `:agent hud off|compact|full` to change it for the
+current run. A config reload restores the file preference. `:agent hud info`
+opens saveable source diagnostics.
 
 Compact uses two rows below the child; full adds operating-mode and recent-tool
 rows, for four rows with the available sources. The child keeps at least six
 rows: full collapses to compact below ten available pane rows, and the strip
-hides below eight. It follows the active live Codex tab, including pane zoom,
-vertical splits and scrollback. Hidden panes, closed tabs, other agents and a
-fullscreen image have no strip or metric subscription. The native composer and
-status line stay inside the resized child.
+hides below eight. It follows the active live Codex or Claude Code tab,
+including pane zoom, vertical splits and scrollback. Hidden panes, closed tabs,
+other agents and a fullscreen image have no strip or metric subscription. The
+native composer and status line stay inside the resized child.
 
-Attention comes from the existing activity dot. Session identity uses the UUID
-suffix, with model, effort, repository, known branch and elapsed minutes added
-when they fit. `Req`, `Turn` and `Thread` are separately reported token totals;
-legacy totals remain labelled and are never added to current totals. A reported
-zero is different from `--`. `Context --` means current occupancy is unknown;
-a reported model window and lifetime usage cannot establish a percentage.
-Limits may be not reported or unsupported. Recent tools are partial observations,
-not a count of active tools or agents. Hook definitions are labelled unverified
-until events are observed; MCP counts describe observed bound connections.
+Attention comes from the existing activity dot, with what a `waiting` agent
+waits on. Session identity uses the UUID suffix, with model, effort, repository,
+known branch and elapsed minutes added when they fit. For a Codex tab, `Req`,
+`Turn` and `Thread` are separately reported token totals; legacy totals remain
+labelled and are never added to current totals. A reported zero is different
+from `--`. `Context --` means current occupancy is unknown; a reported model
+window and lifetime usage cannot establish a percentage. Limits may be not
+reported or unsupported. Recent tools are partial observations, not a count of
+active tools or agents. Hook definitions are labelled unverified until events
+are observed; MCP counts describe observed bound connections.
 
 Collection reads the pinned rollout under the pane's captured Codex home.
 Startup filename lookup is bounded and requires one matching file; missing,
@@ -115,6 +117,24 @@ No account request or additional Codex session is opened. Samples older than
 updates on other events and existing activity animation, so an idle strip has
 no recurring clock. Diagnostics contain source, identity, freshness and bounded
 metric observations, with no prompts, tool arguments or output.
+
+For a Claude Code tab, `Context` is what its latest request sent, in tokens:
+input plus prompt-cache reads and writes. It is never a percentage, since the
+transcript has no window size, and after a compaction it reads `-- (compacted)`
+until the next request. `Session` sums every distinct message since the read
+began, with its output in brackets, and survives compactions; `partial` means a
+long transcript was read from part-way through. Full mode adds the permission
+mode, the two latest tool calls, and how many subagent (`Agent`) and background
+calls were made. Only spyc's own MCP server keeps its name in a tool label;
+other servers' tools read `mcp`.
+
+The strip reads `projects/*/<session>.jsonl` in Claude Code's configuration
+directory, `$CLAUDE_CONFIG_DIR` or else `~/.claude`, as spyc's own environment
+names it at startup. The session is the one the tab's status hooks reported, so
+the strip waits for the first report. Claude Code files a session under the
+directory it started in, so every project is asked for that exact name, and a
+session found in two projects is not guessed between. The plan row is not shown:
+no transcript with `TodoWrite` or the `Task` tools has been checked yet.
 
 ### Colour depth — `[layout] color_depth`
 

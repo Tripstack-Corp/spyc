@@ -2,10 +2,12 @@
 
 use ratatui::{Frame, layout::Rect};
 
-use crate::agent::codex_metrics::Availability;
+use crate::agent::tail::Availability;
 use crate::config::AgentHudMode;
 use crate::pane::AgentActivity;
-use crate::ui::agent_hud::{self, HudView};
+use crate::ui::agent_hud::{self, HudView, Metrics};
+
+use super::super::state::agent_hud::{Feed, Update};
 
 use super::super::App;
 
@@ -23,8 +25,22 @@ impl App {
         let entry = &tabs.tabs()[tabs.active_index()];
         let info = &entry.info;
         let update = self.active_agent_hud_update();
-        let snapshot =
-            update.and_then(|u| (u.availability == Availability::Available).then_some(&u.snapshot));
+        let metrics = match update {
+            Some(Update::Codex(u)) => {
+                Metrics::Codex((u.availability == Availability::Available).then_some(&u.snapshot))
+            }
+            Some(Update::Claude(u)) => Metrics::Claude {
+                snapshot: (u.availability == Availability::Available).then_some(&u.snapshot),
+                tail_only: u.tail_only,
+            },
+            None => match super::super::agent_hud::feed(info.agent().kind()) {
+                Some(Feed::Claude) => Metrics::Claude {
+                    snapshot: None,
+                    tail_only: false,
+                },
+                _ => Metrics::Codex(None),
+            },
+        };
         let cwd = entry.live_cwd();
         let repository = super::super::path_basename_display(&cwd);
         // A different cached column cannot establish the pane's branch.
@@ -56,6 +72,16 @@ impl App {
                 AgentActivity::Unknown => "status --",
             }
         };
+        // What a `waiting` agent waits on, as it or its `Stop` hook said.
+        let note = (!info.suspended && info.activity == AgentActivity::Waiting)
+            .then_some(info.reported.as_ref())
+            .flatten()
+            .filter(|r| r.status == AgentActivity::Waiting)
+            .and_then(|r| r.note.as_deref());
+        let attention = note.map_or_else(
+            || attention.to_owned(),
+            |note| format!("{attention} · {note}"),
+        );
         let hooks = if !info.recent_hook_events.is_empty() {
             "events reported"
         } else if info.status_hooks_restart_needed {
@@ -71,14 +97,14 @@ impl App {
                 .map(|now| now.saturating_sub(info.agent_epoch_secs()))
         });
         let view = HudView {
-            session: info.codex_session_id.as_deref(),
-            attention,
+            session: info.pinned_session_id(),
+            attention: &attention,
             needs_user: info.activity == AgentActivity::Blocked,
             repository: Some(&repository),
             branch,
             elapsed_secs,
-            snapshot,
-            availability: update.map(|u| u.availability),
+            metrics,
+            availability: update.map(Update::availability),
             now: self.state.pane.agent_hud.as_of,
             hooks,
             mcp_connections: self

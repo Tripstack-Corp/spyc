@@ -987,12 +987,13 @@ buffer in one keystroke. The help overlay is excluded from the
 stack. Walking off the end keeps the current pager open with a
 flash instead of silently closing. Scroll positions are preserved.
 
-## Native Codex HUD
+## Native agent HUD
 
-`:agent hud compact` enables a two-row strip below the active Codex pane;
-`:agent hud full` adds operating mode and partial recent-tool observations.
-Attention and session identity lead the strip. Usage scopes stay separate, and
-unavailable context occupancy and limits stay explicit. `:agent hud off` stops
+`:agent hud compact` enables a two-row strip below the active Codex or Claude
+Code pane; `:agent hud full` adds operating mode and recent tools. Attention,
+with what a `waiting` agent waits on, and session identity lead the strip.
+Usage scopes stay separate, and unavailable context occupancy and limits stay
+explicit. A Claude Code tab's context is a token count, never a percentage. `:agent hud off` stops
 collection; `:agent hud info` shows saveable source and freshness diagnostics.
 The strip uses the shared pane geometry, preserves six child rows and needs no
 idle polling. See [configuration and source semantics](CONFIGURATION.md#agent-hud--pane-agent_hud)

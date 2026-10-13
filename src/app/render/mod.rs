@@ -1084,6 +1084,10 @@ mod purity_guard {
         ("render/agent_hud.rs", include_str!("agent_hud.rs")),
         ("render/layout.rs", include_str!("layout.rs")),
         ("ui/agent_hud.rs", include_str!("../../ui/agent_hud.rs")),
+        (
+            "ui/agent_hud/claude.rs",
+            include_str!("../../ui/agent_hud/claude.rs"),
+        ),
     ];
 
     /// High-signal tokens for blocking IO / OS access / thread spawning that

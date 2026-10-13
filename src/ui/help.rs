@@ -468,7 +468,7 @@ const SECTIONS: &[Section] = &[
             ),
             (
                 ":agent hud off|compact|full",
-                "native Codex strip (off by default)",
+                "native Codex / Claude Code strip (off by default)",
             ),
             (":agent hud info", "saveable metric sources and freshness"),
             ("^L", "redraw"),

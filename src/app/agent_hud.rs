@@ -1,12 +1,12 @@
-//! Reconcile the one visible Codex strip consumer through effects. Metric wakes
-//! supplement the display without changing the agent's semantic activity.
+//! Reconcile the one visible agent strip consumer, for a Codex or Claude Code
+//! tab, through effects. Metric wakes supplement the display without changing
+//! the agent's semantic activity.
 
 use jiff::Timestamp;
 use ratatui::layout::Rect;
 
-use super::state::agent_hud::{ConsumerChange, Target};
+use super::state::agent_hud::{Binding, ConsumerChange, Feed, Target, Update};
 use super::{App, Deadline, Effect, RunCtx};
-use crate::agent::codex_metrics::{Binding, Update};
 use crate::config::AgentHudMode;
 use crate::state::sessions::AgentKind;
 
@@ -19,7 +19,7 @@ impl App {
             return AgentHudMode::Off;
         }
         let eligible = self.runtime.pane_tabs.as_ref().is_some_and(|tabs| {
-            !tabs.active().is_closed() && tabs.active_info().agent().kind() == AgentKind::Codex
+            !tabs.active().is_closed() && feed(tabs.active_info().agent().kind()).is_some()
         });
         if eligible {
             self.state.config.pane.agent_hud
@@ -32,15 +32,23 @@ impl App {
         let (cols, rows) = self.view.term_size;
         self.frame_layout(Rect::new(0, 0, cols, rows)).agent_hud?;
         let info = self.runtime.pane_tabs.as_ref()?.active_info();
-        let thread = info
-            .codex_session_id
+        let feed = feed(info.agent().kind())?;
+        let (session, home) = match feed {
+            Feed::Codex => (&info.codex_session_id, &info.codex_home),
+            Feed::Claude => (
+                &info.live_session_id,
+                &self.state.pane.agent_hud.claude_home,
+            ),
+        };
+        let session = session
             .as_deref()
             .filter(|id| crate::state::sessions::is_uuid(id))?;
-        let home = info.codex_home.as_ref().filter(|home| home.is_absolute())?;
+        let home = home.as_ref().filter(|home| home.is_absolute())?;
         Some(Target {
+            feed,
             pane_id: info.id.clone(),
-            thread_id: thread.to_owned(),
-            codex_home: home.clone(),
+            session_id: session.to_owned(),
+            home: home.clone(),
         })
     }
 
@@ -67,10 +75,14 @@ impl App {
         let Some(update) = collector.take() else {
             return false;
         };
-        if !target
-            .as_ref()
-            .is_some_and(|target| target.matches(&update.binding))
-        {
+        if !target.as_ref().is_some_and(|target| {
+            self.state
+                .pane
+                .agent_hud
+                .binding
+                .as_ref()
+                .is_some_and(|b| target.matches(b) && update.is_for(b))
+        }) {
             return false;
         }
         let work = collector.work();
@@ -154,6 +166,15 @@ impl App {
         self.state
             .flash_info("usage: :agent hud off|compact|full|info");
         Vec::new()
+    }
+}
+
+/// The agents whose session files can feed the strip.
+pub(super) const fn feed(kind: AgentKind) -> Option<Feed> {
+    match kind {
+        AgentKind::Codex => Some(Feed::Codex),
+        AgentKind::Claude => Some(Feed::Claude),
+        _ => None,
     }
 }
 
