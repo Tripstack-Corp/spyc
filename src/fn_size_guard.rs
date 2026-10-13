@@ -59,10 +59,6 @@ const FUNCTION: Rule = Rule {
             "src/app/render/activity_hud.rs::App::render_activity_hud",
             157,
         ),
-        (
-            "src/app/render/chrome.rs::App::render_pane_status_line",
-            196,
-        ),
         ("src/app/render/inner.rs::App::render_inner", 141),
         ("src/app/render/mod.rs::App::compute_layout", 183),
         ("src/app/render/overlays.rs::App::render_image_gallery", 129),
