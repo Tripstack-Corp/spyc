@@ -84,6 +84,8 @@ pub enum Message {
 /// collapsed correctly the moment it exists.
 #[derive(Debug)]
 pub enum Wake {
+    /// The bounded HUD startup slot or exact-rollout subscription has changed.
+    AgentHud,
     /// MVU Phase 3b: a pane PTY output WAKEUP — never carries bytes. A
     /// lost-wakeup-safe edge from a parser worker's 0→1 `wake_pending` CAS
     /// (the worker bumps `parser_gen` first). The loop treats it purely as

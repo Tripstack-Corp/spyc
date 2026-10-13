@@ -26,6 +26,7 @@ enum PromptRow<'a> {
 
 impl App {
     pub(super) fn render_inner(&self, frame: &mut Frame, layout: FrameLayout) {
+        self.render_agent_hud_strip(frame, layout.agent_hud);
         // `layout` and the list rows/grid are settled by `prepare_frame`
         // before this draw pass; this method only paints.
 
@@ -33,103 +34,7 @@ impl App {
         // replaces the entire spyc area. Status, list, and prompt are
         // hidden; only the overlay + divider + bottom pane render.
         if let Some(overlay) = self.runtime.top_overlay.as_ref() {
-            // The overlay occupies the spyc unit above the divider
-            // (`top_unit`) — not `status.y + Σheights`, which lands
-            // off-screen and panics with `status_position = "bottom"`.
-            let overlay_area = layout.top_unit;
-            // Overlay resize/drain + the dismissal flag are settled in
-            // `prepare_panes` before this draw (MVU Stage 2).
-            // Visual focus tracks `state.pane_focused`: false ⇒
-            // overlay focused (cursor block, full colour); true ⇒
-            // bottom pane focused (overlay dims to half-lightness via
-            // PaneWidget's DIM modifier). User toggles with ^a-j/k.
-            // The overlay is bright only when it actually owns the keyboard: not
-            // the bottom pane, AND (in a vsplit) its own column is focused — so a
-            // `V` in `a` dims when `^a l` moves focus to `b`. This is the LEFT /
-            // single / no-split overlay slot; the right column's overlay is drawn
-            // (and focus-tracked) in `render_right_split`.
-            let overlay_focused = self.column_focused(state::Side::Left);
-            let want_overlay_cursor = overlay_focused && !self.view.overlay_awaiting_dismiss;
-            overlay.with_screen(|screen| {
-                frame.render_widget(
-                    PaneWidget {
-                        screen,
-                        focused: overlay_focused,
-                        selection: None,
-                    },
-                    overlay_area,
-                );
-                if want_overlay_cursor {
-                    crate::app::util::place_pty_cursor_from_screen(frame, screen, overlay_area);
-                }
-            });
-            // Show a dismiss prompt when the subprocess has exited.
-            if self.view.overlay_awaiting_dismiss && overlay_area.height > 0 {
-                use ratatui::{
-                    style::{Modifier, Style},
-                    text::{Line, Span},
-                    widgets::Paragraph,
-                };
-                let prompt_y = overlay_area.y + overlay_area.height.saturating_sub(1);
-                let prompt_rect = ratatui::layout::Rect {
-                    x: overlay_area.x,
-                    y: prompt_y,
-                    width: overlay_area.width,
-                    height: 1,
-                };
-                let style = Style::default()
-                    .fg(self.view.theme.prompt_prefix)
-                    .add_modifier(Modifier::BOLD);
-                frame.render_widget(
-                    Paragraph::new(Line::from(Span::styled(
-                        "[process exited — press any key to continue]",
-                        style,
-                    ))),
-                    prompt_rect,
-                );
-            }
-
-            // Divider + bottom region still render normally. The bottom region
-            // is the `^a v` scrollback (`view.scroll_pager`) if open, else the
-            // live pane — so a top overlay and a bottom scrollback coexist (the
-            // shared helper is what makes `^a v` work while an editor is open).
-            let displaced = self.displaced_prompt_row(&layout);
-            if let Some(divider_rect) = layout.divider
-                && displaced != Some(divider_rect)
-            {
-                self.render_pane_status_line(frame, divider_rect);
-            }
-            if let Some(rect) = layout.pane {
-                // Suppress the pty cursor while the overlay awaits dismissal so
-                // the "[process exited — press any key]" frame shows no stray
-                // cursor (the overlay's own cursor is suppressed the same way).
-                self.render_bottom_region(frame, rect, self.view.overlay_awaiting_dismiss);
-            }
-            // The overlay (`top_unit`) is scoped to the focused column when a
-            // vertical split is open; keep the OTHER column (its list / the
-            // preview) visible beside it.
-            self.render_column_beside_overlay(frame, &layout);
-            // This branch returns early, so the prompt line is painted here: into
-            // the row a split reserves below its columns, else wherever
-            // `displaced_prompt_row` moved it.
-            if self.state.vsplit.is_some() {
-                self.render_prompt_line(frame, layout.prompt);
-            } else if let Some(rect) = displaced {
-                frame.render_widget(ratatui::widgets::Clear, rect);
-                self.render_prompt_line(frame, rect);
-            }
-            // A centred `Overlay` pager (help / grep / git-view / version, …)
-            // opened while the editor is up must still draw. The user switched
-            // focus off the editor (e.g. `^a l` to `b`), so `?` landed an
-            // Overlay pager in `view.pager` that owns focus but has no draw
-            // site in this branch — paint it on top before returning (mirrors
-            // the TopPane branch's help tail below). Without this it's invisible
-            // yet still eats input.
-            if let Some(view) = self.view.pager.as_ref()
-                && matches!(view.mount, crate::ui::pager::Mount::Overlay)
-            {
-                crate::ui::pager::render(frame, frame.area(), view, &self.view.theme);
-            }
+            self.render_top_overlay_branch(frame, layout, overlay);
             return;
         }
 
@@ -442,7 +347,7 @@ impl App {
     /// so each row records itself and paints its own selection. Rows past
     /// `rect.height` are dropped, matching the clipping a single `Paragraph`
     /// over the same rect would apply.
-    fn draw_chrome_rows(
+    pub(super) fn draw_chrome_rows(
         &self,
         frame: &mut Frame,
         rect: ratatui::layout::Rect,
@@ -778,5 +683,112 @@ impl App {
             Paragraph::new(Line::from(Span::styled(footer, style))),
             hint_area,
         );
+    }
+}
+
+impl App {
+    fn render_top_overlay_branch(
+        &self,
+        frame: &mut Frame,
+        layout: FrameLayout,
+        overlay: &crate::pane::Pane,
+    ) {
+        // The overlay occupies the spyc unit above the divider
+        // (`top_unit`) — not `status.y + Σheights`, which lands
+        // off-screen and panics with `status_position = "bottom"`.
+        let overlay_area = layout.top_unit;
+        // Overlay resize/drain + the dismissal flag are settled in
+        // `prepare_panes` before this draw (MVU Stage 2).
+        // Visual focus tracks `state.pane_focused`: false ⇒
+        // overlay focused (cursor block, full colour); true ⇒
+        // bottom pane focused (overlay dims to half-lightness via
+        // PaneWidget's DIM modifier). User toggles with ^a-j/k.
+        // The overlay is bright only when it actually owns the keyboard: not
+        // the bottom pane, AND (in a vsplit) its own column is focused — so a
+        // `V` in `a` dims when `^a l` moves focus to `b`. This is the LEFT /
+        // single / no-split overlay slot; the right column's overlay is drawn
+        // (and focus-tracked) in `render_right_split`.
+        let overlay_focused = self.column_focused(state::Side::Left);
+        let want_overlay_cursor = overlay_focused && !self.view.overlay_awaiting_dismiss;
+        overlay.with_screen(|screen| {
+            frame.render_widget(
+                PaneWidget {
+                    screen,
+                    focused: overlay_focused,
+                    selection: None,
+                },
+                overlay_area,
+            );
+            if want_overlay_cursor {
+                crate::app::util::place_pty_cursor_from_screen(frame, screen, overlay_area);
+            }
+        });
+        // Show a dismiss prompt when the subprocess has exited.
+        if self.view.overlay_awaiting_dismiss && overlay_area.height > 0 {
+            use ratatui::{
+                style::{Modifier, Style},
+                text::{Line, Span},
+                widgets::Paragraph,
+            };
+            let prompt_y = overlay_area.y + overlay_area.height.saturating_sub(1);
+            let prompt_rect = ratatui::layout::Rect {
+                x: overlay_area.x,
+                y: prompt_y,
+                width: overlay_area.width,
+                height: 1,
+            };
+            let style = Style::default()
+                .fg(self.view.theme.prompt_prefix)
+                .add_modifier(Modifier::BOLD);
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "[process exited — press any key to continue]",
+                    style,
+                ))),
+                prompt_rect,
+            );
+        }
+
+        // Divider + bottom region still render normally. The bottom region
+        // is the `^a v` scrollback (`view.scroll_pager`) if open, else the
+        // live pane — so a top overlay and a bottom scrollback coexist (the
+        // shared helper is what makes `^a v` work while an editor is open).
+        let displaced = self.displaced_prompt_row(&layout);
+        if let Some(divider_rect) = layout.divider
+            && displaced != Some(divider_rect)
+        {
+            self.render_pane_status_line(frame, divider_rect);
+        }
+        if let Some(rect) = layout.pane {
+            // Suppress the pty cursor while the overlay awaits dismissal so
+            // the "[process exited — press any key]" frame shows no stray
+            // cursor (the overlay's own cursor is suppressed the same way).
+            self.render_bottom_region(frame, rect, self.view.overlay_awaiting_dismiss);
+        }
+        // The overlay (`top_unit`) is scoped to the focused column when a
+        // vertical split is open; keep the OTHER column (its list / the
+        // preview) visible beside it.
+        self.render_column_beside_overlay(frame, &layout);
+        // This branch returns early, so the prompt line is painted here: into
+        // the row a split reserves below its columns, else wherever
+        // `displaced_prompt_row` moved it.
+        if self.state.vsplit.is_some() {
+            self.render_prompt_line(frame, layout.prompt);
+        } else if let Some(rect) = displaced {
+            frame.render_widget(ratatui::widgets::Clear, rect);
+            self.render_prompt_line(frame, rect);
+        }
+        // A centred `Overlay` pager (help / grep / git-view / version, …)
+        // opened while the editor is up must still draw. The user switched
+        // focus off the editor (e.g. `^a l` to `b`), so `?` landed an
+        // Overlay pager in `view.pager` that owns focus but has no draw
+        // site in this branch — paint it on top before returning (mirrors
+        // the TopPane branch's help tail below). Without this it's invisible
+        // yet still eats input.
+        if let Some(view) = self.view.pager.as_ref()
+            && matches!(view.mount, crate::ui::pager::Mount::Overlay)
+        {
+            crate::ui::pager::render(frame, frame.area(), view, &self.view.theme);
+        }
     }
 }

@@ -466,6 +466,11 @@ const SECTIONS: &[Section] = &[
                 "(hold a chord)",
                 "which-key popup of a prefix's keys ([layout] chord_hint_delay_ms; 0 disables)",
             ),
+            (
+                ":agent hud off|compact|full",
+                "native Codex strip (off by default)",
+            ),
+            (":agent hud info", "saveable metric sources and freshness"),
             ("^L", "redraw"),
             ("^R", "reload config (auto-reloads on save)"),
             ("Q  ^D  :q  ZZ", "quit (q reserved for future macros)"),

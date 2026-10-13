@@ -183,6 +183,9 @@ impl App {
         // Model, AFTER the drain + `mark_exited` finalized `is_closed` and
         // BEFORE `recv` (see `snapshot_pane_routing`).
         self.snapshot_pane_routing();
+        if self.apply_agent_hud_updates() {
+            ctx.draw.mark(3);
+        }
     }
 
     /// The pre-`recv` timers, debounces and reconciles, against one clock read.
@@ -239,6 +242,9 @@ impl App {
         if !agent_fx.is_empty() {
             self.run_effects(agent_fx, terminal, foreground_exec);
         }
+
+        let hud_fx = self.settle_agent_hud(now_pre, ctx);
+        self.run_effects(hud_fx, terminal, foreground_exec);
 
         // P3-1 visual bell: advance/decay the spice-heat border-pulse flash
         // (armed only after a Blocked/Done transition when `[notify].visual`

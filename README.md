@@ -50,6 +50,10 @@ with git-aware listings; the **bottom pane** is a child process — Claude Code 
 default (Codex, Antigravity and zot are first-class too), in practice anything.
 They share focus through a screen-style `^a` chord prefix.
 
+Codex also has an optional [native session strip](CONFIGURATION.md#agent-hud--pane-agent_hud):
+`:agent hud compact` shows attention, identity and separately scoped usage below
+the child; `full` adds operating mode and recent observations. It is off by default.
+
 Everything else — vi motions, marks, picks, inventory, pager, shell integration —
 is what you'd expect from a keyboard-driven file manager. The MCP bridge is what
 sets spyc apart from Yazi, Broot, or Ranger.

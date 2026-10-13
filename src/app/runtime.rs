@@ -94,6 +94,8 @@ pub(super) struct Runtime {
     pub(super) lua_events: lua_events::LuaEventState,
     /// Bottom pane tabs (each owns a `PtyHost`).
     pub(super) pane_tabs: Option<PaneTabs>,
+    /// The one visible strip subscription; dropping it cancels its workers.
+    pub(super) agent_hud: Option<super::agent_hud::collector::Collector>,
     /// Top-area overlay subprocess (`V`/`D`/`;`) — a `PtyHost`. The LEFT
     /// column's (or single / no-split / full-frame `;cmd`) editor / `$PAGER`.
     pub(super) top_overlay: Option<Pane>,

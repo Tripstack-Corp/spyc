@@ -37,6 +37,8 @@ mod pane_text;
 /// `None` variant) — see `From<PostAction>`.
 #[derive(Debug)]
 pub enum Effect {
+    /// Rebind or cancel the one visible Codex strip consumer.
+    AgentHud(Option<crate::agent::codex_metrics::Binding>),
     /// Read the system clipboard and route it as a paste (middle-click).
     ///
     /// A paste, not raw bytes: it goes through the same `handle_paste` path as a

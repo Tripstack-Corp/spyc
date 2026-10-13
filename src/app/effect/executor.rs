@@ -47,6 +47,7 @@ impl App {
                 continue;
             };
             match effect {
+                Effect::AgentHud(binding) => self.execute_agent_hud(binding),
                 // A-class: copy + flash synchronously, same tick. Never
                 // `?`-propagate a clipboard error — a failed copy flashes
                 // and the loop survives (unlike the former inline sites,
@@ -74,22 +75,7 @@ impl App {
                 // A-class: write the pager body to a timestamped file in the
                 // process cwd, then flash the path/error in the active pager's
                 // title (mirrors the former inline `save_to_file` + `view.flash`).
-                Effect::SavePagerOutput { content } => {
-                    let stamp = crate::sysinfo::format_now().replace([' ', ':'], "_");
-                    let stamp = stamp.trim_end_matches("_UTC");
-                    let filename = format!("spyc_output_{stamp}.txt");
-                    let msg = match std::env::current_dir() {
-                        Ok(dir) => {
-                            let path = dir.join(&filename);
-                            match std::fs::write(&path, &content) {
-                                Ok(()) => format!("saved: {}", path.display()),
-                                Err(e) => format!("save failed: {e}"),
-                            }
-                        }
-                        Err(e) => format!("save failed: {e}"),
-                    };
-                    self.set_active_pager_flash(msg);
-                }
+                Effect::SavePagerOutput { content } => self.save_pager_output(content),
                 Effect::ReadPaneText { kind, then } => self.execute_pane_text(kind, then),
                 // A-class: queue input for the target pane (same tick).
                 // Resolve the target; if it's gone, skip silently (matches
@@ -481,5 +467,24 @@ impl App {
                 }
             }
         }
+    }
+}
+
+impl App {
+    fn save_pager_output(&mut self, content: String) {
+        let stamp = crate::sysinfo::format_now().replace([' ', ':'], "_");
+        let stamp = stamp.trim_end_matches("_UTC");
+        let filename = format!("spyc_output_{stamp}.txt");
+        let msg = match std::env::current_dir() {
+            Ok(dir) => {
+                let path = dir.join(&filename);
+                match std::fs::write(&path, &content) {
+                    Ok(()) => format!("saved: {}", path.display()),
+                    Err(e) => format!("save failed: {e}"),
+                }
+            }
+            Err(e) => format!("save failed: {e}"),
+        };
+        self.set_active_pager_flash(msg);
     }
 }

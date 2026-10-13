@@ -101,11 +101,25 @@ rather than create a new modal type.
   chrome, as the status bar gives way for a zoomed pane; with no pane
   open, the surface's last row. The editor's text is never what gets
   covered.
-- **Activity HUD** — tiny right-anchored debug overlay (`A`
+- **Activity HUD** — tiny right-anchored debug overlay (`:activity`
   toggle). Reports dps, bytes/sec, poll period. Transparent by
   default — coloured text only, so what's beneath shows through the
   ragged left edge; `:activity solid` restores the opaque colour
   bands. Engineering tool; features should not depend on it.
+
+### Native agent strip
+
+The opt-in Codex HUD occupies rows below the child. Compact is two rows; full
+adds only the operating-mode and recent-tool rows supported by the source.
+Keep six child rows, collapse full to compact when needed, then hide the strip.
+The native composer stays visible within the child, including in zoom and splits.
+
+Attention and distinct session identity have first claim on horizontal space.
+Optional model, effort, repository, branch and elapsed minutes drop as the frame
+narrows. Use the existing theme and bold attention in monochrome. Unknown values
+are `--`; zero is measured. Label stale samples and partial observations. Totals
+retain their scopes and never stand in for context occupancy or account limits.
+The engineering Activity HUD remains the separate `:activity` overlay.
 
 ## Icons & glyphs
 

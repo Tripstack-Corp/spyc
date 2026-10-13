@@ -63,7 +63,7 @@ const PRODUCTION: Rule = Rule {
     limit: 1000,
     slack: SLACK,
     advice: "Split out a cohesive module",
-    pins: &[("src/app/state/mod.rs", 1094)],
+    pins: &[("src/app/state/mod.rs", 1053)],
 };
 
 /// Every line of the file.

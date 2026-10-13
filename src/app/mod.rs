@@ -65,6 +65,7 @@ pub struct FrameLayout {
     list: ratatui::layout::Rect,
     divider: Option<ratatui::layout::Rect>,
     pane: Option<ratatui::layout::Rect>,
+    agent_hud: Option<ratatui::layout::Rect>,
     prompt: ratatui::layout::Rect,
     /// The contiguous spyc-unit region a top overlay (`;cmd`/`$EDITOR`) or
     /// a `TopPane` pager paints over: everything above the divider when a
@@ -100,6 +101,7 @@ mod about;
 mod actions;
 mod activity;
 mod activity_diagnostics;
+mod agent_hud;
 mod agent_status;
 mod archive;
 mod archive_ops;

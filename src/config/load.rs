@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use super::{Config, FileConfig, FilePaneTab, PaneTabConfig, ProjectTabs, dsl, home_dir};
+use super::{Config, FileConfig, FilePane, FilePaneTab, PaneTabConfig, ProjectTabs, dsl, home_dir};
 
 /// Trust level of a config file. A `Project` (`<cwd>/.spycrc.toml`) file is
 /// attacker-controllable, so its executing keymap bindings are dropped;
@@ -78,7 +78,41 @@ impl Config {
         self.merge_file(file, path, trust)
     }
 
-    fn merge_file(&mut self, file: FileConfig, source: &Path, trust: Trust) -> anyhow::Result<()> {
+    fn merge_pane_preferences(&mut self, file: &mut FilePane, trust: Trust) {
+        if let Some(cmd) = file.default_command.take() {
+            self.pane.default_command = Some(cmd);
+        }
+        if let Some(v) = file.new_tab_cwd {
+            self.pane.new_tab_cwd = v;
+        }
+        if let Some(b) = file.claude_transcript_scrollback {
+            self.pane.claude_transcript_scrollback = b;
+        }
+        if let Some(b) = file.agy_transcript_scrollback {
+            self.pane.agy_transcript_scrollback = b;
+        }
+        if let Some(b) = file.preview_pasted_images {
+            self.pane.preview_pasted_images = b;
+        }
+        if let Some(b) = file.codex_mcp {
+            self.pane.codex_mcp = b;
+        }
+        if let Some(b) = file.codex_daemon {
+            self.pane.codex_daemon = b;
+        }
+        if trust == Trust::Trusted
+            && let Some(mode) = file.agent_hud
+        {
+            self.pane.agent_hud = mode;
+        }
+    }
+
+    fn merge_file(
+        &mut self,
+        mut file: FileConfig,
+        source: &Path,
+        trust: Trust,
+    ) -> anyhow::Result<()> {
         self.sources.push(source.to_path_buf());
 
         // Colours: any Some() in this file overrides the accumulated value.
@@ -105,28 +139,7 @@ impl Config {
             self.layout.status_flags = f;
         }
 
-        // Pane: per-field merge for the same reason.
-        if let Some(cmd) = file.pane.default_command {
-            self.pane.default_command = Some(cmd);
-        }
-        if let Some(v) = file.pane.new_tab_cwd {
-            self.pane.new_tab_cwd = v;
-        }
-        if let Some(b) = file.pane.claude_transcript_scrollback {
-            self.pane.claude_transcript_scrollback = b;
-        }
-        if let Some(b) = file.pane.agy_transcript_scrollback {
-            self.pane.agy_transcript_scrollback = b;
-        }
-        if let Some(b) = file.pane.preview_pasted_images {
-            self.pane.preview_pasted_images = b;
-        }
-        if let Some(b) = file.pane.codex_mcp {
-            self.pane.codex_mcp = b;
-        }
-        if let Some(b) = file.pane.codex_daemon {
-            self.pane.codex_daemon = b;
-        }
+        self.merge_pane_preferences(&mut file.pane, trust);
         // Startup tabs: the two forms are mutually exclusive within one
         // file — merging them would hide an ambiguity, so surface it as a
         // hard error at load (PANE_STARTUP_TABS_PLAN.md). Whichever form

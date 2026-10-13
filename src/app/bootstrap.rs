@@ -306,6 +306,7 @@ impl App {
                 lua_inflight: None,
                 lua_events: super::lua_events::LuaEventState::default(),
                 pane_tabs: None,
+                agent_hud: None,
                 top_overlay: None,
                 top_overlay_right: None,
                 pending_capture: None,
@@ -318,9 +319,7 @@ impl App {
                 stashed_pager_streams: std::collections::HashMap::new(),
                 pending_git_view: None,
                 agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
-                agent_status_refreshing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
-                    false,
-                )),
+                agent_status_refreshing: std::sync::Arc::default(),
                 codex_pin_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 codex_scan_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                     false,
