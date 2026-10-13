@@ -54,12 +54,7 @@ const FUNCTION: Rule = Rule {
             "src/app/pager_handler/motion.rs::App::handle_pager_motion",
             329,
         ),
-        (
-            "src/app/pager_handler/pickers.rs::App::handle_pager_history_editor",
-            170,
-        ),
         ("src/app/prompt.rs::App::dispatch_prompt", 162),
-        ("src/app/prompt.rs::App::tab_complete_path", 146),
         (
             "src/app/render/activity_hud.rs::App::render_activity_hud",
             157,

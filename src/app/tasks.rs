@@ -818,28 +818,52 @@ mod tests {
         assert_eq!(bg.allocate_id(), 3);
     }
 
-    #[test]
-    fn most_recent_returns_last_pushed_id() {
-        let mut bg = BackgroundTasks::new();
-        assert_eq!(bg.most_recent(), None);
-        // We can't easily construct full BackgroundTask values in a test
-        // (they hold Box<dyn Child>), so we exercise the id allocator
-        // and trust `most_recent`/`take` against the `tasks` Vec they
-        // operate on. These pass-through helpers are simple enough that
-        // the structural test is in the integration of ^Z / :fg flows.
-        let _ = bg.allocate_id();
+    /// `count` `cat` captures, each sent to the background with `^Z`: tasks
+    /// #1 to #`count`, oldest first.
+    fn with_background_cats(count: usize, test: impl FnOnce(&mut crate::app::App)) {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let dir = tmp.path().join("w");
+            std::fs::create_dir(&dir).unwrap();
+            let mut app = crate::app::App::test_app(dir);
+            for _ in 0..count {
+                app.start_capture("cat", "cat", "cat");
+                app.background_capture();
+            }
+            test(&mut app);
+        });
     }
 
-    #[test]
-    fn take_missing_id_returns_none() {
-        let mut bg = BackgroundTasks::new();
-        assert!(bg.take(99).is_none());
+    fn resumed(app: &crate::app::App) -> Option<u32> {
+        app.runtime.pending_capture.as_ref()?.original_id
     }
 
+    /// `:fg` with no number resumes the newest background task, and `:fg N`
+    /// task N; a number that names no task says so.
     #[test]
-    fn running_and_done_counts_are_zero_initially() {
-        let bg = BackgroundTasks::new();
-        assert_eq!(bg.running_count(), 0);
-        assert_eq!(bg.done_count(), 0);
+    fn fg_resumes_the_newest_task_unless_told_which() {
+        with_background_cats(3, |app| {
+            app.foreground_task(None);
+            assert_eq!(resumed(app), Some(3), "the newest");
+            app.background_capture();
+            app.foreground_task(Some(1));
+            assert_eq!(resumed(app), Some(1));
+            app.background_capture();
+            app.foreground_task(Some(9));
+            assert_eq!(app.flash_text(), Some("no task #9"));
+            assert_eq!(resumed(app), None);
+        });
+    }
+
+    /// The status line counts the tasks still running apart from the ones
+    /// that have finished, however they finished.
+    #[test]
+    fn running_and_finished_tasks_are_counted_apart() {
+        with_background_cats(3, |app| {
+            let tasks = &mut app.runtime.background_tasks;
+            tasks.tasks[0].status = TaskStatus::Exited(0);
+            tasks.tasks[1].status = TaskStatus::Crashed("signal".into());
+            assert_eq!((tasks.running_count(), tasks.done_count()), (1, 2));
+        });
     }
 }

@@ -83,16 +83,7 @@ impl App {
                         // Sync picker cursor to the first match.
                         if let Some(line) = view.current_match_line() {
                             view.picker_cursor = Some(line);
-                            let nc = line;
-                            let entries = self.state.history.entries();
-                            let hi = entries.len().saturating_sub(1 + nc);
-                            if let Some(cmd) = entries.get(hi) {
-                                editor.set_content_keep_mode(cmd);
-                            }
-                            let text = format!("  {:>3}  {}", nc + 1, editor.text());
-                            view.lines[nc] = ratatui::text::Line::from(text);
-                            view.picker_edit_cursor =
-                                Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
+                            Self::show_history_selection(view, editor, &self.state.history, true);
                         }
                     } else if self.state.pending_worktrees.is_some() {
                         // Worktree picker: land the highlighted cursor on the
