@@ -591,28 +591,41 @@ impl App {
     /// Sync the history editor after moving the picker cursor to a new line.
     /// Updates the LineEditor content and the display line.
     pub fn sync_history_editor_to_cursor(&mut self) {
-        Self::sync_hist_editor(
-            &mut self.view.pager,
-            &mut self.view.pending_history_pick,
-            &self.state.history,
-        );
+        if let (Some(view), Some(editor)) = (
+            self.view.pager.as_mut(),
+            self.view.pending_history_pick.as_mut(),
+        ) {
+            Self::show_history_selection(view, editor, &self.state.history, true);
+        }
     }
 
-    fn sync_hist_editor(
-        pager: &mut Option<pager::PagerView>,
-        editor_opt: &mut Option<LineEditor>,
+    /// Load the selected command into the history editor and show it on its
+    /// row. `keep_mode` leaves the editor in the mode it was in; otherwise it
+    /// ends up in Insert mode.
+    pub(super) fn show_history_selection(
+        view: &mut pager::PagerView,
+        editor: &mut LineEditor,
         history: &crate::state::history::History,
+        keep_mode: bool,
     ) {
-        let Some(view) = pager else { return };
-        let Some(editor) = editor_opt else { return };
-        let new_cursor = view.picker_cursor.unwrap_or(0);
+        let selected = view.picker_cursor.unwrap_or(0);
         let entries = history.entries();
-        let hist_idx = entries.len().saturating_sub(1 + new_cursor);
-        if let Some(cmd) = entries.get(hist_idx) {
-            editor.set_content_keep_mode(cmd);
+        // Rows are newest first, history is oldest first.
+        if let Some(cmd) = entries.get(entries.len().saturating_sub(1 + selected)) {
+            if keep_mode {
+                editor.set_content_keep_mode(cmd);
+            } else {
+                editor.set_content(cmd);
+            }
         }
-        let text = format!("  {:>3}  {}", new_cursor + 1, editor.text());
-        view.lines[new_cursor] = ratatui::text::Line::from(text);
+        Self::show_edited_history_row(view, editor);
+    }
+
+    /// Show the editor's text on the selected row, with the editor's cursor.
+    pub(super) fn show_edited_history_row(view: &mut pager::PagerView, editor: &LineEditor) {
+        let selected = view.picker_cursor.unwrap_or(0);
+        let text = format!("  {:>3}  {}", selected + 1, editor.text());
+        view.lines[selected] = ratatui::text::Line::from(text);
         view.picker_edit_cursor = Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
     }
 
