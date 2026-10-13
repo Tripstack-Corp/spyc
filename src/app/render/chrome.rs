@@ -36,6 +36,100 @@ fn archive_change(
     })
 }
 
+/// The divider's styles: its rule, the active tab, the other tabs, and a
+/// shell tab with output the user hasn't seen.
+struct DividerStyles {
+    rule: ratatui::style::Style,
+    active: ratatui::style::Style,
+    inactive: ratatui::style::Style,
+    unseen: ratatui::style::Style,
+}
+
+/// The active tab's live cwd, `↪`-marked when it has drifted from where the
+/// tab started (e.g. a `cd` in a shell tab). Its tail, the leaf directories,
+/// is kept when it's longer than `avail` columns; `None` when there's no room.
+fn cwd_span(
+    tabs: &crate::pane::tabs::PaneTabs,
+    styles: &DividerStyles,
+    avail: usize,
+) -> Option<ratatui::text::Span<'static>> {
+    if avail <= 4 {
+        return None;
+    }
+    let entry = &tabs.tabs()[tabs.active_index()];
+    let live = entry.live_cwd();
+    let cwd_display = crate::paths::display_tilde(&live);
+    let drift = live != entry.info.cwd;
+    let cwd_prefix = if drift { "── ↪ " } else { "── " };
+    // Truncate by display columns on a char boundary, keeping the
+    // tail (the leaf dirs). A byte slice here panics on a
+    // non-ASCII cwd ("résumé", "日本語") when the cut lands
+    // mid-codepoint.
+    let truncated = if crate::ui::display_width(&cwd_display) > avail {
+        format!(
+            "…{}",
+            crate::ui::display_truncate_tail(&cwd_display, avail.saturating_sub(1))
+        )
+    } else {
+        cwd_display
+    };
+    let style = if drift {
+        styles.active
+    } else {
+        styles.inactive
+    };
+    Some(ratatui::text::Span::styled(
+        format!("{cwd_prefix}{truncated} "),
+        style,
+    ))
+}
+
+/// How a background task's divider tag is coloured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskTone {
+    Running,
+    Unread,
+    Ok,
+    Failed,
+}
+
+/// A background task's divider glyph: `⏸` paused, `+` running with output
+/// arrived since the last `:fg`, `●` running quietly, `✓` exited cleanly, `✗`
+/// a non-zero exit, a kill or a crash.
+const fn task_glyph(status: &TaskStatus, paused: bool, unread: bool) -> (&'static str, TaskTone) {
+    match (status, unread) {
+        // Pausing is the user's explicit act, so it outranks unread output.
+        (TaskStatus::Running, _) if paused => ("\u{23f8}", TaskTone::Running),
+        (TaskStatus::Running, true) => ("+", TaskTone::Unread),
+        (TaskStatus::Running, false) => ("\u{25cf}", TaskTone::Running),
+        (TaskStatus::Exited(0), _) => ("\u{2713}", TaskTone::Ok),
+        (TaskStatus::Exited(_) | TaskStatus::Crashed(_), _) => ("\u{2717}", TaskTone::Failed),
+    }
+}
+
+/// The task tags that fit in `budget` columns, given oldest first. They're
+/// right-anchored, so when they don't all fit the oldest are dropped; the ones
+/// kept come back oldest first.
+fn fit_task_tags(
+    tags: impl DoubleEndedIterator<Item = (String, TaskTone)>,
+    budget: usize,
+) -> Vec<(String, TaskTone)> {
+    let mut kept = Vec::new();
+    let mut used = 0;
+    for (text, tone) in tags.rev() {
+        // Column width, not bytes — the status glyphs (●✓✗⏸) are 3-byte,
+        // 1-column chars.
+        let width = crate::ui::display_width(&text);
+        if used + width > budget {
+            break;
+        }
+        used += width;
+        kept.push((text, tone));
+    }
+    kept.reverse();
+    kept
+}
+
 impl App {
     /// Pane status line: tab indicators, active cwd, [SCROLL] tag.
     /// Replaces the old plain-rule divider.
@@ -45,22 +139,98 @@ impl App {
             text::{Line, Span},
         };
         let width = area.width as usize;
-        // Tinting the rule + active tab in scroll mode is deliberate
-        // redundancy with the [SCROLL] tag — three signals in different
-        // parts of the divider make "you've left live view" hard to miss.
         let is_scrolling = self
             .runtime
             .pane_tabs
             .as_ref()
             .is_some_and(|t| t.active().is_scrolling());
+        let styles = self.divider_styles(is_scrolling);
+        let mut spans: Vec<Span> = Vec::new();
+        let mut used = 0usize;
+        if let Some(tabs) = &self.runtime.pane_tabs {
+            let active_shown;
+            (used, active_shown) =
+                self.push_tab_spans(&mut spans, tabs, &styles, is_scrolling, area.width);
+            // The active tab's cwd follows its tab, so it shows only when that
+            // tab fitted. Leave room for [SCROLL] and a trailing rule.
+            if active_shown
+                && let Some(cwd) = cwd_span(tabs, &styles, width.saturating_sub(used + 12))
+            {
+                used += crate::ui::display_width(cwd.content.as_ref());
+                spans.push(cwd);
+            }
+        }
+
+        // Only `BottomPane` zoom keeps a divider (this line) to tag; `TopList`
+        // zoom has no divider — its cue rides the status-bar suffix instead
+        // (see `header_parts`).
+        let zoomed = self.state.pane.zoom == state::ZoomTarget::BottomPane;
+        let zoom_tag = if zoomed { " [ZOOM]" } else { "" };
+        let scroll_tag = if is_scrolling { " [SCROLL]" } else { "" };
+        let tag_len = crate::ui::display_width(zoom_tag) + crate::ui::display_width(scroll_tag);
+        // Background-task tags, right-aligned. Distinct colour from pane tabs
+        // so the numbering doesn't visually collide (pane tabs are 1..N
+        // left-to-right; bg tasks are 1..N right-anchored). Reserve room for at
+        // least 4 dashes + the mode tag(s).
+        let tasks = self.runtime.background_tasks.tasks.iter().map(|task| {
+            let (glyph, tone) = task_glyph(&task.status, task.paused, task.has_unread_output);
+            (format!(" [{}{glyph}]", task.id), tone)
+        });
+        let task_tags = fit_task_tags(tasks, width.saturating_sub(used + tag_len + 4));
+        let tags_width: usize = task_tags
+            .iter()
+            .map(|(text, _)| crate::ui::display_width(text))
+            .sum();
+
+        // Dash fill between pane-tab area and bg group / mode tag(s).
+        let fill = width.saturating_sub(used + tag_len + tags_width);
+        if fill > 0 {
+            spans.push(Span::styled("─".repeat(fill), styles.rule));
+        }
+        for (text, tone) in task_tags {
+            let color = match tone {
+                TaskTone::Running => self.view.theme.dir, // soft blue
+                TaskTone::Unread => self.view.theme.take, // teal -- pulls the eye
+                TaskTone::Ok => self.view.theme.exec,     // soft green
+                TaskTone::Failed => ratatui::style::Color::Rgb(0xf7, 0x76, 0x8e), // tokyo red
+            };
+            spans.push(Span::styled(
+                text,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ));
+        }
+        if zoomed {
+            spans.push(Span::styled(
+                zoom_tag,
+                Style::default()
+                    .fg(self.view.theme.prompt_prefix)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        if is_scrolling {
+            spans.push(Span::styled(
+                scroll_tag,
+                Style::default()
+                    .fg(self.view.theme.dir)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        self.draw_chrome_line(frame, area, Line::from(spans));
+    }
+
+    /// The divider's styles. Tinting the rule + active tab in scroll mode is
+    /// deliberate redundancy with the [SCROLL] tag — three signals in different
+    /// parts of the divider make "you've left live view" hard to miss.
+    fn divider_styles(&self, is_scrolling: bool) -> DividerStyles {
+        use ratatui::style::{Modifier, Style};
         // Scroll mode flips the rule + active-tab colour to blue
         // (theme.dir) so "you're in scrollback" is unambiguous from
         // peripheral vision. Amber stays the "focus" colour for live
         // mode; blue is reserved for scrollback and unused elsewhere
-        // as a UI signal. The `[SCROLL]` tag below uses the same
+        // as a UI signal. The `[SCROLL]` tag uses the same
         // colour, plus the active tab's label stays uppercased (shape
         // cue independent of colour).
-        let rule_style = if is_scrolling {
+        let rule = if is_scrolling {
             Style::default()
                 .fg(self.view.theme.dir)
                 .add_modifier(Modifier::BOLD)
@@ -74,252 +244,128 @@ impl App {
         // Active tab gets REVERSED modifier (background fill) so it's
         // unambiguously distinct from a background tab with activity
         // — both used to render as plain amber-bold and were only
-        // differentiated by the small `*`/`+` glyph, which Spencer
-        // (and probably others) read past in peripheral vision. With
+        // differentiated by the small `*`/`+` glyph, which users
+        // read past in peripheral vision. With
         // reverse, "you are here" registers before glyph parsing.
-        let active_tab_style = if is_scrolling {
-            Style::default()
-                .fg(self.view.theme.dir)
-                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        let active_colour = if is_scrolling {
+            self.view.theme.dir
         } else {
-            Style::default()
-                .fg(self.view.theme.prompt_prefix)
-                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+            self.view.theme.prompt_prefix
         };
-        let inactive_tab_style = Style::default().fg(self.view.theme.status_suffix);
+        DividerStyles {
+            rule,
+            active: Style::default()
+                .fg(active_colour)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+            inactive: Style::default().fg(self.view.theme.status_suffix),
+            unseen: Style::default()
+                .fg(self.view.theme.pick)
+                .add_modifier(Modifier::BOLD),
+        }
+    }
 
-        let mut spans: Vec<Span> = Vec::new();
+    /// Push each tab's indicator — `─[N]`, one status cell, its label — for as
+    /// many tabs as fit. Returns the columns used and whether the active tab
+    /// was among them.
+    fn push_tab_spans(
+        &self,
+        spans: &mut Vec<ratatui::text::Span<'static>>,
+        tabs: &crate::pane::tabs::PaneTabs,
+        styles: &DividerStyles,
+        is_scrolling: bool,
+        bar_width: u16,
+    ) -> (usize, bool) {
+        use ratatui::style::Style;
+        use ratatui::text::Span;
+        let tab_layout = super::super::mouse::tab_hit::tab_layout(tabs, is_scrolling, bar_width);
         let mut used = 0usize;
-
-        let activity_style = Style::default()
-            .fg(self.view.theme.pick)
-            .add_modifier(Modifier::BOLD);
-
-        // Tab indicators: ─[1*] claude ─[2+] bash, then "── <live cwd>".
-        // We render the indicators first (immutable iter) and capture the
-        // active index, then read the active tab's live cwd below — a pure
-        // `&self` `live_cwd()` cache read (the refresh kick moved to
-        // `prepare_panes`, #347), so no `&mut` re-borrow is involved.
-        let mut active_idx: Option<usize> = None;
-        if let Some(tabs) = &self.runtime.pane_tabs {
-            let tab_layout =
-                super::super::mouse::tab_hit::tab_layout(tabs, is_scrolling, area.width);
-            for (i, entry) in tabs.tabs().iter().enumerate() {
-                let is_active = i == tabs.active_index();
-                if is_active {
-                    active_idx = Some(i);
-                }
-                let sep = "─";
-                // FIXED-WIDTH indicator so the divider never reflows as statuses
-                // change: every tab is `[N]` + exactly one status cell + label.
-                // The active tab is marked by reverse-video (`active_tab_style`),
-                // not a `*` glyph — that glyph was redundant with the highlight
-                // AND made the active tab one column wider (a focus-switch jump).
-                // The single cell is: the coloured activity dot for an agent tab
-                // (one with a resolved activity), else `+` for a shell tab with
-                // unseen output, else a blank space (still reserved, so a shell's
-                // `+` flicking on/off — e.g. htop — no longer changes the width).
-                let is_agent = entry.info.activity != crate::pane::AgentActivity::Unknown;
-                let suspended = entry.info.suspended;
-                let bracket = format!("[{}]", i + 1);
-                // Suspended (`^z`) → 💤, overriding the activity dot; else an
-                // agent's own coloured dot span; else a shell's `+`/blank cell.
-                // 💤 is 2 cols wide, so a suspended tab is 1 col wider than its
-                // running self — acceptable for a deliberate, sticky toggle
-                // (unlike the per-frame flicker the fixed-width cell prevents).
-                let dot = if suspended {
-                    Some(Span::styled(
-                        "\u{1F4A4}", // 💤
-                        Style::default().fg(self.view.theme.status_suffix),
-                    ))
-                } else if is_agent {
-                    self.agent_activity_span(entry.info.activity, entry.info.anim_phase_offset)
-                } else {
-                    None
-                };
-                let shell_cell = if is_agent || suspended {
-                    "" // the dot span fills the cell instead
-                } else if entry.info.has_activity {
-                    "+"
-                } else {
-                    " " // reserved blank — keeps the width fixed
-                };
-                // Label text (uppercased in scroll mode, padding cropped and
-                // letters shaved to fit the bar) AND width both come from
-                // `tab_hit::tab_layout`, NOT recomputed here: the mouse
-                // hit-test lays the bar out from that same list, and any drift
-                // between the two puts clicks on the wrong tab. See the module
-                // doc on `mouse::tab_hit`.
-                let label_text = tab_layout
-                    .get(i)
-                    .map(|c| c.label_text.clone())
-                    .unwrap_or_default();
-                let tab_len = tab_layout.get(i).map_or(0, |c| c.width) as usize;
-                if used + tab_len > width {
-                    break;
-                }
-                // The painted spans must add up to the budgeted width, or the
-                // bar drifts from what the hit-test believes.
-                debug_assert_eq!(
-                    tab_len,
-                    crate::ui::display_width(sep)
-                        + crate::ui::display_width(&bracket)
-                        + dot
-                            .as_ref()
-                            .map_or(0, |s| crate::ui::display_width(s.content.as_ref()))
-                        + crate::ui::display_width(shell_cell)
-                        + crate::ui::display_width(&label_text),
-                    "tab {i} paints a different width than tab_layout budgeted"
-                );
-                spans.push(Span::styled(sep, rule_style));
-                // An agent tab's eye-pull comes from the coloured dot, so its
-                // label stays calm (inactive style); a shell tab keeps the teal
-                // `activity_style` highlight for unseen output.
-                let style = if is_active {
-                    active_tab_style
-                } else if !is_agent && entry.info.has_activity {
-                    activity_style
-                } else {
-                    inactive_tab_style
-                };
-                spans.push(Span::styled(bracket, style));
-                if let Some(dot) = dot {
-                    spans.push(dot);
-                } else {
-                    spans.push(Span::styled(shell_cell, style));
-                }
-                spans.push(Span::styled(label_text, style));
-                used += tab_len;
-            }
-        }
-
-        if let (Some(idx), Some(tabs)) = (active_idx, self.runtime.pane_tabs.as_ref()) {
-            let entry = &tabs.tabs()[idx];
-            let live = entry.live_cwd();
-            let cwd_display = crate::paths::display_tilde(&live);
-            // Mark when the live cwd has drifted from the spawn cwd
-            // (e.g. user `cd`'d in a bash tab). Helps spot the case
-            // the bug list called out.
-            let drift = live != entry.info.cwd;
-            let cwd_prefix = if drift { "── ↪ " } else { "── " };
-            let avail = width.saturating_sub(used + 12); // room for [SCROLL] + trailing rule
-            if avail > 4 {
-                // Truncate by display columns on a char boundary, keeping the
-                // tail (the leaf dirs). A byte slice here panics on a
-                // non-ASCII cwd ("résumé", "日本語") when the cut lands
-                // mid-codepoint.
-                let truncated = if crate::ui::display_width(&cwd_display) > avail {
-                    format!(
-                        "…{}",
-                        crate::ui::display_truncate_tail(&cwd_display, avail.saturating_sub(1))
-                    )
-                } else {
-                    cwd_display
-                };
-                let cwd_fragment = format!("{cwd_prefix}{truncated} ");
-                used += crate::ui::display_width(&cwd_fragment);
-                let style = if drift {
-                    active_tab_style
-                } else {
-                    inactive_tab_style
-                };
-                spans.push(Span::styled(cwd_fragment, style));
-            }
-        }
-
-        // Right-aligned background-task tags. Distinct colour from pane
-        // tabs so the numbering doesn't visually collide (pane tabs are
-        // 1..N left-to-right; bg tasks are 1..N right-anchored). Keeps
-        // the rendered group ordered ascending L→R, but if there isn't
-        // room for all of them we drop the *oldest* first (keep newest
-        // visible). Glyphs:
-        //   `[N+]`  running, output arrived since last :fg
-        //   `[N\u{25cf}]`  running, quiescent
-        //   `[N\u{2713}]`  exited cleanly
-        //   `[N\u{2717}]`  non-zero exit / killed / crashed
-        let bg_running_color = self.view.theme.dir; // soft blue
-        let bg_unread_color = self.view.theme.take; // teal -- pulls the eye
-        let bg_ok_color = self.view.theme.exec; // soft green
-        let bg_err_color = ratatui::style::Color::Rgb(0xf7, 0x76, 0x8e); // tokyo red
-        let mut bg_pieces_rev: Vec<(String, ratatui::style::Color)> = Vec::new();
-        let mut bg_width = 0usize;
-        // Only `BottomPane` zoom keeps a divider (this line) to tag; `TopList`
-        // zoom has no divider — its cue rides the status-bar suffix instead
-        // (see `header_parts`).
-        let zoom_tag = if self.state.pane.zoom == state::ZoomTarget::BottomPane {
-            " [ZOOM]"
-        } else {
-            ""
-        };
-        let scroll_tag = if is_scrolling { " [SCROLL]" } else { "" };
-        let tag_len = crate::ui::display_width(zoom_tag) + crate::ui::display_width(scroll_tag);
-        // Reserve room for at least 4 dashes + the tag(s).
-        let bg_budget = width.saturating_sub(used + tag_len + 4);
-        for task in self.runtime.background_tasks.tasks.iter().rev() {
-            let (glyph, color) = if task.paused && matches!(task.status, TaskStatus::Running) {
-                // Pause glyph trumps the running/unread variants:
-                // user explicitly paused, that's the headline state.
-                ("\u{23f8}", bg_running_color) // ⏸
+        let mut active_shown = false;
+        for (i, entry) in tabs.tabs().iter().enumerate() {
+            let is_active = i == tabs.active_index();
+            let sep = "─";
+            // FIXED-WIDTH indicator so the divider never reflows as statuses
+            // change: every tab is `[N]` + exactly one status cell + label.
+            // The active tab is marked by reverse-video (`styles.active`),
+            // not a `*` glyph — that glyph was redundant with the highlight
+            // AND made the active tab one column wider (a focus-switch jump).
+            // The single cell is: the coloured activity dot for an agent tab
+            // (one with a resolved activity), else `+` for a shell tab with
+            // unseen output, else a blank space (still reserved, so a shell's
+            // `+` flicking on/off — e.g. htop — no longer changes the width).
+            let is_agent = entry.info.activity != crate::pane::AgentActivity::Unknown;
+            let suspended = entry.info.suspended;
+            let bracket = format!("[{}]", i + 1);
+            // Suspended (`^z`) → 💤, overriding the activity dot; else an
+            // agent's own coloured dot span; else a shell's `+`/blank cell.
+            // 💤 is 2 cols wide, so a suspended tab is 1 col wider than its
+            // running self — acceptable for a deliberate, sticky toggle
+            // (unlike the per-frame flicker the fixed-width cell prevents).
+            let dot = if suspended {
+                Some(Span::styled(
+                    "\u{1F4A4}", // 💤
+                    Style::default().fg(self.view.theme.status_suffix),
+                ))
+            } else if is_agent {
+                self.agent_activity_span(entry.info.activity, entry.info.anim_phase_offset)
             } else {
-                match (&task.status, task.has_unread_output) {
-                    (TaskStatus::Running, true) => ("+", bg_unread_color),
-                    (TaskStatus::Running, false) => ("\u{25cf}", bg_running_color),
-                    (TaskStatus::Exited(0), _) => ("\u{2713}", bg_ok_color),
-                    (TaskStatus::Exited(_) | TaskStatus::Crashed(_), _) => {
-                        ("\u{2717}", bg_err_color)
-                    }
-                }
+                None
             };
-            let text = format!(" [{}{glyph}]", task.id);
-            // Column width, not bytes — the status glyphs (●✓✗⏸) are 3-byte,
-            // 1-column chars.
-            let text_w = crate::ui::display_width(&text);
-            if bg_width + text_w > bg_budget {
+            let shell_cell = if is_agent || suspended {
+                "" // the dot span fills the cell instead
+            } else if entry.info.has_activity {
+                "+"
+            } else {
+                " " // reserved blank — keeps the width fixed
+            };
+            // Label text (uppercased in scroll mode, padding cropped and
+            // letters shaved to fit the bar) AND width both come from
+            // `tab_hit::tab_layout`, NOT recomputed here: the mouse
+            // hit-test lays the bar out from that same list, and any drift
+            // between the two puts clicks on the wrong tab. See the module
+            // doc on `mouse::tab_hit`.
+            let label_text = tab_layout
+                .get(i)
+                .map(|c| c.label_text.clone())
+                .unwrap_or_default();
+            let tab_len = tab_layout.get(i).map_or(0, |c| c.width) as usize;
+            if used + tab_len > bar_width as usize {
                 break;
             }
-            bg_width += text_w;
-            bg_pieces_rev.push((text, color));
+            // The painted spans must add up to the budgeted width, or the
+            // bar drifts from what the hit-test believes.
+            debug_assert_eq!(
+                tab_len,
+                crate::ui::display_width(sep)
+                    + crate::ui::display_width(&bracket)
+                    + dot
+                        .as_ref()
+                        .map_or(0, |s| crate::ui::display_width(s.content.as_ref()))
+                    + crate::ui::display_width(shell_cell)
+                    + crate::ui::display_width(&label_text),
+                "tab {i} paints a different width than tab_layout budgeted"
+            );
+            spans.push(Span::styled(sep, styles.rule));
+            // An agent tab's eye-pull comes from the coloured dot, so its
+            // label stays calm (inactive style); a shell tab keeps the teal
+            // `unseen` highlight for unseen output.
+            let style = if is_active {
+                styles.active
+            } else if !is_agent && entry.info.has_activity {
+                styles.unseen
+            } else {
+                styles.inactive
+            };
+            spans.push(Span::styled(bracket, style));
+            if let Some(dot) = dot {
+                spans.push(dot);
+            } else {
+                spans.push(Span::styled(shell_cell, style));
+            }
+            spans.push(Span::styled(label_text, style));
+            used += tab_len;
+            active_shown |= is_active;
         }
-
-        // Dash fill between pane-tab area and bg group / mode tag(s).
-        let fill = width.saturating_sub(used + tag_len + bg_width);
-        if fill > 0 {
-            spans.push(Span::styled("─".repeat(fill), rule_style));
-            used += fill;
-        }
-
-        // Render bg tasks left-to-right (id-ascending) by reversing the
-        // collection we built right-to-left.
-        for (text, color) in bg_pieces_rev.into_iter().rev() {
-            used += crate::ui::display_width(&text);
-            spans.push(Span::styled(
-                text,
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ));
-        }
-
-        if self.state.pane.zoom == state::ZoomTarget::BottomPane {
-            spans.push(Span::styled(
-                zoom_tag,
-                Style::default()
-                    .fg(self.view.theme.prompt_prefix)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            used += crate::ui::display_width(zoom_tag);
-        }
-        if is_scrolling {
-            spans.push(Span::styled(
-                scroll_tag,
-                Style::default()
-                    .fg(self.view.theme.dir)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            used += crate::ui::display_width(scroll_tag);
-        }
-        // If anything's left (shouldn't be), pad.
-        let _ = used;
-
-        self.draw_chrome_line(frame, area, Line::from(spans));
+        (used, active_shown)
     }
 
     /// The per-tab agent-activity dot span: a spicy heat-pulse `●` while
@@ -671,30 +717,55 @@ mod tests {
 
         // Offsets 0 and 3 sit at opposite ends of the ping-pong (pepper red vs
         // spark) — distinct seeds, distinct colours at one instant.
-        let a = app.spicy_pulse_color(app.view.agent_anim_frame.wrapping_add(0));
-        let b = app.spicy_pulse_color(app.view.agent_anim_frame.wrapping_add(3));
+        let dot = |offset| {
+            app.agent_activity_span(AgentActivity::Working, offset)
+                .expect("a working agent has a dot")
+                .style
+                .fg
+        };
         assert_ne!(
-            a, b,
+            dot(0),
+            dot(3),
             "distinct phase seeds must yield distinct pulse colors"
         );
 
         // A near-max seed added to a non-zero frame must not overflow — the
         // call site wraps. (A raw `+` would panic here in a checked build.)
-        let _ = app.agent_activity_span(AgentActivity::Working, u64::MAX);
+        let _ = dot(u64::MAX);
     }
 
-    // P3-1 visual bell: the pure spice-heat gradient colour fn.
+    /// The visual bell's sweep: it starts at pepper red, and the ring has no
+    /// seam where its two ends meet.
     #[test]
-    fn spice_gradient_is_pure_and_starts_at_pepper_red() {
+    fn spice_gradient_starts_at_pepper_red_and_wraps_seamlessly() {
         // frame 0, frac 0 → the first stop (pepper red) exactly.
         assert_eq!(super::spice_gradient(0.0, 0), (0xE0, 0x32, 0x22));
-        // Deterministic: identical inputs → identical output (a pure fn).
-        assert_eq!(
-            super::spice_gradient(0.42, 5),
-            super::spice_gradient(0.42, 5)
-        );
-        // The ring wraps seamlessly: frac 1.0 == frac 0.0 at any frame
-        // (`rem_euclid`), so there's no seam where the two ends meet.
+        // frac 1.0 == frac 0.0 at any frame (`rem_euclid`).
         assert_eq!(super::spice_gradient(1.0, 3), super::spice_gradient(0.0, 3));
+    }
+
+    /// Task tags are right-anchored: when they don't all fit, the oldest are
+    /// dropped and the newest kept. Width is counted in columns, so a 3-byte
+    /// glyph costs one.
+    #[test]
+    fn task_tags_drop_the_oldest_when_they_dont_fit() {
+        use super::{TaskTone, fit_task_tags};
+        let tags = || {
+            ["one", "two", "three"]
+                .map(|t| (format!(" [{t}\u{25cf}]"), TaskTone::Running))
+                .into_iter()
+        };
+        let texts = |kept: Vec<(String, TaskTone)>| -> Vec<String> {
+            kept.into_iter().map(|(text, _)| text).collect()
+        };
+        // " [one●]" is 7 columns, " [two●]" 7, " [three●]" 9.
+        assert_eq!(texts(fit_task_tags(tags(), 23)).len(), 3);
+        assert_eq!(
+            texts(fit_task_tags(tags(), 22)),
+            [" [two\u{25cf}]", " [three\u{25cf}]"],
+            "the oldest goes first"
+        );
+        assert_eq!(texts(fit_task_tags(tags(), 9)), [" [three\u{25cf}]"]);
+        assert!(fit_task_tags(tags(), 8).is_empty());
     }
 }
