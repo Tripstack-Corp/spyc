@@ -16,6 +16,7 @@ pub mod chrome;
 pub mod codex_approval;
 pub mod codex_command;
 pub mod codex_home;
+pub mod codex_metrics;
 pub mod codex_records;
 pub mod codex_recovery;
 pub mod detect_rules;

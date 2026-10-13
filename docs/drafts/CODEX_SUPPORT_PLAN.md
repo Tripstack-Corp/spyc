@@ -903,6 +903,45 @@ Privacy, identity, partial-line and byte/line bounds are checked with
 `python3 -m unittest discover -s spikes/codex-hud -p test_probe.py`.
 
 
+### B2 collector and reducer
+
+`feat/codex-hud-collector` implements the consumer-owned collector and pure
+reducer. It adds no application HUD consumer, configuration or native strip.
+`examples/codex_metrics.rs` is a read-only acceptance driver for one explicitly
+selected rollout and home; it never launches or resumes Codex.
+
+The `codex_records::metrics` projection shares the transcript normalizer's call
+identity rule, while excluding prompts, arguments, output, reasoning and
+compaction history. Request, turn and thread usage replace cumulative snapshots
+on separate clocks. The legacy family stays separate; compaction invalidates
+legacy current-request data without clearing lifetime totals. Tool observations
+are deduplicated by identity and capped at 64. Missing starts and bounded tail
+coverage do not establish an exhaustive active/completed count. Populated but
+unverified rate-limit windows are labelled unsupported; null windows are not
+reported. Context percentage remains unknown.
+
+One exact rollout is checked against the expected `session_meta.id` and captured
+home. Initial/backlog reads have a 16 MiB cap; records have a 256 KiB cap and an
+incomplete final line is held within that cap. Appends read new bytes plus bounded
+header/anchor checks. Truncation, inode replacement, deletion and a skipped backlog
+clear obsolete state. A one-slot signal and latest-snapshot mailbox coalesce
+bursts. A result is accepted only for the live pane/thread/home/generation tuple.
+
+On macOS, kernel vnode watches cover only the rollout and its parent, with a
+descriptor wake for cancellation. Linux uses the existing native `notify`
+backend and filters read/open events. Neither backend polls at idle or scans the
+sessions tree. The macOS choice also avoids depending on FSEvents startup: a
+direct local public-API probe returned `FSEventStreamStart = false`, while the
+descriptor backend delivered append and replacement events in the same run.
+
+Run the local driver with `cargo run --release --example codex_metrics --
+ABSOLUTE_CODEX_HOME THREAD_ID ABSOLUTE_ROLLOUT`; Ctrl+C ends its consumer. Its
+output reports only metric summaries and work counters. The full native gate,
+Linux lint and a live pinned-rollout observation passed. The user authorized
+shipping while deferring a full manual testing round. B3 supplies the approved
+opt-in strip, Model/Runtime orchestration, source diagnostics and terminal
+layout/input gates.
+
 ### References and positioning
 
 The supplied screenshot is the visual brief: identity/branch/time, context and
