@@ -184,7 +184,7 @@ mod tests {
         assert!(rows[1].contains("thread 5.0M legacy"), "{rows:?}");
         assert!(rows[2].starts_with("recent") && rows[2].contains("4 calls"));
         assert!(rows[2].contains("✗ 1 failed"), "{rows:?}");
-        assert!(rows[2].ends_with("exec 3 · apply_patch 1"), "{rows:?}");
+        assert!(rows[2].ends_with("exec 3 ✗1 · ✓ apply_patch 1"), "{rows:?}");
         assert!(
             !rows[2].contains('◐'),
             "codex never claims a call is running"

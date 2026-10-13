@@ -229,7 +229,7 @@ mod tests {
             [
                 "● working   df17b585       opus-5-5 xhigh   spyc ⎇ main    32m",
                 "context     336.6k         out 370.2k       hit 98%        compacted 1",
-                "tools       271 calls      ✗ 4 failed       ◐ Bash         Bash 182 · Read 41 · Edit 23",
+                "tools       271 calls      ✗ 4 failed       ◐ Bash         Bash 182 ✗3 · ✓ Read 41 · Edit 23 ✗1",
                 "agents      1              background 5     hooks ✓        mcp ✓",
             ]
         );
@@ -320,7 +320,10 @@ mod tests {
             text.contains("◐ Bash +1"),
             "two running, the first named: {text}"
         );
-        assert!(text.ends_with("Read 41 · Bash 18 · Grep 3"), "{text}");
+        assert!(
+            text.ends_with("✓ Read 41 · Bash 18 ✗2 · ✓ Grep 3"),
+            "{text}"
+        );
         let style = |content: &str| {
             line.spans
                 .iter()
@@ -330,6 +333,7 @@ mod tests {
         };
         assert_eq!(style("✗ 2").fg, Some(theme.diff_del_fg));
         assert_eq!(style("◐ ").fg, Some(theme.prompt_prefix));
+        assert_eq!(style("✓ ").fg, Some(theme.diff_add_fg));
         snapshot.tools.clear();
         let idle = rows(&view(Some(&snapshot), false), 160);
         assert!(

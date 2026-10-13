@@ -138,8 +138,9 @@ began, `hit` the share of input read from the prompt cache, and `compacted` the
 compactions seen; all three survive a compaction. When a long transcript was
 read from part-way through, these counts carry `≥` and the tools row reads
 `recent`. The tools row counts every call and every failure, names what is
-running with `◐`, and lists the three most called; the dump lists every tool,
-then the most recent 64 calls with their times and outcomes. The mode row counts
+running with `◐`, and lists the three most called, each marked `✓` or `✗<n>` by
+its own failures; the dump lists every tool, then the most recent 64 calls with
+their times and outcomes. The mode row counts
 subagent (`Agent`) and background calls; Claude Code's own footer already shows
 its permission mode. Only spyc's own MCP server keeps its name in a tool label,
 as `spyc:`; other servers' tools read `mcp`.

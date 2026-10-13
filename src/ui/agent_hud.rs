@@ -32,6 +32,10 @@ const MAX_CELL: usize = 32;
 const MAX_TOOL_NAME: usize = 12;
 /// How many of the most-called tools the collapsed row names.
 const TOP_TOOLS: usize = 3;
+/// Repository and branch are cut tighter than [`MAX_CELL`]: a long branch name
+/// still widens its column, but not enough to push the row's later fields off
+/// a typical terminal.
+const MAX_PLACE: usize = 28;
 
 pub struct HudLayout {
     pub child: Rect,
@@ -400,7 +404,7 @@ fn activity(view: &HudView<'_>, p: Palette) -> Row {
                 spans.push(p.label(" ⎇ "));
                 spans.push(p.tint(branch, p.branch));
             }
-            Field(spans)
+            Field(spans).clip(MAX_PLACE)
         },
     );
     let elapsed = view
@@ -522,9 +526,16 @@ fn tools_row(label: &str, tallies: &[Tally], running: Option<&[String]>, p: Pale
         if i > 0 {
             top.push(p.label(" · "));
         }
+        if tally.failed == 0 {
+            top.push(p.tint("✓ ", p.good));
+        }
         top.extend(Field(vec![p.value(&tally.name)]).clip(MAX_TOOL_NAME).0);
         top.push(Span::raw(" "));
         top.push(p.strong(&tally.calls.to_string()));
+        if tally.failed > 0 {
+            top.push(Span::raw(" "));
+            top.push(p.tint(&format!("✗{}", tally.failed), p.bad));
+        }
     }
     if !top.is_empty() {
         cells.push(Field(top));
@@ -678,7 +689,7 @@ mod tests {
         let columns: [&[&str]; 4] = [
             &["●", "df17b585", "opus-5-5", "spyc", "32m"],
             &["context", "336.6k", "out ", "hit ", "compacted "],
-            &["tools", "175", "✗", "◐", "Read 141"],
+            &["tools", "175", "✗", "◐", "✓ Read 141"],
             &["agents", "7", "background", "hooks", "mcp"],
         ];
         for branch in ["main", "feat/a-branch-name-much-longer-than-any-column"] {
@@ -705,6 +716,36 @@ mod tests {
         }
     }
 
+    /// The repository and branch field is capped tighter than most cells, so an
+    /// unusually long branch name can only push the columns after it so far.
+    #[test]
+    fn a_long_branch_name_only_widens_its_column_up_to_max_place() {
+        let (snapshot, _) = claude_session("main");
+        // The field's own rendered width: from where "spyc" starts to where the
+        // next column's "32m" starts, less the gap between them.
+        let place_width = |branch: &str| {
+            let view = claude_view(&snapshot, branch);
+            let rows = text(&lines(&view, AgentHudMode::Full, 200, &Theme::default()));
+            let start = x_of(&rows[0], "spyc").unwrap();
+            let next = x_of(&rows[0], "32m").unwrap();
+            next - start - GAP
+        };
+        assert_eq!(
+            place_width("main"),
+            display_width("spyc ⎇ main").max(MIN_COLUMN)
+        );
+        for branch in [
+            "a-branch-name-well-past-the-cap-on-this-field",
+            &"x".repeat(200),
+        ] {
+            assert_eq!(
+                place_width(branch),
+                MAX_PLACE,
+                "branch {branch:?} should be cut to exactly the {MAX_PLACE}-column cap"
+            );
+        }
+    }
+
     #[test]
     fn a_cell_past_the_edge_is_dropped_whole_and_the_first_two_are_cut() {
         let (snapshot, branch) = claude_session("main");
@@ -723,7 +764,7 @@ mod tests {
         );
         let last = text(&lines(&view, AgentHudMode::Full, 200, &Theme::default()));
         assert!(
-            last[2].ends_with("Read 141 · spyc:get_sp… 19 · Edit 9"),
+            last[2].ends_with("✓ Read 141 · ✓ spyc:get_sp… 19 · Edit 9 ✗1"),
             "the last column is cut only by the strip: {last:?}"
         );
         let tight = text(&lines(&view, AgentHudMode::Compact, 14, &Theme::default()));
