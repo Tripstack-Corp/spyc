@@ -532,3 +532,341 @@ mod cap_buffer_tests {
         assert!(capped2, "spill at CAPTURE_SPILL_MAX is flagged");
     }
 }
+
+/// The `!` capture and background-task drains, driven the way the loop drives
+/// them: a real child under `/bin/sh` (unit tests never get the user's shell),
+/// drained until the rule under test is observable. Each test names what the
+/// user sees, so none of them reads the drain's locals.
+#[cfg(test)]
+mod drain_tests {
+    use std::time::{Duration, Instant};
+
+    use super::{CAPTURE_SPILL_MAX, TASK_BUFFER_CAP};
+    use crate::app::capture::CaptureSpill;
+    use crate::app::{App, TaskStatus};
+
+    const DEADLINE: Duration = Duration::from_secs(20);
+
+    fn with_app(test: impl FnOnce(&mut App)) {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let dir = tmp.path().join("w");
+            std::fs::create_dir(&dir).unwrap();
+            test(&mut App::test_app(dir));
+        });
+    }
+
+    fn pager_text(app: &App) -> Vec<String> {
+        let view = app.view.pager.as_ref().expect("a pager is open");
+        view.lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect()
+    }
+
+    /// The pager's text without blank lines, so a trailing newline's empty row
+    /// doesn't decide a test about content.
+    fn pager_rows(app: &App) -> Vec<String> {
+        pager_text(app)
+            .into_iter()
+            .filter(|l| !l.is_empty())
+            .collect()
+    }
+
+    /// Run `drain` until `done` holds, returning each drain's redraw answer.
+    fn drain_until(
+        app: &mut App,
+        what: &str,
+        mut drain: impl FnMut(&mut App) -> bool,
+        done: impl Fn(&App) -> bool,
+    ) -> Vec<bool> {
+        let deadline = Instant::now() + DEADLINE;
+        let mut answers = Vec::new();
+        while !done(app) {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            answers.push(drain(app));
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        answers
+    }
+
+    fn drain_capture_until(app: &mut App, what: &str, done: impl Fn(&App) -> bool) -> Vec<bool> {
+        drain_until(app, what, App::drain_pending_capture, done)
+    }
+
+    fn drain_capture_to_exit(app: &mut App) -> Vec<bool> {
+        drain_capture_until(app, "the capture to finish", |a| {
+            a.runtime.pending_capture.is_none()
+        })
+    }
+
+    fn drain_tasks_until(app: &mut App, what: &str, done: impl Fn(&App) -> bool) -> Vec<bool> {
+        drain_until(app, what, App::drain_background_tasks, done)
+    }
+
+    /// `{prefix}{n}` on a line of its own for each `n` in `range`.
+    fn numbered_lines(prefix: &str, range: std::ops::RangeInclusive<u32>) -> String {
+        use std::fmt::Write;
+        range.fold(String::new(), |mut text, n| {
+            writeln!(text, "{prefix}{n}").expect("writing to a String cannot fail");
+            text
+        })
+    }
+
+    fn write_to_capture(app: &mut App, bytes: &[u8]) {
+        let capture = app
+            .runtime
+            .pending_capture
+            .as_mut()
+            .expect("a live capture");
+        capture.host.write_all(bytes).unwrap();
+    }
+
+    fn write_to_task(app: &mut App, bytes: &[u8]) {
+        app.runtime.background_tasks.tasks[0]
+            .host
+            .write_all(bytes)
+            .unwrap();
+    }
+
+    #[test]
+    fn output_reaches_the_pager_while_the_command_is_still_running() {
+        with_app(|app| {
+            app.start_capture("cat", "cat", "cat");
+            write_to_capture(app, b"hello\n");
+            let answers = drain_capture_until(app, "the output", |a| {
+                pager_rows(a).iter().any(|l| l == "hello")
+            });
+            assert_eq!(answers.last(), Some(&true), "new output must draw");
+            assert!(app.runtime.pending_capture.is_some(), "still running");
+            let view = app.view.pager.as_ref().unwrap();
+            assert!(view.streaming, "a running capture is still streaming");
+            assert!(view.title.starts_with('\u{23f3}'), "{}", view.title);
+        });
+    }
+
+    /// A capture with nothing new to show must not draw every loop iteration:
+    /// it draws when the elapsed time in its title changes, and only then.
+    #[test]
+    fn a_quiet_capture_draws_only_when_its_clock_changes() {
+        with_app(|app| {
+            app.start_capture("cat", "cat", "cat");
+            app.runtime.pending_capture.as_mut().unwrap().started = Instant::now();
+            assert!(!app.drain_pending_capture(), "nothing new to show");
+            assert!(!app.drain_pending_capture(), "still nothing new to show");
+
+            let five_seconds_ago = Instant::now()
+                .checked_sub(Duration::from_secs(5))
+                .expect("the clock is past five seconds");
+            app.runtime.pending_capture.as_mut().unwrap().started = five_seconds_ago;
+            assert!(app.drain_pending_capture(), "the clock moved on");
+            let title = &app.view.pager.as_ref().unwrap().title;
+            assert!(title.ends_with("(5s)"), "{title}");
+            assert!(!app.drain_pending_capture(), "the same second again");
+        });
+    }
+
+    #[test]
+    fn a_clean_exit_closes_the_pager_with_a_tick_and_an_eof_line() {
+        with_app(|app| {
+            app.start_capture("printf 'one\\ntwo\\n'", "printf", "printf");
+            let answers = drain_capture_to_exit(app);
+            assert_eq!(answers.last(), Some(&true), "the exit frame must draw");
+            let view = app.view.pager.as_ref().unwrap();
+            assert_eq!(view.title, "\u{2713} ! printf — exit 0");
+            assert!(!view.streaming, "a finished capture stops streaming");
+            assert!(view.saveable, "a finished capture can be saved");
+            assert_eq!(pager_rows(app), ["one", "two", "[EOF — exit 0]"]);
+        });
+    }
+
+    /// The exit draws even when it brings no output of its own: here the
+    /// output has already been shown when the command exits.
+    #[test]
+    fn a_failing_exit_closes_the_pager_with_a_cross_and_its_code() {
+        with_app(|app| {
+            app.start_capture("printf 'x\\n'; sleep 0.2; exit 3", "fails", "fails");
+            drain_capture_until(app, "the output", |a| {
+                pager_rows(a).iter().any(|l| l == "x")
+            });
+            let answers = drain_capture_to_exit(app);
+            assert_eq!(answers.last(), Some(&true), "the exit frame must draw");
+            let view = app.view.pager.as_ref().unwrap();
+            assert_eq!(view.title, "\u{2717} ! fails — exit 3");
+            assert_eq!(pager_rows(app), ["x", "[EOF — exit 3]"]);
+        });
+    }
+
+    /// Output past the live buffer's cap loses its start from that buffer, but
+    /// not from the finished pager: a `!git log` opens at its newest commit.
+    #[test]
+    fn a_capture_past_the_buffer_cap_still_opens_at_its_first_line() {
+        with_app(|app| {
+            // ~1.3 MB, past the 1 MiB cap. `cat` of a file writes in large
+            // blocks; `seq` on a tty flushes per line, and 8-byte chunks take
+            // hundreds of drains to cross a 512-chunk reader channel.
+            let numbers = numbered_lines("", 1..=180_000);
+            let dir = app.state.cur().listing.dir.clone();
+            std::fs::write(dir.join("numbers"), numbers).unwrap();
+            app.start_capture("cat numbers", "cat numbers", "cat numbers");
+            let deadline = Instant::now() + DEADLINE;
+            while app.runtime.pending_capture.is_some() {
+                assert!(Instant::now() < deadline, "the capture never finished");
+                app.drain_pending_capture();
+                if let Some(capture) = app.runtime.pending_capture.as_ref() {
+                    assert!(
+                        capture.buffer.len() <= TASK_BUFFER_CAP,
+                        "the live buffer outgrew its cap: {}",
+                        capture.buffer.len()
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let rows = pager_rows(app);
+            assert_eq!(rows.first().map(String::as_str), Some("1"), "the head");
+            assert_eq!(rows.len(), 180_001, "every line, plus the EOF line");
+            assert_eq!(rows[179_999], "180000", "the tail");
+        });
+    }
+
+    /// When the full copy on disk can't be written, the capture carries on and
+    /// the pager shows the live buffer instead.
+    #[test]
+    fn an_unwritable_spill_falls_back_to_the_live_buffer() {
+        with_app(|app| {
+            app.start_capture("printf 'kept\\n'", "kept", "kept");
+            let capture = app.runtime.pending_capture.as_mut().unwrap();
+            let path = capture
+                .full_log
+                .as_ref()
+                .expect("a spill file")
+                .path
+                .clone();
+            // Read-only, so the drain's write fails.
+            capture.full_log = Some(CaptureSpill {
+                file: std::fs::File::open(&path).unwrap(),
+                path,
+                bytes: 0,
+            });
+            drain_capture_to_exit(app);
+            assert_eq!(pager_rows(app), ["kept", "[EOF — exit 0]"]);
+        });
+    }
+
+    /// The on-disk copy stops at its backstop, and the finished pager says the
+    /// tail was cut rather than ending silently.
+    #[test]
+    fn a_spill_at_its_backstop_stops_growing_and_says_so() {
+        with_app(|app| {
+            app.start_capture("printf 'TAIL\\n'", "big", "big");
+            let capture = app.runtime.pending_capture.as_mut().unwrap();
+            let spill = capture.full_log.as_mut().expect("a spill file");
+            std::io::Write::write_all(&mut spill.file, b"HEAD\n").unwrap();
+            spill.bytes = CAPTURE_SPILL_MAX;
+            drain_capture_to_exit(app);
+            assert_eq!(
+                pager_rows(app),
+                [
+                    "HEAD",
+                    "[EOF — capture exceeded 64 MiB — tail omitted]",
+                    "[EOF — exit 0]",
+                ]
+            );
+        });
+    }
+
+    /// A reader at the bottom follows new output; a reader who scrolled up to
+    /// read is left where they are.
+    #[test]
+    fn the_pager_follows_output_only_for_a_reader_at_the_bottom() {
+        with_app(|app| {
+            app.start_capture("cat", "cat", "cat");
+            app.view.pager.as_ref().unwrap().last_viewport_h.set(10);
+            let lines = numbered_lines("line ", 1..=30);
+            write_to_capture(app, lines.as_bytes());
+            drain_capture_until(app, "thirty lines", |a| {
+                pager_rows(a).iter().filter(|l| *l == "line 30").count() == 2
+            });
+            let view = app.view.pager.as_ref().unwrap();
+            assert!(
+                view.scroll + view.page_lines(10) >= view.line_count(),
+                "the newest line is on screen: scroll {} of {} lines",
+                view.scroll,
+                view.line_count()
+            );
+
+            app.view.pager.as_mut().unwrap().scroll = 0;
+            write_to_capture(app, b"more\n");
+            drain_capture_until(app, "more output", |a| {
+                pager_rows(a).iter().any(|l| l == "more")
+            });
+            assert_eq!(
+                app.view.pager.as_ref().unwrap().scroll,
+                0,
+                "a reader who scrolled up stays put"
+            );
+        });
+    }
+
+    /// After `^Z` the capture's output belongs to its task: the pager drain
+    /// leaves it alone, the task's `[N+]` divider appears once (not on every
+    /// chunk), and its exit is reported with its code.
+    #[test]
+    fn a_backgrounded_capture_flags_new_output_once_and_reports_its_exit() {
+        with_app(|app| {
+            app.start_capture("cat; exit 3", "cat", "cat");
+            app.background_capture();
+            assert!(!app.drain_pending_capture(), "no capture is live");
+
+            let task_has = |a: &App, text: &str| {
+                String::from_utf8_lossy(&a.runtime.background_tasks.tasks[0].buffer).contains(text)
+            };
+            write_to_task(app, b"first\n");
+            let answers = drain_tasks_until(app, "the first output", |a| task_has(a, "first"));
+            assert_eq!(answers.last(), Some(&true), "the [N+] divider appears");
+            assert!(app.runtime.background_tasks.tasks[0].has_unread_output);
+
+            write_to_task(app, b"second\n");
+            let answers = drain_tasks_until(app, "the second output", |a| task_has(a, "second"));
+            assert!(
+                answers.iter().all(|drew| !drew),
+                "more output doesn't change the divider: {answers:?}"
+            );
+
+            write_to_task(app, b"\x04"); // ^D ends `cat`; the shell exits 3
+            let answers = drain_tasks_until(app, "the task to exit", |a| {
+                !matches!(
+                    a.runtime.background_tasks.tasks[0].status,
+                    TaskStatus::Running
+                )
+            });
+            assert_eq!(answers.last(), Some(&true), "the exit must draw");
+            assert!(matches!(
+                app.runtime.background_tasks.tasks[0].status,
+                TaskStatus::Exited(3)
+            ));
+            let flash = app.flash_text().unwrap_or_default();
+            assert!(flash.starts_with("task #1: cat — exit 3 ("), "{flash}");
+        });
+    }
+
+    #[test]
+    fn a_background_task_that_succeeds_is_marked_exited_zero() {
+        with_app(|app| {
+            app.start_capture("true", "true", "true");
+            app.background_capture();
+            drain_tasks_until(app, "the task to exit", |a| {
+                !matches!(
+                    a.runtime.background_tasks.tasks[0].status,
+                    TaskStatus::Running
+                )
+            });
+            assert!(matches!(
+                app.runtime.background_tasks.tasks[0].status,
+                TaskStatus::Exited(0)
+            ));
+            let flash = app.flash_text().unwrap_or_default();
+            assert!(flash.starts_with("task #1: true — exit 0 ("), "{flash}");
+        });
+    }
+}
