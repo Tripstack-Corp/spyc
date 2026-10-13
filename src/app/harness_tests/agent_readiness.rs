@@ -68,6 +68,7 @@ fn report(app: &mut App, status: &str) {
             pane: None,
             status: status.into(),
             ttl_ms: Some(120_000),
+            note: None,
             session_id: None,
             hook_event: None,
         }),
@@ -119,6 +120,7 @@ fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
                 .unwrap()
                 .active_info()
                 .reported
+                .clone()
                 .unwrap()
                 .at;
             app.runtime
@@ -145,6 +147,7 @@ fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
                 .unwrap()
                 .active_info()
                 .reported
+                .clone()
                 .unwrap()
                 .at;
             app.runtime
@@ -208,12 +211,14 @@ fn codex_report_history_is_pane_local_and_not_carried_into_a_restart() {
             pane: None,
             status: "blocked".into(),
             ttl_ms: Some(1),
+            note: None,
             session_id: None,
             hook_event: None,
         });
         let at = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
             .info
             .reported
+            .clone()
             .unwrap()
             .at;
         app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0]
@@ -224,7 +229,7 @@ fn codex_report_history_is_pane_local_and_not_carried_into_a_restart() {
         let tabs = app.runtime.pane_tabs.as_ref().unwrap();
         assert_eq!(tabs.tabs()[0].info.activity, AgentActivity::Blocked);
         assert_eq!(
-            tabs.tabs()[0].info.last_reported.unwrap().status,
+            tabs.tabs()[0].info.last_reported.clone().unwrap().status,
             AgentActivity::Blocked
         );
         assert!(tabs.tabs()[1].info.last_reported.is_none());
@@ -267,6 +272,7 @@ fn status_hook_event_history_is_bounded_pane_local_and_cleared_on_restart() {
                     pane: None,
                     status: "blocked".into(),
                     ttl_ms: Some(1),
+                    note: None,
                     session_id: None,
                     hook_event: Some(event),
                 }),
@@ -322,6 +328,7 @@ fn status_hook_event_metadata_does_not_infer_permission_answers_or_hook_trust() 
                 pane: None,
                 status: "blocked".into(),
                 ttl_ms: Some(1),
+                note: None,
                 session_id: None,
                 hook_event: Some(event),
             }),
@@ -334,6 +341,7 @@ fn status_hook_event_metadata_does_not_infer_permission_answers_or_hook_trust() 
             .unwrap()
             .active_info()
             .reported
+            .clone()
             .unwrap()
             .at;
         let mut ctx = RunCtx::for_test();
@@ -355,6 +363,7 @@ fn status_hook_event_metadata_does_not_infer_permission_answers_or_hook_trust() 
             .unwrap()
             .active_info()
             .reported
+            .clone()
             .unwrap()
             .at;
         app.settle_agent_activity(at + Duration::from_secs(121), &mut ctx);
@@ -371,7 +380,7 @@ fn status_hook_event_metadata_does_not_infer_permission_answers_or_hook_trust() 
 
 fn question_report(app: &mut App, signal: &str, event: &str, call: &str) {
     let result = app.execute_mcp_command(McpCommand::ReportStatus {
-        pane_id: None, pane: None, status: signal.into(), ttl_ms: Some(120_000),
+        pane_id: None, pane: None, status: signal.into(), ttl_ms: Some(120_000), note: None,
         session_id: Some("session-1".into()),
         hook_event: crate::agent::status_hook::StatusHookEvent::from_value(&serde_json::json!({
             "hook_event_name":event, "tool_name":"request_user_input", "turn_id":"turn-1", "tool_use_id":call
@@ -402,6 +411,7 @@ fn codex_question_recovery_matches_the_call_and_survives_quiet_after_answer() {
             .unwrap()
             .active_info()
             .reported
+            .clone()
             .unwrap()
             .at;
         let mut ctx = RunCtx::for_test();
@@ -490,6 +500,7 @@ fn codex_question_recovery_ignores_old_reporters_and_other_panes() {
                 pane: None,
                 status: "codex-question-start".into(),
                 ttl_ms: None,
+                note: None,
                 session_id: Some("session-1".into()),
                 hook_event: None,
             }),
@@ -516,7 +527,7 @@ fn codex_question_recovery_ignores_old_reporters_and_other_panes() {
         question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
         let tabs = app.runtime.pane_tabs.as_ref().unwrap();
         assert_eq!(
-            tabs.tabs()[0].info.reported.unwrap().status,
+            tabs.tabs()[0].info.reported.clone().unwrap().status,
             AgentActivity::Blocked
         );
         assert!(
@@ -646,6 +657,7 @@ fn invalid_question_start_cannot_supersede_a_generic_block() {
                     pane: None,
                     status: "codex-question-start".into(),
                     ttl_ms: None,
+                    note: None,
                     session_id: Some("session-1".into()),
                     hook_event: event,
                 }),
@@ -687,7 +699,7 @@ fn accepted_interrupt_retires_working_reports_without_touching_the_other_tab() {
                     "{name} interrupt left a working report"
                 );
                 assert_eq!(
-                    tabs.tabs()[1].info.reported.unwrap().status,
+                    tabs.tabs()[1].info.reported.clone().unwrap().status,
                     AgentActivity::Blocked
                 );
                 let (_, effects) = app.settle_agent_activity(
@@ -732,6 +744,7 @@ fn ordinary_input_keeps_a_working_report() {
                     .unwrap()
                     .active_info()
                     .reported
+                    .clone()
                     .unwrap()
                     .status,
                 AgentActivity::Working
@@ -751,6 +764,7 @@ fn report_ttl_is_bounded_at_dispatch_even_for_the_largest_u64() {
                 pane: None,
                 status: "working".into(),
                 ttl_ms: Some(ttl),
+                note: None,
                 session_id: None,
                 hook_event: None,
             });
@@ -762,6 +776,7 @@ fn report_ttl_is_bounded_at_dispatch_even_for_the_largest_u64() {
                 .unwrap()
                 .active_info()
                 .reported
+                .clone()
                 .unwrap();
             assert!(reported.expiry.duration_since(reported.at) <= Duration::from_secs(300));
         }
@@ -804,6 +819,7 @@ fn a_closed_agent_pane_retires_reports_and_rejects_late_reports() {
             pane: None,
             status: "working".into(),
             ttl_ms: None,
+            note: None,
             session_id: None,
             hook_event: None,
         });
@@ -856,6 +872,7 @@ fn codex_dump_distinguishes_definitions_from_reports_and_retains_last_report() {
                 .unwrap()
                 .active_info()
                 .reported
+                .clone()
                 .unwrap()
                 .at;
             let mut ctx = RunCtx::for_test();

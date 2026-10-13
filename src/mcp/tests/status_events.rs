@@ -135,3 +135,82 @@ fn correlated_question_reports_cross_the_protocol_boundary() {
     drop(sender);
     worker.join().unwrap();
 }
+
+/// The schema an agent reads, what the socket accepts and what the loop applies
+/// are one vocabulary: every reportable state is advertised and accepted, a
+/// note reaches the loop already cleaned, and `unknown` (a dot state, not a
+/// report) is refused.
+#[test]
+fn report_status_accepts_waiting_with_a_cleaned_note() {
+    let tools = crate::mcp::tool_schemas::tools();
+    let schema = tools["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "report_status")
+        .unwrap();
+    let advertised: Vec<&str> = schema["inputSchema"]["properties"]["status"]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|state| state.as_str().unwrap())
+        .collect();
+    let reportable = |name: &str| crate::pane::AgentActivity::reportable(name).is_some();
+    assert!(
+        advertised.iter().all(|name| reportable(name)),
+        "{advertised:?}"
+    );
+    for state in [
+        crate::pane::AgentActivity::Working,
+        crate::pane::AgentActivity::Idle,
+        crate::pane::AgentActivity::Blocked,
+        crate::pane::AgentActivity::Done,
+        crate::pane::AgentActivity::Waiting,
+    ] {
+        assert!(
+            advertised.contains(&state.name()),
+            "{state:?} not advertised"
+        );
+    }
+
+    let (sender, receiver) = mpsc::channel::<McpRequest>();
+    let (seen_sender, seen_receiver) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        for request in receiver {
+            if let McpCommand::ReportStatus { status, note, .. } = &request.command {
+                seen_sender.send((status.clone(), note.clone())).unwrap();
+            }
+            let _ = request.reply.send(McpResponse::Ok {
+                message: "ok".into(),
+            });
+        }
+    });
+    let call = |arguments: Value| {
+        let request = json!({"jsonrpc":"2.0", "id":1, "method":"tools/call",
+            "params":{"name":"report_status", "arguments":arguments}});
+        let mut output = Vec::new();
+        dispatch(
+            &mut output,
+            &request.to_string(),
+            Path::new("/tmp"),
+            Some(&sender),
+        )
+        .unwrap();
+        parse_response(&output)
+    };
+
+    let accepted = call(json!({"status":"waiting", "note":"CI on\n#641\u{1b}[2J"}));
+    assert_ne!(accepted["result"]["isError"], json!(true), "{accepted}");
+    let (status, note) = seen_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(status, "waiting");
+    assert_eq!(note.as_deref(), Some("CI on #641 [2J"));
+
+    let refused = call(json!({"status":"unknown"}));
+    assert_eq!(refused["result"]["isError"], json!(true), "{refused}");
+    assert!(
+        seen_receiver.try_recv().is_err(),
+        "a refused report reached the loop"
+    );
+    drop(sender);
+    worker.join().unwrap();
+}

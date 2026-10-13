@@ -334,16 +334,25 @@ pub(super) fn clear_blocked_for_input(
     let question_waiting = recovery
         .as_ref()
         .is_some_and(|state| state.question_waiting());
+    let reported = |info: &crate::pane::tabs::TabInfo, status| {
+        info.reported
+            .as_ref()
+            .is_some_and(|report| report.status == status)
+    };
     if !question_waiting
         && input.interrupts_agent()
-        && info
-            .reported
-            .is_some_and(|report| report.status == crate::pane::AgentActivity::Working)
+        && reported(info, crate::pane::AgentActivity::Working)
     {
         info.reported = None;
     }
+    // A new prompt takes over from the background work the agent is waiting
+    // on. An interrupt does not: it stops nothing that is running in the
+    // background, and that work still wakes the agent.
+    if !input.interrupts_agent() && reported(info, crate::pane::AgentActivity::Waiting) {
+        info.reported = None;
+    }
     let blocked = |status| status == crate::pane::AgentActivity::Blocked;
-    if !question_waiting && info.reported.is_some_and(|report| blocked(report.status)) {
+    if !question_waiting && reported(info, crate::pane::AgentActivity::Blocked) {
         info.reported = None;
         // Retire the same ordinary latch in the correlation model. Otherwise a
         // later question completion would inherit an already answered approval.

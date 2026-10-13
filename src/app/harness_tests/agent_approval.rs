@@ -10,6 +10,7 @@ fn report(app: &mut App, status: &str, event: Option<serde_json::Value>) {
         pane: None,
         status: status.into(),
         ttl_ms: Some(120_000),
+        note: None,
         session_id: Some("session-1".into()),
         hook_event: event
             .as_ref()
@@ -35,6 +36,7 @@ fn automatic_codex_permission_review_is_observed_without_latching_blocked() {
             .unwrap()
             .active_info()
             .reported
+            .clone()
             .unwrap();
         report(&mut app, "blocked", Some(permission()));
         let now = original.at + Duration::from_secs(30);
@@ -47,7 +49,7 @@ fn automatic_codex_permission_review_is_observed_without_latching_blocked() {
         app.settle_agent_activity(now, &mut RunCtx::for_test());
         let info = app.runtime.pane_tabs.as_ref().unwrap().active_info();
         assert_eq!(info.activity, AgentActivity::Working);
-        assert_eq!(info.reported.unwrap().at, original.at);
+        assert_eq!(info.reported.clone().unwrap().at, original.at);
         let explanation = dump(&mut app);
         assert!(
             explanation.contains("source: SELF-REPORT status=working"),
@@ -142,6 +144,7 @@ fn visible_codex_approval_temporarily_overrides_working_with_honest_diagnostics(
             .unwrap()
             .active_info()
             .reported
+            .clone()
             .unwrap()
             .at;
         {
@@ -166,7 +169,7 @@ fn visible_codex_approval_temporarily_overrides_working_with_honest_diagnostics(
         assert!(super::agent_readiness::why_status(&mut app).contains("blocked (scrape-fallback:"));
         let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
         assert_eq!(
-            info.reported.unwrap().at,
+            info.reported.clone().unwrap().at,
             at,
             "dialogue must not discard the silent-work report"
         );
@@ -410,7 +413,7 @@ fn codex_approval_scan_has_a_deadline_despite_continuous_redraws() {
             "a repaint cannot postpone every approval scan"
         );
         assert_eq!(
-            info.reported.unwrap().status,
+            info.reported.clone().unwrap().status,
             AgentActivity::Working,
             "retain working for answer recovery"
         );

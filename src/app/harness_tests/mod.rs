@@ -443,11 +443,11 @@ fn agent_transition_notifies_even_when_activity_preset_by_report() {
         let now = std::time::Instant::now();
         {
             let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
-            info.reported = Some(crate::pane::ReportedStatus {
-                status: crate::pane::AgentActivity::Blocked,
-                at: now,
-                expiry: now + std::time::Duration::from_secs(300),
-            });
+            info.reported = Some(crate::pane::ReportedStatus::new(
+                crate::pane::AgentActivity::Blocked,
+                now,
+                now + std::time::Duration::from_secs(300),
+            ));
             info.activity = crate::pane::AgentActivity::Blocked;
             info.notified = crate::pane::AgentActivity::Idle;
         }
@@ -465,6 +465,7 @@ mod agent_approval;
 mod agent_hint;
 mod agent_readiness;
 mod agent_spawn;
+mod agent_waiting;
 mod archive;
 mod codex_home;
 mod codex_images;

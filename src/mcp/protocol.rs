@@ -157,6 +157,30 @@ fn create_worktree_command(args: &Value, caller: &Caller) -> Result<McpCommand, 
     })
 }
 
+/// `report_status`'s arguments. A status hook adds the agent's `session_id`
+/// and its event's metadata; a direct agent call carries neither.
+fn report_status_command(args: &Value, caller: &Caller) -> Result<McpCommand, &'static str> {
+    let status = args["status"].as_str().unwrap_or("").to_string();
+    if crate::pane::AgentActivity::reportable(&status).is_none()
+        && !matches!(
+            status.as_str(),
+            crate::agent::codex_recovery::QUESTION_START
+                | crate::agent::codex_recovery::QUESTION_END
+        )
+    {
+        return Err("status must be one of: working, blocked, idle, done, waiting");
+    }
+    Ok(McpCommand::ReportStatus {
+        pane_id: target_pane_id(args, caller),
+        pane: args["pane"].as_u64().and_then(|n| usize::try_from(n).ok()),
+        status,
+        ttl_ms: args["ttl_ms"].as_u64(),
+        note: args["note"].as_str().and_then(crate::mcp_cmd::report_note),
+        session_id: args["session_id"].as_str().map(String::from),
+        hook_event: crate::agent::status_hook::StatusHookEvent::from_value(&args["hook_event"]),
+    })
+}
+
 /// The tab a targeting call (`report_status`, the scope tools) means by
 /// `pane_id`: the one it names, else this connection's own unless it named a
 /// `pane` index instead. `None` leaves the loop's fallback, the focused tab.
@@ -593,40 +617,10 @@ fn handle_tools_call(
                 return send_tool_error(w, id, "writable actions not available in stdio mode");
             };
             let command = match name {
-                "report_status" => {
-                    let status = args["status"].as_str().unwrap_or("").to_string();
-                    if !matches!(
-                        status.as_str(),
-                        "working"
-                            | "blocked"
-                            | "idle"
-                            | "done"
-                            | crate::agent::codex_recovery::QUESTION_START
-                            | crate::agent::codex_recovery::QUESTION_END
-                    ) {
-                        return send_tool_error(
-                            w,
-                            id,
-                            "status must be one of: working, blocked, idle, done",
-                        );
-                    }
-                    let pane_id = target_pane_id(args, caller);
-                    let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
-                    let ttl_ms = args["ttl_ms"].as_u64();
-                    // Piggybacked by the status-hook reporter (Claude's hook
-                    // stdin carries `session_id`); absent on a direct agent call.
-                    let session_id = args["session_id"].as_str().map(String::from);
-                    let hook_event =
-                        crate::agent::status_hook::StatusHookEvent::from_value(&args["hook_event"]);
-                    McpCommand::ReportStatus {
-                        pane_id,
-                        pane,
-                        status,
-                        ttl_ms,
-                        session_id,
-                        hook_event,
-                    }
-                }
+                "report_status" => match report_status_command(args, caller) {
+                    Ok(cmd) => cmd,
+                    Err(message) => return send_tool_error(w, id, message),
+                },
                 "navigate_to" => {
                     let path = args["path"].as_str().unwrap_or("").to_string();
                     if path.is_empty() {

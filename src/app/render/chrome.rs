@@ -377,10 +377,12 @@ impl App {
 
     /// The per-tab agent-activity dot span: a spicy heat-pulse `●` while
     /// Working, then a *square* `■` (same visual weight as the dot) for the two
-    /// settled "waiting" states — steady hot-red when Blocked ("needs me"),
-    /// calm teal when Done ("finished, waiting for the next prompt") — and a
-    /// quiet `·` when Idle, `None` for a non-agent tab. Circle = live/animated,
-    /// square = stopped/waiting, so shape (not just colour) tells them apart.
+    /// settled "your turn" states — steady hot-red when Blocked ("needs me"),
+    /// calm teal when Done ("finished, waiting for the next prompt") — a steady
+    /// hollow `○` when Waiting on background work that will wake it, a quiet
+    /// `·` when Idle, and `None` for a non-agent tab. Circle = live, square =
+    /// stopped, hollow = not working this moment, so shape (not just colour)
+    /// tells them apart.
     /// The glyph is TIGHT (no leading
     /// space) — the caller renders it right against the `[N*]` bracket so it's
     /// unambiguously that tab's, replacing the redundant `+`. PURE — reads the
@@ -423,6 +425,16 @@ impl App {
                 Style::default()
                     .fg(self.view.theme.take)
                     .add_modifier(Modifier::BOLD),
+            )),
+            // Waiting = not the user's turn: a steady HOLLOW circle `○`, in the
+            // calm directory blue. Mono drops the colour; the shape carries it.
+            AgentActivity::Waiting => Some(Span::styled(
+                "\u{25cb}", // ○
+                if self.view.theme.mono {
+                    Style::default()
+                } else {
+                    Style::default().fg(self.view.theme.dir)
+                },
             )),
         }
     }
@@ -693,6 +705,7 @@ mod tests {
             AgentActivity::Idle,
             AgentActivity::Blocked,
             AgentActivity::Done,
+            AgentActivity::Waiting,
         ] {
             let span = app
                 .agent_activity_span(activity, 0)
@@ -707,6 +720,40 @@ mod tests {
             app.agent_activity_span(AgentActivity::Unknown, 0).is_none(),
             "a non-agent tab carries no dot"
         );
+    }
+
+    /// `waiting` is told apart by shape, which survives a theme with no
+    /// colour: hollow, unlike working's `●`, and round, unlike the squares of
+    /// the two states that are the user's turn. It never pulses.
+    #[test]
+    fn waiting_dot_is_a_steady_hollow_circle_in_both_themes() {
+        let mut app = App::test_app(PathBuf::from("/tmp/proj"));
+        for mono in [false, true] {
+            app.view.theme.mono = mono;
+            let dots: Vec<_> = (0..6)
+                .map(|frame| {
+                    app.view.agent_anim_frame = frame;
+                    app.agent_activity_span(AgentActivity::Waiting, 0)
+                        .expect("a waiting agent has a dot")
+                })
+                .collect();
+            assert!(dots.iter().all(|dot| dot == &dots[0]), "mono={mono}");
+            assert_eq!(dots[0].content, "\u{25cb}", "mono={mono}");
+            let fg = dots[0].style.fg;
+            assert_eq!(fg, (!mono).then_some(app.view.theme.dir), "mono={mono}");
+        }
+        for other in [
+            AgentActivity::Working,
+            AgentActivity::Blocked,
+            AgentActivity::Done,
+            AgentActivity::Idle,
+        ] {
+            let glyph = app
+                .agent_activity_span(other, 0)
+                .expect("an agent state has a dot")
+                .content;
+            assert_ne!(glyph, "\u{25cb}", "{other:?}");
+        }
     }
 
     /// The requirement behind `anim_phase_offset`: two Working tabs at the SAME

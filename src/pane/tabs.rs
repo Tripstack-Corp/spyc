@@ -59,7 +59,7 @@ pub fn resume_still_unsubmitted(tail_lines: &[String], sid: &str) -> bool {
 /// P1 *semantic self-report* over the `report_status` MCP tool, which a
 /// cooperative agent uses to assert `Working` (even through a silent thinking
 /// pause), `Blocked` (waiting on the user — the founding "which agent needs me"
-/// signal), or `Done`. A live report wins over timing (see
+/// signal), `Done`, or `Waiting`. A live report wins over timing (see
 /// [`ReportedStatus`]); when none is active, timing drives Working/Idle.
 /// `Unknown` is a non-agent tab or one with no signal yet — no dot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -72,9 +72,42 @@ pub enum AgentActivity {
     Blocked,
     /// Finished a turn (a `done` self-report). Semantic only.
     Done,
+    /// Neither the user's turn nor finished: the agent ended its turn while
+    /// background work it started is still running, and resumes by itself when
+    /// that work wakes it (a `waiting` report). Semantic only; precedence in
+    /// `agent::waiting`.
+    Waiting,
     /// Not an agent tab, or no signal yet. Renders no dot.
     #[default]
     Unknown,
+}
+
+impl AgentActivity {
+    /// The state's name in `report_status`, the diagnostics and the Lua
+    /// `agent_status` event.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::Idle => "idle",
+            Self::Blocked => "blocked",
+            Self::Done => "done",
+            Self::Waiting => "waiting",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    /// The state a `report_status` name asks for; `unknown` is not reportable.
+    pub fn reportable(name: &str) -> Option<Self> {
+        [
+            Self::Working,
+            Self::Idle,
+            Self::Blocked,
+            Self::Done,
+            Self::Waiting,
+        ]
+        .into_iter()
+        .find(|state| state.name() == name)
+    }
 }
 
 /// A semantic activity self-report from a cooperative agent via the
@@ -85,15 +118,38 @@ pub enum AgentActivity {
 /// stale report). Agy yields non-blocked reports to fresh output. Codex's
 /// visible approval modal temporarily overrides a non-blocked report without
 /// discarding it. Other reports survive redraws and silent tool waits.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct ReportedStatus {
-    /// The reported state (`Working` / `Blocked` / `Idle` / `Done`).
+    /// The reported state.
     pub status: AgentActivity,
     /// When the report was received (monotonic).
     pub at: std::time::Instant,
-    /// Non-blocked backstop expiry (at most five minutes); blocked remains
-    /// latched until settled while the pane is alive.
+    /// Non-blocked backstop expiry (five minutes at most, an hour for
+    /// `waiting`); blocked remains latched until settled while the pane is alive.
     pub expiry: std::time::Instant,
+    /// What the agent said it is doing, bounded and stripped of control
+    /// characters (`mcp_cmd::report_note`). For a hook-inferred `waiting`, what
+    /// it waits on.
+    pub note: Option<String>,
+    /// A `waiting` report has absorbed the hook `done` that ended the turn
+    /// which reported it (`agent::waiting::meet`).
+    pub turn_end_absorbed: bool,
+}
+
+impl ReportedStatus {
+    pub const fn new(
+        status: AgentActivity,
+        at: std::time::Instant,
+        expiry: std::time::Instant,
+    ) -> Self {
+        Self {
+            status,
+            at,
+            expiry,
+            note: None,
+            turn_end_absorbed: false,
+        }
+    }
 }
 
 /// An agent a shell tab is running, as `shell_agents` detected it in the

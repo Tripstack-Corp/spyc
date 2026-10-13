@@ -9,6 +9,44 @@
 
 /// Maximum non-blocked report lifetime; blocked still requires explicit recovery.
 pub const MAX_REPORT_TTL_MS: u64 = 300_000;
+/// `waiting`'s default and maximum lifetime: a CI run outlasts five minutes, and
+/// the agent re-reports each time its work wakes it.
+pub const MAX_WAITING_TTL_MS: u64 = 3_600_000;
+/// Cap on a report's note, in characters.
+pub const REPORT_NOTE_CHARS: usize = 80;
+
+/// A report's note as spyc keeps and draws it. Control characters and the
+/// invisible format characters that reorder or hide text become spaces, runs
+/// of whitespace collapse to one, and anything past [`REPORT_NOTE_CHARS`] is
+/// cut with `…`. `None` when nothing printable is left.
+pub fn report_note(raw: &str) -> Option<String> {
+    let invisible = |c: char| {
+        matches!(
+            c,
+            '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}'
+        )
+    };
+    let printable: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_control() || invisible(c) {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let note = printable.split_whitespace().collect::<Vec<_>>().join(" ");
+    if note.is_empty() {
+        return None;
+    }
+    if note.chars().count() <= REPORT_NOTE_CHARS {
+        return Some(note);
+    }
+    let mut cut: String = note.chars().take(REPORT_NOTE_CHARS - 1).collect();
+    cut.push('…');
+    Some(cut)
+}
 
 use std::sync::mpsc;
 
@@ -67,6 +105,8 @@ pub enum McpCommand {
         pane: Option<usize>,
         status: String,
         ttl_ms: Option<u64>,
+        /// Already normalized by [`report_note`].
+        note: Option<String>,
         /// The agent's live session UUID, piggybacked from the status hook's
         /// stdin (Claude includes `session_id` in every hook payload). `Some`
         /// only on hook-driven reports; a direct agent `report_status` call (or
@@ -149,4 +189,41 @@ pub enum McpCommand {
 pub enum McpResponse {
     Ok { message: String },
     Error { message: String },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{REPORT_NOTE_CHARS, report_note};
+
+    /// A note is drawn in the pane divider's diagnostics and the agent HUD, so
+    /// nothing in it may move the cursor, colour the terminal or reorder text.
+    #[test]
+    fn report_note_keeps_only_printable_text_on_one_line() {
+        assert_eq!(report_note("CI on #641").as_deref(), Some("CI on #641"));
+        assert_eq!(
+            report_note("  CI\n\ton  #641\r\n").as_deref(),
+            Some("CI on #641")
+        );
+        assert_eq!(
+            report_note("\u{1b}[31mred\u{1b}[0m \u{9b}2J").as_deref(),
+            Some("[31mred [0m 2J"),
+            "ESC and the C1 CSI are control characters"
+        );
+        assert_eq!(
+            report_note("abc\u{202E}fed\u{200B}x\u{2066}y\u{FEFF}").as_deref(),
+            Some("abc fed x y")
+        );
+        for empty in ["", "   ", "\n\u{1b}\u{202E}"] {
+            assert_eq!(report_note(empty), None, "{empty:?}");
+        }
+    }
+
+    #[test]
+    fn report_note_is_cut_at_its_character_cap() {
+        let exact = "é".repeat(REPORT_NOTE_CHARS);
+        assert_eq!(report_note(&exact).as_deref(), Some(exact.as_str()));
+        let cut = report_note(&"é".repeat(REPORT_NOTE_CHARS + 1)).unwrap();
+        assert_eq!(cut.chars().count(), REPORT_NOTE_CHARS);
+        assert!(cut.ends_with("é…"), "{cut}");
+    }
 }

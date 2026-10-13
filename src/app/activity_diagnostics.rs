@@ -7,16 +7,6 @@ use super::{App, Effect};
 use crate::pane::{AgentActivity, PaneTabs, ReportedStatus, TabEntry, TabInfo};
 use crate::state::sessions::AgentKind;
 
-const fn state_str(a: AgentActivity) -> &'static str {
-    match a {
-        AgentActivity::Working => "working",
-        AgentActivity::Idle => "idle",
-        AgentActivity::Blocked => "blocked",
-        AgentActivity::Done => "done",
-        AgentActivity::Unknown => "unknown",
-    }
-}
-
 fn is_agent(info: &TabInfo) -> bool {
     info.agent().kind() != AgentKind::Other
 }
@@ -24,12 +14,12 @@ fn is_agent(info: &TabInfo) -> bool {
 /// The self-report the dot follows, as `effective_activity` decides it: none
 /// once the process has exited, and none while Codex's visible approval modal
 /// overrides it.
-fn live_report(e: &TabEntry) -> Option<ReportedStatus> {
+fn live_report(e: &TabEntry) -> Option<&ReportedStatus> {
     let info = &e.info;
-    info.reported.filter(|_| {
+    info.reported.as_ref().filter(|_| {
         !e.pane.is_closed()
             && !crate::agent::codex_approval::overrides_report(
-                info.reported,
+                info.reported.as_ref(),
                 info.scrape_status.map(|(status, _)| status),
                 info.agent().kind(),
             )
@@ -89,7 +79,11 @@ fn verdict(e: &TabEntry) -> Vec<String> {
         Some(at) => format!("{:.1}s since last output", at.elapsed().as_secs_f32()),
         None => "no output yet".to_string(),
     };
-    let mut out = vec![format!("{} ({source})", state_str(info.activity)), age];
+    let note = live_report(e)
+        .and_then(|r| r.note.as_deref())
+        .map(|note| format!(" — {note}"))
+        .unwrap_or_default();
+    let mut out = vec![format!("{} ({source}){note}", info.activity.name()), age];
     if info
         .running
         .is_some_and(|r| r.on_shared_daemon && !r.backgrounded)
@@ -181,7 +175,7 @@ fn tab_report(i: usize, e: &TabEntry, is_active: bool, now: Instant) -> Vec<Stri
             "{marker}[{}] \"{}\"  dot={}  agent={}  suspended={}",
             i + 1,
             info.label,
-            state_str(info.activity),
+            info.activity.name(),
             is_agent(info),
             info.suspended,
         ),
@@ -237,7 +231,7 @@ fn source_lines(e: &TabEntry, now: Instant) -> Vec<String> {
         (true, _, _) => "    source: process-exit (no live agent)".to_string(),
         (false, Some(r), _) => format!(
             "    source: SELF-REPORT status={} set {:.1}s ago, {}",
-            state_str(r.status),
+            r.status.name(),
             r.at.elapsed().as_secs_f32(),
             if r.status == AgentActivity::Blocked {
                 "latched until answered/dismissed or a newer report".to_string()
@@ -250,7 +244,7 @@ fn source_lines(e: &TabEntry, now: Instant) -> Vec<String> {
         ),
         (false, None, Some((s, hint))) => format!(
             "    source: SCRAPE-FALLBACK status={}{}",
-            state_str(s),
+            s.name(),
             match hint {
                 Some(h) => format!(" ({h})"),
                 None => String::new(),
@@ -258,17 +252,25 @@ fn source_lines(e: &TabEntry, now: Instant) -> Vec<String> {
         ),
         (false, None, None) => "    source: output-timing (no live report)".to_string(),
     }];
-    out.push(match info.last_reported {
+    if let Some(note) = reported.and_then(|r| r.note.as_deref()) {
+        out.push(format!("    note: {note}"));
+    }
+    out.push(match &info.last_reported {
         Some(report) => format!(
             "    last_report: status={} received {:.1}s ago (hook or agent; {})",
-            state_str(report.status),
+            report.status.name(),
             report.at.elapsed().as_secs_f32(),
             match info.last_report_ignored {
                 Some(reason) => format!("not applied: {reason}"),
                 None if reported.is_some_and(|live| live.at == report.at) => {
                     "authoritative".into()
                 }
-                None if !closed && info.reported.is_some_and(|live| live.at == report.at) => {
+                None if !closed
+                    && info
+                        .reported
+                        .as_ref()
+                        .is_some_and(|live| live.at == report.at) =>
+                {
                     "retained behind visible approval".into()
                 }
                 None => "no longer authoritative".into(),
@@ -284,7 +286,7 @@ fn source_lines(e: &TabEntry, now: Instant) -> Vec<String> {
             out.push(format!(
                 "      event={} status={} tool={} turn={} call={} received {:.1}s ago",
                 event.hook_event_name,
-                state_str(*status),
+                status.name(),
                 event.tool_name.as_deref().unwrap_or("not-reported"),
                 event.turn_id.as_deref().unwrap_or("not-reported"),
                 event.tool_use_id.as_deref().unwrap_or("not-reported"),
