@@ -7,7 +7,7 @@ use jiff::Timestamp;
 
 use crate::agent::tail::Availability;
 use crate::agent::{claude_metrics, codex_metrics};
-use crate::config::HUD_STALE_AFTER_SECS;
+use crate::config::{AgentHudMode, HUD_STALE_AFTER_SECS};
 
 /// Whose session files feed the strip.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -176,6 +176,10 @@ pub struct AgentHudState {
     /// Claude Code's configuration directory, from spyc's environment at
     /// startup: the one its panes inherit, and where spyc wired their hooks.
     pub claude_home: Option<PathBuf>,
+    /// What `:agent hud` chose. It outranks the config file's preference, is
+    /// saved with the session for `-r`, and outlasts a config reload that
+    /// leaves `agent_hud` alone.
+    pub choice: Option<AgentHudMode>,
     pub binding: Option<Binding>,
     pub update: Option<Update>,
     pub as_of: Option<Timestamp>,
@@ -188,6 +192,19 @@ impl AgentHudState {
         Self {
             claude_home,
             ..Self::default()
+        }
+    }
+
+    /// The mode in force: this session's choice, else the config file's.
+    pub fn mode(&self, preference: AgentHudMode) -> AgentHudMode {
+        self.choice.unwrap_or(preference)
+    }
+
+    /// A reload that changes the file's own preference is the newer word, so
+    /// it replaces the choice; any other reload keeps it.
+    pub fn config_reloaded(&mut self, before: AgentHudMode, after: AgentHudMode) {
+        if before != after {
+            self.choice = None;
         }
     }
 
@@ -369,5 +386,22 @@ mod tests {
         assert!(model.accept(update, (1, 1), now));
         assert!(model.update_for(&claude).is_some());
         assert!(model.update_for(&target("/home/a")).is_none());
+    }
+
+    #[test]
+    fn a_choice_outranks_the_file_until_the_file_itself_changes() {
+        let mut model = AgentHudState::default();
+        assert_eq!(model.mode(AgentHudMode::Off), AgentHudMode::Off);
+        model.choice = Some(AgentHudMode::Full);
+        assert_eq!(model.mode(AgentHudMode::Off), AgentHudMode::Full);
+        model.config_reloaded(AgentHudMode::Off, AgentHudMode::Off);
+        assert_eq!(
+            model.choice,
+            Some(AgentHudMode::Full),
+            "an unrelated edit keeps it"
+        );
+        model.config_reloaded(AgentHudMode::Off, AgentHudMode::Compact);
+        assert_eq!(model.choice, None, "editing agent_hud is the newer word");
+        assert_eq!(model.mode(AgentHudMode::Compact), AgentHudMode::Compact);
     }
 }

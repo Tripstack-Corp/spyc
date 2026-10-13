@@ -17,11 +17,21 @@ pub(super) fn lines(app: &App) -> Vec<String> {
         .collect()
 }
 
+/// The mode in force and where it came from.
+fn mode_line(app: &App) -> String {
+    let source = if app.state.pane.agent_hud.choice.is_some() {
+        "chosen with :agent hud; restored by -r"
+    } else {
+        "from the config file"
+    };
+    format!(
+        "agent HUD: {} ({source})",
+        app.agent_hud_preference().as_str()
+    )
+}
+
 fn diagnostic_lines(app: &App) -> Vec<String> {
-    let mut out = vec![format!(
-        "agent HUD: {}",
-        app.state.config.pane.agent_hud.as_str()
-    )];
+    let mut out = vec![mode_line(app)];
     let (cols, rows) = app.view.term_size;
     let layout = app.frame_layout(ratatui::layout::Rect::new(0, 0, cols, rows));
     out.push(match layout.agent_hud {

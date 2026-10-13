@@ -524,6 +524,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
             project_home: None,
             vsplit: None,
             scope_claims: Vec::new(),
+            agent_hud: None,
         };
         save_session(&session).unwrap();
         let loaded = load_sessions();
@@ -565,6 +566,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                 project_home: None,
                 vsplit: None,
                 scope_claims: Vec::new(),
+                agent_hud: None,
             };
             save_session(&s).unwrap();
         }
@@ -602,6 +604,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                 project_home: None,
                 vsplit: None,
                 scope_claims: Vec::new(),
+                agent_hud: None,
             };
             save_session(&s).unwrap();
         }
@@ -627,6 +630,7 @@ fn tabless_session(id: u64, epoch_secs: u64) -> Session {
         project_home: None,
         vsplit: None,
         scope_claims: Vec::new(),
+        agent_hud: None,
     }
 }
 
@@ -744,6 +748,7 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
                 note: None,
                 claimed_at_secs: 1_700_000_000,
             }],
+            agent_hud: None,
         };
         save_session(&session).unwrap();
 

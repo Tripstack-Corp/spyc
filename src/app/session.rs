@@ -267,6 +267,7 @@ impl App {
                         .map(|c| c.listing.dir.clone()),
                 }),
             scope_claims: self.state.scope_registry.clone(),
+            agent_hud: self.state.pane.agent_hud.choice,
         }
     }
 
@@ -371,6 +372,7 @@ impl App {
         // P2: a scope-registry mutation (register/release) is session-relevant
         // — it's exactly what must survive a crash mid-merge-train.
         self.state.scope_registry.hash(&mut h);
+        self.state.pane.agent_hud.choice.hash(&mut h);
         h.finish()
     }
 
@@ -847,6 +849,41 @@ mod tests {
         });
     }
 
+    /// `-r` brings back what `:agent hud` chose. With no choice nothing is
+    /// saved, so an rc edit between runs still takes effect.
+    #[test]
+    fn the_agent_hud_choice_survives_a_session_roundtrip() {
+        use crate::config::AgentHudMode;
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.open_pane_tab("cat");
+            assert_eq!(app.build_session_snapshot().agent_hud, None);
+            let before = app.session_fingerprint();
+            app.cmd_agent_hud("full");
+            assert_ne!(
+                app.session_fingerprint(),
+                before,
+                "the autosave must see the choice"
+            );
+            let mut saved = app.build_session_snapshot();
+            saved.cwd = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            let json = serde_json::to_string(&saved).unwrap();
+            let restored: crate::state::sessions::Session = serde_json::from_str(&json).unwrap();
+            let mut fresh = App::test_app(tmp.path().to_path_buf());
+            assert_eq!(fresh.agent_hud_preference(), AgentHudMode::Off);
+            fresh.restore_session(&restored);
+            assert_eq!(fresh.agent_hud_preference(), AgentHudMode::Full);
+            let mut older: serde_json::Value = serde_json::from_str(&json).unwrap();
+            older.as_object_mut().unwrap().remove("agent_hud");
+            let older: crate::state::sessions::Session = serde_json::from_value(older).unwrap();
+            assert_eq!(
+                older.agent_hud, None,
+                "a session saved before the field reads"
+            );
+        });
+    }
+
     fn entry_id(app: &App) -> &str {
         &app.runtime.pane_tabs.as_ref().unwrap().tabs()[0].info.id
     }
@@ -868,6 +905,7 @@ mod tests {
             project_home: None,
             vsplit: None,
             scope_claims: Vec::new(),
+            agent_hud: None,
         }
     }
 

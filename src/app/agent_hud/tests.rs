@@ -818,3 +818,23 @@ fn agent_hud_follows_a_claude_tabs_reported_session_in_its_home() {
         assert_ne!(app.state.pane.agent_hud.binding, binding, "{lines:?}");
     });
 }
+
+/// Saving the rc for any other reason keeps what `:agent hud` chose; changing
+/// `agent_hud` in it is the newer word.
+#[test]
+fn a_config_reload_keeps_the_hud_choice_unless_it_changes_agent_hud() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        app.cmd_agent_hud("full");
+        let mut unrelated = app.state.config.clone();
+        unrelated.pane.preview_pasted_images = !unrelated.pane.preview_pasted_images;
+        app.adopt_config(unrelated);
+        assert_eq!(app.agent_hud_preference(), AgentHudMode::Full);
+        let mut edited = app.state.config.clone();
+        edited.pane.agent_hud = AgentHudMode::Compact;
+        app.adopt_config(edited);
+        assert_eq!(app.agent_hud_preference(), AgentHudMode::Compact);
+        assert!(app.state.pane.agent_hud.choice.is_none());
+    });
+}
