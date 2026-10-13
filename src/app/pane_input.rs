@@ -266,11 +266,11 @@ mod tests {
             {
                 let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
                 info.command = "codex".into();
-                info.reported = Some(crate::pane::ReportedStatus {
-                    status: crate::pane::AgentActivity::Blocked,
-                    at: now,
-                    expiry: now + Duration::from_secs(60),
-                });
+                info.reported = Some(crate::pane::ReportedStatus::new(
+                    crate::pane::AgentActivity::Blocked,
+                    now,
+                    now + Duration::from_secs(60),
+                ));
             }
             app.runtime
                 .pane_tabs
@@ -294,6 +294,7 @@ mod tests {
                     .unwrap()
                     .active_info()
                     .reported
+                    .clone()
                     .unwrap()
                     .status,
                 crate::pane::AgentActivity::Working,
@@ -326,6 +327,7 @@ mod tests {
                     .unwrap()
                     .active_info()
                     .reported
+                    .clone()
                     .unwrap()
                     .status,
                 crate::pane::AgentActivity::Blocked

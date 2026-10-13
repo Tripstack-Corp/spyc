@@ -39,7 +39,8 @@ view. Reads default to the focused column; pass `root` for another worktree.\n\
 Before editing, `claim_worktree` and `register_scope`; release claims when done. \
 Before removing a tree, `list_worktrees` and skip others' claims.\n\
 Use `report_status` on turn changes: `working`, `blocked` when waiting for user \
-input, then `done`.\n\
+input, then `done` — or `waiting` with a `note` if background work you started \
+will wake you.\n\
 See the spyc skill for workflows and tool descriptions for arguments.";
 const CONTEXT_URI: &str = "spyc://context";
 
@@ -203,30 +204,36 @@ const fn route(env: &PaneEnv, under_daemon: bool) -> Route {
 }
 
 /// The *effective* report state, given the hook's configured state and the
-/// agent event JSON piped to the hook's stdin. The one remap is Claude-specific
-/// (codex has no `Notification`/idle event, so this is inert for codex
-/// payloads): a `Notification` whose `notification_type` is `idle_prompt`
-/// ("Claude is
-/// waiting for your input") is the agent **finished and waiting** — that's
-/// `done` (the calm teal square), NOT `blocked` (the alarming red "needs me"
-/// square). Without it an idle agent flips to a false-red square after Claude's
-/// ~60s idle nudge — both panes "switched to stop squares" when the user looked
-/// away. A `permission_prompt` Notification (and the `PermissionRequest` event,
-/// which fires for real tool-permission prompts) keeps `blocked`. An empty or
-/// unparseable payload leaves the configured state unchanged. Pure + tested.
+/// agent event JSON piped to the hook's stdin. Both remaps are Claude-specific
+/// and inert for other agents' payloads:
+///
+/// - a `Notification` whose `notification_type` is `idle_prompt` ("Claude is
+///   waiting for your input") is the agent **finished and waiting** — that's
+///   `done` (the calm teal square), NOT `blocked` (the alarming red "needs me"
+///   square). Without it an idle agent flips to a false-red square after
+///   Claude's ~60s idle nudge. A `permission_prompt` Notification (and the
+///   `PermissionRequest` event, which fires for real tool-permission prompts)
+///   keeps `blocked`.
+/// - a `Stop` whose payload lists in-flight background work or a scheduled
+///   wakeup is not finished: the agent resumes by itself when that work wakes
+///   it, so `done` becomes `waiting`. Claude Code's own description of those
+///   lists is "distinguish session is done from session is paused waiting for
+///   background work to wake it".
+///
+/// An empty or unparseable payload leaves the configured state unchanged. Pure
+/// + tested.
 fn effective_report_state<'a>(configured: &'a str, hook_payload: &str) -> &'a str {
-    if configured != "blocked" {
+    let Some(event) = crate::agent::status_hook::StatusHookEvent::from_payload(hook_payload) else {
         return configured;
-    }
-    let idle_notification = serde_json::from_str::<serde_json::Value>(hook_payload)
-        .ok()
-        .is_some_and(|v| {
-            v["hook_event_name"] == "Notification" && v["notification_type"] == "idle_prompt"
-        });
-    if idle_notification {
-        "done"
-    } else {
-        configured
+    };
+    match (configured, event.hook_event_name.as_str()) {
+        ("blocked", "Notification")
+            if event.notification_type.as_deref() == Some("idle_prompt") =>
+        {
+            "done"
+        }
+        ("done", "Stop") if event.wakes_pending() == Some(true) => "waiting",
+        _ => configured,
     }
 }
 

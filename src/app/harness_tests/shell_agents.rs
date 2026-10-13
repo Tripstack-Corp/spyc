@@ -55,6 +55,7 @@ fn a_report_to_a_shell_tab_is_recorded_not_applied() {
             pane: None,
             status: "working".into(),
             ttl_ms: None,
+            note: None,
             session_id: Some("11111111-1111-4111-8111-111111111111".into()),
             hook_event: None,
         });
@@ -142,6 +143,7 @@ fn a_shell_tab_follows_the_agent_it_runs_and_returns_to_a_shell() {
             pane: None,
             status: "working".into(),
             ttl_ms: None,
+            note: None,
             session_id: Some("11111111-1111-4111-8111-111111111111".into()),
             hook_event: None,
         });

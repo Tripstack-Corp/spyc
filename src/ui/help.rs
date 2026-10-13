@@ -276,8 +276,8 @@ const SECTIONS: &[Section] = &[
                 "fork active tab: claude/codex branch its conversation into a new tab; a shell tab copies",
             ),
             (
-                "●  ■  ·",
-                "agent tab dot: pulse ● working, red square ■ blocked, teal square ■ done, dim · idle (:why-status explains it in a pager)",
+                "●  ■  ○  ·",
+                "agent tab dot: pulse ● working, red square ■ blocked, teal square ■ done, blue ○ waiting on background work, dim · idle (:why-status explains it in a pager)",
             ),
             (
                 ":hooks [on|on!|off|ask] [agent]",

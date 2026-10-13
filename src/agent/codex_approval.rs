@@ -71,7 +71,7 @@ pub const RULES: &[DetectionRule] = &[
 /// after approval the silent-work report resumes. Identified questions and
 /// explicit agent blocks remain authoritative until their own recovery.
 pub fn overrides_report(
-    reported: Option<ReportedStatus>,
+    reported: Option<&ReportedStatus>,
     scrape: Option<AgentActivity>,
     kind: AgentKind,
 ) -> bool {

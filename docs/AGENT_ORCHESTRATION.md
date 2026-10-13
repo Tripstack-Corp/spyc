@@ -27,7 +27,8 @@ Each **agent** pane tab carries a live dot in the divider. Its state comes from
 three tiers, with a narrow Codex approval exception:
 
 1. **Semantic self-report** (best) — the agent calls the `report_status` MCP tool
-   (or its lifecycle hook does): `working` / `blocked` / `done` / `idle`.
+   (or its lifecycle hook does): `working` / `blocked` / `done` / `waiting` /
+   `idle`.
 2. **Scrape fallback** — for a state an agent's hooks can't report, spyc reads
    its *visible screen* for a known prompt: agy's tool approval or Codex's
    complete command, file-edit, MCP-tool and network approval forms. Codex scans
@@ -52,6 +53,7 @@ that a turn stopped or finished.
 | quiet `·` | **idle** |
 | steady **red** square `■` | **blocked** — waiting on you ("needs me") |
 | calm **teal** square `■` | **done** — finished a turn |
+| steady **blue** hollow circle `○` | **waiting** — turn over, but background work the agent started will wake it |
 | `💤` | `^z`-suspended |
 
 Semantically reported `blocked` is **latched**: it stays red until you settle the prompt in that pane —
@@ -61,9 +63,37 @@ because no hook reports one: Claude Code ends a declined turn as a user
 interrupt, and `Stop` doesn't fire on an interrupt, so the keystroke is the only
 signal spyc gets.
 
+**`waiting`** is neither the user's turn nor finished: the agent ended its turn
+while work it started (a CI watch, a background build, a monitor, a scheduled
+wakeup) is still pending, and it resumes by itself when that work wakes it. Two
+sources set it:
+
+- **Claude Code says so itself.** Its `Stop` hook payload lists in-flight
+  `background_tasks` and pending `session_crons`, so the reporter turns that
+  turn end's `done` into `waiting` when either list has an entry. The reporter
+  keeps only how many entries each list had, never their descriptions or
+  commands, and the note reads "1 background task". When the work finishes,
+  Claude starts a turn by itself, its `UserPromptSubmit` hook reports `working`,
+  and the next `Stop` decides again.
+- **The agent reports it**: `report_status(waiting, note)`, for an agent whose
+  hooks can't say (codex, agy) or to name what it waits on ("CI on #641"). The
+  agent's note outranks the hook's count.
+
+A live `waiting` holds back only a hook's `done`. Claude's idle nudge is never a
+turn end. When a hook can't say whether work is pending, as with codex's and
+agy's `Stop`, `waiting` absorbs the first `done`, which ends the turn that
+reported it. The next one means the agent woke and finished without reporting
+again, so it applies. A Claude `Stop` that lists no pending work applies too:
+nothing will wake the agent. Every other report replaces `waiting`, as does
+**Enter** in the pane, which starts the user's own turn. Esc and `^c` don't
+retire it: interrupting an idle agent stops nothing running in the background.
+Entering `waiting` fires no notification; the `done` or `blocked` ping fires
+when the work actually ends.
+
 **Auto-reporting.** So it works without the agent choosing to call the tool, spyc
 installs lifecycle hooks that run `spyc --report-status` (prompt-submit→working,
-needs-permission→blocked, turn-end→done), once, in each agent's own user
+needs-permission→blocked, turn-end→done, or `waiting` when Claude's `Stop` lists
+pending work), once, in each agent's own user
 configuration: **claude** (`~/.claude/settings.json`), **codex**
 (`$CODEX_HOME/hooks.json`), **agy** (`~/.gemini/config/hooks.json` — working/done
 only; agy has no approval event, so its `blocked` comes from spyc reading the
@@ -99,7 +129,8 @@ next launch) and goes to the agent, rather than being eaten by a dialogue the
 user was not typing at.
 
 **Debug:** **`:why-status`** opens a pager with the active tab's state + source,
-then its full derivation; **`:activity dump`** opens one with every pane's.
+then its full derivation; **`:activity dump`** opens one with every pane's. A
+live report's note shows in both, so a `waiting` tab says what it waits on.
 
 The dump retains the last received semantic report after expiry or dismissal;
 its source can be a hook or the agent itself. Hook diagnostics separate the
@@ -375,5 +406,7 @@ recovery, and stops using output timing to drive activity. Diagnostics show
 `process-exit` as the source and retain the final output timestamp. Its last received report remains in diagnostics as no longer
 authoritative, and late reports are rejected rather than reviving the dot.
 Non-blocked report TTLs default to five minutes and are capped at five minutes
-at dispatch, including direct callers outside the MCP schema. Blocked remains
-latched until explicit recovery while the pane is alive.
+at dispatch, including direct callers outside the MCP schema. `waiting` defaults
+to, and is capped at, an hour: a CI run outlasts five minutes, and the agent
+re-reports each time its work wakes it. Blocked remains latched until explicit
+recovery while the pane is alive.
