@@ -99,12 +99,7 @@ jobs:
       - name: Toolchain + C compiler
         run: rustc --version && cc --version
       - uses: Swatinem/rust-cache@v2
-      # line-tables-only DWARF keeps panic file:line for failures while
-      # trimming the test compile + shrinking the cache. CI-only override.
       - name: Tests
-        env:
-          CARGO_PROFILE_DEV_DEBUG: line-tables-only
-          CARGO_PROFILE_TEST_DEBUG: line-tables-only
         run: make test
 
   package:

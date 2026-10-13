@@ -230,6 +230,12 @@ proc-macro2 = { version = "1", features = ["span-locations"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
 syn = { version = "3", default-features = false, features = ["full", "parsing", "visit"] }
 
+# Line tables keep file:line in panics and backtraces; full debug info only
+# adds what lldb needs to print locals. `CARGO_PROFILE_DEV_DEBUG=full` brings
+# it back for a debugging session. `test` inherits this.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 opt-level = 3
 lto = "thin"
