@@ -1172,6 +1172,9 @@ fn tar_with_declared_size(path: &Path, name: &str, declared: &[u8; 12], body: &[
 ///
 /// A tar can't do this (its stored bytes end where the next header begins, so a
 /// lie under-reads), which is part of why the zip half was easy to miss.
+///
+/// Since zip 9 the crate refuses a member that outgrows its declaration, so the
+/// lie no longer reaches the cap; the honest member at the end is what does.
 #[test]
 fn an_understated_zip_size_cannot_smuggle_bytes_past_a_read_cap() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1206,13 +1209,50 @@ fn an_understated_zip_size_cannot_smuggle_bytes_past_a_read_cap() {
     let err = member_bytes_within(&archive, entry, cap)
         .expect_err("300 KB must not come back under a 100 KB cap");
     assert!(
+        format!("{err:#}").contains("declared uncompressed size"),
+        "must say why: {err:#}"
+    );
+    let err = member_bytes(&archive, entry).expect_err("zip refuses the lie uncapped too");
+    assert!(format!("{err:#}").contains("declared uncompressed size"));
+
+    // An honest 300 KB member reaches the cap, and the cap is what stops it.
+    zip_at(&archive, &[("big.txt", &body, 0o644)]);
+    let indexed = index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+    let entry = indexed.index.get("big.txt").expect("indexed");
+    let err = member_bytes_within(&archive, entry, cap)
+        .expect_err("300 KB must not come back under a 100 KB cap");
+    assert!(
         format!("{err:#}").contains("read limit"),
         "must say why: {err:#}"
     );
-
-    // The uncapped path is unchanged — this is a ceiling, not a new refusal.
     let all = member_bytes(&archive, entry).expect("uncapped read still works");
-    assert_eq!(all.len(), 300_000, "and still returns the real bytes");
+    assert_eq!(all.len(), 300_000, "a ceiling, not a new refusal");
+}
+
+/// A pre-UTF-8 zip names members in CP437. Since zip 9 a name can fail to
+/// decode, and `index_zip` drops one that does — this pins that a legacy name
+/// is not such a name.
+#[test]
+fn a_cp437_member_name_is_listed_decoded_not_dropped() {
+    let tmp = tempfile::tempdir().unwrap();
+    let archive = tmp.path().join("legacy.zip");
+    zip_at(&archive, &[("cafX.txt", b"x", 0o644)]);
+    // `ZipWriter` takes a `&str`, so the CP437 byte is patched in afterwards:
+    // 0x82 is `é` in CP437 and invalid as UTF-8. The name is outside the CRC.
+    let mut raw = std::fs::read(&archive).unwrap();
+    let mut patched = 0;
+    for i in 0..raw.len() - 7 {
+        if &raw[i..i + 8] == b"cafX.txt" {
+            raw[i + 3] = 0x82;
+            patched += 1;
+        }
+    }
+    assert_eq!(patched, 2, "the local header and the central directory");
+    std::fs::write(&archive, &raw).unwrap();
+
+    let indexed = index_seekable(&archive, ArchiveFormat::Zip, 1000).unwrap();
+    assert_eq!(indexed.facts.empty_names, 0);
+    assert!(indexed.index.get("café.txt").is_some(), "decoded as CP437");
 }
 
 /// The octal maximum (~64 GB) behind an empty body. Before the fix this reached
