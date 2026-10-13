@@ -3,9 +3,12 @@ use std::collections::{BTreeMap, VecDeque};
 use jiff::Timestamp;
 
 use super::records::{Event, ToolCall};
-use super::{Compaction, Mode, Sample, Snapshot, Tool, ToolStatus, Usage};
+use super::{Compaction, Mode, Sample, Snapshot, Tool, ToolCount, ToolStatus, Usage};
 
 pub const MAX_TOOLS: usize = 64;
+/// Tools counted by name; later names share [`OTHER_TOOLS`].
+pub const MAX_TOOL_NAMES: usize = 24;
+pub const OTHER_TOOLS: &str = "other";
 /// How many message ids are remembered to deduplicate their records. A
 /// message's records are written together, so a short window is enough.
 const RECENT_MESSAGES: usize = 64;
@@ -32,6 +35,9 @@ impl Reducer {
         result.tools = self.tools.values().cloned().collect();
         result.tools.sort_by_key(|tool| tool.at);
         result.tools_complete = !self.tools_incomplete;
+        result
+            .tool_counts
+            .sort_by(|a, b| b.calls.cmp(&a.calls).then_with(|| a.name.cmp(&b.name)));
         result.mode = (self.mode != Mode::default())
             .then(|| self.mode_at.or(self.clock))
             .flatten()
@@ -120,6 +126,8 @@ impl Reducer {
         if matches!(call.name.as_deref(), Some("Agent" | "Task")) {
             self.snapshot.subagent_calls = self.snapshot.subagent_calls.saturating_add(1);
         }
+        let count = self.count(call.name.as_deref());
+        count.calls = count.calls.saturating_add(1);
         self.tools.insert(
             call.id,
             Tool {
@@ -149,14 +157,46 @@ impl Reducer {
             self.tools_incomplete = true;
             return;
         };
-        if tool.status != ToolStatus::Failed {
-            tool.status = if failed {
-                ToolStatus::Failed
-            } else {
-                ToolStatus::Completed
-            };
-        }
         tool.at = tool.at.max(at);
+        if tool.status == ToolStatus::Failed {
+            return;
+        }
+        tool.status = if failed {
+            ToolStatus::Failed
+        } else {
+            ToolStatus::Completed
+        };
+        if failed {
+            let name = tool.name.clone();
+            let count = self.count(name.as_deref());
+            count.failed = count.failed.saturating_add(1);
+        }
+    }
+
+    /// The tally for `name`. Past [`MAX_TOOL_NAMES`] distinct names, new ones
+    /// share [`OTHER_TOOLS`], so the list stays bounded.
+    fn count(&mut self, name: Option<&str>) -> &mut ToolCount {
+        let counts = &mut self.snapshot.tool_counts;
+        let name = name.unwrap_or("tool");
+        let index = counts.iter().position(|c| c.name == name).or_else(|| {
+            (counts.len() >= MAX_TOOL_NAMES)
+                .then(|| counts.iter().position(|c| c.name == OTHER_TOOLS))
+                .flatten()
+        });
+        let index = index.unwrap_or_else(|| {
+            let name = if counts.len() >= MAX_TOOL_NAMES {
+                OTHER_TOOLS
+            } else {
+                name
+            };
+            counts.push(ToolCount {
+                name: name.to_owned(),
+                calls: 0,
+                failed: 0,
+            });
+            counts.len() - 1
+        });
+        &mut counts[index]
     }
 
     fn fold_compaction(&mut self, at: Timestamp, compaction: Compaction) {

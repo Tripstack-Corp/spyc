@@ -545,15 +545,17 @@ They do not establish native CLI or fresh hook-trust acceptance.
 ### Claude Code HUD checks
 
 The same strip follows a Claude Code tab once its status hooks report a session;
-until then it reads `awaiting pinned metrics`. For a local round:
+until then it reads `awaiting metrics`. For a local round:
 
 1. Open two Claude Code tabs at the same working directory. Their session
    suffixes, context and session totals follow the active tab.
-2. Run `/compact`. Context reads `-- (compacted)` until the next request, and
-   the session total and compaction count survive it.
-3. Start a background command, end the turn, and check the attention row reads
-   `waiting` with what it waits on.
-4. `/clear` or `/resume` changes the reported session, and the strip starts a
+2. Run `/compact`. `context` reads `--` until the next request, and `out`,
+   `hit` and the compaction count survive it.
+3. Start a background command, end the turn, and check the activity row reads
+   `○ waiting` with what it waits on at its end.
+4. Check the columns: every row's cells start at the same x, at any pane width,
+   and cells drop whole from the right as the pane narrows.
+5. `/clear` or `/resume` changes the reported session, and the strip starts a
    fresh generation on the new transcript. `:agent hud info` names each field's
    transcript record and its freshness.
 

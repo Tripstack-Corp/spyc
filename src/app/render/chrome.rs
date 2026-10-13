@@ -388,7 +388,7 @@ impl App {
     /// unambiguously that tab's, replacing the redundant `+`. PURE — reads the
     /// theme and the already-settled `agent_anim_frame` (advanced off the draw
     /// path in `settle_agent_activity`); the draw never touches the clock.
-    fn agent_activity_span(
+    pub(super) fn agent_activity_span(
         &self,
         activity: crate::pane::AgentActivity,
         phase_offset: u64,

@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 
 pub use crate::agent::tail::Availability;
-pub use reducer::Reducer;
+pub use reducer::{MAX_TOOL_NAMES, OTHER_TOOLS, Reducer};
 
 /// Claude Code's configuration directory: `$CLAUDE_CONFIG_DIR`, else
 /// `~/.claude`. Only an absolute one names a place to read.
@@ -149,6 +149,15 @@ pub struct Tool {
     pub background: bool,
 }
 
+/// Calls of one tool since the read began.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolCount {
+    /// [`reducer::OTHER_TOOLS`] once [`reducer::MAX_TOOL_NAMES`] are counted.
+    pub name: String,
+    pub calls: u32,
+    pub failed: u32,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Snapshot {
     /// The latest message's usage: what its request sent and produced.
@@ -170,6 +179,8 @@ pub struct Snapshot {
     /// False once a result named a call the read never saw start, or a call
     /// was evicted: counts over `tools` are then not exhaustive.
     pub tools_complete: bool,
+    /// Every call since the read began, by tool, most called first.
+    pub tool_counts: Vec<ToolCount>,
     /// `Agent` (or older `Task`) calls: subagents started, not parallel tools.
     pub subagent_calls: u32,
     pub background_calls: u32,

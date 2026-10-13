@@ -990,11 +990,14 @@ flash instead of silently closing. Scroll positions are preserved.
 ## Native agent HUD
 
 `:agent hud compact` enables a two-row strip below the active Codex or Claude
-Code pane; `:agent hud full` adds operating mode and recent tools. Attention,
-with what a `waiting` agent waits on, and session identity lead the strip.
-Usage scopes stay separate, and unavailable context occupancy and limits stay
-explicit. A Claude Code tab's context is a token count, never a percentage. `:agent hud off` stops
-collection; `:agent hud info` shows saveable source and freshness diagnostics.
+Code pane; `:agent hud full` adds a tools row and a mode row. Every agent shares
+one layout of aligned, coloured columns, led by the tab's own activity dot, its
+session and model, with a `waiting` agent's note at the end of the row. Tools
+are counted by name, a running call marked `◐` and failures `✗`. Usage scopes
+stay separate, and unavailable context occupancy and limits stay explicit. A
+Claude Code tab's context is a token count, never a percentage. `:agent hud off`
+stops collection; `:agent hud info` shows saveable source and freshness
+diagnostics.
 The strip uses the shared pane geometry, preserves six child rows and needs no
 idle polling. See [configuration and source semantics](CONFIGURATION.md#agent-hud--pane-agent_hud)
 for the home-only preference and size fallbacks.
