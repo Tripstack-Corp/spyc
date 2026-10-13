@@ -169,18 +169,7 @@ impl App {
                 .flash_error(format!("session dir gone: {}", session.cwd.display()));
             return effects;
         }
-        // Keep the startup-generated name when an older session file
-        // has no name field; otherwise take the saved one.
-        if !session.name.is_empty() {
-            self.state.session_name = Some(session.name.clone());
-        }
-        // Continue overwriting the restored session's own `<id>.json` on
-        // subsequent saves/autosaves (P3-2), rather than forking a new file.
-        self.state.session_id = Some(session.id);
-        self.state.deferred_tabs.clear();
-        self.state.project_home = session.project_home.clone().filter(|p| p.is_dir());
-        // Restore pane layout.
-        self.state.pane.pane_height_pct = session.pane_height_pct;
+        self.restore_session_settings(session);
         if !session.tabs.is_empty() {
             self.runtime.pane_tabs = None;
             let mut restored_indices = Vec::new();
@@ -296,6 +285,24 @@ impl App {
     /// session-cwd `chdir` (which `set_current_dir`s and would race the parallel
     /// test runner) — `open_second_commander_at` / `load_right_preview` don't
     /// touch the process cwd.
+    /// The session's own identity and settings, apart from its tabs and split.
+    fn restore_session_settings(&mut self, session: &crate::state::sessions::Session) {
+        // Keep the startup-generated name when an older session file
+        // has no name field; otherwise take the saved one.
+        if !session.name.is_empty() {
+            self.state.session_name = Some(session.name.clone());
+        }
+        // Continue overwriting the restored session's own `<id>.json` on
+        // subsequent saves/autosaves (P3-2), rather than forking a new file.
+        self.state.session_id = Some(session.id);
+        self.state.deferred_tabs.clear();
+        self.state.project_home = session.project_home.clone().filter(|p| p.is_dir());
+        self.state.pane.pane_height_pct = session.pane_height_pct;
+        if let Some(mode) = session.agent_hud {
+            self.state.pane.agent_hud.choice = Some(mode);
+        }
+    }
+
     pub(super) fn restore_vsplit(
         &mut self,
         sv: &crate::state::sessions::SavedVsplit,

@@ -22,10 +22,18 @@ impl App {
             !tabs.active().is_closed() && feed(tabs.active_info().agent().kind()).is_some()
         });
         if eligible {
-            self.state.config.pane.agent_hud
+            self.agent_hud_preference()
         } else {
             AgentHudMode::Off
         }
+    }
+
+    /// The mode asked for, whether or not the active pane can show it.
+    pub(super) fn agent_hud_preference(&self) -> AgentHudMode {
+        self.state
+            .pane
+            .agent_hud
+            .mode(self.state.config.pane.agent_hud)
     }
 
     pub(super) fn agent_hud_target(&self) -> Option<Target> {
@@ -155,7 +163,7 @@ impl App {
         let Some(mode) = command.and_then(AgentHudMode::parse) else {
             return self.agent_hud_usage();
         };
-        self.state.config.pane.agent_hud = mode;
+        self.state.pane.agent_hud.choice = Some(mode);
         self.clear_pane_selection();
         self.state
             .flash_info(format!("agent HUD: {}", mode.as_str()));

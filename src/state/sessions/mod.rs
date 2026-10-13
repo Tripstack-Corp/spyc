@@ -148,6 +148,10 @@ pub struct Session {
     /// `SavedTab::claim_owner`. Absent on older saves.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scope_claims: Vec<crate::state::scope_registry::ScopeClaim>,
+    /// What `:agent hud` chose, restored on `-r`. `None` when the session left
+    /// the config file's preference alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_hud: Option<crate::config::AgentHudMode>,
 }
 
 /// Persisted vertical-split state for `-r` restore. Primitives only, so the

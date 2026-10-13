@@ -219,6 +219,7 @@ fn session_at(cwd: PathBuf) -> crate::state::sessions::Session {
         project_home: None,
         vsplit: None,
         scope_claims: Vec::new(),
+        agent_hud: None,
     }
 }
 

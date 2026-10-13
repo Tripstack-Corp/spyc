@@ -1,10 +1,10 @@
 //! The opt-in pane strip preference; collection is owned by its visible consumer.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub const HUD_STALE_AFTER_SECS: i64 = 60;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentHudMode {
     #[default]

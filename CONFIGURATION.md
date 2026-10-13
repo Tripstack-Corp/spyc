@@ -85,9 +85,10 @@ for the annotated version of each.
 
 The native agent strip, for Codex and Claude Code tabs, is **off by default**.
 Set `agent_hud = "compact"` or `"full"` in `~/.spycrc.toml`; project-local
-values are ignored. Use `:agent hud off|compact|full` to change it for the
-current run. A config reload restores the file preference. `:agent hud info`
-opens saveable source diagnostics.
+values are ignored. `:agent hud off|compact|full` chooses for the session: the
+choice outranks the file, `spyc -r` brings it back, and a config reload keeps
+it unless the reload changes `agent_hud` itself. `:agent hud info` names which
+one is in force and opens saveable source diagnostics.
 
 Compact uses two rows below the child: the activity row and the usage row. Full
 adds the tools row and the mode row, for four. Every agent shares one layout in

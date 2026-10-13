@@ -23,37 +23,47 @@ impl App {
         // cosmetic settings load anchored to where spyc was launched.)
         match Config::load_default(&self.state.start_dir) {
             Ok(new_config) => {
-                self.state.user_keymap = UserKeymap::from_bindings(new_config.bindings.clone());
-                self.view.theme = Theme::default().with_overrides(&new_config.colors);
-                // Reset to built-in mask defaults first, then apply config
-                // overrides — so removing `[[ignore_masks]]` entries from
-                // the rc file reverts the group to defaults on reload.
-                let mut masks = IgnoreMasks::default();
-                masks.apply_config(&new_config.ignore_masks);
-                let count = new_config.sources.len();
-                let warnings = new_config.warnings.clone();
-                self.state.config = new_config;
-                let sides: Vec<_> = self.state.active_sides().collect();
-                for side in sides {
-                    self.state.col_mut(side).masks = masks.clone();
-                    self.state.rebuild_rows_for(side);
-                }
-                // Non-fatal problems (bad scan-pattern regex, etc.) win over
-                // the success note so a typo is visible the moment the rc is
-                // saved, not only under --debug.
-                if warnings.is_empty() {
-                    self.state
-                        .flash_info(format!("reloaded {count} config file(s)"));
-                } else {
-                    self.state
-                        .flash_error(format!("config: {}", warnings.join("; ")));
-                }
+                self.adopt_config(new_config);
                 // The rebuilt keymap dropped the old synthetic `@map:` entries,
                 // so re-run init.lua to re-register them (silent when there's no
                 // init.lua — a configless `^R` shouldn't flash about Lua).
                 self.reload_init_lua(false);
             }
             Err(e) => self.state.flash_error(format!("config error: {e:#}")),
+        }
+    }
+
+    /// Put a freshly loaded config in force: keymap, theme, masks, and what
+    /// `:agent hud` chose unless the file changed `agent_hud` itself.
+    pub(super) fn adopt_config(&mut self, new_config: Config) {
+        self.state.user_keymap = UserKeymap::from_bindings(new_config.bindings.clone());
+        self.view.theme = Theme::default().with_overrides(&new_config.colors);
+        // Reset to built-in mask defaults first, then apply config
+        // overrides — so removing `[[ignore_masks]]` entries from
+        // the rc file reverts the group to defaults on reload.
+        let mut masks = IgnoreMasks::default();
+        masks.apply_config(&new_config.ignore_masks);
+        let count = new_config.sources.len();
+        let warnings = new_config.warnings.clone();
+        self.state
+            .pane
+            .agent_hud
+            .config_reloaded(self.state.config.pane.agent_hud, new_config.pane.agent_hud);
+        self.state.config = new_config;
+        let sides: Vec<_> = self.state.active_sides().collect();
+        for side in sides {
+            self.state.col_mut(side).masks = masks.clone();
+            self.state.rebuild_rows_for(side);
+        }
+        // Non-fatal problems (bad scan-pattern regex, etc.) win over
+        // the success note so a typo is visible the moment the rc is
+        // saved, not only under --debug.
+        if warnings.is_empty() {
+            self.state
+                .flash_info(format!("reloaded {count} config file(s)"));
+        } else {
+            self.state
+                .flash_error(format!("config: {}", warnings.join("; ")));
         }
     }
 
