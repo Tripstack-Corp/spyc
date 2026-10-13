@@ -238,10 +238,7 @@ fn colon_n_selects_command_n() {
     });
 }
 
-// Found while writing the tests above; the fix un-ignores it.
-
 #[test]
-#[ignore = "bug: `l` is swallowed before the line editor sees it, so it can't move right"]
 fn h_and_l_move_the_editors_cursor() {
     editing_history(&THREE, |app| {
         let cursor = |app: &App| app.view.pending_history_pick.as_ref().unwrap().cursor;
