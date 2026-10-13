@@ -36,6 +36,8 @@ pub enum Region {
     Status,
     /// The 1-column vertical separator between split columns.
     VDivider,
+    /// The agent strip under the pane: text to select, never the child's input.
+    AgentHud,
 }
 
 /// Where a mouse event is dispatched.
@@ -532,7 +534,7 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
             // The single-line chrome surfaces hold text and no keyboard focus, so a
             // press there can only mean "select this". The divider carries the tab
             // bar, where a custom session name is the thing worth copying.
-            if matches!(region, Region::Status | Region::Divider) {
+            if matches!(region, Region::Status | Region::Divider | Region::AgentHud) {
                 return MouseSink::SelectChrome;
             }
             return MouseSink::FocusRegion;
@@ -578,7 +580,9 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
         }
         // Chrome. Nothing to scroll, and clicking it is a later addition (tab
         // bar hit-testing lives on the divider).
-        Region::Divider | Region::Prompt | Region::Status | Region::VDivider => MouseSink::Swallow,
+        Region::Divider | Region::Prompt | Region::Status | Region::VDivider | Region::AgentHud => {
+            MouseSink::Swallow
+        }
     }
 }
 
@@ -600,6 +604,11 @@ pub const fn region_at(layout: &FrameLayout, col: u16, row: u16) -> Option<Regio
         && hit(pane, col, row)
     {
         return Some(Region::Pane);
+    }
+    if let Some(strip) = layout.agent_hud
+        && hit(strip, col, row)
+    {
+        return Some(Region::AgentHud);
     }
     if let Some(divider) = layout.divider
         && hit(divider, col, row)
@@ -2022,13 +2031,38 @@ mod tests {
     /// bar, where a custom session name is the thing worth copying.
     #[test]
     fn chrome_lines_start_a_selection_rather_than_taking_focus() {
-        for region in [Region::Status, Region::Divider] {
+        for region in [Region::Status, Region::Divider, Region::AgentHud] {
             assert_eq!(
                 route_mouse(snap(Some(region)), Gesture::Left),
                 MouseSink::SelectChrome,
                 "{region:?}"
             );
         }
+    }
+
+    /// The agent strip is spyc's text under the pane: a press selects it, and
+    /// nothing reaches the child, whatever the child asked for.
+    #[test]
+    fn the_agent_strip_is_never_the_childs() {
+        let s = MouseSnapshot {
+            pane_wants_mouse: true,
+            ..snap(Some(Region::AgentHud))
+        };
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::SelectChrome);
+        assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
+        let mut layout =
+            App::compute_layout(Rect::new(0, 0, 80, 24), true, 40, StatusPosition::Top);
+        let pane = layout.pane.expect("pane_open = true");
+        let parts = crate::ui::agent_hud::partition(pane, crate::config::AgentHudMode::Full);
+        layout.pane = Some(parts.child);
+        layout.agent_hud = parts.strip;
+        let strip = parts.strip.expect("a tall pane keeps the strip");
+        assert_eq!(region_at(&layout, strip.x, strip.y), Some(Region::AgentHud));
+        assert_eq!(
+            region_at(&layout, strip.x, strip.y - 1),
+            Some(Region::Pane),
+            "the row above the strip is still the child's"
+        );
     }
 
     /// A pager over the list still wins: `covering_pager` is checked before the

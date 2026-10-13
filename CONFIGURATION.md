@@ -87,8 +87,9 @@ The native agent strip, for Codex and Claude Code tabs, is **off by default**.
 Set `agent_hud = "compact"` or `"full"` in `~/.spycrc.toml`; project-local
 values are ignored. `:agent hud off|compact|full` chooses for the session: the
 choice outranks the file, `spyc -r` brings it back, and a config reload keeps
-it unless the reload changes `agent_hud` itself. `:agent hud info` names which
-one is in force and opens saveable source diagnostics.
+it unless the reload changes `agent_hud` itself. `:agent hud info` (or `dump`,
+or a double-click on the strip) names which one is in force and opens saveable
+source diagnostics, with every tool's tally.
 
 Compact uses two rows below the child: the activity row and the usage row. Full
 adds the tools row and the mode row, for four. Every agent shares one layout in
@@ -130,8 +131,9 @@ next request. `out` is the output of every distinct message since the read
 began, `hit` the share of input read from the prompt cache, and `compacted` the
 compactions seen; all three survive a compaction. When a long transcript was
 read from part-way through, these counts carry `≥` and the tools row reads
-`recent`. The tools row counts every call by tool, most called first, with a
-running call first and marked `◐`, and failures as `✗`. The mode row counts
+`recent`. The tools row counts every call and every failure, names what is
+running with `◐`, and lists the three most called; the dump lists every tool,
+then the most recent 64 calls with their times and outcomes. The mode row counts
 subagent (`Agent`) and background calls; Claude Code's own footer already shows
 its permission mode. Only spyc's own MCP server keeps its name in a tool label,
 as `spyc:`; other servers' tools read `mcp`.

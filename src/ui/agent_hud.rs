@@ -25,11 +25,13 @@ const GAP: usize = 3;
 /// Value columns are at least this wide, so a count gaining a digit rarely
 /// moves the next column.
 const MIN_COLUMN: usize = 12;
-/// A cell is cut to this width, so one long branch can't push every other
-/// column off the strip.
+/// A cell with a column after it is cut to this width, so one long branch
+/// can't push every other column off the strip.
 const MAX_CELL: usize = 32;
-/// Tool names are cut to this width inside their cell.
-const MAX_TOOL_NAME: usize = 14;
+/// Tool names are cut to this width in the most-called list.
+const MAX_TOOL_NAME: usize = 12;
+/// How many of the most-called tools the collapsed row names.
+const TOP_TOOLS: usize = 3;
 
 pub struct HudLayout {
     pub child: Rect,
@@ -194,14 +196,20 @@ impl Field {
 /// columns: the activity and the session have first claim on the width, so
 /// they are cut instead.
 fn grid(rows: Vec<Row>, width: usize) -> Vec<Line<'static>> {
+    let columns = rows.iter().map(|row| row.cells.len()).max().unwrap_or(0);
+    // The last column moves nothing, so only the width of the strip cuts it.
     let rows: Vec<Row> = rows
         .into_iter()
         .map(|row| Row {
-            cells: row.cells.into_iter().map(|c| c.clip(MAX_CELL)).collect(),
+            cells: row
+                .cells
+                .into_iter()
+                .enumerate()
+                .map(|(j, c)| if j + 1 < columns { c.clip(MAX_CELL) } else { c })
+                .collect(),
             trailer: row.trailer,
         })
         .collect();
-    let columns = rows.iter().map(|row| row.cells.len()).max().unwrap_or(0);
     let mut starts = Vec::with_capacity(columns);
     let mut x = 0;
     for j in 0..columns {
@@ -448,27 +456,56 @@ fn mcp(connections: usize, p: Palette) -> Field {
     )
 }
 
-/// One tool's tally: `◐` while a call runs, its calls, then failures in red.
+/// One tool's calls and failures.
 struct Tally {
     name: String,
     calls: u32,
     failed: u32,
-    running: bool,
 }
 
-fn tool(tally: &Tally, p: Palette) -> Field {
-    let mut spans = Vec::new();
-    if tally.running {
-        spans.push(p.tint("◐ ", p.active));
+/// The tools row, collapsed: every call, every failure, what is running and
+/// the most called. The dump lists every tool. `running` is `None` for an
+/// agent whose records can't show a call still running.
+fn tools_row(label: &str, tallies: &[Tally], running: Option<&[String]>, p: Palette) -> Row {
+    let calls: u32 = tallies.iter().map(|t| t.calls).sum();
+    let failed: u32 = tallies.iter().map(|t| t.failed).sum();
+    let mut cells = vec![
+        Field(vec![p.label(label)]),
+        Field(vec![p.strong(&calls.to_string()), p.label(" calls")]),
+        if failed == 0 {
+            Field(vec![p.label("0 failed")])
+        } else {
+            Field(vec![
+                p.tint(&format!("✗ {failed}"), p.bad),
+                p.label(" failed"),
+            ])
+        },
+    ];
+    if let Some(running) = running {
+        cells.push(match running {
+            [] => Field(vec![p.label("◌ none")]),
+            [first, rest @ ..] => {
+                let mut spans = vec![p.tint("◐ ", p.active), p.value(first)];
+                if !rest.is_empty() {
+                    spans.push(p.label(&format!(" +{}", rest.len())));
+                }
+                Field(spans)
+            }
+        });
     }
-    spans.extend(Field(vec![p.value(&tally.name)]).clip(MAX_TOOL_NAME).0);
-    spans.push(Span::raw(" "));
-    spans.push(p.strong(&tally.calls.to_string()));
-    if tally.failed > 0 {
-        spans.push(Span::raw(" "));
-        spans.push(p.tint(&format!("✗{}", tally.failed), p.bad));
+    let mut top = Vec::new();
+    for (i, tally) in tallies.iter().take(TOP_TOOLS).enumerate() {
+        if i > 0 {
+            top.push(p.label(" · "));
+        }
+        top.extend(Field(vec![p.value(&tally.name)]).clip(MAX_TOOL_NAME).0);
+        top.push(Span::raw(" "));
+        top.push(p.strong(&tally.calls.to_string()));
     }
-    Field(spans)
+    if !top.is_empty() {
+        cells.push(Field(top));
+    }
+    Row::new(cells)
 }
 
 fn elapsed_label(secs: u64) -> String {
@@ -616,7 +653,7 @@ mod tests {
         let columns: [&[&str]; 4] = [
             &["●", "df17b585", "opus-5-5", "spyc", "32m"],
             &["context", "336.6k", "out ", "hit ", "compacted "],
-            &["tools", "◐", "Read", "spyc:", "Grep"],
+            &["tools", "175", "✗", "◐", "Read 141"],
             &["agents", "7", "background", "hooks", "mcp"],
         ];
         for branch in ["main", "feat/a-branch-name-much-longer-than-any-column"] {
@@ -659,6 +696,11 @@ mod tests {
             narrow[1].trim_end().ends_with("out 370.2k"),
             "a partial cell is never drawn: {narrow:?}"
         );
+        let last = text(&lines(&view, AgentHudMode::Full, 200, &Theme::default()));
+        assert!(
+            last[2].ends_with("Read 141 · spyc:get_sp… 19 · Edit 9"),
+            "the last column is cut only by the strip: {last:?}"
+        );
         let tight = text(&lines(&view, AgentHudMode::Compact, 14, &Theme::default()));
         assert!(tight[0].starts_with("● working"));
         assert!(
@@ -669,24 +711,15 @@ mod tests {
 
     #[test]
     fn the_waiting_note_trails_the_activity_row_without_moving_a_column() {
-        let (mut snapshot, branch) = claude_session("main");
-        // Enough tools that the tools row reaches past the activity row's end.
-        for name in ["Glob", "Write", "WebFetch"] {
-            snapshot.tool_counts.push(ToolCount {
-                name: name.into(),
-                calls: 1,
-                failed: 0,
-            });
-        }
+        let (snapshot, branch) = claude_session("main");
         let mut view = claude_view(&snapshot, branch);
         let before = text(&lines(&view, AgentHudMode::Full, 200, &Theme::default()));
-        assert!(before[2].contains("WebFetch"), "{before:?}");
         view.attention = "waiting";
         view.note = Some("CI on #641, the long way round");
         let after = text(&lines(&view, AgentHudMode::Full, 200, &Theme::default()));
         assert!(
-            after[0].ends_with("CI on #641, the long way round"),
-            "{after:?}"
+            after[0].ends_with("32m   CI on #641, the long way round"),
+            "the note follows the row's last cell, not a column: {after:?}"
         );
         assert_eq!(before[1..], after[1..]);
     }
@@ -830,6 +863,6 @@ mod tests {
         assert_eq!(rendered.len(), 4);
         assert!(rendered[1].starts_with("context") && rendered[1].contains(" -- "));
         assert!(rendered[1].contains("thread 900.0M"));
-        assert!(rendered[2].starts_with("recent") && rendered[2].ends_with("--"));
+        assert!(rendered[2].starts_with("recent") && rendered[2].contains("0 calls"));
     }
 }

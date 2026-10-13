@@ -211,6 +211,13 @@ impl super::super::App {
         let now = std::time::Instant::now();
         let whole_row = super::is_double_click(self.view.last_chrome_click, y, now);
         self.view.last_chrome_click = Some((y, now));
+        if whole_row && self.on_agent_hud(y) {
+            // The strip's double-click opens its dump; a drag still copies.
+            self.view.last_chrome_click = None;
+            self.view.chrome_selection = None;
+            self.view.mouse_selection = None;
+            return self.cmd_agent_hud("dump");
+        }
         self.view.chrome_selection = Some(ChromeSelection {
             y,
             anchor_col: col,

@@ -838,3 +838,74 @@ fn a_config_reload_keeps_the_hud_choice_unless_it_changes_agent_hud() {
         assert!(app.state.pane.agent_hud.choice.is_none());
     });
 }
+
+/// A double-click on the strip opens its dump; one click opens nothing, and
+/// neither copies the row or reaches the child.
+#[test]
+fn agent_hud_double_click_opens_the_dump_and_a_single_click_does_not() {
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    let _lock = crate::mouse_test_lock();
+    struct Capture;
+    impl Drop for Capture {
+        fn drop(&mut self) {
+            crate::set_mouse_capture_for_test(false);
+        }
+    }
+    crate::set_mouse_capture_for_test(true);
+    let _capture = Capture;
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = fixture(tmp.path(), tmp.path());
+        app.state.config.mouse.capture = true;
+        app.cmd_agent_hud("full");
+        let hud = paint(&mut app, 100, 32).0.agent_hud.unwrap();
+        app.snapshot_pane_routing();
+        let press = |app: &mut App, kind| {
+            app.handle_mouse(MouseEvent {
+                kind,
+                column: hud.x + 3,
+                row: hud.y + 1,
+                modifiers: KeyModifiers::NONE,
+            })
+        };
+        let mut effects = press(&mut app, MouseEventKind::Down(MouseButton::Left));
+        effects.extend(press(&mut app, MouseEventKind::Up(MouseButton::Left)));
+        assert!(app.view.pager.is_none(), "one click opens nothing");
+        effects.extend(press(&mut app, MouseEventKind::Down(MouseButton::Left)));
+        effects.extend(press(&mut app, MouseEventKind::Up(MouseButton::Left)));
+        let pager = app
+            .view
+            .pager
+            .as_ref()
+            .expect("a double-click opens the dump");
+        assert!(pager.lines[0].to_string().starts_with("agent HUD: full"));
+        assert!(
+            !effects.iter().any(|e| matches!(
+                e,
+                Effect::SendToPane { .. } | Effect::CopyToClipboard { .. }
+            )),
+            "{effects:?}"
+        );
+        app.view.pager = None;
+        paint(&mut app, 100, 32);
+        let mut drag = press(&mut app, MouseEventKind::Down(MouseButton::Left));
+        drag.extend(app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: hud.x + 9,
+            row: hud.y + 1,
+            modifiers: KeyModifiers::NONE,
+        }));
+        drag.extend(app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: hud.x + 9,
+            row: hud.y + 1,
+            modifiers: KeyModifiers::NONE,
+        }));
+        assert!(
+            drag.iter()
+                .any(|e| matches!(e, Effect::CopyToClipboard { .. })),
+            "a drag across the strip copies its text: {drag:?}"
+        );
+        assert!(!drag.iter().any(|e| matches!(e, Effect::SendToPane { .. })));
+    });
+}

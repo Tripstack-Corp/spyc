@@ -6,7 +6,9 @@ use ratatui::text::Span;
 
 use crate::agent::codex_metrics::{LimitState, Sample, Snapshot, Tokens, ToolStatus};
 
-use super::{AgentRows, Field, HudView, Palette, Row, STALE, Tally, dim_if, short_count, tool};
+use super::{
+    AgentRows, Field, HudView, Palette, Row, STALE, Tally, dim_if, short_count, tools_row,
+};
 
 pub(super) fn rows(snapshot: Option<&Snapshot>, view: &HudView<'_>, p: Palette) -> AgentRows {
     let mode = |approval: Option<&str>, sandbox: Option<&str>| {
@@ -79,7 +81,11 @@ fn usage(s: &Snapshot, view: &HudView<'_>, p: Palette) -> Row {
 /// Calls seen in the recent observations, most first. Codex's records don't
 /// show every completion, so none is claimed to be running.
 fn tools(s: &Snapshot, p: Palette) -> Row {
-    let mut cells = vec![Field(vec![p.label("recent")])];
+    tools_row("recent", &tallies(s), None, p)
+}
+
+/// The recent observations, by tool, most called first.
+fn tallies(s: &Snapshot) -> Vec<Tally> {
     let mut tallies: Vec<Tally> = Vec::new();
     for observed in &s.tools {
         let name = observed.name.as_deref().unwrap_or("tool");
@@ -91,7 +97,6 @@ fn tools(s: &Snapshot, p: Palette) -> Row {
                     name: name.to_owned(),
                     calls: 0,
                     failed: 0,
-                    running: false,
                 });
                 tallies.len() - 1
             });
@@ -101,13 +106,8 @@ fn tools(s: &Snapshot, p: Palette) -> Row {
             tally.failed = tally.failed.saturating_add(1);
         }
     }
-    if tallies.is_empty() {
-        cells.push(Field(vec![p.label("--")]));
-        return Row::new(cells);
-    }
     tallies.sort_by_key(|tally| std::cmp::Reverse(tally.calls));
-    cells.extend(tallies.iter().map(|tally| tool(tally, p)));
-    Row::new(cells)
+    tallies
 }
 
 #[cfg(test)]
@@ -182,11 +182,9 @@ mod tests {
         let rows = rows(&snapshot);
         assert!(rows[1].contains("req 1.2k") && rows[1].contains("turn --"));
         assert!(rows[1].contains("thread 5.0M legacy"), "{rows:?}");
-        assert!(
-            rows[2].starts_with("recent")
-                && rows[2].find("exec 3 ✗1").unwrap() < rows[2].find("apply_patch 1").unwrap(),
-            "{rows:?}"
-        );
+        assert!(rows[2].starts_with("recent") && rows[2].contains("4 calls"));
+        assert!(rows[2].contains("✗ 1 failed"), "{rows:?}");
+        assert!(rows[2].ends_with("exec 3 · apply_patch 1"), "{rows:?}");
         assert!(
             !rows[2].contains('◐'),
             "codex never claims a call is running"

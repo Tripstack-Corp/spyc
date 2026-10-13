@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 
 pub use crate::agent::tail::Availability;
-pub use reducer::{MAX_TOOL_NAMES, OTHER_TOOLS, Reducer};
+pub use reducer::{MAX_TOOL_NAMES, MAX_TOOLS, OTHER_TOOLS, Reducer};
 
 /// Claude Code's configuration directory: `$CLAUDE_CONFIG_DIR`, else
 /// `~/.claude`. Only an absolute one names a place to read.

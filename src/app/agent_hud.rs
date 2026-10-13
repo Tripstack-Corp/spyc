@@ -60,6 +60,14 @@ impl App {
         })
     }
 
+    /// Whether terminal row `y` is one of the visible strip's rows.
+    pub(super) fn on_agent_hud(&self, y: u16) -> bool {
+        let (cols, rows) = self.view.term_size;
+        self.frame_layout(Rect::new(0, 0, cols, rows))
+            .agent_hud
+            .is_some_and(|strip| (strip.y..strip.bottom()).contains(&y))
+    }
+
     pub(super) fn active_agent_hud_update(&self) -> Option<&Update> {
         self.state
             .pane
@@ -151,7 +159,7 @@ impl App {
         if words.next().is_some() {
             return self.agent_hud_usage();
         }
-        if command == Some("info") {
+        if matches!(command, Some("info" | "dump")) {
             let mut pager = crate::ui::pager::PagerView::new_plain(
                 "agent HUD sources",
                 diagnostics::lines(self),
@@ -172,7 +180,7 @@ impl App {
 
     fn agent_hud_usage(&mut self) -> Vec<Effect> {
         self.state
-            .flash_info("usage: :agent hud off|compact|full|info");
+            .flash_info("usage: :agent hud off|compact|full|info|dump");
         Vec::new()
     }
 }
