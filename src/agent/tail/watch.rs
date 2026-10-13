@@ -11,10 +11,7 @@ use std::sync::{
 };
 
 #[cfg(any(test, not(target_os = "macos")))]
-use notify::{
-    EventKind,
-    event::{AccessKind, AccessMode},
-};
+use notify::EventKind;
 
 #[cfg(not(target_os = "macos"))]
 use notify::{RecursiveMode, Watcher};
@@ -113,17 +110,16 @@ impl<U> Drop for Subscription<U> {
     }
 }
 
-/// Whether a `notify` event can have changed `file`: reads and opens never do.
+/// Whether a `notify` event can have changed `file`. No access event does: a
+/// write reports its own `Modify`, and the close that follows (inotify's
+/// `IN_CLOSE_WRITE`) adds nothing to it, so counting both read every append
+/// twice.
 #[cfg(any(test, not(target_os = "macos")))]
 pub fn relevant(kind: EventKind, paths: &[PathBuf], file: &Path) -> bool {
-    !matches!(
-        kind,
-        EventKind::Access(
-            AccessKind::Open(_) | AccessKind::Read | AccessKind::Close(AccessMode::Read)
-        )
-    ) && paths
-        .iter()
-        .any(|path| path == file || Some(path.as_path()) == file.parent())
+    !matches!(kind, EventKind::Access(_))
+        && paths
+            .iter()
+            .any(|path| path == file || Some(path.as_path()) == file.parent())
 }
 
 fn run<R: Refresh>(
