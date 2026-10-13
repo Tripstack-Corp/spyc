@@ -658,6 +658,10 @@ fn capture_ctrl_backslash_tears_down() {
             app.runtime.pending_capture.is_none(),
             "^\\ tears down the live capture"
         );
+        let view = app.view.pager.as_ref().expect("the pager stays open");
+        assert_eq!(view.title, "\u{2717} ! cat — interrupted");
+        assert!(!view.streaming, "an interrupted capture stops streaming");
+        assert!(view.saveable, "what it printed can still be saved");
     });
 }
 
