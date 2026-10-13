@@ -13,6 +13,7 @@
 //! [`detect`] (command → profile, for live panes).
 
 pub mod chrome;
+pub mod claude_metrics;
 pub mod codex_approval;
 pub mod codex_command;
 pub mod codex_home;
