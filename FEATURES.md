@@ -995,8 +995,9 @@ one layout of aligned, coloured columns, led by the tab's own activity dot, its
 session and model, with a `waiting` agent's note at the end of the row. The
 tools row is a summary: every call, every failure, what is running and the
 three most called. Usage scopes stay separate, and unavailable context occupancy
-and limits stay explicit. A Claude Code tab's context is a token count, never a
-percentage. `:agent hud off` stops collection; `:agent hud dump` (or `info`), or
+and limits stay explicit. A Claude Code tab's context is a token count, followed
+by Claude Code's own percentage and the plan's five-hour and seven-day usage
+once spyc's statusline wrapper forwards them. `:agent hud off` stops collection; `:agent hud dump` (or `info`), or
 a double-click on the strip, opens saveable source and freshness diagnostics
 with every tool's tally. A drag across the strip copies its text.
 The strip uses the shared pane geometry, preserves six child rows and needs no

@@ -145,8 +145,9 @@ is dimmed rather than labelled. Monochrome keeps the weights and drops every
 colour. Unknown values are `--`; zero is measured. A count that may be short
 says so with `≥`, or with a `recent` label for a tools row that isn't a full
 tally. Totals retain their scopes and never stand in for context occupancy or
-account limits. Claude Code's context is a token count: a percentage needs a
-window size its transcript doesn't carry.
+account limits. Claude Code's context is a token count; a percentage beside it,
+and the plan windows after it, are Claude Code's own figures from its
+statusline, coloured green, amber, then red by how close each is to its limit.
 The engineering Activity HUD remains the separate `:activity` overlay.
 
 ## Icons & glyphs

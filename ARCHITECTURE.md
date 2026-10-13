@@ -947,6 +947,31 @@ file that is itself a user-scope file (`$HOME` as a project) is never touched.
 Startup also turns every old per-project answer into a no, because an older
 spyc still running reads that store before writing a project its hooks.
 
+Claude Code hands its plan's rate-limit windows and the context window to one
+place only: the `statusLine` command's input. So claude's wiring also wraps that
+command (`wiring::statusline`). The wrapper runs `spyc --statusline`, which
+forwards a bounded projection (`agent::claude_statusline`: the window size,
+Claude Code's own share of it, and the five-hour and seven-day percentages with
+their reset times) to its pane's spyc, then runs the user's command on the same
+input, so the line they see is unchanged. The user's command lives inside the
+wrapper, quoted, rather than in a file of spyc's: removal restores it byte for
+byte. A `settings.json` synced to a machine without spyc still runs it through
+the wrapper's `command -v` guard, and one with a spyc that predates
+`--statusline` runs it through the `||` fallback: that spyc fails before reading
+its input, and a current one exits 0 once it has run the command, so the
+command never runs twice. The forward is an internal JSON-RPC
+method, `spyc/statusline`, never an MCP tool, and the server re-checks the
+projection's bounds, trusting the wire no further.
+
+<!-- SPYC-TRAP: statusline-wrapper-format -->
+`wiring::statusline::unwrap` must keep recognizing every format `wrap` ever
+wrote. A wrapper it can't recognize reads as the user's own command, so the
+next install wraps it again, and the startup refresh adds a layer on every
+launch, each one forwarding and then running the next. Change the format only
+alongside a match arm for the old one, and keep `--statusline -- COMMAND`
+working: a wrapper written by one spyc may be run by another; `a_wrapped_command_comes_back_exactly`
+and `settings_gain_the_wrapper_once_and_lose_it_exactly` hold the current one.
+
 <!-- SPYC-TRAP: user-config-write-through-symlink -->
 A user-configuration file is written through a symlink and keeps its mode
 (`wiring::file::write`). Dotfiles managers keep files like `settings.json` as

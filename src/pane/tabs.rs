@@ -269,6 +269,9 @@ pub struct TabInfo {
     pub codex_session_id: Option<String>,
     /// Effective Codex home frozen at launch and retained across restore/fork.
     pub codex_home: Option<PathBuf>,
+    /// The latest statusline report from this tab's Claude Code (`spyc
+    /// --statusline`), with when it arrived.
+    pub claude_statusline: Option<(crate::agent::claude_statusline::Statusline, jiff::Timestamp)>,
     /// The conversation uuid this tab is known to be running, from either of the
     /// two sources that KNOW rather than guess: the exact `/resume <sid>` session
     /// restore injects, or the id an agent's status hook reported
@@ -390,6 +393,7 @@ impl TabInfo {
             spawn_epoch_secs: crate::sysinfo::epoch_secs(),
             codex_session_id: None,
             codex_home: None,
+            claude_statusline: None,
             live_session_id: None,
             scrape_status: None,
             scrape_dirty: false,

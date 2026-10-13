@@ -244,6 +244,7 @@ pub(super) fn dispatch_for(
         "tools/list" => handle_tools_list(w, &id),
         "tools/call" => handle_tools_call(w, &id, &parsed["params"], ctx_path, cmd_tx, caller),
         "ping" => send_result(w, &id, json!({})),
+        super::statusline::METHOD => super::statusline::handle(w, &id, &parsed["params"], cmd_tx),
         _ => send_error(w, id, -32601, &format!("Method not found: {method}")),
     }
 }
@@ -866,7 +867,7 @@ pub(super) fn send_message(w: &mut impl Write, body: &str) -> io::Result<()> {
     w.flush()
 }
 
-fn send_result(w: &mut impl Write, id: &Value, result: Value) -> io::Result<()> {
+pub(super) fn send_result(w: &mut impl Write, id: &Value, result: Value) -> io::Result<()> {
     let msg = json!({
         "jsonrpc": "2.0",
         "id": id,

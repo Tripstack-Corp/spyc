@@ -214,3 +214,58 @@ fn report_status_accepts_waiting_with_a_cleaned_note() {
     drop(sender);
     worker.join().unwrap();
 }
+
+/// The statusline forwarder's method: a report reaches the loop held to the
+/// projection's bounds, the reply comes at once, and no agent can list it.
+#[test]
+fn a_statusline_report_reaches_the_loop_bounded_and_unlisted() {
+    let (sender, receiver) = mpsc::channel::<McpRequest>();
+    let send = |params: Value| {
+        let request = json!({"jsonrpc":"2.0", "id":7, "method":"spyc/statusline", "params":params});
+        let mut output = Vec::new();
+        dispatch(
+            &mut output,
+            &request.to_string(),
+            Path::new("/tmp"),
+            Some(&sender),
+        )
+        .unwrap();
+        parse_response(&output)
+    };
+    let reply = send(json!({"pane_id":"pane-1", "statusline":{
+        "context":{"size":1_000_000, "used_percent":34},
+        "five_hour":{"used_percent":250, "resets_at":5},
+        "seven_day":{"used_percent":61, "resets_at":1_791_900_000}
+    }}));
+    assert_eq!(reply["result"], json!({}));
+    match receiver.try_recv().unwrap().command {
+        McpCommand::Statusline {
+            pane_id,
+            statusline,
+        } => {
+            assert_eq!(pane_id, "pane-1");
+            assert_eq!(statusline.context.unwrap().used_percent, Some(34));
+            assert_eq!(statusline.five_hour, None, "out of range is dropped");
+            assert_eq!(statusline.seven_day.unwrap().used_percent, 61);
+        }
+        other => panic!("{other:?}"),
+    }
+    for params in [
+        json!({"pane_id":"pane-1", "statusline":{}}),
+        json!({"statusline":{"context":{"size":5, "used_percent":1}}}),
+        json!({"pane_id":"pane-1", "statusline":"not an object"}),
+    ] {
+        assert_eq!(send(params.clone())["result"], json!({}), "{params}");
+        assert!(receiver.try_recv().is_err(), "{params} is never queued");
+    }
+    let mut output = Vec::new();
+    let list = json!({"jsonrpc":"2.0", "id":8, "method":"tools/list"});
+    dispatch(
+        &mut output,
+        &list.to_string(),
+        Path::new("/tmp"),
+        Some(&sender),
+    )
+    .unwrap();
+    assert!(!String::from_utf8(output).unwrap().contains("statusline"));
+}

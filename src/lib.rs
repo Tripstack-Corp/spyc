@@ -124,6 +124,17 @@ struct Cli {
     #[arg(long, value_name = "STATE")]
     report_status: Option<String>,
 
+    /// Run as Claude Code's statusline: forward the plan's rate limits and the
+    /// context window to the spyc this pane runs in, then run the statusline
+    /// command given after `--` on the same input. spyc's wiring writes it into
+    /// claude's `statusLine`; not for direct use.
+    #[arg(long, hide = true)]
+    statusline: bool,
+
+    /// The statusline command `--statusline` wraps.
+    #[arg(last = true, hide = true, value_name = "COMMAND")]
+    wrapped: Vec<String>,
+
     /// Print extended build info (sha, build time, rustc, TERM, os) and exit.
     /// Standalone, NOT a modifier for --version: clap handles --version itself
     /// and exits before this is read, so `--version --verbose` prints the plain
@@ -278,6 +289,14 @@ pub fn run() -> Result<()> {
     if let Some(state) = cli.report_status.as_deref() {
         mcp::report_status_to_socket(state, cli.status_trace);
         return Ok(());
+    }
+    // Claude Code's statusline, once spyc's wiring wraps it. It exits 0 once
+    // the wrapped command has run, so the wrapper's fallback runs that command
+    // only for a spyc that predates `--statusline`.
+    if cli.statusline {
+        std::process::exit(mcp::statusline::run(
+            cli.wrapped.first().map(String::as_str),
+        ));
     }
     if cli.verbose {
         println!("\u{1f336}\u{fe0f} spyc {}", env!("CARGO_PKG_VERSION"));

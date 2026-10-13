@@ -15,6 +15,7 @@ mod cli;
 mod codex;
 mod file;
 pub mod legacy;
+mod statusline;
 
 pub use cli::run_cli;
 

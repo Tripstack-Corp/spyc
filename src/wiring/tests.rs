@@ -111,7 +111,11 @@ fn the_users_key_order_survives() {
     let keys = |v: &Value| v.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
     install(AgentKind::Claude, &s.env).unwrap();
     let v = json(&settings);
-    assert_eq!(keys(&v), ["theme", "model", "env", "hooks"]);
+    assert_eq!(
+        keys(&v),
+        ["theme", "model", "env", "hooks", "statusLine"],
+        "the statusline spyc adds goes last"
+    );
     assert_eq!(keys(&v["env"]), ["Z", "A"]);
     remove(AgentKind::Claude, &s.env).unwrap();
     let v = json(&settings);
@@ -716,4 +720,37 @@ fn spyc_is_named_bare_when_one_is_on_path() {
     let named =
         crate::mcp::with_search_path(bin.path(), || Env::from_process().map(|env| env.spyc));
     assert_eq!(named.as_deref(), Some("spyc"));
+}
+
+/// The user's statusline keeps running inside spyc's wrapper, and comes back
+/// exactly when spyc's wiring is removed.
+#[test]
+fn claude_wiring_wraps_the_users_statusline_and_gives_it_back() {
+    let s = Sandbox::new();
+    let settings = s.home(".claude/settings.json");
+    let mine = r#"bash -c 'echo "my line"'"#;
+    let original = serde_json::to_string_pretty(&serde_json::json!({
+        "statusLine": { "type": "command", "command": mine, "padding": 0 }
+    }))
+    .unwrap()
+        + "\n";
+    s.put(&settings, &original);
+    let installed = install(AgentKind::Claude, &s.env).unwrap();
+    assert_eq!(installed.hooks, Part::Current);
+    let command = json(&settings)["statusLine"]["command"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(command.contains("--statusline"), "{command}");
+    assert_eq!(
+        super::statusline::unwrap(&command),
+        Some(super::statusline::Wrapped::Command(mine.to_owned()))
+    );
+    assert_eq!(
+        status(AgentKind::Claude, &s.env).unwrap().hooks,
+        Part::Current,
+        "an install already in place reads as current"
+    );
+    remove(AgentKind::Claude, &s.env).unwrap();
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), original);
 }

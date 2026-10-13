@@ -258,6 +258,14 @@ the user says yes to that agent's first-launch `[Y/n]` (or runs `:hooks on
   Codex additionally requires the direct reporter command shape described above;
   mentioning the flag in another hook does not permit its removal.
 
+For claude the same consent also wraps its `statusLine`, the only place Claude
+Code shows its plan's rate limits and context window: `spyc --statusline`
+forwards those numbers to the pane's spyc for the agent HUD, then runs the
+command the user had, on the same input, so their line is unchanged. With no
+statusline configured, spyc's prints nothing. `:hooks off claude` puts the
+user's command back exactly; a later `/claude-hud:setup` or similar is wrapped
+again at the next startup refresh.
+
 The commands never vary, so claude's collapsing of identical handlers and
 agy's of named sets keep a leftover project copy from reporting twice; codex
 merges nothing, which is why the old project copies are taken out. Agents that

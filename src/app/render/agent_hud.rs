@@ -5,7 +5,7 @@ use ratatui::{Frame, layout::Rect};
 use crate::agent::tail::Availability;
 use crate::config::AgentHudMode;
 use crate::pane::AgentActivity;
-use crate::ui::agent_hud::{self, Hooks, HudView, Metrics};
+use crate::ui::agent_hud::{self, Hooks, HudView, Metrics, Reported};
 
 use super::super::state::agent_hud::{Feed, Update};
 
@@ -25,22 +25,7 @@ impl App {
         let entry = &tabs.tabs()[tabs.active_index()];
         let info = &entry.info;
         let update = self.active_agent_hud_update();
-        let metrics = match update {
-            Some(Update::Codex(u)) => {
-                Metrics::Codex((u.availability == Availability::Available).then_some(&u.snapshot))
-            }
-            Some(Update::Claude(u)) => Metrics::Claude {
-                snapshot: (u.availability == Availability::Available).then_some(&u.snapshot),
-                tail_only: u.tail_only,
-            },
-            None => match super::super::agent_hud::feed(info.agent().kind()) {
-                Some(Feed::Claude) => Metrics::Claude {
-                    snapshot: None,
-                    tail_only: false,
-                },
-                _ => Metrics::Codex(None),
-            },
-        };
+        let metrics = metrics_of(update, tabs, info);
         let cwd = entry.live_cwd();
         let repository = super::super::path_basename_display(&cwd);
         // A different cached column cannot establish the pane's branch.
@@ -122,5 +107,58 @@ impl App {
             AgentHudMode::Full
         };
         agent_hud::lines(&view, mode, rect.width, &self.view.theme)
+    }
+}
+
+/// What the tabs' statuslines reported: this tab's context share, when its
+/// report is about this tab's session, and the newest plan windows any tab saw.
+fn reported<'a>(
+    tabs: &'a crate::pane::PaneTabs,
+    info: &'a crate::pane::tabs::TabInfo,
+) -> Reported<'a> {
+    let context_percent = info
+        .claude_statusline
+        .as_ref()
+        .filter(|(report, _)| {
+            report.session_id.is_none() || report.session_id == info.live_session_id
+        })
+        .and_then(|(report, _)| report.context?.used_percent);
+    let plan = tabs
+        .tabs()
+        .iter()
+        .filter_map(|entry| entry.info.claude_statusline.as_ref())
+        .filter(|(report, _)| report.five_hour.is_some() || report.seven_day.is_some())
+        .max_by_key(|(_, at)| *at)
+        .map(|(report, _)| report);
+    Reported {
+        context_percent,
+        plan,
+    }
+}
+
+/// The agent's own metrics for the strip, from its update and the tabs'
+/// statusline reports.
+fn metrics_of<'a>(
+    update: Option<&'a Update>,
+    tabs: &'a crate::pane::PaneTabs,
+    info: &'a crate::pane::tabs::TabInfo,
+) -> Metrics<'a> {
+    match update {
+        Some(Update::Codex(u)) => {
+            Metrics::Codex((u.availability == Availability::Available).then_some(&u.snapshot))
+        }
+        Some(Update::Claude(u)) => Metrics::Claude {
+            snapshot: (u.availability == Availability::Available).then_some(&u.snapshot),
+            tail_only: u.tail_only,
+            reported: reported(tabs, info),
+        },
+        None => match super::super::agent_hud::feed(info.agent().kind()) {
+            Some(Feed::Claude) => Metrics::Claude {
+                snapshot: None,
+                tail_only: false,
+                reported: reported(tabs, info),
+            },
+            _ => Metrics::Codex(None),
+        },
     }
 }

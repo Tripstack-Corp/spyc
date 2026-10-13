@@ -66,7 +66,19 @@ pub enum Metrics<'a> {
         /// The read began part-way through the transcript, so its totals
         /// miss what came before.
         tail_only: bool,
+        reported: Reported<'a>,
     },
+}
+
+/// What Claude Code's statusline reported through `spyc --statusline`: its own
+/// figures, which its transcript doesn't carry.
+#[derive(Clone, Copy, Default)]
+pub struct Reported<'a> {
+    /// This session's share of its context window.
+    pub context_percent: Option<u8>,
+    /// The plan's rate-limit windows: the newest report any tab sent, since the
+    /// plan is the account's, not one session's.
+    pub plan: Option<&'a crate::agent::claude_statusline::Statusline>,
 }
 
 /// What the tab's status hooks have shown.
@@ -114,7 +126,8 @@ pub fn lines(
         Metrics::Claude {
             snapshot,
             tail_only,
-        } => claude::rows(snapshot, tail_only, view, p),
+            reported,
+        } => claude::rows(snapshot, tail_only, reported, view, p),
     };
     let mut rows = vec![activity(view, p), agent.usage];
     if mode == AgentHudMode::Full {
@@ -316,6 +329,17 @@ impl Palette {
             safe_label(text),
             Style::default().fg(self.value).add_modifier(Modifier::BOLD),
         )
+    }
+
+    /// A share of a limit, coloured by how close it is: green, then amber from
+    /// half, then red from four fifths.
+    fn meter(self, percent: u8) -> Span<'static> {
+        let color = match percent {
+            0..50 => self.good,
+            50..80 => self.warn,
+            _ => self.bad,
+        };
+        self.tint(&format!("{percent}%"), color)
     }
 
     fn tint(self, text: &str, color: Color) -> Span<'static> {
@@ -638,6 +662,7 @@ mod tests {
             metrics: Metrics::Claude {
                 snapshot: Some(snapshot),
                 tail_only: false,
+                reported: Reported::default(),
             },
             availability: Some(Availability::Available),
             now: None,

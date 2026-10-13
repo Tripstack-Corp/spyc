@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use super::{Env, FilePart, Part, Status, file, json_object, runs_spyc};
+use super::{Env, FilePart, Part, Status, file, json_object, runs_spyc, statusline};
+use crate::mcp::Removal;
 
 /// How long a `claude mcp` command may take before spyc gives up on it.
 const CLI_DEADLINE: Duration = Duration::from_secs(20);
@@ -46,18 +47,33 @@ fn hooks_blocked(env: &Env) -> Option<String> {
         .then(|| "your organization's managed settings allow only its own hooks".to_string())
 }
 
-/// Run `f` over the hooks part.
+/// Run `f` over the hooks part: the status hooks and the statusline wrapper,
+/// both in `settings.json`.
 fn with_hooks<R>(env: &Env, f: impl FnOnce(&FilePart) -> R) -> R {
     let with = |existing: Option<&str>| {
         crate::mcp::merged_status_hooks_json(existing, &env.spyc)
+            .and_then(|text| statusline::settings_with(&text, &env.spyc))
             .ok_or_else(|| "refusing to overwrite — not a JSON object".to_string())
     };
     f(&FilePart {
         path: config_dir(env).join("settings.json"),
         with: &with,
-        without: &|text| json_object(crate::mcp::claude_hooks_without_spyc(text)),
+        without: &without_spyc,
         blocked: hooks_blocked(env),
     })
+}
+
+/// `text` without spyc's hooks or its statusline wrapper.
+fn without_spyc(text: &str) -> Result<Removal, String> {
+    let hooks = json_object(crate::mcp::claude_hooks_without_spyc(text))?;
+    let after_hooks = match &hooks {
+        Removal::Rest { text, .. } => text.as_str(),
+        Removal::NothingOurs => text,
+    };
+    match json_object(statusline::settings_without(after_hooks))? {
+        Removal::NothingOurs => Ok(hooks),
+        rest @ Removal::Rest { .. } => Ok(rest),
+    }
 }
 
 /// The MCP entry `claude mcp add-json` registers.
