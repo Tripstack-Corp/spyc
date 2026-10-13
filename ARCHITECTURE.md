@@ -205,8 +205,8 @@ compile-checked via `COMMAND_TABLE` handler fn-pointers, and a one-way
 `agent::codex_records::metrics` projects numeric usage and bounded mode/tool
 metadata through the shared rollout identity rule. It does not retain transcript
 content. `agent::codex_metrics` owns the pure reducer and the read-only collector;
-the application has no HUD consumer. The library's narrow collector export lets
-the standalone acceptance example drive the same code.
+the native agent HUD is its application consumer. The library's narrow collector
+export lets the standalone acceptance example drive the same code.
 
 The caller supplies the pane's captured home, pinned thread, exact rollout and
 agent generation. Results match that whole binding; a closed or rebound pane
@@ -359,11 +359,14 @@ closed tabs are discarded. Pending image bytes remain in memory only.
 
 ## Native agent HUD
 
-The optional Codex strip is a visible consumer of `codex_metrics`, not an
-activity authority. `AppState.pane.agent_hud` holds one bounded snapshot keyed
-by stable pane id, pinned thread, captured home and a monotonic worker
-generation. `Runtime.agent_hud` owns the cancellable startup worker and the
-exact-rollout subscription. `Effect::AgentHud` starts/stops it only through the
+The optional strip is a visible consumer of `codex_metrics` for a Codex tab and
+`claude_metrics` for a Claude Code tab, not an activity authority.
+`AppState.pane.agent_hud` holds one bounded snapshot keyed by its feed, stable
+pane id, session (Codex's pinned thread, or the session Claude Code's hooks
+reported), the agent's home and a monotonic worker generation. The feed is part
+of the key because a tab that changes agents keeps its pane id, and one id and
+home could name either agent's files. `Runtime.agent_hud` owns the cancellable
+startup worker and the exact-file subscription. `Effect::AgentHud` starts/stops it only through the
 executor; `Wake::AgentHud` lands its coalesced outcome in the pre-receive drain.
 Both the current visible target and full generation binding reject stale work.
 Changing tabs, hiding the pane, closing it or disabling the strip clears the
@@ -372,7 +375,13 @@ Model and cancels the Runtime consumer.
 Startup walks at most 65,536 directory entries through three date levels, with
 bounded iterator depth and no followed directory symlinks. It requires a unique
 filename match under the captured home; the metric reader verifies containment
-and the header. No missing-source polling is armed. The existing bounded reader
+and the header. A Claude Code transcript has no header and lives under the
+directory its session started in, which the pane's cwd may have left: the lookup
+reads `<home>/projects` once, within the same entry budget, and asks each project
+for the exact `<session>.jsonl`, refusing a name found twice. The reader then
+checks containment and every record's session. Claude Code's home comes from
+spyc's environment, read once at startup, because the Model reads no environment.
+No missing-source polling is armed. The existing bounded reader
 handles complete records, partial writes, file replacement and truncation. HUD
 state is memory-only and diagnostics expose its metric projection.
 

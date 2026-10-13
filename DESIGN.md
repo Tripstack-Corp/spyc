@@ -109,16 +109,19 @@ rather than create a new modal type.
 
 ### Native agent strip
 
-The opt-in Codex HUD occupies rows below the child. Compact is two rows; full
-adds only the operating-mode and recent-tool rows supported by the source.
-Keep six child rows, collapse full to compact when needed, then hide the strip.
-The native composer stays visible within the child, including in zoom and splits.
+The opt-in agent HUD occupies rows below a Codex or Claude Code child. Compact
+is two rows; full adds only the operating-mode and recent-tool rows supported by
+the source. Keep six child rows, collapse full to compact when needed, then hide
+the strip. The native composer stays visible within the child, including in zoom
+and splits.
 
 Attention and distinct session identity have first claim on horizontal space.
 Optional model, effort, repository, branch and elapsed minutes drop as the frame
 narrows. Use the existing theme and bold attention in monochrome. Unknown values
 are `--`; zero is measured. Label stale samples and partial observations. Totals
 retain their scopes and never stand in for context occupancy or account limits.
+Claude Code's context is a token count: a percentage needs a window size its
+transcript doesn't carry.
 The engineering Activity HUD remains the separate `:activity` overlay.
 
 ## Icons & glyphs

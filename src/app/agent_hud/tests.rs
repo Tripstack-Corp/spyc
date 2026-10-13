@@ -1,7 +1,7 @@
 //! Real pane geometry/input and application consumer lifecycle, with synthetic children.
 
 use super::*;
-use crate::agent::codex_metrics::{Availability, Mode, Sample, Snapshot, Source, Tokens};
+use crate::agent::codex_metrics::{self, Availability, Mode, Sample, Snapshot, Source, Tokens};
 use crate::app::{ForegroundExec, state};
 use crate::pane::{
     AgentActivity, Pane, PaneTabs,
@@ -84,16 +84,18 @@ fn tick(app: &mut App, ctx: &mut RunCtx) {
     app.settle_before_recv(ctx, &mut terminal, &fg);
 }
 
+fn codex_request(update: &Update) -> Option<u64> {
+    match update {
+        Update::Codex(u) => u.snapshot.request.as_ref()?.value.total,
+        Update::Claude(_) => None,
+    }
+}
+
 fn wait_metrics(app: &mut App, ctx: &mut RunCtx, expected: u64) {
     let end = Instant::now() + Duration::from_secs(10);
     while Instant::now() < end {
         tick(app, ctx);
-        if app
-            .active_agent_hud_update()
-            .and_then(|u| u.snapshot.request.as_ref())
-            .and_then(|s| s.value.total)
-            == Some(expected)
-        {
+        if app.active_agent_hud_update().and_then(codex_request) == Some(expected) {
             return;
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -170,14 +172,7 @@ fn agent_hud_real_loop_rebinds_same_cwd_homes_and_stops_without_a_consumer() {
         let now = Timestamp::now();
         assert!(!app.land_agent_hud_update(old, (0, 0), now));
         assert_eq!(
-            app.active_agent_hud_update()
-                .unwrap()
-                .snapshot
-                .request
-                .as_ref()
-                .unwrap()
-                .value
-                .total,
+            app.active_agent_hud_update().and_then(codex_request),
             Some(99)
         );
         append_usage(&path_b, 77, "2026-10-13T12:00:01Z");
@@ -193,7 +188,7 @@ fn agent_hud_real_loop_rebinds_same_cwd_homes_and_stops_without_a_consumer() {
                         .as_mut()
                         .unwrap()
                         .active_info_mut()
-                        .agent_hint = Some(AgentKind::Claude);
+                        .agent_hint = Some(AgentKind::Agy);
                 }
             }
             tick(&mut app, &mut ctx);
@@ -380,21 +375,23 @@ fn agent_hud_only_changed_visible_fields_request_a_repaint() {
         app.state.config.pane.agent_hud = AgentHudMode::Compact;
         let mut ctx = RunCtx::for_test();
         app.settle_agent_hud(Instant::now(), &mut ctx);
-        let binding = app.state.pane.agent_hud.binding.clone().unwrap();
+        let Some(Binding::Codex(binding)) = app.state.pane.agent_hud.binding.clone() else {
+            panic!("a Codex tab binds a Codex consumer");
+        };
         let at = "2026-10-13T12:00:00Z".parse().unwrap();
-        let mut update = Update {
+        let mut update = codex_metrics::Update {
             binding,
             availability: Availability::Available,
             tail_only: false,
             snapshot: Snapshot::default(),
         };
-        assert!(app.land_agent_hud_update(update.clone(), (1, 1), at));
+        assert!(app.land_agent_hud_update(Update::Codex(Box::new(update.clone())), (1, 1), at));
         update.snapshot.model_context_window = Some(Sample {
             at,
             source: Source::LegacyTokenCount,
             value: 900_000,
         });
-        assert!(!app.land_agent_hud_update(update.clone(), (2, 2), at));
+        assert!(!app.land_agent_hud_update(Update::Codex(Box::new(update.clone())), (2, 2), at));
         update.snapshot.mode = Some(Sample {
             at,
             source: Source::TurnContext,
@@ -405,9 +402,9 @@ fn agent_hud_only_changed_visible_fields_request_a_repaint() {
             },
         });
         // The compact header first observes the unknown model source.
-        assert!(app.land_agent_hud_update(update.clone(), (3, 3), at));
+        assert!(app.land_agent_hud_update(Update::Codex(Box::new(update.clone())), (3, 3), at));
         update.snapshot.mode.as_mut().unwrap().value.approval = Some("never".into());
-        assert!(!app.land_agent_hud_update(update.clone(), (4, 4), at));
+        assert!(!app.land_agent_hud_update(Update::Codex(Box::new(update.clone())), (4, 4), at));
         update.snapshot.request = Some(Sample {
             at,
             source: Source::UsageRecord,
@@ -417,13 +414,13 @@ fn agent_hud_only_changed_visible_fields_request_a_repaint() {
             },
         });
         assert!(
-            app.land_agent_hud_update(update.clone(), (5, 5), at),
+            app.land_agent_hud_update(Update::Codex(Box::new(update.clone())), (5, 5), at),
             "reported zero differs from unknown"
         );
         app.state.config.pane.agent_hud = AgentHudMode::Full;
         update.snapshot.mode.as_mut().unwrap().value.approval = Some("on-request".into());
         assert!(
-            app.land_agent_hud_update(update, (6, 6), at),
+            app.land_agent_hud_update(Update::Codex(Box::new(update)), (6, 6), at),
             "full mode exposes approval"
         );
         app.cmd_agent_hud("info");
@@ -444,19 +441,16 @@ fn agent_hud_only_changed_visible_fields_request_a_repaint() {
 fn agent_hud_collector_has_no_idle_reads_and_cancels_pending_startup() {
     let tmp = tempfile::tempdir().unwrap();
     let path = rollout(tmp.path(), 5);
-    let binding = Binding {
+    let binding = Binding::Codex(codex_metrics::Binding {
         pane_id: "a".into(),
         thread_id: THREAD.into(),
         codex_home: tmp.path().to_owned(),
         generation: 1,
-    };
+    });
     let (tx, rx) = mpsc::channel();
     let mut collector = collector::Collector::start(binding.clone(), Some(tx));
     let end = Instant::now() + Duration::from_secs(10);
-    while collector
-        .take()
-        .is_none_or(|u| u.snapshot.request.is_none())
-    {
+    while collector.take().is_none_or(|u| codex_request(&u).is_none()) {
         assert!(Instant::now() < end);
         rx.recv_timeout(Duration::from_secs(1)).unwrap();
     }
@@ -674,5 +668,137 @@ fn agent_hud_waiting_attention_preserves_the_semantic_state_without_requesting_h
         assert!(lines[0].to_string().starts_with("waiting ·"));
         assert_eq!(lines[0].spans[0].style.fg, Some(app.view.theme.status_path));
         assert!(!lines[0].to_string().contains("needs you"));
+    });
+}
+
+const SESSION: &str = "c1a0de00-0000-4000-8000-000000000001";
+
+fn claude_entry(app: &mut App, cwd: &Path, session: Option<&str>) -> TabEntry {
+    let wake = app.make_pane_wake();
+    let pane = Pane::spawn("cat", 24, 100, cwd, &app.view.context_path, wake).unwrap();
+    let mut info = TabInfo::new("claude", cwd);
+    info.live_session_id = session.map(str::to_owned);
+    info.spawn_epoch_secs = 0;
+    info.activity = AgentActivity::Idle;
+    TabEntry::new(pane, info)
+}
+
+/// A transcript under a project the pane's cwd doesn't name: Claude Code files
+/// a session by the directory it started in.
+fn transcript(home: &Path) -> std::path::PathBuf {
+    let project = home.join("projects/-somewhere-else");
+    std::fs::create_dir_all(&project).unwrap();
+    let path = project.join(format!("{SESSION}.jsonl"));
+    std::fs::write(&path, "").unwrap();
+    path
+}
+
+fn append_message(path: &Path, id: &str, cache_read: u64) {
+    let record = json!({"type": "assistant", "sessionId": SESSION,
+        "timestamp": "2026-10-13T12:00:00Z", "effort": "xhigh",
+        "message": {"id": id, "model": "claude-opus-5-5", "content": [],
+                    "usage": {"input_tokens": 1, "cache_creation_input_tokens": 10,
+                              "cache_read_input_tokens": cache_read, "output_tokens": 5}}});
+    writeln!(
+        std::fs::OpenOptions::new().append(true).open(path).unwrap(),
+        "{record}"
+    )
+    .unwrap();
+}
+
+fn wait_hud_line(app: &mut App, ctx: &mut RunCtx, row: usize, text: &str) -> Vec<String> {
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        tick(app, ctx);
+        let rect = app
+            .frame_layout(Rect::new(0, 0, 100, 32))
+            .agent_hud
+            .unwrap();
+        let lines: Vec<String> = app
+            .agent_hud_lines(rect)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        if lines.get(row).is_some_and(|line| line.contains(text)) {
+            return lines;
+        }
+        assert!(
+            Instant::now() < end,
+            "HUD row {row} never showed {text:?}: {lines:?}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn agent_hud_follows_a_claude_tabs_reported_session_in_its_home() {
+    // The real loop settles the process-global mouse mode.
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("claude-home");
+        let path = transcript(&home);
+        append_message(&path, "msg-1", 100);
+        let mut app = App::test_app(std::env::current_dir().unwrap());
+        app.view.term_size = (100, 32);
+        app.state.config.mouse.capture = false;
+        app.state.pane.pane_height_pct = 50;
+        app.state.pane.agent_hud.claude_home = Some(home);
+        let unreported = claude_entry(&mut app, tmp.path(), None);
+        app.runtime.pane_tabs = Some(PaneTabs::new(unreported));
+        app.cmd_agent_hud("full");
+        let mut ctx = RunCtx::for_test();
+        let lines = wait_hud_line(&mut app, &mut ctx, 1, "awaiting pinned metrics");
+        assert!(
+            app.runtime.agent_hud.is_none(),
+            "no session reported yet, so nothing to read: {lines:?}"
+        );
+
+        let reported = claude_entry(&mut app, tmp.path(), Some(SESSION));
+        app.runtime.pane_tabs.as_mut().unwrap().push(reported);
+        let lines = wait_hud_line(&mut app, &mut ctx, 1, "Context 111 ");
+        assert!(lines[0].contains("claude-opus-5-5 · xhigh"), "{lines:?}");
+        assert!(lines[1].contains("Session 116 (out 5)"), "{lines:?}");
+        append_message(&path, "msg-2", 2_000);
+        wait_hud_line(&mut app, &mut ctx, 1, "Context 2.0k");
+
+        let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+        info.activity = AgentActivity::Waiting;
+        let mut report = crate::pane::tabs::ReportedStatus::new(
+            AgentActivity::Waiting,
+            Instant::now(),
+            Instant::now() + Duration::from_secs(60),
+        );
+        report.note = Some("CI on #641".into());
+        info.reported = Some(report);
+        let lines = wait_hud_line(&mut app, &mut ctx, 0, "waiting · CI on #641 · ");
+        assert_eq!(lines[0].matches(" · ").count(), 3, "{lines:?}");
+
+        app.cmd_agent_hud("info");
+        let info: Vec<String> = app
+            .view
+            .pager
+            .as_ref()
+            .unwrap()
+            .lines
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        for expected in [
+            format!("reported session: {SESSION}"),
+            "context (latest request's input and cache): 2011 tokens".to_owned(),
+            "totals over 2 distinct messages".to_owned(),
+        ] {
+            assert!(
+                info.iter().any(|line| line.contains(&expected)),
+                "{expected:?} missing from {info:?}"
+            );
+        }
+
+        // Another config directory names other files: the consumer starts over.
+        let binding = app.state.pane.agent_hud.binding.clone();
+        app.state.pane.agent_hud.claude_home = Some(tmp.path().join("other-home"));
+        let lines = wait_hud_line(&mut app, &mut ctx, 1, "transcript missing");
+        assert_ne!(app.state.pane.agent_hud.binding, binding, "{lines:?}");
     });
 }

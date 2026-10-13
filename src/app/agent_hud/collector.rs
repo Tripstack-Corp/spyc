@@ -1,5 +1,6 @@
-//! One cancellable startup lookup and one exact-rollout subscription. The lookup
-//! is bounded and happens once per binding; a missing source needs a new consumer.
+//! One cancellable startup lookup and one exact-file subscription: a Codex
+//! rollout or a Claude Code transcript. The lookup is bounded and happens once
+//! per binding; a missing source needs a new consumer.
 
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -8,10 +9,44 @@ use std::sync::{
     mpsc,
 };
 
-use crate::agent::codex_metrics::{Availability, Binding, Snapshot, Update, watch::Subscription};
+use crate::agent::tail::Availability;
+use crate::agent::{claude_metrics, codex_metrics};
+use crate::app::state::agent_hud::{Binding, Update};
 use crate::app::{Message, Wake};
 
 const MAX_LOOKUP_ENTRIES: usize = 65_536;
+
+enum Subscription {
+    Codex(codex_metrics::watch::Subscription),
+    Claude(claude_metrics::watch::Subscription),
+}
+
+impl Subscription {
+    fn start(binding: Binding, path: PathBuf, wake: impl Fn() + Send + 'static) -> Self {
+        match binding {
+            Binding::Codex(b) => {
+                Self::Codex(codex_metrics::watch::Subscription::start(b, path, wake))
+            }
+            Binding::Claude(b) => {
+                Self::Claude(claude_metrics::watch::Subscription::start(b, path, wake))
+            }
+        }
+    }
+
+    fn take(&self) -> Option<Update> {
+        match self {
+            Self::Codex(s) => s.take().map(|u| Update::Codex(Box::new(u))),
+            Self::Claude(s) => s.take().map(|u| Update::Claude(Box::new(u))),
+        }
+    }
+
+    fn work(&self) -> (u64, u64) {
+        match self {
+            Self::Codex(s) => s.work(),
+            Self::Claude(s) => s.work(),
+        }
+    }
+}
 
 pub(in crate::app) struct Collector {
     pub(super) binding: Binding,
@@ -28,11 +63,12 @@ impl Collector {
         let worker_cancelled = cancelled.clone();
         let worker_binding = binding.clone();
         std::thread::spawn(move || {
-            let path = find_pinned(
-                &worker_binding.codex_home,
-                &worker_binding.thread_id,
-                &worker_cancelled,
-            );
+            let path = match &worker_binding {
+                Binding::Codex(b) => find_pinned(&b.codex_home, &b.thread_id, &worker_cancelled),
+                Binding::Claude(b) => {
+                    find_transcript(&b.claude_home, &b.session_id, &worker_cancelled)
+                }
+            };
             if worker_cancelled.load(Ordering::Acquire) {
                 return;
             }
@@ -69,12 +105,7 @@ impl Collector {
             match result {
                 Ok(subscription) => self.subscription = Some(subscription),
                 Err(availability) => {
-                    return Some(Update {
-                        binding: self.binding.clone(),
-                        availability,
-                        tail_only: false,
-                        snapshot: Snapshot::default(),
-                    });
+                    return Some(Update::unavailable(self.binding.clone(), availability));
                 }
             }
         }
@@ -148,6 +179,41 @@ fn find_pinned(home: &Path, thread: &str, cancelled: &AtomicBool) -> Option<Path
     matched
 }
 
+/// `<home>/projects/<project>/<session>.jsonl`: the project is the directory
+/// Claude Code started in, which the pane's cwd may have left, so every
+/// project is asked for the exact name. A session in two projects is not
+/// guessed between.
+fn find_transcript(home: &Path, session: &str, cancelled: &AtomicBool) -> Option<PathBuf> {
+    if !home.is_absolute() || !crate::state::sessions::is_uuid(session) {
+        return None;
+    }
+    let home = home.canonicalize().ok()?;
+    let projects = home.join("projects").canonicalize().ok()?;
+    if !projects.starts_with(&home) {
+        return None;
+    }
+    let name = format!("{session}.jsonl");
+    let mut matched = None;
+    for (seen, entry) in std::fs::read_dir(&projects).ok()?.enumerate() {
+        if seen >= MAX_LOOKUP_ENTRIES || cancelled.load(Ordering::Acquire) {
+            return None;
+        }
+        let Ok(entry) = entry else { continue };
+        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let path = entry.path().join(&name);
+        // The bounded reader verifies containment and every record's session.
+        if std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file()) {
+            if matched.is_some() {
+                return None;
+            }
+            matched = Some(path);
+        }
+    }
+    matched
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,5 +253,50 @@ mod tests {
         assert!(find_pinned(home.path(), THREAD, &cancelled).is_none());
         assert!(find_pinned(Path::new("relative"), THREAD, &cancelled).is_none());
         assert!(find_pinned(home.path(), "../not-a-thread", &cancelled).is_none());
+    }
+
+    #[test]
+    fn transcript_lookup_finds_one_exact_session_and_never_guesses() {
+        const SESSION: &str = "c1a0de00-0000-4000-8000-000000000001";
+        let home = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let name = format!("{SESSION}.jsonl");
+        let started_in = home.path().join("projects/-src-spyc");
+        std::fs::create_dir_all(started_in.join(SESSION).join("subagents")).unwrap();
+        std::fs::write(started_in.join(SESSION).join("subagents").join(&name), "").unwrap();
+        let cancelled = AtomicBool::new(false);
+        assert!(
+            find_transcript(home.path(), SESSION, &cancelled).is_none(),
+            "a subagent's transcript is not the session's"
+        );
+        let file = started_in.join(&name);
+        std::fs::write(&file, "").unwrap();
+        std::fs::create_dir_all(home.path().join("projects/-elsewhere").join(&name)).unwrap();
+        assert_eq!(
+            find_transcript(home.path(), SESSION, &cancelled).map(|p| p.canonicalize().unwrap()),
+            Some(file.canonicalize().unwrap()),
+            "found from any project, and a directory by the name is no transcript"
+        );
+        let copy = home.path().join("projects/-moved");
+        std::fs::create_dir_all(&copy).unwrap();
+        std::fs::write(copy.join(&name), "").unwrap();
+        assert!(
+            find_transcript(home.path(), SESSION, &cancelled).is_none(),
+            "a session in two projects is not guessed between"
+        );
+        std::fs::remove_file(copy.join(&name)).unwrap();
+        cancelled.store(true, Ordering::Release);
+        assert!(find_transcript(home.path(), SESSION, &cancelled).is_none());
+        cancelled.store(false, Ordering::Release);
+        assert!(find_transcript(Path::new("relative"), SESSION, &cancelled).is_none());
+        assert!(find_transcript(home.path(), "../../etc/passwd", &cancelled).is_none());
+        let escaped = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(outside.path().join("-p")).unwrap();
+        std::fs::write(outside.path().join("-p").join(&name), "").unwrap();
+        std::os::unix::fs::symlink(outside.path(), escaped.path().join("projects")).unwrap();
+        assert!(
+            find_transcript(escaped.path(), SESSION, &cancelled).is_none(),
+            "projects outside the home are not read"
+        );
     }
 }

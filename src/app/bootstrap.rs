@@ -179,11 +179,7 @@ impl App {
             session_id,
             frecency: crate::state::Frecency::load(),
             focus: state::Focus::FileList,
-            // spyc (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
-            pane: state::PaneLayout {
-                pane_height_pct: 70,
-                ..Default::default()
-            },
+            pane: initial_pane(),
             vsplit: None,
             pending_delete_preview: None,
             graveyard: Vec::new(),
@@ -406,5 +402,18 @@ impl App {
             app.maybe_offer_skill_update();
         }
         app
+    }
+}
+
+/// spyc (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
+fn initial_pane() -> state::PaneLayout {
+    let claude_home = crate::agent::claude_metrics::home(
+        std::env::var_os("CLAUDE_CONFIG_DIR"),
+        std::env::var_os("HOME"),
+    );
+    state::PaneLayout {
+        pane_height_pct: 70,
+        agent_hud: state::agent_hud::AgentHudState::new(claude_home),
+        ..Default::default()
     }
 }

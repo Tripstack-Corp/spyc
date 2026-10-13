@@ -13,12 +13,23 @@ mod reducer;
 pub mod stream;
 pub mod watch;
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use jiff::Timestamp;
 
 pub use crate::agent::tail::Availability;
 pub use reducer::Reducer;
+
+/// Claude Code's configuration directory: `$CLAUDE_CONFIG_DIR`, else
+/// `~/.claude`. Only an absolute one names a place to read.
+pub fn home(config_dir: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
+    let dir = match config_dir.filter(|dir| !dir.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => PathBuf::from(home.filter(|home| !home.is_empty())?).join(".claude"),
+    };
+    dir.is_absolute().then_some(dir)
+}
 
 /// A result belongs to one agent incarnation: this pane's session, read from
 /// this Claude home, not merely a cwd.

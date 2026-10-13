@@ -2,9 +2,12 @@
 
 use jiff::Timestamp;
 
+use crate::agent::claude_metrics;
 use crate::agent::codex_metrics::{Sample, Snapshot, Tokens};
+use crate::agent::tail::Availability;
 use crate::config::HUD_STALE_AFTER_SECS;
 
+use super::super::state::agent_hud::{Feed, Update};
 use super::App;
 
 pub(super) fn lines(app: &App) -> Vec<String> {
@@ -27,7 +30,10 @@ fn diagnostic_lines(app: &App) -> Vec<String> {
             rect.height,
             layout.pane.map_or(0, |p| p.height)
         ),
-        None => "not visible: off, hidden, short, closed or not an active Codex pane".to_owned(),
+        None => {
+            "not visible: off, hidden, short, closed or not an active Codex or Claude Code pane"
+                .to_owned()
+        }
     });
     out.push("Context occupancy: unknown (no verified native percentage).".to_owned());
     let Some(tabs) = app.runtime.pane_tabs.as_ref() else {
@@ -35,17 +41,29 @@ fn diagnostic_lines(app: &App) -> Vec<String> {
         return out;
     };
     let info = tabs.active_info();
+    let tilde = |home: Option<&std::path::PathBuf>| {
+        home.map_or("--".to_owned(), |p| crate::paths::display_tilde(p))
+    };
     out.push(format!("pane: {}", info.id));
-    out.push(format!(
-        "pinned thread: {}",
-        info.codex_session_id.as_deref().unwrap_or("--")
-    ));
-    out.push(format!(
-        "captured home: {}",
-        info.codex_home
-            .as_ref()
-            .map_or("--".to_owned(), |p| crate::paths::display_tilde(p))
-    ));
+    if super::feed(info.agent().kind()) == Some(Feed::Claude) {
+        out.push(format!(
+            "reported session: {}",
+            info.live_session_id.as_deref().unwrap_or("--")
+        ));
+        out.push(format!(
+            "Claude home (spyc's environment): {}",
+            tilde(app.state.pane.agent_hud.claude_home.as_ref())
+        ));
+    } else {
+        out.push(format!(
+            "pinned thread: {}",
+            info.codex_session_id.as_deref().unwrap_or("--")
+        ));
+        out.push(format!(
+            "captured home: {}",
+            tilde(info.codex_home.as_ref())
+        ));
+    }
     out.push(format!(
         "hooks present at launch: {}; restart needed: {}; reported events: {}",
         info.status_hooks_at_spawn,
@@ -70,12 +88,18 @@ fn diagnostic_lines(app: &App) -> Vec<String> {
     };
     out.push(format!(
         "source: {:?}; generation: {}; bounded tail: {}",
-        update.availability, update.binding.generation, update.tail_only
+        update.availability(),
+        update.generation(),
+        update.tail_only()
     ));
-    if update.availability == crate::agent::codex_metrics::Availability::Missing {
-        out.push(
-            "Pinned rollout unavailable in bounded lookup; toggle the strip to retry.".to_owned(),
-        );
+    if update.availability() == Availability::Missing {
+        let file = match update {
+            Update::Codex(_) => "Pinned rollout",
+            Update::Claude(_) => "Session transcript",
+        };
+        out.push(format!(
+            "{file} unavailable in bounded lookup; toggle the strip to retry."
+        ));
     }
     let work = app.runtime.agent_hud.as_ref().map_or(
         app.state.pane.agent_hud.work,
@@ -85,7 +109,11 @@ fn diagnostic_lines(app: &App) -> Vec<String> {
         "collector bytes read: {}; refreshes: {}",
         work.0, work.1
     ));
-    out.extend(metric_lines(&update.snapshot, Timestamp::now()));
+    let now = Timestamp::now();
+    out.extend(match update {
+        Update::Codex(u) => metric_lines(&u.snapshot, now),
+        Update::Claude(u) => claude_lines(&u.snapshot, now),
+    });
     out
 }
 
@@ -181,6 +209,99 @@ fn freshness<T>(sample: &Sample<T>, now: Timestamp) -> String {
     format!(
         "source {:?}; at {}; {}",
         sample.source,
+        sample.at,
+        if sample.is_stale_at(now, HUD_STALE_AFTER_SECS) {
+            "stale"
+        } else {
+            "fresh"
+        }
+    )
+}
+
+/// Each field with the transcript record it comes from.
+fn claude_lines(s: &claude_metrics::Snapshot, now: Timestamp) -> Vec<String> {
+    let mut out = vec![s.request.as_ref().map_or_else(
+        || "request (assistant message.usage): --".to_owned(),
+        |r| {
+            format!(
+                "request (assistant message.usage): input {}; cache write {}; cache read {}; output {}; {}",
+                r.value.input,
+                r.value.cache_write,
+                r.value.cache_read,
+                r.value.output,
+                claude_freshness(r, now)
+            )
+        },
+    )];
+    out.push(s.context_tokens.as_ref().map_or_else(
+        || "context (latest request's input and cache): -- (none since the read began or the last compaction)".to_owned(),
+        |c| {
+            format!(
+                "context (latest request's input and cache): {} tokens; {}; no window size, so no percentage",
+                c.value,
+                claude_freshness(c, now)
+            )
+        },
+    ));
+    let t = s.totals;
+    out.push(format!(
+        "totals over {} distinct messages since the read began: input {}; cache write {}; cache read {}; output {}",
+        s.messages, t.input, t.cache_write, t.cache_read, t.output
+    ));
+    out.push(s.mode.as_ref().map_or_else(
+        || "mode: --".to_owned(),
+        |m| {
+            format!(
+                "mode: model {} and effort {} (assistant records); permission {} (permission-mode records); {}",
+                m.value.model.as_deref().unwrap_or("--"),
+                m.value.effort.as_deref().unwrap_or("--"),
+                m.value.permission_mode.as_deref().unwrap_or("--"),
+                claude_freshness(m, now)
+            )
+        },
+    ));
+    out.push(s.compaction.as_ref().map_or_else(
+        || format!("compactions (compact_boundary records): {}", s.compactions),
+        |c| {
+            format!(
+                "compactions (compact_boundary records): {}; latest {} at {} tokens; {}",
+                s.compactions,
+                c.value.trigger.as_deref().unwrap_or("--"),
+                c.value
+                    .pre_tokens
+                    .map_or("--".to_owned(), |n| n.to_string()),
+                claude_freshness(c, now)
+            )
+        },
+    ));
+    out.push(
+        "plan: not shown; no transcript with TodoWrite or the Task tools has been probed"
+            .to_owned(),
+    );
+    out.push(format!(
+        "subagent calls (Agent tool): {}; background calls (run_in_background): {}",
+        s.subagent_calls, s.background_calls
+    ));
+    out.push(format!(
+        "recent tool calls (tool_use and tool_result blocks): {}; exhaustive: {}",
+        s.tools.len(),
+        s.tools_complete
+    ));
+    for tool in &s.tools {
+        out.push(format!(
+            "  {}: {:?}; at {}; background: {}",
+            tool.name.as_deref().unwrap_or("tool"),
+            tool.status,
+            tool.at,
+            tool.background
+        ));
+    }
+    out
+}
+
+fn claude_freshness<T>(sample: &claude_metrics::Sample<T>, now: Timestamp) -> String {
+    format!(
+        "at {}; {}",
         sample.at,
         if sample.is_stale_at(now, HUD_STALE_AFTER_SECS) {
             "stale"
