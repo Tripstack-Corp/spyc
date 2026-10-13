@@ -23,6 +23,7 @@ pub mod codex_recovery;
 pub mod detect_rules;
 pub mod resume;
 pub mod status_hook;
+pub mod tail;
 pub mod waiting;
 
 use std::borrow::Cow;
