@@ -562,10 +562,29 @@ doctor: ## Check build prerequisites
 
 # ---------- Clean ------------------------------------------------------------
 
+# A target dir outside the checkout is shared with every other worktree, and
+# `cargo clean` there deletes all of their builds, not this one's.
 .PHONY: clean
-clean: ## Remove build artifacts
+clean: ## Remove build artifacts (refuses on a shared target dir; FORCE=1 overrides)
+	@case "$(abspath $(TARGET_DIR))/" in "$(CURDIR)/"*) ;; *) \
+		if [ -z "$(FORCE)" ]; then \
+			echo "refusing: $(TARGET_DIR) is outside this checkout, so it is shared:"; \
+			echo "  cargo clean would delete every worktree's build, not just this one's."; \
+			echo "  'make prune-target' drops only dead output; 'make clean FORCE=1' wipes it anyway."; \
+			exit 1; \
+		fi ;; \
+	esac
 	cargo clean
 	rm -rf $(DIST_DIR)
+
+# Safe on a shared target dir, where `cargo clean` would wipe every worktree's
+# build: this drops only output no build will read again (see the script).
+PRUNE_DAYS ?= 3
+PRUNE_NICE = $(if $(shell command -v taskpolicy),taskpolicy -d utility,nice -n 10)
+
+.PHONY: prune-target
+prune-target: ## Drop stale worktree builds + unreferenced debug objects from the target dir (PRUNE_DAYS=3, DRY_RUN=1 to preview)
+	@$(PRUNE_NICE) python3 scripts/prune-cargo-target.py --days $(PRUNE_DAYS) $(if $(DRY_RUN),--dry-run)
 
 # ---------- Help -------------------------------------------------------------
 
