@@ -10,10 +10,42 @@
 
 pub mod records;
 mod reducer;
+pub mod stream;
+pub mod watch;
+
+use std::path::PathBuf;
 
 use jiff::Timestamp;
 
+pub use crate::agent::tail::Availability;
 pub use reducer::Reducer;
+
+/// A result belongs to one agent incarnation: this pane's session, read from
+/// this Claude home, not merely a cwd.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Binding {
+    pub pane_id: String,
+    pub session_id: String,
+    /// `CLAUDE_CONFIG_DIR`, else `~/.claude`: transcripts live under its
+    /// `projects`, and nothing outside it is read.
+    pub claude_home: PathBuf,
+    pub generation: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Update {
+    pub binding: Binding,
+    pub availability: Availability,
+    pub tail_only: bool,
+    pub snapshot: Snapshot,
+}
+
+impl Update {
+    /// Closed/rebound panes supply no matching binding and cannot accept a result.
+    pub fn for_binding(&self, live: Option<&Binding>) -> Option<&Snapshot> {
+        (live == Some(&self.binding)).then_some(&self.snapshot)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Sample<T> {
@@ -132,5 +164,7 @@ pub struct Snapshot {
     pub background_calls: u32,
 }
 
+#[cfg(test)]
+mod follow_tests;
 #[cfg(test)]
 mod tests;
