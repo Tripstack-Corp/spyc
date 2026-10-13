@@ -357,6 +357,35 @@ Clipboard capture carries the tab id and draft epoch alongside the forwarded
 paste key. Accepted Enter advances that epoch, and late results for submitted or
 closed tabs are discarded. Pending image bytes remain in memory only.
 
+## Native agent HUD
+
+The optional Codex strip is a visible consumer of `codex_metrics`, not an
+activity authority. `AppState.pane.agent_hud` holds one bounded snapshot keyed
+by stable pane id, pinned thread, captured home and a monotonic worker
+generation. `Runtime.agent_hud` owns the cancellable startup worker and the
+exact-rollout subscription. `Effect::AgentHud` starts/stops it only through the
+executor; `Wake::AgentHud` lands its coalesced outcome in the pre-receive drain.
+Both the current visible target and full generation binding reject stale work.
+Changing tabs, hiding the pane, closing it or disabling the strip clears the
+Model and cancels the Runtime consumer.
+
+Startup walks at most 65,536 directory entries through three date levels, with
+bounded iterator depth and no followed directory symlinks. It requires a unique
+filename match under the captured home; the metric reader verifies containment
+and the header. No missing-source polling is armed. The existing bounded reader
+handles complete records, partial writes, file replacement and truncation. HUD
+state is memory-only and diagnostics expose its metric projection.
+
+`frame_layout` carves the strip after the vertical split and before prompt
+wrapping. Its child rectangle is shared by PTY resize, draw, mouse routing,
+scrollback and held-grid selection. A geometry change cancels a held pane drag
+without forwarding its remaining events. Fullscreen images disable the strip.
+`ui::agent_hud` budgets grapheme widths and escapes control characters in labels.
+Drawing reads cached facts and timestamps. Metric landings compare the same
+visible projection the renderer uses, so hidden fields cause no repaint. One
+finite freshness edge can mark stale data; no recurring elapsed-time timer is
+added. Semantic dots, hook trust and child input retain their existing paths.
+
 ## Vertical (left/right) split
 
 `^s |` (aliased `^a |`) opens a second column on the right hosting a

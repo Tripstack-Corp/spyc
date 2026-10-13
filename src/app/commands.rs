@@ -483,16 +483,24 @@ pub(super) fn cmd_activity(app: &mut App, args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
-/// `:agent list` / `:agent registry` — dump the P2 agent-coordination state to
+/// `:agent hud` controls the native strip; `list` / `registry` dump coordination to
 /// a saveable pager (the orchestration view, sans a full screen). `list` = each
 /// agent tab with its dot + owned scope claims; `registry` = the raw scope
-/// registry (all claims + parked-waiter count). Any other arg prints usage.
+/// registry (all claims + parked-waiter count). Invalid arguments print usage.
 pub(super) fn cmd_agent(app: &mut App, args: &str) -> Vec<Effect> {
+    let (verb, tail) = args
+        .trim()
+        .split_once(char::is_whitespace)
+        .unwrap_or((args.trim(), ""));
+    if verb == "hud" {
+        return app.cmd_agent_hud(tail);
+    }
     let (title, lines) = match args.trim() {
         "list" => ("agent list", agent_list_lines(app)),
         "registry" => ("agent registry", agent_registry_lines(app)),
         _ => {
-            app.state.flash_info("usage: :agent list | :agent registry");
+            app.state
+                .flash_info("usage: :agent list|registry | :agent hud off|compact|full|info");
             return Vec::new();
         }
     };

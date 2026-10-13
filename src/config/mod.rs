@@ -17,6 +17,9 @@ mod load;
 /// always loads cleanly with the current `Config` schema.
 pub const DEFAULT_TEMPLATE: &str = include_str!("default.spycrc.toml");
 
+mod agent_hud;
+pub use agent_hud::{AgentHudMode, HUD_STALE_AFTER_SECS};
+
 use std::path::PathBuf;
 
 use serde::Deserialize;
@@ -260,6 +263,8 @@ pub struct PaneConfig {
     /// disk. Set false to keep spyc's hands off the clipboard entirely.
     /// Default true.
     pub preview_pasted_images: bool,
+    /// Home-configured opt-in strip below the active Codex pane.
+    pub agent_hud: AgentHudMode,
     /// Startup pane tabs. When non-empty, the bottom pane opens at launch
     /// with these tabs already in place — the config-driven analogue of
     /// pressing `^a c` K times (PANE_STARTUP_TABS_PLAN.md). Empty (the
@@ -311,6 +316,7 @@ impl Default for PaneConfig {
             codex_mcp: true,
             codex_daemon: false,
             preview_pasted_images: true,
+            agent_hud: AgentHudMode::Off,
             tabs: Vec::new(),
             project_tabs: None,
         }
@@ -351,6 +357,8 @@ struct FilePane {
     codex_daemon: Option<bool>,
     #[serde(default)]
     preview_pasted_images: Option<bool>,
+    #[serde(default)]
+    agent_hud: Option<AgentHudMode>,
     /// Compact startup-tabs form: `tabs = ["claude", "bash"]`.
     #[serde(default)]
     tabs: Option<Vec<String>>,

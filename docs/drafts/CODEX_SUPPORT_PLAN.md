@@ -963,9 +963,8 @@ Codex statusline. Leave the user's native statusline untouched. See the
 
 ### Product proposal
 
-- **Off by default for initial delivery.** Proposed home-config setting:
-  `[pane] agent_hud = "off" | "compact" | "full"`. These values are a design,
-  not existing config. Runtime control: proposed `:agent hud off|compact|full`;
+- **Off by default for initial delivery.** Home-config setting:
+  `[pane] agent_hud = "off" | "compact" | "full"`. Project values are ignored. Runtime control: `:agent hud off|compact|full`;
   `:agent hud info` opens source/freshness diagnostics in the pager.
 - **Active Codex tab only.** Keep the layout slot agent-neutral, but do not
   duplicate an installed Claude HUD in this first feature. Existing tab dots
@@ -1056,6 +1055,22 @@ Privacy and resource bounds are acceptance criteria: retain only metric fields,
 bounded recent tool names/statuses and identity. No prompt/response arguments,
 tool output or credentials in persisted HUD state or diagnostics. Reading must
 remain read-only and fail independently of the child session.
+
+### B3 implementation candidate
+
+The candidate adds the home-only off/compact/full preference, temporary
+`:agent hud` control and saveable source diagnostics. Its four-row full view
+omits unavailable plan/agent providers. Pure Model state and Runtime subscriptions
+are connected through effects and wakes; common geometry controls child sizing
+and all pointer/scrollback consumers. Disabled, hidden, short, closed, non-Codex
+and fullscreen-image states cancel collection. Full binding generations and
+current-target checks isolate tab/home changes. The bounded startup lookup also
+rejects duplicate pinned filenames; toggling retries an unavailable lookup.
+
+Regression coverage includes actual executor/pre-receive call sites, synthetic
+PTY input/resize/mouse interactions, layout variants, home isolation, idle work,
+visible-only repaint decisions, Unicode/monochrome and explicit unknown context.
+Native CLI multi-pane and local acceptance remain gates before integration.
 
 ## Delivery sequence and gates
 

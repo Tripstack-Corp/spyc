@@ -510,6 +510,38 @@ temporary project with hook installation disabled and closes only its named
 session. They require no model call or hook trust, and do not establish native
 CLI execution or fresh onboarding acceptance.
 
+### Native Codex HUD checks
+
+Enable `:agent hud compact`, then `full`; `off` is the default. The strip follows
+the active live Codex tab and leaves its native composer within the resized
+child. [Configuration and source semantics](../CONFIGURATION.md#agent-hud--pane-agent_hud)
+explain unknown values, freshness and the home-only preference.
+
+For a local acceptance round:
+
+1. Open two native Codex tabs at the same working directory. Check that their
+   session suffixes differ and their request/thread values follow the active
+   tab. Repeat with two captured Codex homes; a tab never inherits the other
+   home's metrics. Resume/fork should acquire their own pinned identity.
+2. Try compact/full/off, narrow and short frames, pane zoom, both status positions,
+   preview/second columns, top pagers and lower scrollback. Full collapses to two
+   rows before hiding; every visible strip leaves six child rows. Check Unicode
+   repository/branch labels and monochrome attention.
+3. Type, paste, use the native question/composer and click in the child. HUD rows
+   never send mouse input to it. Start a Ctrl+drag and change the strip or resize:
+   the held grid cancels and its drag/release tail stays consumed.
+4. Hide/close the pane, change to a different agent or open a fullscreen image.
+   Collection stops; returning creates a fresh generation. `:agent hud info`
+   reports the pinned home/thread, availability and per-source freshness. A
+   missing or ambiguous bounded lookup needs a strip toggle to retry.
+5. Leave a completed tab quiet after finite freshness expiry. Use `:activity` to check
+   zero idle draws and compare collector work in two diagnostic dumps. The
+   elapsed-minute label does not introduce a recurring idle clock.
+
+Real PTY integration tests cover shared geometry, child input, mouse tails,
+consumer cancellation and same-directory/home isolation with synthetic children.
+They do not establish native CLI or fresh hook-trust acceptance.
+
 ### Duplicate Codex hook sources
 
 codex runs the hooks of every layer it loads, user and project alike, without

@@ -20,6 +20,8 @@ pub enum Deadline {
     /// 1 Hz git safety-net poll (1 s). Armed only while
     /// `git_info.is_some()`. PRE-recv timer.
     GitPoll,
+    /// One finite source-freshness edge; old or unavailable HUD data arms nothing.
+    AgentHudExpiry,
     /// 1 s activity-monitor rollover. Armed only while `show_activity`.
     /// POST-recv timer.
     ActivityRollover,
@@ -100,7 +102,7 @@ pub enum Deadline {
 /// Run()-local deadline scheduler (MVU Phase 2). **Advisory** — it only
 /// computes the `recv_timeout` wait from the set of armed deadlines; it
 /// never fires a timer (the loop's existing predicates do, against the
-/// threaded `now`). No thread, no channel. `armed` stays tiny (≤ 6).
+/// threaded `now`). No thread, no channel. Each consumer disarms its deadline when inactive.
 pub struct Scheduler {
     armed: Vec<(Instant, Deadline)>,
 }

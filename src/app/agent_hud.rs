@@ -1,0 +1,161 @@
+//! Reconcile the one visible Codex strip consumer through effects. Metric wakes
+//! supplement the display without changing the agent's semantic activity.
+
+use jiff::Timestamp;
+use ratatui::layout::Rect;
+
+use super::state::agent_hud::{ConsumerChange, Target};
+use super::{App, Deadline, Effect, RunCtx};
+use crate::agent::codex_metrics::{Binding, Update};
+use crate::config::AgentHudMode;
+use crate::state::sessions::AgentKind;
+
+pub(in crate::app) mod collector;
+mod diagnostics;
+
+impl App {
+    pub(super) fn agent_hud_mode(&self) -> AgentHudMode {
+        if self.view.image_view.is_some() {
+            return AgentHudMode::Off;
+        }
+        let eligible = self.runtime.pane_tabs.as_ref().is_some_and(|tabs| {
+            !tabs.active().is_closed() && tabs.active_info().agent().kind() == AgentKind::Codex
+        });
+        if eligible {
+            self.state.config.pane.agent_hud
+        } else {
+            AgentHudMode::Off
+        }
+    }
+
+    pub(super) fn agent_hud_target(&self) -> Option<Target> {
+        let (cols, rows) = self.view.term_size;
+        self.frame_layout(Rect::new(0, 0, cols, rows)).agent_hud?;
+        let info = self.runtime.pane_tabs.as_ref()?.active_info();
+        let thread = info
+            .codex_session_id
+            .as_deref()
+            .filter(|id| crate::state::sessions::is_uuid(id))?;
+        let home = info.codex_home.as_ref().filter(|home| home.is_absolute())?;
+        Some(Target {
+            pane_id: info.id.clone(),
+            thread_id: thread.to_owned(),
+            codex_home: home.clone(),
+        })
+    }
+
+    pub(super) fn active_agent_hud_update(&self) -> Option<&Update> {
+        self.state
+            .pane
+            .agent_hud
+            .update_for(&self.agent_hud_target()?)
+    }
+
+    pub(super) fn execute_agent_hud(&mut self, binding: Option<Binding>) {
+        if binding.as_ref() != self.state.pane.agent_hud.binding.as_ref() {
+            return;
+        }
+        self.runtime.agent_hud = binding
+            .map(|binding| collector::Collector::start(binding, self.runtime.pane_wake_tx.clone()));
+    }
+
+    pub(super) fn apply_agent_hud_updates(&mut self) -> bool {
+        let target = self.agent_hud_target();
+        let Some(collector) = self.runtime.agent_hud.as_mut() else {
+            return false;
+        };
+        let Some(update) = collector.take() else {
+            return false;
+        };
+        if !target
+            .as_ref()
+            .is_some_and(|target| target.matches(&update.binding))
+        {
+            return false;
+        }
+        let work = collector.work();
+        self.land_agent_hud_update(update, work, Timestamp::now())
+    }
+
+    fn land_agent_hud_update(&mut self, update: Update, work: (u64, u64), now: Timestamp) -> bool {
+        let (cols, rows) = self.view.term_size;
+        let Some(rect) = self.frame_layout(Rect::new(0, 0, cols, rows)).agent_hud else {
+            return false;
+        };
+        let before = self.agent_hud_lines(rect);
+        self.state.pane.agent_hud.accept(update, work, now);
+        before != self.agent_hud_lines(rect)
+    }
+
+    pub(super) fn settle_agent_hud(
+        &mut self,
+        now: std::time::Instant,
+        ctx: &mut RunCtx,
+    ) -> Vec<Effect> {
+        let target = self.agent_hud_target();
+        let change = self.state.pane.agent_hud.set_target(target);
+        if change.is_some() {
+            ctx.draw.mark(3);
+        }
+        let wall = Timestamp::now();
+        let (cols, rows) = self.view.term_size;
+        let rect = self.frame_layout(Rect::new(0, 0, cols, rows)).agent_hud;
+        let before = rect.map(|rect| self.agent_hud_lines(rect));
+        if self.state.pane.agent_hud.advance_time(wall)
+            && before != rect.map(|rect| self.agent_hud_lines(rect))
+        {
+            ctx.draw.mark(3);
+        }
+        match self.state.pane.agent_hud.next_expiry(wall) {
+            Some(epoch) => {
+                let delay = epoch.saturating_sub(wall.as_second()) as u64;
+                if let Some(when) = now.checked_add(std::time::Duration::from_secs(delay)) {
+                    ctx.scheduler.arm(Deadline::AgentHudExpiry, when);
+                } else {
+                    ctx.scheduler.disarm(Deadline::AgentHudExpiry);
+                }
+            }
+            None => ctx.scheduler.disarm(Deadline::AgentHudExpiry),
+        }
+        change.map_or_else(Vec::new, |change| {
+            vec![Effect::AgentHud(match change {
+                ConsumerChange::Start(binding) => Some(binding),
+                ConsumerChange::Stop => None,
+            })]
+        })
+    }
+
+    pub(super) fn cmd_agent_hud(&mut self, args: &str) -> Vec<Effect> {
+        let mut words = args.split_whitespace();
+        let command = words.next();
+        if words.next().is_some() {
+            return self.agent_hud_usage();
+        }
+        if command == Some("info") {
+            let mut pager = crate::ui::pager::PagerView::new_plain(
+                "agent HUD sources",
+                diagnostics::lines(self),
+            );
+            pager.saveable = true;
+            self.set_pager(pager);
+            return Vec::new();
+        }
+        let Some(mode) = command.and_then(AgentHudMode::parse) else {
+            return self.agent_hud_usage();
+        };
+        self.state.config.pane.agent_hud = mode;
+        self.clear_pane_selection();
+        self.state
+            .flash_info(format!("agent HUD: {}", mode.as_str()));
+        Vec::new()
+    }
+
+    fn agent_hud_usage(&mut self) -> Vec<Effect> {
+        self.state
+            .flash_info("usage: :agent hud off|compact|full|info");
+        Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests;

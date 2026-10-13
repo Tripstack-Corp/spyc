@@ -60,6 +60,7 @@ claude_transcript_scrollback = false  # `^a v` reads Claude's JSONL transcript i
 codex_mcp = true               # register spyc's MCP server in codex's user config; only $HOME's rc decides
 codex_daemon = false           # false: codex panes run `--no-daemon`, so their hooks + MCP reach the spyc that launched them
 preview_pasted_images = true   # keep a copy of images you paste into an agent pane, for `^a g`
+agent_hud = "off"             # "off", "compact", or "full"; only $HOME's rc decides
 
 [yank]
 include_pager_title = true     # prepend a source header to pager yanks (y/Y)
@@ -79,6 +80,41 @@ confirm = true                 # y/N prompt before R / dd; false = yolo (still r
 
 All optional; anything unset uses the built-in default. See `spyc --print-config`
 for the annotated version of each.
+
+### Agent HUD — `[pane] agent_hud`
+
+The native Codex strip is **off by default**. Set `agent_hud = "compact"` or
+`"full"` in `~/.spycrc.toml`; project-local values are ignored. Use
+`:agent hud off|compact|full` to change it for the current run. A config reload
+restores the file preference. `:agent hud info` opens saveable source diagnostics.
+
+Compact uses two rows below the child; full adds operating-mode and recent-tool
+rows, for four rows with the available sources. The child keeps at least six
+rows: full collapses to compact below ten available pane rows, and the strip
+hides below eight. It follows the active live Codex tab, including pane zoom,
+vertical splits and scrollback. Hidden panes, closed tabs, other agents and a
+fullscreen image have no strip or metric subscription. The native composer and
+status line stay inside the resized child.
+
+Attention comes from the existing activity dot. Session identity uses the UUID
+suffix, with model, effort, repository, known branch and elapsed minutes added
+when they fit. `Req`, `Turn` and `Thread` are separately reported token totals;
+legacy totals remain labelled and are never added to current totals. A reported
+zero is different from `--`. `Context --` means current occupancy is unknown;
+a reported model window and lifetime usage cannot establish a percentage.
+Limits may be not reported or unsupported. Recent tools are partial observations,
+not a count of active tools or agents. Hook definitions are labelled unverified
+until events are observed; MCP counts describe observed bound connections.
+
+Collection reads the pinned rollout under the pane's captured Codex home.
+Startup filename lookup is bounded and requires one matching file; missing,
+ambiguous or out-of-budget lookups do not retry at idle. Toggle the strip to
+retry. An exact-file watch then incrementally reads bounded complete records.
+No account request or additional Codex session is opened. Samples older than
+60 seconds are labelled stale; finite expiry edges can wake once. Elapsed time
+updates on other events and existing activity animation, so an idle strip has
+no recurring clock. Diagnostics contain source, identity, freshness and bounded
+metric observations, with no prompts, tool arguments or output.
 
 ### Colour depth — `[layout] color_depth`
 

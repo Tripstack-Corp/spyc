@@ -7,6 +7,7 @@
 use unicode_truncate::UnicodeTruncateStr;
 use unicode_width::UnicodeWidthStr;
 
+pub mod agent_hud;
 pub mod blame_render;
 pub mod color_depth;
 pub mod diff_render;
