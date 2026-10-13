@@ -414,3 +414,73 @@ fn the_home_is_the_config_dir_else_dot_claude_and_never_relative() {
     assert_eq!(home(None, os("")), None);
     assert_eq!(home(None, None), None);
 }
+
+/// A call counts once however many records repeat its block, and a failure
+/// counts against the tool that made it, once.
+#[test]
+fn tool_counts_tally_calls_and_failures_by_tool() {
+    let snapshot = fold_all(&[
+        assistant(
+            "msg-1",
+            1,
+            usage(1, 1, 1, 1),
+            tool_use("c1", "Bash", json!({})),
+        ),
+        assistant(
+            "msg-1",
+            1,
+            usage(1, 1, 1, 1),
+            tool_use("c1", "Bash", json!({})),
+        ),
+        assistant(
+            "msg-2",
+            2,
+            usage(1, 1, 1, 1),
+            tool_use("c2", "Bash", json!({})),
+        ),
+        assistant(
+            "msg-3",
+            3,
+            usage(1, 1, 1, 1),
+            tool_use("c3", "Read", json!({})),
+        ),
+        result(4, "c1", false),
+        result(5, "c2", true),
+        result(6, "c2", true),
+        result(7, "never-started", true),
+    ]);
+    let counts: Vec<_> = snapshot
+        .tool_counts
+        .iter()
+        .map(|c| (c.name.as_str(), c.calls, c.failed))
+        .collect();
+    assert_eq!(counts, [("Bash", 2, 1), ("Read", 1, 0)]);
+}
+
+#[test]
+fn tool_counts_stay_bounded_and_lose_no_call() {
+    let records: Vec<Value> = (0..40)
+        .map(|i| {
+            assistant(
+                &format!("msg-{i}"),
+                i,
+                usage(1, 1, 1, 1),
+                tool_use(&format!("c{i}"), &format!("Tool{i}"), json!({})),
+            )
+        })
+        .collect();
+    let snapshot = fold_all(&records);
+    assert_eq!(snapshot.tool_counts.len(), MAX_TOOL_NAMES + 1);
+    let other = snapshot
+        .tool_counts
+        .iter()
+        .find(|c| c.name == OTHER_TOOLS)
+        .unwrap();
+    assert_eq!(other.calls as usize, 40 - MAX_TOOL_NAMES);
+    let total: u32 = snapshot.tool_counts.iter().map(|c| c.calls).sum();
+    assert_eq!(total, 40);
+    assert_eq!(
+        snapshot.tool_counts[0].name, OTHER_TOOLS,
+        "most called first"
+    );
+}

@@ -1,20 +1,35 @@
-//! Pure native agent strip geometry and text, for Codex and Claude Code tabs.
-//! The caller supplies every source, timestamp and attention state; this
-//! renderer owns no clock or collection.
+//! The native agent strip: one template that every agent with a metrics source
+//! fills. Its rows are laid out as a grid, so each column starts at the same x
+//! on every row. The template owns the activity row, the health cells and all
+//! styling; an agent supplies only its own usage, tools and mode cells
+//! (`claude`, `codex`). The caller supplies every source, timestamp and
+//! attention state: nothing here reads a clock or collects.
 
 use jiff::Timestamp;
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
 };
 
 use super::{display_truncate, display_truncate_tail, display_width, theme::Theme};
-use crate::agent::claude_metrics;
-use crate::agent::codex_metrics::{Availability, LimitState, Sample, Snapshot, Tokens, ToolStatus};
-use crate::config::{AgentHudMode, HUD_STALE_AFTER_SECS};
+use crate::agent::tail::Availability;
+use crate::agent::{claude_metrics, codex_metrics};
+use crate::config::AgentHudMode;
 
 mod claude;
+mod codex;
+
+/// Spaces between columns.
+const GAP: usize = 3;
+/// Value columns are at least this wide, so a count gaining a digit rarely
+/// moves the next column.
+const MIN_COLUMN: usize = 12;
+/// A cell is cut to this width, so one long branch can't push every other
+/// column off the strip.
+const MAX_CELL: usize = 32;
+/// Tool names are cut to this width inside their cell.
+const MAX_TOOL_NAME: usize = 14;
 
 pub struct HudLayout {
     pub child: Rect,
@@ -43,7 +58,7 @@ pub fn partition(rect: Rect, requested: AgentHudMode) -> HudLayout {
 /// The agent's own metrics, `None` until its source is available.
 #[derive(Clone, Copy)]
 pub enum Metrics<'a> {
-    Codex(Option<&'a Snapshot>),
+    Codex(Option<&'a codex_metrics::Snapshot>),
     Claude {
         snapshot: Option<&'a claude_metrics::Snapshot>,
         /// The read began part-way through the transcript, so its totals
@@ -52,17 +67,33 @@ pub enum Metrics<'a> {
     },
 }
 
+/// What the tab's status hooks have shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hooks {
+    /// Events arrived.
+    Reported,
+    /// Defined at launch; no event yet.
+    Unverified,
+    /// A startup-only hook config changed after launch.
+    RestartNeeded,
+    /// Not present at launch.
+    Absent,
+}
+
 pub struct HudView<'a> {
     pub session: Option<&'a str>,
+    /// The tab's activity dot, in its own colour.
+    pub dot: Option<Span<'static>>,
     pub attention: &'a str,
-    pub needs_user: bool,
+    /// What a `waiting` agent waits on.
+    pub note: Option<&'a str>,
     pub repository: Option<&'a str>,
     pub branch: Option<&'a str>,
     pub elapsed_secs: Option<u64>,
     pub metrics: Metrics<'a>,
     pub availability: Option<Availability>,
     pub now: Option<Timestamp>,
-    pub hooks: &'a str,
+    pub hooks: Hooks,
     pub mcp_connections: usize,
 }
 
@@ -75,175 +106,381 @@ pub fn lines(
     if mode == AgentHudMode::Off || width == 0 {
         return Vec::new();
     }
-    let (metrics, mode_row, tools) = match view.metrics {
-        Metrics::Codex(snapshot) => (
-            metrics(snapshot, view),
-            operating_mode(snapshot, view),
-            tools(snapshot),
-        ),
+    let p = Palette::of(theme);
+    let agent = match view.metrics {
+        Metrics::Codex(snapshot) => codex::rows(snapshot, view, p),
         Metrics::Claude {
             snapshot,
             tail_only,
-        } => (
-            claude::metrics(snapshot, tail_only, view.availability),
-            claude::operating_mode(snapshot, view),
-            claude::tools(snapshot, tail_only),
-        ),
+        } => claude::rows(snapshot, tail_only, view, p),
     };
-    let mut out = vec![identity(view, width, theme), plain(metrics, width, theme)];
+    let mut rows = vec![activity(view, p), agent.usage];
     if mode == AgentHudMode::Full {
-        out.push(plain(mode_row, width, theme));
-        out.push(plain(tools, width, theme));
+        let mut mode_row = agent.mode;
+        mode_row.cells.push(hooks(view.hooks, p));
+        mode_row.cells.push(mcp(view.mcp_connections, p));
+        rows.push(agent.tools);
+        rows.push(mode_row);
     }
-    out
-}
-
-/// The model, effort and whether that report is stale, once one arrived.
-fn model(view: &HudView<'_>) -> Option<String> {
-    let fresh = |stale: bool| if stale { " (stale)" } else { "" };
-    let (model, effort, stale) = match view.metrics {
-        Metrics::Codex(snapshot) => {
-            let mode = snapshot?.mode.as_ref()?;
-            let value = &mode.value;
-            (&value.model, &value.effort, stale(mode, view.now))
+    let mut lines = grid(rows, usize::from(width));
+    if theme.mono {
+        // Shape and weight carry the meaning; no span keeps a colour.
+        for span in lines.iter_mut().flat_map(|line| line.spans.iter_mut()) {
+            span.style.fg = Some(Color::Reset);
         }
-        Metrics::Claude { snapshot, .. } => {
-            let mode = snapshot?.mode.as_ref()?;
-            let value = &mode.value;
-            let stale = view
-                .now
-                .is_some_and(|now| mode.is_stale_at(now, HUD_STALE_AFTER_SECS));
-            (&value.model, &value.effort, stale)
+    }
+    lines
+}
+
+/// An agent's rows, below the shared activity row.
+struct AgentRows {
+    usage: Row,
+    tools: Row,
+    /// The template appends the health cells.
+    mode: Row,
+}
+
+#[derive(Default)]
+struct Row {
+    cells: Vec<Field>,
+    /// Placed after the last cell and outside the grid, so it widens no column.
+    trailer: Option<Field>,
+}
+
+impl Row {
+    const fn new(cells: Vec<Field>) -> Self {
+        Self {
+            cells,
+            trailer: None,
         }
-    };
-    let mut label = model.as_deref().unwrap_or("model --").to_owned();
-    if let Some(effort) = effort.as_deref() {
-        label.push_str(" · ");
-        label.push_str(effort);
     }
-    label.push_str(fresh(stale));
-    Some(label)
 }
 
-fn identity(view: &HudView<'_>, width: u16, theme: &Theme) -> Line<'static> {
-    let session = view
-        .session
-        .map_or("session --", |id| display_truncate_tail(id, 8));
-    let primary = safe_label(&format!("{} · {session}", view.attention));
-    let mut text = display_truncate(&primary, usize::from(width)).to_owned();
-    if let Some(model) = model(view) {
-        append(&mut text, &model, width);
+/// Styled spans the grid places but never splits.
+#[derive(Clone, Default)]
+struct Field(Vec<Span<'static>>);
+
+impl Field {
+    fn width(&self) -> usize {
+        self.0.iter().map(|span| display_width(&span.content)).sum()
     }
-    if let Some(repository) = view.repository {
-        let repo = view.branch.map_or_else(
-            || repository.to_owned(),
-            |branch| format!("{repository} ({branch})"),
-        );
-        append(&mut text, &repo, width);
+
+    /// At most `max` columns wide, ending in `…` when cut.
+    fn clip(self, max: usize) -> Self {
+        if self.width() <= max {
+            return self;
+        }
+        let mut room = max.saturating_sub(1);
+        let mut spans = Vec::new();
+        let mut last = Style::default();
+        for span in self.0 {
+            if room == 0 {
+                break;
+            }
+            let kept = display_truncate(&span.content, room).to_owned();
+            room -= display_width(&kept);
+            last = span.style;
+            spans.push(Span::styled(kept, span.style));
+        }
+        if max > 0 {
+            spans.push(Span::styled("…", last));
+        }
+        Self(spans)
     }
-    if let Some(seconds) = view.elapsed_secs {
-        append(&mut text, &format!("{}m", seconds / 60), width);
-    }
-    let color = if theme.mono {
-        ratatui::style::Color::Reset
-    } else if view.needs_user {
-        theme.diff_del_fg
-    } else {
-        theme.status_path
-    };
-    Line::from(Span::styled(
-        text,
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
-    ))
 }
 
-fn metrics(snapshot: Option<&Snapshot>, view: &HudView<'_>) -> String {
-    let Some(s) = snapshot else {
-        return format!(
-            "Context -- | Usage -- | {}",
-            source_label(view.availability, "rollout")
-        );
-    };
-    let request = s.request.as_ref().or(s.legacy_last.as_ref());
-    let thread = s.thread.as_ref().or(s.legacy_thread.as_ref());
-    let legacy = if s.thread.is_none() && s.legacy_thread.is_some() {
-        " legacy"
-    } else {
-        ""
-    };
-    let limits = s
-        .limits
-        .as_ref()
-        .map_or("not reported".to_owned(), |sample| {
-            let state = match sample.value {
-                LimitState::NotReported => "not reported",
-                LimitState::UnsupportedWindow => "unsupported",
-            };
-            format!(
-                "{state}{}",
-                if stale(sample, view.now) {
-                    " (stale)"
-                } else {
-                    ""
-                }
-            )
-        });
-    format!(
-        "Context -- | Req {} | Turn {} | Thread {}{legacy} | Limits {limits}",
-        token_sample(request, view.now),
-        token_sample(s.turn.as_ref(), view.now),
-        token_sample(thread, view.now)
-    )
-}
-
-fn operating_mode(snapshot: Option<&Snapshot>, view: &HudView<'_>) -> String {
-    let mode = snapshot.and_then(|s| s.mode.as_ref()).map(|s| &s.value);
-    let approval = mode.and_then(|m| m.approval.as_deref()).unwrap_or("--");
-    let sandbox = mode.and_then(|m| m.sandbox.as_deref()).unwrap_or("--");
-    format!(
-        "Mode: {approval} / {sandbox} | hooks: {} | MCP: {} observed",
-        view.hooks, view.mcp_connections
-    )
-}
-
-fn tools(snapshot: Option<&Snapshot>) -> String {
-    let Some(snapshot) = snapshot else {
-        return "Observed tools: --".to_owned();
-    };
-    if snapshot.tools.is_empty() {
-        return "Observed tools: -- (incomplete source)".to_owned();
-    }
-    let recent = snapshot
-        .tools
-        .iter()
-        .rev()
-        .take(2)
-        .map(|tool| {
-            let status = match tool.status {
-                ToolStatus::Started => "start observed",
-                ToolStatus::Completed => "completed",
-                ToolStatus::Failed => "failed",
-            };
-            format!("{} {status}", tool.name.as_deref().unwrap_or("tool"))
+/// Lays `rows` out so column `j` starts at the same x on every row. A cell
+/// past the right edge is dropped, never wrapped, except in the first two
+/// columns: the activity and the session have first claim on the width, so
+/// they are cut instead.
+fn grid(rows: Vec<Row>, width: usize) -> Vec<Line<'static>> {
+    let rows: Vec<Row> = rows
+        .into_iter()
+        .map(|row| Row {
+            cells: row.cells.into_iter().map(|c| c.clip(MAX_CELL)).collect(),
+            trailer: row.trailer,
         })
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("Observed tools (partial): {recent}")
+        .collect();
+    let columns = rows.iter().map(|row| row.cells.len()).max().unwrap_or(0);
+    let mut starts = Vec::with_capacity(columns);
+    let mut x = 0;
+    for j in 0..columns {
+        starts.push(x);
+        let widest = rows
+            .iter()
+            .filter_map(|row| row.cells.get(j))
+            .map(Field::width)
+            .max()
+            .unwrap_or(0);
+        let floor = if j == 0 { 0 } else { MIN_COLUMN };
+        x += widest.max(floor) + GAP;
+    }
+    rows.into_iter()
+        .map(|row| place(row, &starts, width))
+        .collect()
 }
 
-fn token_sample(sample: Option<&Sample<Tokens>>, now: Option<Timestamp>) -> String {
-    let Some(sample) = sample else {
-        return "--".to_owned();
+fn place(row: Row, starts: &[usize], width: usize) -> Line<'static> {
+    let mut spans = Vec::new();
+    let mut x = 0;
+    for (j, cell) in row.cells.into_iter().enumerate() {
+        let start = starts[j];
+        if start >= width {
+            break;
+        }
+        let room = width - start;
+        let cell = if cell.width() <= room {
+            cell
+        } else if j < 2 {
+            cell.clip(room)
+        } else {
+            break;
+        };
+        pad(&mut spans, start - x);
+        x = start + cell.width();
+        spans.extend(cell.0);
+    }
+    if let Some(trailer) = row.trailer {
+        let start = if x == 0 { 0 } else { x + GAP };
+        if start < width {
+            let trailer = trailer.clip(width - start);
+            pad(&mut spans, start - x);
+            spans.extend(trailer.0);
+        }
+    }
+    Line::from(spans)
+}
+
+fn pad(spans: &mut Vec<Span<'static>>, n: usize) {
+    if n > 0 {
+        spans.push(Span::raw(" ".repeat(n)));
+    }
+}
+
+/// The strip's colours, from the theme. Monochrome keeps only the weights.
+#[derive(Clone, Copy)]
+struct Palette {
+    mono: bool,
+    label: Color,
+    value: Color,
+    session: Color,
+    repository: Color,
+    branch: Color,
+    good: Color,
+    bad: Color,
+    warn: Color,
+    active: Color,
+}
+
+impl Palette {
+    const fn of(theme: &Theme) -> Self {
+        Self {
+            mono: theme.mono,
+            label: theme.status_suffix,
+            value: theme.status_path,
+            session: theme.status_user,
+            repository: theme.dir,
+            branch: theme.diff_add_fg,
+            good: theme.diff_add_fg,
+            bad: theme.diff_del_fg,
+            warn: theme.prompt_prefix,
+            active: theme.prompt_prefix,
+        }
+    }
+
+    /// A field's name, or a value that is only a placeholder.
+    fn label(self, text: &str) -> Span<'static> {
+        let style = Style::default().fg(self.label);
+        let style = if self.mono {
+            style.add_modifier(Modifier::DIM)
+        } else {
+            style
+        };
+        Span::styled(safe_label(text), style)
+    }
+
+    fn value(self, text: &str) -> Span<'static> {
+        Span::styled(safe_label(text), Style::default().fg(self.value))
+    }
+
+    fn strong(self, text: &str) -> Span<'static> {
+        Span::styled(
+            safe_label(text),
+            Style::default().fg(self.value).add_modifier(Modifier::BOLD),
+        )
+    }
+
+    fn tint(self, text: &str, color: Color) -> Span<'static> {
+        Span::styled(safe_label(text), Style::default().fg(color))
+    }
+
+    /// `name value`, the name dimmed.
+    fn pair(self, name: &str, value: Span<'static>) -> Field {
+        Field(vec![self.label(name), Span::raw(" "), value])
+    }
+
+    /// Why an agent has no metrics, in place of its usage cells.
+    fn unavailable(self, availability: Option<Availability>, file: &str) -> Row {
+        let reason = match availability {
+            None | Some(Availability::Available) => self.label("awaiting metrics"),
+            Some(other) => self.tint(&source_label(other, file), self.warn),
+        };
+        Row::new(vec![
+            Field(vec![self.label("context")]),
+            Field(vec![reason]),
+        ])
+    }
+}
+
+/// A stale sample is dimmed, not labelled: an idle session's last report is
+/// still its last report.
+fn dim_if(mut cell: Field, stale: bool) -> Field {
+    if stale {
+        for span in &mut cell.0 {
+            span.style = span.style.add_modifier(Modifier::DIM);
+        }
+    }
+    cell
+}
+
+fn activity(view: &HudView<'_>, p: Palette) -> Row {
+    let colour = view.dot.as_ref().and_then(|dot| dot.style.fg);
+    let mut first = Vec::new();
+    if let Some(dot) = &view.dot {
+        first.push(dot.clone());
+        first.push(Span::raw(" "));
+    }
+    first.push(Span::styled(
+        safe_label(view.attention),
+        Style::default()
+            .fg(colour.unwrap_or(p.value))
+            .add_modifier(Modifier::BOLD),
+    ));
+    let session = view.session.map_or_else(
+        || p.label("--"),
+        |id| p.tint(display_truncate_tail(id, 8), p.session),
+    );
+    let place = view.repository.map_or_else(
+        || Field(vec![p.label("--")]),
+        |repository| {
+            let mut spans = vec![p.tint(repository, p.repository)];
+            if let Some(branch) = view.branch {
+                spans.push(p.label(" ⎇ "));
+                spans.push(p.tint(branch, p.branch));
+            }
+            Field(spans)
+        },
+    );
+    let elapsed = view
+        .elapsed_secs
+        .map_or_else(|| p.label("--"), |secs| p.label(&elapsed_label(secs)));
+    Row {
+        cells: vec![
+            Field(first),
+            Field(vec![session]),
+            model(view, p),
+            place,
+            Field(vec![elapsed]),
+        ],
+        trailer: view.note.map(|note| {
+            Field(vec![Span::styled(
+                safe_label(note),
+                Style::default().fg(colour.unwrap_or(p.value)),
+            )])
+        }),
+    }
+}
+
+/// The model and effort, from either agent's latest mode report.
+fn model(view: &HudView<'_>, p: Palette) -> Field {
+    let reported = match view.metrics {
+        Metrics::Codex(snapshot) => snapshot.and_then(|s| s.mode.as_ref()).map(|m| {
+            (
+                &m.value.model,
+                &m.value.effort,
+                view.now.is_some_and(|now| m.is_stale_at(now, STALE)),
+            )
+        }),
+        Metrics::Claude { snapshot, .. } => snapshot.and_then(|s| s.mode.as_ref()).map(|m| {
+            (
+                &m.value.model,
+                &m.value.effort,
+                view.now.is_some_and(|now| m.is_stale_at(now, STALE)),
+            )
+        }),
     };
-    let value = sample.value.total.map_or("--".to_owned(), short_count);
-    format!("{value}{}", if stale(sample, now) { " stale" } else { "" })
+    let Some((model, effort, stale)) = reported else {
+        return Field(vec![p.label("model --")]);
+    };
+    let mut spans = vec![model.as_deref().map_or_else(
+        || p.label("model --"),
+        |model| p.strong(model.strip_prefix("claude-").unwrap_or(model)),
+    )];
+    if let Some(effort) = effort.as_deref() {
+        spans.push(Span::raw(" "));
+        spans.push(p.label(effort));
+    }
+    dim_if(Field(spans), stale)
 }
 
-fn stale<T>(sample: &Sample<T>, now: Option<Timestamp>) -> bool {
-    now.is_some_and(|now| sample.is_stale_at(now, HUD_STALE_AFTER_SECS))
+const STALE: i64 = crate::config::HUD_STALE_AFTER_SECS;
+
+fn hooks(hooks: Hooks, p: Palette) -> Field {
+    p.pair(
+        "hooks",
+        match hooks {
+            Hooks::Reported => p.tint("✓", p.good),
+            Hooks::Unverified => p.tint("unverified", p.warn),
+            Hooks::RestartNeeded => p.tint("restart", p.warn),
+            Hooks::Absent => p.label("off"),
+        },
+    )
 }
 
-pub(super) fn short_count(n: u64) -> String {
+fn mcp(connections: usize, p: Palette) -> Field {
+    p.pair(
+        "mcp",
+        match connections {
+            0 => p.label("--"),
+            1 => p.tint("✓", p.good),
+            n => p.tint(&format!("✓{n}"), p.good),
+        },
+    )
+}
+
+/// One tool's tally: `◐` while a call runs, its calls, then failures in red.
+struct Tally {
+    name: String,
+    calls: u32,
+    failed: u32,
+    running: bool,
+}
+
+fn tool(tally: &Tally, p: Palette) -> Field {
+    let mut spans = Vec::new();
+    if tally.running {
+        spans.push(p.tint("◐ ", p.active));
+    }
+    spans.extend(Field(vec![p.value(&tally.name)]).clip(MAX_TOOL_NAME).0);
+    spans.push(Span::raw(" "));
+    spans.push(p.strong(&tally.calls.to_string()));
+    if tally.failed > 0 {
+        spans.push(Span::raw(" "));
+        spans.push(p.tint(&format!("✗{}", tally.failed), p.bad));
+    }
+    Field(spans)
+}
+
+fn elapsed_label(secs: u64) -> String {
+    let minutes = secs / 60;
+    if minutes < 60 {
+        format!("{minutes}m")
+    } else {
+        format!("{}h{:02}m", minutes / 60, minutes % 60)
+    }
+}
+
+fn short_count(n: u64) -> String {
     for (scale, suffix) in [(1_000_000_000, "B"), (1_000_000, "M"), (1_000, "k")] {
         if n >= scale {
             return format!("{}.{}{suffix}", n / scale, n % scale / (scale / 10));
@@ -253,38 +490,15 @@ pub(super) fn short_count(n: u64) -> String {
 }
 
 /// Why the metrics are unknown. `file` names the agent's session file.
-fn source_label(source: Option<Availability>, file: &str) -> String {
+fn source_label(source: Availability, file: &str) -> String {
     match source {
-        None => "awaiting pinned metrics".to_owned(),
-        Some(Availability::Available) => "Limits not reported".to_owned(),
-        Some(Availability::Missing) => format!("{file} missing"),
-        Some(Availability::Unreadable) => format!("{file} unreadable"),
-        Some(Availability::IdentityMismatch) => "identity mismatch".to_owned(),
-        Some(Availability::InvalidHeader) => format!("invalid {file} header"),
-        Some(Availability::WatchFailed) => "watch unavailable".to_owned(),
+        Availability::Available => "available".to_owned(),
+        Availability::Missing => format!("{file} missing"),
+        Availability::Unreadable => format!("{file} unreadable"),
+        Availability::IdentityMismatch => "identity mismatch".to_owned(),
+        Availability::InvalidHeader => format!("invalid {file} header"),
+        Availability::WatchFailed => "watch unavailable".to_owned(),
     }
-}
-
-fn append(text: &mut String, field: &str, width: u16) {
-    let field = safe_label(field);
-    let field = field.as_str();
-    if display_width(text) + 3 + display_width(field) <= usize::from(width) {
-        text.push_str(" | ");
-        text.push_str(field);
-    }
-}
-
-fn plain(text: String, width: u16, theme: &Theme) -> Line<'static> {
-    let text = safe_label(&text);
-    let color = if theme.mono {
-        ratatui::style::Color::Reset
-    } else {
-        theme.status_path
-    };
-    Line::from(Span::styled(
-        display_truncate(&text, usize::from(width)).to_owned(),
-        Style::default().fg(color),
-    ))
 }
 
 /// Paths and labels can contain control characters; never emit terminal commands.
@@ -303,37 +517,245 @@ pub fn safe_label(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::codex_metrics::Source;
+    use crate::agent::claude_metrics::{self as claude, ToolCount};
+    use crate::agent::codex_metrics::{Sample, Snapshot, Source, Tokens};
+
+    fn codex_view(snapshot: Option<&Snapshot>) -> HudView<'_> {
+        HudView {
+            session: Some("01a133b2-dc16-74c8-af3c-111111111111"),
+            dot: None,
+            attention: "idle",
+            note: None,
+            repository: Some("spyc"),
+            branch: Some("main"),
+            elapsed_secs: None,
+            metrics: Metrics::Codex(snapshot),
+            availability: snapshot.map(|_| Availability::Available),
+            now: None,
+            hooks: Hooks::Unverified,
+            mcp_connections: 0,
+        }
+    }
+
+    fn text(lines: &[Line<'_>]) -> Vec<String> {
+        lines.iter().map(ToString::to_string).collect()
+    }
+
+    /// Where `needle` starts on `line`, in display columns.
+    fn x_of(line: &str, needle: &str) -> Option<usize> {
+        line.find(needle).map(|i| display_width(&line[..i]))
+    }
+
+    fn claude_session(branch: &'static str) -> (claude::Snapshot, &'static str) {
+        let at = Timestamp::from_second(1_791_892_800).unwrap();
+        let count = |name: &str, calls, failed| ToolCount {
+            name: name.into(),
+            calls,
+            failed,
+        };
+        let snapshot = claude::Snapshot {
+            context_tokens: Some(claude::Sample { at, value: 336_600 }),
+            totals: claude::Usage {
+                input: 1_000,
+                cache_write: 2_400_000,
+                cache_read: 118_500_000,
+                output: 370_200,
+            },
+            mode: Some(claude::Sample {
+                at,
+                value: claude::Mode {
+                    model: Some("claude-opus-5-5".into()),
+                    effort: Some("xhigh".into()),
+                    permission_mode: None,
+                },
+            }),
+            tool_counts: vec![
+                count("Read", 141, 0),
+                count("mcp__spyc__get_spyc_context", 19, 0),
+                count("Edit", 9, 1),
+                count("Grep", 6, 0),
+            ],
+            tools: vec![claude::Tool {
+                name: Some("Edit".into()),
+                status: claude::ToolStatus::Started,
+                at,
+                background: false,
+            }],
+            subagent_calls: 7,
+            background_calls: 5,
+            tools_complete: true,
+            ..claude::Snapshot::default()
+        };
+        (snapshot, branch)
+    }
+
+    fn claude_view<'a>(snapshot: &'a claude::Snapshot, branch: &'a str) -> HudView<'a> {
+        HudView {
+            session: Some("537fb604-0a1b-478f-be17-3c76df17b585"),
+            dot: Some(Span::raw("●")),
+            attention: "working",
+            note: None,
+            repository: Some("spyc"),
+            branch: Some(branch),
+            elapsed_secs: Some(32 * 60),
+            metrics: Metrics::Claude {
+                snapshot: Some(snapshot),
+                tail_only: false,
+            },
+            availability: Some(Availability::Available),
+            now: None,
+            hooks: Hooks::Reported,
+            mcp_connections: 1,
+        }
+    }
+
+    /// The point of the layout: a column starts at the same x on every row
+    /// that reaches it, whatever the cells hold and however wide the strip is.
+    #[test]
+    fn every_column_starts_at_the_same_x_on_every_row() {
+        let columns: [&[&str]; 4] = [
+            &["●", "df17b585", "opus-5-5", "spyc", "32m"],
+            &["context", "336.6k", "out ", "hit ", "compacted "],
+            &["tools", "◐", "Read", "spyc:", "Grep"],
+            &["agents", "7", "background", "hooks", "mcp"],
+        ];
+        for branch in ["main", "feat/a-branch-name-much-longer-than-any-column"] {
+            let (snapshot, branch) = claude_session(branch);
+            let view = claude_view(&snapshot, branch);
+            for width in 20..=200 {
+                let rows = text(&lines(&view, AgentHudMode::Full, width, &Theme::default()));
+                for row in &rows {
+                    assert!(display_width(row) <= usize::from(width), "{row:?}");
+                }
+                for j in 0..5 {
+                    let starts: Vec<usize> = rows
+                        .iter()
+                        .zip(columns)
+                        .filter_map(|(row, cells)| x_of(row, cells.get(j)?))
+                        .collect();
+                    assert!(
+                        starts.windows(2).all(|pair| pair[0] == pair[1]),
+                        "column {j} at width {width}: {starts:?}\n{}",
+                        rows.join("\n")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_cell_past_the_edge_is_dropped_whole_and_the_first_two_are_cut() {
+        let (snapshot, branch) = claude_session("main");
+        let view = claude_view(&snapshot, branch);
+        let wide = text(&lines(&view, AgentHudMode::Full, 200, &Theme::default()));
+        let edge = x_of(&wide[1], "hit ").unwrap() + 3;
+        let narrow = text(&lines(
+            &view,
+            AgentHudMode::Full,
+            edge as u16,
+            &Theme::default(),
+        ));
+        assert!(
+            narrow[1].trim_end().ends_with("out 370.2k"),
+            "a partial cell is never drawn: {narrow:?}"
+        );
+        let tight = text(&lines(&view, AgentHudMode::Compact, 14, &Theme::default()));
+        assert!(tight[0].starts_with("● working"));
+        assert!(
+            tight[0].ends_with('…'),
+            "the session is cut, not dropped: {tight:?}"
+        );
+    }
+
+    #[test]
+    fn the_waiting_note_trails_the_activity_row_without_moving_a_column() {
+        let (mut snapshot, branch) = claude_session("main");
+        // Enough tools that the tools row reaches past the activity row's end.
+        for name in ["Glob", "Write", "WebFetch"] {
+            snapshot.tool_counts.push(ToolCount {
+                name: name.into(),
+                calls: 1,
+                failed: 0,
+            });
+        }
+        let mut view = claude_view(&snapshot, branch);
+        let before = text(&lines(&view, AgentHudMode::Full, 200, &Theme::default()));
+        assert!(before[2].contains("WebFetch"), "{before:?}");
+        view.attention = "waiting";
+        view.note = Some("CI on #641, the long way round");
+        let after = text(&lines(&view, AgentHudMode::Full, 200, &Theme::default()));
+        assert!(
+            after[0].ends_with("CI on #641, the long way round"),
+            "{after:?}"
+        );
+        assert_eq!(before[1..], after[1..]);
+    }
+
+    #[test]
+    fn monochrome_keeps_the_weights_and_drops_every_colour() {
+        let (snapshot, branch) = claude_session("main");
+        let view = claude_view(&snapshot, branch);
+        let mono = Theme {
+            mono: true,
+            ..Theme::default()
+        };
+        let lines = lines(&view, AgentHudMode::Full, 160, &mono);
+        let spans: Vec<&Span<'_>> = lines.iter().flat_map(|l| &l.spans).collect();
+        assert!(spans.iter().all(|s| s.style.fg == Some(Color::Reset)));
+        let style = |text: &str| spans.iter().find(|s| s.content == text).unwrap().style;
+        assert!(style("working").add_modifier.contains(Modifier::BOLD));
+        assert!(style("context").add_modifier.contains(Modifier::DIM));
+        assert!(style("336.6k").add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn health_is_a_tick_when_it_works_and_a_word_when_it_does_not() {
+        let (snapshot, branch) = claude_session("main");
+        let mut view = claude_view(&snapshot, branch);
+        let theme = Theme::default();
+        let row = |view: &HudView<'_>| lines(view, AgentHudMode::Full, 200, &theme).pop().unwrap();
+        let ok = row(&view);
+        assert!(ok.to_string().contains("hooks ✓") && ok.to_string().contains("mcp ✓"));
+        let tick = ok.spans.iter().find(|s| s.content == "✓").unwrap();
+        assert_eq!(tick.style.fg, Some(theme.diff_add_fg));
+        for (hooks, word) in [
+            (Hooks::Unverified, "hooks unverified"),
+            (Hooks::RestartNeeded, "hooks restart"),
+            (Hooks::Absent, "hooks off"),
+        ] {
+            view.hooks = hooks;
+            assert!(row(&view).to_string().contains(word));
+        }
+        view.mcp_connections = 0;
+        assert!(row(&view).to_string().contains("mcp --"));
+        view.mcp_connections = 2;
+        assert!(row(&view).to_string().contains("mcp ✓2"));
+    }
 
     #[test]
     fn parallel_session_labels_remain_distinct_and_untrusted_labels_cannot_escape() {
-        let mut view = HudView {
-            session: Some("01a133b2-dc16-74c8-af3c-111111111111"),
-            attention: "idle",
-            needs_user: false,
-            repository: Some("中文\x1b[31m\nrepo"),
-            branch: Some("emoji❤️\tbranch"),
-            elapsed_secs: None,
-            metrics: Metrics::Codex(None),
-            availability: None,
-            now: None,
-            hooks: "defined; unverified",
-            mcp_connections: 0,
-        };
-        let first = lines(&view, AgentHudMode::Compact, 20, &Theme::default())[0].to_string();
+        let mut view = codex_view(None);
+        view.repository = Some("中文❤️\x1b[31m");
+        view.branch = Some("a\tb");
+        let first = text(&lines(&view, AgentHudMode::Compact, 20, &Theme::default()))[0].clone();
         view.session = Some("01a133b2-dc16-74c8-af3c-222222222222");
-        let second = lines(&view, AgentHudMode::Compact, 20, &Theme::default())[0].to_string();
+        let second = text(&lines(&view, AgentHudMode::Compact, 20, &Theme::default()))[0].clone();
         assert_ne!(
             first, second,
             "parallel sessions sharing a timestamp prefix need distinct labels"
         );
-        let wide = lines(&view, AgentHudMode::Full, 180, &Theme::default());
-        let header = wide[0].to_string();
-        assert!(header.contains("中文") && header.contains("❤️"));
+        view.note = Some("note\x07with a bell");
+        let wide = text(&lines(&view, AgentHudMode::Full, 180, &Theme::default()));
         assert!(
-            !header.chars().any(char::is_control),
-            "HUD labels must be terminal-safe: {header:?}"
+            wide[0].contains("中文") && wide[0].contains("❤️"),
+            "{wide:?}"
         );
+        for row in &wide {
+            assert!(
+                !row.chars().any(char::is_control),
+                "HUD labels must be terminal-safe: {row:?}"
+            );
+        }
     }
 
     #[test]
@@ -385,37 +807,29 @@ mod tests {
             }),
             ..Snapshot::default()
         };
-        let view = HudView {
-            session: Some("12345678"),
-            attention: "needs you",
-            needs_user: true,
-            repository: Some("中文❤️"),
-            branch: Some("👨‍👩‍👧"),
-            elapsed_secs: None,
-            metrics: Metrics::Codex(Some(&snapshot)),
-            availability: Some(Availability::Available),
-            now: Some(at),
-            hooks: "defined, unverified",
-            mcp_connections: 1,
-        };
+        let mut view = codex_view(Some(&snapshot));
+        view.attention = "needs you";
+        view.session = Some("12345678");
+        view.now = Some(at);
         for width in 1..130 {
             for mode in [AgentHudMode::Compact, AgentHudMode::Full] {
-                let rendered = lines(&view, mode, width, &Theme::default());
+                let rendered = text(&lines(&view, mode, width, &Theme::default()));
                 assert!(
                     rendered
                         .iter()
-                        .all(|line| display_width(&line.to_string()) <= usize::from(width))
+                        .all(|line| display_width(line) <= usize::from(width))
                 );
                 if width >= 24 {
-                    assert!(rendered[0].to_string().contains("needs you · 12345678"));
+                    assert!(rendered[0].starts_with("needs you"), "{rendered:?}");
+                    assert!(rendered[0].contains("12345678"), "{rendered:?}");
                 }
-                assert!(!rendered.iter().any(|line| line.to_string().contains('%')));
+                assert!(!rendered.iter().any(|line| line.contains('%')));
             }
         }
-        let rendered = lines(&view, AgentHudMode::Full, 160, &Theme::default());
+        let rendered = text(&lines(&view, AgentHudMode::Full, 160, &Theme::default()));
         assert_eq!(rendered.len(), 4);
-        assert!(rendered[1].to_string().contains("Context --"));
-        assert!(rendered[1].to_string().contains("900.0M"));
-        assert!(rendered[3].to_string().contains("incomplete"));
+        assert!(rendered[1].starts_with("context") && rendered[1].contains(" -- "));
+        assert!(rendered[1].contains("thread 900.0M"));
+        assert!(rendered[2].starts_with("recent") && rendered[2].ends_with("--"));
     }
 }

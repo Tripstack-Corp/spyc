@@ -5,7 +5,7 @@ use ratatui::{Frame, layout::Rect};
 use crate::agent::tail::Availability;
 use crate::config::AgentHudMode;
 use crate::pane::AgentActivity;
-use crate::ui::agent_hud::{self, HudView, Metrics};
+use crate::ui::agent_hud::{self, Hooks, HudView, Metrics};
 
 use super::super::state::agent_hud::{Feed, Update};
 
@@ -78,19 +78,19 @@ impl App {
             .flatten()
             .filter(|r| r.status == AgentActivity::Waiting)
             .and_then(|r| r.note.as_deref());
-        let attention = note.map_or_else(
-            || attention.to_owned(),
-            |note| format!("{attention} · {note}"),
-        );
         let hooks = if !info.recent_hook_events.is_empty() {
-            "events reported"
+            Hooks::Reported
         } else if info.status_hooks_restart_needed {
-            "restart needed"
+            Hooks::RestartNeeded
         } else if info.status_hooks_at_spawn {
-            "defined; unverified"
+            Hooks::Unverified
         } else {
-            "not present at launch"
+            Hooks::Absent
         };
+        // The tab's own dot, so the strip and the tab never disagree.
+        let dot = (!info.suspended)
+            .then(|| self.agent_activity_span(info.activity, info.anim_phase_offset))
+            .flatten();
         let elapsed_secs = self.state.pane.agent_hud.as_of.and_then(|now| {
             u64::try_from(now.as_second())
                 .ok()
@@ -98,8 +98,9 @@ impl App {
         });
         let view = HudView {
             session: info.pinned_session_id(),
-            attention: &attention,
-            needs_user: info.activity == AgentActivity::Blocked,
+            dot,
+            attention,
+            note,
             repository: Some(&repository),
             branch,
             elapsed_secs,

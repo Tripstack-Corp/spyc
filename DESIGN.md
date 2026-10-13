@@ -110,18 +110,37 @@ rather than create a new modal type.
 ### Native agent strip
 
 The opt-in agent HUD occupies rows below a Codex or Claude Code child. Compact
-is two rows; full adds only the operating-mode and recent-tool rows supported by
-the source. Keep six child rows, collapse full to compact when needed, then hide
-the strip. The native composer stays visible within the child, including in zoom
-and splits.
+is two rows; full adds the tools row and the mode row. Keep six child rows,
+collapse full to compact when needed, then hide the strip. The native composer
+stays visible within the child, including in zoom and splits.
 
-Attention and distinct session identity have first claim on horizontal space.
-Optional model, effort, repository, branch and elapsed minutes drop as the frame
-narrows. Use the existing theme and bold attention in monochrome. Unknown values
-are `--`; zero is measured. Label stale samples and partial observations. Totals
-retain their scopes and never stand in for context occupancy or account limits.
-Claude Code's context is a token count: a percentage needs a window size its
-transcript doesn't carry.
+```text
+● working   df17b585        opus-5-5 xhigh   spyc ⎇ main    32m
+context     336.6k          out 370.2k       hit 98%        compacted 1
+tools       ◐ Bash 182 ✗3   Read 41          Edit 23 ✗1     spyc:report_s… 19
+agents      1               background 5     hooks ✓        mcp ✓
+```
+
+It is one template for every agent with a metrics source: the activity row,
+the health cells and the styling are shared, and each agent fills only its
+usage, tools and mode cells. The rows form a grid, so a column starts at the
+same x on every row. A label column leads; value columns are at least twelve
+wide, so a count gaining a digit rarely moves its neighbour; a cell is cut past
+32. As the frame narrows, whole cells drop from the right, except the activity
+and the session, which are cut instead. A waiting agent's note trails the
+activity row outside the grid, so it widens no column.
+
+The activity cell is the tab's own dot in its own colour, with the state in
+bold beside it, so the strip and the tab never disagree. Field names are dim and
+values bright; a key value is bold. Calls are counted in bright text, a running
+call is marked `◐` in amber, failures `✗` in red, and a working hook or MCP
+connection `✓` in green, with a word only when one isn't working. A stale value
+is dimmed rather than labelled. Monochrome keeps the weights and drops every
+colour. Unknown values are `--`; zero is measured. A count that may be short
+says so with `≥`, or with a `recent` label for a tools row that isn't a full
+tally. Totals retain their scopes and never stand in for context occupancy or
+account limits. Claude Code's context is a token count: a percentage needs a
+window size its transcript doesn't carry.
 The engineering Activity HUD remains the separate `:activity` overlay.
 
 ## Icons & glyphs

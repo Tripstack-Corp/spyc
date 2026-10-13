@@ -327,7 +327,8 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
                                 );
                                 assert!(rows[0].contains("56789abc") || width < 20);
                                 if strip.width >= 40 {
-                                    assert!(rows[1].starts_with("Context -- | Usage --"));
+                                    assert!(rows[1].starts_with("context"));
+                                    assert!(rows[1].ends_with("awaiting metrics"));
                                 }
                             } else {
                                 assert_eq!(on.pane, off.pane);
@@ -347,8 +348,8 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
         app.view.scroll_pager = Some(pager);
         let (layout, rows) = paint(&mut app, 100, 32);
         assert_eq!(rows.len(), 4);
-        assert!(rows[2].contains("hooks: not present at launch"));
-        assert_eq!(rows[3], "Observed tools: --");
+        assert!(rows[3].starts_with("mode") && rows[3].contains("hooks off"));
+        assert!(rows[2].starts_with("recent") && rows[2].ends_with("--"));
         assert!(
             app.agent_hud_lines(layout.agent_hud.unwrap())
                 .iter()
@@ -401,8 +402,8 @@ fn agent_hud_only_changed_visible_fields_request_a_repaint() {
                 ..Mode::default()
             },
         });
-        // The compact header first observes the unknown model source.
-        assert!(app.land_agent_hud_update(Update::Codex(Box::new(update.clone())), (3, 3), at));
+        // Compact shows the model, which this report doesn't name, and not the mode.
+        assert!(!app.land_agent_hud_update(Update::Codex(Box::new(update.clone())), (3, 3), at));
         update.snapshot.mode.as_mut().unwrap().value.approval = Some("never".into());
         assert!(!app.land_agent_hud_update(Update::Codex(Box::new(update.clone())), (4, 4), at));
         update.snapshot.request = Some(Sample {
@@ -665,8 +666,16 @@ fn agent_hud_waiting_attention_preserves_the_semantic_state_without_requesting_h
             .agent_hud
             .unwrap();
         let lines = app.agent_hud_lines(rect);
-        assert!(lines[0].to_string().starts_with("waiting ·"));
-        assert_eq!(lines[0].spans[0].style.fg, Some(app.view.theme.status_path));
+        let theme = &app.view.theme;
+        assert!(lines[0].to_string().starts_with("○ waiting"));
+        // The tab's own dot and colour: calm, never the needs-you red.
+        let word = lines[0]
+            .spans
+            .iter()
+            .find(|s| s.content == "waiting")
+            .unwrap();
+        assert_eq!(word.style.fg, Some(theme.dir));
+        assert_ne!(word.style.fg, Some(theme.diff_del_fg));
         assert!(!lines[0].to_string().contains("needs you"));
     });
 }
@@ -748,7 +757,7 @@ fn agent_hud_follows_a_claude_tabs_reported_session_in_its_home() {
         app.runtime.pane_tabs = Some(PaneTabs::new(unreported));
         app.cmd_agent_hud("full");
         let mut ctx = RunCtx::for_test();
-        let lines = wait_hud_line(&mut app, &mut ctx, 1, "awaiting pinned metrics");
+        let lines = wait_hud_line(&mut app, &mut ctx, 1, "awaiting metrics");
         assert!(
             app.runtime.agent_hud.is_none(),
             "no session reported yet, so nothing to read: {lines:?}"
@@ -756,11 +765,14 @@ fn agent_hud_follows_a_claude_tabs_reported_session_in_its_home() {
 
         let reported = claude_entry(&mut app, tmp.path(), Some(SESSION));
         app.runtime.pane_tabs.as_mut().unwrap().push(reported);
-        let lines = wait_hud_line(&mut app, &mut ctx, 1, "Context 111 ");
-        assert!(lines[0].contains("claude-opus-5-5 · xhigh"), "{lines:?}");
-        assert!(lines[1].contains("Session 116 (out 5)"), "{lines:?}");
+        let lines = wait_hud_line(&mut app, &mut ctx, 1, " 111 ");
+        assert!(lines[0].contains("opus-5-5 xhigh"), "{lines:?}");
+        assert!(
+            lines[1].contains("out 5 ") && lines[1].contains("hit 90%"),
+            "{lines:?}"
+        );
         append_message(&path, "msg-2", 2_000);
-        wait_hud_line(&mut app, &mut ctx, 1, "Context 2.0k");
+        wait_hud_line(&mut app, &mut ctx, 1, " 2.0k ");
 
         let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
         info.activity = AgentActivity::Waiting;
@@ -771,8 +783,12 @@ fn agent_hud_follows_a_claude_tabs_reported_session_in_its_home() {
         );
         report.note = Some("CI on #641".into());
         info.reported = Some(report);
-        let lines = wait_hud_line(&mut app, &mut ctx, 0, "waiting · CI on #641 · ");
-        assert_eq!(lines[0].matches(" · ").count(), 3, "{lines:?}");
+        let lines = wait_hud_line(&mut app, &mut ctx, 0, "CI on #641");
+        assert!(lines[0].starts_with("○ waiting"), "{lines:?}");
+        assert!(
+            lines[0].ends_with("CI on #641"),
+            "the note trails the row: {lines:?}"
+        );
 
         app.cmd_agent_hud("info");
         let info: Vec<String> = app
