@@ -6,6 +6,47 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{App, Effect};
+use crate::ui::line_edit::{EditResult, Mode as LineMode};
+
+/// What a key does in the history editor before the line editor sees it.
+/// Ctrl+D deletes in either mode; the rest of the vi motions only apply in
+/// Normal mode, since while typing they are text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HistoryKey {
+    Delete,
+    Move(isize),
+    Bottom,
+    Top,
+    /// The first `g` of `gg`.
+    ArmG,
+    Search,
+    SearchNext,
+    SearchPrev,
+    JumpPrompt,
+    /// The line editor's key.
+    Edit,
+}
+
+const fn history_key(key: KeyEvent, normal: bool, g_armed: bool) -> HistoryKey {
+    if matches!(key.code, KeyCode::Char('d')) && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return HistoryKey::Delete;
+    }
+    if !normal {
+        return HistoryKey::Edit;
+    }
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => HistoryKey::Move(1),
+        KeyCode::Char('k') | KeyCode::Up => HistoryKey::Move(-1),
+        KeyCode::Char('G') => HistoryKey::Bottom,
+        KeyCode::Char('g') if g_armed => HistoryKey::Top,
+        KeyCode::Char('g') => HistoryKey::ArmG,
+        KeyCode::Char('/') => HistoryKey::Search,
+        KeyCode::Char('n') => HistoryKey::SearchNext,
+        KeyCode::Char('N') => HistoryKey::SearchPrev,
+        KeyCode::Char(':') => HistoryKey::JumpPrompt,
+        _ => HistoryKey::Edit,
+    }
+}
 
 impl App {
     /// Jump-history popup: j/k navigate, Enter chdirs, x deletes, q/Esc closes.
@@ -174,195 +215,156 @@ impl App {
         key: KeyEvent,
         viewport: u16,
     ) -> Option<Vec<Effect>> {
-        let view = active_pager_mut!(self)?;
-        // History editor: vi-edit highlighted line, Enter runs, d/x deletes.
-        if let Some(ref mut editor) = self.view.pending_history_pick {
-            use crate::ui::line_edit::EditResult;
-            let editor_is_normal = editor.mode == crate::ui::line_edit::Mode::Normal;
-
-            // Ctrl+D deletes the highlighted entry from history (any mode).
-            if key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                let cursor = view.picker_cursor.unwrap_or(0);
-                let entries = self.state.history.entries();
-                let hist_idx = entries.len().saturating_sub(1 + cursor);
-                if hist_idx < entries.len() {
-                    self.state.history.remove(hist_idx);
-                    if self.state.history.entries().is_empty() {
-                        self.clear_pager();
-                        self.view.pending_history_pick = None;
-                        self.view.needs_full_repaint = true;
-                        self.state.flash_info("history is empty");
-                        return Some(Vec::new());
-                    }
-                    let old_cursor = cursor;
-                    self.show_history_popup();
-                    if let Some(ref mut v) = self.view.pager {
-                        let max = v.line_count().saturating_sub(1);
-                        v.picker_cursor = Some(old_cursor.min(max));
-                        let new_cur = v.picker_cursor.unwrap_or(0);
-                        let entries = self.state.history.entries();
-                        let hist_idx = entries.len().saturating_sub(1 + new_cur);
-                        if let Some(ref mut ed) = self.view.pending_history_pick {
-                            if let Some(cmd) = entries.get(hist_idx) {
-                                ed.set_content_keep_mode(cmd);
-                            }
-                            v.picker_edit_cursor = Some((Self::HIST_PREFIX_W + ed.cursor, ed.mode));
-                            let text = format!("  {:>3}  {}", new_cur + 1, ed.text());
-                            v.lines[new_cur] = ratatui::text::Line::from(text);
-                        }
-                    }
-                }
-                return Some(Vec::new());
-            }
-
-            // Inline sync: update editor from the current picker line.
-            // Uses `view` and `editor` already borrowed in this scope.
-            macro_rules! sync_editor {
-                ($v:expr, $ed:expr, $hist:expr) => {{
-                    let nc = $v.picker_cursor.unwrap_or(0);
-                    let entries = $hist.entries();
-                    let hi = entries.len().saturating_sub(1 + nc);
-                    if let Some(cmd) = entries.get(hi) {
-                        $ed.set_content_keep_mode(cmd);
-                    }
-                    let text = format!("  {:>3}  {}", nc + 1, $ed.text());
-                    $v.lines[nc] = ratatui::text::Line::from(text);
-                    $v.picker_edit_cursor = Some((Self::HIST_PREFIX_W + $ed.cursor, $ed.mode));
-                }};
-            }
-
-            // In Normal mode, j/k/G/gg/n/N navigate, / searches, : jumps.
-            if editor_is_normal {
-                let handled = match key.code {
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        self.view.history_pending_g = false;
-                        view.picker_move(1, viewport);
-                        sync_editor!(view, editor, self.state.history);
-                        true
-                    }
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        self.view.history_pending_g = false;
-                        view.picker_move(-1, viewport);
-                        sync_editor!(view, editor, self.state.history);
-                        true
-                    }
-                    KeyCode::Char('G') => {
-                        self.view.history_pending_g = false;
-                        let last = view.lines.len().saturating_sub(1);
-                        let delta = last as isize - view.picker_cursor.unwrap_or(0) as isize;
-                        view.picker_move(delta, viewport);
-                        sync_editor!(view, editor, self.state.history);
-                        true
-                    }
-                    KeyCode::Char('g') => {
-                        if self.view.history_pending_g {
-                            self.view.history_pending_g = false;
-                            let delta = -(view.picker_cursor.unwrap_or(0) as isize);
-                            view.picker_move(delta, viewport);
-                            sync_editor!(view, editor, self.state.history);
-                        } else {
-                            self.view.history_pending_g = true;
-                        }
-                        true
-                    }
-                    KeyCode::Char('/') => {
-                        self.view.history_pending_g = false;
-                        view.begin_search();
-                        true
-                    }
-                    KeyCode::Char('n') => {
-                        self.view.history_pending_g = false;
-                        view.search_next(viewport);
-                        if let Some(line) = view.current_match_line() {
-                            view.picker_cursor = Some(line);
-                            sync_editor!(view, editor, self.state.history);
-                        }
-                        true
-                    }
-                    KeyCode::Char('N') => {
-                        self.view.history_pending_g = false;
-                        view.search_prev(viewport);
-                        if let Some(line) = view.current_match_line() {
-                            view.picker_cursor = Some(line);
-                            sync_editor!(view, editor, self.state.history);
-                        }
-                        true
-                    }
-                    KeyCode::Char(':') => {
-                        self.view.history_pending_g = false;
-                        view.jump_buf = Some(String::new());
-                        true
-                    }
-                    // Disable pager keys that don't make sense here.
-                    KeyCode::Char('l' | 'v') => true,
-                    _ => {
-                        self.view.history_pending_g = false;
-                        false
-                    }
-                };
-                if handled {
-                    return Some(Vec::new());
-                }
-            }
-
-            // Feed all other keys to the line editor.
-            let result = editor.feed(key);
-            // Sync the display line with the editor buffer.
-            let pc = view.picker_cursor.unwrap_or(0);
-            let text = format!("  {:>3}  {}", pc + 1, editor.text());
-            view.lines[pc] = ratatui::text::Line::from(text);
-            view.picker_edit_cursor = Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
-
-            match result {
-                EditResult::Submit => {
-                    let cmd = editor.text();
-                    self.clear_pager();
-                    self.view.pending_history_pick = None;
-                    self.view.needs_full_repaint = true;
-                    if cmd.trim().is_empty() {
-                        return Some(Vec::new());
-                    }
-                    // Execute the (possibly edited) command directly.
-                    self.state.last_captured_cmd = Some(cmd.clone());
-                    self.state.history.push(cmd.trim());
-                    match self.state.expand_selection_percent(&cmd) {
-                        Ok(expanded) => self.start_capture(&expanded, &cmd, &cmd),
-                        Err(e) => self.state.flash_error(e.to_string()),
-                    }
-                }
-                EditResult::Cancel => {
-                    // Esc in Insert → Normal (handled by editor, returns Continue).
-                    // Cancel only fires from Normal-mode Esc or Ctrl+C → close popup.
-                    self.clear_pager();
-                    self.view.pending_history_pick = None;
-                    self.view.needs_full_repaint = true;
-                }
-                EditResult::HistoryPrev | EditResult::HistoryNext => {
-                    // Up/Down in Insert mode → move between lines.
-                    // HistoryPrev = Up key → move toward top of list (newer).
-                    let delta: isize = if result == EditResult::HistoryPrev {
-                        -1
-                    } else {
-                        1
-                    };
-                    view.picker_move(delta, viewport);
-                    let new_cursor = view.picker_cursor.unwrap_or(0);
-                    let entries = self.state.history.entries();
-                    let hist_idx = entries.len().saturating_sub(1 + new_cursor);
-                    if let Some(cmd) = entries.get(hist_idx) {
-                        editor.set_content(cmd);
-                    }
-                    let text = format!("  {:>3}  {}", new_cursor + 1, editor.text());
-                    view.lines[new_cursor] = ratatui::text::Line::from(text);
-                    view.picker_edit_cursor =
-                        Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
-                }
-                EditResult::TabComplete | EditResult::Continue => {}
-            }
-            return Some(Vec::new());
+        active_pager_mut!(self)?;
+        let normal = self.view.pending_history_pick.as_ref()?.mode == LineMode::Normal;
+        let g_armed = self.view.history_pending_g;
+        let action = history_key(key, normal, g_armed);
+        self.view.history_pending_g = match action {
+            HistoryKey::ArmG => true,
+            HistoryKey::Delete => g_armed,
+            HistoryKey::Edit if !normal => g_armed,
+            _ => false,
+        };
+        match action {
+            HistoryKey::Delete => self.delete_selected_history(),
+            HistoryKey::Edit => self.feed_history_editor(key, viewport),
+            _ => self.navigate_history(action, viewport),
         }
+        Some(Vec::new())
+    }
 
-        None
+    /// Move the history editor's selection (or start a search or `:N` jump),
+    /// loading whichever command it lands on.
+    fn navigate_history(&mut self, action: HistoryKey, viewport: u16) {
+        let (Some(view), Some(editor)) = (
+            active_pager_mut!(self),
+            self.view.pending_history_pick.as_mut(),
+        ) else {
+            return;
+        };
+        let moved = match action {
+            HistoryKey::Move(delta) => {
+                view.picker_move(delta, viewport);
+                true
+            }
+            HistoryKey::Bottom => {
+                let last = view.lines.len().saturating_sub(1);
+                let delta = last as isize - view.picker_cursor.unwrap_or(0) as isize;
+                view.picker_move(delta, viewport);
+                true
+            }
+            HistoryKey::Top => {
+                let delta = -(view.picker_cursor.unwrap_or(0) as isize);
+                view.picker_move(delta, viewport);
+                true
+            }
+            HistoryKey::SearchNext | HistoryKey::SearchPrev => {
+                if action == HistoryKey::SearchNext {
+                    view.search_next(viewport);
+                } else {
+                    view.search_prev(viewport);
+                }
+                view.current_match_line()
+                    .map(|line| view.picker_cursor = Some(line))
+                    .is_some()
+            }
+            HistoryKey::Search => {
+                view.begin_search();
+                false
+            }
+            HistoryKey::JumpPrompt => {
+                view.jump_buf = Some(String::new());
+                false
+            }
+            HistoryKey::ArmG | HistoryKey::Delete | HistoryKey::Edit => false,
+        };
+        if moved {
+            Self::show_history_selection(view, editor, &self.state.history, true);
+        }
+    }
+
+    /// Ctrl+D: delete the selected command from history. The next one takes
+    /// its row; deleting the last closes the popup.
+    fn delete_selected_history(&mut self) {
+        let cursor = active_pager_mut!(self)
+            .and_then(|v| v.picker_cursor)
+            .unwrap_or(0);
+        let entries = self.state.history.entries();
+        let hist_idx = entries.len().saturating_sub(1 + cursor);
+        if hist_idx >= entries.len() {
+            return;
+        }
+        self.state.history.remove(hist_idx);
+        if self.state.history.entries().is_empty() {
+            self.clear_pager();
+            self.view.pending_history_pick = None;
+            self.view.needs_full_repaint = true;
+            self.state.flash_info("history is empty");
+            return;
+        }
+        self.show_history_popup();
+        if let (Some(view), Some(editor)) = (
+            self.view.pager.as_mut(),
+            self.view.pending_history_pick.as_mut(),
+        ) {
+            let max = view.line_count().saturating_sub(1);
+            view.picker_cursor = Some(cursor.min(max));
+            Self::show_history_selection(view, editor, &self.state.history, true);
+        }
+    }
+
+    /// Any other key edits the selected command; Enter runs it, Esc in Normal
+    /// mode closes, and Up/Down while typing move between commands.
+    fn feed_history_editor(&mut self, key: KeyEvent, viewport: u16) {
+        let (Some(view), Some(editor)) = (
+            active_pager_mut!(self),
+            self.view.pending_history_pick.as_mut(),
+        ) else {
+            return;
+        };
+        let result = editor.feed(key);
+        Self::show_edited_history_row(view, editor);
+        match result {
+            EditResult::Submit => {
+                let cmd = editor.text();
+                self.run_history_command(cmd);
+            }
+            EditResult::Cancel => {
+                // Esc in Insert → Normal (handled by editor, returns Continue).
+                // Cancel only fires from Normal-mode Esc or Ctrl+C → close popup.
+                self.clear_pager();
+                self.view.pending_history_pick = None;
+                self.view.needs_full_repaint = true;
+            }
+            EditResult::HistoryPrev | EditResult::HistoryNext => {
+                // HistoryPrev = Up key → move toward top of list (newer).
+                let delta = if result == EditResult::HistoryPrev {
+                    -1
+                } else {
+                    1
+                };
+                view.picker_move(delta, viewport);
+                Self::show_history_selection(view, editor, &self.state.history, false);
+            }
+            EditResult::TabComplete | EditResult::Continue => {}
+        }
+    }
+
+    /// Close the popup and run `cmd`, the (possibly edited) command. An emptied
+    /// line runs nothing.
+    fn run_history_command(&mut self, cmd: String) {
+        self.clear_pager();
+        self.view.pending_history_pick = None;
+        self.view.needs_full_repaint = true;
+        if cmd.trim().is_empty() {
+            return;
+        }
+        self.state.last_captured_cmd = Some(cmd.clone());
+        self.state.history.push(cmd.trim());
+        match self.state.expand_selection_percent(&cmd) {
+            Ok(expanded) => self.start_capture(&expanded, &cmd, &cmd),
+            Err(e) => self.state.flash_error(e.to_string()),
+        }
     }
 
     /// Session picker: j/k navigate, Enter/1-9 select, n new.
@@ -432,5 +434,51 @@ impl App {
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HistoryKey, history_key};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    /// While typing, every key but Ctrl+D is text, so a command can contain
+    /// `j`, `g`, `n`, `/` or `:`. In Normal mode those keys navigate.
+    #[test]
+    fn motions_apply_only_in_normal_mode() {
+        let ctrl_d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
+        for normal in [true, false] {
+            assert_eq!(history_key(ctrl_d, normal, false), HistoryKey::Delete);
+        }
+        assert_eq!(
+            history_key(key('d'), true, false),
+            HistoryKey::Edit,
+            "plain `d` edits"
+        );
+        for c in ['j', 'k', 'G', 'g', '/', 'n', 'N', ':'] {
+            assert_eq!(
+                history_key(key(c), false, false),
+                HistoryKey::Edit,
+                "typing {c:?}"
+            );
+            assert_ne!(
+                history_key(key(c), true, false),
+                HistoryKey::Edit,
+                "{c:?} in Normal mode"
+            );
+        }
+        for c in ['h', 'l', 'v'] {
+            assert_eq!(
+                history_key(key(c), true, false),
+                HistoryKey::Edit,
+                "{c:?} is vi's"
+            );
+        }
+        assert_eq!(history_key(key('g'), true, false), HistoryKey::ArmG);
+        assert_eq!(history_key(key('g'), true, true), HistoryKey::Top);
     }
 }
