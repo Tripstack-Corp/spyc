@@ -8,6 +8,7 @@
 
 mod agent;
 /// Read-only, consumer-owned telemetry for one pinned Codex rollout.
+pub use agent::claude_metrics;
 pub use agent::codex_metrics;
 mod app;
 /// Archive browsing — see `docs/archive/ARCHIVE_BROWSING_PLAN.md`.

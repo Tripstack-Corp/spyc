@@ -28,7 +28,7 @@ python3 -m unittest discover -s spikes/claude-hud -p test_probe.py
 | Model | `message.model` on every assistant record (`claude-opus-5-5`). `requestedModel` sits beside it from `2.1.296` but not in `2.1.291`. | Follow the latest assistant record, so a mid-session `/model` shows. Treat `requestedModel` as optional. |
 | Effort | `effort` on every assistant record (`xhigh`), and `effort.level` in every tool-context hook payload. | Latest record. |
 | Tokens | `message.usage`: `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `output_tokens`. A message is written once per content block (`apiBlockIndex`): 192 of 246 messages appear more than once, always with identical usage. | Deduplicate by `message.id` before summing, or totals inflate by about 2.4×. Session totals are a sum over distinct messages. |
-| Context occupancy | The latest message's input + cache creation + cache read (441,725 tokens). The transcript has no window size: auto-compaction fired at 442,230, which a 1M window would not explain. | Show `Context --` until a percentage is checked against `/context`. The window size lives in the statusline's input, which is the user's, not spyc's. |
+| Context occupancy | The latest message's input + cache creation + cache read: 441,725 tokens, just before the compaction, which no request followed. The boundary's `preTokens` (442,230) is that sum plus the message's 505 output tokens, so Claude Code's own count agrees with the arithmetic. The transcript has no window size, and a 1M window would not have compacted at 442k. | Forget the size at a compaction until the next request. Show `Context --` until a percentage is checked against `/context`: the window size lives in the statusline's input, which is the user's, not spyc's. |
 | Permission mode | A `permission-mode` record per turn (`auto`), and `permission_mode` in every hook payload. | Latest record; display only. |
 | Tools | `tool_use` blocks by name, with their results in the following user record. | Bounded counts. Collapse MCP tool names, which can name private servers. |
 | Plan | `TodoWrite`'s `todos[].status`. `2.1.296` also ships `TaskCreate`, `TaskUpdate` and `TaskList`. Neither appears in this transcript. | Unverified: omit the row until a transcript with one of them is probed. |
@@ -36,6 +36,15 @@ python3 -m unittest discover -s spikes/claude-hud -p test_probe.py
 | Background work | `run_in_background` on a `Bash` call (4), with `backgroundTaskId` in its result. At a turn end, the `Stop` hook's `background_tasks` and `session_crons` lists. | The tab's `waiting` state comes from the hook (#645). The transcript only adds counts. |
 | Compaction | A `system` record of subtype `compact_boundary`, whose `compactMetadata` carries `trigger` (`auto`) and `preTokens`, then one `isCompactSummary` user record. | Invalidate occupancy at the boundary; keep lifetime totals. |
 | Turn timing | `system` records of subtype `turn_duration` (9) and `stop_hook_summary` (9). | Possible source for elapsed time; not yet inspected. |
+
+`src/agent/claude_metrics/` is the reducer these rules describe. Its example
+driver folds the same transcript to the same 246 messages and four totals as the
+probe, an independent implementation, and reports the context as unknown, since
+the compaction came last:
+
+```sh
+cargo run --example claude_metrics -- SESSION_ID TRANSCRIPT
+```
 
 Not HUD sources, though they look like it:
 
