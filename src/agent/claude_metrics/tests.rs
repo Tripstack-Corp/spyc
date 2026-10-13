@@ -1,0 +1,377 @@
+use serde_json::{Value, json};
+
+use super::records::{Event, decode};
+use super::reducer::MAX_TOOLS;
+use super::*;
+
+const SESSION: &str = "c1a0de00-0000-4000-8000-000000000001";
+
+fn time(second: u32) -> String {
+    format!("2026-10-13T12:{:02}:{:02}Z", second / 60, second % 60)
+}
+
+fn usage(input: u64, write: u64, read: u64, output: u64) -> Value {
+    json!({"input_tokens": input, "cache_creation_input_tokens": write,
+           "cache_read_input_tokens": read, "output_tokens": output,
+           "service_tier": "standard", "server_tool_use": {"web_search_requests": 0}})
+}
+
+/// One assistant record, as Claude Code writes one per content block.
+fn assistant(id: &str, second: u32, usage: Value, content: Value) -> Value {
+    json!({"type": "assistant", "sessionId": SESSION, "timestamp": time(second),
+           "isSidechain": false, "effort": "xhigh", "requestedModel": "claude-opus-5-5",
+           "message": {"id": id, "model": "claude-opus-5-5", "role": "assistant",
+                       "usage": usage, "content": content}})
+}
+
+fn tool_use(id: &str, name: &str, input: Value) -> Value {
+    json!([{"type": "tool_use", "id": id, "name": name, "input": input}])
+}
+
+fn result(second: u32, id: &str, is_error: bool) -> Value {
+    json!({"type": "user", "sessionId": SESSION, "timestamp": time(second),
+           "message": {"role": "user", "content": [
+               {"type": "tool_result", "tool_use_id": id, "is_error": is_error, "content": "out"}]}})
+}
+
+fn compaction(second: u32, pre_tokens: u64) -> Value {
+    json!({"type": "system", "subtype": "compact_boundary", "sessionId": SESSION,
+           "timestamp": time(second), "content": "Conversation compacted",
+           "compactMetadata": {"trigger": "auto", "preTokens": pre_tokens}})
+}
+
+fn fold_all(values: &[Value]) -> Snapshot {
+    let mut reducer = Reducer::default();
+    for value in values {
+        if let Some(event) = decode(value, SESSION) {
+            reducer.fold(event);
+        }
+    }
+    reducer.snapshot()
+}
+
+/// The spike found 192 of 246 messages written more than once, so summing
+/// records instead of messages inflates every total about 2.4 times.
+#[test]
+fn a_message_written_once_per_block_counts_once() {
+    let first = usage(2, 30, 400, 5);
+    let snapshot = fold_all(&[
+        assistant(
+            "msg-1",
+            1,
+            first.clone(),
+            json!([{"type": "thinking", "thinking": "x"}]),
+        ),
+        assistant(
+            "msg-1",
+            1,
+            first.clone(),
+            json!([{"type": "text", "text": "x"}]),
+        ),
+        assistant("msg-1", 2, first, tool_use("call-1", "Bash", json!({}))),
+        result(3, "call-1", false),
+        assistant("msg-2", 4, usage(1, 10, 500, 7), json!([])),
+    ]);
+    assert_eq!(snapshot.messages, 2);
+    assert_eq!(
+        snapshot.totals,
+        Usage {
+            input: 3,
+            cache_write: 40,
+            cache_read: 900,
+            output: 12
+        }
+    );
+    assert_eq!(snapshot.request.unwrap().value.output, 7);
+    assert_eq!(snapshot.context_tokens.unwrap().value, 1 + 10 + 500);
+}
+
+/// A repeat that reports different usage replaces what the message counted,
+/// whether it follows at once or after other messages.
+#[test]
+fn a_repeat_with_new_usage_replaces_its_count() {
+    let snapshot = fold_all(&[
+        assistant("msg-1", 1, usage(2, 30, 400, 5), json!([])),
+        assistant("msg-2", 2, usage(1, 1, 1, 1), json!([])),
+        assistant("msg-1", 3, usage(2, 30, 400, 50), json!([])),
+    ]);
+    assert_eq!(snapshot.messages, 2);
+    assert_eq!(snapshot.totals.output, 51);
+}
+
+/// After a compaction the context's size is unknown until the next request,
+/// and a record from before the boundary can't restore it. Lifetime totals
+/// carry on across it.
+#[test]
+fn a_compaction_ends_what_is_known_about_the_context_but_not_the_totals() {
+    let before = [
+        assistant("msg-1", 1, usage(2, 30, 440_000, 5), json!([])),
+        compaction(10, 442_230),
+    ];
+    let snapshot = fold_all(&before);
+    assert_eq!(snapshot.context_tokens, None);
+    assert_eq!(snapshot.request.as_ref().unwrap().value.cache_read, 440_000);
+    assert_eq!(snapshot.compactions, 1);
+    let latest = snapshot.compaction.unwrap().value;
+    assert_eq!(
+        (latest.trigger.as_deref(), latest.pre_tokens),
+        (Some("auto"), Some(442_230))
+    );
+
+    let late = assistant("msg-0", 5, usage(1, 1, 1, 1), json!([]));
+    let snapshot = fold_all(&[before[0].clone(), before[1].clone(), late]);
+    assert_eq!(snapshot.context_tokens, None, "a pre-boundary record");
+
+    let after = assistant("msg-2", 20, usage(3, 9_000, 20_000, 8), json!([]));
+    let snapshot = fold_all(&[before[0].clone(), before[1].clone(), after]);
+    assert_eq!(snapshot.context_tokens.unwrap().value, 29_003);
+    assert_eq!(snapshot.totals.cache_read, 460_000);
+    assert_eq!(snapshot.messages, 2);
+}
+
+#[test]
+fn a_tool_call_follows_its_result() {
+    let snapshot = fold_all(&[
+        assistant(
+            "msg-1",
+            1,
+            usage(1, 1, 1, 1),
+            tool_use("ok", "Read", json!({})),
+        ),
+        assistant(
+            "msg-1",
+            1,
+            usage(1, 1, 1, 1),
+            tool_use("bad", "Bash", json!({})),
+        ),
+        assistant(
+            "msg-1",
+            1,
+            usage(1, 1, 1, 1),
+            tool_use("open", "Edit", json!({})),
+        ),
+        result(2, "ok", false),
+        result(3, "bad", true),
+        result(4, "bad", false),
+    ]);
+    let status = |name: &str| {
+        snapshot
+            .tools
+            .iter()
+            .find(|tool| tool.name.as_deref() == Some(name))
+            .unwrap()
+            .status
+    };
+    assert_eq!(status("Read"), ToolStatus::Completed);
+    assert_eq!(status("Bash"), ToolStatus::Failed, "a failure stays failed");
+    assert_eq!(status("Edit"), ToolStatus::Started);
+    assert!(snapshot.tools_complete);
+    let names: Vec<_> = snapshot.tools.iter().map(|t| t.name.clone()).collect();
+    assert_eq!(
+        names.last().unwrap().as_deref(),
+        Some("Bash"),
+        "most recently changed last"
+    );
+}
+
+/// A result for a call the read never saw, and an evicted call, both leave
+/// the list short of exhaustive, and say so.
+#[test]
+fn the_tool_list_says_when_it_is_not_exhaustive() {
+    assert!(!fold_all(&[result(1, "before-the-read", false)]).tools_complete);
+
+    // Ids count down, so the oldest call is the last map key, not the first.
+    let calls: Vec<Value> = (0..=MAX_TOOLS)
+        .map(|n| {
+            let id = format!("call-{:03}", MAX_TOOLS - n);
+            assistant(
+                &format!("msg-{n}"),
+                u32::try_from(n).unwrap(),
+                usage(1, 1, 1, 1),
+                tool_use(&id, "Bash", json!({})),
+            )
+        })
+        .collect();
+    let snapshot = fold_all(&calls);
+    assert_eq!(snapshot.tools.len(), MAX_TOOLS);
+    assert!(!snapshot.tools_complete);
+    assert_eq!(
+        snapshot.tools.first().unwrap().at,
+        time(1).parse().unwrap(),
+        "the oldest call is the one evicted"
+    );
+}
+
+#[test]
+fn subagents_and_background_work_count_calls_not_records() {
+    let agent = tool_use(
+        "agent-1",
+        "Agent",
+        json!({"subagent_type": "general-purpose", "run_in_background": true}),
+    );
+    let shell = tool_use(
+        "shell-1",
+        "Bash",
+        json!({"command": "gh run watch", "run_in_background": true}),
+    );
+    let snapshot = fold_all(&[
+        assistant("msg-1", 1, usage(1, 1, 1, 1), agent.clone()),
+        assistant("msg-1", 1, usage(1, 1, 1, 1), agent),
+        assistant("msg-1", 1, usage(1, 1, 1, 1), shell),
+        assistant(
+            "msg-1",
+            1,
+            usage(1, 1, 1, 1),
+            tool_use("p", "Read", json!({})),
+        ),
+        assistant(
+            "msg-1",
+            1,
+            usage(1, 1, 1, 1),
+            tool_use("old", "Task", json!({})),
+        ),
+    ]);
+    assert_eq!(snapshot.subagent_calls, 2);
+    assert_eq!(snapshot.background_calls, 2);
+    assert!(snapshot.tools.iter().filter(|t| t.background).count() == 2);
+}
+
+#[test]
+fn the_plan_is_the_latest_todo_list() {
+    let todos = |statuses: &[&str]| {
+        let todos: Vec<Value> = statuses
+            .iter()
+            .map(|status| json!({"content": "x", "status": status, "activeForm": "x"}))
+            .collect();
+        json!({ "todos": todos })
+    };
+    let snapshot = fold_all(&[
+        assistant(
+            "msg-1",
+            1,
+            usage(1, 1, 1, 1),
+            tool_use("t1", "TodoWrite", todos(&["pending", "pending", "pending"])),
+        ),
+        assistant(
+            "msg-2",
+            2,
+            usage(1, 1, 1, 1),
+            tool_use(
+                "t2",
+                "TodoWrite",
+                todos(&["completed", "in_progress", "pending", "mystery"]),
+            ),
+        ),
+    ]);
+    assert_eq!(
+        snapshot.plan.unwrap().value,
+        Plan {
+            pending: 1,
+            in_progress: 1,
+            completed: 1
+        }
+    );
+    assert_eq!(fold_all(&[]).plan, None, "no list is not an empty plan");
+}
+
+/// The permission-mode record carries no timestamp; the records around it
+/// date it.
+#[test]
+fn the_mode_follows_the_latest_record_of_each_kind() {
+    let permission = |mode: &str| json!({"type": "permission-mode", "permissionMode": mode, "sessionId": SESSION});
+    let mut second = assistant("msg-2", 9, usage(1, 1, 1, 1), json!([]));
+    second["message"]["model"] = json!("claude-sonnet-5-5");
+    let snapshot = fold_all(&[
+        permission("default"),
+        assistant("msg-1", 5, usage(1, 1, 1, 1), json!([])),
+        permission("auto"),
+        second,
+    ]);
+    let mode = snapshot.mode.unwrap();
+    assert_eq!(mode.value.model.as_deref(), Some("claude-sonnet-5-5"));
+    assert_eq!(mode.value.effort.as_deref(), Some("xhigh"));
+    assert_eq!(mode.value.permission_mode.as_deref(), Some("auto"));
+    assert_eq!(mode.at, time(9).parse().unwrap());
+
+    assert_eq!(
+        fold_all(&[permission("plan")]).mode,
+        None,
+        "nothing dates a mode before the first timed record"
+    );
+}
+
+/// Another session's records, a subagent's, and the records that carry
+/// content but no metrics all contribute nothing.
+#[test]
+fn only_the_sessions_own_main_thread_counts() {
+    let mut other = assistant("msg-x", 1, usage(9, 9, 9, 9), json!([]));
+    other["sessionId"] = json!("another-session");
+    let mut sidechain = assistant("msg-y", 1, usage(9, 9, 9, 9), json!([]));
+    sidechain["isSidechain"] = json!(true);
+    let mut untagged = assistant("msg-z", 1, usage(9, 9, 9, 9), json!([]));
+    untagged.as_object_mut().unwrap().remove("sessionId");
+    for value in [other, sidechain, untagged] {
+        assert_eq!(decode(&value, SESSION), None, "{value}");
+    }
+}
+
+/// The projection keeps labels, counts and ids; every field that carries
+/// conversation content is dropped, including from a `Debug` dump.
+#[test]
+fn no_conversation_content_survives_the_projection() {
+    let content = json!([
+        {"type": "thinking", "thinking": "PRIVATE_REASONING_SENTINEL"},
+        {"type": "text", "text": "PRIVATE_RESPONSE_SENTINEL"},
+        {"type": "tool_use", "id": "call-1", "name": "Bash",
+         "input": {"command": "PRIVATE_ARGUMENT_SENTINEL", "description": "PRIVATE_DESC_SENTINEL"}},
+        {"type": "tool_use", "id": "call-2", "name": "TodoWrite",
+         "input": {"todos": [{"content": "PRIVATE_TODO_SENTINEL", "status": "pending"}]}},
+    ]);
+    let records = [
+        assistant("msg-1", 1, usage(1, 1, 1, 1), content),
+        json!({"type": "user", "sessionId": SESSION, "timestamp": time(2),
+               "cwd": "/PRIVATE_PATH_SENTINEL", "toolUseResult": {"stdout": "PRIVATE_OUTPUT_SENTINEL"},
+               "message": {"content": [{"type": "tool_result", "tool_use_id": "call-1",
+                                        "content": "PRIVATE_RESULT_SENTINEL"}]}}),
+        json!({"type": "user", "sessionId": SESSION, "timestamp": time(3),
+               "message": {"content": "PRIVATE_PROMPT_SENTINEL"}}),
+        json!({"type": "system", "subtype": "compact_boundary", "sessionId": SESSION,
+               "timestamp": time(4), "content": "PRIVATE_SUMMARY_SENTINEL",
+               "compactMetadata": {"trigger": "manual", "preTokens": 10}}),
+        json!({"type": "ai-title", "aiTitle": "PRIVATE_TITLE_SENTINEL", "sessionId": SESSION}),
+    ];
+    let events: Vec<Event> = records.iter().filter_map(|r| decode(r, SESSION)).collect();
+    assert_eq!(
+        events.len(),
+        3,
+        "the prompt and the title contribute nothing"
+    );
+    let dump = format!("{events:?} {:?}", fold_all(&records));
+    assert!(!dump.contains("SENTINEL"), "{dump}");
+}
+
+/// A field the transcript didn't report stays unknown; it never becomes zero.
+#[test]
+fn absence_and_invalid_values_do_not_become_zero() {
+    let mut partial = usage(1, 1, 1, 1);
+    partial
+        .as_object_mut()
+        .unwrap()
+        .remove("cache_read_input_tokens");
+    let mut negative = usage(1, 1, 1, 1);
+    negative["output_tokens"] = json!(-5);
+    let snapshot = fold_all(&[
+        assistant("msg-1", 1, partial, json!([])),
+        assistant("msg-2", 2, negative, json!([])),
+    ]);
+    assert_eq!(snapshot.request, None);
+    assert_eq!(snapshot.context_tokens, None);
+    assert_eq!(snapshot.messages, 0);
+
+    let mut bad = assistant("msg-3", 3, usage(1, 1, 1, 1), json!([]));
+    bad["message"]["model"] = json!("claude\u{1b}[31m");
+    bad["effort"] = json!("x".repeat(81));
+    let snapshot = fold_all(&[bad]);
+    assert_eq!(snapshot.mode, None, "unprintable labels are not a mode");
+    assert_eq!(snapshot.messages, 1);
+}

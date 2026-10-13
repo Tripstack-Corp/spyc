@@ -653,3 +653,26 @@ fn agent_hud_cached_branch_must_belong_to_the_panes_repository() {
         );
     });
 }
+
+#[test]
+fn agent_hud_waiting_attention_preserves_the_semantic_state_without_requesting_help() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = fixture(tmp.path(), tmp.path());
+        app.state.config.pane.agent_hud = AgentHudMode::Compact;
+        app.runtime
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut()
+            .activity = AgentActivity::Waiting;
+        let rect = app
+            .frame_layout(Rect::new(0, 0, 100, 32))
+            .agent_hud
+            .unwrap();
+        let lines = app.agent_hud_lines(rect);
+        assert!(lines[0].to_string().starts_with("waiting ·"));
+        assert_eq!(lines[0].spans[0].style.fg, Some(app.view.theme.status_path));
+        assert!(!lines[0].to_string().contains("needs you"));
+    });
+}

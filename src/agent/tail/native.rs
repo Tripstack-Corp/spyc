@@ -1,4 +1,4 @@
-//! macOS vnode notifications for exactly one rollout and its parent. Descriptor
+//! macOS vnode notifications for exactly one session file and its parent. Descriptor
 //! watches register synchronously and do not depend on the FSEvents service.
 
 use std::fs::{File, OpenOptions};

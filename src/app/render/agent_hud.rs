@@ -49,6 +49,7 @@ impl App {
         } else {
             match info.activity {
                 AgentActivity::Working => "working",
+                AgentActivity::Waiting => "waiting",
                 AgentActivity::Blocked => "needs you",
                 AgentActivity::Done => "done",
                 AgentActivity::Idle => "idle",

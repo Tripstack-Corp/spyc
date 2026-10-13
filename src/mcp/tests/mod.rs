@@ -1102,6 +1102,48 @@ fn idle_prompt_notification_downgrades_blocked_to_done() {
     assert_eq!(eff("blocked", "not json"), "blocked");
 }
 
+/// Claude Code's `Stop` lists the background work and scheduled wakeups that
+/// will start another turn; a turn that ends with either pending is `waiting`,
+/// not `done`. The raw payload goes through `read_payload` first, as the
+/// reporter's does.
+#[test]
+fn stop_with_pending_background_work_reports_waiting() {
+    let eff = |configured: &'static str, raw: &str| {
+        let normalized =
+            crate::agent::status_hook::read_payload(raw.as_bytes()).unwrap_or_default();
+        super::effective_report_state(configured, &normalized)
+    };
+    let task = r#"{"id":"b1","type":"shell","status":"running","description":"CI","command":"gh run watch"}"#;
+    let cron = r#"{"id":"c1","schedule":"*/5 * * * *","recurring":false,"prompt":"check CI"}"#;
+    let stop = |tasks: &str, crons: &str| {
+        format!(
+            r#"{{"hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"merged","background_tasks":[{tasks}],"session_crons":[{crons}]}}"#
+        )
+    };
+
+    assert_eq!(eff("done", &stop(task, "")), "waiting", "a running shell");
+    assert_eq!(
+        eff("done", &stop("", cron)),
+        "waiting",
+        "a scheduled wakeup"
+    );
+    assert_eq!(eff("done", &stop("", "")), "done", "nothing will wake it");
+    assert_eq!(
+        eff(
+            "done",
+            r#"{"hook_event_name":"Stop","stop_hook_active":false}"#
+        ),
+        "done",
+        "an agent whose Stop lists no work at all"
+    );
+    // Only the turn-ending `done` of a `Stop` becomes `waiting`.
+    let prompt = format!(
+        r#"{{"hook_event_name":"UserPromptSubmit","source":"system","background_tasks":[{task}]}}"#
+    );
+    assert_eq!(eff("working", &prompt), "working");
+    assert_eq!(eff("blocked", &stop(task, "")), "blocked");
+}
+
 #[test]
 fn session_id_piggybacks_from_hook_payload() {
     use super::session_id_from_hook_payload as sid;

@@ -73,7 +73,7 @@ const AGENT_ANIM_INTERVAL: Duration = Duration::from_millis(250);
 /// new turn or completion. Agy yields non-blocked reports to output so its
 /// uncovered approval prompt can become authoritative.
 fn report_superseded_by_output(
-    r: ReportedStatus,
+    r: &ReportedStatus,
     last_output_at: Option<Instant>,
     kind: AgentKind,
 ) -> bool {
@@ -418,7 +418,7 @@ impl App {
     /// Non-agent tabs are always `Unknown` (a report targeting one is ignored —
     /// dots are agent-only).
     fn effective_activity(
-        reported: Option<ReportedStatus>,
+        reported: Option<&ReportedStatus>,
         scrape: Option<AgentActivity>,
         kind: AgentKind,
         last_output_at: Option<Instant>,
@@ -612,7 +612,7 @@ impl App {
             // `Blocked` report is latched — it never expires here and output
             // never supersedes it (see `effective_activity`); only the Enter-on-
             // pane clear in `run_effects` or a newer report drops it.
-            if let Some(r) = entry.info.reported
+            if let Some(r) = &entry.info.reported
                 && ((r.status != AgentActivity::Blocked && now >= r.expiry)
                     || report_superseded_by_output(r, entry.info.last_output_at, kind))
             {
@@ -623,7 +623,7 @@ impl App {
             // resurface stale after expiry.
             if entry.info.reported.is_some()
                 && !crate::agent::codex_approval::overrides_report(
-                    entry.info.reported,
+                    entry.info.reported.as_ref(),
                     entry.info.scrape_status.map(|(status, _)| status),
                     kind,
                 )
@@ -634,7 +634,7 @@ impl App {
                 Self::activity_for(kind != AgentKind::Other, None, now)
             } else {
                 Self::effective_activity(
-                    entry.info.reported,
+                    entry.info.reported.as_ref(),
                     entry.info.scrape_status.map(|(s, _)| s),
                     kind,
                     entry.info.last_output_at,
@@ -645,7 +645,7 @@ impl App {
             // or a timing-Working tab's idle-flip, so the dot can't go stale. A
             // latched `Blocked` report never expires, so don't arm a wake for it
             // (nothing would flip; an Enter keystroke clears it via its own path).
-            if let Some(r) = entry.info.reported {
+            if let Some(r) = &entry.info.reported {
                 if r.status != AgentActivity::Blocked {
                     earliest_flip =
                         Some(earliest_flip.map_or(r.expiry, |m: Instant| m.min(r.expiry)));
@@ -869,13 +869,13 @@ mod tests {
         use crate::pane::{AgentActivity, ReportedStatus};
         use std::time::{Duration, Instant};
         let base = Instant::now();
-        let report = |status, at, expiry| Some(ReportedStatus { status, at, expiry });
+        let report = |status, at, expiry| Some(ReportedStatus::new(status, at, expiry));
 
         // A live `working` report wins even with NO output (silent thinking) —
         // the headline win over the timing-only P0 dot.
         assert_eq!(
             App::effective_activity(
-                report(AgentActivity::Working, base, base + Duration::from_secs(60)),
+                report(AgentActivity::Working, base, base + Duration::from_secs(60)).as_ref(),
                 None,
                 AgentKind::Agy,
                 None,
@@ -886,7 +886,7 @@ mod tests {
         // A live `blocked` report → Blocked (the "needs me" signal).
         assert_eq!(
             App::effective_activity(
-                report(AgentActivity::Blocked, base, base + Duration::from_secs(60)),
+                report(AgentActivity::Blocked, base, base + Duration::from_secs(60)).as_ref(),
                 None,
                 AgentKind::Agy,
                 Some(base),
@@ -898,7 +898,7 @@ mod tests {
         // output → Idle). Blocked is exempt from TTL — see the latch test.
         assert_eq!(
             App::effective_activity(
-                report(AgentActivity::Working, base, base + Duration::from_secs(1)),
+                report(AgentActivity::Working, base, base + Duration::from_secs(1)).as_ref(),
                 None,
                 AgentKind::Agy,
                 None,
@@ -910,7 +910,7 @@ mod tests {
         let later = base + Duration::from_millis(500);
         assert_eq!(
             App::effective_activity(
-                report(AgentActivity::Idle, base, base + Duration::from_secs(60)),
+                report(AgentActivity::Idle, base, base + Duration::from_secs(60)).as_ref(),
                 None,
                 AgentKind::Agy,
                 Some(later),
@@ -921,7 +921,7 @@ mod tests {
         // A non-agent tab ignores any report (dots are agent-only).
         assert_eq!(
             App::effective_activity(
-                report(AgentActivity::Working, base, base + Duration::from_secs(60)),
+                report(AgentActivity::Working, base, base + Duration::from_secs(60)).as_ref(),
                 None,
                 AgentKind::Other,
                 None,
@@ -965,14 +965,14 @@ mod tests {
             AgentActivity::Blocked
         );
         // A live report still wins over a scrape guess.
-        let report = Some(crate::pane::ReportedStatus {
-            status: AgentActivity::Working,
-            at: base,
-            expiry: base + Duration::from_secs(60),
-        });
+        let report = Some(crate::pane::ReportedStatus::new(
+            AgentActivity::Working,
+            base,
+            base + Duration::from_secs(60),
+        ));
         assert_eq!(
             App::effective_activity(
-                report,
+                report.as_ref(),
                 Some(AgentActivity::Blocked),
                 AgentKind::Agy,
                 None,
@@ -1074,14 +1074,14 @@ mod tests {
 
         // 2. Scanning behind a live report is therefore harmless: an unexpired,
         //    un-superseded report outranks the scrape result.
-        let report = ReportedStatus {
-            status: AgentActivity::Working,
-            at: base + Duration::from_millis(10),
-            expiry: base + Duration::from_secs(60),
-        };
+        let report = ReportedStatus::new(
+            AgentActivity::Working,
+            base + Duration::from_millis(10),
+            base + Duration::from_secs(60),
+        );
         assert_eq!(
             App::effective_activity(
-                Some(report),
+                Some(&report),
                 Some(AgentActivity::Blocked),
                 AgentKind::Agy,
                 None,
@@ -1098,7 +1098,7 @@ mod tests {
         let output_after = base + Duration::from_millis(50);
         assert_eq!(
             App::effective_activity(
-                Some(report),
+                Some(&report),
                 Some(AgentActivity::Blocked),
                 AgentKind::Agy,
                 Some(output_after),
@@ -1121,17 +1121,13 @@ mod tests {
         use std::time::{Duration, Instant};
         let base = Instant::now();
         let expiry = base + Duration::from_secs(300);
-        let blocked = Some(ReportedStatus {
-            status: AgentActivity::Blocked,
-            at: base,
-            expiry,
-        });
+        let blocked = Some(ReportedStatus::new(AgentActivity::Blocked, base, expiry));
 
         // Output long after the report (the prompt still redrawing while it
         // waits) does NOT supersede — the dot stays Blocked.
         let later = base + Duration::from_secs(30);
         assert_eq!(
-            App::effective_activity(blocked, None, AgentKind::Agy, Some(later), later),
+            App::effective_activity(blocked.as_ref(), None, AgentKind::Agy, Some(later), later),
             AgentActivity::Blocked,
             "blocked is latched — prompt redraws must not bounce it to working"
         );
@@ -1139,14 +1135,14 @@ mod tests {
         // Its TTL does NOT end it either — a blocked report well past `expiry`
         // still reads Blocked (latched until the user answers with Enter). This
         // is the "stuck until <ENTER>" behaviour: no clock revives the dot.
-        let stale = Some(ReportedStatus {
-            status: AgentActivity::Blocked,
-            at: base,
-            expiry: base + Duration::from_secs(1),
-        });
+        let stale = Some(ReportedStatus::new(
+            AgentActivity::Blocked,
+            base,
+            base + Duration::from_secs(1),
+        ));
         assert_eq!(
             App::effective_activity(
-                stale,
+                stale.as_ref(),
                 None,
                 AgentKind::Agy,
                 None,
@@ -1158,14 +1154,10 @@ mod tests {
 
         // Contrast: a non-blocked report (done) is still superseded by later
         // output (unchanged behaviour).
-        let done = Some(ReportedStatus {
-            status: AgentActivity::Done,
-            at: base,
-            expiry,
-        });
+        let done = Some(ReportedStatus::new(AgentActivity::Done, base, expiry));
         assert_eq!(
             App::effective_activity(
-                done,
+                done.as_ref(),
                 None,
                 AgentKind::Agy,
                 Some(base + Duration::from_millis(200)),

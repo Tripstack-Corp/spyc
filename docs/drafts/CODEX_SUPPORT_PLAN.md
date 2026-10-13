@@ -1056,9 +1056,9 @@ bounded recent tool names/statuses and identity. No prompt/response arguments,
 tool output or credentials in persisted HUD state or diagnostics. Reading must
 remain read-only and fail independently of the child session.
 
-### B3 implementation candidate
+### B3 implementation
 
-The candidate adds the home-only off/compact/full preference, temporary
+The implementation provides the home-only off/compact/full preference, temporary
 `:agent hud` control and saveable source diagnostics. Its four-row full view
 omits unavailable plan/agent providers. Pure Model state and Runtime subscriptions
 are connected through effects and wakes; common geometry controls child sizing
@@ -1070,7 +1070,8 @@ rejects duplicate pinned filenames; toggling retries an unavailable lookup.
 Regression coverage includes actual executor/pre-receive call sites, synthetic
 PTY input/resize/mouse interactions, layout variants, home isolation, idle work,
 visible-only repaint decisions, Unicode/monochrome and explicit unknown context.
-Native CLI multi-pane and local acceptance remain gates before integration.
+Automated layout/isolation gates and a release smoke with synthetic panes are
+verified; the full native CLI/local acceptance round follows integration.
 
 ## Delivery sequence and gates
 

@@ -68,13 +68,9 @@ pub struct LuaEventState {
 /// activity — `None` for `Unknown` (a non-agent tab / no signal yet), which
 /// never fires an event. Mirrors the `report_status` MCP vocabulary.
 const fn agent_state_label(a: crate::pane::AgentActivity) -> Option<&'static str> {
-    use crate::pane::AgentActivity::{Blocked, Done, Idle, Unknown, Working};
     match a {
-        Working => Some("working"),
-        Blocked => Some("blocked"),
-        Done => Some("done"),
-        Idle => Some("idle"),
-        Unknown => None,
+        crate::pane::AgentActivity::Unknown => None,
+        known => Some(known.name()),
     }
 }
 

@@ -363,6 +363,7 @@ impl App {
                     pane: None,
                     status,
                     ttl_ms: None,
+                    note: None,
                     session_id: None,
                     hook_event: None,
                 });

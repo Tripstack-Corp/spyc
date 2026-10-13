@@ -49,6 +49,11 @@ pane tab, which is how the user sees at a glance which agent needs them:
 - `blocked` — **you stopped to ask a question or for permission.** This is the
   one that earns attention; it lights the tab hot-red.
 - `done` — you finished a turn
+- `waiting` — you end your turn while work you started (a CI run, a build, a
+  monitor) will wake you. Pass a short `note` saying what you wait on
+  (`CI on #641`); it holds for up to an hour, so report again each time the
+  work wakes you. Claude Code's hooks infer this from its own background tasks,
+  but only your note says what they are.
 - `idle` — nothing pending
 
 Cheap and idempotent, so call it freely. It overrides spyc's output-timing guess,

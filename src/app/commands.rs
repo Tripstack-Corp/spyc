@@ -551,15 +551,7 @@ fn agent_registry_lines(app: &App) -> Vec<String> {
 /// Build the `:agent list` dump — each agent tab with its activity dot + the
 /// scope claims it owns. Pure read of the pane tabs + registry.
 fn agent_list_lines(app: &App) -> Vec<String> {
-    use crate::pane::AgentActivity;
     use crate::state::sessions::AgentKind;
-    let state_str = |a: AgentActivity| match a {
-        AgentActivity::Working => "working",
-        AgentActivity::Idle => "idle",
-        AgentActivity::Blocked => "blocked",
-        AgentActivity::Done => "done",
-        AgentActivity::Unknown => "unknown",
-    };
     let mut out = vec![format!(
         "spyc {} — agents @ {}",
         crate::VERSION,
@@ -581,7 +573,7 @@ fn agent_list_lines(app: &App) -> Vec<String> {
             "{marker}[{}] {}  dot={}",
             i + 1,
             info.label,
-            state_str(info.activity),
+            info.activity.name(),
         ));
         let claims: Vec<&str> = app
             .state

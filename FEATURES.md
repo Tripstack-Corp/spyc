@@ -267,10 +267,16 @@ protocol, no image protocols, no OSC 52 clipboard.
   - **Semantic self-report** via the `report_status` MCP tool: a cooperative
     agent (Claude, codex, …) tells spyc when it's `working` (holds the pulse
     through a silent thinking pause — no false "idle"), `blocked` (a steady
-    **hot-red square `■`** — the "which agent needs me" signal), or `done` (a
-    calm teal square `■`). Shape carries meaning: a **circle `●`** is live /
-    animated (working), a **square `■`** is a *settled, waiting* state (blocked
-    or done) — so you can tell "needs me / finished" from "busy" at a glance.
+    **hot-red square `■`** — the "which agent needs me" signal), `done` (a
+    calm teal square `■`), or `waiting` (a steady blue hollow circle `○`: the
+    turn is over, but background work the agent started will wake it). Shape
+    carries meaning: a **circle `●`** is live / animated (working), a **square
+    `■`** is a *settled* state that is your turn (blocked or done), and a
+    **hollow `○`** is not working this moment but not your turn either — so you
+    can tell "needs me / finished" from "busy" and "waiting on CI" at a glance.
+    Claude Code's turn-end hook lists the background work still running, so its
+    `waiting` needs no report; other agents report it, with a note saying what
+    they wait on, which `:why-status` shows. Entering `waiting` pings nothing.
     For Codex and Claude, live reports survive output and footer redraws until
     a newer report or TTL expiry; quiet tool waits do not erase `working`.
     Agy yields non-blocked reports to fresh output for uncovered approvals.
@@ -1347,7 +1353,7 @@ unambiguous:
   (passing an `ev` table) when a low-frequency event fires: `startup` (once,
   after init.lua loads), `dir_changed` (`ev.cwd`), `project_changed`
   (`ev.project_home`), and `agent_status` (`ev.pane`, `ev.state` ∈
-  working|blocked|done|idle — fired on a semantic transition, so an agent going
+  working|blocked|done|waiting|idle — fired on a semantic transition, so an agent going
   `blocked`/`done` is a natural trigger, e.g.
   `spyc.on("agent_status", function(ev) if ev.state == "blocked" then spyc.notify("agent "..ev.pane.." blocked") end end)`).
   A change a Lua handler itself causes (e.g. an `on("dir_changed")` handler that
@@ -1581,12 +1587,15 @@ Claude can query and control the workspace through these tools:
 - **`get_file_content`** -- reads a file's text content (up to 100KB)
 
 **Write tools (Claude can mutate the TUI):**
-- **`report_status(status, [pane], [ttl_ms])`** -- self-report activity for
-  your pane's dot: `working` / `blocked` (the "needs me" hot-red dot) / `done` /
-  `idle`. Overrides spyc's output-timing guess; targets the caller's own tab
-  by default (the focused tab for a connection that named none). Non-blocked
-  reports default to five minutes and larger `ttl_ms` values are clamped to
-  that maximum; blocked reports stay latched until settled or replaced.
+- **`report_status(status, [pane], [ttl_ms], [note])`** -- self-report activity
+  for your pane's dot: `working` / `blocked` (the "needs me" hot-red dot) /
+  `done` / `waiting` (turn over, background work will wake you; `note` says on
+  what) / `idle`. Overrides spyc's output-timing guess; targets the caller's own
+  tab by default (the focused tab for a connection that named none). Non-blocked
+  reports default to five minutes (`waiting`: an hour) and larger `ttl_ms` values
+  are clamped to that maximum; blocked reports stay latched until settled or
+  replaced. A `waiting` report outlasts the hook `done` that ends its own turn,
+  and Enter in the pane retires it.
   Accepted Escape/`Ctrl-C` retires a working report; Enter, arrows and pasted
   control bytes preserve it. Closed panes cannot retain or receive activity reports.
 - **`register_scope(paths, intent, [pr], [note])`** / **`list_scopes`** /

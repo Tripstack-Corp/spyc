@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use jiff::Timestamp;
 
+pub use crate::agent::tail::Availability;
 pub use reducer::Reducer;
 
 /// A result belongs to one effective agent incarnation, not merely one cwd.
@@ -99,16 +100,6 @@ pub struct Snapshot {
     pub tools: Vec<Tool>,
     /// Missing starts, tail gaps and unknown item kinds prevent an exhaustive count.
     pub tools_complete: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Availability {
-    Available,
-    Missing,
-    Unreadable,
-    IdentityMismatch,
-    InvalidHeader,
-    WatchFailed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

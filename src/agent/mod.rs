@@ -13,6 +13,7 @@
 //! [`detect`] (command → profile, for live panes).
 
 pub mod chrome;
+pub mod claude_metrics;
 pub mod codex_approval;
 pub mod codex_command;
 pub mod codex_home;
@@ -22,6 +23,8 @@ pub mod codex_recovery;
 pub mod detect_rules;
 pub mod resume;
 pub mod status_hook;
+pub mod tail;
+pub mod waiting;
 
 use std::borrow::Cow;
 use std::collections::HashSet;

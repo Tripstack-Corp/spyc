@@ -47,7 +47,7 @@ const FUNCTION: Rule = Rule {
             "src/app/key_dispatch/prompts.rs::App::handle_vi_prompt_key",
             144,
         ),
-        ("src/app/mcp.rs::App::execute_mcp_command", 386),
+        ("src/app/mcp.rs::App::execute_mcp_command", 289),
         ("src/app/mouse/mod.rs::App::handle_mouse", 119),
         ("src/app/pager_handler/file_view.rs::build_pager_view", 151),
         (
@@ -71,7 +71,7 @@ const FUNCTION: Rule = Rule {
         ("src/keymap/action.rs::action_from_name", 118),
         ("src/keymap/resolver/mod.rs::Resolver::feed", 456),
         ("src/lua/api.rs::install", 170),
-        ("src/mcp/protocol.rs::handle_tools_call", 420),
+        ("src/mcp/protocol.rs::handle_tools_call", 384),
         (
             "src/pane/engine_ghostty/mod.rs::GhosttyScreen::fill_from_render_state",
             111,
