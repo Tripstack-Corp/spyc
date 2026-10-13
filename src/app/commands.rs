@@ -500,7 +500,7 @@ pub(super) fn cmd_agent(app: &mut App, args: &str) -> Vec<Effect> {
         "registry" => ("agent registry", agent_registry_lines(app)),
         _ => {
             app.state
-                .flash_info("usage: :agent list|registry | :agent hud off|compact|full|info");
+                .flash_info("usage: :agent list|registry | :agent hud off|compact|full|info|dump");
             return Vec::new();
         }
     };

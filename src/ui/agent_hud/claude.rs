@@ -4,7 +4,7 @@
 
 use crate::agent::claude_metrics::{Snapshot, ToolStatus};
 
-use super::{AgentRows, Field, HudView, Palette, Row, Tally, short_count, tool};
+use super::{AgentRows, Field, HudView, Palette, Row, Tally, short_count, tools_row};
 
 pub(super) fn rows(
     snapshot: Option<&Snapshot>,
@@ -70,32 +70,32 @@ fn usage(s: &Snapshot, at_least: &str, p: Palette) -> Row {
     ])
 }
 
-/// Every tool called since the read began, a running one first.
+/// Every tool called since the read began, most called first.
 fn tools(s: &Snapshot, tail_only: bool, p: Palette) -> Row {
-    let label = if tail_only { "recent" } else { "tools" };
-    let mut cells = vec![Field(vec![p.label(label)])];
-    if s.tool_counts.is_empty() {
-        cells.push(Field(vec![p.label("none")]));
-        return Row::new(cells);
-    }
-    let mut tallies: Vec<Tally> = s
+    let tallies: Vec<Tally> = s
         .tool_counts
         .iter()
         .map(|count| Tally {
-            name: count
-                .name
-                .strip_prefix("mcp__spyc__")
-                .map_or_else(|| count.name.clone(), |rest| format!("spyc:{rest}")),
+            name: display_name(&count.name),
             calls: count.calls,
             failed: count.failed,
-            running: s.tools.iter().any(|t| {
-                t.status == ToolStatus::Started && t.name.as_deref() == Some(count.name.as_str())
-            }),
         })
         .collect();
-    tallies.sort_by_key(|tally| !tally.running);
-    cells.extend(tallies.iter().map(|tally| tool(tally, p)));
-    Row::new(cells)
+    let mut running: Vec<String> = Vec::new();
+    for tool in s.tools.iter().filter(|t| t.status == ToolStatus::Started) {
+        let name = display_name(tool.name.as_deref().unwrap_or("tool"));
+        if !running.contains(&name) {
+            running.push(name);
+        }
+    }
+    let label = if tail_only { "recent" } else { "tools" };
+    tools_row(label, &tallies, Some(&running), p)
+}
+
+/// spyc's own MCP tools read `spyc:` rather than their full MCP name.
+fn display_name(name: &str) -> String {
+    name.strip_prefix("mcp__spyc__")
+        .map_or_else(|| name.to_owned(), |rest| format!("spyc:{rest}"))
 }
 
 #[cfg(test)]
@@ -199,10 +199,10 @@ mod tests {
         assert_eq!(
             rows(&view(Some(&snapshot), false), 120),
             [
-                "● working   df17b585        opus-5-5 xhigh   spyc ⎇ main    32m",
-                "context     336.6k          out 370.2k       hit 98%        compacted 1",
-                "tools       ◐ Bash 182 ✗3   Read 41          Edit 23 ✗1     spyc:report_s… 19   Grep 6",
-                "agents      1               background 5     hooks ✓        mcp ✓",
+                "● working   df17b585       opus-5-5 xhigh   spyc ⎇ main    32m",
+                "context     336.6k         out 370.2k       hit 98%        compacted 1",
+                "tools       271 calls      ✗ 4 failed       ◐ Bash         Bash 182 · Read 41 · Edit 23",
+                "agents      1              background 5     hooks ✓        mcp ✓",
             ]
         );
     }
@@ -226,7 +226,7 @@ mod tests {
         snapshot.compactions = 2;
         let compacted = rows(&view(Some(&snapshot), true), 160);
         assert!(
-            compacted[1].starts_with("context     --              out ≥370.2k"),
+            compacted[1].starts_with("context     --             out ≥370.2k"),
             "lifetime totals survive; a tail-only read says they may be more: {compacted:?}"
         );
         assert!(compacted[1].ends_with("compacted ≥2"));
@@ -265,22 +265,34 @@ mod tests {
     }
 
     #[test]
-    fn the_tool_row_puts_a_running_call_first_and_failures_in_red() {
+    fn the_tool_row_collapses_to_totals_the_running_call_and_the_most_called() {
         let theme = Theme::default();
         let mut snapshot = session();
-        snapshot.tool_counts = vec![count("Read", 41, 0), count("Bash", 18, 2)];
+        snapshot.tool_counts = vec![
+            count("Read", 41, 0),
+            count("Bash", 18, 2),
+            count("Grep", 3, 0),
+        ];
+        snapshot.tools.push(Tool {
+            name: Some("mcp__spyc__report_status".into()),
+            status: ToolStatus::Started,
+            at: at(2),
+            background: false,
+        });
         let line = lines(
             &view(Some(&snapshot), false),
             AgentHudMode::Full,
-            120,
+            160,
             &theme,
         )
         .swap_remove(2);
         let text = line.to_string();
+        assert!(text.contains("62 calls"), "{text}");
         assert!(
-            text.find("◐ Bash 18 ✗2").unwrap() < text.find("Read 41").unwrap(),
-            "{text}"
+            text.contains("◐ Bash +1"),
+            "two running, the first named: {text}"
         );
+        assert!(text.ends_with("Read 41 · Bash 18 · Grep 3"), "{text}");
         let style = |content: &str| {
             line.spans
                 .iter()
@@ -288,16 +300,19 @@ mod tests {
                 .unwrap()
                 .style
         };
-        assert_eq!(style("✗2").fg, Some(theme.diff_del_fg));
+        assert_eq!(style("✗ 2").fg, Some(theme.diff_del_fg));
         assert_eq!(style("◐ ").fg, Some(theme.prompt_prefix));
         snapshot.tools.clear();
-        let idle = rows(&view(Some(&snapshot), false), 120);
+        let idle = rows(&view(Some(&snapshot), false), 160);
         assert!(
-            idle[2].find("Read 41").unwrap() < idle[2].find("Bash 18 ✗2").unwrap(),
-            "with nothing running, the most called leads: {idle:?}"
+            idle[2].contains("◌ none") && !idle[2].contains('◐'),
+            "{idle:?}"
         );
-        assert!(!idle[2].contains('◐'));
         snapshot.tool_counts.clear();
-        assert!(rows(&view(Some(&snapshot), false), 120)[2].ends_with("none"));
+        let none = rows(&view(Some(&snapshot), false), 160);
+        assert!(
+            none[2].contains("0 calls") && none[2].contains("0 failed"),
+            "{none:?}"
+        );
     }
 }

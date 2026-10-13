@@ -126,7 +126,14 @@ impl super::super::App {
                 self.vsplit_focus(crate::app::state::Side::Right);
             }
             // Chrome and off-frame: nothing owns the keyboard there.
-            Some(Region::Divider | Region::Prompt | Region::Status | Region::VDivider) | None => {}
+            Some(
+                Region::Divider
+                | Region::Prompt
+                | Region::Status
+                | Region::VDivider
+                | Region::AgentHud,
+            )
+            | None => {}
         }
     }
 }

@@ -470,7 +470,10 @@ const SECTIONS: &[Section] = &[
                 ":agent hud off|compact|full",
                 "native Codex / Claude Code strip (off by default)",
             ),
-            (":agent hud info", "saveable metric sources and freshness"),
+            (
+                ":agent hud info|dump",
+                "saveable metric sources, freshness and tool tally (or double-click the strip)",
+            ),
             ("^L", "redraw"),
             ("^R", "reload config (auto-reloads on save)"),
             ("Q  ^D  :q  ZZ", "quit (q reserved for future macros)"),

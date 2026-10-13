@@ -122,7 +122,7 @@ fn diagnostic_lines(app: &App) -> Vec<String> {
     let now = Timestamp::now();
     out.extend(match update {
         Update::Codex(u) => metric_lines(&u.snapshot, now),
-        Update::Claude(u) => claude_lines(&u.snapshot, now),
+        Update::Claude(u) => claude_lines(&u.snapshot, u.tail_only, now),
     });
     out
 }
@@ -179,6 +179,23 @@ fn metric_lines(snapshot: &Snapshot, now: Timestamp) -> Vec<String> {
                 format!("compaction: {}; {}", s.value, freshness(s, now))
             }),
     );
+    let mut tallies: Vec<(&str, u32, u32)> = Vec::new();
+    for tool in &snapshot.tools {
+        let name = tool.name.as_deref().unwrap_or("tool");
+        let failed = u32::from(tool.status == crate::agent::codex_metrics::ToolStatus::Failed);
+        match tallies.iter_mut().find(|t| t.0 == name) {
+            Some(t) => {
+                t.1 += 1;
+                t.2 += failed;
+            }
+            None => tallies.push((name, 1, failed)),
+        }
+    }
+    tallies.sort_by_key(|t| std::cmp::Reverse(t.1));
+    out.push("tool calls by tool, from the recent observations (never every call):".to_owned());
+    for (name, calls, failed) in tallies {
+        out.push(format!("  {name}: {calls} calls; {failed} failed"));
+    }
     out.push(format!(
         "recent tool observations: {}; exhaustive: {}",
         snapshot.tools.len(),
@@ -229,7 +246,7 @@ fn freshness<T>(sample: &Sample<T>, now: Timestamp) -> String {
 }
 
 /// Each field with the transcript record it comes from.
-fn claude_lines(s: &claude_metrics::Snapshot, now: Timestamp) -> Vec<String> {
+fn claude_lines(s: &claude_metrics::Snapshot, tail_only: bool, now: Timestamp) -> Vec<String> {
     let mut out = vec![s.request.as_ref().map_or_else(
         || "request (assistant message.usage): --".to_owned(),
         |r| {
@@ -292,9 +309,33 @@ fn claude_lines(s: &claude_metrics::Snapshot, now: Timestamp) -> Vec<String> {
         "subagent calls (Agent tool): {}; background calls (run_in_background): {}",
         s.subagent_calls, s.background_calls
     ));
+    out.extend(claude_tool_lines(s, tail_only));
+    out
+}
+
+/// Every tool's tally, which is complete unless the read began part-way, then
+/// the recent calls the HUD keeps.
+fn claude_tool_lines(s: &claude_metrics::Snapshot, tail_only: bool) -> Vec<String> {
+    let calls: u32 = s.tool_counts.iter().map(|c| c.calls).sum();
+    let failed: u32 = s.tool_counts.iter().map(|c| c.failed).sum();
+    let mut out = vec![format!(
+        "tool calls by tool (tool_use and tool_result blocks), {}: {calls} calls; {failed} failed",
+        if tail_only {
+            "since the read began part-way through"
+        } else {
+            "every call in the session"
+        }
+    )];
+    for count in &s.tool_counts {
+        out.push(format!(
+            "  {}: {} calls; {} failed",
+            count.name, count.calls, count.failed
+        ));
+    }
     out.push(format!(
-        "recent tool calls (tool_use and tool_result blocks): {}; exhaustive: {}",
+        "recent calls, oldest first: {} (at most {}); every call since they began: {}",
         s.tools.len(),
+        claude_metrics::MAX_TOOLS,
         s.tools_complete
     ));
     for tool in &s.tools {
@@ -319,4 +360,50 @@ fn claude_freshness<T>(sample: &claude_metrics::Sample<T>, now: Timestamp) -> St
             "fresh"
         }
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::claude_metrics::{Snapshot, Tool, ToolCount, ToolStatus};
+
+    /// The dump names every tool counted, not only the recent calls the HUD
+    /// keeps, and says whether the tally is the whole session.
+    #[test]
+    fn the_dump_lists_every_tools_tally_then_the_recent_calls() {
+        let at: Timestamp = "2026-10-13T12:00:00Z".parse().unwrap();
+        let count = |name: &str, calls, failed| ToolCount {
+            name: name.into(),
+            calls,
+            failed,
+        };
+        let snapshot = Snapshot {
+            tool_counts: (0..30)
+                .map(|i| count(&format!("Tool{i}"), 30 - i, i % 2))
+                .collect(),
+            tools: vec![Tool {
+                name: Some("Tool0".into()),
+                status: ToolStatus::Completed,
+                at,
+                background: false,
+            }],
+            tools_complete: true,
+            ..Snapshot::default()
+        };
+        let lines = claude_tool_lines(&snapshot, false);
+        assert!(lines[0].contains("every call in the session: 465 calls; 15 failed"));
+        for i in 0..30 {
+            assert!(
+                lines.iter().any(|l| l.starts_with(&format!("  Tool{i}: "))),
+                "Tool{i} missing"
+            );
+        }
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("recent calls, oldest first: 1"))
+        );
+        let partial = claude_tool_lines(&snapshot, true);
+        assert!(partial[0].contains("since the read began part-way through"));
+    }
 }

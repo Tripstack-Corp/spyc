@@ -115,20 +115,26 @@ collapse full to compact when needed, then hide the strip. The native composer
 stays visible within the child, including in zoom and splits.
 
 ```text
-● working   df17b585        opus-5-5 xhigh   spyc ⎇ main    32m
-context     336.6k          out 370.2k       hit 98%        compacted 1
-tools       ◐ Bash 182 ✗3   Read 41          Edit 23 ✗1     spyc:report_s… 19
-agents      1               background 5     hooks ✓        mcp ✓
+● working   df17b585       opus-5-5 xhigh   spyc ⎇ main    32m
+context     336.6k         out 370.2k       hit 98%        compacted 1
+tools       271 calls      ✗ 4 failed       ◐ Bash         Bash 182 · Read 41 · Edit 23
+agents      1              background 5     hooks ✓        mcp ✓
 ```
 
 It is one template for every agent with a metrics source: the activity row,
 the health cells and the styling are shared, and each agent fills only its
 usage, tools and mode cells. The rows form a grid, so a column starts at the
 same x on every row. A label column leads; value columns are at least twelve
-wide, so a count gaining a digit rarely moves its neighbour; a cell is cut past
-32. As the frame narrows, whole cells drop from the right, except the activity
-and the session, which are cut instead. A waiting agent's note trails the
-activity row outside the grid, so it widens no column.
+wide, so a count gaining a digit rarely moves its neighbour; a cell with a
+column after it is cut past 32. As the frame narrows, whole cells drop from the
+right, except the activity and the session, which are cut instead. A waiting
+agent's note trails the activity row outside the grid, so it widens no column.
+
+The tools row is collapsed: every call, every failure, what is running (`◌ none`
+when nothing is) and the three most called. The full list is the dump's, which
+`:agent hud dump` (or `info`) opens, and so does a double-click anywhere on the
+strip. The strip is spyc's text, never the child's input: a press there selects,
+a drag copies, and the wheel does nothing.
 
 The activity cell is the tab's own dot in its own colour, with the state in
 bold beside it, so the strip and the tab never disagree. Field names are dim and
