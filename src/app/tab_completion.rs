@@ -2,7 +2,8 @@
 //! `J`'s visited directories, plus the cycle a repeated Tab steps through.
 //!
 //! The path decision is pure: [`split_word`] picks the word Tab completes,
-//! [`locate`] says where that word is looked up, and [`complete`] says what Tab
+//! [`locate`] says where that word is looked up, [`implied_names`] adds the
+//! completions no directory lists, and [`complete`] says what Tab
 //! does with the names found there. `App::tab_complete_path` reads the
 //! directory and writes the result into the prompt.
 
@@ -34,26 +35,35 @@ pub(super) fn split_word(buffer: &str, last_word_only: bool) -> (&str, &str) {
 }
 
 /// Where a word is looked up: the directory to read and the part of the name
-/// already typed. `expanded` is the word with `~` and `$VARS` expanded; a word
-/// that names no directory looks in `column_dir`.
-pub(super) fn locate(expanded: &Path, column_dir: &Path) -> (PathBuf, String) {
-    let text = expanded.to_string_lossy();
-    if text.is_empty() {
-        return (column_dir.to_path_buf(), String::new());
-    }
-    if text.ends_with('/') {
-        return (expanded.to_path_buf(), String::new());
-    }
-    let dir = match expanded.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
-        _ => column_dir.to_path_buf(),
+/// already typed. The name is the text after the word's last `/`, as typed, so
+/// `.` and `..` are names to complete rather than steps to resolve. The text
+/// before it is expanded (`~`, `$VARS`) and, when relative, read from the
+/// column's directory: completion never depends on the process's cwd.
+pub(super) fn locate(
+    word: &str,
+    column_dir: &Path,
+    expand: impl Fn(&str) -> PathBuf,
+) -> (PathBuf, String) {
+    let dir_part = typed_dir(word);
+    let typed = word[dir_part.len()..].to_string();
+    let dir = if dir_part.is_empty() {
+        column_dir.to_path_buf()
+    } else {
+        column_dir.join(expand(dir_part))
     };
-    let typed = expanded
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("")
-        .to_string();
     (dir, typed)
+}
+
+/// Completions no directory lists: `../` for a typed `..`, and `~/` for a word
+/// that is just `~`.
+pub(super) fn implied_names(word: &str, typed: &str) -> Vec<String> {
+    if typed == ".." {
+        vec!["../".to_string()]
+    } else if word == "~" {
+        vec!["~/".to_string()]
+    } else {
+        Vec::new()
+    }
 }
 
 /// The directory part of a word as the user typed it, up to and including its
@@ -131,10 +141,11 @@ impl App {
 
         let (before, word) = split_word(&buffer, last_word_only);
         let column_dir = self.state.cur().listing.dir.clone();
-        let (dir, typed) = locate(&crate::paths::expand(word), &column_dir);
-        let Some(names) = names_starting_with(&dir, &typed) else {
+        let (dir, typed) = locate(word, &column_dir, crate::paths::expand);
+        let Some(mut names) = names_starting_with(&dir, &typed) else {
             return;
         };
+        names.extend(implied_names(word, &typed));
         let cycle = |matches| TabState {
             original_buf: String::new(),
             buf_prefix: before.to_string(),
@@ -395,9 +406,9 @@ fn common_prefix(strings: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
-    use super::{Completion, complete, cycle_hint, locate, split_word, typed_dir};
+    use super::{Completion, complete, cycle_hint, implied_names, locate, split_word, typed_dir};
 
     fn v(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| (*s).to_string()).collect()
@@ -412,25 +423,54 @@ mod tests {
         assert_eq!(split_word("my dir/fi", false), ("", "my dir/fi"));
     }
 
-    /// `~/fo` is looked up in the expanded home, and the completion goes after
-    /// the `~/` the user typed, not after the expansion.
+    /// A pretend `paths::expand`, so `~` means the same thing on every machine.
+    fn expand(text: &str) -> PathBuf {
+        PathBuf::from(text.replacen('~', "/home/u", 1))
+    }
+
+    /// The name being completed is the text after the last `/`, as typed; the
+    /// directory before it is expanded and, when relative, read from the
+    /// column.
     #[test]
-    fn a_tilde_word_is_looked_up_at_home_and_keeps_its_tilde() {
-        let (dir, typed) = locate(Path::new("/home/u/fo"), Path::new("/column"));
-        assert_eq!(dir, Path::new("/home/u"));
-        assert_eq!(typed, "fo");
+    fn a_word_is_looked_up_where_its_directory_part_says() {
+        let column = Path::new("/column");
+        for (word, dir, typed) in [
+            ("", "/column", ""),
+            ("fo", "/column", "fo"),
+            (".", "/column", "."),
+            ("..", "/column", ".."),
+            ("sub/fi", "/column/sub", "fi"),
+            ("src/.", "/column/src", "."),
+            ("src/..", "/column/src", ".."),
+            ("../x", "/column/..", "x"),
+            ("/abs/fi", "/abs", "fi"),
+            ("~/fo", "/home/u", "fo"),
+            ("sub/", "/column/sub", ""),
+        ] {
+            let (found_dir, found_typed) = locate(word, column, expand);
+            assert_eq!(
+                (found_dir.as_path(), found_typed.as_str()),
+                (Path::new(dir), typed),
+                "{word:?}"
+            );
+        }
+    }
+
+    /// `~/fo` completes after the `~/` the user typed, not after its expansion.
+    #[test]
+    fn a_completion_keeps_the_directory_as_typed() {
         assert_eq!(typed_dir("~/fo"), "~/");
+        assert_eq!(typed_dir("src/."), "src/");
+        assert_eq!(typed_dir("fo"), "");
     }
 
     #[test]
-    fn a_bare_name_is_looked_up_in_the_column() {
-        let (dir, typed) = locate(Path::new("fo"), Path::new("/column"));
-        assert_eq!(
-            (dir.as_path(), typed.as_str()),
-            (Path::new("/column"), "fo")
-        );
-        let (dir, typed) = locate(Path::new(""), Path::new("/column"));
-        assert_eq!((dir.as_path(), typed.as_str()), (Path::new("/column"), ""));
+    fn dot_dot_and_a_bare_tilde_complete_to_directories_no_listing_shows() {
+        assert_eq!(implied_names("..", ".."), ["../"]);
+        assert_eq!(implied_names("src/..", ".."), ["../"]);
+        assert_eq!(implied_names("~", "~"), ["~/"]);
+        assert!(implied_names("~/", "").is_empty());
+        assert!(implied_names(".", ".").is_empty(), "`.` completes dotfiles");
     }
 
     #[test]

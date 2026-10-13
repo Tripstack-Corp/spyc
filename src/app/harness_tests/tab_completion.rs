@@ -261,11 +261,9 @@ fn tab_completes_paths_exactly_where_a_path_is_typed() {
     });
 }
 
-// Found while writing the tests above. Each states the behaviour a user
-// expects; the fix un-ignores them.
+// `.`, `..`, `~` and relative directories complete as typed.
 
 #[test]
-#[ignore = "bug: `.` has no file name, so Tab offers every entry in the directory"]
 fn a_bare_dot_completes_dotfiles() {
     browsing(&[".env", "README.md"], |app, _| {
         open(app, PromptKind::CopyTo, true, ".");
@@ -274,7 +272,6 @@ fn a_bare_dot_completes_dotfiles() {
 }
 
 #[test]
-#[ignore = "bug: `..` has no file name, so Tab offers every entry in the directory"]
 fn a_bare_dot_dot_completes_to_the_parent() {
     browsing(&["README.md"], |app, _| {
         open(app, PromptKind::CopyTo, true, "..");
@@ -283,7 +280,6 @@ fn a_bare_dot_dot_completes_to_the_parent() {
 }
 
 #[test]
-#[ignore = "bug: `src/.` reads as the name `src`, completing to `src/src/`"]
 fn a_dot_after_a_directory_completes_its_dotfiles() {
     browsing(&["src/.env", "src/main.rs"], |app, _| {
         open(app, PromptKind::CopyTo, true, "src/.");
@@ -292,7 +288,6 @@ fn a_dot_after_a_directory_completes_its_dotfiles() {
 }
 
 #[test]
-#[ignore = "bug: `~` expands to $HOME and completes as a bare relative name"]
 fn a_bare_tilde_completes_to_home() {
     browsing(&[], |app, _| {
         open(app, PromptKind::CopyTo, true, "~");
@@ -301,7 +296,6 @@ fn a_bare_tilde_completes_to_home() {
 }
 
 #[test]
-#[ignore = "bug: a relative directory is read from the process's cwd, not the column's"]
 fn a_relative_path_completes_inside_the_columns_directory() {
     browsing(&["sub/file.txt"], |app, _| {
         open(app, PromptKind::CopyTo, true, "sub/fi");
