@@ -9,11 +9,27 @@
 
 use super::App;
 
-/// Backstop expiry for a `report_status` self-report (5 min) when the agent
-/// gives no `ttl_ms`. Non-blocked reports eventually fall back to output timing
-/// if the agent stops reporting; blocked is latched until answered or superseded
-/// by a newer report. Overridable per-report.
-const DEFAULT_REPORT_TTL_MS: u64 = crate::mcp_cmd::MAX_REPORT_TTL_MS;
+/// A report's backstop expiry: what it asked for, within its status's cap,
+/// which is also the default. Non-blocked reports fall back to output timing
+/// once it passes if the agent stops reporting; blocked is latched until
+/// answered or superseded by a newer report.
+fn report_ttl(activity: crate::pane::AgentActivity, requested: Option<u64>) -> std::time::Duration {
+    let cap = if activity == crate::pane::AgentActivity::Waiting {
+        crate::mcp_cmd::MAX_WAITING_TTL_MS
+    } else {
+        crate::mcp_cmd::MAX_REPORT_TTL_MS
+    };
+    std::time::Duration::from_millis(requested.unwrap_or(cap).min(cap))
+}
+
+/// One `report_status` call, less its target.
+struct StatusReport {
+    status: String,
+    ttl_ms: Option<u64>,
+    note: Option<String>,
+    session_id: Option<String>,
+    hook_event: Option<crate::agent::status_hook::StatusHookEvent>,
+}
 
 impl App {
     /// Refresh `activity.proc_rss_kb` / `activity.proc_threads`. Called once
@@ -315,117 +331,20 @@ impl App {
                 pane,
                 status,
                 ttl_ms,
+                note,
                 session_id,
                 hook_event,
-            } => {
-                use crate::pane::{AgentActivity, ReportedStatus};
-                let activity = match status.as_str() {
-                    "working" | crate::agent::codex_recovery::QUESTION_END => {
-                        AgentActivity::Working
-                    }
-                    "blocked" | crate::agent::codex_recovery::QUESTION_START => {
-                        AgentActivity::Blocked
-                    }
-                    "idle" => AgentActivity::Idle,
-                    "done" => AgentActivity::Done,
-                    other => {
-                        return McpResponse::Error {
-                            message: format!("unknown status: {other}"),
-                        };
-                    }
-                };
-                let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
-                    return McpResponse::Error {
-                        message: "no pane open".into(),
-                    };
-                };
-                let ids: Vec<&str> = tabs.tabs().iter().map(|t| t.info.id.as_str()).collect();
-                let idx = match resolve_report_target(
-                    pane_id.as_deref(),
-                    pane,
-                    &ids,
-                    tabs.active_index(),
-                ) {
-                    Ok(i) => i,
-                    Err(message) => return McpResponse::Error { message },
-                };
-                let now = std::time::Instant::now();
-                let ttl = std::time::Duration::from_millis(
-                    ttl_ms
-                        .unwrap_or(DEFAULT_REPORT_TTL_MS)
-                        .min(crate::mcp_cmd::MAX_REPORT_TTL_MS),
-                );
-                let entry = &mut tabs.tabs_mut()[idx];
-                if entry.pane.is_closed() {
-                    return McpResponse::Error {
-                        message: "pane has exited; activity report rejected".into(),
-                    };
-                }
-                let kind = entry.info.agent().kind();
-                let decision = if kind == crate::state::sessions::AgentKind::Codex {
-                    self.state
-                        .codex_recovery
-                        .entry(entry.info.id.clone())
-                        .or_default()
-                        .report(
-                            &status,
-                            activity,
-                            session_id.as_deref(),
-                            hook_event.as_ref(),
-                        )
-                } else {
-                    report_decision(kind, &status, activity)
-                };
-                let received = ReportedStatus {
-                    status: activity,
-                    at: now,
-                    expiry: now + ttl,
-                };
-                entry.info.last_reported = Some(received);
-                entry.info.last_report_ignored = decision.err();
-                if decision.is_ok() {
-                    entry.info.reported = Some(received);
-                }
-                if let Some(event) = hook_event {
-                    let history = &mut entry.info.recent_hook_events;
-                    if history.len() >= crate::agent::status_hook::HISTORY_LIMIT {
-                        history.pop_front();
-                    }
-                    history.push_back((event, activity, now));
-                }
-                // Apply immediately so this frame reflects it; `settle_agent_activity`
-                // maintains it (and falls back to timing once it expires).
-                if decision.is_ok() {
-                    entry.info.activity = activity;
-                }
-                // P1-3: a live session id piggybacked on the hook report supersedes
-                // the spawn-proximity resolver at save time — route it to the id
-                // field for this tab's agent. claude reports `session_id` and agy
-                // `conversationId` (both land in `live_session_id`); codex has its
-                // own spawn-ordered rollout claim.
-                if let Some(sid) = session_id.filter(|_| decision.is_ok()) {
-                    match kind {
-                        crate::state::sessions::AgentKind::Claude
-                        | crate::state::sessions::AgentKind::Agy => {
-                            entry.info.live_session_id = Some(sid);
-                        }
-                        crate::state::sessions::AgentKind::Codex => {
-                            entry.info.codex_session_id = Some(sid);
-                        }
-                        _ => {}
-                    }
-                }
-                let label = entry.info.label.clone();
-                McpResponse::Ok {
-                    message: match decision {
-                        Ok(_) => format!("status '{status}' set for pane {} ({label})", idx + 1),
-                        Err(reason) => format!(
-                            "status '{status}' recorded for pane {} ({label}); not applied: {reason}",
-                            idx + 1
-                        ),
-                    },
-                }
-            }
+            } => self.apply_status_report(
+                pane_id.as_deref(),
+                pane,
+                StatusReport {
+                    status,
+                    ttl_ms,
+                    note,
+                    session_id,
+                    hook_event,
+                },
+            ),
             McpCommand::RegisterScope {
                 pane_id,
                 pane,
@@ -733,6 +652,146 @@ fn resolve_report_target(
         Some(n) if (1..=ids.len()).contains(&n) => Ok(n - 1),
         Some(n) => Err(format!("no pane {n} (have {})", ids.len())),
         None => Ok(active),
+    }
+}
+
+impl App {
+    /// `report_status`: record the report on its tab and apply it to the dot,
+    /// unless the Codex question model or a live `waiting` holds it back.
+    fn apply_status_report(
+        &mut self,
+        pane_id: Option<&str>,
+        pane: Option<usize>,
+        report: StatusReport,
+    ) -> crate::mcp_cmd::McpResponse {
+        use crate::agent::waiting;
+        use crate::mcp_cmd::McpResponse;
+        use crate::pane::ReportedStatus;
+        let StatusReport {
+            status,
+            ttl_ms,
+            note,
+            session_id,
+            hook_event,
+        } = report;
+        let Some(activity) = report_activity(&status) else {
+            return McpResponse::Error {
+                message: format!("unknown status: {status}"),
+            };
+        };
+        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+            return McpResponse::Error {
+                message: "no pane open".into(),
+            };
+        };
+        let ids: Vec<&str> = tabs.tabs().iter().map(|t| t.info.id.as_str()).collect();
+        let idx = match resolve_report_target(pane_id, pane, &ids, tabs.active_index()) {
+            Ok(i) => i,
+            Err(message) => return McpResponse::Error { message },
+        };
+        let now = std::time::Instant::now();
+        let entry = &mut tabs.tabs_mut()[idx];
+        if entry.pane.is_closed() {
+            return McpResponse::Error {
+                message: "pane has exited; activity report rejected".into(),
+            };
+        }
+        let kind = entry.info.agent().kind();
+        let decision = if kind == crate::state::sessions::AgentKind::Codex {
+            self.state
+                .codex_recovery
+                .entry(entry.info.id.clone())
+                .or_default()
+                .report(
+                    &status,
+                    activity,
+                    session_id.as_deref(),
+                    hook_event.as_ref(),
+                )
+        } else {
+            report_decision(kind, &status, activity)
+        };
+        // A direct agent call carries neither; spyc's status hook always sends
+        // at least one.
+        let origin = if hook_event.is_some() || session_id.is_some() {
+            waiting::Origin::Hook(hook_event.as_ref())
+        } else {
+            waiting::Origin::Agent
+        };
+        let verdict = waiting::meet(entry.info.reported.as_ref(), activity, origin, now);
+        let decision = decision.and_then(|a| verdict.ignored_because().map_or(Ok(a), Err));
+        if verdict == waiting::Verdict::AbsorbTurnEnd
+            && let Some(live) = entry.info.reported.as_mut()
+        {
+            live.turn_end_absorbed = true;
+        }
+        let mut received = ReportedStatus::new(activity, now, now + report_ttl(activity, ttl_ms));
+        received.note = waiting::note_for(
+            entry.info.reported.as_ref(),
+            activity,
+            note,
+            hook_event.as_ref(),
+            now,
+        );
+        entry.info.last_reported = Some(received.clone());
+        entry.info.last_report_ignored = decision.err();
+        if decision.is_ok() {
+            entry.info.reported = Some(received);
+        }
+        if let Some(event) = hook_event {
+            let history = &mut entry.info.recent_hook_events;
+            if history.len() >= crate::agent::status_hook::HISTORY_LIMIT {
+                history.pop_front();
+            }
+            history.push_back((event, activity, now));
+        }
+        // Apply immediately so this frame reflects it; `settle_agent_activity`
+        // maintains it (and falls back to timing once it expires).
+        if decision.is_ok() {
+            entry.info.activity = activity;
+        }
+        if let Some(sid) = session_id.filter(|_| decision.is_ok()) {
+            pin_live_session(&mut entry.info, kind, sid);
+        }
+        let label = entry.info.label.clone();
+        McpResponse::Ok {
+            message: match decision {
+                Ok(_) => format!("status '{status}' set for pane {} ({label})", idx + 1),
+                Err(reason) => format!(
+                    "status '{status}' recorded for pane {} ({label}); not applied: {reason}",
+                    idx + 1
+                ),
+            },
+        }
+    }
+}
+
+/// The state a `report_status` name sets, Codex's correlated question
+/// signals included.
+fn report_activity(status: &str) -> Option<crate::pane::AgentActivity> {
+    use crate::agent::codex_recovery::{QUESTION_END, QUESTION_START};
+    use crate::pane::AgentActivity;
+    match status {
+        QUESTION_END => Some(AgentActivity::Working),
+        QUESTION_START => Some(AgentActivity::Blocked),
+        other => AgentActivity::reportable(other),
+    }
+}
+
+/// P1-3: a live session id piggybacked on the hook report supersedes the
+/// spawn-proximity resolver at save time — route it to the id field for this
+/// tab's agent. claude reports `session_id` and agy `conversationId` (both
+/// land in `live_session_id`); codex has its own spawn-ordered rollout claim.
+fn pin_live_session(
+    info: &mut crate::pane::tabs::TabInfo,
+    kind: crate::state::sessions::AgentKind,
+    sid: String,
+) {
+    use crate::state::sessions::AgentKind;
+    match kind {
+        AgentKind::Claude | AgentKind::Agy => info.live_session_id = Some(sid),
+        AgentKind::Codex => info.codex_session_id = Some(sid),
+        _ => {}
     }
 }
 

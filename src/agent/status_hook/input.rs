@@ -1,7 +1,8 @@
 //! Read complete hook JSON without retaining tool arguments or responses.
 //!
 //! serde's `IgnoredAny` validates and skips the document without allocating its
-//! strings. This reader observes only root string fields while bytes pass by.
+//! strings. This reader observes only root string fields, and the entry count of
+//! two root arrays, while bytes pass by.
 //! Fixed field slots, a bounded token buffer and a depth limit also bound memory
 //! for huge keys, oversized metadata and deeply nested ignored content.
 
@@ -19,6 +20,9 @@ const FIELDS: [&str; 7] = [
     "session_id",
     "conversationId",
 ];
+/// Root arrays kept as their count of object entries, never their content:
+/// Claude Code's `Stop` lists in-flight background work and scheduled wakeups.
+const COUNTED: [&str; 2] = ["background_tasks", "session_crons"];
 const TOKEN_LIMIT: usize = 1024; // Includes quotes and up to six bytes per ASCII escape.
 const STRING_LIMIT: usize = 128;
 const DEPTH_LIMIT: usize = 128;
@@ -40,6 +44,12 @@ pub fn read_payload(reader: impl Read) -> Option<String> {
         .into_iter()
         .zip(input.fields)
         .filter_map(|(key, value)| value.map(|value| (key.to_owned(), Value::String(value))))
+        .chain(
+            COUNTED
+                .into_iter()
+                .zip(input.counts)
+                .filter_map(|(key, count)| count.map(|count| (key.to_owned(), Value::from(count)))),
+        )
         .collect();
     serde_json::to_string(&fields).ok()
 }
@@ -54,6 +64,10 @@ enum Token {
 struct MetadataReader<R> {
     inner: R,
     fields: [Option<String>; FIELDS.len()],
+    counts: [Option<u32>; COUNTED.len()],
+    /// The counted key whose value comes next, and the counted array being read.
+    counted_key: Option<usize>,
+    counting: Option<usize>,
     started: bool,
     root_object: bool,
     depth: usize,
@@ -71,6 +85,9 @@ impl<R> MetadataReader<R> {
         Self {
             inner,
             fields: std::array::from_fn(|_| None),
+            counts: [None; COUNTED.len()],
+            counted_key: None,
+            counting: None,
             started: false,
             root_object: false,
             depth: 0,
@@ -103,11 +120,17 @@ impl<R> MetadataReader<R> {
         match self.token {
             Token::Key => {
                 self.key_next = false;
-                self.field = decoded.and_then(|key| FIELDS.iter().position(|field| *field == key));
+                let key = decoded.as_deref();
+                self.field = key.and_then(|key| FIELDS.iter().position(|field| *field == key));
+                self.counted_key =
+                    key.and_then(|key| COUNTED.iter().position(|counted| *counted == key));
                 // Match JSON's last-key-wins behaviour even when the later
                 // value has an invalid type or exceeds the metadata limit.
                 if let Some(field) = self.field {
                     self.fields[field] = None;
+                }
+                if let Some(counted) = self.counted_key {
+                    self.counts[counted] = None;
                 }
             }
             Token::Field(field) => {
@@ -152,6 +175,17 @@ impl<R> MetadataReader<R> {
                 self.capture(byte);
             }
             b'{' | b'[' => {
+                if byte == b'[' && self.depth == 1 && !self.key_next {
+                    self.counting = self.counted_key;
+                    if let Some(counted) = self.counting {
+                        self.counts[counted] = Some(0);
+                    }
+                } else if byte == b'{'
+                    && self.depth == 2
+                    && let Some(counted) = self.counting
+                {
+                    self.counts[counted] = self.counts[counted].map(|n| n.saturating_add(1));
+                }
                 self.depth += 1;
                 if self.depth > DEPTH_LIMIT {
                     return Err(io::Error::new(
@@ -160,10 +194,16 @@ impl<R> MetadataReader<R> {
                     ));
                 }
             }
-            b'}' | b']' => self.depth = self.depth.saturating_sub(1),
+            b'}' | b']' => {
+                self.depth = self.depth.saturating_sub(1);
+                if self.depth <= 1 {
+                    self.counting = None;
+                }
+            }
             b',' if self.depth == 1 => {
                 self.key_next = true;
                 self.field = None;
+                self.counted_key = None;
             }
             _ => {}
         }
@@ -237,6 +277,48 @@ mod tests {
         assert_eq!(
             metadata(r#"{"turn_id":"old","turn_id":"new"}"#),
             serde_json::json!({"turn_id":"new"})
+        );
+    }
+
+    /// Claude Code's `Stop` lists in-flight work with descriptions and shell
+    /// command lines; only how many entries each list had survives.
+    #[test]
+    fn stop_work_lists_are_counted_without_their_content() {
+        let json = r#"{"hook_event_name":"Stop","background_tasks":[
+            {"id":"b1","type":"shell","status":"running","description":"private-desc","command":"private-cmd"},
+            {"id":"b2","type":"monitor","status":"running","description":"[{x}]","server":"s"}
+        ],"session_crons":[{"id":"c1","schedule":"0 9 * * *","recurring":true,"prompt":"private-prompt"}],
+        "last_assistant_message":"private-response"}"#;
+        assert_eq!(
+            metadata(json),
+            serde_json::json!({"hook_event_name":"Stop", "background_tasks":2, "session_crons":1})
+        );
+        assert_eq!(
+            metadata(r#"{"hook_event_name":"Stop","background_tasks":[],"session_crons":[]}"#),
+            serde_json::json!({"hook_event_name":"Stop", "background_tasks":0, "session_crons":0})
+        );
+    }
+
+    /// An absent list stays absent: "no list" and "an empty list" mean
+    /// different things to `waiting` (`StatusHookEvent::wakes_pending`).
+    #[test]
+    fn only_root_arrays_of_the_counted_keys_are_counted() {
+        assert_eq!(
+            metadata(
+                r#"{"tool_input":{"background_tasks":[{"a":1}]},"session_crons":"none","background_tasks":{"x":[{}]},"hook_event_name":"Stop"}"#
+            ),
+            serde_json::json!({"hook_event_name":"Stop"}),
+            "a nested look-alike, a string and an object are not lists"
+        );
+        assert_eq!(
+            metadata(r#"{"background_tasks":[{"a":[{},{}]},"x",3,{}],"hook_event_name":"Stop"}"#),
+            serde_json::json!({"hook_event_name":"Stop", "background_tasks":2}),
+            "object entries only, and an entry's own nested objects are not entries"
+        );
+        assert_eq!(
+            metadata(r#"{"background_tasks":[{},{}],"background_tasks":null}"#),
+            serde_json::json!({}),
+            "last key wins, even when its value is not a list"
         );
     }
 

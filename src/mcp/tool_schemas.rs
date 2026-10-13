@@ -19,14 +19,19 @@ pub fn tools() -> Value {
             },
             {
                 "name": "report_status",
-                "description": "Report YOUR current activity so spyc shows it as a live dot on your pane tab — the 'which agent needs me' signal. Call it as your turn changes: 'working' when you start a non-trivial task, 'blocked' when you stop to ask the user a question or for permission (this is the one that earns attention), 'done' when you finish, 'idle' when waiting with nothing pending. Overrides spyc's output-timing guess and keeps your dot accurate through silent thinking. Targets your own tab by default (the focused tab if your connection named none); pass `pane` for a specific tab. Cheap and idempotent — call it freely.",
+                "description": "Report YOUR current activity so spyc shows it as a live dot on your pane tab — the 'which agent needs me' signal. Call it as your turn changes: 'working' when you start a non-trivial task, 'blocked' when you stop to ask the user a question or for permission (this is the one that earns attention), 'done' when you finish, 'waiting' when you end your turn while background work you started (a CI run, a build, a monitor) will wake you — with a short `note` saying what you wait on — and 'idle' when waiting with nothing pending. Overrides spyc's output-timing guess and keeps your dot accurate through silent thinking. Targets your own tab by default (the focused tab if your connection named none); pass `pane` for a specific tab. Cheap and idempotent — call it freely.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "status": {
                             "type": "string",
-                            "enum": ["working", "blocked", "idle", "done"],
-                            "description": "working = actively doing a task; blocked = waiting on the user (needs attention); done = finished a turn; idle = nothing pending."
+                            "enum": ["working", "blocked", "idle", "done", "waiting"],
+                            "description": "working = actively doing a task; blocked = waiting on the user (needs attention); done = finished a turn; waiting = turn over, but background work you started will wake you; idle = nothing pending."
+                        },
+                        "note": {
+                            "type": "string",
+                            "maxLength": crate::mcp_cmd::REPORT_NOTE_CHARS,
+                            "description": "Optional short note shown with your status in spyc, e.g. what a `waiting` agent waits on ('CI on #641'). Longer notes are cut."
                         },
                         "pane_id": {
                             "type": "string",
@@ -38,8 +43,8 @@ pub fn tools() -> Value {
                         },
                         "ttl_ms": {
                             "type": "integer",
-                            "maximum": crate::mcp_cmd::MAX_REPORT_TTL_MS,
-                            "description": "Optional non-blocked report backstop in ms; default and maximum 300000 (five minutes). Larger values are clamped. Blocked stays latched until settled or replaced."
+                            "maximum": crate::mcp_cmd::MAX_WAITING_TTL_MS,
+                            "description": "Optional non-blocked report backstop in ms; default and maximum 300000 (five minutes), or 3600000 (an hour) for `waiting`. Larger values are clamped. Blocked stays latched until settled or replaced."
                         }
                     },
                     "required": ["status"]
