@@ -117,7 +117,7 @@ stays visible within the child, including in zoom and splits.
 ```text
 ● working   df17b585       opus-5-5 xhigh   spyc ⎇ main    32m
 context     336.6k         out 370.2k       hit 98%        compacted 1
-tools       271 calls      ✗ 4 failed       ◐ Bash         Bash 182 · Read 41 · Edit 23
+tools       271 calls      ✗ 4 failed       ◐ Bash         Bash 182 ✗3 · ✓ Read 41 · Edit 23 ✗1
 agents      1              background 5     hooks ✓        mcp ✓
 ```
 
@@ -126,12 +126,15 @@ the health cells and the styling are shared, and each agent fills only its
 usage, tools and mode cells. The rows form a grid, so a column starts at the
 same x on every row. A label column leads; value columns are at least twelve
 wide, so a count gaining a digit rarely moves its neighbour; a cell with a
-column after it is cut past 32. As the frame narrows, whole cells drop from the
-right, except the activity and the session, which are cut instead. A waiting
-agent's note trails the activity row outside the grid, so it widens no column.
+column after it is cut past 32, and the repository and branch past 28, so an
+unusually long branch name can only push the columns after it so far. As the
+frame narrows, whole cells drop from the right, except the activity and the
+session, which are cut instead. A waiting agent's note trails the activity row
+outside the grid, so it widens no column.
 
 The tools row is collapsed: every call, every failure, what is running (`◌ none`
-when nothing is) and the three most called. The full list is the dump's, which
+when nothing is) and the three most called, each marked `✓` when it has no
+failures of its own or `✗<n>` when it does. The full list is the dump's, which
 `:agent hud dump` (or `info`) opens, and so does a double-click anywhere on the
 strip. The strip is spyc's text, never the child's input: a press there selects,
 a drag copies, and the wheel does nothing.
