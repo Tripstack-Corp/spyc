@@ -1,0 +1,122 @@
+{
+  "probe_version": 1,
+  "coverage": {
+    "file_bytes": 4596853,
+    "bytes_read": 4596853,
+    "tail_only": false,
+    "line_cap_bytes": 262144,
+    "skipped": {
+      "oversized": 1
+    }
+  },
+  "records": {
+    "mode": 91,
+    "permission-mode": 91,
+    "file-history-snapshot": 11,
+    "user": 302,
+    "atis-latch": 91,
+    "attachment": 381,
+    "last-prompt": 90,
+    "ai-title": 90,
+    "assistant": 591,
+    "queue-operation": 12,
+    "system": 20,
+    "file-history-delta": 18,
+    "pr-link": 72,
+    "cost-state": 2
+  },
+  "attachments": {
+    "environment": 2,
+    "model": 2,
+    "deferred_tools_delta": 2,
+    "agent_listing_delta": 2,
+    "mcp_instructions_delta": 2,
+    "skill_listing": 1,
+    "auto_mode": 1,
+    "total_tokens_reminder": 247,
+    "instructions": 2,
+    "session_context": 2,
+    "date": 2,
+    "credential_org": 2,
+    "remote_session_change": 2,
+    "prompt_snapshot": 3,
+    "deferred_tools_record": 78,
+    "silent_turn_reminder": 7,
+    "diagnostics": 10,
+    "queued_command": 5,
+    "edited_text_file": 6,
+    "compact_file_reference": 1,
+    "file": 2
+  },
+  "system_subtypes": {
+    "stop_hook_summary": 9,
+    "turn_duration": 9,
+    "compact_boundary": 1,
+    "informational": 1
+  },
+  "sidechain_records": 0,
+  "window": {
+    "first": "2026-10-08T17:13:26.693000+00:00",
+    "last": "2026-10-09T02:29:49.260000+00:00"
+  },
+  "identity": {
+    "claude_code_version": "2.1.291",
+    "model": "claude-opus-5-5",
+    "requested_model": null,
+    "effort": "xhigh",
+    "permission_mode": "auto",
+    "mode": "normal"
+  },
+  "models": {
+    "claude-opus-5-5": 591
+  },
+  "usage": {
+    "assistant_records": 591,
+    "distinct_messages": 246,
+    "messages_written_more_than_once": 192,
+    "repeats_with_differing_usage": 0,
+    "latest_message": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 100,
+      "cache_read_input_tokens": 441623,
+      "output_tokens": 505
+    },
+    "latest_context_tokens": 441725,
+    "distinct_message_totals": {
+      "input_tokens": 492,
+      "cache_creation_input_tokens": 584067,
+      "cache_read_input_tokens": 65181170,
+      "output_tokens": 204419
+    }
+  },
+  "stop_reasons": {
+    "tool_use": 579,
+    "end_turn": 12
+  },
+  "context_management_records": 0,
+  "tools": {
+    "ToolSearch": 4,
+    "mcp:spyc": 47,
+    "Bash": 189,
+    "Read": 18,
+    "Edit": 29,
+    "Write": 1
+  },
+  "background_tool_calls": {
+    "Bash": 4
+  },
+  "tool_result_task_keys": {
+    "backgroundTaskId": 4,
+    "backgroundCwdHint": 1
+  },
+  "subagent_types": {},
+  "latest_todos": null,
+  "compaction": {
+    "summaries": 1,
+    "latest_boundary": {
+      "trigger": "auto",
+      "pre_tokens": 442230,
+      "timestamp": "2026-10-08T21:48:05.117000+00:00"
+    }
+  }
+}
